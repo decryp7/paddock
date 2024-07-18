@@ -7,7 +7,7 @@
     "distDir": "../out"
   },
   "package": {
-    "productName": "release-monitor-rust",
+    "productName": "release-monitor",
     "version": "0.1.0"
   },
   "tauri": {

@@ -15,7 +15,7 @@ impl Default for VersionCheckerConfig {
     fn default() -> Self {
         VersionCheckerConfig {
             path: String::from(r"/Volumes/Data/Test"),
-            file_regex: String::from(r".*HashInfo.txt"),
+            file_regex: String::from(r".*.txt"),
             interval_seconds: 5
         }
     }
