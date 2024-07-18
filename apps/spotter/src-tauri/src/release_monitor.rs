@@ -66,7 +66,7 @@ impl ReleaseMonitor {
                 let latest_version = vc.get_latest_version().unwrap();
                 let cached_version = vu.get_version();
                 println!("cached: {}, latest: {}, eq: {}", cached_version, latest_version, cached_version == latest_version);
-                vu.set_version(latest_version);
+
                 if latest_version != BuildVersion::default() &&
                     cached_version != latest_version {
                     p.lock().unwrap().notify(Event::LatestVersion, latest_version);

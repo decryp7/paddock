@@ -20,48 +20,53 @@ impl SharedFolderVersionChecker {
 
 impl VersionChecker for SharedFolderVersionChecker {
     fn get_latest_version(&self) -> Result<BuildVersion, Error> {
-        let directory = fs::read_dir(self.path.as_str()).unwrap();
         let mut latest_version = BuildVersion::default();
-        for file in directory {
-            if self.file_regex.is_match(file.as_ref().unwrap().file_name().to_str().unwrap()) {
-                match file.as_ref() {
-                    Ok(f) => {
-                        let filename = f.file_name();
-                        match BuildVersion::parse(filename.to_str().unwrap()) {
-                            Ok(version) => {
-                                //println!("{:?}", version);
-                                if version.major > latest_version.major {
-                                    latest_version = version;
-                                    continue;
-                                }
+        match fs::read_dir(self.path.as_str()) {
+            Ok(directory) => {
+                for file in directory {
+                    if self.file_regex.is_match(file.as_ref().unwrap().file_name().to_str().unwrap()) {
+                        match file.as_ref() {
+                            Ok(f) => {
+                                let filename = f.file_name();
+                                match BuildVersion::parse(filename.to_str().unwrap()) {
+                                    Ok(version) => {
+                                        //println!("{:?}", version);
+                                        if version.major > latest_version.major {
+                                            latest_version = version;
+                                            continue;
+                                        }
 
-                                if version.major == latest_version.major &&
-                                    version.minor > latest_version.minor {
-                                    latest_version = version;
-                                    continue;
-                                }
+                                        if version.major == latest_version.major &&
+                                            version.minor > latest_version.minor {
+                                            latest_version = version;
+                                            continue;
+                                        }
 
-                                if version.major == latest_version.major &&
-                                    version.minor == latest_version.minor &&
-                                    version.patch > latest_version.patch {
-                                    latest_version = version;
-                                    continue;
-                                }
+                                        if version.major == latest_version.major &&
+                                            version.minor == latest_version.minor &&
+                                            version.patch > latest_version.patch {
+                                            latest_version = version;
+                                            continue;
+                                        }
 
-                                if version.major == latest_version.major &&
-                                    version.minor == latest_version.minor &&
-                                    version.patch == latest_version.patch &&
-                                    version.t > latest_version.t {
-                                    latest_version = version;
+                                        if version.major == latest_version.major &&
+                                            version.minor == latest_version.minor &&
+                                            version.patch == latest_version.patch &&
+                                            version.t > latest_version.t {
+                                            latest_version = version;
+                                        }
+                                    }
+                                    Err(_) => {}
                                 }
                             }
                             Err(_) => {}
                         }
                     }
-                    Err(_) => {}
                 }
             }
+            Err(_) => {}
         }
+
         Ok(latest_version)
     }
 }

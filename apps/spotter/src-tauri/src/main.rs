@@ -11,6 +11,7 @@ mod config;
 use std::{env, thread};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use anyhow::Error;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use figment::{Figment, Provider};
@@ -22,8 +23,9 @@ use crate::build_version::BuildVersion;
 use crate::config::VersionCheckerConfig;
 use crate::release_monitor::ReleaseMonitor;
 use crate::publisher::{Event, Subscription};
-use crate::version_checker::SharedFolderVersionChecker;
-use crate::version_updater::FileCacheVersionUpdater;
+use crate::version_checker::{SharedFolderVersionChecker, VersionChecker};
+use crate::version_updater::{FileCacheVersionUpdater, VersionUpdater};
+use std::string::String;
 
 fn main() {
     let mut version_checker_config = VersionCheckerConfig::default();
@@ -45,6 +47,22 @@ fn main() {
                 Box::new(SharedFolderVersionChecker::new( version_checker_config.path.as_str(), version_checker_config.file_regex.as_str()));
             let version_updater =
                 Box::new(FileCacheVersionUpdater::new(env::temp_dir().join(r"version.txt").to_str().unwrap()));
+
+            let mut title = String::new();
+            match version_checker.get_latest_version(){
+                Ok(v) => {
+                    title = v.to_string();
+                }
+                Err(_) => {
+                    title = String::from("Unable to retrieve latest version");
+                }
+            }
+
+            let main_window = app.get_window("main").unwrap();
+            main_window
+                .set_title(title.as_str())
+                .unwrap();
+            main_window.emit("latest-version", title).unwrap();
 
             let app = Arc::new(app.handle());
             let subscription = Arc::new(Subscription::new(Box::new(move |v| {
