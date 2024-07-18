@@ -9,6 +9,7 @@ use tokio::sync::mpsc::Sender;
 use regex::Regex;
 use tauri::AppHandle;
 use tauri::Manager;
+use tracing::info;
 use crate::build_version::BuildVersion;
 use crate::publisher::{Event, Publisher, Subscription};
 use crate::version_checker::VersionChecker;
@@ -65,11 +66,11 @@ impl ReleaseMonitor {
 
                 let latest_version = vc.get_latest_version().unwrap();
                 let cached_version = vu.get_version();
-                println!("cached: {}, latest: {}, eq: {}", cached_version, latest_version, cached_version == latest_version);
 
                 if latest_version != BuildVersion::default() &&
                     cached_version != latest_version {
                     p.lock().unwrap().notify(Event::LatestVersion, latest_version);
+                    info!("Detected new version. cached: {}, latest: {}", cached_version, latest_version);
                 }
                 thread::sleep(Duration::from_secs(60));
             }

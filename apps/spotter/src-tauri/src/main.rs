@@ -26,8 +26,21 @@ use crate::publisher::{Event, Subscription};
 use crate::version_checker::{SharedFolderVersionChecker, VersionChecker};
 use crate::version_updater::{FileCacheVersionUpdater, VersionUpdater};
 use std::string::String;
+use tracing::{error, info};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 fn main() {
+    let logfile = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("release-monitor")
+        .filename_suffix("log")
+        .build(env::current_exe().unwrap().parent().unwrap())
+        .unwrap();
+
+    tracing_subscriber::fmt()
+        .with_writer(logfile)
+        .init();
+
     let mut version_checker_config = VersionCheckerConfig::default();
     match Figment::from(VersionCheckerConfig::default())
             .merge(Toml::file(env::current_exe().unwrap().parent().unwrap().join("app.toml")))
@@ -36,7 +49,7 @@ fn main() {
             version_checker_config = c;
         }
         Err(_) => {
-            println!("Unable to read config!");
+            error!("Unable to read config!");
         }
     }
 
@@ -73,17 +86,22 @@ fn main() {
                     .set_title(v.to_string().as_str())
                     .unwrap();
                 main_window.emit("latest-version", v.to_string()).unwrap();
-                let _ = Notification::new(&a.config().tauri.bundle.identifier)
+                match Notification::new(&a.config().tauri.bundle.identifier)
                     .title("New T Version")
                     .body(v.to_string().as_str())
-                    .show();
+                    .show() {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Unable to show notification! Error: {}", e);
+                    }
+                }
             })));
 
             let mut release_monitor = ReleaseMonitor::new(version_checker, version_updater);
             release_monitor.subscribe(Event::LatestVersion, subscription.clone());
             match release_monitor.start() {
-                Ok(_) => { println!("Release monitor started!")}
-                Err(_) => { println!("Failed to start monitor!") }
+                Ok(_) => { info!("Release monitor started!")}
+                Err(_) => { error!("Failed to start monitor!") }
             }
             Ok(())
         })

@@ -13,8 +13,7 @@ pub struct VersionCheckerConfig {
 impl Default for VersionCheckerConfig {
     fn default() -> Self {
         VersionCheckerConfig {
-            path: String::from_utf8(BASE64_STANDARD
-                .decode(b"XFxzZ2RjZnNcUHJvamVjdHNcMDA2X1BhbGFudGlyXEZyb21ZSFFcQ0VOVFVNX1ZQ").unwrap()).unwrap_or(String::from("")),
+            path: String::from(r"/Volumes/Data/Test"),
             file_regex: String::from(r".*HashInfo.txt"),
         }
     }

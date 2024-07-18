@@ -2,6 +2,7 @@ use std::{env, fs};
 use std::fs::{metadata, OpenOptions};
 use std::io::Write;
 use anyhow::Error;
+use tracing::{error, info};
 use crate::build_version::BuildVersion;
 
 pub trait VersionUpdater{
@@ -30,7 +31,7 @@ impl VersionUpdater for FileCacheVersionUpdater {
                     return v;
                 }
                 Err(e) => {
-                    println!("Unable to parse version {}. Error: {}", s, e);
+                    error!("Unable to parse version {}. Error: {}", s, e);
                 }
             }
         }
@@ -47,10 +48,10 @@ impl VersionUpdater for FileCacheVersionUpdater {
             .unwrap();
         match file.write_all(version.to_string().as_bytes()) {
             Ok(_) => {
-                println!("Wrote {} to {}.",version, env::current_dir().unwrap().into_os_string().into_string().unwrap());
+                info!("Wrote {} to {}.",version, env::current_dir().unwrap().into_os_string().into_string().unwrap());
             }
             Err(e) => {
-                println!("Unable to write version to {}. Error: {}", &self.path, e);
+                error!("Unable to write version to {}. Error: {}", &self.path, e);
             }
         }
     }
@@ -58,9 +59,11 @@ impl VersionUpdater for FileCacheVersionUpdater {
     fn reset(&self) {
         if metadata(&self.path).is_ok() {
             match fs::remove_file(&self.path) {
-                Ok(_) => {}
+                Ok(_) => {
+                    info!("Removed file {}.", &self.path);
+                }
                 Err(e) => {
-                    println!("Failed to remove file {}. Error: {}", &self.path, e);
+                    error!("Failed to remove file {}. Error: {}", &self.path, e);
                 }
             }
         }

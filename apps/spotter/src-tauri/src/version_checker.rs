@@ -1,6 +1,7 @@
 use std::fs;
 use anyhow::Error;
 use regex::Regex;
+use tracing::error;
 use crate::build_version::BuildVersion;
 
 pub trait VersionChecker {
@@ -56,15 +57,21 @@ impl VersionChecker for SharedFolderVersionChecker {
                                             latest_version = version;
                                         }
                                     }
-                                    Err(_) => {}
+                                    Err(e) => {
+                                        error!("Failed to parse {}. Error: {}.", filename.to_str().unwrap(), e);
+                                    }
                                 }
                             }
-                            Err(_) => {}
+                            Err(e) => {
+                                error!("Unable to find file with the following expression {}. Error: {}.", self.file_regex, e);
+                            }
                         }
                     }
                 }
             }
-            Err(_) => {}
+            Err(e) => {
+                println!("Unable to read directory {}. Error: {}.", self.path, e);
+            }
         }
 
         Ok(latest_version)

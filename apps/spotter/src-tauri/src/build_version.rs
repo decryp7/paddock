@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 use regex::{Captures, Regex};
+use tracing::error;
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct BuildVersion {
@@ -15,7 +16,7 @@ impl BuildVersion {
         let binding = version.to_uppercase();
         match version_regex.captures(binding.as_str()) {
             None => {
-                println!("Unable to parse {}.", binding);
+                error!("Unable to parse {}.", binding);
             }
             Some(c) => {
                 //println!("{}", c.len());
