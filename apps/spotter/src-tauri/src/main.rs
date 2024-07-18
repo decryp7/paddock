@@ -97,7 +97,7 @@ fn main() {
                 }
             })));
 
-            let mut release_monitor = ReleaseMonitor::new(version_checker, version_updater);
+            let mut release_monitor = ReleaseMonitor::new(version_checker, version_updater, version_checker_config.interval_seconds);
             release_monitor.subscribe(Event::LatestVersion, subscription.clone());
             match release_monitor.start() {
                 Ok(_) => { info!("Release monitor started!")}

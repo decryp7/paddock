@@ -19,17 +19,20 @@ pub struct ReleaseMonitor {
     publisher: Arc<Mutex<Publisher>>,
     version_checker: Arc<Box<dyn VersionChecker + Send + Sync>>,
     version_updater: Arc<Box<dyn VersionUpdater + Send + Sync>>,
-    stop: Arc<AtomicBool>
+    stop: Arc<AtomicBool>,
+    interval_seconds: u32
 }
 
 impl ReleaseMonitor {
     pub fn new(version_checker: Box<dyn VersionChecker + Send + Sync>,
-               version_updater: Box<dyn VersionUpdater + Send + Sync>) -> ReleaseMonitor {
+               version_updater: Box<dyn VersionUpdater + Send + Sync>,
+                interval_seconds: u32) -> ReleaseMonitor {
         Self {
             publisher: Arc::new(Mutex::new(Publisher::default())),
             version_checker: Arc::new(version_checker),
             version_updater: Arc::new(version_updater),
-            stop: Arc::new(AtomicBool::new(false))
+            stop: Arc::new(AtomicBool::new(false)),
+            interval_seconds
         }
     }
 
@@ -58,6 +61,7 @@ impl ReleaseMonitor {
         let vu = self.version_updater.clone();
         let p = self.publisher.clone();
         let stop = self.stop.clone();
+        let interval = self.interval_seconds.clone();
         thread::spawn(move ||{
             loop {
                 if stop.load(Ordering::Relaxed) {
@@ -72,7 +76,7 @@ impl ReleaseMonitor {
                     p.lock().unwrap().notify(Event::LatestVersion, latest_version);
                     info!("Detected new version. cached: {}, latest: {}", cached_version, latest_version);
                 }
-                thread::sleep(Duration::from_secs(60));
+                thread::sleep(Duration::from_secs(interval as u64));
             }
         });
         Ok(())
