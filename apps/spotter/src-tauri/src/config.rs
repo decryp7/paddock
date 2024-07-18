@@ -1,5 +1,3 @@
-use base64::Engine;
-use base64::prelude::BASE64_STANDARD;
 use figment::{Error, Metadata, Profile, Provider};
 use figment::value::{Dict, Map};
 use serde::{Deserialize, Serialize};
@@ -16,7 +14,7 @@ impl Default for VersionCheckerConfig {
         VersionCheckerConfig {
             path: String::from(r"/Volumes/Data/Test"),
             file_regex: String::from(r".*.txt"),
-            interval_seconds: 5
+            interval_seconds: 60
         }
     }
 }

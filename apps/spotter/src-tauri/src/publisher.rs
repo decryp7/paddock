@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
 use std::ptr::eq;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use crate::build_version::BuildVersion;
 
 /// An event type.
