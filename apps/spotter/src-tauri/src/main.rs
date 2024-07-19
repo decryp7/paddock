@@ -70,14 +70,14 @@ fn acknowledge(app_handle: tauri::AppHandle, services: tauri::State<HashMap<&str
 
 fn main() {
     let project_dirs = ProjectDirs::from("com", "decryptology",  "releasemonitor").unwrap();
-    let config_path = project_dirs.config_dir();
+    let config_path = Arc::new(project_dirs.config_dir().to_path_buf());
 
     let logfile = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_prefix("release-monitor")
         .filename_suffix("log")
         .max_log_files(10)
-        .build(&config_path)
+        .build(&*config_path)
         .unwrap();
 
     tracing_subscriber::fmt()
@@ -128,6 +128,7 @@ fn main() {
         .add_item(quit);
     let tray = SystemTray::new().with_menu(tray_menu);
 
+    let c = config_path.clone();
     tauri::Builder::default()
         .on_window_event(|event| match event.event() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -137,7 +138,7 @@ fn main() {
             _ => {}
         })
         .system_tray(tray)
-        .on_system_tray_event(|app, event| match event {
+        .on_system_tray_event(move |app, event| match event {
             SystemTrayEvent::MenuItemClick { id,.. } => {
                 match id.as_str() {
                     "show" => {
@@ -145,13 +146,12 @@ fn main() {
                         window.show().unwrap();
                     }
                     "edit_config" => {
-                        let project_dirs = ProjectDirs::from("com", "decryptology",  "releasemonitor").unwrap();
-                        let config_path = project_dirs.config_dir().join("app.toml");
+                        let config_file = c.join("app.toml");
 
-                        if !metadata(&config_path).is_ok() {
-                            OpenOptions::new().create(true).write(true).open(&config_path).unwrap();
+                        if !metadata(&config_file).is_ok() {
+                            OpenOptions::new().create(true).write(true).open(&config_file).unwrap();
                         }
-                        match open::that(&config_path) {
+                        match open::that(&config_file) {
                             Ok(_) => {}
                             Err(e) => {
                                 error!("Failed to open config file. Error: {}", e);
