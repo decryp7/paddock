@@ -7,7 +7,11 @@ export default function Home() {
       <main className="flex min-h-screen flex-col items-center justify-between p-20">
           <VersionPane/>
           <div className="absolute bottom-10 left-0 right-0 text-center">
-              Made with <a className="font-medium text-blue-600 underline dark:text-blue-500 hover:no-underline" href="https://tauri.app/">Tauri</a> and <a className="font-medium text-blue-600 underline dark:text-blue-500 hover:no-underline" href="https://www.rust-lang.org/">Rust</a> :)
+              Made with <a className="font-medium text-blue-600 underline dark:text-blue-500 hover:no-underline"
+                           href="https://tauri.app/" target="_blank">Tauri</a> and <a
+              className="font-medium text-blue-600 underline dark:text-blue-500 hover:no-underline"
+              href="https://www.rust-lang.org/" target="_blank">Rust</a> :)
+              <div className="text-gray-300 dark:text-gray-600">No servers were harmed when checking build version. I think...should be la.</div>
           </div>
       </main>
   );

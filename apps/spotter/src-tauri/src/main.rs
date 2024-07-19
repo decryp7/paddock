@@ -221,8 +221,8 @@ fn main() {
                 main_window.emit("latest-version", v.to_string()).unwrap();
                 a.tray_handle().set_icon(tauri::Icon::Raw(include_bytes!("../icons/icon-blue.ico").to_vec())).unwrap();
                 match Notification::new(&a.config().tauri.bundle.identifier)
-                    .title("Aiyoyo! Got new T version!")
-                    .body(format!("Mai tu liao! \nMust install {} right now!",v.to_string().as_str()))
+                    .title("Aiyoyo! Got new build version!")
+                    .body(format!("Mai tu liao! Must install {} right now!",v.to_string().as_str()))
                     .show() {
                     Ok(_) => {}
                     Err(e) => {
