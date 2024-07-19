@@ -211,9 +211,6 @@ fn main() {
             }
 
             let main_window = app.get_window("main").unwrap();
-            main_window
-                .set_title(title.as_str())
-                .unwrap();
             main_window.emit("latest-version", title).unwrap();
 
             let app = Arc::new(app.handle());
@@ -221,9 +218,6 @@ fn main() {
                 //println!("{}", v);
                 let a = app.clone();
                 let main_window = a.get_window("main").unwrap();
-                main_window
-                    .set_title(v.to_string().as_str())
-                    .unwrap();
                 main_window.emit("latest-version", v.to_string()).unwrap();
                 a.tray_handle().set_icon(tauri::Icon::Raw(include_bytes!("../icons/icon-blue.ico").to_vec())).unwrap();
                 match Notification::new(&a.config().tauri.bundle.identifier)
