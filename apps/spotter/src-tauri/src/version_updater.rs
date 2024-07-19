@@ -47,7 +47,7 @@ impl VersionUpdater for FileCacheVersionUpdater {
             .unwrap();
         match file.write_all(version.to_string().as_bytes()) {
             Ok(_) => {
-                info!("Wrote {} to {}.",version, env::current_dir().unwrap().into_os_string().into_string().unwrap());
+                info!("Wrote {} to {}.",version, &self.path);
             }
             Err(e) => {
                 error!("Unable to write version to {}. Error: {}", &self.path, e);
