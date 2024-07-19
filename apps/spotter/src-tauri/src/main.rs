@@ -8,9 +8,11 @@ mod publisher;
 mod version_updater;
 mod config;
 
-use std::{env, thread};
+use std::{env, fs, thread};
 use std::any::Any;
 use std::collections::HashMap;
+use std::fs::{metadata, OpenOptions};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use anyhow::Error;
@@ -19,7 +21,7 @@ use base64::prelude::BASE64_STANDARD;
 use figment::{Figment, Provider};
 use figment::providers::{Format, Toml};
 use serde::Serialize;
-use tauri::{Manager, Window, SystemTray, SystemTrayMenu, SystemTrayEvent, CustomMenuItem, SystemTrayMenuItem};
+use tauri::{Manager, Window, SystemTray, SystemTrayMenu, SystemTrayEvent, CustomMenuItem, SystemTrayMenuItem, State};
 use tauri::api::notification::Notification;
 use crate::build_version::BuildVersion;
 use crate::config::VersionCheckerConfig;
@@ -107,10 +109,16 @@ fn main() {
     services.insert("version_updater", version_updater.clone());
 
     let show = CustomMenuItem::new("show".to_string(), "Show");
+    let edit_config = CustomMenuItem::new("edit_config".to_string(), "Edit Config");
+    let reset = CustomMenuItem::new("reset".to_string(), "Reset");
+    let restart = CustomMenuItem::new("restart".to_string(), "Restart");
     let quit = CustomMenuItem::new("quit".to_string(), "Quit");
     let tray_menu = SystemTrayMenu::new()
         .add_item(show)
+        .add_item(edit_config)
+        .add_item(reset)
         .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(restart)
         .add_item(quit);
     let tray = SystemTray::new().with_menu(tray_menu);
 
@@ -126,12 +134,37 @@ fn main() {
         .on_system_tray_event(|app, event| match event {
             SystemTrayEvent::MenuItemClick { id,.. } => {
                 match id.as_str() {
-                    "quit" => {
-                        std::process::exit(0);
-                    }
-                    "show" =>{
+                    "show" => {
                         let window = app.get_window("main").unwrap();
                         window.show().unwrap();
+                    }
+                    "edit_config" => {
+                        let config_path = env::current_exe().unwrap().parent().unwrap().join("app.toml");
+                        if !metadata(&config_path).is_ok() {
+                            OpenOptions::new().create(true).write(true).open(&config_path).unwrap();
+                        }
+                        match open::that(config_path) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Failed to open config file. Error: {}", e);
+                            }
+                        }
+                    }
+                    "reset" => {
+                        let services : State<HashMap<&str, Arc<dyn Any +Send + Sync>>> = app.state();
+                        match services.get("version_updater") {
+                            None => {}
+                            Some(r) => {
+                                let vc : Arc<FileCacheVersionUpdater> = r.clone().downcast::<FileCacheVersionUpdater>().unwrap();
+                                vc.reset();
+                            }
+                        }
+                    }
+                    "restart" => {
+                        app.restart();
+                    }
+                    "quit" => {
+                        std::process::exit(0);
                     }
                     _ => {}
                 }
