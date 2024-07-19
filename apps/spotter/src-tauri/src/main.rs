@@ -46,7 +46,7 @@ fn get_latest_version(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + S
 }
 
 #[tauri::command]
-fn acknowledge(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>, version:String) -> bool {
+fn acknowledge(app_handle: tauri::AppHandle, services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>, version:String) -> bool {
     let v = BuildVersion::parse(version.as_str()).unwrap();
     if v == BuildVersion::default() {
         return false;
@@ -57,6 +57,7 @@ fn acknowledge(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>,
         Some(r) => {
             let vc : Arc<ReleaseMonitor> = r.clone().downcast::<ReleaseMonitor>().unwrap();
             vc.acknowledge(v);
+            app_handle.tray_handle().set_icon(tauri::Icon::Raw(include_bytes!("../icons/icon.ico").to_vec())).unwrap();
             return true;
         }
     }

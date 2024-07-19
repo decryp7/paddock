@@ -27,7 +27,6 @@ impl VersionUpdater for FileCacheVersionUpdater {
             let s = fs::read_to_string(&self.path).unwrap();
             match BuildVersion::parse(&s) {
                 Ok(v) => {
-                    println!("{}", v);
                     return v;
                 }
                 Err(e) => {

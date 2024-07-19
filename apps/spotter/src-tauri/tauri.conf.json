@@ -64,8 +64,8 @@
     "windows": [
       {
         "fullscreen": false,
-        "height": 600,
-        "resizable": true,
+        "height": 500,
+        "resizable": false,
         "title": "release-monitor-rust",
         "width": 800
       }
