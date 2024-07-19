@@ -30,6 +30,7 @@ use crate::publisher::{Event, Subscription};
 use crate::version_checker::{SharedFolderVersionChecker, VersionChecker};
 use crate::version_updater::{FileCacheVersionUpdater, VersionUpdater};
 use std::string::String;
+use directories::ProjectDirs;
 use tracing::{error, info};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
@@ -68,12 +69,15 @@ fn acknowledge(app_handle: tauri::AppHandle, services: tauri::State<HashMap<&str
 }
 
 fn main() {
+    let project_dirs = ProjectDirs::from("com", "decryptology",  "releasemonitor").unwrap();
+    let config_path = project_dirs.config_dir();
+
     let logfile = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_prefix("release-monitor")
         .filename_suffix("log")
         .max_log_files(10)
-        .build(env::current_exe().unwrap().parent().unwrap())
+        .build(&config_path)
         .unwrap();
 
     tracing_subscriber::fmt()
@@ -82,7 +86,7 @@ fn main() {
 
     let mut version_checker_config = VersionCheckerConfig::default();
     match Figment::from(VersionCheckerConfig::default())
-            .merge(Toml::file(env::current_exe().unwrap().parent().unwrap().join("app.toml")))
+            .merge(Toml::file(&config_path.join("app.toml")))
             .extract::<VersionCheckerConfig>() {
         Ok(c) => {
             version_checker_config = c;
@@ -111,12 +115,14 @@ fn main() {
     let show = CustomMenuItem::new("show".to_string(), "Show");
     let edit_config = CustomMenuItem::new("edit_config".to_string(), "Edit Config");
     let reset = CustomMenuItem::new("reset".to_string(), "Reset");
+    let logs = CustomMenuItem::new("logs".to_string(), "Logs");
     let restart = CustomMenuItem::new("restart".to_string(), "Restart");
     let quit = CustomMenuItem::new("quit".to_string(), "Quit");
     let tray_menu = SystemTrayMenu::new()
         .add_item(show)
         .add_item(edit_config)
         .add_item(reset)
+        .add_item(logs)
         .add_native_item(SystemTrayMenuItem::Separator)
         .add_item(restart)
         .add_item(quit);
@@ -139,11 +145,13 @@ fn main() {
                         window.show().unwrap();
                     }
                     "edit_config" => {
-                        let config_path = env::current_exe().unwrap().parent().unwrap().join("app.toml");
+                        let project_dirs = ProjectDirs::from("com", "decryptology",  "releasemonitor").unwrap();
+                        let config_path = project_dirs.config_dir().join("app.toml");
+
                         if !metadata(&config_path).is_ok() {
                             OpenOptions::new().create(true).write(true).open(&config_path).unwrap();
                         }
-                        match open::that(config_path) {
+                        match open::that(&config_path) {
                             Ok(_) => {}
                             Err(e) => {
                                 error!("Failed to open config file. Error: {}", e);
@@ -157,6 +165,17 @@ fn main() {
                             Some(r) => {
                                 let vc : Arc<FileCacheVersionUpdater> = r.clone().downcast::<FileCacheVersionUpdater>().unwrap();
                                 vc.reset();
+                            }
+                        }
+                    }
+                    "logs" => {
+                        let project_dirs = ProjectDirs::from("com", "decryptology",  "releasemonitor").unwrap();
+                        let config_path = project_dirs.config_dir();
+
+                        match open::that(&config_path) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Failed to open config dir. Error: {}", e);
                             }
                         }
                     }
