@@ -45,10 +45,14 @@ impl Publisher {
     }
 
     pub fn notify(&self, event_type: Event, version: BuildVersion) {
-        let listeners = self.events.get(&event_type).unwrap();
-        //println!("{}", listeners.len());
-        for listener in listeners {
-            (listener.func)(version.clone());
+        match self.events.get(&event_type) {
+            None => {}
+            Some(listeners) => {
+                //println!("{}", listeners.len());
+                for listener in listeners {
+                    (listener.func)(version.clone());
+                }
+            }
         }
     }
 }

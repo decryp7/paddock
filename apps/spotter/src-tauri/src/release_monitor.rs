@@ -17,20 +17,20 @@ use crate::version_updater::VersionUpdater;
 
 pub struct ReleaseMonitor {
     publisher: Arc<Mutex<Publisher>>,
-    version_checker: Arc<Box<dyn VersionChecker + Send + Sync>>,
-    version_updater: Arc<Box<dyn VersionUpdater + Send + Sync>>,
+    version_checker: Arc<dyn VersionChecker + Send + Sync>,
+    version_updater: Arc<dyn VersionUpdater + Send + Sync>,
     stop: Arc<AtomicBool>,
     interval_seconds: u32
 }
 
 impl ReleaseMonitor {
-    pub fn new(version_checker: Box<dyn VersionChecker + Send + Sync>,
-               version_updater: Box<dyn VersionUpdater + Send + Sync>,
+    pub fn new(version_checker: Arc<dyn VersionChecker + Send + Sync>,
+               version_updater: Arc<dyn VersionUpdater + Send + Sync>,
                 interval_seconds: u32) -> ReleaseMonitor {
         Self {
             publisher: Arc::new(Mutex::new(Publisher::default())),
-            version_checker: Arc::new(version_checker),
-            version_updater: Arc::new(version_updater),
+            version_checker,
+            version_updater,
             stop: Arc::new(AtomicBool::new(false)),
             interval_seconds
         }
@@ -48,11 +48,11 @@ impl ReleaseMonitor {
         self.stop.store(true, Ordering::Relaxed);
     }
 
-    pub fn subscribe(&mut self, event_type: Event, listener: Arc<Subscription>) -> () {
+    pub fn subscribe(&self, event_type: Event, listener: Arc<Subscription>) -> () {
         self.publisher.lock().unwrap().subscribe(event_type, listener);
     }
 
-    pub fn unsubscribe(&mut self, event_type: Event, listener: Arc<Subscription>) -> () {
+    pub fn unsubscribe(&self, event_type: Event, listener: Arc<Subscription>) -> () {
         self.publisher.lock().unwrap().unsubscribe(event_type, listener);
     }
 

@@ -9,6 +9,8 @@ mod version_updater;
 mod config;
 
 use std::{env, thread};
+use std::any::Any;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use anyhow::Error;
@@ -17,7 +19,7 @@ use base64::prelude::BASE64_STANDARD;
 use figment::{Figment, Provider};
 use figment::providers::{Format, Toml};
 use serde::Serialize;
-use tauri::{Manager, Window, SystemTray, SystemTrayMenu, SystemTrayEvent};
+use tauri::{Manager, Window, SystemTray, SystemTrayMenu, SystemTrayEvent, CustomMenuItem, SystemTrayMenuItem};
 use tauri::api::notification::Notification;
 use crate::build_version::BuildVersion;
 use crate::config::VersionCheckerConfig;
@@ -28,6 +30,39 @@ use crate::version_updater::{FileCacheVersionUpdater, VersionUpdater};
 use std::string::String;
 use tracing::{error, info};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+
+#[tauri::command]
+fn get_latest_version(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>) -> String {
+    match services.get("version_checker") {
+        None => {}
+        Some(r) => {
+            let vc : Arc<SharedFolderVersionChecker> = r.clone().downcast::<SharedFolderVersionChecker>().unwrap();
+            let build_version = vc.get_latest_version().unwrap();
+            return build_version.to_string();
+        }
+    }
+
+    return String::from("");
+}
+
+#[tauri::command]
+fn acknowledge(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>, version:String) -> bool {
+    let v = BuildVersion::parse(version.as_str()).unwrap();
+    if v == BuildVersion::default() {
+        return false;
+    }
+
+    match services.get("release_monitor") {
+        None => {}
+        Some(r) => {
+            let vc : Arc<ReleaseMonitor> = r.clone().downcast::<ReleaseMonitor>().unwrap();
+            vc.acknowledge(v);
+            return true;
+        }
+    }
+
+    return false;
+}
 
 fn main() {
     let logfile = RollingFileAppender::builder()
@@ -54,14 +89,64 @@ fn main() {
         }
     }
 
-    tauri::Builder::default()
-        .system_tray(SystemTray::new())
-        .setup(move |app| {
-            let version_checker =
-                Box::new(SharedFolderVersionChecker::new( version_checker_config.path.as_str(), version_checker_config.file_regex.as_str()));
-            let version_updater =
-                Box::new(FileCacheVersionUpdater::new(env::temp_dir().join(r"version.txt").to_str().unwrap()));
+    let version_checker =
+        Arc::new(SharedFolderVersionChecker::new( version_checker_config.path.as_str(), version_checker_config.file_regex.as_str()));
+    let version_updater =
+        Arc::new(FileCacheVersionUpdater::new(env::temp_dir().join(r"version.txt").to_str().unwrap()));
 
+    let release_monitor = Arc::new(ReleaseMonitor::new(version_checker.clone(), version_updater.clone(), version_checker_config.interval_seconds));
+    match release_monitor.start() {
+        Ok(_) => { info!("Release monitor started!")}
+        Err(_) => { error!("Failed to start monitor!") }
+    }
+
+    let mut services : HashMap<&str, Arc<dyn Any +Send + Sync>> = HashMap::new();
+    services.insert("release_monitor", release_monitor.clone());
+    services.insert("version_checker", version_checker.clone());
+    services.insert("version_updater", version_updater.clone());
+
+    let show = CustomMenuItem::new("show".to_string(), "Show");
+    let quit = CustomMenuItem::new("quit".to_string(), "Quit");
+    let tray_menu = SystemTrayMenu::new()
+        .add_item(show)
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(quit);
+    let tray = SystemTray::new().with_menu(tray_menu);
+
+    tauri::Builder::default()
+        .on_window_event(|event| match event.event() {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                event.window().hide().unwrap();
+                api.prevent_close();
+            }
+            _ => {}
+        })
+        .system_tray(tray)
+        .on_system_tray_event(|app, event| match event {
+            SystemTrayEvent::MenuItemClick { id,.. } => {
+                match id.as_str() {
+                    "quit" => {
+                        std::process::exit(0);
+                    }
+                    "show" =>{
+                        let window = app.get_window("main").unwrap();
+                        window.show().unwrap();
+                    }
+                    _ => {}
+                }
+            }
+            SystemTrayEvent::LeftClick { .. } => {}
+            SystemTrayEvent::RightClick { .. } => {}
+            SystemTrayEvent::DoubleClick { .. } => {
+                info!("system tray received a double click");
+                let window = app.get_window("main").unwrap();
+                window.show().unwrap();
+            }
+            _ => {}
+        })
+        .manage(services)
+        .invoke_handler(tauri::generate_handler![get_latest_version, acknowledge])
+        .setup(move |app| {
             let mut title = String::new();
             match version_checker.get_latest_version(){
                 Ok(v) => {
@@ -87,9 +172,10 @@ fn main() {
                     .set_title(v.to_string().as_str())
                     .unwrap();
                 main_window.emit("latest-version", v.to_string()).unwrap();
+                a.tray_handle().set_icon(tauri::Icon::Raw(include_bytes!("../icons/icon-blue.ico").to_vec())).unwrap();
                 match Notification::new(&a.config().tauri.bundle.identifier)
-                    .title("New T Version")
-                    .body(v.to_string().as_str())
+                    .title("Aiyoyo! Got new T version!")
+                    .body(format!("Mai tu liao! \nMust install {} right now!",v.to_string().as_str()))
                     .show() {
                     Ok(_) => {}
                     Err(e) => {
@@ -97,15 +183,16 @@ fn main() {
                     }
                 }
             })));
-
-            let mut release_monitor = ReleaseMonitor::new(version_checker, version_updater, version_checker_config.interval_seconds);
             release_monitor.subscribe(Event::LatestVersion, subscription.clone());
-            match release_monitor.start() {
-                Ok(_) => { info!("Release monitor started!")}
-                Err(_) => { error!("Failed to start monitor!") }
-            }
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app_handle, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                api.prevent_exit();
+            }
+            _ => {}
+        });
 }
