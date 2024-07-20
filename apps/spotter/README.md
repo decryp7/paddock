@@ -5,3 +5,6 @@ A cross-platform application which checks for new build version.
 | Light                                      | Dark                                     |
 |--------------------------------------------|------------------------------------------|
 | ![Light](screenshots/screenshot_light.png) | ![Dark](screenshots/screenshot_dark.png) |
+
+### Video
+![video](screenshots/video.mp4)
