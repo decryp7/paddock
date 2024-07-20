@@ -229,27 +229,31 @@ fn main() {
         .manage(services)
         .invoke_handler(tauri::generate_handler![get_latest_version, acknowledge, get_auto_launch, set_auto_launch])
         .setup(move |app| {
-            let mut title = String::new();
-            match version_checker.get_latest_version(){
-                Ok(v) => {
-                    title = v.to_string();
-                }
-                Err(_) => {
-                    title = String::from("Unable to retrieve latest version");
-                }
-            }
-
-            let main_window = app.get_window("main").unwrap();
-            main_window.emit("latest-version", title).unwrap();
 
             let app = Arc::new(app.handle());
+            let app_one = app.clone();
+            thread::spawn(move || {
+                let mut title = String::new();
+                match version_checker.get_latest_version(){
+                    Ok(v) => {
+                        title = v.to_string();
+                    }
+                    Err(_) => {
+                        title = String::from("Unable to retrieve latest version");
+                    }
+                }
+
+                let main_window = app_one.get_window("main").unwrap();
+                main_window.emit("latest-version", title).unwrap();
+            });
+
+            let app_two = app.clone();
             let subscription = Arc::new(Subscription::new(Box::new(move |v| {
                 //println!("{}", v);
-                let a = app.clone();
-                let main_window = a.get_window("main").unwrap();
+                let main_window = app_two.get_window("main").unwrap();
                 main_window.emit("latest-version", v.to_string()).unwrap();
-                a.tray_handle().set_icon(tauri::Icon::Raw(include_bytes!("../icons/icon-blue.ico").to_vec())).unwrap();
-                match Notification::new(&a.config().tauri.bundle.identifier)
+                app_two.tray_handle().set_icon(tauri::Icon::Raw(include_bytes!("../icons/icon-blue.ico").to_vec())).unwrap();
+                match Notification::new(&app_two.config().tauri.bundle.identifier)
                     .title("Aiyoyo! Got new build version!")
                     .body(format!("Mai tu liao! Must install {} right now!",v.to_string().as_str()))
                     .show() {
