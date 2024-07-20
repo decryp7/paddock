@@ -232,7 +232,7 @@ fn main() {
 
             let app = Arc::new(app.handle());
             let app_one = app.clone();
-            thread::spawn(move || {
+            tauri::async_runtime::spawn(async move {
                 let mut title = String::new();
                 match version_checker.get_latest_version(){
                     Ok(v) => {
@@ -267,6 +267,9 @@ fn main() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            info!("{}, {argv:?}, {cwd}", app.package_info().name);
+        }))
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|_app_handle, event| match event {
