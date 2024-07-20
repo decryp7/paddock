@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/tauri'
 
 const VersionPane = React.memo((props , context) =>{
-    const [version, setVersion] = useState("");
+    const [version, setVersion] = useState("R0.00.00T00");
     const [ack, setAck] = useState(true);
     const [autoLaunch, setAutoLaunch] = useState(false);
 
