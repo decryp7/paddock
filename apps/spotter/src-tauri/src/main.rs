@@ -30,9 +30,38 @@ use crate::publisher::{Event, Subscription};
 use crate::version_checker::{SharedFolderVersionChecker, VersionChecker};
 use crate::version_updater::{FileCacheVersionUpdater, VersionUpdater};
 use std::string::String;
+use auto_launch::{AutoLaunch, AutoLaunchBuilder};
 use directories::ProjectDirs;
 use tracing::{error, info};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+
+fn get_auto_launch_builder() -> AutoLaunch {
+    return AutoLaunchBuilder::new()
+        .set_app_name("release-monitor")
+        .set_app_path(env::current_exe().unwrap().to_str().unwrap())
+        .set_use_launch_agent(true)
+        .build()
+        .unwrap();
+}
+
+#[tauri::command]
+fn get_auto_launch() -> bool {
+    return get_auto_launch_builder().is_enabled().unwrap();
+}
+
+#[tauri::command]
+fn set_auto_launch(auto_launch: bool) -> bool {
+    let auto = get_auto_launch_builder();
+
+    if auto_launch {
+        auto.enable().unwrap();
+    }else{
+        auto.disable().unwrap();
+    }
+    println!("{}", auto.is_enabled().unwrap());
+    return auto.is_enabled().unwrap();
+}
+
 
 #[tauri::command]
 fn get_latest_version(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>) -> String {
@@ -198,7 +227,7 @@ fn main() {
             _ => {}
         })
         .manage(services)
-        .invoke_handler(tauri::generate_handler![get_latest_version, acknowledge])
+        .invoke_handler(tauri::generate_handler![get_latest_version, acknowledge, get_auto_launch, set_auto_launch])
         .setup(move |app| {
             let mut title = String::new();
             match version_checker.get_latest_version(){
