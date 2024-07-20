@@ -7,4 +7,4 @@ A cross-platform application which checks for new build version.
 | ![Light](screenshots/screenshot_light.png) | ![Dark](screenshots/screenshot_dark.png) |
 
 ### Video
-![video](screenshots/video.mp4)
+<video src="screenshots/video.mp4" controls></video>
