@@ -11,7 +11,8 @@ use tauri::AppHandle;
 use tauri::Manager;
 use tracing::info;
 use crate::build_version::BuildVersion;
-use crate::publisher::{Event, Publisher, Subscription};
+use crate::publisher;
+use crate::publisher::{Event, Publisher, Subscription, NewVersion};
 use crate::version_checker::VersionChecker;
 use crate::version_updater::VersionUpdater;
 
@@ -85,18 +86,17 @@ impl ReleaseMonitor {
 
                 if *cached_version != latest_version {
                     *cached_version = latest_version;
-                    notify = true;
+                    notify = false;
                 }else if acked_version != latest_version {
                     notify = true;
                 }
 
-                if notify {
-                    p.lock().unwrap().notify(Event::LatestVersion, latest_version);
-                    info!("Detected new version. vc: {}, latest: {}, cached: {}",
-                        acked_version,
-                        latest_version,
-                        *cached_version);
-                }
+                p.lock().unwrap().notify(Event::NewVersion, NewVersion::new(latest_version, notify));
+                info!("Detected new version. vc: {}, latest: {}, cached: {}",
+                    acked_version,
+                    latest_version,
+                    *cached_version);
+
             }
         });
         Ok(())

@@ -272,6 +272,11 @@ fn main() {
                 //println!("{}", v);
                 let main_window = app_two.get_window("main").unwrap();
                 main_window.emit("latest-version", v.to_string()).unwrap();
+
+                if !v.notify {
+                    return;
+                }
+
                 app_two.tray_handle().set_icon(tauri::Icon::Raw(include_bytes!("../icons/icon-blue.ico").to_vec())).unwrap();
                 match Notification::new(&app_two.config().tauri.bundle.identifier)
                     .title("Aiyoyo! Got new build version!")
@@ -283,7 +288,7 @@ fn main() {
                     }
                 }
             })));
-            release_monitor.subscribe(Event::LatestVersion, subscription.clone());
+            release_monitor.subscribe(Event::NewVersion, subscription.clone());
 
             Ok(())
         })

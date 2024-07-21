@@ -15,7 +15,6 @@ const VersionPane = React.memo((props , context) =>{
         const unListen = listen<string>('latest-version', (event) => {
             console.log('Received event:', event.payload);
             setVersion(event.payload);
-            setAck(false);
         });
 
         return () => {

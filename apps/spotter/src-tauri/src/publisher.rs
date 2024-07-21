@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::ptr::eq;
 use std::sync::{Arc};
 use crate::build_version::BuildVersion;
@@ -7,10 +8,29 @@ use crate::build_version::BuildVersion;
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub enum Event {
     LatestVersion,
+    NewVersion
+}
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct NewVersion {
+    pub version: BuildVersion,
+    pub notify: bool
+}
+
+impl NewVersion {
+    pub fn new(version: BuildVersion, notify: bool) -> Self{
+        Self { version, notify}
+    }
+}
+
+impl Display for NewVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "R{}.{:0>2}.{:0>2}T{:0>2}", self.version.major, self.version.minor, self.version.patch, self.version.t)
+    }
 }
 
 pub struct Subscription {
-    pub func: Box<dyn Fn(BuildVersion) + Send + Sync + 'static>
+    pub func: Box<dyn Fn(NewVersion) + Send + Sync + 'static>
 }
 
 impl PartialEq for Subscription{
@@ -20,7 +40,7 @@ impl PartialEq for Subscription{
 }
 
 impl Subscription {
-    pub fn new(func: Box<dyn Fn(BuildVersion) + Send + Sync + 'static>) -> Self {
+    pub fn new(func: Box<dyn Fn(NewVersion) + Send + Sync + 'static>) -> Self {
         Self { func }
     }
 }
@@ -44,7 +64,7 @@ impl Publisher {
             .retain(|x| *x != listener);
     }
 
-    pub fn notify(&self, event_type: Event, version: BuildVersion) {
+    pub fn notify(&self, event_type: Event, version: NewVersion) {
         match self.events.get(&event_type) {
             None => {}
             Some(listeners) => {
