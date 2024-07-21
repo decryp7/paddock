@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::{fs, thread};
 use std::fs::DirEntry;
 use std::io::Error;
@@ -20,7 +20,8 @@ pub struct ReleaseMonitor {
     version_checker: Arc<dyn VersionChecker + Send + Sync>,
     version_updater: Arc<dyn VersionUpdater + Send + Sync>,
     stop: Arc<AtomicBool>,
-    interval_seconds: u32
+    interval_seconds: u32,
+    cached_version: Arc<Mutex<BuildVersion>>
 }
 
 impl ReleaseMonitor {
@@ -32,7 +33,8 @@ impl ReleaseMonitor {
             version_checker,
             version_updater,
             stop: Arc::new(AtomicBool::new(false)),
-            interval_seconds
+            interval_seconds,
+            cached_version : Arc::new(Mutex::new(BuildVersion::default()))
         }
     }
 
@@ -62,21 +64,39 @@ impl ReleaseMonitor {
         let p = self.publisher.clone();
         let stop = self.stop.clone();
         let interval = self.interval_seconds.clone();
+        let cv = self.cached_version.clone();
         thread::spawn(move ||{
             loop {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
 
-                let latest_version = vc.get_latest_version().unwrap();
-                let cached_version = vu.get_version();
-
-                if latest_version != BuildVersion::default() &&
-                    cached_version != latest_version {
-                    p.lock().unwrap().notify(Event::LatestVersion, latest_version);
-                    info!("Detected new version. cached: {}, latest: {}", cached_version, latest_version);
-                }
                 thread::sleep(Duration::from_secs(interval as u64));
+
+                let latest_version = vc.get_latest_version().unwrap();
+                let acked_version = vu.get_version();
+
+                if latest_version == BuildVersion::default() {
+                    continue;
+                }
+
+                let mut notify = false;
+                let mut cached_version = cv.lock().unwrap();
+
+                if *cached_version != latest_version {
+                    *cached_version = latest_version;
+                    notify = true;
+                }else if acked_version != latest_version {
+                    notify = true;
+                }
+
+                if notify {
+                    p.lock().unwrap().notify(Event::LatestVersion, latest_version);
+                    info!("Detected new version. vc: {}, latest: {}, cached: {}",
+                        acked_version,
+                        latest_version,
+                        *cached_version);
+                }
             }
         });
         Ok(())

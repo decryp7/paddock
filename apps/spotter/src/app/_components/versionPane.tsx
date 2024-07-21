@@ -10,6 +10,7 @@ const VersionPane = React.memo((props , context) =>{
     useEffect(()=>{
         invoke('get_latest_version').then((v: any) => setVersion(v));
         invoke('get_auto_launch').then((b: any) => setAutoLaunch(b));
+        invoke('get_acked', {version: version}).then((a: any) => setAck(a));
 
         const unListen = listen<string>('latest-version', (event) => {
             console.log('Received event:', event.payload);

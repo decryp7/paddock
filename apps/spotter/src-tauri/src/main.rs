@@ -78,6 +78,26 @@ fn get_latest_version(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + S
 }
 
 #[tauri::command]
+fn get_acked(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>, version : String) -> bool {
+    let v = BuildVersion::parse(version.as_str()).unwrap();
+
+    if v == BuildVersion::default() {
+        return true;
+    }
+
+    match services.get("version_updater") {
+        None => {}
+        Some(r) => {
+            let vu : Arc<FileCacheVersionUpdater > = r.clone().downcast::<FileCacheVersionUpdater >().unwrap();
+            let ack_version = vu.get_version();
+            return ack_version == v;
+        }
+    }
+
+    return false;
+}
+
+#[tauri::command]
 fn acknowledge(app_handle: tauri::AppHandle, services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>, version:String) -> bool {
     let v = BuildVersion::parse(version.as_str()).unwrap();
     if v == BuildVersion::default() {
@@ -227,7 +247,7 @@ fn main() {
             _ => {}
         })
         .manage(services)
-        .invoke_handler(tauri::generate_handler![get_latest_version, acknowledge, get_auto_launch, set_auto_launch])
+        .invoke_handler(tauri::generate_handler![get_latest_version, acknowledge, get_auto_launch, set_auto_launch, get_acked])
         .setup(move |app| {
 
             let app = Arc::new(app.handle());
