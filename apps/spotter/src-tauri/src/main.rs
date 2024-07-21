@@ -58,7 +58,7 @@ fn set_auto_launch(auto_launch: bool) -> bool {
     }else{
         auto.disable().unwrap();
     }
-    println!("{}", auto.is_enabled().unwrap());
+
     return auto.is_enabled().unwrap();
 }
 

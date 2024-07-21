@@ -70,7 +70,7 @@ impl VersionChecker for SharedFolderVersionChecker {
                 }
             }
             Err(e) => {
-                println!("Unable to read directory {}. Error: {}.", self.path, e);
+                error!("Unable to read directory {}. Error: {}.", self.path, e);
             }
         }
 
