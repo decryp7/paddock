@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 pub struct VersionCheckerConfig {
     pub path: String,
     pub file_regex: String,
-    pub interval_seconds: u32
+    pub interval_seconds: u32,
+    pub naggy: bool
 }
 
 impl Default for VersionCheckerConfig {
@@ -14,7 +15,8 @@ impl Default for VersionCheckerConfig {
         VersionCheckerConfig {
             path: String::from(r"/Volumes/Data/Test"),
             file_regex: String::from(r".*.txt"),
-            interval_seconds: 60
+            interval_seconds: 60,
+            naggy: false
         }
     }
 }

@@ -6,11 +6,13 @@ const VersionPane = React.memo((props , context) =>{
     const [version, setVersion] = useState("R0.00.00T00");
     const [ack, setAck] = useState(true);
     const [autoLaunch, setAutoLaunch] = useState(false);
+    const [naggy, setNaggy] = useState(false);
 
     useEffect(()=>{
         invoke('get_latest_version').then((v: any) => setVersion(v));
         invoke('get_auto_launch').then((b: any) => setAutoLaunch(b));
         invoke('get_acked', {version: version}).then((a: any) => setAck(a));
+        invoke('get_naggy').then((b: any) => setNaggy(b));
 
         const unListen = listen<string>('latest-version', (event) => {
             console.log('Received event:', event.payload);
@@ -37,6 +39,12 @@ const VersionPane = React.memo((props , context) =>{
             .then((b: any) => setAutoLaunch(b));
     }
 
+    function handleChangeNaggy(e : React.ChangeEvent<HTMLInputElement>)    {
+        console.log(e.target.checked);
+        invoke('set_naggy', {naggy: e.target.checked})
+            .then();
+    }
+
     return <div className="flex flex-col space-y-3 text-gray-700 dark:text-white">
         <div
             className="flex flex-col items-center justify-center p-6 bg-white border border-gray-200 rounded-lg shadow dark:bg-gray-800 dark:border-gray-700">
@@ -53,6 +61,12 @@ const VersionPane = React.memo((props , context) =>{
                    onChange={handleChangeAutoLaunch}
                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"/>
             <label className="ms-2 text-sm font-medium dark:text-gray-300">Please auto launch when PC start hor!</label>
+            <br />
+            <input type="checkbox"
+                   checked={naggy}
+                   onChange={handleChangeNaggy}
+                   className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"/>
+            <label className="ms-2 text-sm font-medium dark:text-gray-300">Please continuously nag me about new releases (until I acknowledge. OK?)!</label>
         </div>
     </div>;
 });

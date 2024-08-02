@@ -12,6 +12,7 @@ use std::{env, fs, thread};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fs::{metadata, OpenOptions};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -62,6 +63,53 @@ fn set_auto_launch(auto_launch: bool) -> bool {
     return auto.is_enabled().unwrap();
 }
 
+#[tauri::command]
+fn set_naggy(app_handle: tauri::AppHandle, naggy: bool) {
+    let config_path = get_config_path();
+    let mut version_checker_config = get_config(&config_path);
+
+    version_checker_config.naggy = naggy;
+
+    let toml_string = toml::to_string_pretty(&version_checker_config).unwrap();
+    match fs::write(&config_path.join("app.toml"), &toml_string){
+        Ok(_) => {}
+        Err(e) => {
+            error!("Failed to write config file! {}", e);
+        }
+    }
+
+    app_handle.restart();
+}
+
+#[tauri::command]
+fn get_naggy() -> bool {
+    let config_path = get_config_path();
+    let mut version_checker_config = get_config(&config_path);
+
+    version_checker_config.naggy
+}
+
+
+fn get_config(config_path: &Arc<PathBuf>) -> VersionCheckerConfig {
+    let mut version_checker_config = VersionCheckerConfig::default();
+    match Figment::from(VersionCheckerConfig::default())
+        .merge(Toml::file(&config_path.join("app.toml")))
+        .extract::<VersionCheckerConfig>() {
+        Ok(c) => {
+            version_checker_config = c;
+        }
+        Err(_) => {
+            error!("Unable to read config!");
+        }
+    }
+    version_checker_config
+}
+
+fn get_config_path() -> Arc<PathBuf> {
+    let project_dirs = ProjectDirs::from("com", "decryptology", "releasemonitor").unwrap();
+    let config_path = Arc::new(project_dirs.config_dir().to_path_buf());
+    config_path
+}
 
 #[tauri::command]
 fn get_latest_version(services: tauri::State<HashMap<&str, Arc<dyn Any +Send + Sync>>>) -> String {
@@ -118,8 +166,8 @@ fn acknowledge(app_handle: tauri::AppHandle, services: tauri::State<HashMap<&str
 }
 
 fn main() {
-    let project_dirs = ProjectDirs::from("com", "decryptology",  "releasemonitor").unwrap();
-    let config_path = Arc::new(project_dirs.config_dir().to_path_buf());
+    let config_path = get_config_path();
+    let mut version_checker_config = get_config(&config_path);
 
     let logfile = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
@@ -133,15 +181,11 @@ fn main() {
         .with_writer(logfile)
         .init();
 
-    let mut version_checker_config = VersionCheckerConfig::default();
-    match Figment::from(VersionCheckerConfig::default())
-            .merge(Toml::file(&config_path.join("app.toml")))
-            .extract::<VersionCheckerConfig>() {
-        Ok(c) => {
-            version_checker_config = c;
-        }
-        Err(_) => {
-            error!("Unable to read config!");
+    let toml_string = toml::to_string_pretty(&version_checker_config).unwrap();
+    match fs::write(&config_path.join("app.toml"), &toml_string){
+        Ok(_) => {}
+        Err(e) => {
+            error!("Failed to write config file! {}", e);
         }
     }
 
@@ -247,7 +291,7 @@ fn main() {
             _ => {}
         })
         .manage(services)
-        .invoke_handler(tauri::generate_handler![get_latest_version, acknowledge, get_auto_launch, set_auto_launch, get_acked])
+        .invoke_handler(tauri::generate_handler![get_latest_version, acknowledge, get_auto_launch, set_auto_launch, get_acked, set_naggy, get_naggy])
         .setup(move |app| {
 
             let app = Arc::new(app.handle());
@@ -268,6 +312,7 @@ fn main() {
             });
 
             let app_two = app.clone();
+            let last_notified_version = Arc::new(Mutex::new(BuildVersion::default()));
             let subscription = Arc::new(Subscription::new(Box::new(move |v| {
                 //println!("{}", v);
                 let main_window = app_two.get_window("main").unwrap();
@@ -278,14 +323,17 @@ fn main() {
                 }
 
                 app_two.tray_handle().set_icon(tauri::Icon::Raw(include_bytes!("../icons/icon-blue.ico").to_vec())).unwrap();
-                match Notification::new(&app_two.config().tauri.bundle.identifier)
-                    .title("Aiyoyo! Got new build version!")
-                    .body(format!("Mai tu liao! Must install {} right now!",v.to_string().as_str()))
-                    .show() {
-                    Ok(_) => {}
-                    Err(e) => {
-                        error!("Unable to show notification! Error: {}", e);
+                if version_checker_config.naggy || *last_notified_version.lock().unwrap() != v.version {
+                    match Notification::new(&app_two.config().tauri.bundle.identifier)
+                        .title("Aiyoyo! Got new build version!")
+                        .body(format!("Mai tu liao! Must install {} right now!", v.to_string().as_str()))
+                        .show() {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Unable to show notification! Error: {}", e);
+                        }
                     }
+                    *last_notified_version.lock().unwrap() = v.version;
                 }
             })));
             release_monitor.subscribe(Event::NewVersion, subscription.clone());

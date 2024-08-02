@@ -3365,7 +3365,7 @@ checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 
 [[package]]
 name = "release-monitor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "auto-launch",
@@ -3380,6 +3380,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-single-instance",
  "tokio",
+ "toml 0.8.14",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
