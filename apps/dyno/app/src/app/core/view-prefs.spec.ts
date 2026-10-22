@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { ViewPrefs } from './view-prefs';
 
 describe('ViewPrefs', () => {
+  beforeEach(() => localStorage.clear());
   afterEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();

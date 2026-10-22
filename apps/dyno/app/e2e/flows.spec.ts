@@ -256,7 +256,6 @@ test.describe('inventory', () => {
 test.describe('widgets', () => {
   test('edit the dashboard: add a widget from the gallery, resize, save; a preset swaps the layout', async ({ page }) => {
     await page.goto(url());
-    await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
     await expect(page.getByRole('group', { name: 'CPU', exact: true }).first()).toBeVisible();
     await page.getByRole('button', { name: 'Edit dashboard' }).click();
     const before = await page.locator('dy-widget').count();

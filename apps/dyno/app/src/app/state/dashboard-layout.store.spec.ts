@@ -14,7 +14,7 @@ async function setup() {
 describe('DashboardLayoutStore', () => {
   it('shows the saved layout and edits a draft until saved', async () => {
     const { store, settings } = await setup();
-    expect(store.widgets().length).toBe(7);
+    expect(store.widgets().length).toBe(16);
     expect(store.editing()).toBe(false);
     store.startEdit();
     store.add('bars', 'swap');
@@ -23,7 +23,7 @@ describe('DashboardLayoutStore', () => {
     store.move(0, 2);
     expect(store.dirty()).toBe(true);
     expect(store.widgets().find((w) => w.id === 'cpu')!.size).toBe('l');
-    expect(settings.settings()!.dashboard!.widgets.length).toBe(7);
+    expect(settings.settings()!.dashboard!.widgets.length).toBe(16);
     expect(await store.save()).toBe(true);
     expect(store.editing()).toBe(false);
     expect(settings.settings()!.dashboard!.widgets.some((w) => w.kind === 'bars')).toBe(true);
@@ -63,7 +63,7 @@ describe('DashboardLayoutStore', () => {
     const { store } = await setup();
     store.add('graph', 'cpuTotal');
     store.remove('cpu');
-    expect(store.widgets().length).toBe(7);
+    expect(store.widgets().length).toBe(16);
     expect(await store.save()).toBe(false);
   });
 

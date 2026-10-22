@@ -11,7 +11,11 @@ import { LiveStore } from '../../state/live.store';
 import { ANOMALY_LABEL } from '../../shared/labels';
 import type { Widget, WidgetKind } from '../../core/api.types';
 import { AnimatedNumber } from './animated-number';
-import { KIND_LABEL, metricLabel, readMetric, seriesFor, thresholdTone } from './widget-model';
+import { CpuTile } from '../dashboard/tiles';
+import { DiagnosisCard } from '../dashboard/diagnosis-card';
+import { EventsFeed } from '../dashboard/events-feed';
+import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
+import { PANEL_KINDS, KIND_LABEL, metricLabel, readMetric, seriesFor, thresholdTone } from './widget-model';
 
 const ICON: Record<WidgetKind, IconName> = {
   graph: 'trend',
@@ -22,6 +26,12 @@ const ICON: Record<WidgetKind, IconName> = {
   topProcesses: 'processes',
   issues: 'alert',
   health: 'health',
+  cpu: 'cpu',
+  diagnosis: 'why',
+  events: 'bell',
+  history: 'trend',
+  consumers: 'processes',
+  diskTrend: 'disk',
 };
 
 /**
@@ -31,10 +41,11 @@ const ICON: Record<WidgetKind, IconName> = {
  */
 @Component({
   selector: 'dy-widget',
-  imports: [Icon, Ring, Sparkline, AnimatedNumber],
+  imports: [Icon, Ring, Sparkline, AnimatedNumber, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { role: 'group', '[attr.aria-label]': 'title()', '[attr.data-kind]': 'widget().kind' },
+  host: { role: 'group', '[attr.aria-label]': 'title()', '[attr.data-kind]': 'widget().kind', '[class.own-card]': 'ownCard()' },
   template: `
+    @if (!ownCard()) {
     <header>
       <dy-icon [name]="icon()" />
       <h3 class="truncate">{{ title() }}</h3>
@@ -42,6 +53,7 @@ const ICON: Record<WidgetKind, IconName> = {
         <span class="faint">Not available</span>
       }
     </header>
+    }
     @switch (widget().kind) {
       @case ('bigNumber') {
         <div class="hero" [attr.data-tone]="tone()"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
@@ -96,6 +108,12 @@ const ICON: Record<WidgetKind, IconName> = {
           }
         </ul>
       }
+      @case ('cpu') { <dy-cpu-tile /> }
+      @case ('diagnosis') { <dy-diagnosis-card /> }
+      @case ('events') { <dy-events-feed /> }
+      @case ('history') { <dy-history-panel /> }
+      @case ('consumers') { <dy-consumers-panel /> }
+      @case ('diskTrend') { <dy-disk-trend-panel /> }
       @case ('health') {
         @if (health.report(); as r) {
           <div class="ringrow">
@@ -110,6 +128,7 @@ const ICON: Record<WidgetKind, IconName> = {
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 132px; padding: var(--sp-4); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
+    :host(.own-card) { padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; min-height: 0; }
     header { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); }
     header dy-icon { --icon-size: 16px; color: var(--text-3); }
     h3 { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); flex: 1; }
@@ -137,7 +156,9 @@ export class WidgetView {
   protected readonly health = inject(HealthStore);
   private readonly diagnosis = inject(DiagnosisStore);
 
-  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${metricLabel(this.widget().metric).toLowerCase()}` : this.widget().kind === 'health' || this.widget().kind === 'issues' ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
+  protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${metricLabel(this.widget().metric).toLowerCase()}` : PANEL_KINDS.includes(this.widget().kind) ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
+  /** The panel kinds are cards of their own (they bring header, loading and error states). */
+  protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind));
   protected readonly icon = computed(() => ICON[this.widget().kind]);
   protected readonly reading = computed(() => readMetric(this.widget().metric, this.live.system()));
   protected readonly percent = computed(() => this.reading().percent !== null);

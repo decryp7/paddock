@@ -815,7 +815,7 @@ export interface SystemInventory {
 // --------------------------------------------------------------------------------------------------------- widgets
 // `Settings` gains `dashboard: DashboardLayout` and `trayItems: TrayItems` (both optional in the JSON; defaults fill in).
 
-export type WidgetKind = 'graph' | 'bigNumber' | 'bars' | 'ring' | 'heatmap' | 'topProcesses' | 'issues' | 'health';
+export type WidgetKind = 'graph' | 'bigNumber' | 'bars' | 'ring' | 'heatmap' | 'topProcesses' | 'issues' | 'health' | 'cpu' | 'diagnosis' | 'events' | 'history' | 'consumers' | 'diskTrend';
 
 /** Externally tagged: unit variants are strings, the two with an argument are single-key objects. */
 export type WidgetMetric =

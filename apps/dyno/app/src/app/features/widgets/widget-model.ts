@@ -25,6 +25,12 @@ export const KIND_LABEL: Record<WidgetKind, string> = {
   topProcesses: 'Top processes',
   issues: 'Issues',
   health: 'Health',
+  cpu: 'CPU',
+  diagnosis: 'Why slow',
+  events: 'Recent events',
+  history: 'History',
+  consumers: 'Biggest consumers',
+  diskTrend: 'Disk space trend',
 };
 
 export const KIND_HINT: Record<WidgetKind, string> = {
@@ -36,6 +42,12 @@ export const KIND_HINT: Record<WidgetKind, string> = {
   topProcesses: 'The apps using the most.',
   issues: 'Unusual patterns found.',
   health: 'The health score.',
+  cpu: 'Load, per-core view and details.',
+  diagnosis: 'What is slowing the PC, in words.',
+  events: 'Alarms and what Dyno did.',
+  history: 'A chart with events marked.',
+  consumers: 'Biggest consumers over a day.',
+  diskTrend: 'When the disks will be full.',
 };
 
 export const KINDS = Object.keys(KIND_LABEL) as WidgetKind[];
@@ -71,6 +83,9 @@ export function isPercent(m: WidgetMetric): boolean {
   return m === 'cpuTotal' || m === 'memory' || m === 'swap' || m === 'diskFree' || m === 'gpuLoad' || m === 'battery';
 }
 
+/** Kinds that draw a panel of their own and ignore the metric. */
+export const PANEL_KINDS: readonly WidgetKind[] = ['health', 'issues', 'cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'];
+
 /** Whether a widget kind can show a metric (the same rule as `WidgetKind::accepts` in the engine). */
 export function accepts(kind: WidgetKind, m: WidgetMetric): boolean {
   switch (kind) {
@@ -101,7 +116,7 @@ export function newWidget(kind: WidgetKind, metric: WidgetMetric, existing: read
     id: `${base}-${n.toString()}`,
     kind,
     metric,
-    size: kind === 'topProcesses' || kind === 'heatmap' ? 'l' : kind === 'graph' ? 'm' : 's',
+    size: kind === 'topProcesses' || kind === 'heatmap' || kind === 'history' || kind === 'diskTrend' ? 'l' : kind === 'cpu' || kind === 'diagnosis' || kind === 'events' || kind === 'consumers' ? 'm' : kind === 'graph' ? 'm' : 's',
     options: { rangeSecs: 300, showLabel: true, fill: true, accent: null },
     thresholds: { ...NO_THRESHOLDS },
   };

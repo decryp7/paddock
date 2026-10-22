@@ -84,6 +84,18 @@ pub enum WidgetKind {
     Issues,
     /// The health score.
     Health,
+    /// The CPU card: load, history, the per-core view and a link to the CPU details.
+    Cpu,
+    /// The plain-language reading of what is slowing the PC down (the "Why slow" summary).
+    Diagnosis,
+    /// What happened lately: alarms, rule actions and Dyno's own changes.
+    Events,
+    /// The history chart with events marked.
+    History,
+    /// The biggest consumers over the last day.
+    Consumers,
+    /// How fast the disks are filling and when they will be full.
+    DiskTrend,
 }
 
 impl WidgetKind {
@@ -106,7 +118,17 @@ impl WidgetKind {
                 metric,
                 Metric::CpuTotal | Metric::Memory | Metric::DiskActivity | Metric::NetworkUp | Metric::NetworkDown | Metric::GpuLoad
             ),
-            WidgetKind::Graph | WidgetKind::BigNumber | WidgetKind::Bars | WidgetKind::Issues | WidgetKind::Health => true,
+            WidgetKind::Graph
+            | WidgetKind::BigNumber
+            | WidgetKind::Bars
+            | WidgetKind::Issues
+            | WidgetKind::Health
+            | WidgetKind::Cpu
+            | WidgetKind::Diagnosis
+            | WidgetKind::Events
+            | WidgetKind::History
+            | WidgetKind::Consumers
+            | WidgetKind::DiskTrend => true,
         }
     }
 
@@ -380,14 +402,25 @@ impl Preset {
             x
         };
         match self {
+            // What the fixed dashboard used to show, as widgets: the verdict first, then the live tiles, the busiest apps,
+            // what happened and the history.
             Preset::Overview => vec![
                 w("health", K::Health, M::CpuTotal, S),
-                w("cpu", K::Graph, M::CpuTotal, Md),
-                w("memory", K::Ring, M::Memory, S),
-                w("disk", K::Graph, M::DiskActivity, Md),
-                w("network", K::Graph, M::NetworkDown, Md),
-                w("top", K::TopProcesses, M::CpuTotal, L),
-                w("issues", K::Issues, M::CpuTotal, Md),
+                w("diagnosis", K::Diagnosis, M::CpuTotal, Md),
+                w("issues", K::Issues, M::CpuTotal, S),
+                w("cpu", K::Cpu, M::CpuTotal, Md),
+                w("memory", K::Graph, M::Memory, S),
+                w("disk", K::Graph, M::DiskActivity, S),
+                w("network", K::Graph, M::NetworkDown, S),
+                w("gpu", K::Graph, M::GpuLoad, S),
+                w("battery", K::Ring, M::Battery, S),
+                hot(w("temp", K::BigNumber, M::Temperature, S), 80.0, 92.0),
+                w("top-cpu", K::TopProcesses, M::CpuTotal, Md),
+                w("top-memory", K::TopProcesses, M::Memory, Md),
+                w("events", K::Events, M::CpuTotal, Md),
+                w("consumers", K::Consumers, M::CpuTotal, Md),
+                w("history", K::History, M::CpuTotal, L),
+                w("disk-trend", K::DiskTrend, M::DiskFree, L),
             ],
             Preset::Developer => vec![
                 w("cpu-cores", K::Heatmap, M::CpuPerCore, L),
@@ -801,6 +834,18 @@ mod tests {
         assert_eq!(d.presets.len(), 4);
         assert_eq!(d.widgets, Preset::Overview.widgets());
         assert_eq!(TrayItems::default().validate(), Ok(()));
+    }
+
+    #[test]
+    fn the_overview_recreates_the_old_fixed_dashboard() {
+        let ids: Vec<String> = Preset::Overview.widgets().into_iter().map(|w| w.id).collect();
+        for needed in ["health", "diagnosis", "issues", "cpu", "memory", "disk", "network", "gpu", "battery", "top-cpu", "top-memory", "events", "history"] {
+            assert!(ids.iter().any(|i| i == needed), "the overview lacks {needed}");
+        }
+        for kind in ["cpu", "diagnosis", "events", "history", "consumers", "diskTrend"] {
+            let k: WidgetKind = serde_json::from_value(serde_json::json!(kind)).unwrap();
+            assert!(k.accepts(&Metric::CpuTotal));
+        }
     }
 
     #[test]

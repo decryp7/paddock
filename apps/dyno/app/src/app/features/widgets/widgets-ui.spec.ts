@@ -1,3 +1,4 @@
+import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
@@ -12,7 +13,7 @@ import { WidgetView } from './widget-view';
 
 function env() {
   const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, provideRouter([])] });
   TestBed.inject(LiveStore).receive(mock.liveUpdate('summary'));
   return mock;
 }
@@ -20,7 +21,7 @@ function env() {
 describe('dy-widget', () => {
   it('draws every kind from live data without errors', () => {
     env();
-    for (const [kind, metric] of [['bigNumber', 'cpuTotal'], ['graph', 'networkDown'], ['bars', 'memory'], ['ring', 'memory'], ['heatmap', 'cpuPerCore'], ['topProcesses', 'memory'], ['issues', 'cpuTotal'], ['health', 'cpuTotal'], ['bigNumber', 'fan'], ['graph', 'fan']] as const) {
+    for (const [kind, metric] of [['bigNumber', 'cpuTotal'], ['graph', 'networkDown'], ['bars', 'memory'], ['ring', 'memory'], ['heatmap', 'cpuPerCore'], ['topProcesses', 'memory'], ['issues', 'cpuTotal'], ['health', 'cpuTotal'], ['bigNumber', 'fan'], ['graph', 'fan'], ['cpu', 'cpuTotal'], ['diagnosis', 'cpuTotal'], ['events', 'cpuTotal'], ['history', 'cpuTotal'], ['consumers', 'cpuTotal'], ['diskTrend', 'diskFree']] as const) {
       const f = TestBed.createComponent(WidgetView);
       f.componentRef.setInput('widget', newWidget(kind, metric, []));
       f.detectChanges();
@@ -68,24 +69,58 @@ describe('dy-widget-board', () => {
     const f = TestBed.createComponent(WidgetBoard);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelectorAll('dy-widget')).toHaveLength(7);
+    expect(el.querySelectorAll('dy-widget')).toHaveLength(16);
     [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Edit dashboard'))!.click();
     f.detectChanges();
-    expect(el.querySelectorAll('.edit').length).toBe(7);
+    expect(el.querySelectorAll('.edit').length).toBe(16);
     [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Add widget'))!.click();
     f.detectChanges();
-    expect(el.querySelectorAll('.gtile')).toHaveLength(8);
+    expect(el.querySelectorAll('.gtile')).toHaveLength(14);
     (el.querySelectorAll('.gtile')[2] as HTMLButtonElement).click();
     f.detectChanges();
-    expect(el.querySelectorAll('dy-widget')).toHaveLength(8);
+    expect(el.querySelectorAll('dy-widget')).toHaveLength(17);
     (el.querySelector('button[aria-label="Remove widget"]') as HTMLButtonElement).click();
     f.detectChanges();
-    expect(el.querySelectorAll('dy-widget')).toHaveLength(7);
+    expect(el.querySelectorAll('dy-widget')).toHaveLength(16);
     (el.querySelectorAll('.seg button')[2] as HTMLButtonElement).click();
     f.detectChanges();
     expect(TestBed.inject(DashboardLayoutStore).dirty()).toBe(true);
     [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Cancel')!.click();
     f.detectChanges();
+    expect(el.querySelector('.edit')).toBeNull();
+  });
+});
+
+describe('dy-widget-board presets', () => {
+  it('has no layout switch, resets to the default and saves the layout as a named preset', async () => {
+    env();
+    await TestBed.inject(SettingsStore).load();
+    const f = TestBed.createComponent(WidgetBoard);
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    const click = (text: string) => [...el.querySelectorAll('button')].find((b) => b.textContent?.includes(text))!.click();
+    click('Edit dashboard');
+    f.detectChanges();
+    (el.querySelector('button[aria-label="Remove widget"]') as HTMLButtonElement).click();
+    f.detectChanges();
+    expect(el.querySelectorAll('dy-widget')).toHaveLength(15);
+    click('Reset to default');
+    f.detectChanges();
+    expect(el.querySelectorAll('dy-widget')).toHaveLength(16);
+    (el.querySelector('button[aria-label="Remove widget"]') as HTMLButtonElement).click();
+    f.detectChanges();
+    click('Save as preset');
+    f.detectChanges();
+    const input = el.querySelector<HTMLInputElement>('input[aria-label="Preset name"]')!;
+    expect(el.querySelector('button.primary')).not.toBeNull();
+    input.value = 'Lean';
+    input.dispatchEvent(new Event('input'));
+    f.detectChanges();
+    click('Save preset');
+    await f.whenStable();
+    f.detectChanges();
+    const presets = TestBed.inject(DashboardLayoutStore).presets();
+    expect(presets.find((p) => p.name === 'Lean')?.widgets).toHaveLength(15);
     expect(el.querySelector('.edit')).toBeNull();
   });
 });

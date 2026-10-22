@@ -93,7 +93,6 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     name: 'widgets-overview',
     path: '/#/',
     ready: async (page) => {
-      await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
       await expect(page.locator('dy-widget').first()).toBeVisible();
       await page.clock.runFor(2_000);
     },
@@ -102,7 +101,6 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     name: 'widgets-edit',
     path: '/#/',
     ready: async (page) => {
-      await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
       await page.getByRole('button', { name: 'Add widget' }).click();
       await expect(page.getByRole('region', { name: 'Widget gallery' })).toBeVisible();
@@ -113,7 +111,6 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     name: 'widgets-developer',
     path: '/#/',
     ready: async (page) => {
-      await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
       await page.getByLabel('Preset').selectOption('developer');
       await page.clock.runFor(2_000);
@@ -123,7 +120,6 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     name: 'widgets-gaming',
     path: '/#/',
     ready: async (page) => {
-      await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
       await page.getByLabel('Preset').selectOption('gaming');
       await page.clock.runFor(2_000);

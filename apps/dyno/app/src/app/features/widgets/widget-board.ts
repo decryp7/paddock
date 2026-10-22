@@ -7,7 +7,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
 import { SettingsStore } from '../../state/settings.store';
 import { WidgetView } from './widget-view';
-import { KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS, SIZE_LABEL, accepts, defaultMetric, metricLabel } from './widget-model';
+import { PANEL_KINDS, KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS, SIZE_LABEL, accepts, defaultMetric, metricLabel } from './widget-model';
 
 /** The dashboard as widgets: view mode, or edit mode with a gallery, resize, drag to arrange, remove, presets and reset. */
 @Component({
@@ -31,7 +31,13 @@ import { KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS, SIZE_LABEL,
           </select>
         </label>
         <button type="button" class="btn sm" [attr.aria-expanded]="gallery()" [disabled]="!store.canAdd()" (click)="gallery.set(!gallery())"><dy-icon name="plus" /> Add widget</button>
-        <button type="button" class="btn sm ghost" (click)="store.reset()"><dy-icon name="restore" /> Reset</button>
+        <button type="button" class="btn sm ghost" (click)="store.reset()"><dy-icon name="restore" /> Reset to default</button>
+        @if (naming()) {
+          <input class="input sm" type="text" maxlength="64" aria-label="Preset name" placeholder="Preset name" [value]="presetName()" (input)="presetName.set($any($event.target).value)" (keydown.enter)="savePreset()" />
+          <button type="button" class="btn sm" [disabled]="!presetName().trim() || settings.saving()" (click)="savePreset()">Save preset</button>
+        } @else {
+          <button type="button" class="btn sm ghost" (click)="naming.set(true)"><dy-icon name="plus" /> Save as preset</button>
+        }
         <span class="spacer"></span>
         <button type="button" class="btn sm" (click)="store.cancel()">Cancel</button>
         <button type="button" class="btn sm primary" [disabled]="!store.dirty() || settings.saving()" (click)="store.save()">Save dashboard</button>
@@ -75,7 +81,7 @@ import { KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS, SIZE_LABEL,
                   <button type="button" [attr.aria-pressed]="w.size === s" [title]="sizeLabel(s)" (click)="store.resize(w.id, s)">{{ s.toUpperCase() }}</button>
                 }
               </span>
-              @if (w.kind !== 'health' && w.kind !== 'issues') {
+              @if (!panel(w.kind)) {
                 <select class="select sm" [attr.aria-label]="'Metric of ' + w.id" (change)="metric(w, $event)">
                   @for (m of metricsFor(w); track m.label) {
                     <option [value]="m.value" [selected]="m.label === metricName(w)">{{ m.label }}</option>
@@ -120,7 +126,10 @@ export class WidgetBoard {
   protected readonly store = inject(DashboardLayoutStore);
   protected readonly settings = inject(SettingsStore);
   protected readonly gallery = signal(false);
+  protected readonly naming = signal(false);
+  protected readonly presetName = signal('');
   protected readonly kinds = KINDS;
+  protected readonly panel = (k: WidgetKind) => PANEL_KINDS.includes(k);
   protected readonly sizes = SIZES;
   protected readonly widgetCount = computed(() => `${this.store.widgets().length.toString()} widgets`);
   protected readonly kindLabel = (k: WidgetKind) => KIND_LABEL[k];
@@ -141,6 +150,12 @@ export class WidgetBoard {
     this.store.add(kind, defaultMetric(kind));
     this.gallery.set(false);
   }
+  protected async savePreset(): Promise<void> {
+    if (await this.store.saveAsPreset(this.presetName())) {
+      this.naming.set(false);
+      this.presetName.set('');
+    }
+  }
   protected drop(e: CdkDragDrop<unknown>): void {
     this.store.move(e.previousIndex, e.currentIndex);
   }
@@ -154,7 +169,7 @@ export class WidgetBoard {
   }
 }
 
-const ICONS: Record<WidgetKind, 'trend' | 'gauge' | 'reports' | 'cpu' | 'processes' | 'alert' | 'health'> = {
+const ICONS: Record<WidgetKind, 'trend' | 'gauge' | 'reports' | 'cpu' | 'processes' | 'alert' | 'health' | 'why' | 'bell' | 'disk' | 'calendar'> = {
   graph: 'trend',
   bigNumber: 'gauge',
   bars: 'reports',
@@ -163,4 +178,10 @@ const ICONS: Record<WidgetKind, 'trend' | 'gauge' | 'reports' | 'cpu' | 'process
   topProcesses: 'processes',
   issues: 'alert',
   health: 'health',
+  cpu: 'cpu',
+  diagnosis: 'why',
+  events: 'bell',
+  history: 'trend',
+  consumers: 'processes',
+  diskTrend: 'disk',
 };
