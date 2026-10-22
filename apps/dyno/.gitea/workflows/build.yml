@@ -423,9 +423,10 @@ jobs:
         run: |
           npm ci
           bundles="$BUNDLES"
+          # The DMG step removes the .app it packed unless the app bundle is requested too; the bundle check and the
+          # macOS updater both need it.
+          if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
-            # macOS updates install from the .app bundle's archive.
-            if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
             mkdir -p ../target
             node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
             npx tauri build --bundles "$bundles" --config ../target/updater.conf.json -- --profile dist
