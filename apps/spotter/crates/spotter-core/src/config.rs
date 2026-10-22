@@ -16,7 +16,11 @@ use crate::watch::{Settings, WatchSpec};
 use serde::Serialize;
 
 /// The schema this build writes.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
+
+/// The oldest schema still read. Schema 1 files have no `tracking` table and no folder scale options; every new key
+/// is optional, so they load unchanged and are written back as schema 2.
+pub const OLDEST_SCHEMA: u32 = 1;
 
 /// The configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -61,11 +65,11 @@ pub fn parse(text: &str) -> Result<Loaded, String> {
             if !table.is_empty() {
                 warnings.push("The configuration has no schema version; it was read as version 1.".to_string());
             }
-            SCHEMA_VERSION as i64
+            OLDEST_SCHEMA as i64
         }
         Some(v) => v.as_integer().ok_or("The configuration's schema version is not a number.")?,
     };
-    if schema > SCHEMA_VERSION as i64 || schema < 1 {
+    if schema > SCHEMA_VERSION as i64 || schema < OLDEST_SCHEMA as i64 {
         return Err(format!(
             "The configuration was written by another version of Spotter (schema {schema}; this one reads {SCHEMA_VERSION}). Update Spotter."
         ));
@@ -216,7 +220,7 @@ mod tests {
             settings: Settings::default(),
             watches: vec![spec("a"), spec("a"), spec("c")],
         });
-        good = good.replacen("schema = 1", "schema = 1\n", 1);
+        good = good.replacen("schema = 2", "schema = 2\n", 1);
         let l = parse(&good).unwrap();
         assert_eq!(l.doc.watches.len(), 2);
         assert!(l.warnings[0].contains("same id"));
@@ -232,11 +236,28 @@ mod tests {
         let no_schema = parse("[settings]\ntheme = 'dark'").unwrap();
         assert!(no_schema.warnings[0].contains("no schema"));
 
-        assert!(parse("schema = 2").unwrap_err().contains("Update Spotter"));
+        assert!(parse("schema = 3").unwrap_err().contains("Update Spotter"));
         assert!(parse("schema = 0").is_err());
         assert!(parse("schema = 'x'").unwrap_err().contains("not a number"));
         assert!(parse("not toml [").unwrap_err().contains("not valid TOML"));
         assert!(parse(&"#".repeat(MAX_CONFIG_BYTES + 1)).unwrap_err().contains("larger"));
+    }
+
+    #[test]
+    fn schema_1_files_migrate_to_schema_2_with_defaults() {
+        let old =
+            "schema = 1\n[[watches]]\nid = 'a'\nname = 'A'\n[watches.source]\nkind = 'folder'\n[watches.source.values]\npath = '/x'\n";
+        let l = parse(old).unwrap();
+        assert!(l.warnings.is_empty(), "{:?}", l.warnings);
+        assert_eq!(l.doc.watches[0].tracking, crate::tracking::Tracking::default());
+        let written = render(&l.doc);
+        assert!(written.contains("schema = 2"));
+        assert_eq!(parse(&written).unwrap().doc, l.doc);
+        // New keys round trip.
+        let mut doc = l.doc.clone();
+        doc.watches[0].tracking.latest_by = crate::release::LatestBy::Modified;
+        doc.watches[0].tracking.products.only = vec!["PRO".into()];
+        assert_eq!(parse(&render(&doc)).unwrap().doc, doc);
     }
 
     #[test]
