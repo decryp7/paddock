@@ -20,6 +20,7 @@ pub struct MacProbe {
     gpu: Reading<GpuSample>,
     gpu_missing_until: u64,
     mem_total: u64,
+    kinds: Option<(usize, usize)>,
 }
 
 impl MacProbe {
@@ -30,7 +31,20 @@ impl MacProbe {
             gpu: Reading::unavailable("Not read yet"),
             gpu_missing_until: 0,
             mem_total: 0,
+            kinds: None,
         }
+    }
+
+    /// Apple silicon (and no Intel Mac) has performance levels: `hw.perflevel0` is the faster cluster. The kernel
+    /// numbers the efficiency cores first.
+    fn kinds(&mut self, total: usize) -> Vec<dyno_core::metrics::CoreKind> {
+        if self.kinds.is_none() {
+            let p = sysctl_int("hw.perflevel0.logicalcpu").unwrap_or(0);
+            let e = sysctl_int("hw.perflevel1.logicalcpu").unwrap_or(0);
+            self.kinds = Some((e.max(0) as usize, p.max(0) as usize));
+        }
+        let (e, p) = self.kinds.unwrap_or((0, 0));
+        dyno_core::metrics::kinds_from_counts(total, e, p, true)
     }
 
     fn read_gpu(&mut self) -> Reading<GpuSample> {
@@ -65,6 +79,16 @@ impl Default for MacProbe {
     }
 }
 
+/// An integer sysctl, when the kernel has it.
+pub fn sysctl_int(name: &str) -> Option<i32> {
+    let cname = std::ffi::CString::new(name).ok()?;
+    let mut v: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>();
+    // SAFETY: `cname` is NUL-terminated; `v` and `size` are valid for writes of the sizes given; nothing is set.
+    let r = unsafe { libc::sysctlbyname(cname.as_ptr(), (&mut v as *mut libc::c_int).cast(), &mut size, std::ptr::null_mut(), 0) };
+    (r == 0).then_some(v)
+}
+
 /// The kernel's memory-pressure level.
 pub fn memory_pressure() -> Option<MemoryPressure> {
     let name = c"kern.memorystatus_vm_pressure_level";
@@ -89,6 +113,9 @@ impl SensorProbe for MacProbe {
         self.mem_total = sample.memory.total;
         if let Some(p) = memory_pressure() {
             sample.memory.pressure = Reading::Available(p);
+        }
+        if sample.cpu.core_kinds.is_empty() {
+            sample.cpu.core_kinds = self.kinds(sample.cpu.per_core.len());
         }
         sample.memory.commit = Reading::unavailable("macOS has no commit limit: memory pressure and compression show how full it is");
         if self.ticks.is_multiple_of(GPU_EVERY) && self.ticks >= self.gpu_missing_until {
@@ -137,6 +164,8 @@ mod tests {
             .iter()
             .all(|d| !d.mount.starts_with("/System/Volumes/") || d.mount.ends_with("/Data")));
         assert!(x.uptime_secs > 0);
+        assert!(x.cpu.core_kinds.is_empty() || x.cpu.core_kinds.len() == x.cpu.per_core.len());
+        assert_eq!(x.cpu.core_frequency_mhz.len(), x.cpu.per_core.len());
         match &x.gpu {
             Reading::Available(g) => assert!((0.0..=100.0).contains(&g.utilization) && !g.name.is_empty()),
             Reading::Unavailable(why) => assert!(!why.is_empty()),

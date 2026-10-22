@@ -322,6 +322,9 @@ pub struct History {
     pub boots: Vec<BootRecord>,
     /// Crashes per day.
     pub crashes: Vec<DayCount>,
+    /// Per-core load per bucket (same tier and resolution as `points`); empty when the range has none.
+    #[serde(default)]
+    pub core_points: Vec<crate::history::CoreBucket>,
 }
 
 /// A plugin's state.

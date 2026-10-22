@@ -177,6 +177,7 @@ pub fn commit() -> Option<Commit> {
 pub struct WinProbe {
     counters: Option<Counters>,
     adapter: Option<(String, u64)>,
+    kinds: Option<Vec<dyno_core::metrics::CoreKind>>,
 }
 
 impl WinProbe {
@@ -185,6 +186,7 @@ impl WinProbe {
         WinProbe {
             counters: Counters::open(),
             adapter: main_adapter(),
+            kinds: None,
         }
     }
 }
@@ -197,6 +199,11 @@ impl Default for WinProbe {
 
 impl SensorProbe for WinProbe {
     fn enrich(&mut self, s: &mut SystemSample) {
+        if s.cpu.core_kinds.is_empty() {
+            let n = s.cpu.per_core.len();
+            let kinds = self.kinds.get_or_insert_with(|| super::topology::core_kinds(n));
+            s.cpu.core_kinds = kinds.clone();
+        }
         if let Some(c) = commit() {
             s.memory.commit = Reading::Available(c);
             s.memory.pressure = Reading::Available(dyno_core::metrics::derive_pressure(&s.memory));

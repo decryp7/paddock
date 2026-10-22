@@ -186,6 +186,63 @@ pub fn point_from(s: &SystemSample) -> HistoryPoint {
     }
 }
 
+/// Minimum, average and maximum load of one logical core over a bucket, percent.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CoreStat {
+    /// Lowest load.
+    pub min: f32,
+    /// Average load.
+    pub avg: f32,
+    /// Highest load.
+    pub max: f32,
+}
+
+/// Per-core load for one bucket (every logical core, in the order of `CpuSample::per_core`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CoreBucket {
+    /// Bucket start.
+    pub at: Timestamp,
+    /// One entry per logical core.
+    pub cores: Vec<CoreStat>,
+}
+
+/// The per-core raw point of a sample.
+pub fn core_bucket_from(s: &SystemSample) -> CoreBucket {
+    CoreBucket {
+        at: s.at,
+        cores: s.cpu.per_core.iter().map(|v| CoreStat { min: *v, avg: *v, max: *v }).collect(),
+    }
+}
+
+/// Buckets per-core points like [`downsample`]: min of minima, mean of averages, max of maxima. A change in the
+/// number of cores (hot-plug) starts a new bucket.
+pub fn downsample_cores(points: &[CoreBucket], width_ms: i64) -> Vec<CoreBucket> {
+    let mut out: Vec<(CoreBucket, u32)> = Vec::new();
+    for p in points {
+        let bucket = p.at.floor_to(width_ms);
+        match out.last_mut() {
+            Some((b, n)) if b.at == bucket && b.cores.len() == p.cores.len() => {
+                for (a, s) in b.cores.iter_mut().zip(&p.cores) {
+                    a.min = a.min.min(s.min);
+                    a.max = a.max.max(s.max);
+                    a.avg = (a.avg * *n as f32 + s.avg) / (*n as f32 + 1.0);
+                }
+                *n += 1;
+            }
+            _ => out.push((
+                CoreBucket {
+                    at: bucket,
+                    cores: p.cores.clone(),
+                },
+                1,
+            )),
+        }
+    }
+    out.into_iter().map(|(b, _)| b).collect()
+}
+
 /// Buckets `points` (sorted by time) into buckets of `width_ms`: averages of averages, maxima of maxima.
 pub fn downsample(points: &[HistoryPoint], width_ms: i64) -> Vec<HistoryPoint> {
     let mut out: Vec<HistoryPoint> = Vec::new();
@@ -228,7 +285,11 @@ impl Acc {
         self.at = at;
         self.n += 1;
         self.cpu_min = if self.n == 1 { p.cpu_min } else { self.cpu_min.min(p.cpu_min) };
-        self.mem_min = if self.n == 1 { p.memory_min } else { self.mem_min.min(p.memory_min) };
+        self.mem_min = if self.n == 1 {
+            p.memory_min
+        } else {
+            self.mem_min.min(p.memory_min)
+        };
         self.cpu += f64::from(p.cpu);
         self.cpu_max = self.cpu_max.max(p.cpu_max);
         self.mem += f64::from(p.memory);
@@ -390,6 +451,34 @@ mod tests {
         let d = downsample(&[a, b, p(2, 1.0)], MINUTE);
         assert_eq!(d[0].gpu, Some(20.0));
         assert_eq!(d[0].temperature, Some(70.0));
+    }
+
+    #[test]
+    fn core_buckets_keep_min_avg_max_per_core() {
+        let c = |at, a: f32, b: f32| CoreBucket {
+            at: Timestamp(at),
+            cores: vec![CoreStat { min: a, avg: a, max: a }, CoreStat { min: b, avg: b, max: b }],
+        };
+        let d = downsample_cores(&[c(0, 10.0, 0.0), c(1_000, 90.0, 0.0), c(60_000, 5.0, 5.0)], MINUTE);
+        assert_eq!(d.len(), 2);
+        assert_eq!(
+            d[0].cores[0],
+            CoreStat {
+                min: 10.0,
+                avg: 50.0,
+                max: 90.0
+            }
+        );
+        assert_eq!(d[1].at, Timestamp(60_000));
+        let mut three = c(2_000, 1.0, 1.0);
+        three.cores.push(CoreStat::default());
+        assert_eq!(
+            downsample_cores(&[c(0, 1.0, 1.0), three], MINUTE).len(),
+            2,
+            "hot-plug starts a new bucket"
+        );
+        let s = crate::metrics::fixtures::sample(7);
+        assert_eq!(core_bucket_from(&s).cores.len(), 8);
     }
 
     #[test]

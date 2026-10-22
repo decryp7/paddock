@@ -7,7 +7,7 @@
 use dyno_core::activity::{ActivityEntry, UndoRecord};
 use dyno_core::alerts::Alert;
 use dyno_core::forecast::DiskTrendPoint;
-use dyno_core::history::{AppMinute, HistoryPoint, Retention, Tier};
+use dyno_core::history::{AppMinute, CoreBucket, HistoryPoint, Retention, Tier};
 use dyno_core::protocol::{BootRecord, TimelineEvent, TimelineEventKind};
 use dyno_core::snapshot::{Snapshot, SnapshotInfo};
 use dyno_core::time::{Timestamp, DAY};
@@ -43,6 +43,7 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS points (tier INTEGER NOT NULL, at INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (tier, at)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS core_points (tier INTEGER NOT NULL, at INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (tier, at)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS app_minutes (at INTEGER NOT NULL, app TEXT NOT NULL, cpu REAL NOT NULL, memory INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS app_minutes_at ON app_minutes (at);
 CREATE TABLE IF NOT EXISTS disk_free (disk TEXT NOT NULL, at INTEGER NOT NULL, total INTEGER NOT NULL, free INTEGER NOT NULL, PRIMARY KEY (disk, at)) WITHOUT ROWID;
@@ -173,6 +174,29 @@ impl Store {
             .prepare_cached("SELECT data FROM points WHERE tier = ?1 AND at >= ?2 AND at < ?3 ORDER BY at")?;
         let rows = st.query_map(params![tier_id(tier), from.millis(), to.millis()], |r| r.get::<_, String>(0))?;
         Ok(rows.filter_map(|r| r.ok()).filter_map(|s| parse(&s)).collect())
+    }
+
+    /// Stores a per-core bucket of a tier.
+    pub fn put_core_point(&self, tier: Tier, p: &CoreBucket) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO core_points (tier, at, data) VALUES (?1, ?2, ?3)",
+            params![tier_id(tier), p.at.millis(), json(&p.cores)?],
+        )?;
+        Ok(())
+    }
+
+    /// Per-core buckets of a tier in `[from, to)`, oldest first.
+    pub fn core_points(&self, tier: Tier, from: Timestamp, to: Timestamp) -> Result<Vec<CoreBucket>> {
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT at, data FROM core_points WHERE tier = ?1 AND at >= ?2 AND at < ?3 ORDER BY at")?;
+        let rows = st.query_map(params![tier_id(tier), from.millis(), to.millis()], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })?;
+        Ok(rows
+            .filter_map(|r| r.ok())
+            .filter_map(|(at, s)| parse(&s).map(|cores| CoreBucket { at: Timestamp(at), cores }))
+            .collect())
     }
 
     /// Stores one minute's top apps.
@@ -489,6 +513,10 @@ impl Store {
         for t in Tier::ALL {
             self.conn.execute(
                 "DELETE FROM points WHERE tier = ?1 AND at < ?2",
+                params![tier_id(t), r.cutoff(t, now).millis()],
+            )?;
+            self.conn.execute(
+                "DELETE FROM core_points WHERE tier = ?1 AND at < ?2",
                 params![tier_id(t), r.cutoff(t, now).millis()],
             )?;
         }

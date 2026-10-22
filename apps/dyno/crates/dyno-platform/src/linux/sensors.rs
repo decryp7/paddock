@@ -157,6 +157,37 @@ impl LinuxProbe {
         }
     }
 
+    /// P/E kinds (Intel hybrid lists, else ARM `cpu_capacity`) and per-core frequency from cpufreq.
+    fn cpu_topology(&self, sample: &mut SystemSample) {
+        let n = sample.cpu.per_core.len();
+        let sys = &self.paths.sys;
+        if sample.cpu.core_kinds.is_empty() {
+            let core = read_trim(&sys.join("devices/cpu_core/cpus")).unwrap_or_default();
+            let atom = read_trim(&sys.join("devices/cpu_atom/cpus")).unwrap_or_default();
+            let mut kinds = crate::parse::cpu_topology::kinds_from_core_atom(n, &core, &atom);
+            if kinds.is_empty() {
+                let caps: Vec<u32> = (0..n)
+                    .filter_map(|c| read_trim(&sys.join(format!("devices/system/cpu/cpu{c}/cpu_capacity"))).and_then(|v| v.parse().ok()))
+                    .collect();
+                if caps.len() == n {
+                    kinds = crate::parse::cpu_topology::kinds_from_classes(&caps);
+                }
+            }
+            sample.cpu.core_kinds = kinds;
+        }
+        let freqs: Vec<u32> = (0..n)
+            .map(|c| {
+                read_trim(&sys.join(format!("devices/system/cpu/cpu{c}/cpufreq/scaling_cur_freq")))
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .map(|khz| u32::try_from(khz / 1000).unwrap_or(0))
+                    .unwrap_or(0)
+            })
+            .collect();
+        if freqs.iter().any(|f| *f > 0) {
+            sample.cpu.core_frequency_mhz = freqs;
+        }
+    }
+
     fn cpu_frequency(&self, sample: &mut SystemSample) {
         let cpufreq = |cpu: usize, file: &str| read_trim(&self.paths.sys.join(format!("devices/system/cpu/cpu{cpu}/cpufreq/{file}")));
         if sample.cpu.frequency_mhz == 0 {
@@ -215,6 +246,7 @@ impl SensorProbe for LinuxProbe {
         Self::volumes(sample);
         sample.network.retain(|n| !is_virtual_interface(&n.name));
         self.cpu_frequency(sample);
+        self.cpu_topology(sample);
         self.hardware(sample);
         self.ticks = self.ticks.wrapping_add(1);
     }
@@ -242,6 +274,7 @@ mod tests {
                 per_core: vec![1.0, 1.0],
                 frequency_mhz: 0,
                 base_frequency_mhz: 0,
+                ..Default::default()
             },
             memory: MemorySample {
                 total: 16 << 30,

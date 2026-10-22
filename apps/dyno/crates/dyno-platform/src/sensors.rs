@@ -81,6 +81,8 @@ impl SysinfoSensors {
             per_core,
             frequency_mhz: u32::try_from(freq).unwrap_or(0),
             base_frequency_mhz: 0,
+            core_kinds: Vec::new(),
+            core_frequency_mhz: cpus.iter().map(|c| u32::try_from(c.frequency()).unwrap_or(0)).collect(),
         }
     }
 

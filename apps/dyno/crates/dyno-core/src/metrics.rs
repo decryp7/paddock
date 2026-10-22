@@ -52,6 +52,39 @@ pub struct CpuSample {
     /// Base (nominal) frequency in MHz, 0 when unknown. A current frequency far below it under load hints at
     /// thermal or power throttling.
     pub base_frequency_mhz: u32,
+    /// Kind of each logical core, same length as `per_core` (or empty when the OS exposes no topology).
+    #[serde(default)]
+    pub core_kinds: Vec<CoreKind>,
+    /// Current frequency of each logical core in MHz, same length as `per_core` (or empty when unknown).
+    #[serde(default)]
+    pub core_frequency_mhz: Vec<u32>,
+}
+
+/// What kind of core a logical core is on a hybrid CPU (Apple silicon P/E clusters, Intel hybrid P/E cores).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum CoreKind {
+    /// A performance core.
+    Performance,
+    /// An efficiency core.
+    Efficiency,
+    /// The OS does not say, or the CPU is uniform.
+    #[default]
+    Unknown,
+}
+
+/// Assigns kinds from counts: `efficiency_first` cores are Efficiency (Apple silicon numbers its E cores first),
+/// the rest Performance. Zero of either, or counts that do not add up to `total`, give no topology (empty).
+pub fn kinds_from_counts(total: usize, efficiency: usize, performance: usize, efficiency_first: bool) -> Vec<CoreKind> {
+    if efficiency == 0 || performance == 0 || efficiency + performance != total {
+        return Vec::new();
+    }
+    let (e, p) = (vec![CoreKind::Efficiency; efficiency], vec![CoreKind::Performance; performance]);
+    if efficiency_first {
+        [e, p].concat()
+    } else {
+        [p, e].concat()
+    }
 }
 
 /// How hard the OS is working to find memory.
@@ -282,6 +315,7 @@ pub(crate) mod fixtures {
                 per_core: vec![10.0; 8],
                 frequency_mhz: 3_000,
                 base_frequency_mhz: 3_000,
+                ..Default::default()
             },
             memory: MemorySample {
                 total: 16 << 30,
@@ -327,6 +361,18 @@ pub(crate) mod fixtures {
 mod tests {
     use super::fixtures::sample;
     use super::*;
+
+    #[test]
+    fn kinds_follow_counts_or_are_absent() {
+        use CoreKind::*;
+        assert_eq!(
+            kinds_from_counts(6, 2, 4, true),
+            vec![Efficiency, Efficiency, Performance, Performance, Performance, Performance]
+        );
+        assert_eq!(kinds_from_counts(3, 1, 2, false), vec![Performance, Performance, Efficiency]);
+        assert!(kinds_from_counts(8, 0, 8, true).is_empty());
+        assert!(kinds_from_counts(8, 2, 4, true).is_empty());
+    }
 
     #[test]
     fn readings_carry_values_or_reasons() {

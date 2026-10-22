@@ -270,6 +270,7 @@ pub fn quiet_sample(at: Timestamp) -> SystemSample {
             per_core: vec![5.0; 4],
             frequency_mhz: 2_400,
             base_frequency_mhz: 2_400,
+            ..Default::default()
         },
         memory: MemorySample {
             total: 8 << 30,

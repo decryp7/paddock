@@ -444,6 +444,14 @@ fn history(shared: &Shared, range: dyno_core::history::HistoryRange, end: Option
         disk_trends,
         boots: s.boots(w.from.minus(30 * DAY), w.to).map_err(internal)?,
         crashes: Vec::new(),
+        core_points: {
+            let raw = s.core_points(w.tier, w.from, w.to).map_err(internal)?;
+            if w.resolution_ms > w.tier.step_ms() {
+                dyno_core::history::downsample_cores(&raw, w.resolution_ms)
+            } else {
+                raw
+            }
+        },
     })
 }
 

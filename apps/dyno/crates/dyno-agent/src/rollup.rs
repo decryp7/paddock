@@ -4,7 +4,7 @@
 
 use crate::store::{Result, Store};
 use dyno_core::grouping::AppGroup;
-use dyno_core::history::{downsample, point_from, AppMinute, Tier, RAW_STEP_MS, TOP_APPS_PER_MINUTE};
+use dyno_core::history::{core_bucket_from, downsample, downsample_cores, point_from, AppMinute, Tier, RAW_STEP_MS, TOP_APPS_PER_MINUTE};
 use dyno_core::metrics::SystemSample;
 use dyno_core::time::{Timestamp, HOUR, MINUTE};
 use std::collections::HashMap;
@@ -56,6 +56,9 @@ impl HistoryWriter {
             let mut p = point_from(s);
             p.at = at;
             store.put_point(Tier::Raw, &p)?;
+            let mut c = core_bucket_from(s);
+            c.at = at;
+            store.put_core_point(Tier::Raw, &c)?;
             self.last_raw = Some(at);
         }
         self.add_apps(store, s.at, groups)?;
@@ -136,6 +139,10 @@ pub fn roll_up(store: &Store, now: Timestamp) -> Result<()> {
             let pts = store.points(src, Timestamp(from), Timestamp(from + width))?;
             for p in downsample(&pts, width) {
                 store.put_point(dest, &p)?;
+            }
+            let cores = store.core_points(src, Timestamp(from), Timestamp(from + width))?;
+            for c in downsample_cores(&cores, width) {
+                store.put_core_point(dest, &c)?;
             }
             from += width;
         }
@@ -227,6 +234,13 @@ mod tests {
             let g = vec![group("busy", 80.0), group("idle", 1.0)];
             w.record(&mut store, &s, &g).unwrap();
         }
+        assert_eq!(store.core_points(Tier::Raw, Timestamp(0), Timestamp(MINUTE)).unwrap().len(), 6);
+        assert_eq!(
+            store.core_points(Tier::Raw, Timestamp(0), Timestamp(MINUTE)).unwrap()[0]
+                .cores
+                .len(),
+            4
+        );
         // 30 s of ticks at 1 s: 6 raw points.
         assert_eq!(store.points(Tier::Raw, Timestamp(0), Timestamp(MINUTE)).unwrap().len(), 6);
         s.at = Timestamp(MINUTE + 1);
