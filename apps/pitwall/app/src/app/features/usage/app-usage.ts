@@ -52,14 +52,16 @@ const METRICS: { id: UsageMetric; label: string }[] = [
 
     <pw-panel heading="Limits" icon="shield" sub="set under Permissions" [loading]="store.loading() && !store.detail()" [ready]="!!store.detail()">
       @if (limits().length === 0) {
-        <pw-empty-state icon="shield" heading="No limits set" text="This app can use Pitwall without a request or token budget. Add limits under Permissions to cap it." />
+        <p class="none">No limits set: this app can use Pitwall without a request or token budget. Add limits under Permissions to cap it.</p>
       } @else {
         <ul class="limits" aria-label="Limits and how much of each is used">
           @for (l of limits(); track l.kind) {
             <li [attr.data-state]="l.state">
               <div class="head">
                 <span class="name">{{ label[l.kind].label }}</span>
-                <span class="pill dot" [attr.data-tone]="look(l).tone">{{ look(l).label }}</span>
+                @if (l.state !== 'ok') {
+                  <span class="status" [attr.data-tone]="look(l).tone">{{ look(l).label }}</span>
+                }
                 <span class="faint reset">{{ label[l.kind].resets }}</span>
               </div>
               <div class="bar" role="progressbar" [attr.aria-label]="label[l.kind].label" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="width(l.percent)" [attr.aria-valuetext]="l.percent + '% used'">
@@ -88,7 +90,9 @@ const METRICS: { id: UsageMetric; label: string }[] = [
               <th scope="col">Time</th>
               <th scope="col">Endpoint</th>
               <th scope="col">Model</th>
-              <th scope="col">Status</th>
+              @if (hasFailures()) {
+                <th scope="col">Status</th>
+              }
               <th scope="col" class="right">Tokens</th>
               <th scope="col" class="right">Took</th>
             </tr>
@@ -98,8 +102,14 @@ const METRICS: { id: UsageMetric; label: string }[] = [
               <tr>
                 <td class="muted num">{{ time(r.at) }}</td>
                 <td class="mono ep">{{ r.endpoint }}</td>
-                <td class="mono">{{ r.modelId ?? '—' }}</td>
-                <td><span class="pill" [attr.data-tone]="tone(r.status)">{{ r.status }}{{ r.error ? ' failed' : ' ok' }}</span></td>
+                <td>{{ r.modelId ?? '—' }}</td>
+                @if (hasFailures()) {
+                  <td>
+                    @if (r.status >= 400) {
+                      <span class="status" [attr.data-tone]="tone(r.status)">{{ r.status }} failed</span>
+                    }
+                  </td>
+                }
                 <td class="right num">{{ count(tokens(r)) }}</td>
                 <td class="right num">{{ dur(r.totalMs) }}</td>
               </tr>
@@ -145,22 +155,17 @@ const METRICS: { id: UsageMetric; label: string }[] = [
         }
       }
     }
+    /* The totals are a row of figures on the card, not a boxed grid inside it. */
     .figures {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 1px;
+      gap: var(--sp-4);
       margin: 0 0 var(--sp-3);
-      background: var(--border-soft);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-md);
-      overflow: hidden;
-      > div {
-        padding: var(--sp-2) var(--sp-3);
-        background: var(--bg-card);
-      }
+      padding-bottom: var(--sp-3);
+      border-bottom: 1px solid var(--border-soft);
       dt {
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--fs-sm);
+        color: var(--text-2);
       }
       dd {
         margin: 2px 0 0;
@@ -173,7 +178,12 @@ const METRICS: { id: UsageMetric; label: string }[] = [
     }
     .note {
       margin: var(--sp-2) 0 0;
-      font-size: var(--fs-xs);
+      font-size: var(--fs-sm);
+    }
+    .none {
+      margin: 0;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
     .limits {
       display: flex;
@@ -192,7 +202,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       }
       .reset {
         margin-left: auto;
-        font-size: var(--fs-xs);
+        font-size: var(--fs-sm);
       }
     }
     .bar {
@@ -238,6 +248,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
     }
     .ep {
       max-width: 220px;
+      font-size: var(--fs-sm);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -270,6 +281,8 @@ export class AppUsage {
   protected readonly rangeText = computed(() => USAGE_RANGE_TEXT[this.store.range()]);
   protected readonly limits = computed(() => this.store.detail()?.limits ?? []);
   protected readonly recent = computed(() => this.store.detail()?.recent ?? []);
+  /** The Status column exists only when something failed: a column of nothing is noise. */
+  protected readonly hasFailures = computed(() => this.recent().some((r) => r.status >= 400));
   protected readonly chartKey = computed(() => `${this.theme.resolved()}:${this.store.range()}:${this.metric()}`);
   protected readonly option = computed<EChartsCoreOption>(() => {
     const s = this.store.series();

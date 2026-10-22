@@ -172,8 +172,8 @@ describe('chart options', () => {
       const month = demoUsageSeries('30d', NOW2, null);
       const o = usageChart(month, 'tokens', 'app', t) as unknown as Opt;
       expect((o['xAxis'] as { axisLabel: { formatter: (v: number) => string } }).axisLabel.formatter(NOW2)).toBe('22 Oct');
-      expect((o['grid'] as { bottom: number }).bottom).toBe(52);
-      expect((usageChart(one, 'tokens', 'kind', t) as unknown as { grid: { bottom: number } }).grid.bottom).toBe(32);
+      expect((o['grid'] as { bottom: number }).bottom).toBe(64);
+      expect((usageChart(one, 'tokens', 'kind', t) as unknown as { grid: { bottom: number } }).grid.bottom).toBe(44);
     });
   });
 });

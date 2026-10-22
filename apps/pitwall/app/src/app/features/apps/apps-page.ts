@@ -10,7 +10,11 @@ import { ago, compact, date, duration, int } from '../../shared/format';
 import { injectNow } from '../../shared/now';
 import { Confirm } from '../../shared/ui/confirm';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { AppAvatar } from '../../shared/ui/app-avatar';
+import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
 import { Panel } from '../../shared/ui/panel';
+import { RowMenu } from '../../shared/ui/row-menu';
+import { isMenuKey } from '../../shared/ui/row-nav';
 import { limitsText } from '../dashboard/apps-card';
 import { groupCode, permissionSummary } from '../dashboard/pairing-card';
 import { AppsStore } from './apps.store';
@@ -22,7 +26,7 @@ import { PermissionsEditor } from './permissions-editor';
 /** Apps & keys: who may use Pitwall, with which models and how much, their keys and pending pairings. */
 @Component({
   selector: 'pw-apps-page',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, PermissionsEditor, AppUsage],
+  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, PermissionsEditor, AppUsage, AppAvatar, RowMenu],
   providers: [AppsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -33,7 +37,7 @@ import { PermissionsEditor } from './permissions-editor';
           <p class="sub">Who may use Pitwall, with which models and how much. Pitwall keeps only a hash of each key.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn primary" [disabled]="store.isBusy('create')" (click)="newApp()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New app</button>
+          <button type="button" class="btn" [class.primary]="!live.pairings().length" [disabled]="store.isBusy('create')" (click)="newApp()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New app</button>
         </div>
       </header>
 
@@ -43,16 +47,12 @@ import { PermissionsEditor } from './permissions-editor';
             @for (p of live.pairings(); track p.id) {
               <li>
                 <div class="pmain">
-                  <p><b>{{ p.appName }}</b> <span class="faint">asked {{ when(p.requestedAt, now()) }}</span></p>
-                  <ul class="tags" aria-label="Requested permissions">
-                    @for (t of summary(p.permissions); track t) {
-                      <li class="tag">{{ t }}</li>
-                    }
-                  </ul>
+                  <p><b>{{ p.appName }}</b>{{ ' ' }}<span class="faint">asked {{ when(p.requestedAt, now()) }}</span></p>
+                  <p class="perms" aria-label="Requested permissions">{{ summary(p.permissions).join(' · ') }}</p>
                 </div>
                 <div class="code" [attr.aria-label]="'Pairing code ' + p.code"><span class="mono">{{ code(p.code) }}</span></div>
                 <div class="pact">
-                  <button type="button" class="btn" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="live.denyPairing(p.id)">Deny</button>
+                  <button type="button" class="btn ghost" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="live.denyPairing(p.id)">Deny</button>
                   <button type="button" class="btn primary" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="approve(p.id, p.permissions)">
                     <mat-icon svgIcon="pw:check" aria-hidden="true" />Approve
                   </button>
@@ -77,14 +77,9 @@ import { PermissionsEditor } from './permissions-editor';
               @for (a of store.apps(); track a.id) {
                 <li>
                   <button type="button" class="app" [attr.aria-current]="selected()?.id === a.id ? 'true' : null" (click)="select(a.id)">
-                    <span class="avatar" aria-hidden="true">{{ a.name[0] }}</span>
+                    <pw-app-avatar [key]="a.id" [name]="a.name" />
                     <span class="ainfo">
-                      <span class="aname">
-                        <span class="nm">{{ a.name }}</span>
-                        @if (a.suite) {
-                          <span class="tag">Suite</span>
-                        }
-                      </span>
+                      <span class="aname"><span class="nm">{{ a.name }}</span></span>
                       <span class="asub num">{{ count(a.today.requests) }} requests today · {{ a.keys.length }} {{ a.keys.length === 1 ? 'key' : 'keys' }}</span>
                     </span>
                     <span class="conn" [class.on]="a.connected" [attr.aria-label]="a.connected ? 'Connected' : 'Not connected'"></span>
@@ -98,16 +93,16 @@ import { PermissionsEditor } from './permissions-editor';
             @if (selected(); as a) {
               <section class="hero" [attr.aria-label]="a.name">
                 <div class="hero-top">
-                  <span class="avatar lg" aria-hidden="true">{{ a.name[0] }}</span>
+                  <pw-app-avatar [key]="a.id" [name]="a.name" size="lg" />
                   <div class="htitle">
                     <h2>{{ a.name }}</h2>
                     <p>
-                      <span class="pill dot" [attr.data-tone]="a.connected ? 'ok' : 'muted'">{{ a.connected ? 'Connected' : 'Not connected' }}</span>
+                      <span class="status" [attr.data-tone]="a.connected ? 'ok' : 'muted'">{{ a.connected ? 'Connected' : 'Not connected' }}</span>
                       <span class="faint">{{ a.connected ? 'active ' : 'last seen ' }}{{ when(a.lastSeenAt, now()) }}</span>
                       <span class="faint">· {{ limits(a.permissions.limits) }}</span>
                     </p>
                   </div>
-                  <button type="button" class="btn ghost danger sm" [disabled]="store.isBusy('app:' + a.id)" (click)="remove(a)"><mat-icon svgIcon="pw:trash" aria-hidden="true" />Delete app</button>
+                  <pw-row-menu [items]="appMenu(a)" [label]="'More actions for ' + a.name" />
                 </div>
                 <dl class="usage" aria-label="Usage today">
                   <div><dt>Requests</dt><dd class="num">{{ intText(a.today.requests) }}</dd></div>
@@ -121,7 +116,7 @@ import { PermissionsEditor } from './permissions-editor';
 
               <pw-app-usage [appId]="a.id" [appName]="a.name" [permissions]="a.permissions" />
 
-              <pw-panel heading="Keys" icon="key" [sub]="a.keys.length ? a.keys.length + ' active' : ''" [flush]="true">
+              <pw-panel heading="Keys" icon="key" [flush]="true">
                 <button panel-actions type="button" class="btn sm" [disabled]="store.isBusy('app:' + a.id)" (click)="createKey(a)"><mat-icon svgIcon="pw:plus" aria-hidden="true" />Create key</button>
                 @if (a.keys.length === 0) {
                   <pw-empty-state icon="key" heading="No keys" [text]="a.name + ' cannot call Pitwall until it has a key or pairs again.'" />
@@ -137,13 +132,11 @@ import { PermissionsEditor } from './permissions-editor';
                     </thead>
                     <tbody>
                       @for (k of a.keys; track k.id) {
-                        <tr>
+                        <tr tabindex="0" (keydown)="onKeyRow(a, k, $event)" (contextmenu)="onKeyMenu(a, k, $event)">
                           <td><span class="mono prefix">{{ k.prefix }}</span></td>
                           <td class="muted">{{ day(k.createdAt) }}</td>
                           <td class="muted">{{ when(k.lastUsedAt, now()) }}</td>
-                          <td class="right">
-                            <button type="button" class="btn ghost sm danger" [attr.aria-label]="'Revoke key ' + k.prefix" [disabled]="store.isBusy('key:' + k.id)" (click)="revoke(a, k.id, k.prefix)">Revoke</button>
-                          </td>
+                          <td class="right"><pw-row-menu [items]="keyMenu(a, k)" [label]="'More actions for key ' + k.prefix" /></td>
                         </tr>
                       }
                     </tbody>
@@ -172,6 +165,11 @@ import { PermissionsEditor } from './permissions-editor';
       border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
       background: linear-gradient(90deg, var(--accent-soft), transparent 60%), var(--bg-card);
     }
+    .perms {
+      margin: 2px 0 0;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+    }
     .pair-list {
       list-style: none;
       margin: 0;
@@ -189,20 +187,13 @@ import { PermissionsEditor } from './permissions-editor';
         }
       }
     }
-    .tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--sp-1);
-      margin: var(--sp-2) 0 0;
-      padding: 0;
-      list-style: none;
-    }
     .code span {
       display: inline-block;
       padding: var(--sp-1) var(--sp-3);
-      font-size: 18px;
+      font-size: var(--fs-3xl);
       font-weight: var(--fw-semibold);
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
+      line-height: 1.2;
       background: var(--bg-sunken);
       border: 1px solid var(--border);
       border-radius: var(--r-md);
@@ -244,30 +235,6 @@ import { PermissionsEditor } from './permissions-editor';
       }
       &[aria-current='true'] {
         background: var(--bg-active);
-        .avatar {
-          color: var(--text-on-accent);
-          background: var(--accent);
-        }
-      }
-    }
-    .avatar {
-      display: grid;
-      place-items: center;
-      flex: none;
-      width: 28px;
-      height: 28px;
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-semibold);
-      color: var(--text-2);
-      background: var(--bg-active);
-      border-radius: var(--r-md);
-      &.lg {
-        width: 40px;
-        height: 40px;
-        font-size: var(--fs-lg);
-        color: var(--text-on-accent);
-        background: var(--accent);
-        border-radius: var(--r-lg);
       }
     }
     .ainfo {
@@ -288,8 +255,8 @@ import { PermissionsEditor } from './permissions-editor';
       }
     }
     .asub {
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
     .conn {
       flex: none;
@@ -334,22 +301,17 @@ import { PermissionsEditor } from './permissions-editor';
         font-size: var(--fs-sm);
       }
     }
+    /* The day's figures are a row on the card, set off by one hairline: no boxed grid inside the card. */
     .usage {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 1px;
-      margin: var(--sp-5) 0 0;
-      background: var(--border-soft);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-md);
-      overflow: hidden;
-      > div {
-        padding: var(--sp-3);
-        background: var(--bg-card);
-      }
+      gap: var(--sp-4);
+      margin: var(--sp-4) 0 0;
+      padding-top: var(--sp-4);
+      border-top: 1px solid var(--border-soft);
       dt {
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--fs-sm);
+        color: var(--text-2);
       }
       dd {
         margin: 2px 0 0;
@@ -363,7 +325,7 @@ import { PermissionsEditor } from './permissions-editor';
     }
     .today {
       margin-top: var(--sp-2);
-      font-size: var(--fs-xs);
+      font-size: var(--fs-sm);
     }
     .keys {
       margin-top: var(--sp-2);
@@ -377,10 +339,7 @@ import { PermissionsEditor } from './permissions-editor';
       }
     }
     .prefix {
-      padding: 2px 6px;
-      background: var(--bg-sunken);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-xs);
+      font-size: var(--fs-sm);
     }
   `,
 })
@@ -389,6 +348,7 @@ export class AppsPage implements OnInit {
   protected readonly live = inject(LiveStore);
   private readonly dialog = inject(Dialog);
   private readonly confirm = inject(Confirm);
+  private readonly menu = inject(ContextMenuService);
   protected readonly now = injectNow(15_000);
 
   protected readonly when = ago;
@@ -410,6 +370,35 @@ export class AppsPage implements OnInit {
 
   ngOnInit(): void {
     void this.store.load();
+  }
+
+  /** Delete is not a button in the page: it lives in this menu and asks first. */
+  protected appMenu(a: AppInfo): ContextMenuItem[] {
+    return [
+      { label: 'Create key', run: () => void this.createKey(a), disabled: this.store.isBusy('app:' + a.id) },
+      { label: 'Delete app…', run: () => void this.remove(a), danger: true, divider: true, disabled: this.store.isBusy('app:' + a.id) },
+    ];
+  }
+
+  /** Revoke is only in the key's menu, in danger text, and names the key. */
+  protected keyMenu(a: AppInfo, k: AppInfo['keys'][number]): ContextMenuItem[] {
+    return [
+      { label: 'Copy key prefix', run: () => void navigator.clipboard?.writeText(k.prefix).catch(() => undefined) },
+      { label: 'Revoke key…', run: () => void this.revoke(a, k.id, k.prefix), danger: true, divider: true, disabled: this.store.isBusy('key:' + k.id) },
+    ];
+  }
+
+  protected onKeyRow(a: AppInfo, k: AppInfo['keys'][number], e: KeyboardEvent): void {
+    if (e.target === e.currentTarget && isMenuKey(e)) {
+      e.preventDefault();
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      this.menu.open(r.left + 48, r.bottom - 8, this.keyMenu(a, k));
+    }
+  }
+
+  protected onKeyMenu(a: AppInfo, k: AppInfo['keys'][number], e: MouseEvent): void {
+    e.preventDefault();
+    this.menu.open(e.clientX, e.clientY, this.keyMenu(a, k));
   }
 
   protected select(id: string): void {

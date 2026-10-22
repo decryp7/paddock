@@ -88,7 +88,13 @@ describe('AppsPage', () => {
 
   it('revokes a key after confirming', async () => {
     const { fixture, el, button } = await render();
-    (el.querySelector('button[aria-label^="Revoke key"]') as HTMLButtonElement).click();
+    // Revoke is only in the key's menu, in danger text.
+    expect(el.querySelector('button[aria-label^="Revoke key"]')).toBeNull();
+    (el.querySelector('button[aria-label^="More actions for key"]') as HTMLButtonElement).click();
+    await settle(fixture);
+    const revoke = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.includes('Revoke key'))!;
+    expect(revoke.classList.contains('danger')).toBe(true);
+    revoke.click();
     await settle(fixture);
     const confirm = overlay().querySelector('pw-confirm-dialog') as HTMLElement;
     expect(confirm.textContent).toContain("can't be undone");
@@ -117,7 +123,11 @@ describe('AppsPage', () => {
 
   it('deletes an app after confirming', async () => {
     const { fixture, el, button } = await render();
-    button(el, 'Delete app')!.click();
+    // Delete is in the "..." menu of the app, not a button on the page.
+    expect(button(el, 'Delete app')).toBeUndefined();
+    (el.querySelector('button[aria-label="More actions for Debrief"]') as HTMLButtonElement).click();
+    await settle(fixture);
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.includes('Delete app'))!.click();
     await settle(fixture);
     button(overlay().querySelector('pw-confirm-dialog')!, 'Delete app')!.click();
     await settle(fixture);

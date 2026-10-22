@@ -322,7 +322,7 @@ export function stackedRequestsChart(points: HistoryPoint[], series: KeyedSeries
       formatter: (p: unknown) => tooltipRows(p, (v) => `${Math.round(v)}`),
     },
     legend: { ...legend(t, folded.map((s) => s.key)), top: 'auto', bottom: 0, left: 0, right: 0 },
-    grid: { left: 8, right: 12, top: 10, bottom: folded.length > 3 ? 52 : 32 },
+    grid: { left: 8, right: 12, top: 10, bottom: folded.length > 3 ? 64 : 44 },
     xAxis: timeAxis(t, range),
     yAxis: valueAxis(t, 0, (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`)),
     dataZoom: [{ type: 'inside', filterMode: 'none' }],
@@ -385,7 +385,7 @@ export function usageChart(series: UsageSeries, metric: UsageMetric, split: Usag
       formatter: (p: unknown) => tooltipRows(p, unit),
     },
     legend: { ...legend(t, entries.map((e) => e.name)), top: 'auto', bottom: 0, left: 0, right: 0 },
-    grid: { left: 8, right: 12, top: 10, bottom: entries.length > 3 ? 52 : 32 },
+    grid: { left: 8, right: 12, top: 10, bottom: entries.length > 3 ? 64 : 44 },
     xAxis: { ...timeAxis(t, series.range), boundaryGap: false },
     yAxis: valueAxis(t, 0, (v) => (metric === 'memory' ? bytes(v, 0) : compact(v)), { min: 0 }),
     series: entries.map((e, i) =>

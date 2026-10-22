@@ -28,14 +28,20 @@ describe('AppUsage', () => {
     const bar = limits[2]!.querySelector('[role="progressbar"]')!;
     expect(bar.getAttribute('aria-label')).toBe('Tokens per day');
     expect(Number(bar.getAttribute('aria-valuenow'))).toBeGreaterThanOrEqual(0);
-    expect(limits[2]!.querySelector('.pill')!.textContent!.length).toBeGreaterThan(3);
+    // A limit within its budget says nothing in words; only the ones close to or over it carry a status.
+    const flagged = limits.filter((l) => l.querySelector('.status'));
+    expect(flagged.length).toBeLessThan(limits.length);
+    for (const l of flagged) expect(l.querySelector('.status')!.textContent!.length).toBeGreaterThan(3);
   });
 
   it('lists the latest requests as metadata with a status in words', async () => {
     const { el } = await mount();
     const rows = el.querySelectorAll('table.recent tbody tr');
     expect(rows.length).toBeGreaterThan(0);
-    expect(text(rows[0]!)).toMatch(/\d+ (ok|failed)/);
+    // Successes carry no status; a failure says so in words.
+    expect(text(rows[0]!)).not.toMatch(/ ok/);
+    const failed = Array.from(rows).filter((r) => r.querySelector('.status'));
+    for (const r of failed) expect(text(r)).toMatch(/\d+ failed/);
   });
 
   it('switches the range and the metric', async () => {
