@@ -6,8 +6,13 @@ import { toCommandError } from '../core/command-error';
 import { Notifier } from '../shared/notifier';
 import { ActivityStore } from './activity.store';
 
+/** Most earlier diagnoses kept for the Why slow page (this session only; the engine does not store them). */
+export const MAX_DIAGNOSIS_HISTORY = 10;
+
 interface DiagnosisState {
   diagnosis: Diagnosis | null;
+  /** The diagnoses run since the app opened, newest first (the first is `diagnosis`). */
+  history: Diagnosis[];
   running: boolean;
   error: CommandError | null;
   anomalies: Anomaly[];
@@ -18,13 +23,13 @@ interface DiagnosisState {
 /** "Why is my PC slow?" (the engine's diagnosis, run on demand) and the anomalies it found in the history. */
 export const DiagnosisStore = signalStore(
   { providedIn: 'root' },
-  withState<DiagnosisState>({ diagnosis: null, running: false, error: null, anomalies: [], anomaliesLoaded: false, anomaliesError: null }),
+  withState<DiagnosisState>({ diagnosis: null, history: [], running: false, error: null, anomalies: [], anomaliesLoaded: false, anomaliesError: null }),
   withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier), activity = inject(ActivityStore)) => ({
     async run(): Promise<void> {
       patchState(store, { running: true, error: null });
       try {
         const diagnosis = await backend.whySlow();
-        patchState(store, { diagnosis, running: false });
+        patchState(store, (s) => ({ diagnosis, history: [diagnosis, ...s.history].slice(0, MAX_DIAGNOSIS_HISTORY), running: false }));
       } catch (e) {
         patchState(store, { running: false, error: toCommandError(e) });
       }

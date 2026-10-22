@@ -122,6 +122,46 @@ pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
+/// "Export" on the Reports page: the OS save dialog (so the path is one the person chose, never one the webview supplied),
+/// then the agent writes the week's report there as Markdown or HTML. `null` when they cancel.
+#[tauri::command]
+pub async fn save_report(
+    app: AppHandle,
+    link: State<'_, Arc<AgentLink>>,
+    format: dyno_core::report::ReportFormat,
+    weeks_ago: u32,
+) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use dyno_core::report::ReportFormat;
+        use tauri_plugin_dialog::DialogExt;
+        let (name, filter) = match format {
+            ReportFormat::Markdown => ("dyno-weekly-report.md", ("Markdown", "md")),
+            ReportFormat::Html => ("dyno-weekly-report.html", ("Web page", "html")),
+        };
+        let Some(chosen) = app
+            .dialog()
+            .file()
+            .set_title("Save the weekly report")
+            .set_file_name(name)
+            .add_filter(filter.0, &[filter.1])
+            .blocking_save_file()
+        else {
+            return Ok(Value::Null);
+        };
+        let path = chosen
+            .into_path()
+            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
+        let path = path.to_string_lossy().into_owned();
+        let reply = link.call(Request::SaveReport { path, format, weeks_ago })?;
+        reply
+            .into_json()
+            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
 /// The tray dropdown's "Open Dyno".
 #[tauri::command]
 pub async fn tray_open_main(app: AppHandle) -> Result<(), CommandError> {

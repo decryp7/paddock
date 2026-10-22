@@ -17,6 +17,7 @@ use dyno_core::process::{Pid, ProcessAction, ProcessRef, ProcessSample};
 use dyno_core::protect::Protection;
 use dyno_core::protocol::{AgentError, ErrorCode, History, LiveDetail, Message, PluginInfo, PluginState, Reply, Request};
 use dyno_core::recorder::CaptureReason;
+use dyno_core::report::{self, ReportChange, ReportDisk, ReportFormat, ReportInput, ReportIssue, SavedReport, ScorePoint, WeeklyReport};
 use dyno_core::rules::{Command as RuleCommand, Situation};
 use dyno_core::snapshot;
 use dyno_core::startup::StartupState;
@@ -286,7 +287,8 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Tuning => crate::tuning::list(shared).map(Reply::Tuning),
         Request::ApplyTuning { id } => crate::tuning::apply(shared, &id).map(Reply::Activity),
         Request::RevertTuning { id, force } => crate::tuning::revert(shared, &id, force).map(Reply::Activity),
-        Request::WeeklyReport => Err(not_built("The weekly report")),
+        Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
+        Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
 }
 
@@ -688,7 +690,7 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
         .map(|(disk, _, pts)| (disk, disk_full(&pts)))
         .collect();
     let system_disk = sample.disks.first().map(|d| d.id.clone()).unwrap_or_default();
-    Ok(assess(&HealthInput {
+    let report = assess(&HealthInput {
         now: t,
         sample: &sample,
         facts: &facts,
@@ -698,8 +700,137 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
         anomalies: &anomalies,
         crashes_7d: 0,
         tuning: &tuning,
+    });
+    // Bookkeeping for the weekly report's trend (one row per hour; a failed write loses one point, nothing else).
+    let _ = core.store.put_score(t, report.score);
+    Ok(report)
+}
+
+/// The report for the seven days ending `weeks_ago` weeks before now, from what the store holds. A week with nothing in
+/// it is still a report (`nothing_to_report`).
+fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentError> {
+    if weeks_ago > MAX_WEEKS_AGO {
+        return Err(bad(format!("Dyno keeps at most {MAX_WEEKS_AGO} weeks; choose a more recent one.")));
+    }
+    let to = now().minus(i64::from(weeks_ago) * 7 * DAY);
+    let from = to.minus(7 * DAY);
+    // The score now is measured (and recorded for the trend); earlier weeks use what was recorded.
+    let live_score = if weeks_ago == 0 {
+        health(shared).ok().map(|h| h.score)
+    } else {
+        None
+    };
+    let core = lock(&shared.core);
+    let s = &core.store;
+    let points = s.points(Tier::QuarterHour, from, to).map_err(internal)?;
+    let top_apps = top_consumers(&s.app_minutes(from, to).map_err(internal)?, 5);
+    let score = live_score.or(s.score_at(to).map_err(internal)?);
+    let in_week = |at: Timestamp| at >= from && at < to;
+    let activity: Vec<ActivityEntry> = s
+        .activity(1_000)
+        .map_err(internal)?
+        .into_iter()
+        .map(|(e, _, _)| e)
+        .filter(|e| in_week(e.at))
+        .collect();
+    let rule_actions = activity.iter().filter(|e| e.kind == ActivityKind::Rule).count() as u32;
+    let cleaned_bytes = activity
+        .iter()
+        .filter(|e| e.kind == ActivityKind::Cleanup)
+        .filter_map(|e| e.bytes)
+        .sum();
+    let changes = activity
+        .iter()
+        .filter(|e| {
+            !matches!(
+                e.kind,
+                ActivityKind::Rule | ActivityKind::Alert | ActivityKind::System | ActivityKind::Release
+            )
+        })
+        .map(|e| ReportChange {
+            at: e.at,
+            title: e.title.clone(),
+            detail: e.detail.clone(),
+        })
+        .collect();
+    let issues: Vec<ReportIssue> = s
+        .alerts(1_000)
+        .map_err(internal)?
+        .into_iter()
+        .filter(|a| in_week(a.at))
+        .map(|a| ReportIssue {
+            at: a.at,
+            severity: a.severity,
+            title: a.title,
+            detail: a.detail,
+        })
+        .collect();
+    let crashes = s
+        .app_events(from, to)
+        .map_err(internal)?
+        .iter()
+        .filter(|(_, _, k)| *k == crate::store::AppEvent::Crash)
+        .count() as u32;
+    let disks = s
+        .disk_free(from.minus(14 * DAY), to)
+        .map_err(internal)?
+        .into_iter()
+        .filter_map(|(disk, total, pts)| {
+            let free = pts.iter().max_by_key(|p| p.at)?.free;
+            Some(ReportDisk {
+                forecast: disk_full(&pts),
+                disk,
+                total,
+                free,
+            })
+        })
+        .collect();
+    Ok(report::weekly(ReportInput {
+        from,
+        to,
+        points: &points,
+        top_apps,
+        score,
+        score_before: s.score_at(from).map_err(internal)?,
+        rule_actions,
+        cleaned_bytes,
+        crashes,
+        alerts: issues.len() as u32,
+        score_trend: s
+            .scores(from, to)
+            .map_err(internal)?
+            .into_iter()
+            .map(|(at, score)| ScorePoint { at, score })
+            .collect(),
+        disks,
+        issues,
+        changes,
     }))
 }
+
+/// Writes the report to the path the user chose in the save dialog (Markdown or HTML).
+fn save_report(shared: &Shared, path: &str, format: ReportFormat, weeks_ago: u32) -> Result<SavedReport, AgentError> {
+    let dest = report::validate_destination(path, format).map_err(bad)?;
+    if !dest.parent().is_some_and(Path::is_dir) {
+        return Err(bad("The folder to save the report in does not exist."));
+    }
+    let text = format.render(&weekly_report(shared, weeks_ago)?);
+    std::fs::write(&dest, text.as_bytes()).map_err(|e| {
+        let code = if e.kind() == std::io::ErrorKind::PermissionDenied {
+            ErrorCode::AccessDenied
+        } else {
+            ErrorCode::Internal
+        };
+        AgentError::new(code, format!("Dyno could not write the report ({e}). Choose another folder."))
+    })?;
+    Ok(SavedReport {
+        path: dest.to_string_lossy().into_owned(),
+        bytes: text.len() as u64,
+    })
+}
+
+/// Reports go back at most this many weeks (the store keeps about a year of quarter-hour rows; older weeks are mostly empty).
+const MAX_WEEKS_AGO: u32 = 52;
 
 fn plugins(shared: &Shared) -> Vec<PluginInfo> {
     // Started on first use: most users have none, and discovery is a directory scan.

@@ -57,9 +57,13 @@ until the helper does it. Where it cannot be read the page shows the reason inst
 
 ## Why is it slow?
 
-**Engine only.** `WhySlow` returns a diagnosis: a headline and causes (kind, confidence, evidence, suggestions such as "lower
-priority of X"); `Anomalies` lists unusual behaviour; disk-full forecasts come from history. The dashboard shows the diagnosis on
-request ("Check now"). The dedicated Why slow screen is a placeholder.
+**Built.** `WhySlow` returns a diagnosis: a headline and causes (kind, confidence, evidence, the busiest apps behind each cause,
+how many seconds were measured, suggestions such as "lower priority of X"); `Anomalies` lists unusual behaviour; disk-full
+forecasts come from history. The dashboard card shows the answer on request ("Check now") and links to the **Why slow** page:
+every cause with what was measured, the apps involved, links to Processes / Network / Flight recorder / Health, **Run again**,
+**Copy as text**, and the earlier results of this session. A fix that changes a process shows what it will do first and waits
+for a second click; fixes that only open a screen navigate. The history of results is kept in the app for the session (the engine
+does not store diagnoses).
 
 ## CPU taming and profiles
 
@@ -113,8 +117,13 @@ built yet." Work packages [WP-01](roadmap.md#wp-01-privileged-helper), [WP-05](r
 
 ## Alerts and reports
 
-**Engine only / planned.** Alerts (low disk, overheating, crash loops, rule actions) are stored and listed (`Alerts`); the weekly
-report type exists but the agent answers "The weekly report is not built yet." The Reports screen is a placeholder.
+**Reports built; alert history and notifications planned.** Alerts (low disk, overheating, crash loops, rule actions) are stored
+and listed (`Alerts`). `WeeklyReport { weeksAgo }` builds the report for any of the last 52 weeks from stored data, in the engine:
+health score and its trend, CPU and memory, the busiest apps, free space and the disk-full forecast per disk, the week's alerts
+as issues, and what changed (cleanups, startup and tuning changes, your own process actions). A week with nothing in it is a valid
+report ("Nothing to report"). The **Reports** page has a week selector and exports the week as Markdown or a web page
+(`SaveReport`, through the OS save dialog; dates in the export are UTC). The health score is recorded hourly while the app asks
+for it (the dashboard and Reports do), so a week with no visit has no trend. A weekly OS notification is not built.
 [WP-08](roadmap.md#wp-08-alerts-and-the-weekly-report).
 
 ## Tray, window and settings

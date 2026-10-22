@@ -48,6 +48,8 @@ import type {
   Timestamp,
   TuningSuggestion,
   WeeklyReport,
+  ReportFormat,
+  SavedReport,
 } from './api.types';
 
 /** Stops a subscription. */
@@ -153,7 +155,10 @@ export interface DynoBackend {
   compareBenchmarks(before: string, after: string): Promise<BenchComparison>;
 
   // Reports, settings, plugins.
-  weeklyReport(): Promise<WeeklyReport>;
+  /** The report for the seven days ending `weeksAgo` weeks before now (0 = the last seven days, at most 52). */
+  weeklyReport(weeksAgo: number): Promise<WeeklyReport>;
+  /** Asks where to save (the OS save dialog) and writes the week's report there; resolves `null` when they cancel. */
+  saveReport(format: ReportFormat, weeksAgo: number): Promise<SavedReport | null>;
   /** The most recent alerts, newest first. */
   alerts(limit: number): Promise<Alert[]>;
   settings(): Promise<Settings>;

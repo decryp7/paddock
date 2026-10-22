@@ -53,7 +53,7 @@ describe('TauriBackend: request shapes', () => {
     ['revertTuning forced', (b) => b.revertTuning('t', true), { revertTuning: { id: 't', force: true } }],
     ['startupEntries', (b) => b.startupEntries(), 'startupEntries'],
     ['setStartupState', (b) => b.setStartupState('s', { delayed: 30 }), { setStartupState: { id: 's', state: { delayed: 30 } } }],
-    ['weeklyReport', (b) => b.weeklyReport(), 'weeklyReport'],
+    ['weeklyReport', (b) => b.weeklyReport(3), { weeklyReport: { weeksAgo: 3 } }],
     ['alerts', (b) => b.alerts(10), { alerts: { limit: 10 } }],
     ['settings', (b) => b.settings(), 'settings'],
     ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS } }],
@@ -65,6 +65,12 @@ describe('TauriBackend: request shapes', () => {
     await expect(call(backend)).resolves.toBe('ok');
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith('dyno', { request });
+  });
+
+  it('saveReport asks the shell for the dialog with the format and the week, and waits as long as the person does', async () => {
+    const { backend, invoke } = fake();
+    await backend.saveReport('markdown', 1);
+    expect(invoke).toHaveBeenCalledWith('save_report', { format: 'markdown', weeksAgo: 1 });
   });
 
   it('popoverResize sends the measured height to popover_resize', async () => {

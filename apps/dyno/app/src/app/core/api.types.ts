@@ -298,10 +298,21 @@ export interface Cause {
   confidence: number;
   evidence: Evidence[];
   suggestions: Suggestion[];
+  /** The busiest apps behind the cause (empty when it is not an app). */
+  involved: Involved[];
+}
+
+/** An app that is part of a cause, with its share of what was measured ("63% CPU", "1.2 GB"). */
+export interface Involved {
+  id: string;
+  name: string;
+  share: string;
 }
 
 export interface Diagnosis {
   at: Timestamp;
+  /** How many seconds of samples the diagnosis looked at. */
+  windowSecs: number;
   headline: string;
   causes: Cause[];
 }
@@ -661,7 +672,8 @@ export interface Alert {
 export interface WeeklyReport {
   from: Timestamp;
   to: Timestamp;
-  score: number;
+  /** The health score at the end of the week; null when none was recorded. */
+  score: number | null;
   scoreChange: number;
   avgCpu: number;
   peakCpu: number;
@@ -672,6 +684,46 @@ export interface WeeklyReport {
   crashes: number;
   alerts: number;
   highlights: string[];
+  scoreTrend: ScorePoint[];
+  disks: ReportDisk[];
+  /** The week's alerts, newest first (at most 20). */
+  issues: ReportIssue[];
+  /** What changed on the machine, newest first (at most 20). */
+  changes: ReportChange[];
+  /** True when the week holds nothing: a valid report that says so. */
+  nothingToReport: boolean;
+}
+
+export interface ScorePoint {
+  at: Timestamp;
+  score: number;
+}
+
+export interface ReportDisk {
+  disk: string;
+  total: number;
+  free: number;
+  forecast: Forecast;
+}
+
+export interface ReportIssue {
+  at: Timestamp;
+  severity: Severity;
+  title: string;
+  detail: string;
+}
+
+export interface ReportChange {
+  at: Timestamp;
+  title: string;
+  detail: string;
+}
+
+export type ReportFormat = 'markdown' | 'html';
+
+export interface SavedReport {
+  path: string;
+  bytes: number;
 }
 
 // ------------------------------------------------------------------------------------------------------ settings

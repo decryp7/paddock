@@ -38,7 +38,7 @@ export const HealthStore = signalStore(
       async loadReport(): Promise<void> {
         patchState(store, { reportError: null });
         try {
-          const [report, weekly] = await Promise.all([backend.health(), backend.weeklyReport().catch(() => null)]);
+          const [report, weekly] = await Promise.all([backend.health(), backend.weeklyReport(0).catch(() => null)]);
           patchState(store, { report, weekly });
         } catch (e) {
           patchState(store, { reportError: toCommandError(e) });

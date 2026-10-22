@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import type { Suggestion } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { formatCount, formatFraction, formatPercent, formatRate } from '../../shared/format';
@@ -11,13 +11,16 @@ import { LiveStore } from '../../state/live.store';
 /** "Why is my PC slow?": one button, and the engine's latest answer (headline, top cause, evidence, what to do). */
 @Component({
   selector: 'dy-diagnosis-card',
-  imports: [Icon],
+  imports: [Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Why is my PC slow?">
       <div class="card-head">
         <h2><dy-icon name="why" /> Why is my PC slow?</h2>
         <span class="spacer"></span>
+        @if (store.diagnosis()) {
+          <a class="btn sm ghost" routerLink="/why-slow">See the evidence</a>
+        }
         <button type="button" class="btn sm primary" [disabled]="store.running()" (click)="store.run()">
           <dy-icon name="why" /> {{ store.diagnosis() ? 'Check again' : 'Check now' }}
         </button>
@@ -79,16 +82,16 @@ import { LiveStore } from '../../state/live.store';
   styles: `
     :host { display: block; min-width: 0; }
     .card { height: 100%; }
-    .body { padding: var(--sp-3) var(--sp-4) var(--sp-4); display: grid; gap: var(--sp-3); align-content: start; }
+    .body { padding: var(--sp-4) var(--sp-4) var(--sp-5); display: grid; gap: var(--sp-4); align-content: start; }
     .idle { color: var(--text-2); max-width: 62ch; }
     .headline { font: var(--fw-semibold) var(--fs-lg) / 1.3 var(--font-display); }
-    .cause { display: flex; gap: var(--sp-3); padding: var(--sp-1) 0 var(--sp-1) var(--sp-3); border-left: 3px solid var(--warn); }
+    .cause { display: flex; gap: var(--sp-3); align-items: flex-start; }
     .ic { display: grid; place-items: center; width: 28px; height: 28px; color: var(--text-2); flex: none; }
-    .txt { display: grid; gap: var(--sp-1); min-width: 0; }
+    .txt { display: grid; gap: var(--sp-2); min-width: 0; }
     .txt > span { color: var(--text-2); font-size: var(--fs-sm); }
-    .evidence { margin: var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-sm); }
+    .evidence { margin: 0; color: var(--text-3); font-size: var(--fs-sm); line-height: 1.5; }
     .evidence span + span::before { content: ' · '; }
-    .actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+    .actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding-top: var(--sp-1); }
     .more { justify-self: start; }
     .others { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-sm); }
     .others li { display: flex; align-items: center; gap: var(--sp-2); }
@@ -97,7 +100,7 @@ import { LiveStore } from '../../state/live.store';
     .faint { color: var(--text-3); }
     .card { display: flex; flex-direction: column; }
     .body { flex: 1; }
-    .stats { margin: 0; padding: var(--sp-3) var(--sp-4); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); border-top: 1px solid var(--border-subtle); }
+    .stats { margin: 0; padding: var(--sp-4); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); border-top: 1px solid var(--border-subtle); }
     .stats dt { color: var(--text-3); font-size: var(--fs-sm); }
     .stats dd { margin: 2px 0 0; font: var(--fw-semibold) var(--fs-md) / 1.3 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .err { display: flex; gap: var(--sp-3); align-items: flex-start; }

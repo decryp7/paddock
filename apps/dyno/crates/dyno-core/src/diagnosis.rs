@@ -75,6 +75,21 @@ pub struct Suggestion {
     pub action: SuggestedAction,
 }
 
+/// An app that is part of a cause, with its share of what was measured.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Involved {
+    /// The app group's id.
+    pub id: String,
+    /// The app's name.
+    pub name: String,
+    /// Its share, formatted ("63% CPU", "1.2 GB", "40 MB/s").
+    pub share: String,
+}
+
+/// Most apps named per cause.
+pub const MAX_INVOLVED: usize = 3;
+
 /// One cause.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +106,8 @@ pub struct Cause {
     pub evidence: Vec<Evidence>,
     /// What to do.
     pub suggestions: Vec<Suggestion>,
+    /// The busiest apps behind it (empty when the cause is not an app, e.g. heat).
+    pub involved: Vec<Involved>,
 }
 
 /// The answer.
@@ -99,6 +116,8 @@ pub struct Cause {
 pub struct Diagnosis {
     /// When.
     pub at: Timestamp,
+    /// How many seconds of samples it looked at.
+    pub window_secs: u32,
     /// The top cause's title.
     pub headline: String,
     /// Causes, most likely first (one `NothingWrong` when none).
@@ -173,6 +192,21 @@ fn app_kind(g: &AppGroup, by_pid: &HashMap<u32, &ProcessSample>) -> Option<Cause
     }
 }
 
+/// The busiest apps by `key` (those with a share above zero), at most [`MAX_INVOLVED`].
+fn involved(groups: &[AppGroup], key: impl Fn(&AppGroup) -> f32, show: impl Fn(f32) -> String) -> Vec<Involved> {
+    let mut ranked: Vec<(&AppGroup, f32)> = groups.iter().map(|g| (g, key(g))).filter(|(_, v)| *v > 0.0).collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+    ranked
+        .into_iter()
+        .take(MAX_INVOLVED)
+        .map(|(g, v)| Involved {
+            id: g.id.clone(),
+            name: g.name.clone(),
+            share: show(v),
+        })
+        .collect()
+}
+
 fn pct(v: f32) -> String {
     format!("{v:.0}%")
 }
@@ -201,10 +235,16 @@ pub fn diagnose(input: &Input<'_>) -> Diagnosis {
             confidence: 1.0,
             evidence: vec![Evidence::new("CPU", pct(cpu)), Evidence::new("Memory in use", pct(mem))],
             suggestions: vec![],
+            involved: vec![],
         });
     }
+    let window_secs = match (input.samples.first(), input.samples.last()) {
+        (Some(a), Some(b)) => (b.at.since(a.at) / 1000).clamp(0, i64::from(u32::MAX)) as u32,
+        _ => 0,
+    };
     Diagnosis {
         at: input.now,
+        window_secs,
         headline: causes[0].title.clone(),
         causes,
     }
@@ -318,6 +358,7 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
         confidence,
         evidence,
         suggestions,
+        involved: involved(input.groups, |g| g.cpu, |v| format!("{} CPU", pct(v))),
     });
 }
 
@@ -375,6 +416,7 @@ fn memory_cause(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &
         confidence,
         evidence,
         suggestions,
+        involved: involved(input.groups, |g| g.memory as f32, |v| bytes(v as u64)),
     });
 }
 
@@ -415,6 +457,7 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
             label: "Open the task manager".into(),
             action: SuggestedAction::OpenTaskManager,
         }],
+        involved: involved(input.groups, |g| g.disk_bps as f32, |v| format!("{}/s", bytes(v as u64))),
     });
 }
 
@@ -444,6 +487,7 @@ fn thermal_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
         confidence: if hot.is_some() && slowed { 0.85 } else { 0.6 },
         evidence,
         suggestions: vec![],
+        involved: vec![],
     });
 }
 
@@ -468,6 +512,7 @@ fn space_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
             label: "Free up space".into(),
             action: SuggestedAction::OpenCleanup,
         }],
+        involved: vec![],
     });
 }
 
@@ -485,6 +530,7 @@ fn gpu_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
         confidence: 0.4,
         evidence: vec![Evidence::new("GPU", pct(util))],
         suggestions: vec![],
+        involved: vec![],
     });
 }
 
@@ -565,6 +611,31 @@ mod tests {
         c.procs = vec![proc(20, None, "csrss.exe", 63.0, 1)];
         let d = c.run();
         assert_eq!(d.causes[0].suggestions.len(), 1);
+    }
+
+    #[test]
+    fn a_cause_names_the_busiest_apps_and_the_window_looked_at() {
+        let mut c = Case::new();
+        c.each(|s| s.cpu.total = 92.0);
+        c.procs.push(proc(20, None, "rustc.exe", 63.0, 900));
+        let d = c.run();
+        // 12 samples 5 s apart.
+        assert_eq!(d.window_secs, 55);
+        let inv = &d.causes[0].involved;
+        assert_eq!(
+            inv.first().map(|i| (i.name.as_str(), i.share.as_str())),
+            Some(("Rust compiler", "63% CPU"))
+        );
+        assert!(inv.len() <= MAX_INVOLVED && inv.windows(2).all(|w| w[0].name != w[1].name));
+        // Not an app: heat names nobody; a quiet machine has no window.
+        let mut c = Case::new();
+        c.each(|s| s.cpu.total = 99.0);
+        assert!(c.run().causes[0].involved.is_empty());
+        let empty = Case {
+            samples: vec![],
+            procs: vec![],
+        };
+        assert_eq!(empty.run().window_secs, 0);
     }
 
     #[test]

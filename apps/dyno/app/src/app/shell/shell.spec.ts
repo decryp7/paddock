@@ -26,7 +26,7 @@ describe('NAV', () => {
     expect(NAV[0]!.path).toBe('/');
   });
   it('lists unbuilt features only in the Coming list, never as routes', () => {
-    expect(COMING.map((c) => c.label)).toEqual(['Why slow', 'Weekly report']);
+    expect(COMING.map((c) => c.label)).toEqual(['Administrator tuning', 'Issues']);
     expect(NAV.some((n) => COMING.some((c) => c.label === n.label))).toBe(false);
   });
 });
