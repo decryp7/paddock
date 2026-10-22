@@ -5,7 +5,8 @@ import { Chart } from '../../shared/chart';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { EVENT_LABEL, forecastText } from '../../shared/labels';
-import { formatBytes } from '../../shared/format';
+import { formatBytes, formatPercent } from '../../shared/format';
+import { LiveStore } from '../../state/live.store';
 import { HistoryStore } from '../../state/history.store';
 import { EVENT_STYLE, consumersOption, diskTrendOption, eventCounts, historyOption } from './history-options';
 
@@ -175,12 +176,25 @@ export class DiskTrendPanel implements OnInit {
       <div class="card-head">
         <h2><dy-icon name="processes" /> Top consumers</h2>
         <span class="spacer"></span>
-        <span class="faint">{{ rangeText() }}</span>
+        <span class="seg sm" role="group" aria-label="Top consumers period">
+          <button type="button" [attr.aria-pressed]="view() === 'now'" (click)="view.set('now')">Now</button>
+          <button type="button" [attr.aria-pressed]="view() === 'range'" (click)="view.set('range')">{{ rangeShort() }}</button>
+        </span>
       </div>
+      @if (view() === 'now') {
+        <ol class="now" aria-label="Busiest apps right now">
+          @for (g of now(); track g.id) {
+            <li><span class="truncate">{{ g.name }}</span><span class="bar" role="presentation"><i [style.width.%]="g.cpu"></i></span><span class="num">{{ pct(g.cpu) }}</span></li>
+          } @empty {
+            <li class="faint">Waiting for the first reading…</li>
+          }
+        </ol>
+      } @else {
       <dy-async [loaded]="!!store.history()" [error]="store.error()" [empty]="consumers().length === 0" emptyTitle="Nothing to rank yet" what="top consumers" [rows]="0" (retry)="store.load()">
         <div skeleton class="skeleton chart-skeleton"></div>
         <dy-chart [options]="option()" label="Apps with the highest average CPU over the range" style="--chart-h: 190px" />
       </dy-async>
+      }
     </section>
   `,
   styles: `
@@ -189,6 +203,11 @@ export class DiskTrendPanel implements OnInit {
     dy-async { padding: 0 var(--sp-4); }
     .chart-skeleton { height: 190px; margin-top: var(--sp-2); }
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
+    .now { list-style: none; margin: 0; padding: 0 var(--sp-4); display: grid; gap: var(--sp-2); font-size: var(--fs-sm); }
+    .now li { display: grid; grid-template-columns: minmax(0, 1fr) 90px 52px; gap: var(--sp-3); align-items: center; }
+    .now .bar { height: 5px; border-radius: 3px; background: var(--surface-active); overflow: hidden; }
+    .now .bar i { display: block; height: 100%; background: var(--accent); min-width: 2px; }
+    .now .num { text-align: right; }
   `,
 })
 export class ConsumersPanel implements OnInit {
@@ -196,7 +215,11 @@ export class ConsumersPanel implements OnInit {
   private readonly theme = inject(ThemeService);
   protected readonly consumers = computed(() => this.store.history()?.topConsumers ?? []);
   protected readonly option = computed(() => (this.consumers().length ? consumersOption(this.consumers(), this.theme.tokens()) : null));
-  protected readonly rangeText = computed(() => RANGES.find((r) => r.id === this.store.range())?.long ?? '');
+  protected readonly rangeShort = computed(() => RANGES.find((r) => r.id === this.store.range())?.id ?? '24h');
+  protected readonly view = signal<'now' | 'range'>('range');
+  private readonly live = inject(LiveStore);
+  protected readonly now = computed(() => (this.live.update()?.topCpu ?? []).slice(0, 6));
+  protected readonly pct = formatPercent;
 
   ngOnInit(): void {
     void this.store.ensure();

@@ -130,6 +130,15 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     },
   },
   {
+    name: 'widgets-battery',
+    path: '/#/',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Edit dashboard' }).click();
+      await page.getByLabel('Preset').selectOption('battery');
+      await page.clock.runFor(2_000);
+    },
+  },
+  {
     name: 'widgets-gaming',
     path: '/#/',
     ready: async (page) => {
@@ -185,7 +194,7 @@ for (const theme of ['dark', 'light'] as const) {
       await screen.ready(page);
       if (screen.name === 'tray') {
         // A desktop-like backdrop (blurred wallpaper gradient and a menu bar) so the rounded, translucent popover is visible.
-        const wall = theme === 'dark' ? 'linear-gradient(135deg, #1d2b64 0%, #7b3f98 55%, #d46a6a 100%)' : 'linear-gradient(135deg, #8ec5fc 0%, #e0c3fc 55%, #fbc2a6 100%)';
+        const wall = theme === 'dark' ? 'linear-gradient(160deg, #262a33 0%, #3b414d 100%)' : 'linear-gradient(160deg, #c3c7cf 0%, #e1e3e8 100%)';
         await page.addStyleTag({
           content: `html[data-surface='popover'] { background: ${wall} !important; }
             html[data-surface='popover'] body { padding: 34px 40px 0 !important; }
@@ -193,7 +202,13 @@ for (const theme of ['dark', 'light'] as const) {
         });
         await page.clock.runFor(500);
       }
-      await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`) });
+      if (screen.name === 'tray') {
+        // Only the popover plus a margin, not the empty wallpaper below it.
+        const bottom = await page.evaluate(() => Math.ceil(document.querySelector('dy-tray')?.getBoundingClientRect().bottom ?? 600));
+        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`), clip: { x: 0, y: 0, width: 440, height: Math.min(660, bottom + 24) } });
+      } else {
+        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`) });
+      }
       if (screen.name === 'dashboard') {
         await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('button', { name: 'Per core' }).click();
         await page.clock.runFor(1_000);
