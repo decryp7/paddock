@@ -2,6 +2,12 @@
 
 Conventional Commits; one semver tag for the whole repo.
 
+## Unreleased
+
+### Changed
+- `@decryp7/paddock-ui` is published to the Gitea npm registry by the tag workflow (`.npmrc` with the `@decryp7` registry and
+  `"@decryp7/paddock-ui": "^0.1.0"`) instead of a release-asset tarball; releases carry notes only.
+
 ## 0.1.0 - 2026-10-22
 
 ### Added
@@ -14,7 +20,7 @@ Conventional Commits; one semver tag for the whole repo.
   `sequentialRamp`).
 - Token test: WCAG contrast of every pair and colour-vision separation of the chart palette (131 tests).
 - Gallery app with Playwright screenshots (every component, both themes, five accents), axe, keyboard and CSP checks.
-- `crates/` Cargo workspace root (no members), `docs/` design guide and lessons, CI workflow, release tarball script.
+- `crates/` Cargo workspace root (no members), `docs/` design guide and lessons, CI workflow, release script.
 
 ### Changed (design guide values that failed the token test)
 - text-subtle, text-muted (light), success (light), chart-neutral-bar, Pitwall fill and the whole chart palette; added

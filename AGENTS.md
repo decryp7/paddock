@@ -51,7 +51,7 @@ The shared repo of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spot
 ## Dependencies and releases
 - Prefer permissive, well-maintained dependencies; commit `package-lock.json`; CI uses `npm ci`.
 - Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`). No Co-Authored-By or AI attribution.
-- One semver tag per release (`v0.1.0`); CI attaches `paddock-ui-<version>.tgz` to the Gitea release. ADRs in `docs/adr/`.
+- One semver tag per release (`v0.1.0`); CI publishes `@decryp7/paddock-ui` to the Gitea npm registry and creates the release (never publish from a workstation). ADRs in `docs/adr/`.
 
 ## Style
 - Match surrounding code. Comments only where intent isn't obvious; doc comments on exported items. Sentence-case copy,

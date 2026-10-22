@@ -7,19 +7,21 @@ Angular components and an ECharts theme. Part of [paddock](../README.md); versio
 
 ## Install
 
-Each release attaches a built tarball to its Gitea release. Apps depend on that URL:
+The package is published to the Gitea npm registry. In the app, add an `.npmrc` next to `package.json`:
+
+```ini
+@decryp7:registry=https://dev.decryptology.net/api/packages/decryp7/npm/
+```
 
 ```json
 "dependencies": {
-  "@decryp7/paddock-ui": "https://dev.decryptology.net/decryp7/paddock/releases/download/v0.1.0/paddock-ui-0.1.0.tgz"
+  "@decryp7/paddock-ui": "^0.1.0"
 }
 ```
 
-Why a tarball and not a `git+https` dependency: npm does not run an Angular library build for git dependencies, so a git
-dependency would have to commit `dist/`. The tarball is the same built output, versioned by release, with an `integrity`
-hash that `npm ci` verifies from `package-lock.json`; nothing is built in the app's CI and no registry is needed. Peer
-dependencies: `@angular/core` and `@angular/common` 22 (echarts 6 is optional, only for the chart theme).
-To upgrade, change the version in the URL and run `npm install`.
+The package is public, so installing needs no token; `npm ci` verifies the integrity hash from `package-lock.json`, and nothing
+is built in the app's CI. Peer dependencies: `@angular/core` and `@angular/common` 22 (echarts 6 is optional, only for the
+chart theme). To upgrade, bump the range and run `npm install`.
 
 ## Use
 
@@ -102,7 +104,7 @@ npm run test:tokens      # WCAG contrast of every pair + colour-vision separatio
 npm test                 # component and helper specs (Vitest via ng test), 100% lines
 npx playwright test      # gallery: axe (both themes), keyboard, native feel, CSP; SCREENSHOTS=1 rewrites docs/screenshots
 npm run build            # ng-packagr build to dist/paddock-ui
-npm run release          # build and pack dist/paddock-ui-<version>.tgz
+npm run release          # dry run: build and list the package contents (CI publishes on a v* tag)
 ```
 
 ### What the token test checks

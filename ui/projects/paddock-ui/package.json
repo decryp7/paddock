@@ -34,5 +34,9 @@
   "exports": {
     "./css/*": "./css/*",
     "./scss/*": "./scss/*"
+  },
+  "publishConfig": {
+    "registry": "https://dev.decryptology.net/api/packages/decryp7/npm/",
+    "access": "public"
   }
 }

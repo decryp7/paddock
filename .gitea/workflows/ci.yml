@@ -1,5 +1,5 @@
-# Checks the shared UI package on every push and pull request; a v* tag also builds paddock-ui-<version>.tgz and attaches it
-# to a Gitea release (needs the repository secret RELEASE_TOKEN: an access token with write:repository scope).
+# Checks the shared UI package on every push and pull request; a v* tag also publishes @decryp7/paddock-ui to the Gitea npm
+# registry and creates the Gitea release with notes. Releases are made only by this workflow, never from a workstation.
 # Rust jobs are added with the first crate in crates/.
 
 name: ci
@@ -50,10 +50,13 @@ jobs:
           npx playwright test
 
   release:
-    name: release tarball
+    name: release (npm registry)
     needs: ui
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     container:
       image: catthehacker/ubuntu:act-latest
     defaults:
@@ -65,9 +68,9 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
-      - name: Pack and attach paddock-ui-<version>.tgz to the release
+      - name: Publish to the npm registry and create the release
         env:
-          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITEA_TOKEN: ${{ github.token }}
         run: node scripts/release.mjs --publish
 
   # rust:

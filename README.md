@@ -5,19 +5,24 @@ Everything the Paddock app family shares: **Debrief, Pitcrew, Pitwall, Dyno, Spo
 
 | Part | Path | What | How apps consume it |
 |---|---|---|---|
-| UI package `@decryp7/paddock-ui` | [`ui/`](ui/README.md) | design tokens (dark/light, five accents, three densities), base styles, Angular components, ECharts theme, gallery | npm dependency on the release tarball `paddock-ui-<version>.tgz` |
+| UI package `@decryp7/paddock-ui` | [`ui/`](ui/README.md) | design tokens (dark/light, five accents, three densities), base styles, Angular components, ECharts theme, gallery | npm dependency from the Gitea npm registry |
 | Rust crates | [`crates/`](crates/README.md) | Cargo workspace for shared Rust code (empty until the first crate is extracted) | git dependency pinned to a repo tag |
 | Design guide | [`docs/design-guide.md`](docs/design-guide.md) | the Paddock design guide (principles, layout, type, colour, charts, components, motion, microcopy, polish checklist) | read; `ui/` is its executable form |
 | Lessons | [`docs/lessons.md`](docs/lessons.md) | what Debrief and Pitcrew taught (build, window, service, native feel, tests, process) | read before starting an app |
 
 ## Consuming the UI package
 
-```json
-"@decryp7/paddock-ui": "https://dev.decryptology.net/decryp7/paddock/releases/download/v0.1.0/paddock-ui-0.1.0.tgz"
+```ini
+# .npmrc (public package, no token needed to install)
+@decryp7:registry=https://dev.decryptology.net/api/packages/decryp7/npm/
 ```
 
-`npm ci` installs it from `package-lock.json` (the lock file records the tarball URL and its sha512), so CI needs no registry
-and builds nothing. Usage, tokens, components and migration notes per app are in [`ui/README.md`](ui/README.md).
+```json
+"@decryp7/paddock-ui": "^0.1.0"
+```
+
+`npm ci` installs it from `package-lock.json` (which records the registry URL and the sha512). Usage, tokens, components and
+migration notes per app are in [`ui/README.md`](ui/README.md).
 
 ## Consuming a crate (later)
 
@@ -29,9 +34,10 @@ paddock-foo = { git = "https://dev.decryptology.net/decryp7/paddock", tag = "v0.
 
 One semver tag for the whole repo: `vMAJOR.MINOR.PATCH`. Pre-1.0 a minor bump may change tokens or component APIs (there is no
 backward-compatibility promise before Paddock's v1: removed things are deleted, not deprecated). Pushing a `v*` tag runs CI,
-which packs `paddock-ui-<version>.tgz` and attaches it to the Gitea release. Steps: update the version in
-`ui/projects/paddock-ui/package.json` and `CHANGELOG.md`, commit, tag, push the tag. Locally: `cd ui && npm run release`
-builds the tarball; `GITEA_TOKEN=... node scripts/release.mjs --publish` creates the release and uploads it.
+which publishes `@decryp7/paddock-ui` to the Gitea npm registry and creates the Gitea release with notes (no asset). Releases
+are made only by CI, never from a workstation. Steps: update the version in `ui/projects/paddock-ui/package.json` and
+`CHANGELOG.md`, commit, tag, push the tag. Re-running a tag for an already published version is reported as "already
+published" and is not an error. `cd ui && npm run release` is a local dry run (build and list the package contents).
 
 ## Layout
 
