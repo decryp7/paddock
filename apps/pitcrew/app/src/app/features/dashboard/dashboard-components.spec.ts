@@ -1,0 +1,210 @@
+import { TestBed } from '@angular/core/testing';
+import type { FinishedJob, MachineSample, RunnerSnapshot, ServiceInfo } from '../../core/api.types';
+import { BACKEND } from '../../core/backend';
+import { MockBackend } from '../../core/mock-backend';
+import { StatusStore } from '../../state/status.store';
+import { NOW, appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
+import { EventsFeed } from './events-feed';
+import type { FeedItem } from './feed';
+import { MachineTiles } from './machine-tiles';
+import { RunnerTile } from './runner-tile';
+
+describe('RunnerTile', () => {
+  let mock: MockBackend;
+  let runners: RunnerSnapshot[];
+
+  beforeEach(async () => {
+    mock = makeMock();
+    TestBed.configureTestingModule({ providers: appProviders(mock) });
+    runners = (await mock.status()).runners;
+  });
+  afterEach(() => mock.dispose());
+
+  async function mount(name: string, inputs: Record<string, unknown> = {}) {
+    const f = TestBed.createComponent(RunnerTile);
+    f.componentRef.setInput('runner', runners.find((r) => r.name === name));
+    f.componentRef.setInput('now', NOW);
+    for (const [k, v] of Object.entries(inputs)) f.componentRef.setInput(k, v);
+    await settle(f);
+    return { f, el: f.nativeElement as HTMLElement };
+  }
+
+  it('shows the running job, its details and opens the run', async () => {
+    const details = await mock.runDetails('build-win');
+    const open = vi.spyOn(mock, 'openUrl').mockResolvedValue();
+    const { el } = await mount('build-win', { details });
+    expect(text(el.querySelector('.name'))).toBe('build-win');
+    expect(text(el.querySelector('.repo'))).toContain('acme/storefront');
+    expect(text(el.querySelector('.elapsed'))).toBe('07:32');
+    expect(text(el.querySelector('.run'))).toContain('Retry declined card payments at checkout');
+    expect(text(el.querySelector('.run'))).toContain('ci.yml');
+    expect(text(el.querySelector('.run'))).toContain('feature/checkout-retry');
+    (byText(el, 'button', 'Open run #342') as HTMLButtonElement).click();
+    expect(open).toHaveBeenCalledWith(details!.url);
+  });
+
+  it('shows a pending action of a busy runner', async () => {
+    runners = runners.map((r) => (r.name === 'build-win' ? { ...r, pending: 'restart' as const } : r));
+    const { el } = await mount('build-win');
+    expect(text(el.querySelector('.note'))).toBe('Restarts after the current job');
+  });
+
+  it('shows the problem of a crash-looping runner and flags attention', async () => {
+    const { el } = await mount('docker-lab');
+    expect(text(el.querySelector('.problem'))).toContain('Exited 5 times in 10 minutes');
+    expect(text(el.querySelector('.problem'))).toContain('Next start in 22 min');
+    expect(el.querySelector('.tile.attention')).not.toBeNull();
+    expect(text(el.querySelector('.disk'))).toContain('· low');
+    expect(text(el)).toContain('7 restarts / 24 h');
+    expect(text(el)).toContain('5.3.0 available');
+  });
+
+  it('shows that a paused runner takes no jobs and offers Resume', async () => {
+    const { el } = await mount('legacy-ci');
+    expect(text(el.querySelector('.quiet'))).toContain('Takes no jobs until you resume it.');
+    expect(text(el.querySelector('.quiet'))).toContain('service account');
+    const resume = byText<HTMLButtonElement>(el, 'button', 'Resume')!;
+    const act = vi.spyOn(mock, 'resume');
+    resume.click();
+    await flush();
+    expect(act).toHaveBeenCalledWith('legacy-ci');
+    expect(byText(el, 'button', 'Update now')).toBeNull();
+  });
+
+  it('waits for jobs when idle, mentions the last job, and updates now', async () => {
+    const lastJob: FinishedJob = { info: { repository: 'a/b', job: 'x', jobId: 1, runId: 1, runNumber: 1, taskId: 1, server: null }, startedAt: NOW - 600_000, finishedAt: NOW - 300_000 };
+    const { el } = await mount('ui-tests', { lastJob });
+    expect(text(el.querySelector('.quiet'))).toContain('Waiting for jobs');
+    expect(text(el.querySelector('.quiet'))).toContain('Last job finished 5 min ago');
+    const apply = vi.spyOn(mock, 'applyUpdate');
+    byText<HTMLButtonElement>(el, 'button', 'Update now')!.click();
+    await flush();
+    expect(apply).toHaveBeenCalledWith('ui-tests');
+  });
+
+  it('shows the update phase while updating', async () => {
+    runners = runners.map((r) => (r.name === 'ui-tests' ? { ...r, updatePhase: { phase: 'downloading' as const, plan: { from: '5.2.0', to: '5.3.0' } } } : r));
+    const { el } = await mount('ui-tests');
+    expect(text(el.querySelector('.phase'))).toBe('Downloading · 5.3.0');
+    expect(byText(el, 'button', 'Update now')).toBeNull();
+  });
+
+  it('shows a stopped runner and disables Drain', async () => {
+    runners = runners.map((r) => (r.name === 'ui-tests' ? { ...r, status: 'stopped' as const, disk: null, runningSince: null } : r));
+    const { el } = await mount('ui-tests');
+    expect(text(el.querySelector('.quiet'))).toBe('Not running.');
+    expect(byText<HTMLButtonElement>(el, 'button', 'Drain')!.disabled).toBe(true);
+    expect(text(el.querySelector('dl'))).toContain('—');
+  });
+
+  it('runs Restart and Clean now through the store', async () => {
+    const { el } = await mount('ui-tests');
+    const store = TestBed.inject(StatusStore);
+    const act = vi.spyOn(store, 'act');
+    const clean = vi.spyOn(store, 'clean');
+    byText<HTMLButtonElement>(el, 'button', 'Restart')!.click();
+    byText<HTMLButtonElement>(el, 'button', 'Clean now')!.click();
+    expect(act).toHaveBeenCalledWith('ui-tests', 'restart');
+    expect(clean).toHaveBeenCalledWith('ui-tests');
+    await flush();
+  });
+
+  it('links to the runner and its logs', async () => {
+    const { el } = await mount('ui-tests');
+    expect(el.querySelector('a.name')?.getAttribute('href')).toBe('/runners/ui-tests');
+    expect(el.querySelector('a.logs')?.getAttribute('href')).toBe('/logs?runner=ui-tests');
+  });
+});
+
+describe('MachineTiles', () => {
+  const sample = (i: number): MachineSample => ({
+    at: i,
+    cpuPermille: 100 * i,
+    cpuPeakPermille: 150 * i,
+    memUsedBytes: 8 * 1024 ** 3,
+    memTotalBytes: 16 * 1024 ** 3,
+    diskFreeBytes: 50 * 1024 ** 3,
+    diskTotalBytes: 500 * 1024 ** 3,
+  });
+  const service = (machine: MachineSample | null): ServiceInfo => ({
+    version: '0.1.0',
+    startedAt: NOW - 3_600_000,
+    dataDir: 'C:\\x',
+    configProblems: [],
+    readOnly: false,
+    machine,
+    ownCpuPermille: 25,
+    ownMemBytes: 24 * 1024 ** 2,
+  });
+
+  beforeEach(() => TestBed.configureTestingModule({ providers: appProviders(makeMock()) }));
+
+  function mount(samples: MachineSample[], svc: ServiceInfo | null) {
+    const f = TestBed.createComponent(MachineTiles);
+    f.componentRef.setInput('samples', samples);
+    f.componentRef.setInput('service', svc);
+    f.componentRef.setInput('now', NOW);
+    f.detectChanges();
+    return f.nativeElement as HTMLElement;
+  }
+
+  it('shows CPU, memory and free disk with trends, and the service cost', () => {
+    const el = mount([sample(1), sample(2), sample(3)], service(null));
+    const tiles = Array.from(el.querySelectorAll('section')).map((s) => s.getAttribute('aria-label'));
+    expect(tiles[0]).toBe('CPU: 30%, avg 20% · peak 45%');
+    expect(tiles[1]).toBe('Memory: 8.0 GB, of 16 GB · 50%');
+    expect(tiles[2]).toBe('Free disk: 50.0 GB, of 500 GB · 10% free');
+    expect(text(el.querySelector('.own'))).toContain('2.5% CPU');
+    expect(text(el.querySelector('.own'))).toContain('24.0 MB memory · up 1h 00m');
+    expect(el.querySelectorAll('pc-sparkline')).toHaveLength(3);
+  });
+
+  it('falls back to the service sample, and to dashes without data', () => {
+    const el = mount([], service(sample(5)));
+    expect(el.querySelector('section')?.getAttribute('aria-label')).toBe('CPU: 50%, No samples yet');
+    const empty = mount([], null);
+    expect(empty.querySelector('section')?.getAttribute('aria-label')).toBe('CPU: —, No samples yet');
+    expect(text(empty.querySelector('.own'))).toContain('— CPU');
+  });
+
+  it('warns about low free disk', () => {
+    const low = { ...sample(1), diskFreeBytes: 10 * 1024 ** 3 };
+    const el = mount([low], service(null));
+    const spark = el.querySelectorAll('pc-sparkline')[2] as HTMLElement;
+    expect(spark.style.color).toContain('--warning');
+  });
+});
+
+describe('EventsFeed', () => {
+  beforeEach(() => TestBed.configureTestingModule({ providers: appProviders(makeMock()) }));
+
+  function mount(items: FeedItem[]) {
+    const f = TestBed.createComponent(EventsFeed);
+    f.componentRef.setInput('items', items);
+    f.componentRef.setInput('now', NOW);
+    f.detectChanges();
+    return f.nativeElement as HTMLElement;
+  }
+
+  it('says when nothing happened', () => {
+    expect(text(mount([]))).toContain('Nothing happened in this range');
+  });
+
+  it('lists events with runner and relative time', () => {
+    const el = mount([
+      { key: 'a', at: NOW - 3_600_000, runner: 'build-win', tone: 'danger', icon: 'x-octagon', title: 'Crashed and restarted', detail: 'Exited with code 1.' },
+      { key: 'b', at: NOW - 60_000, runner: 'ui-tests', tone: 'success', icon: 'play', title: 'Resumed', detail: 'Takes jobs again.' },
+    ]);
+    const rows = el.querySelectorAll('li');
+    expect(rows).toHaveLength(2);
+    expect(text(rows[0])).toContain('Crashed and restarted');
+    expect(text(rows[0])).toContain('build-win · 1 h ago');
+    expect(rows[0]!.querySelector('time')?.getAttribute('datetime')).toBe(new Date(NOW - 3_600_000).toISOString());
+    expect(rows[1]!.querySelector('.icon')?.classList.contains('success')).toBe(true);
+  });
+});
+
+it('provides the mock for the dashboard components', () => {
+  TestBed.configureTestingModule({ providers: appProviders(makeMock()) });
+  expect(TestBed.inject(BACKEND)).toBeInstanceOf(MockBackend);
+});

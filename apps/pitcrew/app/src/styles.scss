@@ -1,77 +1,34 @@
-/* Pitcrew's global theme. Colours, spacing and radii are tokens; components only use var(--…).
-   Dark and light follow the system (prefers-color-scheme); a [data-theme] on <html> overrides it.
-   Angular Material components, when added, map their --mat-sys-* tokens to these (as IMT does). */
+/* Pitcrew's global styles: tokens, element defaults and the shared building blocks every screen uses.
+   Components keep only their own layout in their styles; anything reused lives in these partials. */
 
+@use '@angular/cdk' as cdk;
+@use '@angular/material' as mat;
+@use 'styles/tokens';
+@use 'styles/base';
+@use 'styles/controls';
+@use 'styles/surfaces';
+
+@include cdk.overlay();
+@include cdk.a11y-visually-hidden();
+
+/* Material's base tokens (shapes, sizes, typography) for the few Material components; colours follow color-scheme. */
+html {
+  @include mat.theme((color: (theme-type: color-scheme, primary: mat.$orange-palette), typography: system-ui, density: 0));
+}
+
+/* Material's system tokens, mapped onto Pitcrew's so the few Material components follow both themes. */
 :root {
-  color-scheme: light dark;
-  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'Cascadia Mono', Menlo, monospace;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --radius: 6px;
-
-  /* Light */
-  --bg-1: #f7f7f8;
-  --bg-2: #ffffff;
-  --text: #1b1d21;
-  --text-2: #5b616b;
-  --border: #d9dce1;
-  --accent: #2463c9;
-  /* Status roles: checked for contrast on --bg-2 and distinguishable with colour-vision deficiency (blue/orange
-     pairing; the label text always says the status too). */
-  --ok: #18794e;
-  --warn: #a35200;
-  --bad: #c22b2b;
-}
-
-@mixin dark {
-  --bg-1: #16181c;
-  --bg-2: #1e2126;
-  --text: #e6e8eb;
-  --text-2: #9aa1ab;
-  --border: #33373e;
-  --accent: #6ea2ff;
-  --ok: #4cc38a;
-  --warn: #f0a24a;
-  --bad: #ff6b6b;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    @include dark;
-  }
-}
-
-:root[data-theme='dark'] {
-  @include dark;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-html,
-body {
-  margin: 0;
-  background: var(--bg-1);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: 14px;
-}
-
-button {
-  font: inherit;
-  color: var(--text);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-1) var(--space-3);
-  cursor: pointer;
+  --mat-sys-primary: var(--accent-bg);
+  --mat-sys-on-primary: var(--on-accent);
+  --mat-sys-surface: var(--surface);
+  --mat-sys-on-surface: var(--text);
+  --mat-sys-on-surface-variant: var(--text-2);
+  --mat-sys-outline: var(--border-strong);
+  --mat-sys-surface-container-highest: var(--surface-3);
+  --mat-sys-inverse-surface: var(--text);
+  --mat-sys-inverse-on-surface: var(--surface);
+  --mat-sys-body-medium-font: var(--font-sans);
+  --mat-sys-body-small-font: var(--font-sans);
+  --mat-sys-body-medium-size: var(--text-md);
+  --mat-sys-body-small-size: var(--text-sm);
 }

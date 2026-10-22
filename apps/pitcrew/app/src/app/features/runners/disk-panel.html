@@ -1,0 +1,142 @@
+<pc-load-state what="The disk scan" [hasValue]="!!store.disk().value" [error]="store.disk().error" [skeleton]="[90, 200]" (retry)="store.load(runner())">
+  @if (store.disk().value; as d) {
+    <div class="top">
+      <section class="card usage" aria-labelledby="usage-title">
+        <header class="card-header">
+          <h3 id="usage-title">Folder usage</h3>
+          <span class="meta">{{ bytes(d.scan.folderBytes) }}{{ d.scan.freeBytes !== null ? ' · ' + bytes(d.scan.freeBytes) + ' free on the disk' : '' }}</span>
+        </header>
+        <div class="card-body">
+          <div class="stack" role="img" [attr.aria-label]="'Folder usage by kind: ' + groups().map(g => g.name + ' ' + g.bytes).join(', ')">
+            @for (g of groups(); track g.name) {
+              <span [style.width.%]="g.share" [style.background]="g.color"></span>
+            }
+          </div>
+          <ul class="legend">
+            @for (g of groups(); track g.name) {
+              <li><span class="swatch" [style.background]="g.color"></span>{{ g.name }} <span class="num muted">{{ g.bytes }}</span></li>
+            }
+          </ul>
+          @if (d.scan.truncated) {
+            <p class="faint small">The scan stopped early (too many files); sizes are lower bounds.</p>
+          }
+        </div>
+      </section>
+
+      <section class="card clean" aria-labelledby="clean-title">
+        <header class="card-header">
+          <h3 id="clean-title">Clean now</h3>
+        </header>
+        <div class="card-body">
+          @if (preview(); as p) {
+            @if (p.empty) {
+              <p class="muted">Nothing to delete right now: everything is within the policy.</p>
+            } @else {
+              <p class="big num">{{ p.freed }}</p>
+              <p class="muted">would be freed by deleting {{ p.count }}.</p>
+              @if (p.still) {
+                <p class="tone-warning small">Still {{ p.still }} short of the free-space target after that.</p>
+              }
+            }
+          }
+          <button type="button" class="btn primary" (click)="store.clean()" [disabled]="cleaning()">
+            <mat-icon svgIcon="pc:broom" aria-hidden="true" [class.pulse]="cleaning()" />
+            {{ cleaning() ? 'Cleaning…' : 'Clean now' }}
+          </button>
+          <p class="faint small">Never touches a running job’s work folder.</p>
+        </div>
+      </section>
+    </div>
+
+    <section class="card" aria-labelledby="entries-title">
+      <header class="card-header">
+        <h3 id="entries-title">What’s in the folder</h3>
+        <span class="meta">dry run: rows marked “Will delete” go in a cleanup now</span>
+      </header>
+      <div class="card-body flush">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Path</th>
+              <th scope="col">Kind</th>
+              <th scope="col" class="num">Size</th>
+              <th scope="col">Last used</th>
+              <th scope="col">Cleanup now</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of entries(); track row.entry.path) {
+              <tr>
+                <td class="mono path">{{ row.entry.path }}</td>
+                <td class="muted">{{ row.kind }}</td>
+                <td class="num">{{ bytes(row.entry.bytes) }}</td>
+                <td class="muted nowrap">{{ ago(row.entry.modified) }}</td>
+                <td>
+                  @if (row.reason) {
+                    <span class="badge warning"><mat-icon svgIcon="pc:trash" aria-hidden="true" />Will delete</span>
+                    <span class="reason faint">{{ row.reason }}</span>
+                  } @else {
+                    <span class="faint">Keep</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="last-title">
+      <header class="card-header">
+        <h3 id="last-title">Last cleanup</h3>
+        @if (report(); as r) {
+          <span class="meta">{{ trigger(r) }} · {{ when(r.at) }}</span>
+        }
+      </header>
+      <div class="card-body">
+        @if (report(); as r) {
+          <p>
+            Freed <strong class="num">{{ bytes(r.freedBytes) }}</strong>, deleted <span class="num">{{ r.deleted }}</span> items.
+            @if (r.failures.length > 0) {
+              <span class="tone-warning">{{ r.failures.length }} could not be deleted:</span>
+            }
+          </p>
+          @if (r.failures.length > 0) {
+            <ul class="failures">
+              @for (f of r.failures; track f.path) {
+                <li>
+                  <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+                  <div>
+                    <div class="mono path">{{ f.path }}</div>
+                    <div class="muted small">{{ f.reason }}</div>
+                  </div>
+                </li>
+              }
+            </ul>
+            <p class="faint small">Pitcrew tries these again at the next cleanup. Files in use are usually freed once the job or tool that holds them exits.</p>
+          }
+        } @else {
+          <p class="muted">No cleanup has run yet.</p>
+        }
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="policy-title">
+      <header class="card-header">
+        <h3 id="policy-title">Cleanup policy</h3>
+        <label class="check small">
+          <input type="checkbox" [checked]="!!override()" (change)="setOverride($any($event.target).checked)" [disabled]="settings.readOnly() || settings.saving() || !settings.config()" />
+          Override the defaults for this runner
+        </label>
+      </header>
+      <div class="card-body">
+        @if (policy(); as p) {
+          <pc-cleanup-policy-editor [policy]="p" [readOnly]="!override() || settings.readOnly()" [saving]="settings.saving()" id="runner-cleanup" (save)="savePolicy($event)" />
+          @if (!override()) {
+            <p class="faint small">Uses the defaults from Settings ▸ Defaults.</p>
+          }
+        }
+      </div>
+    </section>
+  }
+</pc-load-state>

@@ -1,0 +1,139 @@
+@let r = runner();
+<article class="card tile" [class.attention]="r.status === 'crashLoop' || r.status === 'stalled' || r.status === 'notRegistered'" [attr.aria-labelledby]="'tile-' + r.name">
+  <header class="head">
+    <div class="title">
+      <a class="name" [id]="'tile-' + r.name" [routerLink]="['/runners', r.name]">{{ r.name }}</a>
+      <span class="kind faint">{{ r.kind }}</span>
+    </div>
+    <pc-status-badge [status]="r.status" />
+    <pc-runner-actions [runner]="r" [small]="true" />
+  </header>
+
+  <div class="body">
+    @if (r.currentJob; as job) {
+      <div class="job">
+        <div class="job-line">
+          <span class="dot pulse tone-info" aria-hidden="true"></span>
+          <span class="elapsed num" [attr.aria-label]="'Running for ' + elapsed()">{{ elapsed() }}</span>
+          <span class="muted">running</span>
+          @if (details()?.url; as url) {
+            <button type="button" class="btn sm ghost open" (click)="openRun(url)">
+              Open run #{{ job.info.runNumber }}
+              <mat-icon svgIcon="pc:external" aria-hidden="true" />
+            </button>
+          }
+        </div>
+        <div class="repo truncate">
+          <strong>{{ job.info.repository ?? 'Unknown repository' }}</strong>
+          <span class="muted"> · {{ job.info.job ?? 'job' }}</span>
+        </div>
+        @if (details(); as d) {
+          <div class="run truncate muted">
+            @if (d.title) {
+              <span>“{{ d.title }}”</span>
+            }
+            @if (d.workflow) {
+              <span class="sep">·</span><span>{{ d.workflow }}</span>
+            }
+            @if (d.branch) {
+              <span class="sep">·</span>
+              <mat-icon svgIcon="pc:branch" aria-hidden="true" class="inline" />
+              <span>{{ d.branch }}</span>
+            }
+          </div>
+        }
+        @if (pending(); as p) {
+          <div class="note tone-warning">{{ p }}</div>
+        }
+      </div>
+    } @else if (r.problem) {
+      <div class="problem">
+        <p>{{ r.problem }}</p>
+        @if (r.nextStartAt) {
+          <span class="faint">Next start {{ nextStart() }}</span>
+        }
+      </div>
+    } @else if (paused()) {
+      <div class="quiet">
+        <p>Takes no jobs until you resume it.</p>
+        <span class="faint">{{ session() }}</span>
+      </div>
+    } @else if (r.status === 'stopped') {
+      <div class="quiet"><p>Not running.</p></div>
+    } @else {
+      <div class="quiet">
+        <p>Waiting for jobs</p>
+        @if (lastJobAgo(); as ago) {
+          <span class="faint">Last job finished {{ ago }}</span>
+        }
+      </div>
+    }
+    @if (phase(); as ph) {
+      <div class="phase">
+        <mat-icon svgIcon="pc:download" aria-hidden="true" />
+        <span>{{ ph }}</span>
+      </div>
+    }
+  </div>
+
+  <dl class="stats">
+    <div>
+      <dt>Version</dt>
+      <dd>
+        <span class="num">{{ r.currentVersion ?? '—' }}</span>
+        @if (r.updateTarget && r.updatePhase.phase === 'idle') {
+          <span class="badge accent upd">{{ r.updateTarget }} available</span>
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>Up for</dt>
+      <dd>
+        <span class="num">{{ uptime() }}</span>
+        @if (r.restarts24h > 0) {
+          <span class="faint small">{{ r.restarts24h }} {{ r.restarts24h === 1 ? 'restart' : 'restarts' }} / 24 h</span>
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>Disk</dt>
+      @if (disk(); as d) {
+        <dd class="disk">
+          <span class="num" [class.tone-danger]="d.low">{{ d.used }}{{ d.low ? ' · low' : '' }}</span>
+          <span class="meter" [class.danger]="d.low" aria-hidden="true"><span [style.width.%]="d.share * 100"></span></span>
+          @if (r.nextCleanupAt) {
+            <span class="faint small">Cleanup {{ nextCleanup() }}</span>
+          }
+        </dd>
+      } @else {
+        <dd class="faint">—</dd>
+      }
+    </div>
+  </dl>
+
+  <footer class="actions">
+    @if (paused()) {
+      <button type="button" class="btn sm" (click)="store.act(r.name, 'resume')" [disabled]="!!busy()">
+        <mat-icon svgIcon="pc:play" aria-hidden="true" />Resume
+      </button>
+    } @else {
+      <button type="button" class="btn sm" (click)="store.act(r.name, 'restart')" [disabled]="!!busy() || r.status === 'notRegistered'">
+        <mat-icon svgIcon="pc:refresh" aria-hidden="true" [class.spin]="busy() === 'restart'" />Restart
+      </button>
+      <button type="button" class="btn sm" (click)="store.act(r.name, 'drain')" [disabled]="!!busy() || r.status === 'stopped'" matTooltip="Finish the current job, then take no new ones">
+        <mat-icon svgIcon="pc:pause-circle" aria-hidden="true" />Drain
+      </button>
+    }
+    @if (r.updateTarget && r.updatePhase.phase === 'idle' && r.managedBinary) {
+      <button type="button" class="btn sm" (click)="store.act(r.name, 'applyUpdate')" [disabled]="!!busy()">
+        <mat-icon svgIcon="pc:download" aria-hidden="true" />Update now
+      </button>
+    }
+    <button type="button" class="btn sm" (click)="store.clean(r.name)" [disabled]="!!busy()">
+      <mat-icon svgIcon="pc:broom" aria-hidden="true" [class.pulse]="busy() === 'clean'" />Clean now
+    </button>
+    <a class="btn sm ghost logs" [routerLink]="['/logs']" [queryParams]="{ runner: r.name }">
+      <mat-icon svgIcon="pc:logs" aria-hidden="true" />Logs
+    </a>
+  </footer>
+</article>

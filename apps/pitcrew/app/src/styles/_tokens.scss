@@ -1,0 +1,200 @@
+/* Design tokens. Components only use var(--…); nothing outside this file names a raw colour.
+   Contrast (WCAG 2.2) was measured for every text/background pair below (text ≥ 4.5:1, status text on its tinted
+   background ≥ 4.5:1 in both themes). Status roles are told apart by words and icons first; their hues are a
+   blue / orange / teal / vermillion set that stays distinct under protanopia, deuteranopia and tritanopia.
+   The chart palette is the validated categorical order (blue, orange, aqua, yellow) checked with the data-viz
+   validator against both card surfaces (adjacent CVD ΔE ≥ 8.4, normal-vision ΔE ≥ 19.8).
+   The accent is Pitcrew orange: fills use #d4440d (white text 4.5:1); accent text is #c2410c on light (5.2:1) and
+   #ff8a4c on dark (7.3:1). */
+
+:root {
+
+  /* Type */
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI Variable', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Variable', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+  --leading-tight: 1.25;
+  --leading: 1.5;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Space (4 px grid) */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration: 180ms;
+  --duration-slow: 280ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Layers */
+  --z-sticky: 10;
+  --z-sidebar: 20;
+  --z-banner: 30;
+  --z-overlay: 1000;
+  --z-toast: 1100;
+
+  /* Layout */
+  --sidebar-width: 224px;
+  --titlebar-inset: 0px;
+  --control-height: 30px;
+  --control-height-sm: 24px;
+
+
+}
+
+@mixin light {
+  color-scheme: light;
+  --canvas: #f2f2f5;
+  --sidebar-bg: #ececf0;
+  --pane: #fbfbfc;
+  --surface: #ffffff;
+  --surface-2: #f6f6f8;
+  --surface-3: #ececf0;
+  --hover: rgb(23 24 28 / 0.045);
+  --active: rgb(23 24 28 / 0.08);
+  --border: #e5e5ea;
+  --border-strong: #d2d3da;
+  --text: #17181c;
+  --text-2: #555a65;
+  --text-3: #6b707c;
+  --accent: #c2410c;
+  --accent-bg: #d4440d;
+  --accent-bg-hover: #b8390a;
+  --on-accent: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  --focus-ring: color-mix(in srgb, var(--accent) 55%, transparent);
+
+  --success: #0b7563;
+  --info: #1f5fc4;
+  --warning: #9a4b00;
+  --danger: #c22f1c;
+  --neutral: #5b606b;
+
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-muted: #b9bcc5;
+  --chart-faint: #dcdee3;
+  --chart-grid: #ececf0;
+  --chart-axis: #d2d3da;
+
+  --shadow-sm: 0 1px 2px rgb(16 18 27 / 0.06);
+  --shadow-md: 0 1px 2px rgb(16 18 27 / 0.06), 0 4px 12px rgb(16 18 27 / 0.06);
+  --shadow-lg: 0 2px 4px rgb(16 18 27 / 0.06), 0 16px 40px rgb(16 18 27 / 0.14);
+  --scrim: rgb(16 18 27 / 0.32);
+  --skeleton: #ececf0;
+  --skeleton-shine: #f6f6f8;
+}
+
+@mixin dark {
+  color-scheme: dark;
+  --canvas: #0d0e11;
+  --sidebar-bg: #111216;
+  --pane: #15161a;
+  --surface: #1b1c21;
+  --surface-2: #212329;
+  --surface-3: #2a2c33;
+  --hover: rgb(255 255 255 / 0.045);
+  --active: rgb(255 255 255 / 0.08);
+  --border: #26282f;
+  --border-strong: #353841;
+  --text: #ececf0;
+  --text-2: #a3a7b1;
+  --text-3: #868a96;
+  --accent: #ff8a4c;
+  --accent-bg: #d4440d;
+  --accent-bg-hover: #b8390a;
+  --on-accent: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  --focus-ring: color-mix(in srgb, var(--accent) 70%, transparent);
+
+  --success: #3fbfa3;
+  --info: #6aa6ff;
+  --warning: #f0a243;
+  --danger: #ff7a6b;
+  --neutral: #a3a7b1;
+
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-muted: #5a5e69;
+  --chart-faint: #3a3d46;
+  --chart-grid: #24262c;
+  --chart-axis: #353841;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 14px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 20px 48px rgb(0 0 0 / 0.5);
+  --scrim: rgb(0 0 0 / 0.55);
+  --skeleton: #22242a;
+  --skeleton-shine: #2a2c33;
+}
+
+:root {
+  @include light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    @include dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  @include dark;
+}
+
+/* Brand (Pitcrew orange) for large fills: base #ef5f1c, top #ff8a4c, bottom #d4440d. Text and focus use --accent. */
+:root {
+  --brand: #ef5f1c;
+  --brand-top: #ff8a4c;
+  --brand-bottom: #d4440d;
+}
+
+/* Status roles: the text colour and a tinted background that keeps it ≥ 4.5:1. */
+:root {
+  --success-soft: color-mix(in srgb, var(--success) 14%, var(--surface));
+  --info-soft: color-mix(in srgb, var(--info) 14%, var(--surface));
+  --warning-soft: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  --danger-soft: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  --neutral-soft: color-mix(in srgb, var(--neutral) 14%, var(--surface));
+}
+
+/* Windows 11 Mica: the webview is transparent, so the window chrome lets Mica through while panes stay opaque. */
+:root[data-effects='mica'] {
+  --canvas: transparent;
+  --sidebar-bg: color-mix(in srgb, var(--surface-3) 35%, transparent);
+}
+
+/* macOS: the hidden title bar leaves the traffic lights over the top-left corner of the sidebar. */
+:root[data-platform='macos'] {
+  --titlebar-inset: 28px;
+}

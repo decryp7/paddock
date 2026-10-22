@@ -8,6 +8,7 @@ const CODES: ReadonlySet<CommandError['code']> = new Set([
   'badRequest',
   'permissionDenied',
   'busy',
+  'cancelled',
   'internal',
 ]);
 

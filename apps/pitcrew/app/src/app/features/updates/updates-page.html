@@ -1,0 +1,152 @@
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Updates</h1>
+      <p class="subtitle">
+        @if (inProgress() > 0) {
+          {{ inProgress() }} in progress ·
+        }
+        {{ available() === 0 ? 'All runners are up to date' : available() + (available() === 1 ? ' update' : ' updates') + ' available' }}
+      </p>
+    </div>
+  </header>
+
+  <section aria-labelledby="runners-title" class="block">
+    <h2 id="runners-title" class="section-label">Runners</h2>
+    @if (status.status() && status.runners().length === 0) {
+      <section class="card"><pc-empty-state icon="updates" title="No runners" text="Register a runner to manage its updates here." /></section>
+    }
+    <div class="list">
+      @for (r of status.runners(); track r.name) {
+        <article class="card runner" [attr.aria-labelledby]="'u-' + r.name">
+          <div class="main">
+            <div class="who">
+              <a class="name" [id]="'u-' + r.name" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'updates' }">{{ r.name }}</a>
+              <span class="faint small">{{ mode(r) }}</span>
+            </div>
+            <dl class="versions">
+              <div><dt>Installed</dt><dd class="num">{{ r.currentVersion ?? '—' }}</dd></div>
+              <div><dt>Latest</dt><dd class="num">{{ r.latestVersion ?? '—' }}</dd></div>
+              <div>
+                <dt>Target</dt>
+                <dd>
+                  @if (r.updateTarget) {
+                    <span class="badge accent num">{{ r.updateTarget }}</span>
+                  } @else if (!r.managedBinary) {
+                    <span class="faint small">your own binary</span>
+                  } @else {
+                    <span class="faint small">up to date</span>
+                  }
+                </dd>
+              </div>
+              <div>
+                <dt>Checked</dt>
+                <dd class="small muted">{{ r.checkedAt ? ago(r.checkedAt) : 'never' }}</dd>
+              </div>
+            </dl>
+            <div class="btn-row actions">
+              @if (r.managedBinary) {
+                @if (r.updatePhase.phase === 'idle') {
+                  <button type="button" class="btn sm primary" (click)="status.act(r.name, 'applyUpdate')" [disabled]="!r.updateTarget || busy(r)">
+                    <mat-icon svgIcon="pc:download" aria-hidden="true" />Update now
+                  </button>
+                  @if (r.updateTarget) {
+                    <button type="button" class="btn sm" (click)="status.skipVersion(r.name, r.updateTarget)" [disabled]="busy(r)">Skip</button>
+                    <button type="button" class="btn sm" (click)="status.pinVersion(r.name, r.currentVersion)" [disabled]="busy(r) || !r.currentVersion">
+                      <mat-icon svgIcon="pc:pin" aria-hidden="true" />Pin {{ r.currentVersion }}
+                    </button>
+                  }
+                } @else {
+                  <button type="button" class="btn sm" (click)="status.act(r.name, 'cancelUpdate')" [disabled]="busy(r) || !cancellable(r)">
+                    <mat-icon svgIcon="pc:x" aria-hidden="true" />Cancel
+                  </button>
+                }
+                <button type="button" class="btn sm ghost icon" (click)="status.act(r.name, 'checkUpdate')" [disabled]="busy(r)" [attr.aria-label]="'Check ' + r.name + ' for updates'">
+                  <mat-icon svgIcon="pc:refresh" aria-hidden="true" [class.spin]="status.inFlight()[r.name] === 'checkUpdate'" />
+                </button>
+              }
+            </div>
+          </div>
+          @if (r.updatePhase.phase !== 'idle') {
+            <pc-update-progress class="progress" [phase]="r.updatePhase" [now]="clock.now()" />
+          }
+          @if (look(r); as l) {
+            <div class="last">
+              <span class="badge" [class]="l.tone">{{ l.label }}</span>
+              <span class="muted truncate" [title]="l.detail">{{ l.detail }}</span>
+              <span class="faint when">{{ when(r.lastUpdate!.finishedAt) }}</span>
+            </div>
+          }
+        </article>
+      }
+    </div>
+  </section>
+
+  <div class="two">
+    <section class="card" aria-labelledby="sched-title">
+      <header class="card-header">
+        <h2 id="sched-title">Default schedule</h2>
+        <span class="meta">for runners without their own policy</span>
+      </header>
+      <div class="card-body">
+        <pc-load-state what="Settings" [hasValue]="!!settings.config()" [error]="settings.settings().error" [skeleton]="[60, 30, 30]" (retry)="settings.load()">
+          @if (settings.config(); as c) {
+            <pc-update-policy-editor id="defaults-upd" [policy]="c.defaults.update" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="saveDefaults($event)" />
+          }
+        </pc-load-state>
+      </div>
+    </section>
+
+    <section class="card self" aria-labelledby="self-title">
+      <header class="card-header">
+        <h2 id="self-title">Pitcrew</h2>
+        @if (app().value; as a) {
+          <span class="meta num">version {{ a.currentVersion }}</span>
+        }
+      </header>
+      <div class="card-body body">
+        <pc-load-state what="Pitcrew's update status" [hasValue]="!!app().value" [error]="app().error" [skeleton]="[20, 30]" (retry)="loadApp()">
+          @if (app().value; as a) {
+            @if (!a.available) {
+              <div class="callout">
+                <mat-icon svgIcon="pc:info" aria-hidden="true" />
+                <div class="callout-body">
+                  <strong>Self-update is off</strong>
+                  <span class="muted">{{ a.reason ?? 'Updates are not available in this build.' }}</span>
+                </div>
+              </div>
+            } @else {
+              <p class="muted">Pitcrew checks its signed releases and installs them when you say so. The service and runners keep running.</p>
+              @if (found() === null) {
+                <p class="tone-success">Pitcrew is up to date.</p>
+              } @else if (found(); as f) {
+                <div class="callout info">
+                  <mat-icon svgIcon="pc:sparkle" aria-hidden="true" />
+                  <div class="callout-body">
+                    <strong>Pitcrew {{ f.version }} is available</strong>
+                    @if (f.notes) {
+                      <span class="muted notes">{{ f.notes }}</span>
+                    }
+                  </div>
+                </div>
+              }
+              <div class="btn-row">
+                <button type="button" class="btn" (click)="checkApp()" [disabled]="appBusy() !== null">
+                  <mat-icon svgIcon="pc:refresh" aria-hidden="true" [class.spin]="appBusy() === 'check'" />Check for updates
+                </button>
+                @if (found()) {
+                  <button type="button" class="btn primary" (click)="installApp()" [disabled]="appBusy() !== null">
+                    <mat-icon svgIcon="pc:download" aria-hidden="true" />{{ appBusy() === 'install' ? 'Installing…' : 'Install and restart' }}
+                  </button>
+                }
+              </div>
+            }
+            @if (appError(); as e) {
+              <p class="tone-danger small" role="alert">{{ e.message }}</p>
+            }
+          }
+        </pc-load-state>
+      </div>
+    </section>
+  </div>
+</div>

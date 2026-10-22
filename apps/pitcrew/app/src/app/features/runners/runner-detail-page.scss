@@ -1,0 +1,76 @@
+.page {
+  gap: var(--space-4);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+
+  mat-icon {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.head {
+  align-items: center;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.tabs button mat-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.span-2 {
+  grid-column: span 2;
+}
+
+.span-3 {
+  grid-column: 1 / -1;
+}
+
+.job {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+.elapsed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+}
+
+.small {
+  font-size: var(--text-sm);
+}
+
+.folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

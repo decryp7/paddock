@@ -1,0 +1,121 @@
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Activity</h1>
+      <p class="subtitle">Uptime, restarts, jobs and updates over time.</p>
+    </div>
+    <div class="btn-row">
+      <label>
+        <span class="visually-hidden">Runner</span>
+        <select class="select" [value]="runner() ?? ''" (change)="pick($any($event.target).value)">
+          <option value="">All runners</option>
+          @for (n of names(); track n) {
+            <option [value]="n" [selected]="n === runner()">{{ n }}</option>
+          }
+        </select>
+      </label>
+      <div class="segmented" role="radiogroup" aria-label="Range">
+        @for (d of dayOptions; track d.key) {
+          <button type="button" role="radio" [attr.aria-checked]="store.days() === d.key" (click)="setDays(d.key)">{{ d.label }}</button>
+        }
+      </div>
+    </div>
+  </header>
+
+  @if (status.status() && names().length === 0) {
+    <section class="card"><pc-empty-state icon="activity" title="No history yet" text="Activity appears once a runner is registered and running." /></section>
+  } @else {
+    <pc-load-state what="Activity" [hasValue]="state().hasValue" [error]="state().error" [skeleton]="[110, 160, 220]" (retry)="store.retry()">
+      <div class="cards">
+        @for (c of cards(); track c.name) {
+          <section class="card stat" [attr.aria-label]="c.name">
+            <header>
+              <a class="name" [routerLink]="['/runners', c.name]">{{ c.name }}</a>
+            </header>
+            <dl>
+              <div><dt>Jobs</dt><dd class="num">{{ c.jobs }}</dd></div>
+              <div><dt>Uptime</dt><dd class="num">{{ c.uptime }}</dd></div>
+              <div><dt>Restarts</dt><dd class="num">{{ c.restarts }}</dd></div>
+              <div><dt>Avg job</dt><dd class="num">{{ c.avgJob }}</dd></div>
+            </dl>
+            <div class="sparks">
+              <div>
+                <span class="faint">Jobs per day</span>
+                <pc-sparkline [values]="c.jobsPerDay" [height]="28" />
+              </div>
+              <div>
+                <span class="faint">Uptime per day</span>
+                <pc-sparkline class="up" [values]="c.uptimePerDay" [max]="1000" [height]="28" />
+              </div>
+            </div>
+          </section>
+        }
+      </div>
+
+      <section class="card" aria-labelledby="tl-title">
+        <header class="card-header"><h2 id="tl-title">Timeline</h2></header>
+        <div class="card-body">
+          <pc-timeline [rows]="rows()" [from]="from()" [to]="clock.now()" />
+        </div>
+      </section>
+
+      <div class="split">
+        <section class="card" aria-labelledby="jobs-title">
+          <header class="card-header"><h2 id="jobs-title">Jobs per day</h2></header>
+          <div class="card-body">
+            <pc-chart [option]="jobsOption()" [height]="220" label="Jobs per day by outcome" />
+          </div>
+        </section>
+        <section class="card" aria-labelledby="upd-title">
+          <header class="card-header"><h2 id="upd-title">Update results</h2></header>
+          <div class="card-body">
+            @for (u of updates(); track u.name + u.at) {
+              <div class="update">
+                <span class="badge" [class]="u.look.tone">{{ u.look.label }}</span>
+                <div class="text">
+                  <strong>{{ u.name }}</strong>
+                  <span class="muted">{{ u.look.detail }}</span>
+                </div>
+                <span class="faint when">{{ when(u.at) }}</span>
+              </div>
+            } @empty {
+              <p class="faint">No updates in this range.</p>
+            }
+          </div>
+        </section>
+      </div>
+
+      <section class="card" aria-labelledby="recent-title">
+        <header class="card-header"><h2 id="recent-title">Recent jobs</h2></header>
+        <div class="card-body flush">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Repository</th>
+                <th scope="col">Job</th>
+                <th scope="col">Runner</th>
+                <th scope="col" class="num">Run</th>
+                <th scope="col" class="num">Duration</th>
+                <th scope="col" class="num">Finished</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of jobs(); track row.name + row.job.startedAt) {
+                <tr>
+                  <td>{{ row.job.info.repository ?? '—' }}</td>
+                  <td class="muted">{{ row.job.info.job ?? '—' }}</td>
+                  <td class="muted">{{ row.name }}</td>
+                  <td class="num muted">#{{ row.job.info.runNumber ?? '—' }}</td>
+                  <td class="num">{{ took(row.job.startedAt, row.job.finishedAt) }}</td>
+                  <td class="num muted">{{ ago(row.job.finishedAt) }}</td>
+                </tr>
+              } @empty {
+                <tr><td colspan="6" class="faint">No jobs in this range.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </pc-load-state>
+  }
+</div>
