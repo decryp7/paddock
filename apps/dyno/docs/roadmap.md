@@ -37,17 +37,17 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-15 | Declarative TOML packs | planned |
 | WP-16 | Optional local web API | planned |
 | WP-17 | Explain this via Pitwall | planned |
-| WP-19 | Per-core CPU view | core, platform and agent committed (P/E kinds, per-core frequency, per-core rollups); UI (tile toggle, P/E grouping, detail heatmap, tray bars) in progress |
-| WP-20 | Memory modules inventory with slot drawings | in progress |
-| WP-21 | Customisable widgets (ADR 0012) | in progress |
-| WP-22 | Native tray popover | in progress |
+| WP-19 | Per-core CPU view | built: P/E kinds, per-core frequency and rollups, tile toggle, detail heatmap (tray per-core bars via tray items); Windows kinds CI-only |
+| WP-20 | Memory modules inventory with slot drawings | built: parsers (Windows/macOS/Linux DMI), hints, inventory page with slot drawing; Linux helper read planned |
+| WP-21 | Customisable widgets (ADR 0012) | built: model, dashboard edit mode/presets, menu-bar items editor; preset save button planned |
+| WP-22 | Native tray popover | built: popover.rs + dy-popover; Windows/Linux look CI/manual-only |
 | WP-23 | Throttling detector | planned |
 | WP-24 | Disk and battery life forecasts | planned |
 | WP-25 | "Is this normal?" learned baselines | planned |
-| WP-26 | Alarms view and custom alerts (ADR 0013) | data model in progress (`dyno_core::alarms`, not committed yet); UI and agent planned |
+| WP-26 | Alarms view and custom alerts (ADR 0013) | state machine, store and protocol built; Alarms UI, custom alert rules and notifications planned |
 | WP-27 | `dyno` CLI (ADR 0014) | planned |
-| WP-28 | Flight recorder | in progress |
-| WP-29 | Diagnostics bundle | model in progress |
+| WP-28 | Flight recorder | built in the agent (ring, capture, alarm capture); timeline UI planned |
+| WP-29 | Diagnostics bundle | built in core/agent (redaction, preview, zip); UI planned |
 | WP-30 | Suite tie-ins (Spotter, Debrief, Pitcrew, Pitwall) | planned |
 | WP-31 | Session recording to CSV/Parquet with a built-in viewer | planned |
 | WP-33 | Right-click "search this file's hash on VirusTotal" (opens the browser only; nothing is uploaded) | planned |
