@@ -37,7 +37,7 @@ export function withJobsAxis(option: Record<string, unknown>): Record<string, un
   const series = Array.isArray(option['series']) ? option['series'] : [];
   const legend = (option['legend'] ?? {}) as object;
   const yAxis = (option['yAxis'] ?? {}) as object;
-  return { ...option, legend: { ...legend, show: series.length > 1 }, yAxis: { ...yAxis, name: 'Jobs', nameTextStyle: { align: 'left' }, min: 0 } };
+  return { ...option, legend: { ...legend, show: series.length > 1 }, yAxis: { ...yAxis, min: 0 } };
 }
 
 /** History per runner or for all: per-runner table, uptime timeline, jobs per day, updates and recent jobs. */

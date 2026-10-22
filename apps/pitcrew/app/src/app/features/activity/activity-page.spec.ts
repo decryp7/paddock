@@ -115,7 +115,7 @@ describe('ActivityPage', () => {
     expect(trendBars([0, 0], 64, 20).every((b) => b.h === 1)).toBe(true);
     const one = withJobsAxis({ series: [{}], yAxis: { type: 'value' } }) as { legend: { show: boolean }; yAxis: { name: string; min: number } };
     expect(one.legend.show).toBe(false);
-    expect(one.yAxis.name).toBe('Jobs');
+    expect(one.yAxis.min).toBe(0);
     expect(one.yAxis.min).toBe(0);
     expect((withJobsAxis({ series: [{}, {}] }) as { legend: { show: boolean } }).legend.show).toBe(true);
     expect((withJobsAxis({}) as { legend: { show: boolean } }).legend.show).toBe(false);
