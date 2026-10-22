@@ -19,6 +19,7 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 - [The standard APIs](#the-standard-apis)
 - [Extras for apps (`/x/v1`)](#extras-for-apps-xv1)
 - [Apps, keys and pairing](#apps-keys-and-pairing)
+- [Command line](#command-line)
 - [Queue and priorities](#queue-and-priorities)
 - [Packs: more engines and model lists without code](#packs-more-engines-and-model-lists-without-code)
 - [Dashboard](#dashboard)
@@ -174,6 +175,17 @@ Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR
 - **Keyless local access** (for Ollama-style tools that send no key) is a setting, **off** by default, and applies only to
   requests with no `Origin` header. Works.
 - **The admin key** (`admin.key`, owner-only) is what Pitwall's own window uses for the management API; apps never see it. Works.
+
+## Command line
+
+`pitwall` (crate `pitwall-cli`) controls the local server from a terminal or script: `status`, `ps`, `models`, `load`,
+`unload`, `pull` (a download job with progress, resumable, shows the host, honours offline mode), `keys`
+(list, create, revoke; a new key is shown once), `presets`, `chat` (streams over the standard OpenAI endpoint with a per-app
+key from `PITWALL_API_KEY`) and `bench`. `--json` on every read command, a time limit on every call, stable exit codes
+(0 ok, 1 error, 2 usage, 3 server not running, 4 refused) and error messages that say what to fix. The admin key comes from
+the OS credential store, `PITWALL_ADMIN_KEY` or `--key-file`, never from an argument. It reaches the server only through the
+loopback-only client, so it cannot connect anywhere else. Works against the in-process fake server in tests; not yet
+packaged inside the installers (see the roadmap).
 
 ## Queue and priorities
 

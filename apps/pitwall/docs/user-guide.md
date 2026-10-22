@@ -16,6 +16,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 - [Connect an app: pairing](#connect-an-app-pairing)
 - [API keys, permissions and limits](#api-keys-permissions-and-limits)
 - [Using Pitwall from your tools](#using-pitwall-from-your-tools)
+- [The `pitwall` command-line tool](#the-pitwall-command-line-tool)
 - [Choosing a model by capability, priority and provenance](#choosing-a-model-by-capability-priority-and-provenance)
 - [Model presets and aliases](#model-presets-and-aliases)
 - [Memory presets and idle release](#memory-presets-and-idle-release)
@@ -257,6 +258,59 @@ curl -s $PW/api/chat -H "Authorization: Bearer $PITWALL_KEY" \
 
 Streaming is the Ollama default (`stream` omitted means newline-delimited JSON). Point Ollama clients at
 `OLLAMA_HOST=http://127.0.0.1:11435` (and give them a key, or allow keyless local access).
+
+## The `pitwall` command-line tool
+
+`pitwall` is a small program for terminals and scripts. It is a client of the local server like any other: it calls
+Pitwall's management API and the standard OpenAI endpoint on `127.0.0.1` and nothing else, and it can only open a
+connection to this machine (it uses the same loopback-only client as the server's engine code). It adds no server
+surface and sends nothing off-machine; downloads are done by the server, which shows the host and honours offline mode.
+
+```sh
+pitwall status                        # version, serving or paused, memory, loaded models, queue, speed
+pitwall ps                            # models loaded in memory
+pitwall models                        # installed models, size and fit
+pitwall load qwen2.5-0.5b-instruct-q4_k_m
+pitwall unload qwen2.5-0.5b-instruct-q4_k_m
+pitwall pull Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf
+pitwall keys                          # apps and their keys (ids and prefixes only)
+pitwall keys create my-script --new   # a new app and its first key; the key is printed once
+pitwall keys create Debrief           # another key for an existing app (by name or id)
+pitwall keys revoke Debrief key-1
+pitwall presets                       # aliases and where each one resolves now
+pitwall presets show debrief-explain
+pitwall chat debrief-explain "Explain this error in one sentence"
+echo "Summarise this" | pitwall chat fast
+pitwall bench qwen2.5-0.5b-instruct-q4_k_m
+```
+
+**Finding the server.** The port comes from `--port`, else the discovery file in the data folder, else 11435. If nothing
+answers, the tool exits with code 3 and says to start the Pitwall app or service.
+
+**Keys.** Management commands need the admin key. The tool looks for it, in this order, in `--key-file <path>`, the
+environment variable `PITWALL_ADMIN_KEY` (for headless machines: copy `admin.key` from the server's data folder), the OS
+credential store (the entry the Pitwall window keeps) and the server's `admin.key`. `chat` uses a per-app key from
+`PITWALL_API_KEY` instead, so a script holds a key with an app's limits, never the admin key. A key is never a command-line
+argument (it would show in process lists and shell history; `--key` is refused), is never printed in output or errors, and
+`keys create` prints the new key once, alone on standard output (progress and notes go to standard error), so
+`KEY=$(pitwall keys create ci --new 2>/dev/null)` captures it.
+
+**Output.** Read commands print tables for people; add `--json` for the server's JSON (`status`, `ps`, `models`, `keys`,
+`presets`, `bench`, and `keys create`). `chat` streams the answer to standard output as it is generated; without a prompt
+argument it reads standard input (at most 1 MB). `pull` shows progress on standard error (a live line on a terminal, a line
+per 10 % otherwise) and resumes an interrupted download when you run the same command again; `--no-wait` starts the
+download and prints its id. Pressing Ctrl-C stops the tool, not the download.
+
+Every call has a time limit: 30 seconds by default, 10 minutes for `load`, `bench` and the first answer of `chat`; change
+it with `--timeout <seconds>`.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Done |
+| 1 | An error (not found, wrong key, a failed download, an unexpected answer); the message says what to fix |
+| 2 | The command line is wrong (unknown command or option, missing argument, no prompt) |
+| 3 | The server is not running (or not on that port); start Pitwall or pass `--port` |
+| 4 | The server refused: not enough memory to load, offline mode, busy, a limit reached, or the model is not loaded |
 
 ## Choosing a model by capability, priority and provenance
 

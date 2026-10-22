@@ -106,6 +106,21 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 47h | Quit Pitwall, damage `presets.json` (write `{ not json`), start it. | It starts; the presets come back from `presets.json.bak`; with both damaged the list is empty and the Dashboard events say so. |
 | 48 | Reduced-motion and large-text settings of the OS. | Animations are off; layouts survive. |
 
+## Command line
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 29 | With Pitwall running run `pitwall status`, `pitwall ps`, `pitwall models`, each also with `--json`. | Tables for people, the server's JSON with `--json`; no key appears in any output. |
+| 30 | `pitwall pull Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf`; interrupt it with Ctrl-C and run it again. | Progress on stderr naming `huggingface.co`; the second run resumes; the Models page shows the same download. With offline mode on: exit code 4 and the offline message. |
+| 31 | `pitwall load <model>`, `pitwall ps`, `pitwall unload <model>`; load a model larger than the free memory. | Loaded, listed, released; the oversized load exits with 4 and says to unload another model. |
+| 32 | `pitwall keys create cli-test --new`, then `export PITWALL_API_KEY=...; pitwall chat <model> "Say hi"`. | The key is printed once on stdout; the answer streams to stdout. `pitwall keys` shows only the id and prefix. |
+| 33 | `pitwall keys revoke cli-test <key-id>`, then chat again. | The chat fails with exit 1 and a message about the key. |
+| 34 | Quit Pitwall (and stop the service), run `pitwall status`; run `pitwall frobnicate`. | Exit 3 with "start the Pitwall app"; exit 2. |
+| 35 | On a machine without the Pitwall app, put the server's `admin.key` in a file and run `pitwall --key-file <file> status` and with `PITWALL_ADMIN_KEY`. | Both work; `pitwall status --key abc` is refused with exit 2. |
+
+Automated: `cargo test -p pitwall-cli` runs the unit tests and `tests/cli.rs`, which starts the built binary against a fake
+local server on an ephemeral port with a temp data folder.
+
 ## Per-platform extras
 
 - **Real-engine automated run (any platform):** `PITWALL_LLAMA_E2E=1 cargo test -p pitwall-server --test llama_e2e` downloads the

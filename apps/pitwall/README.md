@@ -114,6 +114,19 @@ export OPENAI_API_KEY=pw_your_key_here
 
 The step-by-step version, with what to expect at each point, is the [user guide](docs/user-guide.md).
 
+The `pitwall` command-line tool does the same from a terminal or a script (no new server surface; it talks to the local
+APIs only):
+
+```sh
+pitwall status                     # server, memory, loaded models, queue
+pitwall pull Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf
+pitwall load qwen2.5-0.5b-instruct-q4_k_m
+export PITWALL_API_KEY=$(pitwall keys create my-script --new 2>/dev/null)
+pitwall chat qwen2.5-0.5b-instruct-q4_k_m "Say hello in five words."
+```
+
+See [the CLI section of the user guide](docs/user-guide.md#the-pitwall-command-line-tool) for every command and the exit codes.
+
 ## API examples
 
 ```sh
@@ -149,7 +162,8 @@ built-in AI as the default and offline fallback. See
 | Path | What it is |
 | --- | --- |
 | `crates/pitwall-core` | Pure logic: API formats, scheduler, memory policy, selection, keys, metrics, settings, packs |
-| `crates/pitwall-loopback` | HTTP client that can only talk to `127.0.0.1` (engines) |
+| `crates/pitwall-loopback` | HTTP client that can only talk to `127.0.0.1` (engines, the CLI) |
+| `crates/pitwall-cli` | The `pitwall` command-line tool: status, models, load, unload, pull, keys, presets, chat, bench |
 | `crates/pitwall-server` | The server: engines, library, serving, auth, HTTP APIs, management API |
 | `app/` | Angular UI and the Tauri 2 shell (`app/src-tauri`) |
 | `docs/` | [Architecture](docs/architecture.md), [design diagrams](docs/design.md), [features](docs/features.md), [user guide](docs/user-guide.md), [development](docs/development.md), [releasing](docs/releasing.md), [roadmap](docs/roadmap.md), [testing manual](docs/testing-manual.md), [ADRs](docs/adr/README.md) |

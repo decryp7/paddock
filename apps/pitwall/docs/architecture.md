@@ -23,7 +23,9 @@ gives every app one place to use them. It has four parts:
    closed. The only outbound HTTP client lives in one module (`egress.rs`) ([ADR 0001](adr/0001-local-only.md)).
 3. **`pitwall-loopback`**, a tiny HTTP client whose port type can only mean `127.0.0.1`. The server reaches its
    engine processes through it.
-4. **The app**: a Tauri 2 shell with a tray icon (`app/src-tauri`)
+4. **`pitwall-cli`**, the `pitwall` command-line tool ([ADR 0015](adr/0015-command-line-tool.md)): a client of the management
+   and standard APIs through `pitwall-loopback`, for terminals and scripts.
+5. **The app**: a Tauri 2 shell with a tray icon (`app/src-tauri`)
    around an Angular 22 UI (`app/src`) that talks to the server's management API through a backend service injected
    by DI token (a real Tauri backend, or a mock for browser development and tests).
 
@@ -81,6 +83,18 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 | `paths.rs`, `system.rs` | Data folders and atomic writes; hardware and memory probes (RAM, GPUs, disk, process RSS) |
 | `service/` | Running as an OS service: `spec.rs` (pure functions of a target OS: names, paths, unit text, restart-after-update decision), `systemd.rs`, `windows.rs`, `login_path.rs` (the user's login-shell `PATH` for supervised servers), `watch.rs` (restart itself when its own binary changed and it is idle) |
 | `fake_engine.rs` | A test double: a small OpenAI-compatible server run as `pitwall-server --fake-engine` |
+
+### Command line (`crates/pitwall-cli`)
+
+| File | Role |
+| --- | --- |
+| `args.rs` | Pure parser: the command line becomes an `Invocation` (command, `--json`, `--port`, `--key-file`, `--timeout`); a key option is refused with the safe alternatives |
+| `exit.rs` | Pure: the exit codes (0 to 4), `CliError`, and the mapping from the management `ErrorCode` and loopback failures, each with a next step |
+| `format.rs` | Pure: tables, decimal sizes, durations, UTC timestamps, the text of every command's output |
+| `sse.rs` | Pure, bounded parser for the streamed chat completion |
+| `discover.rs` | The decisions about the port (flag, discovery file, 11435), the data folder per OS and the admin key order (`--key-file`, `PITWALL_ADMIN_KEY`, OS credential store, `admin.key`), over a `Sources` trait |
+| `api.rs` | The thin edge: `POST /mgmt/v1/rpc/{method}` and the streamed `/v1/chat/completions`, only through `pitwall_loopback::Client` |
+| `run.rs`, `main.rs` | One function per command (progress polling for `pull`, key creation, chat streaming) and the process entry point |
 
 ### App (`app/`)
 
