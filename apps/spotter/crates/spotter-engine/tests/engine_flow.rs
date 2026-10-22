@@ -138,3 +138,46 @@ async fn due_watches_follow_backoff_and_the_clock() {
     clock.advance_secs(24 * 3600);
     assert_eq!(engine.due_watches(clock.now()).len(), 1);
 }
+
+#[tokio::test]
+async fn downloads_and_failed_actions_reach_the_journal() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, _, _) = engine(dir.path());
+    let hits = Arc::new(AtomicUsize::new(0));
+    let url = server(Arc::new(std::sync::Mutex::new(feed(&["1.0.0"]))), hits).await;
+    let saved = engine.save_watch(spec(&url, true), &BTreeMap::new()).unwrap();
+    engine
+        .record_download(&saved.id, "1.0.0", Ok(("/tmp/x/app.bin".into(), 42, true)))
+        .unwrap();
+    engine.record_download(&saved.id, "1.0.0", Err("disk full".into())).unwrap();
+    engine
+        .record_action_failure(&saved.id, "run-command", "the program could not be started")
+        .unwrap();
+    let kinds: Vec<String> = engine.events(10, None).unwrap().into_iter().map(|e| e.kind).collect();
+    assert!(kinds.contains(&"download-finished".to_string()), "{kinds:?}");
+    assert_eq!(kinds.iter().filter(|k| *k == "action-failed").count(), 2, "{kinds:?}");
+    assert!(engine.record_action_failure("nope!", "x", "y").is_err());
+}
+
+#[tokio::test]
+async fn a_known_release_can_be_looked_up_for_the_shell() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, _, _) = engine(dir.path());
+    let url = server(
+        Arc::new(std::sync::Mutex::new(feed(&["1.0.0", "1.1.0"]))),
+        Arc::new(AtomicUsize::new(0)),
+    )
+    .await;
+    let saved = engine.save_watch(spec(&url, true), &BTreeMap::new()).unwrap();
+    engine.check_now(Some(&saved.id)).await.unwrap();
+    let r = engine.release_of(&saved.id, "1.1.0").unwrap();
+    assert_eq!(r.location, "https://x/1.1.0");
+    assert!(matches!(
+        engine.release_of(&saved.id, "9.9.9"),
+        Err(spotter_engine::EngineError::NotFound(_))
+    ));
+    assert!(matches!(
+        engine.release_of("missing", "1.0.0"),
+        Err(spotter_engine::EngineError::NotFound(_))
+    ));
+}

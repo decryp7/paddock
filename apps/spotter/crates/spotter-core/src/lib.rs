@@ -26,8 +26,8 @@ pub mod pattern;
 
 pub mod release;
 pub mod render;
-pub mod schema;
 pub mod schedule;
+pub mod schema;
 pub mod source;
 pub mod state;
 pub mod store;

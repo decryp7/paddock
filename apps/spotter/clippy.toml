@@ -1,5 +1,5 @@
 # Every child process Spotter starts (plugins, "run a command" actions) goes through a helper that opens no
 # console window on Windows, clears what must not leak and always has a timeout. Tests and build scripts may allow this.
 disallowed-methods = [
-    { path = "std::process::Command::new", reason = "use spotter_plugin_host::process::command or the action runner: no console window, always bounded" },
+    { path = "std::process::Command::new", reason = "the action runner in app/src-tauri/src/notifier.rs: no console window, always bounded" },
 ]

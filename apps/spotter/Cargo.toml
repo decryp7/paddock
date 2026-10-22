@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/spotter-core", "crates/spotter-sources", "crates/spotter-engine", "crates/spotter-render"]
+members = ["crates/spotter-core", "crates/spotter-sources", "crates/spotter-engine", "crates/spotter-render", "app/src-tauri"]
 resolver = "2"
 
 # Shared by every member: `edition.workspace = true` etc.

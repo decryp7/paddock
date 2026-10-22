@@ -1,24 +1,29 @@
-//! The UI ↔ app wire contract (camelCase JSON), mirroring `app/src/app/core/api.types.ts`. Change both in the same
-//! commit. Conversions from the core's types live here, apart from the commands that use them.
+//! The UI <-> app wire contract (camelCase JSON), mirroring `app/src/app/core/api.types.ts`. Change both in the same
+//! commit. The engine's types become DTOs here, apart from the commands that use them. Inputs are parsed into core
+//! types once, at this edge ([`WatchDraftDto::into_spec`], [`SettingsDto::into_settings`]).
 
 use serde::{Deserialize, Serialize};
 use spotter_core::action::Action;
-use spotter_core::dashboard::{self, NewItem, WatchNumbers};
-use spotter_core::journal::{Event, EventKind};
-use spotter_core::notify::{NotificationPolicy, NotifyMode};
-use spotter_core::release::Release;
+use spotter_core::filter::VersionFilter;
+use spotter_core::notify::{DigestMode, NotificationChannel, NotificationPolicy, NotifyMode};
+use spotter_core::pack::Preset;
+use spotter_core::schema::{FieldKind, FieldSpec, SourceKindSpec};
+use spotter_core::source::web_page::DiscoveredFeed;
 use spotter_core::source::SourceConfig;
-use spotter_core::state::{CheckRecord, KnownRelease, WatchStatus};
-use spotter_core::time::{ClockTime, QuietHours};
+use spotter_core::state::{CheckRecord, WatchStatus};
+use spotter_core::time::QuietHours;
 use spotter_core::watch::{Settings, Theme, WatchSpec};
-use spotter_plugin_api::{FieldKind, FieldSpec, SourceKindSpec};
+use spotter_engine::error::EngineError;
+use spotter_engine::view::{self, EventView, ReleaseView};
 use std::collections::BTreeMap;
 
-/// `WatchStatus`.
+pub use spotter_render::RendererStatus as RendererStatusDto;
+
+/// `WatchStatus`: `kind` is `pending`, `ok`, `noMatch`, `unreachable`, `authNeeded`, `needsYou`, `invalid` or `failed`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchStatusDto {
-    /// `pending`, `ok`, `noMatch`, `unreachable`, `authNeeded`, `pluginError`, `invalid`, `failed`.
+    /// The status kind.
     pub kind: &'static str,
     /// Why, for failures.
     pub message: Option<String>,
@@ -32,7 +37,7 @@ impl From<&WatchStatus> for WatchStatusDto {
             WatchStatus::NoMatch => ("noMatch", None),
             WatchStatus::Unreachable(m) => ("unreachable", Some(m.clone())),
             WatchStatus::AuthNeeded(m) => ("authNeeded", Some(m.clone())),
-            WatchStatus::PluginError(m) => ("pluginError", Some(m.clone())),
+            WatchStatus::NeedsYou(m) => ("needsYou", Some(m.clone())),
             WatchStatus::Invalid(m) => ("invalid", Some(m.clone())),
             WatchStatus::Failed(m) => ("failed", Some(m.clone())),
         };
@@ -44,178 +49,162 @@ impl From<&WatchStatus> for WatchStatusDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseDto {
-    /// Version text.
+    /// The version as the scheme shows it.
     pub version: String,
-    /// Pre-release label present.
+    /// A pre-release.
     pub prerelease: bool,
-    /// Name.
+    /// Display name.
     pub name: String,
-    /// URL or path.
+    /// A URL or a path.
     pub location: String,
-    /// Published.
+    /// When it was published.
     pub published_at_ms: Option<i64>,
-    /// First seen.
+    /// When Spotter first found it.
     pub first_seen_ms: i64,
-    /// Size.
+    /// Size in bytes.
     pub size: Option<u64>,
-    /// SHA-256 hex.
+    /// SHA-256 in hex.
     pub sha256: Option<String>,
 }
 
-impl ReleaseDto {
-    /// From a release and when it was first seen.
-    pub fn new(r: &Release, first_seen_ms: i64) -> ReleaseDto {
+impl From<&ReleaseView> for ReleaseDto {
+    fn from(r: &ReleaseView) -> Self {
         ReleaseDto {
-            version: r.version.text.clone(),
-            prerelease: r.version.is_prerelease(),
+            version: r.version.clone(),
+            prerelease: r.prerelease,
             name: r.name.clone(),
             location: r.location.clone(),
-            published_at_ms: r.published_at.map(|t| t.0),
-            first_seen_ms,
+            published_at_ms: r.published_at_ms,
+            first_seen_ms: r.first_seen_ms,
             size: r.size,
-            sha256: r.sha256.map(|d| d.to_hex()),
+            sha256: r.sha256.clone(),
         }
     }
 }
 
-impl From<&KnownRelease> for ReleaseDto {
-    fn from(k: &KnownRelease) -> Self {
-        ReleaseDto::new(&k.release, k.first_seen.0)
+/// `NotificationPolicy` (the core's `quiet_hours` is `quietHours` on the wire).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPolicyDto {
+    /// Which releases notify (`every-new`, `newer-than-installed`, `off`).
+    pub mode: NotifyMode,
+    /// Repeat until acknowledged.
+    pub nag: bool,
+    /// Hours when notifications wait.
+    pub quiet_hours: Option<QuietHours>,
+}
+
+impl From<NotificationPolicy> for NotificationPolicyDto {
+    fn from(p: NotificationPolicy) -> Self {
+        NotificationPolicyDto {
+            mode: p.mode,
+            nag: p.nag,
+            quiet_hours: p.quiet_hours,
+        }
     }
 }
 
-/// Quiet hours (`HH:MM`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QuietHoursDto {
-    /// Start.
-    pub start: String,
-    /// End.
-    pub end: String,
+impl From<NotificationPolicyDto> for NotificationPolicy {
+    fn from(p: NotificationPolicyDto) -> Self {
+        NotificationPolicy {
+            mode: p.mode,
+            nag: p.nag,
+            quiet_hours: p.quiet_hours,
+        }
+    }
 }
 
-/// `NotificationPolicy`.
+/// `VersionFilter` (`soak_hours` is `soakHours`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NotifyDto {
-    /// `every-new`, `newer-than-installed`, `off`.
-    pub mode: String,
-    /// Repeat until acknowledged.
-    pub nag: bool,
-    /// Quiet hours.
-    pub quiet_hours: Option<QuietHoursDto>,
+pub struct VersionFilterDto {
+    /// Only versions with this prefix.
+    pub prefix: String,
+    /// Hours a release must exist before it is announced.
+    pub soak_hours: u32,
 }
 
-/// An action (same JSON shape as the core's).
-pub type ActionDto = Action;
-
-/// The source part of a draft.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceDto {
-    /// Kind id.
-    pub kind: String,
-    /// Values.
-    pub values: BTreeMap<String, String>,
-}
-
-/// `WatchDraft`.
+/// `WatchDraft`: a watch as edited and stored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchDraftDto {
-    /// `None` for a new watch.
+    /// `null` for a new watch.
     pub id: Option<String>,
-    /// Name.
+    /// Display name.
     pub name: String,
-    /// Source.
-    pub source: SourceDto,
-    /// Scheme id.
+    /// Where releases come from.
+    pub source: SourceConfig,
+    /// The version scheme id.
     pub versions: String,
-    /// Custom scheme pattern.
+    /// The pattern of a custom scheme.
     pub version_pattern: Option<String>,
     /// Keep pre-releases.
     pub include_prereleases: bool,
-    /// Name glob.
+    /// Glob on release names.
     pub name_filter: String,
-    /// Interval.
+    /// Seconds between checks.
     pub interval_secs: u32,
-    /// Notifications.
-    pub notify: NotifyDto,
-    /// Actions.
-    pub actions: Vec<ActionDto>,
-    /// Paused.
+    /// When to notify.
+    pub notify: NotificationPolicyDto,
+    /// Actions on a new release.
+    pub actions: Vec<Action>,
+    /// Extra channels.
+    pub channels: Vec<NotificationChannel>,
+    /// Version prefix and soak time.
+    pub filter: VersionFilterDto,
+    /// Not checked while paused.
     pub paused: bool,
 }
 
 impl WatchDraftDto {
-    /// The stored form, with `id`. The error lists every problem.
-    pub fn to_spec(&self, id: String) -> Result<WatchSpec, Vec<String>> {
-        let mode = match self.notify.mode.as_str() {
-            "every-new" => NotifyMode::EveryNew,
-            "newer-than-installed" => NotifyMode::NewerThanInstalled,
-            "off" => NotifyMode::Off,
-            other => return Err(vec![format!("\"{other}\" is not a notification mode.")]),
-        };
-        let quiet_hours = match &self.notify.quiet_hours {
-            None => None,
-            Some(q) => Some(QuietHours {
-                start: ClockTime::try_from(q.start.clone()).map_err(|e| vec![e])?,
-                end: ClockTime::try_from(q.end.clone()).map_err(|e| vec![e])?,
-            }),
-        };
-        Ok(WatchSpec {
-            id,
-            name: self.name.clone(),
-            source: SourceConfig {
-                kind: self.source.kind.clone(),
-                values: self.source.values.iter().filter(|(_, v)| !v.trim().is_empty()).map(|(k, v)| (k.clone(), v.clone())).collect(),
-            },
-            versions: self.versions.clone(),
-            version_pattern: self.version_pattern.clone().filter(|p| !p.trim().is_empty()),
+    /// The core's spec. `allow_local` is not editable in the UI, so the caller passes the stored value.
+    pub fn into_spec(self, allow_local: bool) -> WatchSpec {
+        WatchSpec {
+            id: self.id.unwrap_or_default(),
+            name: self.name,
+            source: self.source,
+            versions: self.versions,
+            version_pattern: self.version_pattern,
             include_prereleases: self.include_prereleases,
-            name_filter: self.name_filter.clone(),
+            name_filter: self.name_filter,
             interval_secs: self.interval_secs,
-            notify: NotificationPolicy { mode, nag: self.notify.nag, quiet_hours },
-            actions: self.actions.clone(),
+            notify: self.notify.into(),
+            actions: self.actions,
+            channels: self.channels,
+            version_filter: VersionFilter {
+                prefix: self.filter.prefix,
+                soak_hours: self.filter.soak_hours,
+            },
+            allow_local,
             paused: self.paused,
-        })
+        }
     }
 }
 
 impl From<&WatchSpec> for WatchDraftDto {
     fn from(s: &WatchSpec) -> Self {
         WatchDraftDto {
-            id: Some(s.id.clone()),
+            id: (!s.id.is_empty()).then(|| s.id.clone()),
             name: s.name.clone(),
-            source: SourceDto {
-                kind: s.source.kind.clone(),
-                values: s.source.values.clone(),
-            },
+            source: s.source.clone(),
             versions: s.versions.clone(),
             version_pattern: s.version_pattern.clone(),
             include_prereleases: s.include_prereleases,
             name_filter: s.name_filter.clone(),
             interval_secs: s.interval_secs,
-            notify: NotifyDto {
-                mode: match s.notify.mode {
-                    NotifyMode::EveryNew => "every-new",
-                    NotifyMode::NewerThanInstalled => "newer-than-installed",
-                    NotifyMode::Off => "off",
-                }
-                .into(),
-                nag: s.notify.nag,
-                quiet_hours: s.notify.quiet_hours.map(|q| QuietHoursDto {
-                    start: q.start.into(),
-                    end: q.end.into(),
-                }),
-            },
+            notify: s.notify.into(),
             actions: s.actions.clone(),
+            channels: s.channels.clone(),
+            filter: VersionFilterDto {
+                prefix: s.version_filter.prefix.clone(),
+                soak_hours: s.version_filter.soak_hours,
+            },
             paused: s.paused,
         }
     }
 }
 
-/// `WatchSummary`.
+/// `WatchSummary`: one row of the watch list, the tiles and the tray.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchSummaryDto {
@@ -223,36 +212,60 @@ pub struct WatchSummaryDto {
     pub id: String,
     /// Name.
     pub name: String,
-    /// Kind id.
+    /// Source kind id.
     pub source_kind: String,
-    /// Kind label.
+    /// Source kind label.
     pub source_label: String,
     /// Where it looks.
     pub source_description: String,
-    /// Status.
+    /// Status after the last check.
     pub status: WatchStatusDto,
     /// Paused.
     pub paused: bool,
-    /// A check is running.
+    /// A check is running now.
     pub checking: bool,
-    /// Latest.
+    /// The newest release.
     pub latest: Option<ReleaseDto>,
-    /// Acknowledged version.
+    /// The acknowledged version.
     pub acknowledged: Option<String>,
-    /// Installed version.
+    /// The installed version.
     pub installed: Option<String>,
-    /// Latest newer than acknowledged.
+    /// The latest is newer than the acknowledged version.
     pub unseen: bool,
-    /// Latest newer than installed.
+    /// The latest is newer than the installed version.
     pub newer_than_installed: Option<bool>,
     /// Last check.
     pub last_check_ms: Option<i64>,
     /// Next check.
     pub next_check_ms: Option<i64>,
-    /// Failures in a row.
+    /// Failures since the last success.
     pub failures: u32,
-    /// Interval.
+    /// Seconds between checks.
     pub interval_secs: u32,
+}
+
+impl From<&view::WatchSummary> for WatchSummaryDto {
+    fn from(w: &view::WatchSummary) -> Self {
+        WatchSummaryDto {
+            id: w.id.clone(),
+            name: w.name.clone(),
+            source_kind: w.source_kind.clone(),
+            source_label: w.source_label.clone(),
+            source_description: w.source_description.clone(),
+            status: (&w.status).into(),
+            paused: w.paused,
+            checking: w.checking,
+            latest: w.latest.as_ref().map(Into::into),
+            acknowledged: w.acknowledged.clone(),
+            installed: w.installed.clone(),
+            unseen: w.unseen,
+            newer_than_installed: w.newer_than_installed,
+            last_check_ms: w.last_check_ms,
+            next_check_ms: w.next_check_ms,
+            failures: w.failures,
+            interval_secs: w.interval_secs,
+        }
+    }
 }
 
 /// `CheckRecord`.
@@ -261,11 +274,11 @@ pub struct WatchSummaryDto {
 pub struct CheckRecordDto {
     /// When.
     pub at_ms: i64,
-    /// Duration.
+    /// How long it took.
     pub took_ms: u64,
-    /// Error.
+    /// The failure, if any.
     pub error: Option<String>,
-    /// Found.
+    /// Releases found.
     pub found: usize,
 }
 
@@ -284,51 +297,63 @@ impl From<&CheckRecord> for CheckRecordDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchDetailDto {
-    /// Summary.
+    /// The row.
     pub summary: WatchSummaryDto,
-    /// Stored form.
+    /// The stored watch.
     pub spec: WatchDraftDto,
-    /// History.
+    /// Newest first.
     pub history: Vec<ReleaseDto>,
-    /// Checks.
+    /// Newest last.
     pub checks: Vec<CheckRecordDto>,
-    /// Secret keys with a stored value.
+    /// Keys of secret fields that have a value (never the values).
     pub secrets_set: Vec<String>,
+}
+
+impl From<&view::WatchDetail> for WatchDetailDto {
+    fn from(d: &view::WatchDetail) -> Self {
+        WatchDetailDto {
+            summary: (&d.summary).into(),
+            spec: (&d.spec).into(),
+            history: d.history.iter().map(Into::into).collect(),
+            checks: d.checks.iter().map(Into::into).collect(),
+            secrets_set: d.secrets_set.clone(),
+        }
+    }
+}
+
+/// One choice of a `choice` field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChoiceDto {
+    /// Stored value.
+    pub value: String,
+    /// Shown text.
+    pub label: String,
 }
 
 /// `FieldSpec`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldSpecDto {
-    /// Key.
+    /// Key in the source's values.
     pub key: String,
     /// Label.
     pub label: String,
-    /// Help.
+    /// Help text.
     pub help: String,
-    /// Kind.
+    /// `text`, `url`, `folder`, `secret`, `integer`, `toggle` or `choice`.
     pub kind: &'static str,
     /// Required.
     pub required: bool,
-    /// Default.
+    /// Default value.
     pub default: String,
     /// Placeholder.
     pub placeholder: String,
-    /// Integer minimum.
+    /// Smallest integer.
     pub min: Option<i64>,
-    /// Integer maximum.
+    /// Largest integer.
     pub max: Option<i64>,
-    /// Choice options.
-    pub options: Vec<OptionDto>,
-}
-
-/// A choice option.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct OptionDto {
-    /// Value.
-    pub value: String,
-    /// Label.
-    pub label: String,
+    /// Choices.
+    pub options: Vec<ChoiceDto>,
 }
 
 impl From<&FieldSpec> for FieldSpecDto {
@@ -345,9 +370,9 @@ impl From<&FieldSpec> for FieldSpecDto {
                 None,
                 None,
                 o.iter()
-                    .map(|o| OptionDto {
-                        value: o.value.clone(),
-                        label: o.label.clone(),
+                    .map(|c| ChoiceDto {
+                        value: c.value.clone(),
+                        label: c.label.clone(),
                     })
                     .collect(),
             ),
@@ -367,6 +392,16 @@ impl From<&FieldSpec> for FieldSpecDto {
     }
 }
 
+/// The group a source kind is shown under in the add-watch form.
+pub fn group_of(kind_id: &str) -> &'static str {
+    match kind_id {
+        "folder" => "files",
+        "github" | "gitea" | "gitlab" => "forge",
+        "oci" | "npm" | "crates" => "registry",
+        _ => "web",
+    }
+}
+
 /// `SourceKind`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -375,112 +410,144 @@ pub struct SourceKindDto {
     pub id: String,
     /// Label.
     pub label: String,
-    /// Description.
+    /// One sentence.
     pub description: String,
-    /// Group.
+    /// `files`, `web`, `forge` or `registry`.
     pub group: &'static str,
-    /// Plugin name.
-    pub plugin: Option<String>,
-    /// Form.
+    /// The form.
     pub fields: Vec<FieldSpecDto>,
 }
 
-impl SourceKindDto {
-    /// A built-in kind.
-    pub fn builtin(k: &SourceKindSpec) -> SourceKindDto {
-        let group = match k.id.as_str() {
-            "folder" => "files",
-            "web-directory" | "feed" | "json-api" => "web",
-            "github" | "gitea" | "gitlab" => "forge",
-            _ => "registry",
-        };
+impl From<&SourceKindSpec> for SourceKindDto {
+    fn from(k: &SourceKindSpec) -> Self {
         SourceKindDto {
             id: k.id.clone(),
             label: k.label.clone(),
             description: k.description.clone(),
-            group,
-            plugin: None,
-            fields: k.fields.iter().map(FieldSpecDto::from).collect(),
-        }
-    }
-
-    /// A plugin's kind with its full id.
-    pub fn plugin(full_id: String, plugin_name: String, k: &SourceKindSpec) -> SourceKindDto {
-        SourceKindDto {
-            id: full_id,
-            label: k.label.clone(),
-            description: k.description.clone(),
-            group: "plugin",
-            plugin: Some(plugin_name),
-            fields: k.fields.iter().map(FieldSpecDto::from).collect(),
+            group: group_of(&k.id),
+            fields: k.fields.iter().map(Into::into).collect(),
         }
     }
 }
 
 /// `SourcePreview`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourcePreviewDto {
-    /// Draft problems.
+    /// Problems with the draft.
     pub problems: Vec<String>,
     /// The check's failure.
     pub error: Option<WatchStatusDto>,
-    /// Releases.
+    /// Newest first.
     pub releases: Vec<ReleaseDto>,
-    /// Unparsed names.
+    /// Names that held no version.
     pub without_version: Vec<String>,
-    /// Skipped pre-releases.
+    /// Pre-releases left out.
     pub prereleases_skipped: usize,
-    /// Skipped names.
+    /// Names left out by the filter.
     pub names_skipped: usize,
-    /// Duration.
+    /// How long it took.
     pub took_ms: u64,
+}
+
+impl From<&view::SourcePreview> for SourcePreviewDto {
+    fn from(p: &view::SourcePreview) -> Self {
+        SourcePreviewDto {
+            problems: p.problems.clone(),
+            error: p.error.as_ref().map(Into::into),
+            releases: p.releases.iter().map(Into::into).collect(),
+            without_version: p.without_version.clone(),
+            prereleases_skipped: p.prereleases_skipped,
+            names_skipped: p.names_skipped,
+            took_ms: p.took_ms,
+        }
+    }
+}
+
+/// `Preset`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetDto {
+    /// Id.
+    pub id: String,
+    /// Name.
+    pub name: String,
+    /// Description.
+    pub description: String,
+    /// Category.
+    pub category: String,
+    /// The draft to start from.
+    pub draft: WatchDraftDto,
+}
+
+impl From<&Preset> for PresetDto {
+    fn from(p: &Preset) -> Self {
+        PresetDto {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            description: p.description.clone(),
+            category: p.category.clone(),
+            draft: (&p.spec).into(),
+        }
+    }
+}
+
+/// `DiscoveredFeed`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DiscoveredFeedDto {
+    /// Address.
+    pub url: String,
+    /// Title.
+    pub title: String,
+}
+
+impl From<&DiscoveredFeed> for DiscoveredFeedDto {
+    fn from(f: &DiscoveredFeed) -> Self {
+        DiscoveredFeedDto {
+            url: f.url.clone(),
+            title: f.title.clone(),
+        }
+    }
+}
+
+/// `ImportResult`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportResultDto {
+    /// Drafts, not yet saved.
+    pub drafts: Vec<WatchDraftDto>,
+    /// Entries left out, with the reason.
+    pub skipped: Vec<String>,
 }
 
 /// `WhatsNewItem`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WhatsNewDto {
-    /// Watch id.
+pub struct WhatsNewItemDto {
+    /// The watch.
     pub watch_id: String,
-    /// Watch name.
+    /// Its name.
     pub watch_name: String,
-    /// Kind id.
+    /// Its source kind.
     pub source_kind: String,
-    /// Release.
+    /// The release.
     pub release: ReleaseDto,
-    /// Released.
+    /// When it came out.
     pub released_at_ms: i64,
     /// Newer than installed.
     pub newer_than_installed: Option<bool>,
-    /// Unseen.
+    /// Not seen yet.
     pub unseen: bool,
-}
-
-impl WhatsNewDto {
-    /// From the core's item, with the watch's name and kind.
-    pub fn new(n: &NewItem, name: String, kind: String, first_seen_ms: i64) -> WhatsNewDto {
-        WhatsNewDto {
-            watch_id: n.watch.to_string(),
-            watch_name: name,
-            source_kind: kind,
-            release: ReleaseDto::new(&n.release, first_seen_ms),
-            released_at_ms: n.released_at.0,
-            newer_than_installed: n.newer_than_installed,
-            unseen: n.unseen,
-        }
-    }
 }
 
 /// `WatchNumbers`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WatchNumbersDto {
-    /// Watch id.
+    /// The watch.
     pub watch_id: String,
-    /// Average interval.
+    /// Average time between releases.
     pub average_interval_ms: Option<i64>,
-    /// Since last.
+    /// Time since the last release.
     pub since_last_ms: Option<i64>,
     /// Releases per bucket.
     pub releases: Vec<u32>,
@@ -488,132 +555,127 @@ pub struct WatchNumbersDto {
     pub failed_checks: Vec<u32>,
     /// Checks per bucket.
     pub checks: Vec<u32>,
-    /// Sparkline.
+    /// Releases per week over 12 weeks.
     pub sparkline: Vec<u32>,
 }
 
-impl From<&WatchNumbers> for WatchNumbersDto {
-    fn from(w: &WatchNumbers) -> Self {
-        WatchNumbersDto {
-            watch_id: w.watch.to_string(),
-            average_interval_ms: w.average_interval_ms,
-            since_last_ms: w.since_last_ms,
-            releases: w.releases.clone(),
-            failed_checks: w.failed_checks.clone(),
-            checks: w.checks.clone(),
-            sparkline: w.sparkline.clone(),
-        }
-    }
-}
-
 /// `DownloadBucket`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DownloadBucketDto {
-    /// Worked.
+    /// Downloads.
     pub count: u32,
-    /// Failed.
+    /// Failed downloads.
     pub failed: u32,
     /// Bytes.
     pub bytes: u64,
-}
-
-impl From<&dashboard::DownloadBucket> for DownloadBucketDto {
-    fn from(d: &dashboard::DownloadBucket) -> Self {
-        DownloadBucketDto {
-            count: d.count,
-            failed: d.failed,
-            bytes: d.bytes,
-        }
-    }
 }
 
 /// `Dashboard`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardDto {
-    /// Range.
+    /// `30d`, `90d` or `1y`.
     pub range: String,
-    /// Buckets.
+    /// Bucket starts, oldest first.
     pub buckets_ms: Vec<i64>,
-    /// What's new.
-    pub whats_new: Vec<WhatsNewDto>,
+    /// The newest releases.
+    pub whats_new: Vec<WhatsNewItemDto>,
     /// Per watch.
     pub watches: Vec<WatchNumbersDto>,
-    /// Downloads.
+    /// Downloads per bucket.
     pub downloads: Vec<DownloadBucketDto>,
-    /// Cost.
+    /// Engine time in microseconds.
     pub compute_micros: u64,
 }
 
-/// `AppEvent`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+impl From<&view::DashboardView> for DashboardDto {
+    fn from(d: &view::DashboardView) -> Self {
+        DashboardDto {
+            range: d.range.clone(),
+            buckets_ms: d.buckets_ms.clone(),
+            whats_new: d
+                .whats_new
+                .iter()
+                .map(|w| WhatsNewItemDto {
+                    watch_id: w.watch_id.clone(),
+                    watch_name: w.watch_name.clone(),
+                    source_kind: w.source_kind.clone(),
+                    release: (&w.release).into(),
+                    released_at_ms: w.released_at_ms,
+                    newer_than_installed: w.newer_than_installed,
+                    unseen: w.unseen,
+                })
+                .collect(),
+            watches: d
+                .watches
+                .iter()
+                .map(|n| WatchNumbersDto {
+                    watch_id: n.watch.to_string(),
+                    average_interval_ms: n.average_interval_ms,
+                    since_last_ms: n.since_last_ms,
+                    releases: n.releases.clone(),
+                    failed_checks: n.failed_checks.clone(),
+                    checks: n.checks.clone(),
+                    sparkline: n.sparkline.clone(),
+                })
+                .collect(),
+            downloads: d
+                .downloads
+                .iter()
+                .map(|b| DownloadBucketDto {
+                    count: b.count,
+                    failed: b.failed,
+                    bytes: b.bytes,
+                })
+                .collect(),
+            compute_micros: d.compute_micros,
+        }
+    }
+}
+
+/// `AppEvent`: fields a kind does not use are null.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppEventDto {
     /// When.
     pub at_ms: i64,
-    /// Kind.
-    pub kind: &'static str,
-    /// Watch id.
+    /// `new-release`, `check-failed`, `recovered`, `download-finished`, `action-failed` or `needs-you`.
+    pub kind: String,
+    /// The watch.
     pub watch_id: Option<String>,
-    /// Watch name.
+    /// Its name.
     pub watch_name: Option<String>,
     /// Version.
     pub version: Option<String>,
-    /// Name.
+    /// Release name.
     pub name: Option<String>,
     /// Message.
     pub message: Option<String>,
-    /// Path.
+    /// File path.
     pub path: Option<String>,
     /// Size.
     pub size: Option<u64>,
-    /// Verified.
+    /// Checksum verified.
     pub verified: Option<bool>,
     /// Action.
     pub action: Option<String>,
-    /// Plugin.
-    pub plugin: Option<String>,
 }
 
-impl AppEventDto {
-    /// From a journal event and its watch's name.
-    pub fn new(e: &Event, watch_name: Option<String>) -> AppEventDto {
-        let mut d = AppEventDto {
-            at_ms: e.at.0,
-            watch_id: e.watch.as_ref().map(|w| w.to_string()),
-            watch_name,
-            ..AppEventDto::default()
-        };
-        match &e.kind {
-            EventKind::NewRelease { version, name } => {
-                d.kind = "new-release";
-                d.version = Some(version.clone());
-                d.name = Some(name.clone());
-            }
-            EventKind::CheckFailed { message } => {
-                d.kind = "check-failed";
-                d.message = Some(message.clone());
-            }
-            EventKind::Recovered => d.kind = "recovered",
-            EventKind::DownloadFinished { version, path, size, verified } => {
-                d.kind = "download-finished";
-                d.version = Some(version.clone());
-                d.path = Some(path.clone());
-                d.size = Some(*size);
-                d.verified = Some(*verified);
-            }
-            EventKind::ActionFailed { action, message } => {
-                d.kind = "action-failed";
-                d.action = Some(action.clone());
-                d.message = Some(message.clone());
-            }
-            EventKind::PluginIssue { plugin, message } => {
-                d.kind = "plugin-issue";
-                d.plugin = Some(plugin.clone());
-                d.message = Some(message.clone());
-            }
+impl From<&EventView> for AppEventDto {
+    fn from(e: &EventView) -> Self {
+        AppEventDto {
+            at_ms: e.at_ms,
+            kind: e.kind.clone(),
+            watch_id: e.watch_id.clone(),
+            watch_name: e.watch_name.clone(),
+            version: e.version.clone(),
+            name: e.name.clone(),
+            message: e.message.clone(),
+            path: e.path.clone(),
+            size: e.size,
+            verified: e.verified,
+            action: e.action.clone(),
         }
-        d
     }
 }
 
@@ -621,122 +683,55 @@ impl AppEventDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsDto {
-    /// `system`, `light`, `dark`.
-    pub theme: String,
-    /// Notifications.
+    /// Colour theme.
+    pub theme: Theme,
+    /// Notifications at all.
     pub notifications: bool,
     /// Paused until.
     pub notifications_paused_until_ms: Option<i64>,
-    /// Automatic update checks.
+    /// Check for Spotter's updates automatically.
     pub check_app_updates: bool,
-    /// Downloads folder.
+    /// Where downloads go.
     pub downloads_folder: Option<String>,
-    /// Default interval.
+    /// Interval for new watches.
     pub default_interval_secs: u32,
-    /// Disabled plugins.
-    pub disabled_plugins: Vec<String>,
+    /// `off`, `daily` or `weekly`.
+    pub digest: DigestMode,
+    /// Global quiet hours.
+    pub quiet_hours: Option<QuietHours>,
+    /// Use an OS webview when no Chromium is found.
+    pub allow_os_webview: bool,
 }
 
 impl From<&Settings> for SettingsDto {
     fn from(s: &Settings) -> Self {
         SettingsDto {
-            theme: match s.theme {
-                Theme::System => "system",
-                Theme::Light => "light",
-                Theme::Dark => "dark",
-            }
-            .into(),
+            theme: s.theme,
             notifications: s.notifications,
             notifications_paused_until_ms: s.notifications_paused_until,
             check_app_updates: s.check_app_updates,
             downloads_folder: s.downloads_folder.clone(),
             default_interval_secs: s.default_interval_secs,
-            disabled_plugins: s.disabled_plugins.clone(),
+            digest: s.digest,
+            quiet_hours: s.quiet_hours,
+            allow_os_webview: s.allow_os_webview,
         }
     }
 }
 
 impl SettingsDto {
-    /// The core's settings; the error says what is wrong.
-    pub fn to_settings(&self) -> Result<Settings, String> {
-        let theme = match self.theme.as_str() {
-            "system" => Theme::System,
-            "light" => Theme::Light,
-            "dark" => Theme::Dark,
-            other => return Err(format!("\"{other}\" is not a theme.")),
-        };
-        Ok(Settings {
-            theme,
+    /// The core's settings.
+    pub fn into_settings(self) -> Settings {
+        Settings {
+            theme: self.theme,
             notifications: self.notifications,
             notifications_paused_until: self.notifications_paused_until_ms,
             check_app_updates: self.check_app_updates,
-            downloads_folder: self.downloads_folder.clone().filter(|f| !f.trim().is_empty()),
-            default_interval_secs: spotter_core::schedule::clamp_interval(self.default_interval_secs),
-            disabled_plugins: self.disabled_plugins.clone(),
-        })
-    }
-}
-
-/// `PluginInfo`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginInfoDto {
-    /// Id.
-    pub id: String,
-    /// Name.
-    pub name: String,
-    /// Version.
-    pub version: Option<String>,
-    /// Folder.
-    pub dir: String,
-    /// Kinds.
-    pub kinds: Vec<KindRef>,
-    /// Why not usable.
-    pub problem: Option<String>,
-    /// Disabled.
-    pub disabled: bool,
-    /// Quarantined.
-    pub quarantined: bool,
-    /// Last problem.
-    pub last_problem: Option<String>,
-    /// Recent strikes.
-    pub strikes: usize,
-}
-
-/// A kind reference.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct KindRef {
-    /// Full id.
-    pub id: String,
-    /// Label.
-    pub label: String,
-}
-
-impl From<&spotter_plugin_host::PluginStatus> for PluginInfoDto {
-    fn from(s: &spotter_plugin_host::PluginStatus) -> Self {
-        let i = &s.installed;
-        let m = i.manifest.as_ref();
-        PluginInfoDto {
-            id: i.id.clone(),
-            name: m.map_or_else(|| i.id.clone(), |m| m.name.clone()),
-            version: m.map(|m| m.version.clone()),
-            dir: i.dir.display().to_string(),
-            kinds: m
-                .map(|m| {
-                    m.kinds
-                        .iter()
-                        .map(|k| KindRef {
-                            id: format!("{}/{}", i.id, k.id),
-                            label: k.label.clone(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-            problem: i.problem.clone(),
-            disabled: s.disabled,
-            quarantined: s.health.quarantined,
-            last_problem: s.health.last_problem.clone(),
-            strikes: s.health.strikes.len(),
+            downloads_folder: self.downloads_folder,
+            default_interval_secs: self.default_interval_secs,
+            digest: self.digest,
+            quiet_hours: self.quiet_hours,
+            allow_os_webview: self.allow_os_webview,
         }
     }
 }
@@ -745,33 +740,42 @@ impl From<&spotter_plugin_host::PluginStatus> for PluginInfoDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfoDto {
-    /// Version.
+    /// Spotter's version.
     pub version: String,
-    /// `spotter.toml`.
+    /// The configuration file.
     pub config_path: String,
-    /// Logs.
+    /// The logs folder.
     pub logs_dir: String,
-    /// Plugins.
-    pub plugins_dir: String,
-    /// Downloads.
+    /// The downloads folder.
     pub downloads_dir: String,
-    /// Load warnings.
+    /// Problems worked around at start-up.
     pub warnings: Vec<String>,
-    /// Migrated from Release Monitor at this start.
+    /// The old Release Monitor's configuration was migrated.
     pub migrated_from_legacy: bool,
-    /// `windows`, `macos`, `linux`.
+    /// `windows`, `macos` or `linux`.
     pub platform: &'static str,
+}
+
+/// The platform name the UI expects.
+pub const fn platform_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
 }
 
 /// `AppUpdateStatus`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppUpdateStatusDto {
-    /// Whether this build can update itself.
+    /// False in builds without the update key.
     pub available: bool,
     /// Why not.
     pub reason: Option<String>,
-    /// Version.
+    /// This build's version.
     pub current_version: String,
 }
 
@@ -787,211 +791,219 @@ pub struct AppUpdateCheckDto {
     pub notes: Option<String>,
 }
 
-/// `StatePush`.
+/// `StatePush`: the event payload on `spotter://state`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct StatePushDto {
+pub struct StatePush {
     /// Every watch.
     pub watches: Vec<WatchSummaryDto>,
 }
 
-/// A command error (`CommandError` in api.types.ts).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, thiserror::Error)]
+/// `CommandError.code`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[error("{message}")]
+pub enum CommandErrorCode {
+    /// The request is wrong.
+    BadRequest,
+    /// No such thing.
+    NotFound,
+    /// The input is invalid.
+    Invalid,
+    /// Something needed is unavailable.
+    Unavailable,
+    /// A bug or an I/O failure.
+    Internal,
+}
+
+/// `CommandError`: what every rejected command carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CommandError {
-    /// `badRequest`, `notFound`, `invalid`, `unavailable`, `internal`.
-    pub code: &'static str,
-    /// For the user.
+    /// Machine-readable code.
+    pub code: CommandErrorCode,
+    /// What to do about it.
     pub message: String,
-    /// Every problem, for `invalid`.
+    /// For `invalid`: every problem.
     pub problems: Vec<String>,
 }
 
 impl CommandError {
-    /// A bad argument.
-    pub fn bad_request(message: impl Into<String>) -> CommandError {
+    /// A wrong request.
+    pub fn bad(message: impl Into<String>) -> Self {
         CommandError {
-            code: "badRequest",
+            code: CommandErrorCode::BadRequest,
             message: message.into(),
             problems: Vec::new(),
         }
     }
 
-    /// Something that does not exist.
-    pub fn not_found(message: impl Into<String>) -> CommandError {
+    /// Something unavailable.
+    pub fn unavailable(message: impl Into<String>) -> Self {
         CommandError {
-            code: "notFound",
+            code: CommandErrorCode::Unavailable,
             message: message.into(),
             problems: Vec::new(),
         }
     }
 
-    /// Input with problems.
-    pub fn invalid(problems: Vec<String>) -> CommandError {
+    /// A bug or failure on Spotter's own files.
+    pub fn internal(message: impl Into<String>) -> Self {
         CommandError {
-            code: "invalid",
-            message: problems.first().cloned().unwrap_or_else(|| "The input is not valid.".into()),
-            problems,
-        }
-    }
-
-    /// Something not available here or now.
-    pub fn unavailable(message: impl Into<String>) -> CommandError {
-        CommandError {
-            code: "unavailable",
-            message: message.into(),
-            problems: Vec::new(),
-        }
-    }
-
-    /// Anything else.
-    pub fn internal(message: impl Into<String>) -> CommandError {
-        CommandError {
-            code: "internal",
+            code: CommandErrorCode::Internal,
             message: message.into(),
             problems: Vec::new(),
         }
     }
 }
+
+impl From<EngineError> for CommandError {
+    fn from(e: EngineError) -> Self {
+        let code = match &e {
+            EngineError::BadRequest(_) => CommandErrorCode::BadRequest,
+            EngineError::NotFound(_) => CommandErrorCode::NotFound,
+            EngineError::Invalid(_) => CommandErrorCode::Invalid,
+            EngineError::Unavailable(_) => CommandErrorCode::Unavailable,
+            EngineError::Internal(_) => CommandErrorCode::Internal,
+        };
+        CommandError {
+            code,
+            message: e.to_string(),
+            problems: e.problems().to_vec(),
+        }
+    }
+}
+
+/// Secrets the UI sends: key to value.
+pub type Secrets = BTreeMap<String, String>;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    fn draft() -> WatchDraftDto {
-        serde_json::from_value(json!({
-            "id": null, "name": "N", "source": {"kind": "folder", "values": {"path": "/d", "pattern": " "}},
-            "versions": "semver", "versionPattern": " ", "includePrereleases": false, "nameFilter": "",
-            "intervalSecs": 60, "notify": {"mode": "newer-than-installed", "nag": true, "quietHours": {"start": "22:00", "end": "07:00"}},
-            "actions": [{"kind": "download", "folder": "/x", "verify": true}, {"kind": "run-command", "program": "/bin/x", "args": ["{path}"]}],
-            "paused": false
-        }))
-        .unwrap()
+    fn draft_json() -> serde_json::Value {
+        json!({
+            "id": null, "name": "Example", "source": {"kind": "github", "values": {"repo": "o/r"}},
+            "versions": "semver", "versionPattern": null, "includePrereleases": false, "nameFilter": "",
+            "intervalSecs": 3600,
+            "notify": {"mode": "newer-than-installed", "nag": true, "quietHours": {"start": "22:00", "end": "07:00"}},
+            "actions": [{"kind": "open-location"}, {"kind": "download", "folder": "/tmp/x", "verify": true},
+                        {"kind": "run-command", "program": "/bin/echo", "args": ["{path}"]}],
+            "channels": [{"kind": "ntfy", "target": "topic_1"}],
+            "filter": {"prefix": "1.", "soakHours": 24}, "paused": false
+        })
     }
 
     #[test]
-    fn drafts_round_trip_through_specs() {
-        let spec = draft().to_spec("w1".into()).unwrap();
-        assert_eq!(spec.source.values.len(), 1, "empty values are dropped");
-        assert_eq!(spec.version_pattern, None);
+    fn a_draft_round_trips_through_the_core_spec() {
+        let dto: WatchDraftDto = serde_json::from_value(draft_json()).unwrap();
+        let spec = dto.clone().into_spec(true);
+        assert!(spec.allow_local && spec.id.is_empty());
+        assert_eq!(spec.version_filter.soak_hours, 24);
         assert_eq!(spec.notify.mode, NotifyMode::NewerThanInstalled);
         let back = WatchDraftDto::from(&spec);
-        assert_eq!(back.id.as_deref(), Some("w1"));
-        assert_eq!(back.notify.quiet_hours.as_ref().unwrap().start, "22:00");
-        let json = serde_json::to_value(&back).unwrap();
-        assert_eq!(json["actions"][1]["kind"], "run-command");
-        assert_eq!(json["intervalSecs"], 60);
-        let mut bad = draft();
-        bad.notify.mode = "loud".into();
-        assert!(bad.to_spec("x".into()).is_err());
-        let mut bad = draft();
-        bad.notify.quiet_hours = Some(QuietHoursDto {
-            start: "25:00".into(),
-            end: "01:00".into(),
-        });
-        assert!(bad.to_spec("x".into()).is_err());
-        let mut off = draft();
-        off.notify.mode = "off".into();
-        off.notify.quiet_hours = None;
-        assert_eq!(WatchDraftDto::from(&off.to_spec("x".into()).unwrap()).notify.mode, "off");
-        off.notify.mode = "every-new".into();
-        assert_eq!(WatchDraftDto::from(&off.to_spec("x".into()).unwrap()).notify.mode, "every-new");
+        assert_eq!(back, dto);
+        assert_eq!(serde_json::to_value(&back).unwrap(), draft_json());
     }
 
     #[test]
-    fn statuses_settings_and_errors_serialise_as_the_ui_expects() {
-        let all = [
+    fn a_draft_with_unknown_enum_values_is_refused_at_the_edge() {
+        let mut j = draft_json();
+        j["notify"]["mode"] = json!("sometimes");
+        assert!(serde_json::from_value::<WatchDraftDto>(j).is_err());
+        let mut j = draft_json();
+        j["notify"]["quietHours"]["start"] = json!("25:00");
+        assert!(serde_json::from_value::<WatchDraftDto>(j).is_err());
+    }
+
+    #[test]
+    fn statuses_use_the_ui_names() {
+        let kinds: Vec<&str> = [
             WatchStatus::Pending,
             WatchStatus::Ok,
             WatchStatus::NoMatch,
-            WatchStatus::Unreachable("m".into()),
-            WatchStatus::AuthNeeded("m".into()),
-            WatchStatus::PluginError("m".into()),
-            WatchStatus::Invalid("m".into()),
-            WatchStatus::Failed("m".into()),
-        ];
-        let kinds: Vec<&str> = all.iter().map(|s| WatchStatusDto::from(s).kind).collect();
-        assert_eq!(kinds, ["pending", "ok", "noMatch", "unreachable", "authNeeded", "pluginError", "invalid", "failed"]);
-        for theme in [Theme::System, Theme::Light, Theme::Dark] {
-            let s = Settings { theme, ..Settings::default() };
-            assert_eq!(SettingsDto::from(&s).to_settings().unwrap(), s);
-        }
-        let mut bad = SettingsDto::from(&Settings::default());
-        bad.theme = "pink".into();
-        assert!(bad.to_settings().is_err());
-        let json = serde_json::to_value(CommandError::invalid(vec!["a".into(), "b".into()])).unwrap();
-        assert_eq!(json, json!({"code": "invalid", "message": "a", "problems": ["a", "b"]}));
-        assert_eq!(CommandError::invalid(vec![]).message, "The input is not valid.");
-        for e in [
-            CommandError::bad_request("x"),
-            CommandError::not_found("x"),
-            CommandError::unavailable("x"),
-            CommandError::internal("x"),
-        ] {
-            assert_eq!(e.to_string(), "x");
-        }
+            WatchStatus::Unreachable("a".into()),
+            WatchStatus::AuthNeeded("a".into()),
+            WatchStatus::NeedsYou("a".into()),
+            WatchStatus::Invalid("a".into()),
+            WatchStatus::Failed("a".into()),
+        ]
+        .iter()
+        .map(|s| WatchStatusDto::from(s).kind)
+        .collect();
+        assert_eq!(
+            kinds,
+            [
+                "pending",
+                "ok",
+                "noMatch",
+                "unreachable",
+                "authNeeded",
+                "needsYou",
+                "invalid",
+                "failed"
+            ]
+        );
+        assert_eq!(WatchStatusDto::from(&WatchStatus::Ok).message, None);
     }
 
     #[test]
-    fn fields_and_kinds_map_for_the_form() {
-        let kinds: Vec<SourceKindDto> = spotter_core::source::catalog::builtin_kinds().iter().map(SourceKindDto::builtin).collect();
-        let groups: Vec<&str> = kinds.iter().map(|k| k.group).collect();
-        assert!(groups.contains(&"files") && groups.contains(&"forge") && groups.contains(&"registry") && groups.contains(&"web"));
-        let f = FieldSpecDto::from(&FieldSpec::new("n", "N", FieldKind::Integer { min: 1, max: 5 }));
-        assert_eq!((f.kind, f.min, f.max), ("integer", Some(1), Some(5)));
-        for (kind, name) in [
-            (FieldKind::Text, "text"),
-            (FieldKind::Url, "url"),
-            (FieldKind::Folder, "folder"),
-            (FieldKind::Secret, "secret"),
-            (FieldKind::Toggle, "toggle"),
-        ] {
-            assert_eq!(FieldSpecDto::from(&FieldSpec::new("k", "K", kind)).kind, name);
-        }
-        let p = SourceKindDto::plugin("p/k".into(), "P".into(), &SourceKindSpec::new("k", "K", "d"));
-        assert_eq!((p.group, p.plugin.as_deref()), ("plugin", Some("P")));
+    fn settings_round_trip_and_use_camel_case() {
+        let s = Settings::default();
+        let dto = SettingsDto::from(&s);
+        let j = serde_json::to_value(&dto).unwrap();
+        assert_eq!(j["theme"], "system");
+        assert_eq!(j["digest"], "off");
+        assert!(j.get("notificationsPausedUntilMs").is_some() && j.get("defaultIntervalSecs").is_some());
+        assert_eq!(serde_json::from_value::<SettingsDto>(j).unwrap().into_settings(), s);
     }
 
     #[test]
-    fn events_map_every_kind() {
-        let id = spotter_core::watch::WatchId::parse("w").unwrap();
-        let kinds = [
-            EventKind::NewRelease {
-                version: "1".into(),
-                name: "n".into(),
-            },
-            EventKind::CheckFailed { message: "m".into() },
-            EventKind::Recovered,
-            EventKind::DownloadFinished {
-                version: "1".into(),
-                path: "/p".into(),
-                size: 3,
-                verified: true,
-            },
-            EventKind::ActionFailed {
-                action: "download".into(),
-                message: "m".into(),
-            },
-            EventKind::PluginIssue {
-                plugin: "p".into(),
-                message: "m".into(),
-            },
-        ];
-        let names: Vec<&str> = kinds
-            .into_iter()
-            .map(|kind| {
-                AppEventDto::new(
-                    &Event {
-                        at: spotter_core::time::Timestamp(1),
-                        watch: Some(id.clone()),
-                        kind,
-                    },
-                    Some("W".into()),
-                )
-                .kind
-            })
-            .collect();
-        assert_eq!(names, ["new-release", "check-failed", "recovered", "download-finished", "action-failed", "plugin-issue"]);
+    fn every_builtin_kind_has_a_group_and_fields_keep_their_shape() {
+        for k in spotter_core::source::catalog::builtin_kinds() {
+            let d = SourceKindDto::from(&k);
+            assert!(["files", "web", "forge", "registry"].contains(&d.group), "{}", k.id);
+            assert_eq!(d.fields.len(), k.fields.len());
+        }
+        let f = FieldSpec::new("n", "Count", FieldKind::Integer { min: 1, max: 10 });
+        let d = FieldSpecDto::from(&f);
+        assert_eq!((d.kind, d.min, d.max), ("integer", Some(1), Some(10)));
+        let c = FieldSpec::new(
+            "c",
+            "Choice",
+            FieldKind::Choice(vec![spotter_core::schema::ChoiceOption::new("a", "A")]),
+        );
+        assert_eq!(FieldSpecDto::from(&c).options.len(), 1);
+        assert_eq!(group_of("folder"), "files");
+        assert_eq!(group_of("gitlab"), "forge");
+        assert_eq!(group_of("npm"), "registry");
+        assert_eq!(group_of("web-page"), "web");
+    }
+
+    #[test]
+    fn errors_keep_code_message_and_problems() {
+        let e = CommandError::from(EngineError::Invalid(vec!["a".into(), "b".into()]));
+        let j = serde_json::to_value(&e).unwrap();
+        assert_eq!(j["code"], "invalid");
+        assert_eq!(j["problems"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            CommandError::from(EngineError::NotFound("x".into())).code,
+            CommandErrorCode::NotFound
+        );
+        assert_eq!(
+            CommandError::from(EngineError::BadRequest("x".into())).code,
+            CommandErrorCode::BadRequest
+        );
+        assert_eq!(
+            CommandError::from(EngineError::Unavailable("x".into())).code,
+            CommandErrorCode::Unavailable
+        );
+        assert_eq!(CommandError::bad("b").code, CommandErrorCode::BadRequest);
+        assert_eq!(CommandError::unavailable("u").code, CommandErrorCode::Unavailable);
+        assert_eq!(CommandError::internal("i").code, CommandErrorCode::Internal);
+    }
+
+    #[test]
+    fn platform_is_one_of_the_three() {
+        assert!(["windows", "macos", "linux"].contains(&platform_name()));
     }
 }

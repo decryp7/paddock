@@ -185,7 +185,12 @@ pub struct SourceKindSpec {
 impl SourceKindSpec {
     /// A kind without fields.
     pub fn new(id: &str, label: &str, description: &str) -> SourceKindSpec {
-        SourceKindSpec { id: id.into(), label: label.into(), description: description.into(), fields: Vec::new() }
+        SourceKindSpec {
+            id: id.into(),
+            label: label.into(),
+            description: description.into(),
+            fields: Vec::new(),
+        }
     }
 
     /// The same kind with one more field.

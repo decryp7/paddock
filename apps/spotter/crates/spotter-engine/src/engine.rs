@@ -560,6 +560,40 @@ impl Engine {
         })
     }
 
+    /// A release the watch knows (the latest or one in its history), by its version text. The shell downloads or opens
+    /// it; the engine does not.
+    pub fn release_of(&self, id: &str, version: &str) -> Result<spotter_core::release::Release> {
+        self.find_spec(id)?;
+        let wid = self.watch_id(id)?;
+        let states = lock(&self.inner.states);
+        let state = states.get(&wid);
+        state
+            .into_iter()
+            .flat_map(|s| s.latest.iter().chain(s.history.iter()))
+            .find(|k| k.release.version.text == version)
+            .map(|k| k.release.clone())
+            .ok_or_else(|| {
+                EngineError::NotFound(format!(
+                    "The watch has no release \"{version}\" (it may have aged out of the history)."
+                ))
+            })
+    }
+
+    /// Records that an action on a release failed (a command that could not run, a folder that could not be opened);
+    /// the shell runs the actions, the journal shows the failure.
+    pub fn record_action_failure(&self, id: &str, action: &str, message: &str) -> Result<()> {
+        use spotter_core::journal::EventKind;
+        let wid = self.watch_id(id)?;
+        self.record(
+            self.now(),
+            Some(wid),
+            EventKind::ActionFailed {
+                action: action.into(),
+                message: message.into(),
+            },
+        )
+    }
+
     // ---- dashboard and events ----
 
     /// The dashboard for a range (`30d`, `90d`, `1y`).
