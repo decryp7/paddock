@@ -192,4 +192,31 @@ mod tests {
         let e = save(&dir.path().join("nope").join("spotter.toml"), &ConfigDoc::default()).unwrap_err();
         assert!(e.to_string().contains("writable"));
     }
+
+    #[test]
+    fn a_path_below_a_file_is_a_read_warning_and_a_damaged_backup_is_not_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plain");
+        std::fs::write(&file, "x").unwrap();
+        let l = load(&file.join("spotter.toml"));
+        assert!(l.warnings[0].contains("could not be read"), "{:?}", l.warnings);
+        let p = dir.path().join("spotter.toml");
+        std::fs::write(&p, "= = =").unwrap();
+        std::fs::write(dir.path().join("spotter.toml.bak"), "also = = broken").unwrap();
+        let l = load(&p);
+        assert!(l.doc.watches.is_empty());
+        assert!(l.warnings.iter().all(|w| !w.contains("restored")), "{:?}", l.warnings);
+        assert!(l.warnings.last().unwrap().contains("defaults"));
+    }
+
+    #[test]
+    fn a_save_that_cannot_replace_the_file_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("spotter.toml");
+        // A folder where the file belongs: the final rename fails.
+        std::fs::create_dir_all(p.join("inside")).unwrap();
+        let e = save(&p, &doc("x")).unwrap_err();
+        assert!(e.to_string().contains("could not be saved"), "{e}");
+        assert!(!dir.path().join("spotter.toml.tmp").exists());
+    }
 }

@@ -721,4 +721,117 @@ mod tests {
         .join();
         db.kv_set("a", "b").unwrap();
     }
+
+    #[test]
+    fn database_errors_tell_the_user_what_to_do() {
+        let e = internal(rusqlite::Error::InvalidQuery);
+        let m = e.to_string();
+        assert!(m.contains("history database failed") && m.contains("delete spotter.db"), "{m}");
+    }
+
+    #[test]
+    fn a_database_that_opens_but_fails_its_integrity_check_is_moved_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.db");
+        drop(Db::open(&path));
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE guarded (x INTEGER CHECK (x > 0)); PRAGMA ignore_check_constraints = ON; INSERT INTO guarded VALUES (-1);",
+            )
+            .unwrap();
+        }
+        let (db, warnings) = Db::open(&path);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains(".corrupt"), "{warnings:?}");
+        assert!(dir.path().join("s.db.corrupt").exists());
+        db.save_state(&id("a"), &WatchState::default()).unwrap();
+    }
+
+    const TABLES: [&str; 7] = [
+        "watch_state",
+        "events",
+        "check_days",
+        "downloads",
+        "http_cache",
+        "digest_queue",
+        "kv",
+    ];
+
+    /// Runs every operation once and returns how many of them failed.
+    fn run_everything(db: &Db) -> usize {
+        let w = id("a");
+        let validators = crate::fetch::Validators {
+            etag: Some("e".into()),
+            last_modified: None,
+        };
+        let results = [
+            db.schema_version().is_err(),
+            db.load_states().is_err(),
+            db.save_state(&w, &WatchState::default()).is_err(),
+            db.delete_watch(&w).is_err(),
+            db.record_event(&event(1, "a")).is_err(),
+            db.events(10, None).is_err(),
+            db.count_check(&w, Timestamp(1), true).is_err(),
+            db.record_download(&DownloadRecord {
+                at: Timestamp(1),
+                watch: w.clone(),
+                version: "1".into(),
+                size: 1,
+                ok: true,
+            })
+            .is_err(),
+            db.load_journal().is_err(),
+            db.prune(Timestamp(1), std::slice::from_ref(&w)).is_err(),
+            db.cached_validators(&w, "f").is_err(),
+            db.store_validators(&w, "f", &validators).is_err(),
+            db.store_validators(&w, "f", &crate::fetch::Validators::default()).is_err(),
+            db.queue_digest(&w, Timestamp(1), "{}").is_err(),
+            db.take_digest().is_err(),
+            db.digest_len().is_err(),
+            db.kv_get("k").is_err(),
+            db.kv_set("k", "v").is_err(),
+        ];
+        results.iter().filter(|failed| **failed).count()
+    }
+
+    #[test]
+    fn a_database_whose_tables_vanished_reports_errors_and_never_panics() {
+        let db = Db::in_memory();
+        assert_eq!(run_everything(&db), 0, "a healthy database has no failing operation");
+        for t in TABLES {
+            db.conn().execute_batch(&format!("DROP TABLE {t};")).unwrap();
+        }
+        // Everything that touches a table fails; only the schema version (a pragma) still answers.
+        assert!(run_everything(&db) >= 16);
+        let e = db.kv_get("k").unwrap_err();
+        assert!(e.to_string().contains("delete spotter.db"), "{e}");
+    }
+
+    #[test]
+    fn rows_of_the_wrong_type_are_errors_or_skipped_not_panics() {
+        let db = Db::in_memory();
+        {
+            let c = db.conn();
+            for t in TABLES {
+                c.execute_batch(&format!("DROP TABLE {t};")).unwrap();
+            }
+            // Same names, no types and no constraints: NULLs and blobs where the engine expects text.
+            c.execute_batch(
+                "CREATE TABLE watch_state (id, json); INSERT INTO watch_state VALUES (NULL, NULL);
+                 CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, at, watch, json); INSERT INTO events (at, watch, json) VALUES (1, NULL, NULL);
+                 CREATE TABLE check_days (watch, day, ok, failed); INSERT INTO check_days VALUES (NULL, NULL, NULL, NULL);
+                 CREATE TABLE downloads (id INTEGER PRIMARY KEY AUTOINCREMENT, at, watch, json); INSERT INTO downloads (at, watch, json) VALUES (1, NULL, NULL);
+                 CREATE TABLE http_cache (watch, fingerprint, etag, last_modified); INSERT INTO http_cache VALUES ('a', 'f', x'00', x'00');
+                 CREATE TABLE digest_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, at, watch, json); INSERT INTO digest_queue (at, watch, json) VALUES (1, 'a', NULL);
+                 CREATE TABLE kv (key, value);",
+            )
+            .unwrap();
+        }
+        assert!(db.load_states().is_err());
+        assert!(db.events(10, None).is_err());
+        assert!(db.load_journal().is_err());
+        assert!(db.cached_validators(&id("a"), "f").is_err());
+        assert!(db.take_digest().unwrap().is_empty(), "an unreadable queued item is dropped, not fatal");
+    }
 }
