@@ -61,6 +61,10 @@ impl Dirs {
     pub fn discovery(&self) -> PathBuf {
         self.root.join(pitwall_core::discovery::FILE_NAME)
     }
+    /// Benchmark results.
+    pub fn benchmarks(&self) -> PathBuf {
+        self.root.join("benchmarks.json")
+    }
     /// Metrics history.
     pub fn metrics(&self) -> PathBuf {
         self.root.join("metrics.json")

@@ -14,6 +14,7 @@
 
 pub mod api;
 pub mod backoff;
+pub mod benchmarks;
 pub mod cache;
 pub mod chat;
 pub mod config;
@@ -34,6 +35,7 @@ pub mod packs;
 pub mod pressure;
 pub mod privacy;
 pub mod quant;
+pub mod redact;
 pub mod runtimes;
 pub mod scheduler;
 pub mod select;

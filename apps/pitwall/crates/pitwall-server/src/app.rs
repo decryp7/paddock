@@ -70,6 +70,9 @@ pub struct AppState {
     pub live: broadcast::Sender<String>,
     /// Recent requests (metadata only).
     pub requests: Mutex<VecDeque<RequestRecord>>,
+    /// Prompts and answers of the latest requests, only while "keep request content" is on: in memory, redacted,
+    /// bounded in number and size, gone when Pitwall stops.
+    pub contents: Mutex<VecDeque<pitwall_core::mgmt::RequestContent>>,
     /// Recent request speeds for the dashboard tiles.
     pub recent: Mutex<VecDeque<(u64, f64, f64, u64)>>,
     /// Engine installs in progress or finished.
@@ -99,6 +102,10 @@ impl AppState {
             hardware.clone(),
             BuildChoice::parse(&settings.engines.build_choice),
         );
+        let stored_benchmarks = {
+            let (p, b) = paths::read_with_backup(&dirs.benchmarks(), pitwall_core::benchmarks::MAX_BYTES);
+            pitwall_core::benchmarks::load(p.as_deref(), b.as_deref())
+        };
         let engine: Arc<dyn Engine> = engine_override.unwrap_or_else(|| Arc::new(llama.clone()));
         let mut engines: Vec<Arc<dyn Engine>> = vec![engine.clone()];
         let planned = |kind, reason: &str| {
@@ -160,13 +167,15 @@ impl AppState {
             started_at: now_ms(),
             live,
             requests: Mutex::new(VecDeque::new()),
+            contents: Mutex::new(VecDeque::new()),
             recent: Mutex::new(VecDeque::new()),
             installs: Mutex::new(Default::default()),
             install_cancel: Mutex::new(Default::default()),
-            benchmarks: Mutex::new(Vec::new()),
+            benchmarks: Mutex::new(stored_benchmarks),
             new_secrets: Mutex::new(Default::default()),
             port: std::sync::atomic::AtomicU16::new(0),
         });
+        st.serving.set_speeds(pitwall_core::benchmarks::speeds(&lock(&st.benchmarks)));
         st.event(EventKind::EngineStarted, Severity::Info, "Pitwall started".into());
         for p in st.packs.problems.iter() {
             st.event(
@@ -411,6 +420,11 @@ impl AppState {
         let job = permit.id();
         let chosen_by = resolved.chosen_by;
         let stream = req.stream;
+        let request_text = if cfg.privacy.keep_request_content {
+            Some(request_text(&req))
+        } else {
+            None
+        };
         let engine = busy.model().engine.0.clone();
         let rx = self.serving.chat(busy, permit, req, timeout);
         Ok(Run {
@@ -431,6 +445,7 @@ impl AppState {
                 stream,
                 cold_start_ms: cold,
                 text: String::new(),
+                request_text,
                 model: name,
                 chosen_by,
                 done: false,
@@ -490,6 +505,8 @@ pub struct Recorder {
     stream: bool,
     cold_start_ms: Option<u64>,
     text: String,
+    /// The redacted request, only when content is kept.
+    request_text: Option<String>,
     model: String,
     chosen_by: ChosenBy,
     done: bool,
@@ -553,8 +570,21 @@ impl Recorder {
             self.st
                 .event(EventKind::RequestFailed, Severity::Warn, format!("{}: {e}", self.model));
         }
+        let id = format!("r{now}-{}", lock(&self.st.requests).len());
+        let has_content = if let Some(request) = self.request_text.take() {
+            let mut c = lock(&self.st.contents);
+            c.push_front(pitwall_core::mgmt::RequestContent {
+                id: id.clone(),
+                request,
+                response: pitwall_core::redact::redact(&self.text),
+            });
+            c.truncate(MAX_CONTENTS);
+            true
+        } else {
+            false
+        };
         let rec = RequestRecord {
-            id: format!("r{now}-{}", lock(&self.st.requests).len()),
+            id,
             at: now,
             app_id: self.app.clone(),
             api: self.family,
@@ -571,12 +601,45 @@ impl Recorder {
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
             error,
-            has_content: false,
+            has_content,
         };
         let mut q = lock(&self.st.requests);
         q.push_front(rec);
         q.truncate(MAX_RECORDS);
+        // Content outlives its record by nothing: drop what no record points to any more.
+        let keep: std::collections::HashSet<&str> = q.iter().filter(|r| r.has_content).map(|r| r.id.as_str()).collect();
+        lock(&self.st.contents).retain(|c| keep.contains(c.id.as_str()));
     }
+}
+
+/// The most requests whose text is kept.
+const MAX_CONTENTS: usize = 50;
+/// The most bytes of one request's text that are kept.
+const MAX_CONTENT_BYTES: usize = 64 * 1024;
+
+/// The request as readable, redacted text for the inspector, bounded.
+fn request_text(req: &ChatRequest) -> String {
+    use pitwall_core::chat::Part;
+    let mut out = String::new();
+    for m in &req.messages {
+        out.push_str(&format!("{:?}: ", m.role).to_lowercase());
+        for p in &m.parts {
+            match p {
+                Part::Text(t) => out.push_str(t),
+                Part::Image(_) => out.push_str("[image]"),
+            }
+        }
+        out.push('\n');
+        if out.len() >= MAX_CONTENT_BYTES {
+            break;
+        }
+    }
+    let mut end = out.len().min(MAX_CONTENT_BYTES);
+    while !out.is_char_boundary(end) {
+        end -= 1;
+    }
+    out.truncate(end);
+    pitwall_core::redact::redact(&out)
 }
 
 impl Drop for Recorder {

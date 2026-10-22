@@ -2,6 +2,7 @@
 //! endpoint once. Off by default and in CI: it downloads files from the allow-listed hosts (GitHub releases and Hugging
 //! Face), which the user asked for by setting `PITWALL_LLAMA_E2E=1`. Everything lives in a temp folder that is removed
 //! when the test ends; no engine process outlives it.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 mod common;
 
 use serde_json::json;

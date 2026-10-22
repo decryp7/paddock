@@ -144,6 +144,8 @@ struct Inner {
     next_port: AtomicU64,
     cancelled: Mutex<Vec<JobId>>,
     supervisor: Mutex<Supervisor>,
+    /// Measured generation speed by model id (from stored benchmarks), for "fast" selection.
+    speeds: RwLock<HashMap<String, f64>>,
 }
 
 /// The serving core.
@@ -191,6 +193,7 @@ impl Serving {
                 next_port: AtomicU64::new(0),
                 cancelled: Mutex::new(vec![]),
                 supervisor: Mutex::new(Supervisor::default()),
+                speeds: RwLock::new(HashMap::new()),
             }),
         }
     }
@@ -307,6 +310,7 @@ impl Serving {
                     req.capabilities.push(select::Capability::Tools);
                 }
                 let room = system::room(&self.hw(), hot.values().map(|h| h.ram).sum());
+                let speeds = self.inner.speeds.read().map(|g| g.clone()).unwrap_or_default();
                 let cands: Vec<Candidate> = local
                     .iter()
                     .map(|f| Candidate {
@@ -315,7 +319,7 @@ impl Serving {
                         context_max: f.info.context_length.map(|c| c.min(u64::from(u32::MAX)) as u32),
                         size: f.size,
                         loaded: hot.contains_key(&f.id),
-                        gen_tps: None,
+                        gen_tps: speeds.get(f.id.as_str()).copied(),
                         fit: fit::assess(Some(&library::size_of(f)), s.models.default_context, &room).verdict,
                     })
                     .collect();
@@ -548,6 +552,13 @@ impl Serving {
             format!("Loaded {id} in {:.1} s", ms as f64 / 1000.0),
         );
         Ok((Busy::new(h), Some(ms)))
+    }
+
+    /// Sets the measured speeds selection prefers (from the stored benchmarks).
+    pub fn set_speeds(&self, speeds: HashMap<String, f64>) {
+        if let Ok(mut g) = self.inner.speeds.write() {
+            *g = speeds;
+        }
     }
 
     /// Replaces the restart limits (tests use short delays).

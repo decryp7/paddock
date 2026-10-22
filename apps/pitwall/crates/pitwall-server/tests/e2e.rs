@@ -700,3 +700,76 @@ async fn an_idle_models_context_is_cleared_before_its_weights_are_released() {
     h.st.serving.tick();
     assert!(h.st.serving.loaded().is_empty(), "unloaded after the full idle time");
 }
+
+#[tokio::test]
+async fn request_content_is_kept_only_when_asked_redacted_bounded_and_local() {
+    let h = harness(false).await;
+    let key = h.make_key("Inspector").await;
+    let secret = format!("pw_{}", "Zk9Qx2Lm".repeat(5));
+    let body = |text: &str| json!({"model": "tiny-q4_k_m", "messages": [{"role": "user", "content": text}]});
+
+    // Off by default: nothing is kept and the answer says how to turn it on.
+    h.call("POST", "/v1/chat/completions", Some(&key), Some(body("first, unkept")), &[])
+        .await;
+    let list = h.rpc("requests", json!({"limit": 10})).await.json();
+    assert_eq!(list[0]["hasContent"], false);
+    let id = list[0]["id"].as_str().unwrap().to_string();
+    let r = h.rpc("request_content", json!({"id": id})).await;
+    assert_eq!(r.status, 404);
+    assert!(r.body.contains("Keep request content"), "{}", r.body);
+
+    // On: the prompt and the answer are kept, secrets masked.
+    let mut s = h.rpc("settings", json!({})).await.json();
+    s["privacy"]["keepRequestContent"] = json!(true);
+    assert_eq!(h.rpc("save_settings", json!({"settings": s})).await.status, 200);
+    h.call(
+        "POST",
+        "/v1/chat/completions",
+        Some(&key),
+        Some(body(&format!("my key is {secret}, summarise"))),
+        &[],
+    )
+    .await;
+    let list = h.rpc("requests", json!({"limit": 10})).await.json();
+    assert_eq!(list[0]["hasContent"], true);
+    let c = h.rpc("request_content", json!({"id": list[0]["id"]})).await.json();
+    assert!(c["request"].as_str().unwrap().contains("my key is [redacted], summarise"), "{c}");
+    assert!(!c.to_string().contains(&secret));
+    assert_eq!(c["response"], "Hello world");
+
+    // Bounded: only the latest 50 are kept.
+    for i in 0..55 {
+        h.call("POST", "/v1/chat/completions", Some(&key), Some(body(&format!("n{i}"))), &[])
+            .await;
+    }
+    let list = h.rpc("requests", json!({"limit": 500})).await.json();
+    let kept = list.as_array().unwrap().iter().filter(|r| r["hasContent"] == true).count();
+    assert!(kept > 0);
+    assert!(h.st.contents.lock().unwrap().len() <= 50);
+    // Unknown ids are not found.
+    assert_eq!(h.rpc("request_content", json!({"id": "nope"})).await.status, 404);
+}
+
+#[tokio::test]
+async fn benchmark_results_survive_a_restart_and_tolerate_damage() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = common::harness_in(dir, false).await;
+    let b = h.rpc("run_benchmark", json!({"modelId": "tiny-q4_k_m"})).await;
+    assert_eq!(b.status, 200, "{}", b.body);
+    assert!(h.dir.path().join("benchmarks.json").exists(), "written to disk");
+
+    // A new server over the same folder reads it back.
+    let dir = h.dir;
+    drop(h.st);
+    let again = common::harness_in(dir, false).await;
+    let list = again.rpc("benchmarks", json!({})).await.json();
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(list[0]["modelId"], "tiny-q4_k_m");
+
+    // A damaged file is tolerated: the backup, then nothing.
+    std::fs::write(again.dir.path().join("benchmarks.json"), "{ not json").unwrap();
+    let dir = again.dir;
+    drop(again.st);
+    let third = common::harness_in(dir, false).await;
+    assert!(third.rpc("benchmarks", json!({})).await.json().as_array().unwrap().len() <= 1);
+}

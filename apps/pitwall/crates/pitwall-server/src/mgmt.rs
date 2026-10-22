@@ -369,10 +369,18 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let limit: usize = arg(a, "limit")?;
             ok(lock(&st.requests).iter().take(limit.min(500)).cloned().collect::<Vec<_>>())
         }
-        "request_content" => Err(err(
-            mgmt::ErrorCode::NotFound,
-            "request content is not kept. Turn on \"Keep request content\" in Settings > Privacy to inspect prompts on this machine.",
-        )),
+        "request_content" => {
+            let id: String = arg(a, "id")?;
+            lock(&st.contents).iter().find(|c| c.id == id).cloned().map_or_else(
+                || {
+                    Err(err(
+                        mgmt::ErrorCode::NotFound,
+                        "this request's content is not kept. Turn on \"Keep request content\" in Settings > Privacy to inspect prompts on this machine (only requests made afterwards are kept, the latest 50).",
+                    ))
+                },
+                ok,
+            )
+        }
         "benchmarks" => ok(lock(&st.benchmarks).clone()),
         "run_benchmark" => {
             let id = model(a, "modelId")?;
@@ -888,8 +896,16 @@ async fn run_benchmark(st: &Arc<AppState>, id: ModelId) -> R<Value> {
     };
     {
         let mut g = lock(&st.benchmarks);
-        g.retain(|b| b.model_id != result.model_id);
-        g.push(result.clone());
+        pitwall_core::benchmarks::upsert(&mut g, result.clone());
+        st.serving.set_speeds(pitwall_core::benchmarks::speeds(&g));
+        if let Err(e) = crate::paths::write_atomic(&st.dirs.benchmarks(), pitwall_core::benchmarks::to_json(&g).as_bytes()) {
+            drop(g);
+            st.event(
+                EventKind::RequestFailed,
+                Severity::Warn,
+                format!("The benchmark result could not be saved ({e}); it is kept until Pitwall stops."),
+            );
+        }
     }
     ok(result)
 }
