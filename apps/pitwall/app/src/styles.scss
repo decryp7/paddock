@@ -94,6 +94,10 @@
   --info: #1f5fa8;
   --info-soft: #e4eef9;
   --track: #e8eaee;
+  /* The suite's categorical palette (guide section 4), first three slots: one series each, never decoration. */
+  --viz-1: #0072b2;
+  --viz-2: #c77f00;
+  --viz-3: #007a5e;
   --skeleton: #eceef2;
   --skeleton-shine: #f6f7f9;
   --scrim: rgba(15, 17, 22, 0.32);
@@ -136,6 +140,9 @@
   --info: #7db2e8;
   --info-soft: rgba(125, 178, 232, 0.14);
   --track: #22242a;
+  --viz-1: #56b4e9;
+  --viz-2: #f0a030;
+  --viz-3: #2ec4a0;
   --skeleton: #1b1d22;
   --skeleton-shine: #24262c;
   --scrim: rgba(0, 0, 0, 0.55);
@@ -537,6 +544,61 @@ textarea.input {
   }
 }
 
+/* Status = a dot and a sentence-case word, calm by default (no pill on every row). */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  &::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-3);
+  }
+  &[data-tone='ok']::before {
+    background: var(--ok);
+  }
+  &[data-tone='warn']::before {
+    background: var(--warn);
+  }
+  &[data-tone='bad']::before {
+    background: var(--bad);
+  }
+  &[data-tone='info']::before {
+    background: var(--info);
+  }
+  &[data-tone='muted']::before {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--text-3);
+  }
+  &[data-tone='warn'],
+  &[data-tone='bad'] {
+    color: var(--text);
+  }
+}
+
+/* A count next to a tab or a nav label: neutral, never a status colour. */
+.count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  color: var(--text-2);
+  background: var(--bg-active);
+  border-radius: var(--r-full);
+  font-variant-numeric: tabular-nums;
+}
+
 .tag {
   display: inline-flex;
   align-items: center;
@@ -567,10 +629,15 @@ textarea.input {
   h1 {
     font-size: var(--fs-xl);
   }
+  /* One muted line, 80 characters at most: the page's purpose, not a paragraph. */
   .sub {
     margin-top: var(--sp-1);
+    max-width: 80ch;
+    overflow: hidden;
     color: var(--text-2);
-    font-size: var(--fs-base);
+    font-size: var(--fs-sm);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .actions {
     display: flex;
@@ -642,6 +709,56 @@ textarea.input {
   }
   .right {
     text-align: right;
+  }
+}
+
+/* Row actions: icon buttons that appear on hover and keyboard focus; the "..." button stays at 40 % (RowMenu). */
+.table .row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  .reveal {
+    opacity: 0;
+  }
+}
+.table tbody tr:hover .row-actions .reveal,
+.table tbody tr:focus-within .row-actions .reveal,
+.table tbody tr.selected .row-actions .reveal {
+  opacity: 1;
+}
+.table tbody tr[tabindex] {
+  cursor: default;
+  &:focus-visible {
+    outline: 2px solid var(--accent-ring);
+    outline-offset: -2px;
+  }
+}
+.table tbody tr.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.table .num,
+.table .right {
+  font-variant-numeric: tabular-nums;
+}
+.table th.right {
+  text-align: right;
+}
+
+/* A page with a detail panel on the right: the list keeps the remaining width and scrolls on its own. */
+.with-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  > :first-child {
+    flex: 1;
+    min-width: 0;
+  }
+  pw-detail-panel {
+    position: sticky;
+    top: 0;
+    max-height: calc(100vh - var(--sp-10) * 2);
   }
 }
 
@@ -745,6 +862,15 @@ textarea.input {
     &.danger {
       color: var(--bad);
     }
+    &[aria-disabled='true'] {
+      opacity: 0.45;
+    }
+  }
+  .pw-menu-divider {
+    height: 1px;
+    margin: var(--sp-1) 0;
+    background: var(--border);
+    border: none;
   }
 }
 

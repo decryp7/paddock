@@ -36,29 +36,36 @@ async function render(backend: PitwallBackend = new MockBackend()) {
     await tick();
     fixture.detectChanges();
   };
-  return { el, settle, toasts: TestBed.inject(Toasts) };
+  /** Opens the first model's details (the build setting lives there). */
+  const open = async () => {
+    el.querySelector<HTMLElement>('pw-library-tab tbody tr')!.click();
+    await settle();
+  };
+  return { el, settle, open, toasts: TestBed.inject(Toasts) };
 }
 
 describe('Per-model engine pins in the library', () => {
   it('offers a build menu per model with only builds that passed their self-test', async () => {
-    const { el } = await render();
+    const { el, open } = await render();
+    await open();
     const select = el.querySelector<HTMLSelectElement>('select[id^="pin-"]')!;
     expect(select).not.toBeNull();
     const options = Array.from(select.options).map((o) => o.textContent?.trim());
-    expect(options).toEqual(['Build: follows global choice', 'Pin to CUDA 13 (NVIDIA) b11669', 'Pin to Vulkan b11669']);
+    expect(options).toEqual(['Follows global choice', 'Pin to CUDA 13 (NVIDIA) b11669', 'Pin to Vulkan b11669']);
     expect(el.querySelector('.pinned-build')).toBeNull();
   });
 
   it('pins a model, shows "pinned to" in words, and unpins it', async () => {
     const backend = new MockBackend();
-    const { el, settle, toasts } = await render(backend);
+    const { el, settle, toasts, open } = await render(backend);
+    await open();
     const select = el.querySelector<HTMLSelectElement>('select[id^="pin-"]')!;
     const id = select.id.replace('pin-', '');
     select.value = 'vulkan';
     select.dispatchEvent(new Event('change'));
     await settle();
     expect((await backend.enginePins()).models).toEqual([{ modelId: id, buildId: 'vulkan', tag: 'b11669' }]);
-    expect(el.querySelector('.pinned-build')?.textContent).toContain('pinned to vulkan b11669');
+    expect(el.querySelector('.pinned-build')?.textContent).toContain('Pinned to vulkan b11669');
     expect(toasts.toasts().at(-1)?.message).toContain(`${id} is pinned to vulkan`);
     const again = el.querySelector<HTMLSelectElement>(`#pin-${id}`)!;
     again.value = '';
@@ -69,7 +76,8 @@ describe('Per-model engine pins in the library', () => {
   });
 
   it('keeps the library working and hides the menu when the pins cannot be read', async () => {
-    const { el } = await render(new MockBackend({ failing: ['enginePins'] }));
+    const { el, open } = await render(new MockBackend({ failing: ['enginePins'] }));
+    await open();
     expect(el.querySelector('select[id^="pin-"]')).toBeNull();
     expect(el.querySelector('table')).not.toBeNull();
   });
@@ -79,7 +87,8 @@ describe('Per-model engine pins in the library', () => {
     const backend = new Proxy(mock, {
       get: (t, k) => (k === 'setModelPin' ? () => Promise.reject({ code: 'notFound', message: 'The engine build metal is pinned for x but is not installed. Install it in Engines, or remove the pin.' }) : Reflect.get(t, k, t)),
     }) as PitwallBackend;
-    const { el, settle, toasts } = await render(backend);
+    const { el, settle, toasts, open } = await render(backend);
+    await open();
     const select = el.querySelector<HTMLSelectElement>('select[id^="pin-"]')!;
     select.value = 'vulkan';
     select.dispatchEvent(new Event('change'));

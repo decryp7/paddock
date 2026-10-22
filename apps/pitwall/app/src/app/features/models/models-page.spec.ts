@@ -41,7 +41,22 @@ async function render(backend: PitwallBackend = new MockBackend(), confirm = tru
     fixture.detectChanges();
   };
   const button = (text: string) => Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim().startsWith(text)) as HTMLButtonElement;
-  return { fixture, el, settle, button, live };
+  /** Opens a model's details by clicking its row. */
+  const open = async (name: string) => {
+    const row = Array.from(el.querySelectorAll<HTMLElement>('pw-library-tab tbody tr')).find((r) => r.textContent!.includes(name))!;
+    row.click();
+    await settle();
+    return el.querySelector('pw-detail-panel') as HTMLElement;
+  };
+  /** Opens a row's "..." menu and runs one item by its label. */
+  const menu = async (name: string, item: string) => {
+    (el.querySelector(`button[aria-label="More actions for ${name}"]`) as HTMLButtonElement).click();
+    await settle();
+    const entry = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent?.trim() === item)!;
+    entry.click();
+    await settle();
+  };
+  return { fixture, el, settle, button, live, open, menu };
 }
 
 describe('models helpers', () => {
@@ -99,36 +114,82 @@ describe('ModelsPage', () => {
     expect(el.textContent).toContain('Partial downloads');
     expect(el.textContent).toContain('1 unused for 30+ days');
     expect(el.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Library');
-    expect(el.querySelector('button[aria-label="Delete Gemma 3 12B"]')).not.toBeNull();
+    // Nothing destructive at rest: Delete lives in the "..." menu only.
+    expect(el.querySelector('button[aria-label="Delete Gemma 3 12B"]')).toBeNull();
+    expect(el.querySelector('button[aria-label="More actions for Gemma 3 12B"]')).not.toBeNull();
+    expect(Array.from(el.querySelectorAll('pw-library-tab thead th')).map((t) => t.textContent!.trim())).toEqual(['Model', 'Size', 'Params', 'Context', 'Status', 'Actions']);
+    expect(rows[0]!.querySelector('mat-icon[aria-label="Chat"]')).not.toBeNull();
+    expect(rows[0]!.querySelector('.tag, .pill')).toBeNull();
   });
 
-  it('loads, pins, sets idle, deletes and cleans up from the table', async () => {
+  it('opens the details on a row click or Enter and closes them with Escape, returning focus to the row', async () => {
+    const { el, settle, open } = await render();
+    expect(el.querySelector('pw-detail-panel')).toBeNull();
+    const panel = await open('Gemma 3 12B');
+    expect(panel.textContent).toContain('Gemma 3 12B');
+    expect(panel.textContent).toContain('unsloth/gemma-3-12b-it-GGUF');
+    expect(panel.textContent).toContain('Q4_K_M');
+    expect(el.querySelector('tbody tr.selected')?.textContent).toContain('Gemma 3 12B');
+    const row = el.querySelector<HTMLElement>('#row-gemma-3-12b-it-q4_k_m')!;
+    row.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(el.querySelector('pw-detail-panel')).toBeNull();
+    expect(document.activeElement).toBe(row);
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    expect(el.querySelector('pw-detail-panel')).not.toBeNull();
+    el.querySelector<HTMLButtonElement>('pw-detail-panel button[aria-label="Close details"]')!.click();
+    await settle();
+    expect(el.querySelector('pw-detail-panel')).toBeNull();
+  });
+
+  it('moves between rows with the arrow keys and opens the menu with Shift+F10 and right-click', async () => {
+    const { el, settle } = await render();
+    const rows = Array.from(el.querySelectorAll<HTMLElement>('pw-library-tab tbody tr'));
+    rows[0]!.focus();
+    rows[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(rows[1]);
+    rows[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+    await settle();
+    const labels = () => Array.from(document.querySelectorAll('.pw-menu .pw-menu-item')).map((b) => b.textContent!.trim());
+    expect(labels()).toContain('Delete…');
+    expect(document.querySelector('.pw-menu .pw-menu-item.danger')?.textContent).toContain('Delete');
+    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')!.click();
+    rows[2]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+    await settle();
+    expect(labels()).toContain('Unload');
+    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')!.click();
+  });
+
+  it('loads, pins, sets idle, deletes and cleans up from the table and its details', async () => {
     const backend = new MockBackend();
-    const { el, settle, button } = await render(backend);
+    const { el, settle, button, open, menu } = await render(backend);
     (el.querySelector('button[aria-label="Load Gemma 3 12B"]') as HTMLButtonElement).click();
     await settle();
     expect(el.querySelector('button[aria-label="Unload Gemma 3 12B"]')).not.toBeNull();
-    (el.querySelector('button[aria-label="Pin Gemma 3 12B"]') as HTMLButtonElement).click();
+    const panel = await open('Gemma 3 12B');
+    Array.from(panel.querySelectorAll('button')).find((b) => b.textContent!.includes('Pin (keep loaded)'))!.click();
     await settle();
-    expect(el.querySelector('button[aria-label="Unpin Gemma 3 12B"]')).not.toBeNull();
+    expect(el.querySelector('pw-detail-panel')!.textContent).toContain('Unpin');
+    expect(el.querySelector('#row-gemma-3-12b-it-q4_k_m mat-icon[aria-label="Pinned"]')).not.toBeNull();
 
-    const idleOf = async () => (await backend.localModels()).find((m) => m.id === 'llama-3.2-3b-instruct-q5_k_m')?.idleSecs;
-    const choose = async (label: string) => {
-      (el.querySelector('#idle-llama-3\\.2-3b-instruct-q5_k_m') as HTMLButtonElement).click();
-      await settle();
-      const opt = Array.from(document.querySelectorAll<HTMLButtonElement>('.pop [role="menuitemradio"]')).find((o) => o.textContent?.trim() === label)!;
-      opt.click();
+    const id = 'llama-3.2-3b-instruct-q5_k_m';
+    const idleOf = async () => (await backend.localModels()).find((m) => m.id === id)?.idleSecs;
+    await open('Llama 3.2 3B Instruct');
+    const choose = async (value: string) => {
+      const select = el.querySelector(`#idle-llama-3\\.2-3b-instruct-q5_k_m`) as HTMLSelectElement;
+      select.value = value;
+      select.dispatchEvent(new Event('change'));
       await settle();
     };
-    await choose('After 10 min');
+    await choose('600');
     expect(await idleOf()).toBe(600);
-    expect(el.querySelector('#idle-llama-3\\.2-3b-instruct-q5_k_m')?.textContent).toContain('After 10 min');
-    await choose('Global setting');
+    expect((el.querySelector(`#idle-llama-3\\.2-3b-instruct-q5_k_m`) as HTMLSelectElement).selectedOptions[0]!.textContent).toContain('After 10 min');
+    await choose('');
     expect(await idleOf()).toBeNull();
-    expect(document.querySelector('.pop')).toBeNull();
 
-    (el.querySelector('button[aria-label="Delete BGE reranker v2 m3"]') as HTMLButtonElement).click();
-    await settle();
+    await menu('BGE reranker v2 m3', 'Delete…');
     expect(el.textContent).not.toContain('BGE reranker v2 m3');
     button('Clean up unused').click();
     await settle();
@@ -136,8 +197,8 @@ describe('ModelsPage', () => {
   });
 
   it('does nothing when a confirmation is declined', async () => {
-    const { el, settle, button } = await render(new MockBackend(), false);
-    (el.querySelector('button[aria-label="Delete BGE reranker v2 m3"]') as HTMLButtonElement).click();
+    const { el, settle, button, menu } = await render(new MockBackend(), false);
+    await menu('BGE reranker v2 m3', 'Delete…');
     button('Clean up unused').click();
     await settle();
     expect(el.textContent).toContain('BGE reranker v2 m3');
@@ -229,13 +290,15 @@ describe('ModelsPage', () => {
     expect(el.textContent).toContain('No downloads');
   });
 
-  it('has a Slots column that opens the slots panel, saves a count and says a loaded model keeps its own', async () => {
+  it('has a Parallel slots setting in the details that opens the slots panel, saves a count and says a loaded model keeps its own', async () => {
     const backend = new MockBackend();
-    const { el, settle, fixture } = await render(backend);
-    expect(el.querySelector('pw-library-tab thead')?.textContent).toContain('Slots');
+    const { el, settle, fixture, open } = await render(backend);
+    expect(el.querySelector('pw-library-tab thead')?.textContent).not.toContain('Slots');
+    await open('Llama 3.2 3B Instruct');
+    expect(el.querySelector('button[aria-label^="Parallel slots for Llama 3.2 3B Instruct"]')?.textContent).toContain('4 slots');
+    await open('Gemma 3 12B');
     const trigger = el.querySelector('button[aria-label="Parallel slots for Gemma 3 12B: 2 slots (default)"]') as HTMLButtonElement;
     expect(trigger).not.toBeNull();
-    expect(el.querySelector('button[aria-label^="Parallel slots for Llama 3.2 3B Instruct"]')?.textContent).toContain('4 slots');
     trigger.click();
     await settle();
     const panel = document.querySelector('pw-slots-panel') as HTMLElement;
@@ -252,22 +315,24 @@ describe('ModelsPage', () => {
     const store = fixture.debugElement.injector.get(ModelsStore);
     await store.load();
     fixture.detectChanges();
+    await open('Qwen3 8B Instruct');
     el.querySelector('button[aria-label^="Parallel slots for Qwen3 8B Instruct"]')!.dispatchEvent(new Event('mouseenter'));
     await settle();
     expect(document.body.textContent).toContain('Loaded with 2 slots; 8 slots apply the next time it loads');
   });
 
-  it('shows a banner and a note on the row of each model with an update on offer, and Get it asks first', async () => {
+  it('shows a banner, a glyph on the row and the update in the details, and Get it asks first', async () => {
     const backend = new MockBackend({ modelUpdates: true });
     const spy = vi.spyOn(backend, 'downloadModel');
-    const { el, settle } = await render(backend, false);
+    const { el, settle, open } = await render(backend, false);
     expect(el.querySelector('pw-update-banner .banner')!.textContent).toContain('2 updates available');
-    const notes = Array.from(el.querySelectorAll('.upd')).map((n) => n.textContent!.replace(/\s+/g, ' ').trim());
-    expect(notes).toEqual(['Update available: newer revision Get it', 'Update available: better quantisation Get it']);
+    const marks = Array.from(el.querySelectorAll('tbody mat-icon.upd')).map((n) => n.getAttribute('aria-label'));
+    expect(marks).toEqual(['Update available for Qwen3 8B Instruct', 'Update available for Llama 3.2 3B Instruct']);
     const row = (name: string) => Array.from(el.querySelectorAll('tbody tr')).find((r) => r.textContent!.includes(name))!;
-    expect(row('Qwen3 8B Instruct').querySelector('.upd')).not.toBeNull();
     expect(row('Gemma 3 12B').querySelector('.upd')).toBeNull();
-    (row('Qwen3 8B Instruct').querySelector('.upd button') as HTMLButtonElement).click();
+    const panel = await open('Qwen3 8B Instruct');
+    expect(panel.querySelector('.callout')!.textContent).toContain('Update available: newer revision');
+    (panel.querySelector('.callout button') as HTMLButtonElement).click();
     await settle();
     expect(spy).not.toHaveBeenCalled();
   });

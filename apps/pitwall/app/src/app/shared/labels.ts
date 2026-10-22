@@ -68,6 +68,17 @@ export const CAPABILITY_LABEL: Record<Capability, string> = {
   transcription: 'Transcription',
 };
 
+/** The 14 px glyph that stands for a capability after a model's name (the word is its label and tooltip). */
+export const CAPABILITY_ICON: Record<Capability, string> = {
+  chat: 'playground',
+  vision: 'vision',
+  tools: 'tool',
+  json: 'braces',
+  embeddings: 'vector',
+  rerank: 'sort',
+  transcription: 'activity',
+};
+
 /**
  * The tone of a usage meter: neutral until it matters (calm by default), warning above 85 %, danger above 95 %.
  * Accent is never used for usage: it means action and selection.

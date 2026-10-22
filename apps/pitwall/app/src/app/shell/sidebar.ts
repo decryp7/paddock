@@ -43,18 +43,14 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
   template: `
     <div class="brand" data-tauri-drag-region>
       <mat-icon class="logo" svgIcon="pw:logo" aria-hidden="true" />
-      <div class="name" data-tauri-drag-region>
-        <span class="product">Pitwall</span>
-        @if (live.server(); as s) {
-          <span class="state" [attr.data-state]="s.serving">
-            <span class="dot" aria-hidden="true"></span>{{ s.serving === 'paused' ? 'Paused' : 'Serving' }} · :{{ s.port }}
-          </span>
-        } @else if (live.error()) {
-          <span class="state" data-state="down"><span class="dot" aria-hidden="true"></span>Server unreachable</span>
-        } @else {
-          <span class="state"><span class="dot" aria-hidden="true"></span>Connecting…</span>
-        }
-      </div>
+      <span class="product" data-tauri-drag-region>Pitwall</span>
+      @if (live.server(); as s) {
+        <span class="state" [attr.data-state]="s.serving" [matTooltip]="(s.serving === 'paused' ? 'Paused' : 'Serving') + ' on port ' + s.port"><span class="dot" aria-hidden="true"></span>{{ s.serving === 'paused' ? 'Paused' : 'Serving' }}</span>
+      } @else if (live.error()) {
+        <span class="state" data-state="down"><span class="dot" aria-hidden="true"></span>Unreachable</span>
+      } @else {
+        <span class="state"><span class="dot" aria-hidden="true"></span>Connecting</span>
+      }
     </div>
 
     <nav aria-label="Main">
@@ -118,45 +114,43 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: var(--sp-2);
       padding: var(--sp-1) var(--sp-2) var(--sp-4);
     }
     .logo {
-      width: 28px;
-      height: 28px;
+      width: 24px;
+      height: 24px;
       color: var(--accent);
       --logo-ink: var(--text-on-accent);
       flex: none;
     }
-    .name {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      line-height: 1.25;
-    }
     .product {
+      flex: 1;
       font-weight: var(--fw-semibold);
-      font-size: var(--fs-md);
+      font-size: var(--fs-lg);
       letter-spacing: var(--tracking-tight);
     }
+    /* One pill for the serving state; the port is in its tooltip. */
     .state {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
+      height: 22px;
+      padding: 0 8px;
       font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-weight: var(--fw-medium);
+      color: var(--text-2);
+      background: var(--bg-active);
+      border-radius: var(--r-full);
+      white-space: nowrap;
       .dot {
-        width: 6px;
-        height: 6px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
         background: var(--text-3);
       }
       &[data-state='serving'] .dot {
         background: var(--ok);
-        box-shadow: 0 0 0 3px var(--ok-soft);
-      }
-      &[data-state='paused'] {
-        color: var(--warn);
       }
       &[data-state='paused'] .dot {
         background: var(--warn);
@@ -176,7 +170,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       padding: var(--sp-4) var(--sp-2) var(--sp-1);
       font-size: var(--fs-xs);
       font-weight: var(--fw-medium);
-      color: var(--text-3);
+      color: var(--text-2);
     }
     .item {
       display: flex;

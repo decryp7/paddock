@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { LiveStore } from '../../core/live.store';
 import { downloadActive } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
@@ -30,7 +31,7 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
 /** Models: the local library, Hugging Face discovery with fit verdicts, and downloads. */
 @Component({
   selector: 'pw-models-page',
-  imports: [MatIconModule, Panel, LibraryTab, DiscoverTab, PresetsTab, DownloadsList, UpdateBanner],
+  imports: [MatIconModule, MatTooltipModule, Panel, LibraryTab, DiscoverTab, PresetsTab, DownloadsList, UpdateBanner],
   providers: [ModelsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -38,10 +39,10 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
       <header class="page-head">
         <div>
           <h1>Models</h1>
-          <p class="sub">GGUF models on this machine, and new ones from Hugging Face with a verdict on what fits.</p>
+          <p class="sub">Models on this machine, and new ones from Hugging Face with a verdict on what fits.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" />Refresh</button>
+          <button type="button" class="btn ghost icon" aria-label="Refresh" matTooltip="Refresh" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -64,7 +65,7 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
               <span class="count num">{{ store.library().length }}</span>
             }
             @if (t.id === 'downloads' && active() > 0) {
-              <span class="count live num">{{ active() }}</span>
+              <span class="count num">{{ active() }}</span>
             }
           </button>
         }
@@ -125,20 +126,6 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
             background: var(--accent);
           }
         }
-      }
-    }
-    .count {
-      min-width: 18px;
-      height: 17px;
-      padding: 0 5px;
-      font-size: var(--fs-2xs);
-      line-height: 17px;
-      text-align: center;
-      color: var(--text-2);
-      background: var(--bg-active);
-      border-radius: var(--r-full);
-      &.live {
-        color: var(--text);
       }
     }
   `,

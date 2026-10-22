@@ -21,8 +21,8 @@ test.describe('model updates', () => {
     await summary.getByRole('link', { name: 'Review' }).click();
     const banner = page.locator('pw-update-banner .banner');
     await expect(banner).toContainText('2 updates available for models you downloaded');
-    await expect(page.locator('pw-library-tab .upd')).toHaveCount(2);
-    await expect(page.locator('pw-library-tab .upd').first()).toContainText('Update available: newer revision');
+    await expect(page.locator('pw-library-tab tbody mat-icon.upd')).toHaveCount(2);
+    await expect(page.locator('pw-library-tab tbody mat-icon.upd').first()).toHaveAttribute('aria-label', 'Update available for Qwen3 8B Instruct');
 
     // Get it names the host and the size; cancelling downloads nothing.
     await banner.getByRole('button', { name: 'Get Qwen3-8B-Instruct-Q4_K_M.gguf' }).click();
@@ -46,7 +46,7 @@ test.describe('model updates', () => {
     // Dismissing the last one removes the banner and the row note.
     await banner.getByRole('button', { name: /^Dismiss the update for llama-3.2-3b/ }).click();
     await expect(page.locator('pw-update-banner .banner')).toHaveCount(0);
-    await expect(page.locator('pw-library-tab .upd')).toHaveCount(0);
+    await expect(page.locator('pw-library-tab tbody mat-icon.upd')).toHaveCount(0);
   });
 
   test('turns the schedule on and off, and offline mode stops the check', async ({ page }) => {

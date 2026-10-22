@@ -3,11 +3,16 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output, si
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
-import { ago, bytes, seconds, slotsText } from '../../shared/format';
-import { CAPABILITY_LABEL, UPDATE_KIND_LABEL, fitLook } from '../../shared/labels';
+import { ago, bytes, date, seconds, slotsText } from '../../shared/format';
+import { CAPABILITY_ICON, CAPABILITY_LABEL, UPDATE_KIND_LABEL, fitLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
+import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
+import { DetailPanel } from '../../shared/ui/detail-panel';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { Fact } from '../../shared/ui/fact';
 import { Panel } from '../../shared/ui/panel';
+import { RowMenu } from '../../shared/ui/row-menu';
+import { fromControl, isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
 import { ModelsStore } from './models.store';
 import { UpdatesStore } from '../updates/updates.store';
 import { SlotsPanel } from './slots-panel';
@@ -37,12 +42,12 @@ export function contextText(tokens: number | null): string {
 /** The local library: disk usage with clean-up, and every model with load, pin, idle override and delete. */
 @Component({
   selector: 'pw-library-tab',
-  imports: [MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, EmptyState, SlotsPanel],
+  imports: [MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, EmptyState, SlotsPanel, DetailPanel, Fact, RowMenu],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Disk" icon="disk" [loading]="store.loading()" [error]="store.disk() ? null : store.error()" [ready]="!!store.disk()" [skeletonLines]="2" (retry)="store.load()">
       <div panel-actions>
-        <button type="button" class="btn sm" [disabled]="store.unusedModels().length === 0 || store.isBusy()('cleanup')" (click)="cleanUp()" [matTooltip]="cleanupHint()">
+        <button type="button" class="btn ghost sm" [disabled]="store.unusedModels().length === 0 || store.isBusy()('cleanup')" (click)="cleanUp()" [matTooltip]="cleanupHint()">
           <mat-icon svgIcon="pw:broom" aria-hidden="true" />Clean up unused
         </button>
       </div>
@@ -52,183 +57,209 @@ export function contextText(tokens: number | null): string {
             <span class="seg" [attr.data-k]="s.key" [style.flex-grow]="s.bytes"></span>
           }
         </div>
-        <ul class="disk-legend">
-          <li><i data-k="models"></i>Models <b class="num">{{ size(d.modelsBytes) }}</b></li>
-          <li><i data-k="engines"></i>Engines <b class="num">{{ size(d.enginesBytes) }}</b></li>
-          <li><i data-k="partial"></i>Partial downloads <b class="num">{{ size(d.partialBytes) }}</b></li>
-          <li><i data-k="free"></i>Free <b class="num">{{ size(d.freeBytes) }}</b></li>
-          @if (store.unusedModels().length) {
-            <li class="unused">{{ store.unusedModels().length }} unused for {{ d.unusedAfterDays }}+ days · {{ size(store.unusedBytes()) }}</li>
+        <ul class="disk-labels">
+          @for (s of segments(); track s.key) {
+            <li [attr.data-k]="s.key" [style.flex-grow]="s.share"><i></i><span class="what">{{ s.label }}</span> <b class="num">{{ size(s.bytes) }}</b></li>
           }
         </ul>
+        @if (store.unusedModels().length) {
+          <p class="unused">{{ store.unusedModels().length }} unused for {{ d.unusedAfterDays }}+ days · {{ size(store.unusedBytes()) }}</p>
+        }
       }
     </pw-panel>
 
-    <pw-panel heading="Library" icon="models" [sub]="summary()" [flush]="true" [loading]="store.loading()" [error]="store.error()" [ready]="store.loaded()" [skeletonLines]="6" (retry)="store.load()">
-      @if (store.library().length === 0) {
-        <pw-empty-state icon="models" heading="No models yet" text="Search Hugging Face for a GGUF model; Pitwall tells you which quantisation fits this machine.">
-          <button type="button" class="btn primary sm" (click)="discover.emit()"><mat-icon svgIcon="pw:search" aria-hidden="true" />Discover models</button>
-        </pw-empty-state>
-      } @else {
-        <div class="scroll">
-          <table class="table">
-            <thead>
-              <tr>
-                <th scope="col">Model</th>
-                <th scope="col">Quant</th>
-                <th scope="col" class="right">Params</th>
-                <th scope="col" class="right">Context</th>
-                <th scope="col" class="right">Size</th>
-                <th scope="col">Capabilities</th>
-                <th scope="col">Engine</th>
-                <th scope="col">Slots</th>
-                <th scope="col">Release when idle</th>
-                <th scope="col">Status</th>
-                <th scope="col"><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (m of store.library(); track m.id) {
-                <tr [class.hot]="m.loaded">
-                  <td class="model">
-                    <span class="name">{{ m.name }}</span>
-                    <span class="repo">{{ m.repo }} · used {{ when(m.lastUsedAt, now()) }}</span>
-                    @for (u of updates.noticesFor()(m.id); track u.id) {
-                      <span class="upd" [matTooltip]="u.summary">
-                        <mat-icon svgIcon="pw:download" aria-hidden="true" />Update available: {{ updateKind[u.kind] }}
-                        <button type="button" class="link" [disabled]="updates.isBusy()(u.id)" [attr.aria-label]="'Get ' + u.file + ' for ' + m.name" (click)="updates.get(u)">Get it</button>
-                      </span>
-                    }
-                  </td>
-                  <td><span class="tag mono">{{ m.quant ?? '—' }}</span></td>
-                  <td class="right num">{{ params(m.paramsB) }}</td>
-                  <td class="right num">{{ ctx(m.contextMax) }}</td>
-                  <td class="right num">{{ size(m.sizeBytes) }}</td>
-                  <td>
-                    <span class="caps">
-                      @for (c of m.capabilities; track c) {
-                        <span class="tag">{{ capability[c] }}</span>
-                      }
-                    </span>
-                  </td>
-                  <td>
-                    @if (store.engineChoices().length) {
-                      <label class="sr-only" [for]="'engine-' + m.id">Engine for {{ m.name }}</label>
-                      <select class="select idle" [id]="'engine-' + m.id" [disabled]="m.loaded || store.isBusy()('model:' + m.id)" [matTooltip]="m.loaded ? 'Unload the model to change its engine' : ''" (change)="setEngine(m, $any($event.target).value)">
-                        <option value="" [selected]="!m.engine">llama.cpp</option>
-                        @for (e of store.engineChoices(); track e.id) {
-                          <option [value]="e.id" [selected]="m.engine === e.id">{{ e.name }}</option>
-                        }
-                      </select>
-                    } @else {
-                      <span class="faint">llama.cpp</span>
-                    }
-                    @if (!m.engine && store.enginePins() && store.pinnableBuilds().length) {
-                      <label class="sr-only" [for]="'pin-' + m.id">Engine build for {{ m.name }}</label>
-                      <select class="select idle pin-select" [id]="'pin-' + m.id" [disabled]="store.isBusy()('pin:' + m.id)" (change)="setPin(m, $any($event.target).value)">
-                        <option value="" [selected]="!store.pinOf()(m.id)">Build: follows global choice</option>
-                        @for (b of store.pinnableBuilds(); track b.id) {
-                          <option [value]="b.id" [selected]="store.pinOf()(m.id)?.buildId === b.id">Pin to {{ b.label }} {{ b.tag }}</option>
-                        }
-                      </select>
-                      @if (store.pinOf()(m.id); as pin) {
-                        <span class="pill pinned-build" data-tone="info" [matTooltip]="m.loaded ? 'Loaded models keep their engine until they are loaded again' : 'Used from the next load'">pinned to {{ pin.buildId }}{{ pin.tag ? ' ' + pin.tag : '' }}</span>
-                      }
-                    }
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      class="btn ghost sm idle-btn"
-                      [id]="'slots-' + m.id"
-                      cdkOverlayOrigin
-                      #slotsOrigin="cdkOverlayOrigin"
-                      [attr.aria-label]="'Parallel slots for ' + m.name + ': ' + slotsLabel(m)"
-                      aria-haspopup="dialog"
-                      [attr.aria-expanded]="slotsOpen() === m.id"
-                      [matTooltip]="slotsHint(m)"
-                      (click)="toggleSlots(m.id)"
-                    >
-                      {{ slotsLabel(m) }}<mat-icon svgIcon="pw:chevron-down" aria-hidden="true" />
-                    </button>
-                    <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="slotsOrigin" [cdkConnectedOverlayOpen]="slotsOpen() === m.id" [cdkConnectedOverlayPush]="true" [cdkConnectedOverlayViewportMargin]="12" (overlayOutsideClick)="slotsOpen.set(null)" (detach)="slotsOpen.set(null)">
-                      <pw-slots-panel role="dialog" [attr.aria-label]="'Parallel slots for ' + m.name" [model]="m" (closed)="slotsOpen.set(null)" (keydown.escape)="slotsOpen.set(null)" />
-                    </ng-template>
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      class="btn ghost sm idle-btn"
-                      [id]="'idle-' + m.id"
-                      cdkOverlayOrigin
-                      #origin="cdkOverlayOrigin"
-                      [disabled]="m.pinned || store.isBusy()('model:' + m.id)"
-                      [attr.aria-label]="'Release ' + m.name + ' when idle: ' + idleLabel(m.idleSecs)"
-                      aria-haspopup="menu"
-                      [attr.aria-expanded]="idleOpen() === m.id"
-                      (click)="toggleIdle(m.id)"
-                    >
-                      {{ idleLabel(m.idleSecs) }}<mat-icon svgIcon="pw:chevron-down" aria-hidden="true" />
-                    </button>
-                    <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="origin" [cdkConnectedOverlayOpen]="idleOpen() === m.id" (overlayOutsideClick)="idleOpen.set(null)" (detach)="idleOpen.set(null)">
-                      <div class="pop" role="menu" tabindex="-1" [attr.aria-label]="'Release ' + m.name + ' when idle'" (keydown.escape)="idleOpen.set(null)">
-                        <p class="pop-title">Release when idle</p>
-                        <button type="button" role="menuitemradio" class="opt" [attr.aria-checked]="m.idleSecs === null" (click)="chooseIdle(m, '')">Global setting</button>
-                        @for (s of idleOptions(m.idleSecs); track s) {
-                          <button type="button" role="menuitemradio" class="opt" [attr.aria-checked]="m.idleSecs === s" (click)="chooseIdle(m, '' + s)">After {{ secs(s) }}</button>
-                        }
-                      </div>
-                    </ng-template>
-                  </td>
-                  <td>
-                    @if (m.loaded) {
-                      <span class="pill dot" data-tone="ok">Loaded</span>
-                    } @else {
-                      <span class="pill dot" [attr.data-tone]="fit(m).tone" [matTooltip]="m.fit.message">{{ fit(m).label }}</span>
-                    }
-                    @if (m.pinned) {
-                      <mat-icon class="pinned" svgIcon="pw:pin" aria-label="Pinned" matTooltip="Pinned: never released automatically" />
-                    }
-                  </td>
-                  <td class="right">
-                    <span class="actions">
-                      @if (m.loaded) {
-                        <button type="button" class="btn sm" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)" [attr.aria-label]="'Unload ' + m.name">Unload</button>
-                      } @else {
-                        <button type="button" class="btn sm" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)" [attr.aria-label]="'Load ' + m.name">Load</button>
-                      }
-                      <button type="button" class="btn ghost icon sm" [attr.aria-label]="(m.pinned ? 'Unpin ' : 'Pin ') + m.name" [matTooltip]="m.pinned ? 'Unpin' : 'Pin (keep loaded)'" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.pinModel(m.id, !m.pinned)">
-                        <mat-icon [svgIcon]="m.pinned ? 'pw:unpin' : 'pw:pin'" aria-hidden="true" />
-                      </button>
-                      <button type="button" class="btn ghost icon sm del" [attr.aria-label]="'Delete ' + m.name" matTooltip="Delete from disk" [disabled]="store.isBusy()('model:' + m.id)" (click)="remove(m)">
-                        <mat-icon svgIcon="pw:trash" aria-hidden="true" />
-                      </button>
-                    </span>
-                  </td>
+    <div class="with-panel">
+      <pw-panel [flush]="true" [loading]="store.loading()" [error]="store.error()" [ready]="store.loaded()" [skeletonLines]="6" (retry)="store.load()">
+        @if (store.library().length === 0) {
+          <pw-empty-state icon="models" heading="No models yet" text="Search Hugging Face for a GGUF model; Pitwall tells you which quantisation fits this machine.">
+            <button type="button" class="btn primary sm" (click)="discover.emit()"><mat-icon svgIcon="pw:search" aria-hidden="true" />Discover models</button>
+          </pw-empty-state>
+        } @else {
+          <div class="toolbar">{{ summary() }}</div>
+          <div class="scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Model</th>
+                  <th scope="col" class="right col-size">Size</th>
+                  <th scope="col" class="right col-params">Params</th>
+                  <th scope="col" class="right col-ctx">Context</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" class="act"><span class="sr-only">Actions</span></th>
                 </tr>
+              </thead>
+              <tbody>
+                @for (m of store.library(); track m.id) {
+                  <tr
+                    tabindex="0"
+                    [id]="'row-' + m.id"
+                    [class.selected]="selectedId() === m.id"
+                    [attr.aria-selected]="selectedId() === m.id"
+                    (click)="onRowClick(m, $event)"
+                    (keydown)="onRowKey(m, $event)"
+                    (contextmenu)="onRowMenu(m, $event)"
+                  >
+                    <td class="model">
+                      <span class="line">
+                        <span class="name" [matTooltip]="m.name" matTooltipShowDelay="600">{{ m.name }}</span>
+                        <span class="glyphs">
+                          @for (c of m.capabilities; track c) {
+                            <mat-icon [svgIcon]="'pw:' + glyph[c]" role="img" [attr.aria-label]="capability[c]" [matTooltip]="capability[c]" />
+                          }
+                          @if (updates.noticesFor()(m.id).length) {
+                            <mat-icon class="upd" svgIcon="pw:download" role="img" [attr.aria-label]="'Update available for ' + m.name" [matTooltip]="'Update available: ' + updateKind[updates.noticesFor()(m.id)[0]!.kind]" />
+                          }
+                        </span>
+                      </span>
+                      <span class="repo" [matTooltip]="m.repo" matTooltipShowDelay="600">{{ m.repo }}</span>
+                    </td>
+                    <td class="right num col-size">{{ size(m.sizeBytes) }}</td>
+                    <td class="right num col-params">{{ params(m.paramsB) }}</td>
+                    <td class="right num col-ctx">{{ ctx(m.contextMax) }}</td>
+                    <td>
+                      @if (m.loaded) {
+                        <span class="status" data-tone="ok">Loaded</span>
+                      } @else {
+                        <span class="status" [attr.data-tone]="fit(m).tone" [matTooltip]="m.fit.message">{{ fit(m).label }}</span>
+                      }
+                      @if (m.pinned) {
+                        <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned" matTooltip="Pinned: never released automatically" />
+                      }
+                    </td>
+                    <td class="act">
+                      <span class="row-actions">
+                        @if (m.loaded) {
+                          <button type="button" class="btn sm" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)" [attr.aria-label]="'Unload ' + m.name">Unload</button>
+                        } @else {
+                          <button type="button" class="btn sm" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)" [attr.aria-label]="'Load ' + m.name">Load</button>
+                        }
+                        <pw-row-menu [items]="menuItems(m)" [label]="'More actions for ' + m.name" />
+                      </span>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </pw-panel>
+
+      @if (selected(); as m) {
+        <pw-detail-panel [heading]="m.name" [sub]="m.repo" (closed)="close()">
+          <pw-row-menu panel-actions [items]="menuItems(m)" [label]="'More actions for ' + m.name" />
+
+          <div panel-toolbar>
+            @if (m.loaded) {
+              <button type="button" class="btn" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)">Unload</button>
+            } @else {
+              <button type="button" class="btn" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)">Load</button>
+            }
+            <button type="button" class="btn ghost" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.pinModel(m.id, !m.pinned)">
+              <mat-icon [svgIcon]="m.pinned ? 'pw:unpin' : 'pw:pin'" aria-hidden="true" />{{ m.pinned ? 'Unpin' : 'Pin (keep loaded)' }}
+            </button>
+          </div>
+
+          @for (u of updates.noticesFor()(m.id); track u.id) {
+            <div class="callout" role="note">
+              <p><b>Update available: {{ updateKind[u.kind] }}</b></p>
+              <p>{{ u.summary }}</p>
+              <button type="button" class="btn sm" [disabled]="updates.isBusy()(u.id)" [attr.aria-label]="'Get ' + u.file + ' for ' + m.name" (click)="updates.get(u)">Get it</button>
+            </div>
+          }
+
+          <section aria-label="About this model" class="facts">
+            <pw-fact label="Status" [value]="statusText(m)"><span class="status" [attr.data-tone]="m.loaded ? 'ok' : fit(m).tone">{{ statusText(m) }}</span></pw-fact>
+            <pw-fact label="Repository" [value]="m.repo" [copy]="true" [mono]="true" />
+            <pw-fact label="File" [value]="m.file" [copy]="true" [mono]="true" />
+            <pw-fact label="Quantisation" [value]="m.quant ?? '—'" />
+            <pw-fact label="Size" [value]="size(m.sizeBytes)" [num]="true" />
+            <pw-fact label="Parameters" [value]="params(m.paramsB)" [num]="true" />
+            <pw-fact label="Context" [value]="ctx(m.contextMax)" [num]="true" />
+            @if (m.architecture) {
+              <pw-fact label="Architecture" [value]="m.architecture" />
+            }
+            <pw-fact label="Capabilities" [value]="capabilityText(m)" />
+            <pw-fact label="Added" [value]="added(m)" />
+            <pw-fact label="Last used" [value]="when(m.lastUsedAt, now())" />
+          </section>
+
+          <section aria-label="Settings" class="settings">
+            <label class="field">
+              <span>Release when idle</span>
+              <select class="select" [id]="'idle-' + m.id" [disabled]="m.pinned || store.isBusy()('model:' + m.id)" [attr.aria-label]="'Release ' + m.name + ' when idle'" (change)="setIdle(m, $any($event.target).value)">
+                <option value="" [selected]="m.idleSecs === null">Global setting</option>
+                @for (s of idleOptions(m.idleSecs); track s) {
+                  <option [value]="'' + s" [selected]="m.idleSecs === s">After {{ secs(s) }}</option>
+                }
+              </select>
+              @if (m.pinned) {
+                <span class="hint">Pinned models are never released automatically.</span>
               }
-            </tbody>
-          </table>
-        </div>
+            </label>
+
+            <label class="field">
+              <span>Engine</span>
+              @if (store.engineChoices().length) {
+                <select class="select" [id]="'engine-' + m.id" [disabled]="m.loaded || store.isBusy()('model:' + m.id)" [matTooltip]="m.loaded ? 'Unload the model to change its engine' : ''" [attr.aria-label]="'Engine for ' + m.name" (change)="setEngine(m, $any($event.target).value)">
+                  <option value="" [selected]="!m.engine">llama.cpp</option>
+                  @for (e of store.engineChoices(); track e.id) {
+                    <option [value]="e.id" [selected]="m.engine === e.id">{{ e.name }}</option>
+                  }
+                </select>
+              } @else {
+                <span class="plain">llama.cpp</span>
+              }
+            </label>
+
+            @if (!m.engine && store.enginePins() && store.pinnableBuilds().length) {
+              <label class="field">
+                <span>Engine build</span>
+                <select class="select" [id]="'pin-' + m.id" [disabled]="store.isBusy()('pin:' + m.id)" [attr.aria-label]="'Engine build for ' + m.name" (change)="setPin(m, $any($event.target).value)">
+                  <option value="" [selected]="!store.pinOf()(m.id)">Follows global choice</option>
+                  @for (b of store.pinnableBuilds(); track b.id) {
+                    <option [value]="b.id" [selected]="store.pinOf()(m.id)?.buildId === b.id">Pin to {{ b.label }} {{ b.tag }}</option>
+                  }
+                </select>
+                @if (store.pinOf()(m.id); as pin) {
+                  <span class="hint pinned-build" [matTooltip]="m.loaded ? 'Loaded models keep their engine until they are loaded again' : 'Used from the next load'">Pinned to {{ pin.buildId }}{{ pin.tag ? ' ' + pin.tag : '' }}</span>
+                }
+              </label>
+            }
+
+            <div class="field">
+              <span>Parallel slots</span>
+              <button
+                type="button"
+                class="btn sm slots-btn"
+                [id]="'slots-' + m.id"
+                cdkOverlayOrigin
+                #slotsOrigin="cdkOverlayOrigin"
+                [attr.aria-label]="'Parallel slots for ' + m.name + ': ' + slotsLabel(m)"
+                aria-haspopup="dialog"
+                [attr.aria-expanded]="slotsOpen() === m.id"
+                [matTooltip]="slotsHint(m)"
+                (click)="toggleSlots(m.id)"
+              >
+                {{ slotsLabel(m) }}<mat-icon svgIcon="pw:chevron-down" aria-hidden="true" />
+              </button>
+              <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="slotsOrigin" [cdkConnectedOverlayOpen]="slotsOpen() === m.id" [cdkConnectedOverlayPush]="true" [cdkConnectedOverlayViewportMargin]="12" (overlayOutsideClick)="slotsOpen.set(null)" (detach)="slotsOpen.set(null)">
+                <pw-slots-panel role="dialog" [attr.aria-label]="'Parallel slots for ' + m.name" [model]="m" (closed)="slotsOpen.set(null)" (keydown.escape)="slotsOpen.set(null)" />
+              </ng-template>
+            </div>
+          </section>
+
+        </pw-detail-panel>
       }
-    </pw-panel>
+    </div>
   `,
   styles: `
     :host {
       display: grid;
       gap: var(--sp-3);
     }
-    .pin-select {
-      display: block;
-      margin-top: 4px;
-    }
-    .pinned-build {
-      margin-top: 4px;
-      color: var(--accent);
-    }
     .disk {
       display: flex;
-      gap: 2px;
+      gap: 1px;
       height: 8px;
       border-radius: var(--r-full);
       overflow: hidden;
@@ -238,53 +269,84 @@ export function contextText(tokens: number | null): string {
       }
     }
     [data-k='models'] {
-      background: var(--accent);
+      --seg: var(--viz-1);
     }
     [data-k='engines'] {
-      background: color-mix(in srgb, var(--accent) 50%, var(--text-3));
+      --seg: var(--viz-2);
     }
     [data-k='partial'] {
-      background: var(--warn);
+      --seg: var(--viz-3);
     }
     [data-k='free'] {
-      background: var(--track);
+      --seg: var(--track);
     }
-    .disk-legend {
+    .disk .seg {
+      background: var(--seg);
+    }
+    /* Direct labels under the bar, in the bar's order; each takes at least its own width. */
+    .disk-labels {
       display: flex;
-      flex-wrap: wrap;
-      gap: var(--sp-2) var(--sp-5);
-      margin: var(--sp-3) 0 0;
+      gap: var(--sp-4);
+      margin: var(--sp-2) 0 0;
       padding: 0;
       list-style: none;
       font-size: var(--fs-sm);
       color: var(--text-2);
       li {
+        flex: 1 1 auto;
         display: inline-flex;
         align-items: center;
         gap: 6px;
+        white-space: nowrap;
       }
       i {
         width: 8px;
         height: 8px;
         border-radius: 2px;
+        background: var(--seg);
+        box-shadow: inset 0 0 0 1px var(--border-strong);
+      }
+      li:not([data-k='free']) i {
+        box-shadow: none;
       }
       b {
         font-weight: var(--fw-medium);
         color: var(--text);
       }
-      .unused {
-        margin-left: auto;
-        color: var(--warn);
-      }
+    }
+    .unused {
+      margin: var(--sp-2) 0 0;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      height: 44px;
+      padding: 0 var(--sp-4);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      border-bottom: 1px solid var(--border-soft);
     }
     .scroll {
+      container-type: inline-size;
       overflow-x: auto;
-      margin-top: var(--sp-2);
     }
-    /* The action column stays in view whatever the window width, so Load / Unload never clip; a soft edge shows
-       that the table scrolls under it. */
-    .table th:last-child,
-    .table td:last-child {
+    /* A narrow list (the detail panel is open, or a small window) drops the columns the panel repeats. */
+    @container (max-width: 640px) {
+      .col-params,
+      .col-ctx {
+        display: none;
+      }
+    }
+    @container (max-width: 500px) {
+      .col-size {
+        display: none;
+      }
+    }
+    /* The action column stays in view whatever the width, so Load / Unload never clip. */
+    .table th.act,
+    .table td.act {
       position: sticky;
       right: 0;
       z-index: 1;
@@ -292,52 +354,11 @@ export function contextText(tokens: number | null): string {
       background: var(--bg-card);
       box-shadow: -10px 0 8px -8px color-mix(in srgb, var(--text) 14%, transparent);
     }
-    .table tr:hover td:last-child {
+    .table tr:hover td.act {
       background: color-mix(in srgb, var(--bg-card) 94%, var(--text));
     }
-    .idle-btn {
-      gap: 2px;
-      padding: 0 6px 0 8px;
-      color: var(--text-2);
-      font-variant-numeric: tabular-nums;
-      mat-icon {
-        width: 14px;
-        height: 14px;
-      }
-    }
-    .pop {
-      display: flex;
-      flex-direction: column;
-      min-width: 168px;
-      padding: var(--sp-1);
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-pop);
-    }
-    .pop-title {
-      padding: 4px 8px 6px;
-      font-size: var(--fs-sm);
-      color: var(--text-3);
-    }
-    .opt {
-      display: block;
-      height: 28px;
-      padding: 0 8px;
-      font: inherit;
-      text-align: left;
-      color: var(--text);
-      background: none;
-      border: none;
-      border-radius: var(--r-md);
-      cursor: default;
-      &:hover {
-        background: var(--bg-hover);
-      }
-      &[aria-checked='true'] {
-        font-weight: var(--fw-semibold);
-        color: var(--accent);
-      }
+    .table tr.selected td.act {
+      background: color-mix(in srgb, var(--bg-card) 90%, var(--accent));
     }
     .table th:first-child,
     .table td:first-child {
@@ -345,33 +366,54 @@ export function contextText(tokens: number | null): string {
     }
     .table th:last-child,
     .table td:last-child {
-      padding-right: var(--sp-4);
+      padding-right: var(--sp-3);
     }
     .table td {
-      height: 52px;
+      height: 48px;
+    }
+    .table td.act {
+      min-width: 128px;
     }
     .model {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      max-width: 300px;
-    }
-    .name {
-      font-weight: var(--fw-medium);
-    }
-    .repo {
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      width: 100%;
+      max-width: 0;
+      min-width: 180px;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .caps {
-      display: inline-flex;
-      gap: 4px;
+    .line {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      min-width: 0;
     }
-    .idle {
-      height: 26px;
-      font-size: var(--fs-sm);
+    .name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: var(--fs-base);
+      font-weight: var(--fw-semibold);
+    }
+    .glyphs {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: none;
+      mat-icon {
+        width: 14px;
+        height: 14px;
+        color: var(--text-3);
+      }
+      .upd {
+        color: var(--accent);
+      }
+    }
+    .repo {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: var(--fs-xs);
+      color: var(--text-2);
     }
     .pinned {
       width: 13px;
@@ -380,39 +422,59 @@ export function contextText(tokens: number | null): string {
       vertical-align: -2px;
       color: var(--text-3);
     }
-    .actions {
-      display: inline-flex;
-      align-items: center;
-      gap: 2px;
-      .btn.sm:not(.icon) {
-        min-width: 62px;
-        margin-right: var(--sp-1);
+    .row-actions .btn.sm:not(.icon) {
+      min-width: 64px;
+    }
+    .callout {
+      display: grid;
+      gap: var(--sp-1);
+      justify-items: start;
+      margin-bottom: var(--sp-3);
+      padding: var(--sp-2) var(--sp-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      background: var(--bg-sunken);
+      border-left: 3px solid var(--info);
+      border-radius: var(--r-sm);
+      b {
+        color: var(--text);
       }
     }
-    .upd {
-      display: inline-flex;
-      align-items: center;
+    .facts {
+      display: grid;
+    }
+    .settings {
+      display: grid;
+      gap: var(--sp-3);
+      margin-top: var(--sp-4);
+      padding-top: var(--sp-3);
+      border-top: 1px solid var(--border-soft);
+    }
+    .field {
+      display: grid;
       gap: 4px;
-      margin-top: 2px;
-      font-size: var(--fs-xs);
-      color: var(--accent);
-      mat-icon {
-        width: 12px;
-        height: 12px;
-      }
-      .link {
-        padding: 0;
-        font: inherit;
-        font-weight: var(--fw-medium);
-        color: var(--accent);
-        text-decoration: underline;
-        background: none;
-        border: none;
-        cursor: default;
+      justify-items: start;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      .select {
+        width: 100%;
+        height: 28px;
       }
     }
-    .del:hover:not(:disabled) {
-      color: var(--bad);
+    .hint {
+      color: var(--text-2);
+    }
+    .plain {
+      font-size: var(--fs-base);
+      color: var(--text);
+    }
+    .slots-btn {
+      gap: 2px;
+      font-variant-numeric: tabular-nums;
+      mat-icon {
+        width: 14px;
+        height: 14px;
+      }
     }
   `,
 })
@@ -423,6 +485,7 @@ export class LibraryTab {
   protected readonly updates = inject(UpdatesStore);
   protected readonly updateKind = UPDATE_KIND_LABEL;
   private readonly confirm = inject(Confirm);
+  private readonly menu = inject(ContextMenuService);
   protected readonly size = bytes;
   protected readonly when = ago;
   protected readonly secs = seconds;
@@ -430,6 +493,7 @@ export class LibraryTab {
   protected readonly ctx = contextText;
   protected readonly idleOptions = idleOptions;
   protected readonly capability = CAPABILITY_LABEL;
+  protected readonly glyph = CAPABILITY_ICON;
   protected readonly fit = (m: LocalModel) => fitLook(m.fit.verdict);
 
   constructor() {
@@ -446,12 +510,14 @@ export class LibraryTab {
   protected readonly segments = computed(() => {
     const d = this.store.disk();
     if (!d) return [];
-    return [
-      { key: 'models', bytes: d.modelsBytes },
-      { key: 'engines', bytes: d.enginesBytes },
-      { key: 'partial', bytes: d.partialBytes },
-      { key: 'free', bytes: d.freeBytes },
+    const all = [
+      { key: 'models', label: 'Models', bytes: d.modelsBytes },
+      { key: 'engines', label: 'Engines', bytes: d.enginesBytes },
+      { key: 'partial', label: 'Partial downloads', bytes: d.partialBytes },
+      { key: 'free', label: 'Free', bytes: d.freeBytes },
     ].filter((s) => s.bytes > 0);
+    const total = all.reduce((t, s) => t + s.bytes, 0) || 1;
+    return all.map((s) => ({ ...s, share: s.bytes / total }));
   });
 
   protected readonly diskLabel = computed(() => {
@@ -465,8 +531,10 @@ export class LibraryTab {
     return n ? `Delete ${n} ${n === 1 ? 'model' : 'models'} unused for ${days} days (${bytes(this.store.unusedBytes())})` : `No model has been unused for ${days} days`;
   });
 
-  protected readonly idleOpen = signal<string | null>(null);
   protected readonly slotsOpen = signal<string | null>(null);
+  /** The model whose details are open on the right. */
+  protected readonly selectedId = signal<string | null>(null);
+  protected readonly selected = computed(() => this.store.library().find((m) => m.id === this.selectedId()) ?? null);
 
   /** `4 slots`, with the default marked: `2 slots (default)`. */
   protected slotsLabel(m: LocalModel): string {
@@ -483,18 +551,65 @@ export class LibraryTab {
     this.slotsOpen.update((open) => (open === id ? null : id));
   }
 
-  /** The trigger's text: the model's own idle time, or "Global". */
-  protected idleLabel(secs: number | null): string {
-    return secs === null ? 'Global' : `After ${seconds(secs)}`;
+  protected statusText(m: LocalModel): string {
+    return m.loaded ? 'Loaded' : fitLook(m.fit.verdict).label;
   }
 
-  protected toggleIdle(id: string): void {
-    this.idleOpen.update((open) => (open === id ? null : id));
+  protected capabilityText(m: LocalModel): string {
+    return m.capabilities.map((c) => CAPABILITY_LABEL[c]).join(', ') || '—';
   }
 
-  protected chooseIdle(m: LocalModel, value: string): void {
-    this.idleOpen.set(null);
-    this.setIdle(m, value);
+  protected added(m: LocalModel): string {
+    return date(m.addedAt);
+  }
+
+  /** The one list behind the row's "..." button, its right-click menu and Shift+F10. Delete is only here. */
+  protected menuItems(m: LocalModel): ContextMenuItem[] {
+    const busy = this.store.isBusy()('model:' + m.id);
+    return [
+      { label: 'Details', run: () => this.selectedId.set(m.id) },
+      m.loaded
+        ? { label: 'Unload', run: () => void this.store.unloadModel(m.id), disabled: busy }
+        : { label: 'Load', run: () => void this.store.loadModel(m.id), disabled: busy || m.fit.verdict === 'wontFit' },
+      { label: m.pinned ? 'Unpin' : 'Pin (keep loaded)', run: () => void this.store.pinModel(m.id, !m.pinned), disabled: busy },
+      { label: 'Release when idle…', run: () => this.focusSetting(m, 'idle'), disabled: m.pinned },
+      { label: 'Parallel slots…', run: () => this.focusSetting(m, 'slots') },
+      { label: 'Delete…', run: () => void this.remove(m), danger: true, divider: true, disabled: busy },
+    ];
+  }
+
+  /** Opens the details and moves focus to one setting, for the menu items that name it. */
+  private focusSetting(m: LocalModel, which: 'idle' | 'slots'): void {
+    this.selectedId.set(m.id);
+    setTimeout(() => document.getElementById(`${which}-${m.id}`)?.focus(), 0);
+  }
+
+  protected onRowClick(m: LocalModel, e: Event): void {
+    if (!fromControl(e)) this.selectedId.set(m.id);
+  }
+
+  protected onRowKey(m: LocalModel, e: KeyboardEvent): void {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.selectedId.set(m.id);
+    } else if (isMenuKey(e)) {
+      e.preventDefault();
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      this.menu.open(r.left + 48, r.bottom - 8, this.menuItems(m));
+    } else {
+      moveRowFocus(e);
+    }
+  }
+
+  protected onRowMenu(m: LocalModel, e: MouseEvent): void {
+    e.preventDefault();
+    this.menu.open(e.clientX, e.clientY, this.menuItems(m));
+  }
+
+  protected close(): void {
+    this.selectedId.set(null);
+    this.slotsOpen.set(null);
   }
 
   protected setIdle(m: LocalModel, value: string): void {
@@ -511,7 +626,10 @@ export class LibraryTab {
 
   protected async remove(m: LocalModel): Promise<void> {
     const ok = await this.confirm.ask({ title: `Delete ${m.name}?`, message: `${m.file} (${bytes(m.sizeBytes)}) is removed from disk. You can download it again later.`, confirm: 'Delete', danger: true });
-    if (ok) await this.store.deleteModel(m.id);
+    if (ok) {
+      if (this.selectedId() === m.id) this.selectedId.set(null);
+      await this.store.deleteModel(m.id);
+    }
   }
 
   protected async cleanUp(): Promise<void> {

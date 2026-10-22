@@ -9,9 +9,23 @@ test.describe('models', () => {
     await expect(page.getByText('Loaded', { exact: true }).first()).toBeVisible();
   });
 
+  test('opens a model\'s details from its row, with Delete only in the menu, and closes them with Escape', async ({ page }) => {
+    await openApp(page, '/models');
+    await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0);
+    await page.getByRole('row', { name: /Gemma 3 12B/ }).click();
+    const panel = page.getByRole('complementary', { name: 'Gemma 3 12B' });
+    await expect(panel).toContainText('unsloth/gemma-3-12b-it-GGUF');
+    await expect(panel.getByLabel('Release Gemma 3 12B when idle')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await page.getByRole('button', { name: 'More actions for Gemma 3 12B' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Delete…' })).toBeVisible();
+  });
+
   test('slots: see what each adds, check the fit table, save, and learn a loaded model keeps its count', async ({ page }) => {
     await openApp(page, '/models');
     // A loaded model: the change is saved but applies on the next load.
+    await page.getByRole('row', { name: /Qwen3 8B Instruct/ }).click();
     await page.getByRole('button', { name: /^Parallel slots for Qwen3 8B Instruct/ }).click();
     const panel = page.locator('pw-slots-panel');
     await expect(panel).toContainText('Parallel slots · Qwen3 8B Instruct');

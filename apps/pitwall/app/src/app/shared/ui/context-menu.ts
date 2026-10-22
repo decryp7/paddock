@@ -6,6 +6,11 @@ import { ChangeDetectionStrategy, Component, Injectable, inject, input, output }
 export interface ContextMenuItem {
   label: string;
   run: () => void;
+  /** Destructive: shown in the danger colour. The action behind it must ask for a confirmation that names the thing. */
+  danger?: boolean;
+  disabled?: boolean;
+  /** Draws a divider above the item. */
+  divider?: boolean;
 }
 
 @Component({
@@ -16,7 +21,10 @@ export interface ContextMenuItem {
   template: `
     <div cdkMenu aria-label="Context menu" (keydown.escape)="closed.emit()" tabindex="-1">
       @for (item of items(); track item.label) {
-        <button type="button" cdkMenuItem class="pw-menu-item" (cdkMenuItemTriggered)="item.run(); closed.emit()">{{ item.label }}</button>
+        @if (item.divider) {
+          <hr class="pw-menu-divider" />
+        }
+        <button type="button" cdkMenuItem class="pw-menu-item" [class.danger]="item.danger" [cdkMenuItemDisabled]="!!item.disabled" (cdkMenuItemTriggered)="item.run(); closed.emit()">{{ item.label }}</button>
       }
     </div>
   `,
@@ -56,6 +64,12 @@ export class ContextMenuService {
     });
     ref.keydownEvents().subscribe((e) => e.key === 'Escape' && this.close());
     queueMicrotask(() => this.ref === ref && ref.overlayElement.querySelector<HTMLElement>('.pw-menu-item')?.focus());
+  }
+
+  /** Opens the menu under a trigger button (the row's "..." button), right-aligned with it. */
+  openFrom(trigger: HTMLElement, items: ContextMenuItem[]): void {
+    const r = trigger.getBoundingClientRect();
+    this.open(r.right, r.bottom + 2, items);
   }
 
   close(): void {

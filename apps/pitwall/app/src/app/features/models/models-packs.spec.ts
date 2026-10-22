@@ -154,6 +154,8 @@ describe('Models page: recommendations and engines', () => {
     await backend.installBuild('ik-llama-cpu');
     for (let i = 0; i < 400; i++) backend.tick();
     r = await render(backend);
+    r.el.querySelector<HTMLElement>('pw-library-tab tbody tr')!.click();
+    await r.settle();
     const select = r.el.querySelector<HTMLSelectElement>('select[id^="engine-"]')!;
     expect(select).not.toBeNull();
     select.value = 'ik-llama-cpu';

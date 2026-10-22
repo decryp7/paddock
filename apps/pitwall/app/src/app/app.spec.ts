@@ -128,6 +128,6 @@ describe('App', () => {
     const { fixture, el, live } = create(new MockBackend({ failing: ['overview'] }));
     await settle(fixture, 6);
     expect(live.error()?.code).toBe('serverUnavailable');
-    expect(el.querySelector('pw-sidebar .state')?.textContent).toContain('Server unreachable');
+    expect(el.querySelector('pw-sidebar .state')?.textContent).toContain('Unreachable');
   });
 });

@@ -42,7 +42,7 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
       <p class="err" role="alert">{{ e.message }} <button type="button" class="btn ghost sm" (click)="ask()">Retry</button></p>
     } @else if (fits.fit(); as f) {
       <p class="answer" [attr.data-tone]="look(f.verdict).tone">
-        <span class="pill dot" [attr.data-tone]="look(f.verdict).label === 'Unknown' ? 'muted' : look(f.verdict).tone">{{ look(f.verdict).label }}</span>
+        <span class="status" [attr.data-tone]="look(f.verdict).tone">{{ look(f.verdict).label }}</span>
         {{ f.message }}
       </p>
       @if (f.choices.length) {
@@ -65,7 +65,7 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
                   <td class="right num">{{ size(c.needBytes) }}</td>
                   <td class="right num">{{ c.extraBytes ? '+' + size(c.extraBytes) : '—' }}</td>
                   <td class="right num">{{ c.maxContext ? tokens(c.maxContext) : 'none' }}</td>
-                  <td><span class="pill dot" [attr.data-tone]="look(c.verdict).tone">{{ look(c.verdict).label }}</span></td>
+                  <td><span class="status" [attr.data-tone]="look(c.verdict).tone">{{ look(c.verdict).label }}</span></td>
                 </tr>
               }
             </tbody>

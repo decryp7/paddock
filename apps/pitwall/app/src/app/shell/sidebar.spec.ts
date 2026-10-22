@@ -35,7 +35,7 @@ describe('Sidebar', () => {
     expect(el.querySelector('.state')?.textContent).toContain('Connecting');
     await live.load();
     await settle(fixture);
-    expect(el.querySelector('.state')?.textContent?.replace(/\s+/g, ' ')).toContain('Serving · :11500');
+    expect(el.querySelector('.state')?.textContent?.replace(/\s+/g, ' ')).toContain('Serving');
     expect(el.querySelector('.state')?.getAttribute('data-state')).toBe('serving');
   });
 
@@ -50,7 +50,7 @@ describe('Sidebar', () => {
 
   it('says the server is unreachable when the overview fails', async () => {
     const { el } = await setup(new MockBackend({ failing: ['overview'] }));
-    expect(el.querySelector('.state')?.textContent).toContain('Server unreachable');
+    expect(el.querySelector('.state')?.textContent).toContain('Unreachable');
     expect(el.querySelector('.state')?.getAttribute('data-state')).toBe('down');
     expect(el.querySelector('.mem')).toBeNull();
   });
