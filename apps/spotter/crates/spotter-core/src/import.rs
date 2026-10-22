@@ -76,6 +76,7 @@ fn draft(name: &str, source: SourceConfig, scheme: &str, interval_secs: u32) -> 
         version_filter: Default::default(),
         allow_local: false,
         paused: false,
+        tracking: Default::default(),
     }
 }
 

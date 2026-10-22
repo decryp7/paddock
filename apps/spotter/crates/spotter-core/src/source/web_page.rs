@@ -173,6 +173,7 @@ impl WebPageSource {
                     size: None,
                     sha256: None,
                     prerelease: false,
+                    created_at: None,
                 }
             }
             PageMode::Change => Candidate {
@@ -183,6 +184,7 @@ impl WebPageSource {
                 size: None,
                 sha256: None,
                 prerelease: false,
+                created_at: None,
             },
         }
     }

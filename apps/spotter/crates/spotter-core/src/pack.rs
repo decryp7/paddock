@@ -103,6 +103,7 @@ impl PresetDef {
             version_filter: self.filter,
             allow_local: self.allow_local,
             paused: false,
+            tracking: Default::default(),
         };
         // The preset must be a watch once it has an id.
         let probe = Pack {

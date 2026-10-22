@@ -33,6 +33,7 @@ pub mod source;
 pub mod state;
 pub mod store;
 pub mod time;
+pub mod tracking;
 pub mod user_regex;
 pub mod version;
 pub mod watch;

@@ -145,6 +145,7 @@ fn candidate(it: Item) -> Candidate {
         size,
         sha256: None,
         prerelease: false,
+        created_at: None,
     }
 }
 

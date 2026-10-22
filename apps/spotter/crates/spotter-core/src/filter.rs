@@ -116,6 +116,7 @@ mod tests {
             published_at: None,
             size: None,
             sha256: None,
+            detail: Default::default(),
         }
     }
 

@@ -130,6 +130,7 @@ impl ForgeSource {
             size: None,
             sha256: None,
             prerelease: r.prerelease,
+            created_at: None,
         };
         if !self.assets.is_any() {
             let asset = r.assets.into_iter().find(|a| self.assets.matches(&a.name))?;
@@ -150,6 +151,7 @@ impl ForgeSource {
             size: None,
             sha256: None,
             prerelease: r.upcoming_release,
+            created_at: None,
         };
         if !self.assets.is_any() {
             let link = r.assets.links.into_iter().find(|l| self.assets.matches(&l.name))?;

@@ -219,6 +219,7 @@ mod tests {
                 published_at: None,
                 size: None,
                 sha256: None,
+                detail: Default::default(),
             },
             first_seen: Timestamp(day * DAY_MS + 1000),
         }

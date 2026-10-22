@@ -113,6 +113,7 @@ impl JsonApiSource {
             size: text(&self.size).and_then(|s| s.parse().ok()),
             sha256: text(&self.sha256).as_deref().and_then(Sha256Digest::parse),
             prerelease: false,
+            created_at: None,
             version_text: version,
         })
     }

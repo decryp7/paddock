@@ -78,6 +78,7 @@ impl FolderSource {
                 size: if e.is_dir { None } else { e.size },
                 sha256: None,
                 prerelease: false,
+                created_at: None,
             })
             .collect()
     }
