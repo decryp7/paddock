@@ -351,6 +351,8 @@ mod tests {
                 Action::Download {
                     folder: dest.path().display().to_string(),
                     verify: false,
+                    variant: String::new(),
+                    extension: String::new(),
                 },
                 Action::RunCommand {
                     program: "/nonexistent/prog".into(),
@@ -379,7 +381,7 @@ mod tests {
     async fn actions_requested_by_the_engine_run_on_their_own_task() {
         let opened = Arc::new(Opened::default());
         let n = notifier(opened.clone(), Arc::new(Toasts::default()));
-        n.run_actions(&request(vec![Action::OpenLocation], "https://example.org/x"));
+        n.run_actions(&request(vec![Action::open_location()], "https://example.org/x"));
         for _ in 0..200 {
             if !opened.seen.lock().unwrap().is_empty() {
                 break;
