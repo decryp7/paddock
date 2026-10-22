@@ -7,7 +7,7 @@
     "frontendDist": "../dist/app/browser",
     "devUrl": "http://localhost:4200",
     "beforeDevCommand": "node ../scripts/sidecar.mjs --dev && npm run start",
-    "beforeBuildCommand": "node ../scripts/sidecar.mjs && npm run build"
+    "beforeBuildCommand": "node ../scripts/sidecar.mjs && npm run build && node ../scripts/check-index.mjs"
   },
   "app": {
     "windows": [
