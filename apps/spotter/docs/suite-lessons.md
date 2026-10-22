@@ -51,3 +51,5 @@ Process and workflow
 - No plugin systems unless third-party code/untrusted parsing/privilege separation needs one (user decision).
 - Docs like Debrief: architecture.md, design.md with C4/UML draw.io + exported SVGs, user guide, features,
   roadmap, manual tests, README in Debrief's structure — and regenerate screenshots/diagrams at the end.
+
+- Never await IPC or the backend before the first paint: an app initializer that awaits a Tauri command with no timeout left Pitcrew's reopened window blank for good (the first IPC call in a freshly created window can go unanswered). Initializers start work in the background and return void; anything start-up must know gets a short timeout and a local fallback (e.g. platform from the user agent).
