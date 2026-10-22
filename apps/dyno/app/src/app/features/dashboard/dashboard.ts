@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { ViewPrefs } from '../../core/view-prefs';
+import { WidgetBoard } from '../widgets/widget-board';
 import { isNotBuilt } from '../../core/command-error';
 import { formatDuration } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -25,6 +27,7 @@ import { TopApps } from './top-apps';
     RouterLink,
     Icon,
     AnomaliesCallout,
+    WidgetBoard,
     HealthHero,
     DiagnosisCard,
     CpuTile,
@@ -48,12 +51,19 @@ import { TopApps } from './top-apps';
           <h1>Dashboard</h1>
           <p class="num">{{ subtitle() }}</p>
         </div>
+        <div class="seg" role="group" aria-label="Dashboard layout">
+          <button type="button" [attr.aria-pressed]="prefs.dashboardView() === 'standard'" (click)="prefs.setDashboardView('standard')">Standard</button>
+          <button type="button" [attr.aria-pressed]="prefs.dashboardView() === 'widgets'" (click)="prefs.setDashboardView('widgets')">Widgets</button>
+        </div>
         <a class="btn" routerLink="/processes"><dy-icon name="processes" /> Open task manager</a>
         <button type="button" class="btn" [disabled]="!rules.loaded() || rules.saving()" (click)="rules.pause(!rules.paused())">
           <dy-icon [name]="rules.paused() ? 'play' : 'pause'" /> {{ rules.paused() ? 'Resume rules' : 'Pause rules' }}
         </button>
       </header>
 
+      @if (prefs.dashboardView() === 'widgets') {
+        <dy-widget-board />
+      } @else {
       <dy-anomalies-callout />
 
       <div class="grid" [class.no-hero]="!showHero()">
@@ -81,6 +91,7 @@ import { TopApps } from './top-apps';
           <dy-disk-trend-panel />
         </div>
       </div>
+      }
     </div>
   `,
   styles: `
@@ -114,6 +125,7 @@ import { TopApps } from './top-apps';
 export class Dashboard implements OnInit {
   protected readonly live = inject(LiveStore);
   protected readonly rules = inject(RulesStore);
+  protected readonly prefs = inject(ViewPrefs);
   private readonly health = inject(HealthStore);
 
   /** The health score is shown only when the engine provides it: a "not built yet" answer hides it instead of faking a number. */

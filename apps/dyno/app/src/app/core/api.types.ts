@@ -684,6 +684,10 @@ export interface Settings {
   };
   cleanup: { schedule: CleanupSchedule; categories: string[]; mode: DeleteMode; devProjectAgeDays: number };
   webApi: { enabled: boolean; port: number; lan: boolean };
+  /** The customisable dashboard (the engine fills the default Overview when absent). */
+  dashboard?: DashboardLayout;
+  /** The menu-bar / tray items (at most 4; the engine fills the default when absent). */
+  trayItems?: TrayItems;
 }
 
 export interface PluginInfo {
@@ -1000,4 +1004,46 @@ export interface AlarmStats {
   meanTimeToAcknowledgeMs: number | null;
   medianTimeToAcknowledgeMs: number | null;
   suggestions: AlarmSuggestion[];
+}
+
+// ------------------------------------------------------------------------------------------------------- recorder
+// Agent requests: `capture` -> RecorderSnapshotInfo, `recorderSnapshots` -> RecorderSnapshotInfo[],
+// `recorderSnapshot {id}` -> RecorderSnapshot. `Settings.flightRecorder: boolean` (default true).
+
+export type CaptureReason = 'manual' | { alarm: { alarmId: number; title: string } };
+
+export interface RecorderProcess {
+  name: string;
+  /** Percent of the machine. */
+  cpu: number;
+  memory: number;
+}
+
+export interface RecorderSample {
+  at: Timestamp;
+  cpuTotal: number;
+  cpuCores: number[];
+  memoryUsed: number;
+  memoryTotal: number;
+  diskReadBps: number;
+  diskWriteBps: number;
+  netRxBps: number;
+  netTxBps: number;
+  top: RecorderProcess[];
+}
+
+export interface RecorderSnapshotInfo {
+  id: number;
+  at: Timestamp;
+  reason: CaptureReason;
+  bytes: number;
+  samples: number;
+}
+
+export interface RecorderSnapshot {
+  version: number;
+  at: Timestamp;
+  reason: CaptureReason;
+  /** About one per second, oldest first (thinned if the capture was large). */
+  samples: RecorderSample[];
 }

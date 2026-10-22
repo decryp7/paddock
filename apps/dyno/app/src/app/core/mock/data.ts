@@ -1,3 +1,4 @@
+import { defaultTrayItems, layoutFromPreset } from './widget-presets';
 import type {
   ActivityEntry,
   Alert,
@@ -492,6 +493,8 @@ export function demoSettings(): Settings {
     alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10 },
     cleanup: { schedule: 'weekly', categories: CLEANUP_CATEGORIES.filter((c) => c.scheduled).map((c) => c.id), mode: 'quarantine', devProjectAgeDays: 30 },
     webApi: { enabled: false, port: 7878, lan: false },
+    dashboard: layoutFromPreset('overview'),
+    trayItems: defaultTrayItems(),
   };
 }
 
