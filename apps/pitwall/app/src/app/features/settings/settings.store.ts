@@ -1,0 +1,105 @@
+import { computed, inject } from '@angular/core';
+import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
+import type { AppUpdateStatus, CommandError, Preset, Settings } from '../../core/api.types';
+import { BACKEND } from '../../core/backend';
+import { toCommandError } from '../../core/command-error';
+import { Toasts } from '../../core/toasts';
+import { PRESET_LABEL } from '../../shared/labels';
+
+type Section = keyof Settings;
+
+interface SettingsState {
+  /** What the server has. */
+  saved: Settings | null;
+  /** The form: `saved` plus unsaved edits. */
+  draft: Settings | null;
+  update: AppUpdateStatus | null;
+  loading: boolean;
+  saving: boolean;
+  error: CommandError | null;
+  /** The last save's error, shown next to the Save bar. */
+  saveError: CommandError | null;
+}
+
+const initial: SettingsState = { saved: null, draft: null, update: null, loading: false, saving: false, error: null, saveError: null };
+
+/** Applies an edit to one section; any memory edit other than the preset itself makes the preset `custom`. */
+export function editSettings<S extends Section>(s: Settings, section: S, values: Partial<Settings[S]>): Settings {
+  const next = { ...s, [section]: { ...s[section], ...values } } as Settings;
+  if (section === 'memory' && !('preset' in values)) next.memory = { ...next.memory, preset: 'custom' };
+  return next;
+}
+
+/** Settings: the saved values, a draft the form edits, Save / Discard, presets and the update status. */
+export const SettingsStore = signalStore(
+  withState(initial),
+  withComputed(({ saved, draft }) => ({
+    dirty: computed(() => {
+      const s = saved();
+      const d = draft();
+      return !!s && !!d && JSON.stringify(s) !== JSON.stringify(d);
+    }),
+  })),
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => ({
+    async load(): Promise<void> {
+      patchState(store, { loading: true, error: null });
+      try {
+        const settings = await backend.settings();
+        patchState(store, { saved: settings, draft: structuredClone(settings), loading: false });
+      } catch (e) {
+        patchState(store, { loading: false, error: toCommandError(e) });
+      }
+      try {
+        patchState(store, { update: await backend.appUpdateStatus() });
+      } catch {
+        // The updates card says it could not ask; the rest of Settings works.
+        patchState(store, { update: null });
+      }
+    },
+
+    edit<S extends Section>(section: S, values: Partial<Settings[S]>): void {
+      const d = store.draft();
+      if (d) patchState(store, { draft: editSettings(d, section, values), saveError: null });
+    },
+
+    discard(): void {
+      const s = store.saved();
+      patchState(store, { draft: s && structuredClone(s), saveError: null });
+    },
+
+    /** Saves the draft; the server validates it and returns what it kept. */
+    async save(): Promise<boolean> {
+      const d = store.draft();
+      if (!d || store.saving()) return false;
+      patchState(store, { saving: true, saveError: null });
+      try {
+        const settings = await backend.saveSettings(d);
+        patchState(store, { saved: settings, draft: structuredClone(settings), saving: false });
+        toasts.ok('Settings saved.');
+        return true;
+      } catch (e) {
+        const error = toCommandError(e);
+        patchState(store, { saving: false, saveError: error });
+        toasts.error(error);
+        return false;
+      }
+    },
+
+    /** Applies a memory preset on the server and shows its values (other unsaved edits stay). */
+    async applyPreset(preset: Exclude<Preset, 'custom'>): Promise<void> {
+      if (store.saving()) return;
+      patchState(store, { saving: true });
+      try {
+        const settings = await backend.applyPreset(preset);
+        const d = store.draft();
+        patchState(store, { saved: settings, draft: d ? { ...d, memory: structuredClone(settings.memory) } : structuredClone(settings), saving: false });
+        toasts.ok(`${PRESET_LABEL[preset]} preset applied.`);
+      } catch (e) {
+        patchState(store, { saving: false });
+        toasts.error(toCommandError(e));
+      }
+    },
+  })),
+);
+
+export type SettingsStore = InstanceType<typeof SettingsStore>;

@@ -1,0 +1,253 @@
+import { Channel, invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import type {
+  AppInfo,
+  AppPermissions,
+  AppUpdateStatus,
+  BenchmarkResult,
+  CreatedKey,
+  DiskUsage,
+  Download,
+  Engine,
+  History,
+  HistoryRange,
+  HfModel,
+  HfRepo,
+  LiveUpdate,
+  LocalModel,
+  McpServerInfo,
+  Overview,
+  PairingRequest,
+  PitwallEvent,
+  PlaygroundEvent,
+  PlaygroundRequest,
+  PluginInfo,
+  Preset,
+  RequestContent,
+  RequestRecord,
+  Settings,
+} from './api.types';
+import type { PitwallBackend, Unsubscribe } from './backend';
+import { toCommandError } from './command-error';
+
+/** The Tauri event the app forwards every live update on. */
+export const LIVE_EVENT = 'pitwall://live';
+
+/** The Tauri primitives the backend uses, injectable so a spec can pin every command name and argument shape. */
+export interface TauriBridge {
+  invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
+  listen<T>(event: string, handler: (payload: T) => void): Promise<() => void>;
+  channel<T>(onMessage: (message: T) => void): unknown;
+}
+
+/* v8 ignore start -- the real Tauri primitives exist only inside the app's webview. */
+const realBridge: TauriBridge = {
+  invoke: (cmd, args) => invoke(cmd, args),
+  listen: (event, handler) => listen(event, (e) => handler(e.payload as never)),
+  channel: <T>(onMessage: (message: T) => void) => {
+    const channel = new Channel<T>();
+    channel.onmessage = onMessage;
+    return channel;
+  },
+};
+/* v8 ignore stop */
+
+/**
+ * The real backend: one Tauri command per method (`app/src-tauri/src/commands.rs`), named after the method in
+ * snake_case, with the method's parameters as camelCase arguments. Rejections become typed {@link CommandError}s.
+ */
+export class TauriBackend implements PitwallBackend {
+  constructor(private readonly bridge: TauriBridge = realBridge) {}
+
+  // Dashboard
+  overview(): Promise<Overview> {
+    return this.run('overview');
+  }
+  history(range: HistoryRange): Promise<History> {
+    return this.run('history', { range });
+  }
+  events(limit: number): Promise<PitwallEvent[]> {
+    return this.run('events', { limit });
+  }
+  subscribe(listener: (update: LiveUpdate) => void): Unsubscribe {
+    let stopped = false;
+    let unlisten: (() => void) | null = null;
+    this.bridge
+      .listen<LiveUpdate>(LIVE_EVENT, (update) => {
+        if (!stopped) listener(update);
+      })
+      .then(
+        (u) => {
+          if (stopped) u();
+          else unlisten = u;
+        },
+        () => undefined,
+      );
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
+  }
+  setServing(paused: boolean): Promise<void> {
+    return this.run('set_serving', { paused });
+  }
+  releaseMemory(): Promise<number> {
+    return this.run('release_memory');
+  }
+  applyPreset(preset: Preset): Promise<Settings> {
+    return this.run('apply_preset', { preset });
+  }
+  cancelJob(id: string): Promise<void> {
+    return this.run('cancel_job', { id });
+  }
+
+  // Models
+  localModels(): Promise<LocalModel[]> {
+    return this.run('local_models');
+  }
+  searchModels(query: string): Promise<HfModel[]> {
+    return this.run('search_models', { query });
+  }
+  repoFiles(repo: string): Promise<HfRepo> {
+    return this.run('repo_files', { repo });
+  }
+  downloadModel(repo: string, file: string, projector: string | null): Promise<Download> {
+    return this.run('download_model', { repo, file, projector });
+  }
+  downloads(): Promise<Download[]> {
+    return this.run('downloads');
+  }
+  cancelDownload(id: string): Promise<void> {
+    return this.run('cancel_download', { id });
+  }
+  deleteModel(id: string): Promise<void> {
+    return this.run('delete_model', { id });
+  }
+  loadModel(id: string): Promise<void> {
+    return this.run('load_model', { id });
+  }
+  unloadModel(id: string): Promise<void> {
+    return this.run('unload_model', { id });
+  }
+  pinModel(id: string, pinned: boolean): Promise<void> {
+    return this.run('pin_model', { id, pinned });
+  }
+  setModelIdle(id: string, idleSecs: number | null): Promise<void> {
+    return this.run('set_model_idle', { id, idleSecs });
+  }
+  diskUsage(): Promise<DiskUsage> {
+    return this.run('disk_usage');
+  }
+
+  // Engines
+  engines(): Promise<Engine[]> {
+    return this.run('engines');
+  }
+  installBuild(buildId: string): Promise<Download> {
+    return this.run('install_build', { buildId });
+  }
+  removeBuild(buildId: string, tag: string): Promise<void> {
+    return this.run('remove_build', { buildId, tag });
+  }
+  selectBuild(choice: string): Promise<void> {
+    return this.run('select_build', { choice });
+  }
+  rollbackBuild(): Promise<void> {
+    return this.run('rollback_build');
+  }
+
+  // Apps and keys
+  apps(): Promise<AppInfo[]> {
+    return this.run('apps');
+  }
+  createApp(name: string): Promise<AppInfo> {
+    return this.run('create_app', { name });
+  }
+  deleteApp(id: string): Promise<void> {
+    return this.run('delete_app', { id });
+  }
+  createKey(appId: string): Promise<CreatedKey> {
+    return this.run('create_key', { appId });
+  }
+  revokeKey(appId: string, keyId: string): Promise<void> {
+    return this.run('revoke_key', { appId, keyId });
+  }
+  setPermissions(appId: string, permissions: AppPermissions): Promise<AppInfo> {
+    return this.run('set_permissions', { appId, permissions });
+  }
+  approvePairing(id: string, permissions: AppPermissions): Promise<void> {
+    return this.run('approve_pairing', { id, permissions });
+  }
+  denyPairing(id: string): Promise<void> {
+    return this.run('deny_pairing', { id });
+  }
+  pairings(): Promise<PairingRequest[]> {
+    return this.run('pairings');
+  }
+
+  // Request inspector
+  requests(limit: number): Promise<RequestRecord[]> {
+    return this.run('requests', { limit });
+  }
+  requestContent(id: string): Promise<RequestContent> {
+    return this.run('request_content', { id });
+  }
+
+  // Playground and benchmarks
+  chat(request: PlaygroundRequest, onEvent: (event: PlaygroundEvent) => void): Unsubscribe {
+    let stopped = false;
+    let id: string | null = null;
+    const cancel = (streamId: string) => this.bridge.invoke('chat_cancel', { id: streamId }).catch(() => undefined);
+    const channel = this.bridge.channel<PlaygroundEvent>((event) => {
+      if (!stopped) onEvent(event);
+    });
+    this.run<string>('chat', { request, onEvent: channel }).then(
+      (streamId) => {
+        id = streamId;
+        if (stopped) void cancel(streamId);
+      },
+      (error) => {
+        if (!stopped) onEvent({ kind: 'error', error });
+      },
+    );
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      if (id !== null) void cancel(id);
+    };
+  }
+  benchmarks(): Promise<BenchmarkResult[]> {
+    return this.run('benchmarks');
+  }
+  runBenchmark(modelId: string): Promise<BenchmarkResult> {
+    return this.run('run_benchmark', { modelId });
+  }
+
+  // Settings, plugins, tools
+  settings(): Promise<Settings> {
+    return this.run('settings');
+  }
+  saveSettings(settings: Settings): Promise<Settings> {
+    return this.run('save_settings', { settings });
+  }
+  plugins(): Promise<PluginInfo[]> {
+    return this.run('plugins');
+  }
+  setPluginEnabled(id: string, enabled: boolean): Promise<void> {
+    return this.run('set_plugin_enabled', { id, enabled });
+  }
+  mcpServers(): Promise<McpServerInfo[]> {
+    return this.run('mcp_servers');
+  }
+  appUpdateStatus(): Promise<AppUpdateStatus> {
+    return this.run('app_update_status');
+  }
+
+  private async run<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    try {
+      return await (args === undefined ? this.bridge.invoke<T>(cmd) : this.bridge.invoke<T>(cmd, args));
+    } catch (e) {
+      throw toCommandError(e);
+    }
+  }
+}

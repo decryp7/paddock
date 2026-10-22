@@ -1,0 +1,16 @@
+[package]
+name = "pitwall-server"
+description = "Pitwall's server: the local OpenAI/Anthropic/Ollama-compatible API, engines, models and memory management"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[dependencies]
+pitwall-core.workspace = true
+
+[lints]
+workspace = true

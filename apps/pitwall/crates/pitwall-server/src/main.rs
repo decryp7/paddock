@@ -1,0 +1,2 @@
+//! Pitwall server.
+fn main() {}

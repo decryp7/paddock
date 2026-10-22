@@ -1,0 +1,13 @@
+# The manifest of the redact filter (see pitwall-plugin-api's manifest module). Embedded in the binary too, so the
+# plugin and Pitwall agree on what it is.
+id = "redact-filter"
+name = "Redact filter"
+version = "0.1.0"
+contract = "1.0"
+kinds = ["filter"]
+executable = "pitwall-redact-filter"
+memory_mb = 128
+description = "Removes e-mail addresses, IPv4 addresses and long secrets from prompts before they reach the model."
+
+[permissions]
+network = false

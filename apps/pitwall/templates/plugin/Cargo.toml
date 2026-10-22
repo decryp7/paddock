@@ -1,0 +1,16 @@
+[package]
+name = "pitwall-plugin-template"
+description = "A copyable template for a Pitwall plugin (built in CI as a workspace member so it never rots)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Outside this repository: pitwall-plugin-api = { git = "https://dev.decryptology.net/decryp7/pitwall" }
+pitwall-plugin-api.workspace = true

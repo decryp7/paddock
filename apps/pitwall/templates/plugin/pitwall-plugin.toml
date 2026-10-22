@@ -1,0 +1,12 @@
+# Your plugin's manifest. Pitwall reads it before starting anything; the plugin embeds it too (src/main.rs).
+id = "my-plugin"                       # a-z 0-9 . -  (also the name of the plugin's folder)
+name = "My plugin"
+version = "0.1.0"
+contract = "1.0"                       # pitwall_plugin_api::CONTRACT_VERSION
+kinds = ["tool"]                       # engine | endpoint | tool | filter
+executable = "pitwall-plugin-template" # your binary's name; ".exe" is added on Windows
+description = "Says hello."
+# memory_mb = 256                      # the memory cap you need (default 512)
+
+[permissions]
+network = false                        # true only if you must; the user has to allow it as well
