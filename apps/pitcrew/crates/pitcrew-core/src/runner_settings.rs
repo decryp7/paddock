@@ -185,11 +185,9 @@ impl Reader<'_> {
 
     fn text(&mut self, path: &str) -> Option<String> {
         let v = self.get(path)?;
-        match v {
-            Value::String(s) => Some(s.clone()),
-            Value::Number(n) => Some(n.to_string()),
-            Value::Bool(b) => Some(b.to_string()),
-            _ => {
+        match scalar(v) {
+            Some(s) => Some(s),
+            None => {
                 self.unreadable.push(path.into());
                 None
             }
@@ -220,17 +218,12 @@ impl Reader<'_> {
 
     fn list(&mut self, path: &str) -> Vec<String> {
         let Some(v) = self.get(path) else { return vec![] };
-        match v.as_sequence() {
-            Some(items) if items.iter().all(|i| i.is_string() || i.is_number() || i.is_bool()) => items
-                .iter()
-                .filter_map(|i| match i {
-                    Value::String(s) => Some(s.clone()),
-                    Value::Number(n) => Some(n.to_string()),
-                    Value::Bool(b) => Some(b.to_string()),
-                    _ => None,
-                })
-                .collect(),
-            _ => {
+        match v
+            .as_sequence()
+            .and_then(|items| items.iter().map(scalar).collect::<Option<Vec<_>>>())
+        {
+            Some(items) => items,
+            None => {
                 self.unreadable.push(path.into());
                 vec![]
             }
@@ -266,6 +259,16 @@ impl Reader<'_> {
             out.insert(key, val);
         }
         out
+    }
+}
+
+/// A scalar value as text.
+fn scalar(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
     }
 }
 
@@ -710,6 +713,19 @@ container:
             Some(LogLevel::Error)
         );
         assert_eq!(RunnerSettings::from_text("log:\n  level: loud\n").unwrap().0.log_level, None);
+    }
+
+    #[test]
+    fn scalars_of_every_kind_are_read_as_text() {
+        let (s, un) =
+            RunnerSettings::from_text("cache:\n  dir: true\nrunner:\n  envs: {A: true, B: 1.5}\n  labels: [a, {b: c}]\n").unwrap();
+        assert_eq!(s.cache_dir.as_deref(), Some("true"));
+        assert_eq!(s.envs.get("A").map(String::as_str), Some("true"));
+        assert_eq!(un, vec!["runner.labels"]);
+        assert_eq!(LogLevel::Warn.as_str(), "warn");
+        assert_eq!(LogLevel::Trace.as_str(), "trace");
+        let (s, un) = RunnerSettings::from_text("runner:\n  envs: {[a]: b}\n").unwrap();
+        assert!(s.envs.is_empty() && un == vec!["runner.envs"]);
     }
 
     #[test]

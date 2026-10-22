@@ -300,4 +300,22 @@ mod tests {
         assert_eq!(prev.started_at, t(1));
         assert_eq!(tr.current().map(|c| c.started_at), Some(t(50)));
     }
+
+    #[test]
+    fn the_peaks_of_a_job_are_kept_with_it() {
+        let mut t = JobTracker::new();
+        t.observe_usage(900, 9_000);
+        t.task_started(JobInfo::default(), Timestamp(1000));
+        t.observe_usage(300, 5_000);
+        t.observe_usage(100, 7_000);
+        let done = t.process_exited(Timestamp(2000)).unwrap();
+        assert_eq!(
+            (done.peak_cpu_permille, done.peak_mem_bytes),
+            (300, 7_000),
+            "usage before the job does not count"
+        );
+        t.task_started(JobInfo::default(), Timestamp(3000));
+        let next = t.process_exited(Timestamp(4000)).unwrap();
+        assert_eq!((next.peak_cpu_permille, next.peak_mem_bytes), (0, 0), "peaks start over");
+    }
 }

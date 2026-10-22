@@ -848,4 +848,59 @@ automatic = false
             assert!(!is_absolute_anywhere(bad), "{bad}");
         }
     }
+
+    #[test]
+    fn process_settings_load_override_and_are_validated() {
+        let l = load(
+            Some(
+                r#"
+schema_version = 1
+[defaults.processes]
+cleanup = false
+keep = { amount = 2, unit = "hours" }
+[[defaults.processes.rules]]
+pattern = "adb"
+keep = "never"
+[[runners]]
+name = "a"
+kind = "gitea-runner"
+dir = "/r/a"
+[runners.processes]
+cleanup = true
+[[runners.processes.rules]]
+pattern = "java"
+keep = { amount = 1, unit = "days" }
+[[runners]]
+name = "b"
+kind = "gitea-runner"
+dir = "/r/b"
+"#,
+            ),
+            None,
+        );
+        assert!(l.problems.is_empty(), "{:?}", l.problems);
+        let d = &l.config.defaults;
+        assert!(!d.processes.cleanup);
+        let a = l.config.runners[0].process_policy(d);
+        assert!(a.cleanup && a.keep == crate::process_policy::KeepFor::hours(2));
+        assert_eq!(a.rules[0].pattern, "java", "the runner's rules come first");
+        assert!(!l.config.runners[1].process_policy(d).cleanup);
+        // The shipped defaults are on.
+        assert!(Config::default().defaults.processes.cleanup);
+        // They survive a save.
+        let again = load(Some(&to_toml(&l.config).unwrap()), None);
+        assert_eq!(again.config, l.config);
+        // Invalid values are reported: the section is replaced, a runner is skipped.
+        let bad = load(
+            Some("schema_version = 1\n[defaults.processes]\nkeep = { amount = 0, unit = \"hours\" }\n"),
+            None,
+        );
+        assert!(matches!(bad.problems[0], ConfigProblem::SectionIgnored { .. }));
+        assert!(bad.config.defaults.processes.cleanup);
+        let bad = load(
+            Some("schema_version = 1\n[[runners]]\nname = \"a\"\nkind = \"gitea-runner\"\ndir = \"/r\"\n[runners.processes]\nkeep = { amount = 0, unit = \"hours\" }\n"),
+            None,
+        );
+        assert!(matches!(bad.problems[0], ConfigProblem::RunnerSkipped { .. }));
+    }
 }

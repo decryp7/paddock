@@ -288,7 +288,7 @@ fn is_env_ref(v: &Value) -> bool {
 }
 
 fn type_error(kind: Kind, v: &Value) -> Option<String> {
-    if matches!(v, Value::Null) || is_env_ref(v) || kind == Kind::Any {
+    if matches!(v, Value::Null) || is_env_ref(v) {
         return None;
     }
     let v = match v {
@@ -553,6 +553,17 @@ mod tests {
             assert_eq!(parse_size(bad), None, "{bad:?}");
         }
         let _ = errs("");
+    }
+
+    #[test]
+    fn odd_keys_and_tags_do_not_trip_the_check() {
+        let i = check_text("? [a, b]\n: 1\n1: x\ntrue: y\nrunner:\n  capacity: !!int 3\n");
+        assert!(i.iter().any(|i| i.message.contains("not plain text")), "{i:?}");
+        assert!(
+            i.iter().filter(|i| i.severity == Severity::Warning).count() >= 2,
+            "numbers and booleans are keys too: {i:?}"
+        );
+        assert!(!has_errors(&check_text("runner:\n  capacity: !custom 3\n")));
     }
 
     #[test]

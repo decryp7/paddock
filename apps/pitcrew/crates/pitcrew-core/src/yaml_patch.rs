@@ -441,11 +441,16 @@ impl Doc {
 
     /// The text after the colon of key line `i`, split into `(value, comment)`.
     fn value_of(&self, i: usize) -> (String, String) {
-        let Some(k) = parse_key(&self.lines[i]) else {
-            return (String::new(), String::new());
-        };
-        let (v, c) = split_comment(&self.lines[i][k.after_colon..]);
-        (v.to_string(), c.to_string())
+        parse_key(&self.lines[i]).map_or((String::new(), String::new()), |k| {
+            let (v, c) = split_comment(&self.lines[i][k.after_colon..]);
+            (v.to_string(), c.to_string())
+        })
+    }
+
+    /// The text of key line `i` up to and including its colon.
+    fn head_of(&self, i: usize) -> String {
+        let end = parse_key(&self.lines[i]).map_or(self.lines[i].len(), |k| k.after_colon);
+        self.lines[i][..end].to_string()
     }
 
     /// The lines under `parent` (`None`: the whole document).
@@ -515,10 +520,7 @@ impl Doc {
                 Ok(None) => return Ok(Err((parent, n))),
             }
         }
-        match parent {
-            Some(i) => Ok(Ok(i)),
-            None => refuse(path, "the key path is empty"),
-        }
+        Ok(parent.ok_or((None, 0)))
     }
 
     fn insert(&mut self, at: usize, new: Vec<String>) {
@@ -549,10 +551,8 @@ impl Doc {
     fn open_section(&mut self, i: usize) {
         let (v, c) = self.value_of(i);
         if !v.is_empty() {
-            if let Some(k) = parse_key(&self.lines[i]) {
-                let head = self.lines[i][..k.after_colon].to_string();
-                self.replace_line(i, format!("{head}{c}"));
-            }
+            let head = self.head_of(i);
+            self.replace_line(i, format!("{head}{c}"));
         }
     }
 
@@ -609,10 +609,6 @@ impl Doc {
                 Ok(())
             }
             Ok(i) => {
-                let k = parse_key(&self.lines[i]).ok_or_else(|| PatchError {
-                    path: path.join("."),
-                    reason: "its line is not a plain `key: value` line".into(),
-                })?;
                 let (current, comment) = self.value_of(i);
                 if self.block(Some(i)).last.is_some() {
                     return refuse(path, "it is a section or a list, not a single value");
@@ -623,7 +619,7 @@ impl Doc {
                 if !current.is_empty() && unquote(&current) == value.text() && current != "{}" && current != "[]" {
                     return Ok(());
                 }
-                let head = &self.lines[i][..k.after_colon];
+                let head = self.head_of(i);
                 self.replace_line(i, format!("{head} {}{comment}", value.render()));
                 Ok(())
             }
@@ -643,12 +639,8 @@ impl Doc {
     }
 
     fn rewrite_list(&mut self, i: usize, path: &[String], items: &[String]) -> Result<(), PatchError> {
-        let k = parse_key(&self.lines[i]).ok_or_else(|| PatchError {
-            path: path.join("."),
-            reason: "its line is not a plain `key: value` line".into(),
-        })?;
         let (value, comment) = self.value_of(i);
-        let head = self.lines[i][..k.after_colon].to_string();
+        let head = self.head_of(i);
         let b = self.block(Some(i));
         // A list on one line: `[a, "b"]` or `[]`.
         if let Some(inner) = value.strip_prefix('[') {
@@ -745,11 +737,7 @@ impl Doc {
             }
             Ok(i) => {
                 let (value, comment) = self.value_of(i);
-                let k = parse_key(&self.lines[i]).ok_or_else(|| PatchError {
-                    path: path.join("."),
-                    reason: "its line is not a plain `key: value` line".into(),
-                })?;
-                let head = self.lines[i][..k.after_colon].to_string();
+                let head = self.head_of(i);
                 if !value.is_empty() && value != "{}" && value != "~" && value != "null" {
                     return refuse(path, "it is not a block of `name: value` lines");
                 }
@@ -1426,6 +1414,50 @@ cache:
         );
         assert_eq!(parse_flow_items("{a}"), None);
         assert_eq!(parse_flow_items("\"a\\"), None);
+    }
+
+    #[test]
+    fn escapes_in_quoted_text_round_trip() {
+        assert_eq!(render_string("a\rb"), "\"a\\rb\"");
+        assert_eq!(unquote("\"a\\nb\\tc\\rd\\0e\\\\f\""), "a\nb\tc\rd\0e\\f");
+        assert_eq!(unquote("\"trailing\\\""), "trailing");
+        assert_eq!(unquote("\"\\u00e9\\uZZZZ\""), "é\u{fffd}");
+        assert_eq!(unquote("'it''s'"), "it's");
+        let t = "\"a\\\"b\": 1\n'c''d': 2\n";
+        assert_eq!(
+            apply(t, &[set("a\"b", int(5)), set("c'd", int(6))]).unwrap(),
+            "\"a\\\"b\": 5\n'c''d': 6\n"
+        );
+    }
+
+    #[test]
+    fn nulls_and_odd_shapes_are_handled() {
+        assert_eq!(
+            apply(
+                "l: ~\nz: 1\n",
+                &[Edit::SetList {
+                    path: p("l"),
+                    items: vec!["a".into()]
+                }]
+            )
+            .unwrap(),
+            "l:\n  - a\nz: 1\n"
+        );
+        assert!(apply(
+            "e:\n  k: v\n    more\n",
+            &[Edit::SetMap {
+                path: p("e"),
+                entries: vec![]
+            }]
+        )
+        .is_err());
+        assert_eq!(line_of("a:\n  b: 1\n", &p("a.b")), Some(1));
+        assert_eq!(line_of("a: 1\n", &p("x")), None);
+        assert_eq!(line_of("a:\n\tb: 1\n", &p("a")), None);
+        assert!(apply("a: 1\n", &[Edit::Remove { path: p("a.b") }]).is_err());
+        assert!(parse_flow_items("'open").is_none());
+        let doc = Doc::parse("a: 1\n").unwrap();
+        assert!(matches!(doc.locate(&[]), Ok(Err((None, 0)))));
     }
 
     #[test]
