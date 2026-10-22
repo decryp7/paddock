@@ -10,17 +10,48 @@ Decisions already taken for these packages (2026-10-22): three-tier extensibilit
 SQLite ([0008](adr/0008-storage-sqlite-and-retention.md)), observe-only by default with a helper installed on first admin
 use ([0006](adr/0006-privileged-helper-and-observe-only.md)), Linux a first-class platform next to Windows and macOS.
 
-## Order
+## Scope: v1 (frozen) and After v1
 
-1. **Foundation gaps** (below): small, unblock the rest.
-2. **WP-01 helper**, **WP-02 CPU taming UI**, **WP-03 health and startup UI**, **WP-04 cleanup**, **WP-05 tuning**: the
-   screens that are placeholders today, in dependency order.
-3. **WP-06 Issues with statistics**, **WP-07 unusual processes**, **WP-08 alerts and the weekly report**.
-4. **WP-09 right-click search**, **WP-10 watched folders**, **WP-11 benchmarks**, **WP-12 performance counters**,
-   **WP-13 extras**, **WP-14 backup health**, **WP-15 declarative packs**.
-5. **WP-16 local web API**, **WP-17 Explain via Pitwall**; **WP-18 multi-PC LAN view** after v1.
+**v1 is frozen**: it is every work package in the "v1" table below, nothing more and nothing less. There is no cut-down
+release; v1 ships when all of them are done. New ideas go to [After v1](#after-v1), never into v1.
 
-No cut-down release: v1 is when this list is done.
+Status words are honest: **built** (code and tests committed), **in progress** (another agent is working on it; not all of it
+is committed, re-check `git log`), **planned** (nothing in the code).
+
+| WP | Feature | Status (2026-10-22) |
+| --- | --- | --- |
+| WP-01 | Privileged helper | planned (core types only) |
+| WP-02 | CPU taming screen and profiles | engine built, UI planned |
+| WP-03 | Health score and startup manager screen | engine built, UI planned |
+| WP-04 | Cleanup with quarantine and undo | policy built, rest planned |
+| WP-05 | Tuning catalogue | planned |
+| WP-06 | Issues with statistics | planned |
+| WP-07 | New and unusual processes | planned |
+| WP-08 | Alerts and the weekly report | engine partly built, rest planned (superseded in part by WP-26) |
+| WP-09 | Right-click search | planned |
+| WP-10 | Watched folders with keep-for times | planned |
+| WP-11 | Benchmarks on click | planned |
+| WP-12 | Performance counters browser | planned |
+| WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | planned |
+| WP-14 | Backup health checks | planned |
+| WP-15 | Declarative TOML packs | planned |
+| WP-16 | Optional local web API | planned |
+| WP-17 | Explain this via Pitwall | planned |
+| WP-19 | Per-core CPU view | core, platform and agent committed (P/E kinds, per-core frequency, per-core rollups); UI (tile toggle, P/E grouping, detail heatmap, tray bars) in progress |
+| WP-20 | Memory modules inventory with slot drawings | in progress |
+| WP-21 | Customisable widgets (ADR 0012) | in progress |
+| WP-22 | Native tray popover | in progress |
+| WP-23 | Throttling detector | planned |
+| WP-24 | Disk and battery life forecasts | planned |
+| WP-25 | "Is this normal?" learned baselines | planned |
+| WP-26 | Alarms view and custom alerts (ADR 0013) | data model in progress (`dyno_core::alarms`, not committed yet); UI and agent planned |
+| WP-27 | `dyno` CLI (ADR 0014) | planned |
+| WP-28 | Flight recorder | in progress |
+| WP-29 | Diagnostics bundle | model in progress |
+| WP-30 | Suite tie-ins (Spotter, Debrief, Pitcrew, Pitwall) | planned |
+
+Suggested order: foundation gaps; WP-01 to WP-05; WP-06 to WP-08 and WP-26; the in-progress items as their agents report;
+WP-09 to WP-17; WP-23 to WP-25, WP-27 to WP-30.
 
 ## Known gaps in the foundation
 
@@ -245,11 +276,115 @@ Each is small and independent; all are core logic plus an adapter plus a card or
 - **Depends on.** WP-09, WP-06, WP-07; Pitwall's API.
 - **Touches.** shell command, `app/src/app/core/backend.ts`, UI.
 
-## WP-18 Multi-PC LAN view (after v1)
+## WP-19 Per-core CPU view
 
-- **Scope.** See several of your own PCs on one dashboard over the LAN, opt-in, authenticated, read-only.
-- **Acceptance.** Needs its own ADR (discovery, authentication, transport security) before any code.
-- **Depends on.** WP-16.
+- **Scope.** A per-core view of CPU: a dashboard tile toggle (total or per core), performance and efficiency cores grouped and
+  labelled, per-core frequency, a CPU detail page with a heatmap over time, per-core min/avg/max rollups in history, and
+  per-core bars in the tray item.
+- **State.** Core types, platform probes, the agent's sampling and the per-core rollups are committed (`c2b757f`); the UI parts
+  are in progress.
+- **Acceptance.** A machine without per-core data says why; P/E grouping is correct on Apple Silicon and Intel hybrid parts and
+  absent elsewhere; the heatmap prints the numbers as well as colours (ADR 0011).
+- **Touches.** `dyno-core` metrics and history, `dyno-platform/**`, `app/src/app/features/dashboard/**` and a CPU detail page,
+  `dyno_core::tray`.
+
+## WP-20 Memory modules inventory
+
+- **Scope.** The installed memory modules (size, type, speed, slot, manufacturer) drawn as slots: Windows through WMI, macOS
+  through `system_profiler` (including Apple Silicon's unified memory, drawn as one package), Linux through DMI tables, which
+  need the helper and are read only on a click.
+- **Acceptance.** Empty slots are drawn empty; an unreadable source says why; the Linux read asks for the helper first
+  (ADR 0006) and the app works without it.
+- **Depends on.** WP-01 for Linux. **Touches.** `dyno-platform/**`, a facts type in the core, a memory detail page.
+
+## WP-21 Customisable widgets and tray items
+
+- **Scope.** ADR 0012: dashboard edit mode, a gallery of widgets, presets, and several menu-bar or tray items (iStat and Stats
+  style) with per-OS rendering notes.
+- **Acceptance.** Layouts are versioned settings that survive damage; unknown kinds are dropped with a note; the tray item count
+  is limited to what the OS supports; presets are undoable.
+- **Touches.** `dyno_core::{settings,tray}`, `app/src/app/features/dashboard/**`, `app/src-tauri/src/tray.rs`.
+
+## WP-22 Native tray popover
+
+- **Scope.** A rounded, material-backed popover opened from the tray (macOS vibrancy, Windows Mica where available, a plain
+  themed window on Linux), showing the compact dashboard.
+- **Acceptance.** Looks native on each OS in both themes; closes on blur; honours ADR 0009.
+- **Touches.** `app/src-tauri/src/{tray,window,placement}.rs`, `app/src/app/features/tray/**`.
+
+## WP-23 Throttling detector
+
+- **Scope.** Detect that the CPU or GPU is running slower than it could under load, name the cause (thermal limit, power limit,
+  battery saver) and quantify the impact (percent of expected frequency lost, for how long).
+- **Acceptance.** A pure detector over frequency, temperature and power readings with tests per cause; an unavailable input
+  gives "cannot tell", never a guess; the result feeds Why slow and alarms.
+- **Touches.** new `dyno-core/src/throttle.rs`, adapters for frequency and limit flags, `diagnosis.rs`.
+
+## WP-24 Disk and battery life forecasts
+
+- **Scope.** SSD wear (SMART or NVMe data, total bytes written against rated TBW) as a remaining-years estimate; battery
+  capacity trend and cycle count as "replace in about N months".
+- **Acceptance.** Estimates show a range and the data they stand on; too little history says so; no estimate without data.
+- **Touches.** `dyno-core/src/forecast.rs`, facts adapters, history of capacity and wear.
+
+## WP-25 "Is this normal?" baselines
+
+- **Scope.** Learn per metric and app a baseline by time of day and day of week from history; highlight values outside it on
+  the dashboard and feed alarms.
+- **Acceptance.** A pure statistics function with tests; a new install learns silently for a configurable period; highlights
+  carry the words ("higher than usual for Tuesday mornings"), not colour alone.
+- **Touches.** `dyno-core/src/stats.rs` and `anomaly.rs`, history queries, dashboard.
+
+## WP-26 Alarms view and custom alerts
+
+- **Scope.** ADR 0013 in full: the pure state machine, custom alerts on any metric using the taming rule engine in
+  notification-only mode, Active, History and Statistics views, acknowledge, shelve, mute, notes, Open in Debrief, tray and
+  dashboard badge, native notifications with Acknowledge and Snooze, quiet hours with a critical bypass, bounded SQLite
+  retention.
+- **Acceptance.** Every (state, event) pair is tested; repeats de-duplicate; shelving expires correctly across a reboot; active
+  alarms are never pruned; notifications never contain file contents.
+- **Touches.** `dyno-core/src/alarms.rs` (in progress), `alerts.rs` (superseded), `store.rs`, handlers, `features/alarms/**`.
+
+## WP-27 `dyno` CLI
+
+- **Scope.** ADR 0014: `dyno status --json`, `why-slow`, `top`, `alarms`, over the same protocol and discovery file; a design note
+  already sits in `crates/dyno-agent/src/server.rs`.
+- **Acceptance.** Refuses a wrong protocol version with a clear message; read-only unless an explicit acting flag is given;
+  output is stable JSON.
+- **Touches.** new crate `crates/dyno-cli`, workspace `Cargo.toml` (integrating agent), docs.
+
+## WP-28 Flight recorder
+
+- **Scope.** The last 10 minutes at 1 s kept in memory, bounded; saved automatically when an alarm fires or on "Capture"; a
+  timeline of captured snapshots; overhead within about 1 % of the machine.
+- **Acceptance.** Memory is capped by construction (ring buffer); saving writes nothing outside the data folder; the overhead
+  is measured with `dyno-agent bench` and recorded.
+- **Touches.** new `dyno-core/src/flight.rs`, the sampler, `store.rs`, UI.
+
+## WP-29 Diagnostics bundle
+
+- **Scope.** One click builds a zip: inventory, health score and reasons, recent issues and alarms, a flight snapshot and the
+  weekly summary, with user names, paths and the machine name redacted (Debrief style), previewed before it is saved.
+- **Acceptance.** Redaction is a tested pure function; the preview shows exactly the files and text that go in; nothing is sent
+  anywhere.
+- **Depends on.** WP-06, WP-26, WP-28, WP-13 (inventory). **Touches.** `dyno-core` redaction (shared with WP-09), agent export,
+  UI dialog.
+
+## WP-30 Suite tie-ins
+
+- **Scope.** The installed-apps inventory feeds Spotter's "watch for updates"; issues and alarms offer Open in Debrief;
+  Pitcrew shows Dyno's machine health when both run; Pitwall's Explain this (WP-17). All through ADR 0014's protocol, on the
+  user's click or opt-in.
+- **Acceptance.** Each integration declares what it reads; none writes; each degrades to nothing when the other app is absent.
+
+## After v1
+
+Not part of v1; anything new goes here.
+
+- **Multi-PC LAN view.** See several of your own PCs on one dashboard over the LAN, opt-in, read-only, over **TLS with a
+  pre-shared key**. Needs its own ADR (discovery, key exchange, certificate handling) before any code; depends on WP-16 and
+  WP-27.
+- Further ideas land here as they come up.
 
 ## Screenshot checklist
 
@@ -273,3 +408,16 @@ feature needs its images; a row is done when both exist and show the built scree
 | Benchmarks | `benchmarks-*.png` | not started (WP-11) |
 | Performance counters | `counters-*.png` | not started (WP-12) |
 | Backup health | `backup-*.png` | not started (WP-14) |
+| Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-*.png` | in progress (WP-19) |
+| CPU detail with per-core heatmap | `cpu-detail-*.png` | in progress (WP-19) |
+| Tray popover on a desktop backdrop | `tray-popover-*.png` | in progress (WP-22) |
+| Widget gallery | `widget-gallery-*.png` | in progress (WP-21) |
+| Dashboard edit mode | `dashboard-edit-*.png` | in progress (WP-21) |
+| Presets | `presets-*.png` | in progress (WP-21) |
+| Customised menu bar (several tray items) | `menu-bar-*.png` | in progress (WP-21) |
+| Memory slot drawings, including Apple Silicon unified memory | `memory-slots-*.png`, `memory-slots-apple-silicon-*.png` | in progress (WP-20) |
+| Alarms: Active | `alarms-active-*.png` | planned (WP-26) |
+| Alarms: History | `alarms-history-*.png` | planned (WP-26) |
+| Alarms: Statistics | `alarms-statistics-*.png` | planned (WP-26) |
+| Diagnostics bundle preview | `diagnostics-bundle-*.png` | planned (WP-29) |
+| Throttling and forecasts | `throttling-*.png`, `forecasts-*.png` | planned (WP-23, WP-24) |
