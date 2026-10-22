@@ -587,11 +587,18 @@ mod tests {
 
     #[test]
     fn only_specific_folders_may_be_cleaned_as_a_cache() {
-        let home = std::path::Path::new("/Users/me");
-        assert!(safe_cache_dir(std::path::Path::new("/Users/me/.cache/actcache"), Some(home)).is_ok());
-        assert!(safe_cache_dir(std::path::Path::new("relative"), Some(home)).is_err());
-        assert!(safe_cache_dir(std::path::Path::new("/"), Some(home)).is_err());
-        assert!(safe_cache_dir(std::path::Path::new("/Users"), Some(home)).is_err());
-        assert!(safe_cache_dir(std::path::Path::new("/Users/me"), Some(home)).is_err());
+        // Absolute on this OS: a drive on Windows, the root elsewhere.
+        let root = if cfg!(windows) {
+            std::path::PathBuf::from("C:\\")
+        } else {
+            std::path::PathBuf::from("/")
+        };
+        let users = root.join("Users");
+        let home = users.join("me");
+        assert!(safe_cache_dir(&home.join(".cache").join("actcache"), Some(&home)).is_ok());
+        assert!(safe_cache_dir(std::path::Path::new("relative"), Some(&home)).is_err());
+        assert!(safe_cache_dir(&root, Some(&home)).is_err());
+        assert!(safe_cache_dir(&users, Some(&home)).is_err());
+        assert!(safe_cache_dir(&home, Some(&home)).is_err());
     }
 }

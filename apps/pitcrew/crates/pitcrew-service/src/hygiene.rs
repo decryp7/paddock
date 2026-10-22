@@ -518,6 +518,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(d);
     }
 
+    // A folder's own time cannot be set through a file handle on Windows; the logic is the same everywhere.
+    #[cfg(unix)]
     #[test]
     fn the_cache_folder_is_reported_planned_and_trimmed_safely() {
         let home = temp("cachehome");
@@ -590,9 +592,9 @@ mod tests {
             ..RunnerSettings::default()
         };
         let (p, def) = cache_dir_of(&s, Path::new("/r"), Some(Path::new("/h"))).unwrap();
-        assert_eq!((p, def), (PathBuf::from("/r/caches"), false));
+        assert_eq!((p, def), (Path::new("/r").join("caches"), false));
         let (p, def) = cache_dir_of(&RunnerSettings::default(), Path::new("/r"), Some(Path::new("/h"))).unwrap();
-        assert_eq!((p, def), (PathBuf::from("/h/.cache/actcache"), true));
+        assert_eq!((p, def), (Path::new("/h").join(".cache").join("actcache"), true));
         assert!(cache_dir_of(&RunnerSettings::default(), Path::new("/r"), None).is_none());
         assert_eq!(size_limit_mb("10GB"), Some(9536));
     }
