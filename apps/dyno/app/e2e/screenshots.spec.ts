@@ -52,14 +52,18 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
   {
     name: 'network',
     path: '/#/network',
-    ready: async (page) => void (await expect(page.getByRole('region', { name: 'Listening ports' })).toBeVisible()),
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Listening' }).click();
+      await expect(page.getByRole('grid', { name: 'Listening ports' })).toBeVisible();
+    },
   },
   {
     name: 'network-connections',
     path: '/#/network',
     ready: async (page) => {
-      await page.getByRole('button', { name: /^Connections/ }).click();
-      await expect(page.getByRole('region', { name: 'Google Chrome' })).toBeVisible();
+      await expect(page.getByRole('grid', { name: 'Connections' })).toBeVisible();
+      await page.getByRole('row', { name: /142.250.74.46/ }).click();
+      await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible();
     },
   },
   {

@@ -292,16 +292,33 @@ test.describe('widgets', () => {
 });
 
 test.describe('network', () => {
-  test('lists listeners with an Exposed badge, hides loopback by default and looks up only public addresses', async ({ page }) => {
+  test('one dense table: grouped by program with collapsible group rows, loopback hidden, Look up IP only for public peers', async ({ page }) => {
     await page.goto(url('/network'));
-    const listening = page.getByRole('region', { name: 'Listening ports' });
-    await expect(listening.getByText('Exposed').first()).toBeVisible();
-    await expect(listening.getByText('postgres')).toHaveCount(0);
-    await page.getByLabel('Show loopback').check();
-    await expect(listening.getByText('postgres')).toBeVisible();
-    await page.getByRole('button', { name: /^Connections/ }).click();
+    const grid = page.getByRole('grid', { name: 'Connections' });
+    await expect(grid.getByRole('row', { name: /Google Chrome/ }).first()).toBeVisible();
+    await expect(page.getByRole('row', { name: /142.250.74.46/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Collapse Google Chrome' }).click();
+    await expect(page.getByRole('row', { name: /142.250.74.46/ })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Expand Google Chrome' }).click();
+    await page.getByLabel('Group by').selectOption('none');
+    await expect(page.getByRole('button', { name: 'Collapse Slack' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Look up IP 10.0.0.8' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Look up IP 142.250.74.46' })).toBeEnabled();
+  });
+
+  test('listening tab marks exposed listeners first; loopback shows on request; Enter opens the detail panel', async ({ page }) => {
+    await page.goto(url('/network'));
+    await page.getByRole('button', { name: 'Listening' }).click();
+    const grid = page.getByRole('grid', { name: 'Listening ports' });
+    await expect(grid.getByText('Exposed').first()).toBeVisible();
+    await expect(grid.getByText('postgres')).toHaveCount(0);
+    await page.getByLabel('Show loopback').check();
+    await expect(grid.getByText('postgres').first()).toBeVisible();
+    await grid.focus();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible();
   });
 
   test('settings: choosing a preset fills the address and a bad address is explained', async ({ page }) => {

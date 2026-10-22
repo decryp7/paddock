@@ -227,7 +227,10 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
   every 30 s, activity entries for new exposed listeners and new remote hosts), request `network`; UI page `/network`.
   **Look up IP** (`dyno_core::ip_lookup`, request `lookupIp`, Settings ▸ Network ▸ IP lookup) opens the user's https
   template in the browser; private, loopback, link-local and CGNAT addresses are refused. No country database is bundled.
-- **Open.** Reverse DNS through the OS resolver (on demand, switchable); per-connection or per-process traffic rates;
+- **Page.** One dense table with a sticky header and virtualised rows, group rows by program or remote host (collapsed state
+  remembered), a summary strip, a detail panel and keyboard control; program icons are initial avatars.
+- **Open.** Reverse DNS through the OS resolver (on demand, switchable) and the remote host name column; per-connection or
+  per-process traffic rates and sparklines in group rows; a row context menu; the user column in the detail panel;
   the tab in process details; resolving other users' sockets through the helper; rules that alert on a new non-loopback
   listener; redacting remote IPs in diagnostics bundles unless the user opts in; ASN column (the ASN lookup template is
   stored but no ASN is known yet).

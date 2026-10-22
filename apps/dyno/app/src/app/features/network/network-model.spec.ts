@@ -1,11 +1,12 @@
 import type { ConnectionRow, ListenerRow } from '../../core/api.types';
-import { endpoint, exposureBadge, groupConnections, listenerLine, lookupBlockedReason, ownerName, ownerReason } from './network-model';
+import { connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, ownerName, ownerReason, portService, protoText, sortListeners, stateView, summarise, tableRows } from './network-model';
 
 const owner = { kind: 'process', pid: 1, name: 'node', path: null } as const;
 const unknown = { kind: 'unknown', reason: 'because' } as const;
 const c = (remote: string, o: ConnectionRow['owner'] = owner, lookupOk = true): ConnectionRow => ({
   proto: 'tcp', ipv6: remote.includes(':'), local: '1.1.1.1', localPort: 1, remote, remotePort: 443, remoteIsLoopback: false, lookupOk, state: 'established', stateLabel: 'ESTABLISHED', owner: o, firstSeen: null,
 });
+const l = (port: number, exposure: ListenerRow['exposure']): ListenerRow => ({ proto: 'tcp', ipv6: false, local: '0.0.0.0', port, exposure, owner, firstSeen: null });
 
 describe('network model', () => {
   it('names owners and explains unknown ones', () => {
@@ -17,7 +18,7 @@ describe('network model', () => {
 
   it('exposure badges carry words', () => {
     expect(exposureBadge('allInterfaces')).toMatchObject({ label: 'Exposed', tone: 'warn' });
-    expect(exposureBadge('loopback').label).toBe('This PC only');
+    expect(exposureBadge('loopback').label).toBe('Loopback only');
     expect(exposureBadge('interface').label).toBe('One interface');
   });
 
@@ -26,20 +27,51 @@ describe('network model', () => {
     expect(lookupBlockedReason(c('8.8.8.8'))).toBeNull();
   });
 
-  it('groups by program or host, biggest group first', () => {
-    const rows = [c('1.1.1.1'), c('2.2.2.2'), c('1.1.1.1', unknown), c('3.3.3.3')];
-    expect(groupConnections(rows, 'none')).toHaveLength(1);
-    const byHost = groupConnections(rows, 'host');
-    expect(byHost[0]).toMatchObject({ title: '1.1.1.1' });
-    expect(byHost[0]!.rows).toHaveLength(2);
-    const byProc = groupConnections(rows, 'process');
-    expect(byProc.map((g) => g.title)).toEqual(['node', 'Owner unknown']);
+  it('names well-known ports and leaves the others plain', () => {
+    expect(portService(443)).toBe('443 · HTTPS');
+    expect(portService(5432)).toBe('5432 · PostgreSQL');
+    expect(portService(51234)).toBe('51234');
   });
 
-  it('formats endpoints with IPv6 in brackets', () => {
+  it('states are sentence case and only the meaningful ones are coloured', () => {
+    expect(stateView('established')).toEqual({ text: 'Established', tone: 'ok' });
+    expect(stateView('timeWait')).toEqual({ text: 'Time wait', tone: null });
+    expect(stateView('closeWait').tone).toBe('warn');
+    expect(stateView('synSent').text).toBe('Connecting');
+    expect(protoText('udp', true)).toBe('UDP · v6');
+  });
+
+  it('groups by program or host, biggest first, and collapsed groups hide their rows', () => {
+    const rows = [c('1.1.1.1'), c('2.2.2.2'), c('1.1.1.1', unknown), c('3.3.3.3')];
+    const byProc = tableRows(rows, 'process', new Set());
+    expect(byProc.filter((r) => r.kind === 'group').map((r) => (r.kind === 'group' ? r.title : ''))).toEqual(['node', 'Owner unknown']);
+    expect(byProc).toHaveLength(2 + 4);
+    const first = byProc[0]!;
+    expect(first.kind === 'group' && first.count === 3 && first.hosts === 3).toBe(true);
+    const collapsed = tableRows(rows, 'process', new Set(['node']));
+    expect(collapsed).toHaveLength(2 + 1);
+    const byHost = tableRows(rows, 'host', new Set());
+    expect(byHost[0]).toMatchObject({ kind: 'group', title: '1.1.1.1', count: 2, programs: 2 });
+  });
+
+  it('"none" is a really flat list with no group rows', () => {
+    const rows = tableRows([c('1.1.1.1'), c('2.2.2.2')], 'none', new Set(['node']));
+    expect(rows.every((r) => r.kind === 'item')).toBe(true);
+    expect(rows).toHaveLength(2);
+  });
+
+  it('summarises and sorts exposed listeners first', () => {
+    const s = summarise([c('1.1.1.1'), c('1.1.1.1', unknown), c('2.2.2.2')], [l(1, 'loopback'), l(2, 'allInterfaces')]);
+    expect(s).toEqual({ connections: 3, programs: 2, hosts: 2, exposed: 1 });
+    expect(sortListeners([l(1, 'loopback'), l(9, 'interface'), l(5, 'allInterfaces'), l(3, 'allInterfaces')]).map((x) => x.port)).toEqual([3, 5, 9, 1]);
+  });
+
+  it('formats endpoints and copyable lines', () => {
     expect(endpoint('1.2.3.4', 80)).toBe('1.2.3.4:80');
     expect(endpoint('::1', 80)).toBe('[::1]:80');
-    const l: ListenerRow = { proto: 'tcp', ipv6: false, local: '0.0.0.0', port: 3000, exposure: 'allInterfaces', owner, firstSeen: null };
-    expect(listenerLine(l)).toBe('tcp 0.0.0.0:3000 (node)');
+    expect(listenerLine(l(3000, 'allInterfaces'))).toBe('tcp 0.0.0.0:3000 (node)');
+    expect(connectionLine(c('8.8.8.8'))).toBe('tcp 1.1.1.1:1 -> 8.8.8.8:443 Established (node)');
+    expect(initial(' node')).toBe('N');
+    expect(initial('')).toBe('?');
   });
 });
