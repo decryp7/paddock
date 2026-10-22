@@ -400,6 +400,11 @@ export interface LocalModel {
   /** Per-model idle release in seconds; null: the global setting. */
   idleSecs: number | null;
   fit: Fit;
+  /**
+   * The engine chosen for this model: an installed pack engine id, or null/absent for llama.cpp. Optional because the
+   * server's `local_models` does not report it yet (the UI then remembers the choice it sent).
+   */
+  engine?: string | null;
 }
 
 export interface HfModel {
@@ -585,4 +590,40 @@ export interface AppUpdateStatus {
   available: boolean;
   reason: string | null;
   currentVersion: string;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Declarative packs (ADR 0011)
+
+/** A pack file that was skipped (problem) or loaded with a note (warning). */
+export interface PackNote {
+  file: string;
+  message: string;
+}
+
+/** An engine pack that is loaded. */
+export interface PackEngine {
+  id: string;
+  name: string;
+  version: string;
+}
+
+/** A catalog model and the variant that fits this machine best, with its verdict. */
+export interface Recommendation {
+  id: string;
+  name: string;
+  repo: string;
+  file: string;
+  quant: string | null;
+  sizeBytes: number;
+  tags: string[];
+  fit: Fit;
+  contextTokens: number;
+}
+
+export interface PacksInfo {
+  engines: PackEngine[];
+  problems: PackNote[];
+  warnings: PackNote[];
+  recommendations: Recommendation[];
 }

@@ -29,7 +29,7 @@ export interface KeySecretData {
     </div>
 
     <label class="sr-only" for="pw-key-secret">Secret key</label>
-    <div class="secret">
+    <div class="secret pitwall-selectable">
       <input id="pw-key-secret" class="mono" readonly [value]="data.created.secret" (focus)="$any($event.target).select()" spellcheck="false" autocomplete="off" />
       <button type="button" class="btn" [class.primary]="!copied()" (click)="copy()" cdkFocusInitial>
         <mat-icon [svgIcon]="copied() ? 'pw:check' : 'pw:copy'" aria-hidden="true" />{{ copied() ? 'Copied' : 'Copy' }}

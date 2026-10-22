@@ -28,7 +28,7 @@
     background: none;
     border: none;
     border-radius: var(--r-md);
-    cursor: pointer;
+    cursor: default;
     transition: background var(--dur-fast) var(--ease);
     mat-icon {
       width: 15px;
@@ -126,7 +126,7 @@
     background: none;
     border: none;
     border-radius: var(--r-sm);
-    cursor: pointer;
+    cursor: default;
     mat-icon {
       width: 13px;
       height: 13px;
@@ -163,7 +163,7 @@
   background: var(--bg-card);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  cursor: pointer;
+  cursor: default;
   transition:
     border-color var(--dur-fast) var(--ease),
     background var(--dur-fast) var(--ease);

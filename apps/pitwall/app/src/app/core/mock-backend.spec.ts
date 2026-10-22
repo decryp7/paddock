@@ -49,7 +49,7 @@ describe('MockBackend', () => {
     expect((await mock.events(3)).length).toBe(3);
     expect((await mock.searchModels('qwen')).every((m) => m.repo.toLowerCase().includes('qwen'))).toBe(true);
     expect((await mock.repoFiles('unsloth/gemma-3-12b-it-GGUF')).projectors.length).toBe(1);
-    expect((await mock.engines()).length).toBe(4);
+    expect((await mock.engines()).length).toBe(5);
     expect((await mock.apps()).length).toBe(5);
     expect((await mock.pairings()).length).toBe(1);
     expect((await mock.requests(10)).length).toBe(10);

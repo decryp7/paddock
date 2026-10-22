@@ -18,6 +18,7 @@ import type {
   LocalModel,
   MemorySample,
   Overview,
+  PacksInfo,
   PairingRequest,
   PitwallEvent,
   PlaygroundEvent,
@@ -46,6 +47,7 @@ import {
   demoHistory,
   demoLoaded,
   demoLocalModels,
+  demoPacks,
   demoPairings,
   demoRepo,
   demoRequests,
@@ -251,12 +253,13 @@ export class MockBackend implements PitwallBackend {
         this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, fit: demoFit(d.bytesTotal) });
       }
     } else {
-      const llama = this.engines_[0]!;
-      const cat = llama.catalog.find((c) => d.id.endsWith(c.id));
-      if (cat) {
+      const engine = this.engineOfBuild(d.id.replace(/^eng-\d+-/, ''));
+      const cat = engine?.catalog.find((c) => d.id.endsWith(c.id));
+      if (engine && cat) {
         cat.installed = true;
-        llama.builds = llama.builds.filter((b) => b.id !== cat.id);
-        llama.builds.push({ id: cat.id, tag: cat.tag, label: cat.label, sizeBytes: cat.downloadBytes * 1.05, selfTest: 'passed', selfTestMessage: 'Self-test passed', devices: [GPU_NAME], active: false, outdated: false });
+        engine.builds = engine.builds.filter((b) => b.id !== cat.id);
+        engine.builds.push({ id: cat.id, tag: cat.tag, label: cat.label, sizeBytes: cat.downloadBytes * 1.05, selfTest: 'passed', selfTestMessage: 'Self-test passed', devices: [engine.kind === 'pack' ? 'CPU' : GPU_NAME], active: engine.kind === 'pack', outdated: false });
+        if (engine.kind === 'pack') engine.availability = { state: 'available' };
       }
     }
     this.pushEvent({ kind: 'download', severity: 'info', message: `Downloaded ${d.name} (${(d.bytesTotal / GiB).toFixed(1)} GB, verified)`, modelId: null, appId: null, reason: null });
@@ -496,11 +499,30 @@ export class MockBackend implements PitwallBackend {
     return this.reply('engines', () => this.engines_);
   }
 
+  private engineOfBuild(buildId: string): Engine | undefined {
+    return this.engines_.find((e) => e.catalog.some((c) => c.id === buildId));
+  }
+
+  packs(tag: string | null = null): Promise<PacksInfo> {
+    return this.reply('packs', () => demoPacks(tag));
+  }
+
+  setModelEngine(id: string, engine: string | null): Promise<void> {
+    return this.reply('setModelEngine', () => {
+      const m = this.library.find((x) => x.id === id) ?? this.fail('notFound', `No model ${id}.`);
+      if (engine !== null && engine !== 'llama.cpp' && !this.engines_.some((e) => e.kind === 'pack' && e.catalog.some((c) => c.id === engine))) {
+        this.fail('notFound', `There is no engine pack "${engine}".`);
+      }
+      m.engine = engine === 'llama.cpp' ? null : engine;
+    });
+  }
+
   installBuild(buildId: string): Promise<Download> {
     return this.reply('installBuild', () => {
       if (this.server.offline) this.fail('offline', 'Offline mode is on: Pitwall downloads nothing.');
-      const cat = this.engines_[0]!.catalog.find((c) => c.id === buildId) ?? this.fail('notFound', `No build ${buildId} in the catalog.`);
-      const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: `llama.cpp ${cat.label} ${cat.tag}`, host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
+      const engine = this.engineOfBuild(buildId) ?? this.fail('notFound', `No build ${buildId} in the catalog.`);
+      const cat = engine.catalog.find((c) => c.id === buildId)!;
+      const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: `${engine.name} ${cat.label} ${cat.tag}`, host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
       this.downloads_.unshift(d);
       this.emit({ kind: 'download', download: clone(d) });
       return d;

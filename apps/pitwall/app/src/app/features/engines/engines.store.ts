@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { CatalogBuild, CommandError, Engine, InstalledBuild } from '../../core/api.types';
+import type { CatalogBuild, CommandError, Engine, InstalledBuild, PackNote } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
@@ -9,21 +9,24 @@ interface EnginesState {
   engines: Engine[];
   loading: boolean;
   loaded: boolean;
+  /** Pack files that were skipped, and non-fatal notes about loaded ones. */
+  packProblems: PackNote[];
+  packWarnings: PackNote[];
   error: CommandError | null;
   /** Actions in flight, by key (`install:<id>`, `remove:<id>:<tag>`, `select`, `rollback`). */
   busy: Record<string, true>;
 }
 
-const initial: EnginesState = { engines: [], loading: false, loaded: false, error: null, busy: {} };
+const initial: EnginesState = { engines: [], loading: false, loaded: false, packProblems: [], packWarnings: [], error: null, busy: {} };
 
 /** The Engines screen: llama.cpp builds (installed, catalog, choice, rollback), processes and planned engines. */
 export const EnginesStore = signalStore(
   withState(initial),
   withComputed(({ engines, busy }) => ({
     /** The engines that can serve today (llama.cpp first). */
-    available: computed(() => engines().filter((e) => e.availability.state === 'available' || e.builds.length > 0)),
+    available: computed(() => engines().filter((e) => e.availability.state === 'available' || e.builds.length > 0 || e.kind === 'pack')),
     /** Planned or unsupported engines, shown with their honest reason. */
-    planned: computed(() => engines().filter((e) => e.availability.state !== 'available' && e.builds.length === 0)),
+    planned: computed(() => engines().filter((e) => e.availability.state !== 'available' && e.builds.length === 0 && e.kind !== 'pack')),
     isBusy: computed(() => (key: string) => key in busy()),
   })),
   withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => {
@@ -39,6 +42,13 @@ export const EnginesStore = signalStore(
       try {
         const engines = await backend.engines();
         patchState(store, { engines, loading: false, loaded: true });
+        // Pack notes are secondary: a failure here must not hide the engines.
+        try {
+          const packs = await backend.packs();
+          patchState(store, { packProblems: packs.problems, packWarnings: packs.warnings });
+        } catch {
+          patchState(store, { packProblems: [], packWarnings: [] });
+        }
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
       }
@@ -66,7 +76,7 @@ export const EnginesStore = signalStore(
 
       /** Downloads, verifies and self-tests a catalog build; progress arrives as live download updates. */
       install(build: CatalogBuild): Promise<boolean> {
-        return act(`install:${build.id}`, () => backend.installBuild(build.id), `Installing llama.cpp ${build.label} ${build.tag}.`);
+        return act(`install:${build.id}`, () => backend.installBuild(build.id), `Installing ${build.label} ${build.tag}.`);
       },
 
       remove(build: InstalledBuild): Promise<boolean> {

@@ -234,7 +234,7 @@ import { PermissionsEditor } from './permissions-editor';
       background: none;
       border: none;
       border-radius: var(--r-md);
-      cursor: pointer;
+      cursor: default;
       &:hover {
         background: var(--bg-hover);
       }

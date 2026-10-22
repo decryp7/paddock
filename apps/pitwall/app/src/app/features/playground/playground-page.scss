@@ -119,7 +119,7 @@
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  cursor: pointer;
+  cursor: default;
   transition:
     background var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease);

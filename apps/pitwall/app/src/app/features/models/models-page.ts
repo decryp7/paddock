@@ -100,7 +100,7 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
         color: var(--text-2);
         background: none;
         border: none;
-        cursor: pointer;
+        cursor: default;
         &:hover {
           color: var(--text);
         }

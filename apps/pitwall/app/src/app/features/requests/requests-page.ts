@@ -180,7 +180,7 @@ export function msCell(ms: number | null): string {
         background: none;
         border: none;
         border-radius: var(--r-sm);
-        cursor: pointer;
+        cursor: default;
         &[aria-checked='true'] {
           color: var(--text);
           background: var(--bg-card);
@@ -220,7 +220,7 @@ export function msCell(ms: number | null): string {
       font-size: var(--fs-sm);
       border-bottom: 1px solid var(--border-soft);
       white-space: nowrap;
-      cursor: pointer;
+      cursor: default;
       outline: none;
       > span {
         min-width: 0;

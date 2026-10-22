@@ -16,6 +16,7 @@ import type {
   LiveUpdate,
   LocalModel,
   Overview,
+  PacksInfo,
   PairingRequest,
   PitwallEvent,
   PlaygroundEvent,
@@ -135,6 +136,12 @@ export class TauriBackend implements PitwallBackend {
   }
   diskUsage(): Promise<DiskUsage> {
     return this.run('disk_usage');
+  }
+  packs(tag: string | null = null): Promise<PacksInfo> {
+    return this.run('packs', { tag });
+  }
+  setModelEngine(id: string, engine: string | null): Promise<void> {
+    return this.run('set_model_engine', { id, engine });
   }
 
   // Engines

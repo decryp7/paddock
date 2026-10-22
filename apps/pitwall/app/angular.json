@@ -32,9 +32,6 @@
               }
             ],
             "styles": [
-              "node_modules/@fontsource/inter/latin-400.css",
-              "node_modules/@fontsource/inter/latin-500.css",
-              "node_modules/@fontsource/inter/latin-600.css",
               "node_modules/@angular/cdk/overlay-prebuilt.css",
               "src/styles.scss"
             ]
@@ -53,7 +50,15 @@
                   "maximumError": "24kB"
                 }
               ],
-              "outputHashing": "all"
+              "outputHashing": "all",
+              "optimization": {
+                "scripts": true,
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": false
+                },
+                "fonts": false
+              }
             },
             "development": {
               "optimization": false,

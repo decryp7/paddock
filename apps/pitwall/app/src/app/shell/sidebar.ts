@@ -283,7 +283,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
         background: none;
         border: none;
         border-radius: var(--r-sm);
-        cursor: pointer;
+        cursor: default;
         mat-icon {
           width: 13px;
           height: 13px;

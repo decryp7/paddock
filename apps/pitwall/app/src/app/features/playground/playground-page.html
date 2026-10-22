@@ -52,13 +52,13 @@
               }
               @for (t of pane.turns; track $index) {
                 @if (t.role === 'user') {
-                  <div class="turn user"><p class="text">{{ t.content }}</p></div>
+                  <div class="turn user"><p class="text pitwall-selectable">{{ t.content }}</p></div>
                 } @else {
                   <div class="turn bot">
                     <span class="avatar" aria-hidden="true"><mat-icon svgIcon="pw:sparkles" /></span>
                     <div class="body">
                       @if (t.content || !t.streaming) {
-                        <p class="text">{{ t.content }}@if (t.streaming) {<span class="caret" aria-hidden="true"></span>}</p>
+                        <p class="text pitwall-selectable">{{ t.content }}@if (t.streaming) {<span class="caret" aria-hidden="true"></span>}</p>
                       } @else {
                         <p class="thinking" aria-label="Waiting for the first token"><span></span><span></span><span></span></p>
                       }

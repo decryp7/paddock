@@ -12,7 +12,8 @@
   color-scheme: light;
 
   /* Type */
-  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* The operating system's UI font (ADR 0012): San Francisco on macOS, Segoe UI Variable on Windows, the desktop font on Linux. */
+  --font-sans: system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Cantarell, Ubuntu, 'Noto Sans', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
   --fs-2xs: 10.5px;
   --fs-xs: 11px;
@@ -248,7 +249,13 @@ body {
   font-family: var(--font-sans);
   font-size: var(--fs-base);
   line-height: var(--lh);
-  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  /* Desktop feel (ADR 0012): the window is application chrome, not a page. Nothing selects, drags, highlights on
+     tap or rubber-bands unless it opts in below; the pointer stays an arrow. */
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -292,6 +299,52 @@ kbd,
   outline-offset: 2px;
 }
 
+img,
+svg,
+a {
+  -webkit-user-drag: none;
+}
+
+/* Content the user copies opts in to selection (ADR 0012): text fields, code, request and error detail, and anything
+   marked `.pitwall-selectable`. Alerts and notes select by nature so a message can go into a bug report. */
+input,
+textarea,
+[contenteditable]:not([contenteditable='false']),
+[role='textbox'],
+[role='alert'],
+[role='note'],
+pre,
+code,
+.pitwall-selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Chrome inside selectable content (buttons on a row, tabs in a message) still does not select. */
+button,
+label,
+[role='button'],
+[role='tab'],
+.btn {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Text fields show the text cursor; everything else keeps the arrow, as in a native app. */
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='button'], [type='submit']),
+textarea,
+[contenteditable]:not([contenteditable='false']) {
+  cursor: text;
+}
+button,
+[role='button'],
+[role='tab'],
+a,
+select,
+summary {
+  cursor: default;
+}
+
 /* Scrollbars that recede */
 * {
   scrollbar-width: thin;
@@ -318,7 +371,7 @@ kbd,
   border: 1px solid var(--btn-border);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-1);
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
   user-select: none;
   transition:
@@ -665,7 +718,7 @@ textarea.input {
     background: none;
     border: none;
     border-radius: var(--r-sm);
-    cursor: pointer;
+    cursor: default;
     &:hover,
     &:focus-visible,
     &.cdk-menu-item:focus {

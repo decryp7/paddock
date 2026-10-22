@@ -4,6 +4,8 @@
  * deterministic. Browser development and UI tests only: this is never the reference for behaviour.
  */
 import type {
+  PacksInfo,
+  Recommendation,
   AppInfo,
   AppPermissions,
   BenchmarkResult,
@@ -176,6 +178,17 @@ export function demoEngines(now: number): Engine[] {
         { pid: 9960, modelId: 'nomic-embed-text-v1.5-f16', health: 'healthy', restarts: 0, rssBytes: 0.21 * GiB, startedAt: now - 5 * HOUR },
       ],
       rollbackTo: 'b11602',
+    },
+    {
+      kind: 'pack',
+      name: 'ik_llama.cpp (pack)',
+      description: 'A community fork with faster CPU and hybrid inference, added as a declarative engine pack (ADR 0011).',
+      availability: { state: 'notInstalled', reason: 'Install a build to serve models with this engine.' },
+      buildChoice: 'auto',
+      builds: [],
+      catalog: [{ id: 'ik-llama-cpu', label: 'CPU (AVX2)', tag: 'v0.9.2', downloadBytes: 29 * MiB, suggested: true, installed: false }],
+      processes: [],
+      rollbackTo: null,
     },
     { kind: 'whisper.cpp', name: 'whisper.cpp', description: 'Speech to text (OpenAI-compatible /v1/audio/transcriptions).', availability: { state: 'notInstalled', reason: 'Planned for a later version: transcription is not wired to the router yet.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
     { kind: 'mlx', name: 'MLX', description: "Apple's array framework for Apple silicon.", availability: { state: 'notAvailable', reason: 'MLX runs on Apple silicon only; this is a Windows PC.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
@@ -468,3 +481,43 @@ export function demoBenchmarks(now: number): BenchmarkResult[] {
 
 export const DEMO_REPLY =
   'Pitwall keeps models hot only while they are useful. When a model has been idle for the configured time it first releases the context (the KV cache), and later the weights, so your games and IDE get the memory back. Under memory pressure it releases the least recently used model at once, and pinned models stay loaded until you unpin them.';
+
+
+// ---- Packs -------------------------------------------------------------------------------------------------------
+
+interface DemoCatalogModel {
+  id: string;
+  name: string;
+  repo: string;
+  base: string;
+  quant: string;
+  sizeGiB: number;
+  tags: string[];
+}
+
+const DEMO_CATALOG: DemoCatalogModel[] = [
+  { id: 'qwen2.5-coder-7b', name: 'Qwen2.5 Coder 7B Instruct', repo: 'bartowski/Qwen2.5-Coder-7B-Instruct-GGUF', base: 'Qwen2.5-Coder-7B-Instruct', quant: 'Q4_K_M', sizeGiB: 4.4, tags: ['code', 'chat'] },
+  { id: 'qwen3-1.7b', name: 'Qwen3 1.7B', repo: 'unsloth/Qwen3-1.7B-GGUF', base: 'Qwen3-1.7B', quant: 'Q8_0', sizeGiB: 1.8, tags: ['small', 'chat'] },
+  { id: 'llama-3.2-3b', name: 'Llama 3.2 3B Instruct', repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF', base: 'Llama-3.2-3B-Instruct', quant: 'Q5_K_M', sizeGiB: 2.3, tags: ['small', 'chat'] },
+  { id: 'gemma-3-12b', name: 'Gemma 3 12B Instruct', repo: 'unsloth/gemma-3-12b-it-GGUF', base: 'gemma-3-12b-it', quant: 'Q4_K_M', sizeGiB: 6.9, tags: ['chat', 'vision'] },
+  { id: 'qwen3-32b', name: 'Qwen3 32B', repo: 'unsloth/Qwen3-32B-GGUF', base: 'Qwen3-32B', quant: 'Q4_K_M', sizeGiB: 19.8, tags: ['chat', 'reasoning'] },
+  { id: 'qwen3-coder-30b', name: 'Qwen3 Coder 30B A3B', repo: 'unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF', base: 'Qwen3-Coder-30B-A3B-Instruct', quant: 'Q4_K_M', sizeGiB: 18.6, tags: ['code'] },
+  { id: 'nomic-embed', name: 'Nomic Embed Text v1.5', repo: 'nomic-ai/nomic-embed-text-v1.5-GGUF', base: 'nomic-embed-text-v1.5', quant: 'F16', sizeGiB: 0.26, tags: ['small', 'embedding'] },
+];
+
+/** The demo packs (mock only): recommendations sorted fits first, optionally for one tag; one pack with a problem. */
+export function demoPacks(tag: string | null): PacksInfo {
+  const rank = { fits: 0, tight: 1, unknown: 2, wontFit: 3 } as const;
+  const recommendations = DEMO_CATALOG.filter((m) => !tag || m.tags.includes(tag))
+    .map((m): Recommendation => {
+      const sizeBytes = Math.round(m.sizeGiB * GiB);
+      return { id: m.id, name: m.name, repo: m.repo, file: `${m.base}-${m.quant}.gguf`, quant: m.quant, sizeBytes, tags: m.tags, fit: demoFit(sizeBytes), contextTokens: 8192 };
+    })
+    .sort((a, b) => rank[a.fit.verdict] - rank[b.fit.verdict] || a.sizeBytes - b.sizeBytes);
+  return {
+    engines: [{ id: 'ik-llama-cpu', name: 'ik_llama.cpp (pack)', version: '0.9.2' }],
+    problems: [{ file: 'packs/old-vllm.toml', message: 'skipped: unknown key `launch.cmd`; engine packs need `[launch] args`.' }],
+    warnings: [{ file: 'packs/ik-llama.toml', message: 'unknown key `notes` ignored.' }],
+    recommendations,
+  };
+}

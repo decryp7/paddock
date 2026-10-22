@@ -165,7 +165,7 @@ export function fitDetail(f: Fit): string {
       background: none;
       border: none;
       border-radius: var(--r-md);
-      cursor: pointer;
+      cursor: default;
       &:hover {
         background: var(--bg-hover);
       }

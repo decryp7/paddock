@@ -27,7 +27,7 @@ describe('EnginesStore', () => {
     const p = store.load();
     expect(store.loading()).toBe(true);
     await p;
-    expect(store.available().map((e) => e.kind)).toEqual(['llama.cpp']);
+    expect(store.available().map((e) => e.kind)).toEqual(['llama.cpp', 'pack']);
     expect(store.planned().map((e) => e.kind)).toEqual(['whisper.cpp', 'mlx', 'vllm']);
   });
 

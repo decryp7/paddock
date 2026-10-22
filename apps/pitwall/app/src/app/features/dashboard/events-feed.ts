@@ -19,7 +19,7 @@ import { EmptyState } from '../../shared/ui/empty-state';
         <li [attr.data-tone]="tone(e.severity)">
           <span class="ic"><mat-icon [svgIcon]="'pw:' + icon(e.kind)" aria-hidden="true" /></span>
           <div class="main">
-            <p class="msg">{{ e.message }}</p>
+            <p class="msg pitwall-selectable">{{ e.message }}</p>
             <p class="meta">
               <time class="num">{{ when(e.at, now()) }}</time>
               @if (e.reason) {

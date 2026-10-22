@@ -191,7 +191,7 @@ export class PerfMeter {
         background: none;
         border: none;
         border-radius: var(--r-sm);
-        cursor: pointer;
+        cursor: default;
         transition: background var(--dur-fast) var(--ease);
         &:hover:not(:disabled) {
           color: var(--text);

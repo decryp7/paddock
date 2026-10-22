@@ -155,7 +155,7 @@ const LIMITS: { key: LimitKey; label: string; unit: string }[] = [
       display: inline-flex;
       align-items: center;
       gap: var(--sp-2);
-      cursor: pointer;
+      cursor: default;
       input {
         accent-color: var(--accent);
         margin: 0;
@@ -199,7 +199,7 @@ const LIMITS: { key: LimitKey; label: string; unit: string }[] = [
         background: none;
         border: none;
         border-radius: var(--r-sm);
-        cursor: pointer;
+        cursor: default;
         &[aria-checked='true'] {
           color: var(--text);
           background: var(--bg-card);

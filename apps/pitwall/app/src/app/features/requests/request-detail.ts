@@ -17,7 +17,7 @@ import { RequestsStore } from './requests.store';
     <div class="inner" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
       <header>
         <div>
-          <p class="eyebrow mono">{{ r().id }}</p>
+          <p class="eyebrow mono pitwall-selectable">{{ r().id }}</p>
           <h2 id="pw-req-title"><span class="mono">{{ r().endpoint }}</span></h2>
           <p class="faint">{{ appName() }} · {{ when(r().at) }}</p>
         </div>
@@ -53,7 +53,7 @@ import { RequestsStore } from './requests.store';
 
       <section aria-labelledby="pw-req-route">
         <h3 id="pw-req-route">Routing</h3>
-        <dl class="kv">
+        <dl class="kv pitwall-selectable">
           <dt>API</dt><dd>{{ api[r().api] }}</dd>
           <dt>Model</dt><dd class="mono">{{ r().modelId ?? 'none' }}</dd>
           <dt>Chosen by</dt><dd>{{ chosen[r().chosenBy] }}</dd>

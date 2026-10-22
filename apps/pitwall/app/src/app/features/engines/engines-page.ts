@@ -32,6 +32,29 @@ import { EnginesStore } from './engines.store';
         @if (store.error(); as err) {
           <pw-panel heading="Engines" icon="engines" [error]="err" [ready]="false" (retry)="store.load()" />
         }
+        @if (store.packProblems().length || store.packWarnings().length) {
+          <section class="pack-notice" role="status" aria-label="Pack problems">
+            <mat-icon svgIcon="pw:alert" aria-hidden="true" />
+            <div>
+              <p class="head">
+                @if (store.packProblems().length) {
+                  {{ store.packProblems().length }} pack {{ store.packProblems().length === 1 ? 'file was' : 'files were' }} skipped.
+                } @else {
+                  Packs loaded with notes.
+                }
+                Fix the file and use Refresh.
+              </p>
+              <ul>
+                @for (n of store.packProblems(); track n.file + n.message) {
+                  <li><span class="mono">{{ n.file }}</span> {{ n.message }}</li>
+                }
+                @for (n of store.packWarnings(); track n.file + n.message) {
+                  <li class="warn"><span class="mono">{{ n.file }}</span> {{ n.message }}</li>
+                }
+              </ul>
+            </div>
+          </section>
+        }
         <div class="stack">
           @for (e of store.available(); track e.kind) {
             <pw-engine-card [engine]="e" [now]="now()" />
@@ -57,6 +80,33 @@ import { EnginesStore } from './engines.store';
     </div>
   `,
   styles: `
+    .pack-notice {
+      display: flex;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--sp-4);
+      background: var(--warn-soft);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      font-size: var(--fs-sm);
+      mat-icon {
+        flex: none;
+        width: 16px;
+        height: 16px;
+        color: var(--warn);
+      }
+      .head {
+        font-weight: var(--fw-semibold);
+      }
+      ul {
+        margin: var(--sp-1) 0 0;
+        padding: 0;
+        list-style: none;
+        color: var(--text-2);
+      }
+      li.warn {
+        color: var(--text-3);
+      }
+    }
     .stack {
       display: grid;
       gap: var(--sp-3);

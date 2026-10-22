@@ -15,6 +15,7 @@ import type {
   LiveUpdate,
   LocalModel,
   Overview,
+  PacksInfo,
   PairingRequest,
   PitwallEvent,
   PlaygroundEvent,
@@ -58,6 +59,10 @@ export interface PitwallBackend {
   pinModel(id: string, pinned: boolean): Promise<void>;
   setModelIdle(id: string, idleSecs: number | null): Promise<void>;
   diskUsage(): Promise<DiskUsage>;
+  /** Engine packs, pack problems and the catalog's recommendations for this machine, optionally for one tag. */
+  packs(tag?: string | null): Promise<PacksInfo>;
+  /** The engine for one model: an installed pack engine id, or null for llama.cpp. */
+  setModelEngine(id: string, engine: string | null): Promise<void>;
 
   // Engines
   engines(): Promise<Engine[]>;
