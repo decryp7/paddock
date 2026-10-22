@@ -4,8 +4,8 @@
 
 use super::{model_ref, object, opt, opt_f32, opt_u32, stops, ApiError, ModelEntry};
 use crate::chat::{
-    ChatEvent, ChatOutput, ChatRequest, EmbedOutput, EmbedRequest, Finish, Image, Message, ModelRef, OutputFormat, Part, Role, Tool, ToolCall,
-    ToolChoice,
+    ChatEvent, ChatOutput, ChatRequest, EmbedOutput, EmbedRequest, Finish, Image, Message, ModelRef, OutputFormat, Part, Role, Tool,
+    ToolCall, ToolChoice,
 };
 use serde_json::{json, Map, Value};
 
@@ -30,9 +30,12 @@ fn parts(v: &Value) -> Result<Vec<Part>, ApiError> {
             .map(|p| {
                 let t = p.get("type").and_then(Value::as_str).unwrap_or("text");
                 match t {
-                    "text" | "input_text" | "output_text" => {
-                        Ok(Part::Text(p.get("text").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("a text part has no `text`"))?.to_string()))
-                    }
+                    "text" | "input_text" | "output_text" => Ok(Part::Text(
+                        p.get("text")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| ApiError::invalid("a text part has no `text`"))?
+                            .to_string(),
+                    )),
                     "image_url" | "input_image" => {
                         let url = p
                             .get("image_url")
@@ -40,7 +43,10 @@ fn parts(v: &Value) -> Result<Vec<Part>, ApiError> {
                             .ok_or_else(|| ApiError::invalid("an image part has no `image_url`"))?;
                         Ok(Part::Image(Image::from_data_url(url)?))
                     }
-                    other => Err(ApiError::new(super::ErrorKind::NotAvailable, format!("content parts of type {other:?} are not supported"))),
+                    other => Err(ApiError::new(
+                        super::ErrorKind::NotAvailable,
+                        format!("content parts of type {other:?} are not supported"),
+                    )),
                 }
             })
             .collect(),
@@ -49,16 +55,24 @@ fn parts(v: &Value) -> Result<Vec<Part>, ApiError> {
 }
 
 fn tools(o: &Map<String, Value>) -> Result<Vec<Tool>, ApiError> {
-    let Some(list) = opt(o, "tools", Value::as_array, "an array")? else { return Ok(vec![]) };
+    let Some(list) = opt(o, "tools", Value::as_array, "an array")? else {
+        return Ok(vec![]);
+    };
     list.iter()
         .map(|t| {
             // Chat Completions nests the function; Responses puts name and parameters at the top.
             let f = t.get("function").unwrap_or(t);
-            let name = f.get("name").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("a tool has no `name`"))?;
+            let name = f
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ApiError::invalid("a tool has no `name`"))?;
             Ok(Tool {
                 name: name.to_string(),
                 description: f.get("description").and_then(Value::as_str).unwrap_or_default().to_string(),
-                parameters: f.get("parameters").cloned().unwrap_or_else(|| json!({"type": "object", "properties": {}})),
+                parameters: f
+                    .get("parameters")
+                    .cloned()
+                    .unwrap_or_else(|| json!({"type": "object", "properties": {}})),
             })
         })
         .collect()
@@ -83,14 +97,18 @@ fn tool_choice(o: &Map<String, Value>) -> Result<ToolChoice, ApiError> {
 }
 
 fn format(v: Option<&Value>) -> Result<OutputFormat, ApiError> {
-    let Some(f) = v.filter(|v| !v.is_null()) else { return Ok(OutputFormat::Text) };
+    let Some(f) = v.filter(|v| !v.is_null()) else {
+        return Ok(OutputFormat::Text);
+    };
     match f.get("type").and_then(Value::as_str) {
         Some("text") => Ok(OutputFormat::Text),
         Some("json_object") => Ok(OutputFormat::JsonObject),
         Some("json_schema") => {
             // Chat Completions: {json_schema: {schema}}; Responses: {schema} directly.
             let schema = f.pointer("/json_schema/schema").or_else(|| f.get("schema")).cloned();
-            schema.map(OutputFormat::JsonSchema).ok_or_else(|| ApiError::invalid("a json_schema format needs a `schema`"))
+            schema
+                .map(OutputFormat::JsonSchema)
+                .ok_or_else(|| ApiError::invalid("a json_schema format needs a `schema`"))
         }
         _ => Err(ApiError::invalid("unknown response format")),
     }
@@ -113,7 +131,11 @@ pub fn parse_chat(v: &Value) -> Result<ChatRequest, ApiError> {
     let msgs = opt(o, "messages", Value::as_array, "an array")?.ok_or_else(|| ApiError::invalid("`messages` is required"))?;
     let mut req = ChatRequest::default();
     for m in msgs {
-        let r = role(m.get("role").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("a message has no `role`"))?)?;
+        let r = role(
+            m.get("role")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ApiError::invalid("a message has no `role`"))?,
+        )?;
         let calls = m
             .get("tool_calls")
             .and_then(Value::as_array)
@@ -123,7 +145,11 @@ pub fn parse_chat(v: &Value) -> Result<ChatRequest, ApiError> {
                         let f = c.get("function").unwrap_or(&Value::Null);
                         Ok(ToolCall {
                             id: c.get("id").and_then(Value::as_str).unwrap_or_default().to_string(),
-                            name: f.get("name").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("a tool call has no name"))?.to_string(),
+                            name: f
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .ok_or_else(|| ApiError::invalid("a tool call has no name"))?
+                                .to_string(),
                             arguments: match f.get("arguments") {
                                 Some(Value::String(s)) => s.clone(),
                                 Some(other) => other.to_string(),
@@ -159,7 +185,10 @@ fn finish_reason(f: Option<Finish>) -> &'static str {
 }
 
 fn tool_calls_json(calls: &[ToolCall]) -> Value {
-    calls.iter().map(|c| json!({"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}})).collect()
+    calls
+        .iter()
+        .map(|c| json!({"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}))
+        .collect()
 }
 
 /// The `chat.completion` object.
@@ -201,7 +230,12 @@ pub struct ChatStream {
 impl ChatStream {
     /// A stream for one answer.
     pub fn new(id: &str, model: &str, created_secs: u64) -> ChatStream {
-        ChatStream { id: id.into(), model: model.into(), created: created_secs, started: false }
+        ChatStream {
+            id: id.into(),
+            model: model.into(),
+            created: created_secs,
+            started: false,
+        }
     }
 
     fn chunk(&self, delta: Value, finish: Option<&str>, usage: Option<Value>) -> String {
@@ -229,7 +263,12 @@ impl ChatStream {
         match e {
             ChatEvent::Delta(t) => out.push(self.chunk(json!({"content": t}), None, None)),
             ChatEvent::Reasoning(t) => out.push(self.chunk(json!({"reasoning_content": t}), None, None)),
-            ChatEvent::ToolCall { index, id, name, arguments } => {
+            ChatEvent::ToolCall {
+                index,
+                id,
+                name,
+                arguments,
+            } => {
                 let mut call = json!({"index": index, "function": {"arguments": arguments}});
                 if let Some(id) = id {
                     call["id"] = json!(id);
@@ -268,7 +307,12 @@ pub fn parse_responses(v: &Value) -> Result<ChatRequest, ApiError> {
                 match it.get("type").and_then(Value::as_str).unwrap_or("message") {
                     "message" => {
                         let r = role(it.get("role").and_then(Value::as_str).unwrap_or("user"))?;
-                        req.messages.push(Message { role: r, parts: parts(it.get("content").unwrap_or(&Value::Null))?, tool_calls: vec![], tool_call_id: None });
+                        req.messages.push(Message {
+                            role: r,
+                            parts: parts(it.get("content").unwrap_or(&Value::Null))?,
+                            tool_calls: vec![],
+                            tool_call_id: None,
+                        });
                     }
                     "function_call" => req.messages.push(Message {
                         role: Role::Assistant,
@@ -290,7 +334,12 @@ pub fn parse_responses(v: &Value) -> Result<ChatRequest, ApiError> {
                         tool_calls: vec![],
                         tool_call_id: it.get("call_id").and_then(Value::as_str).map(str::to_string),
                     }),
-                    other => return Err(ApiError::new(super::ErrorKind::NotAvailable, format!("input items of type {other:?} are not supported"))),
+                    other => {
+                        return Err(ApiError::new(
+                            super::ErrorKind::NotAvailable,
+                            format!("input items of type {other:?} are not supported"),
+                        ))
+                    }
                 }
             }
         }
@@ -300,7 +349,10 @@ pub fn parse_responses(v: &Value) -> Result<ChatRequest, ApiError> {
     req.max_tokens = opt_u32(o, "max_output_tokens")?;
     req.format = format(o.get("text").and_then(|t| t.get("format")))?;
     if o.get("previous_response_id").is_some_and(|v| !v.is_null()) {
-        return Err(ApiError::new(super::ErrorKind::NotAvailable, "Pitwall does not store responses: send the whole conversation in `input`"));
+        return Err(ApiError::new(
+            super::ErrorKind::NotAvailable,
+            "Pitwall does not store responses: send the whole conversation in `input`",
+        ));
     }
     req.check()?;
     Ok(req)
@@ -354,7 +406,14 @@ pub struct ResponsesStream {
 impl ResponsesStream {
     /// A stream for one answer.
     pub fn new(id: &str, model: &str, created_secs: u64) -> ResponsesStream {
-        ResponsesStream { id: id.into(), model: model.into(), created: created_secs, seq: 0, out: ChatOutput::default(), started: false }
+        ResponsesStream {
+            id: id.into(),
+            model: model.into(),
+            created: created_secs,
+            seq: 0,
+            out: ChatOutput::default(),
+            started: false,
+        }
     }
 
     fn emit(&mut self, name: &str, mut body: Value) -> String {
@@ -376,14 +435,20 @@ impl ResponsesStream {
         match e {
             ChatEvent::Delta(t) => {
                 let item = format!("msg_{}", self.id);
-                frames.push(self.emit("response.output_text.delta", json!({"item_id": item, "output_index": 0, "content_index": 0, "delta": t})));
+                frames.push(self.emit(
+                    "response.output_text.delta",
+                    json!({"item_id": item, "output_index": 0, "content_index": 0, "delta": t}),
+                ));
             }
             ChatEvent::Reasoning(_) | ChatEvent::ToolCall { .. } => {}
             ChatEvent::Done { .. } => {
                 if !self.out.text.is_empty() {
                     let item = format!("msg_{}", self.id);
                     let text = self.out.text.clone();
-                    frames.push(self.emit("response.output_text.done", json!({"item_id": item, "output_index": 0, "content_index": 0, "text": text})));
+                    frames.push(self.emit(
+                        "response.output_text.done",
+                        json!({"item_id": item, "output_index": 0, "content_index": 0, "text": text}),
+                    ));
                 }
                 for (i, item) in response_output(&self.out, &self.id).into_iter().enumerate() {
                     frames.push(self.emit("response.output_item.done", json!({"output_index": i, "item": item})));
@@ -403,14 +468,21 @@ pub fn parse_embeddings(v: &Value) -> Result<EmbedRequest, ApiError> {
         Some(Value::String(s)) => vec![s.clone()],
         Some(Value::Array(a)) => a
             .iter()
-            .map(|x| x.as_str().map(str::to_string).ok_or_else(|| ApiError::invalid("`input` must hold strings (token arrays are not supported)")))
+            .map(|x| {
+                x.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| ApiError::invalid("`input` must hold strings (token arrays are not supported)"))
+            })
             .collect::<Result<_, _>>()?,
         _ => return Err(ApiError::invalid("`input` is required")),
     };
     if o.get("encoding_format").and_then(Value::as_str).is_some_and(|f| f != "float") {
         return Err(ApiError::invalid("only `encoding_format: \"float\"` is supported"));
     }
-    let req = EmbedRequest { model: model_ref(o)?, input };
+    let req = EmbedRequest {
+        model: model_ref(o)?,
+        input,
+    };
     req.check()?;
     Ok(req)
 }
@@ -495,16 +567,46 @@ mod tests {
             (json!({"messages": [{"role": "robot", "content": "x"}]}), "unknown message role"),
             (json!({"messages": [{"role": "user", "content": 5}]}), "string or an array"),
             (json!({"messages": [{"role": "user", "content": [{"type": "text"}]}]}), "no `text`"),
-            (json!({"messages": [{"role": "user", "content": [{"type": "image_url"}]}]}), "no `image_url`"),
-            (json!({"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": "https://x/y.png"}]}]}), "never fetches"),
-            (json!({"messages": [{"role": "user", "content": [{"type": "input_audio"}]}]}), "not supported"),
-            (json!({"messages": [{"role": "assistant", "tool_calls": [{"function": {}}]}]}), "no name"),
-            (json!({"messages": [{"role": "user", "content": "x"}], "tool_choice": "maybe"}), "unknown tool_choice"),
-            (json!({"messages": [{"role": "user", "content": "x"}], "tool_choice": {}}), "names no function"),
-            (json!({"messages": [{"role": "user", "content": "x"}], "tools": [{"function": {}}]}), "no `name`"),
-            (json!({"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "yaml"}}), "unknown response format"),
-            (json!({"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "json_schema"}}), "needs a `schema`"),
-            (json!({"messages": [{"role": "user", "content": "x"}], "stream": "yes"}), "`stream` must be a boolean"),
+            (
+                json!({"messages": [{"role": "user", "content": [{"type": "image_url"}]}]}),
+                "no `image_url`",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": "https://x/y.png"}]}]}),
+                "never fetches",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": [{"type": "input_audio"}]}]}),
+                "not supported",
+            ),
+            (
+                json!({"messages": [{"role": "assistant", "tool_calls": [{"function": {}}]}]}),
+                "no name",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": "x"}], "tool_choice": "maybe"}),
+                "unknown tool_choice",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": "x"}], "tool_choice": {}}),
+                "names no function",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": "x"}], "tools": [{"function": {}}]}),
+                "no `name`",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "yaml"}}),
+                "unknown response format",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": "x"}], "response_format": {"type": "json_schema"}}),
+                "needs a `schema`",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": "x"}], "stream": "yes"}),
+                "`stream` must be a boolean",
+            ),
             (json!({"messages": []}), "no messages"),
         ];
         for (v, needle) in cases {
@@ -518,8 +620,16 @@ mod tests {
         assert_eq!(r.messages[0].tool_calls[1].arguments, "{}");
         assert_eq!(r.tool_choice, ToolChoice::Required);
         let r = parse_chat(&json!({"messages": [{"role": "user", "content": "x"}], "tool_choice": "none", "max_tokens": 9, "response_format": {"type": "json_object"}})).unwrap();
-        assert_eq!((r.tool_choice, r.max_tokens, r.format), (ToolChoice::None, Some(9), OutputFormat::JsonObject));
-        assert_eq!(parse_chat(&json!({"messages": [{"role": "user", "content": "x"}], "tool_choice": "auto"})).unwrap().tool_choice, ToolChoice::Auto);
+        assert_eq!(
+            (r.tool_choice, r.max_tokens, r.format),
+            (ToolChoice::None, Some(9), OutputFormat::JsonObject)
+        );
+        assert_eq!(
+            parse_chat(&json!({"messages": [{"role": "user", "content": "x"}], "tool_choice": "auto"}))
+                .unwrap()
+                .tool_choice,
+            ToolChoice::Auto
+        );
     }
 
     #[test]
@@ -529,7 +639,10 @@ mod tests {
             reasoning: "hm".into(),
             tool_calls: vec![],
             finish: Some(Finish::Stop),
-            usage: Usage { prompt_tokens: 3, completion_tokens: 1 },
+            usage: Usage {
+                prompt_tokens: 3,
+                completion_tokens: 1,
+            },
             timings: Some(Timings::default()),
         };
         let r = chat_response(&out, "chatcmpl-1", "m", 9);
@@ -540,7 +653,11 @@ mod tests {
         assert_eq!(r["usage"]["total_tokens"], 4);
         let calls = ChatOutput {
             text: String::new(),
-            tool_calls: vec![ToolCall { id: "c".into(), name: "f".into(), arguments: "{}".into() }],
+            tool_calls: vec![ToolCall {
+                id: "c".into(),
+                name: "f".into(),
+                arguments: "{}".into(),
+            }],
             finish: Some(Finish::ToolCalls),
             ..Default::default()
         };
@@ -548,7 +665,18 @@ mod tests {
         assert!(r["choices"][0]["message"]["content"].is_null());
         assert_eq!(r["choices"][0]["message"]["tool_calls"][0]["function"]["name"], "f");
         assert_eq!(r["choices"][0]["finish_reason"], "tool_calls");
-        assert_eq!(chat_response(&ChatOutput { finish: Some(Finish::Length), ..Default::default() }, "x", "m", 0)["choices"][0]["finish_reason"], "length");
+        assert_eq!(
+            chat_response(
+                &ChatOutput {
+                    finish: Some(Finish::Length),
+                    ..Default::default()
+                },
+                "x",
+                "m",
+                0
+            )["choices"][0]["finish_reason"],
+            "length"
+        );
 
         let mut s = ChatStream::new("id", "m", 1);
         let f = s.event(&ChatEvent::Delta("He".into()));
@@ -556,11 +684,28 @@ mod tests {
         assert!(f[0].contains("\"role\":\"assistant\""));
         assert!(f[1].starts_with("data: ") && f[1].contains("\"content\":\"He\""));
         assert!(s.event(&ChatEvent::Reasoning("r".into()))[0].contains("reasoning_content"));
-        let t = s.event(&ChatEvent::ToolCall { index: 0, id: Some("c".into()), name: Some("f".into()), arguments: "{".into() });
+        let t = s.event(&ChatEvent::ToolCall {
+            index: 0,
+            id: Some("c".into()),
+            name: Some("f".into()),
+            arguments: "{".into(),
+        });
         assert!(t[0].contains("\"name\":\"f\"") && t[0].contains("\"type\":\"function\""));
-        let t = s.event(&ChatEvent::ToolCall { index: 0, id: None, name: None, arguments: "}".into() });
+        let t = s.event(&ChatEvent::ToolCall {
+            index: 0,
+            id: None,
+            name: None,
+            arguments: "}".into(),
+        });
         assert!(!t[0].contains("\"name\""));
-        let d = s.event(&ChatEvent::Done { finish: Finish::Stop, usage: Usage { prompt_tokens: 1, completion_tokens: 2 }, timings: None });
+        let d = s.event(&ChatEvent::Done {
+            finish: Finish::Stop,
+            usage: Usage {
+                prompt_tokens: 1,
+                completion_tokens: 2,
+            },
+            timings: None,
+        });
         assert!(d[0].contains("\"finish_reason\":\"stop\"") && d[0].contains("\"total_tokens\":3"));
         assert_eq!(d[1], "data: [DONE]\n\n");
     }
@@ -591,18 +736,34 @@ mod tests {
         assert_eq!(r.tools[0].name, "f");
         assert_eq!(r.max_tokens, Some(10));
         assert!(matches!(r.format, OutputFormat::JsonSchema(_)));
-        assert_eq!(parse_responses(&json!({"input": "hello"})).unwrap().messages[0].text_content(), "hello");
+        assert_eq!(
+            parse_responses(&json!({"input": "hello"})).unwrap().messages[0].text_content(),
+            "hello"
+        );
         assert!(parse_responses(&json!({})).unwrap_err().to_string().contains("`input` is required"));
-        assert!(parse_responses(&json!({"input": [{"type": "reasoning"}]})).unwrap_err().to_string().contains("not supported"));
-        assert!(parse_responses(&json!({"input": "x", "previous_response_id": "r1"})).unwrap_err().to_string().contains("does not store"));
+        assert!(parse_responses(&json!({"input": [{"type": "reasoning"}]}))
+            .unwrap_err()
+            .to_string()
+            .contains("not supported"));
+        assert!(parse_responses(&json!({"input": "x", "previous_response_id": "r1"}))
+            .unwrap_err()
+            .to_string()
+            .contains("does not store"));
         let tools_default = parse_responses(&json!({"input": "x", "tools": [{"name": "g"}]})).unwrap();
         assert_eq!(tools_default.tools[0].parameters["type"], "object");
 
         let out = ChatOutput {
             text: "ok".into(),
-            tool_calls: vec![ToolCall { id: "c".into(), name: "f".into(), arguments: "{}".into() }],
+            tool_calls: vec![ToolCall {
+                id: "c".into(),
+                name: "f".into(),
+                arguments: "{}".into(),
+            }],
             finish: Some(Finish::ToolCalls),
-            usage: Usage { prompt_tokens: 2, completion_tokens: 3 },
+            usage: Usage {
+                prompt_tokens: 2,
+                completion_tokens: 3,
+            },
             ..Default::default()
         };
         let r = responses_response(&out, "resp_1", "m", 5);
@@ -611,7 +772,15 @@ mod tests {
         assert_eq!(r["output"][0]["content"][0]["type"], "output_text");
         assert_eq!(r["output"][1]["type"], "function_call");
         assert_eq!(r["usage"]["total_tokens"], 5);
-        let cut = responses_response(&ChatOutput { finish: Some(Finish::Length), ..Default::default() }, "r", "m", 0);
+        let cut = responses_response(
+            &ChatOutput {
+                finish: Some(Finish::Length),
+                ..Default::default()
+            },
+            "r",
+            "m",
+            0,
+        );
         assert_eq!(cut["status"], "incomplete");
         assert_eq!(cut["incomplete_details"]["reason"], "max_output_tokens");
 
@@ -619,11 +788,19 @@ mod tests {
         let f = s.event(&ChatEvent::Delta("a".into()));
         assert!(f[0].starts_with("event: response.created\n") && f[1].contains("response.output_text.delta"));
         assert!(s.event(&ChatEvent::Reasoning("x".into())).is_empty());
-        let f = s.event(&ChatEvent::Done { finish: Finish::Stop, usage: Usage::default(), timings: None });
+        let f = s.event(&ChatEvent::Done {
+            finish: Finish::Stop,
+            usage: Usage::default(),
+            timings: None,
+        });
         assert!(f[0].contains("output_text.done") && f.last().unwrap().contains("response.completed"));
         assert!(f.last().unwrap().contains("\"sequence_number\":"));
         let mut empty = ResponsesStream::new("r3", "m", 1);
-        let f = empty.event(&ChatEvent::Done { finish: Finish::Stop, usage: Usage::default(), timings: None });
+        let f = empty.event(&ChatEvent::Done {
+            finish: Finish::Stop,
+            usage: Usage::default(),
+            timings: None,
+        });
         assert!(!f.iter().any(|x| x.contains("output_text.done")));
     }
 
@@ -631,12 +808,21 @@ mod tests {
     fn embeddings_and_models() {
         let r = parse_embeddings(&json!({"model": "e", "input": ["a", "b"]})).unwrap();
         assert_eq!(r.input, vec!["a", "b"]);
-        assert_eq!(parse_embeddings(&json!({"input": "a", "encoding_format": "float"})).unwrap().input, vec!["a"]);
-        assert!(parse_embeddings(&json!({"input": [[1, 2]]})).unwrap_err().to_string().contains("token arrays"));
+        assert_eq!(
+            parse_embeddings(&json!({"input": "a", "encoding_format": "float"})).unwrap().input,
+            vec!["a"]
+        );
+        assert!(parse_embeddings(&json!({"input": [[1, 2]]}))
+            .unwrap_err()
+            .to_string()
+            .contains("token arrays"));
         assert!(parse_embeddings(&json!({"input": "a", "encoding_format": "base64"})).is_err());
         assert!(parse_embeddings(&json!({})).is_err());
         assert!(parse_embeddings(&json!({"input": []})).is_err());
-        let out = EmbedOutput { vectors: vec![vec![1.0], vec![2.0]], prompt_tokens: 4 };
+        let out = EmbedOutput {
+            vectors: vec![vec![1.0], vec![2.0]],
+            prompt_tokens: 4,
+        };
         let r = embeddings_response(&out, "e");
         assert_eq!(r["data"][1]["index"], 1);
         assert_eq!(r["data"][1]["object"], "embedding");

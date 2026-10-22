@@ -24,7 +24,17 @@ const MAX_MODELS: usize = 500;
 const MAX_VARIANTS: usize = 32;
 
 /// The placeholders an argument template may use.
-pub const PLACEHOLDERS: &[&str] = &["host", "port", "model", "mmproj", "context", "alias", "threads", "engine_dir", "binary"];
+pub const PLACEHOLDERS: &[&str] = &[
+    "host",
+    "port",
+    "model",
+    "mmproj",
+    "context",
+    "alias",
+    "threads",
+    "engine_dir",
+    "binary",
+];
 
 /// A problem with a pack, attributed to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,7 +171,10 @@ pub struct Packs {
 }
 
 fn is_slug(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) && s.starts_with(|c: char| c.is_ascii_alphanumeric())
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && s.starts_with(|c: char| c.is_ascii_alphanumeric())
 }
 
 fn is_sha256(s: &str) -> bool {
@@ -169,11 +182,18 @@ fn is_sha256(s: &str) -> bool {
 }
 
 fn is_platform(s: &str) -> bool {
-    matches!(s, "windows-x64" | "windows-arm64" | "macos-arm64" | "macos-x64" | "linux-x64" | "linux-arm64")
+    matches!(
+        s,
+        "windows-x64" | "windows-arm64" | "macos-arm64" | "macos-x64" | "linux-x64" | "linux-arm64"
+    )
 }
 
 fn is_file_name(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 200 && !s.starts_with('.') && !s.contains("..") && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+    !s.is_empty()
+        && s.len() <= 200
+        && !s.starts_with('.')
+        && !s.contains("..")
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
 }
 
 /// The placeholders used in a template, or the first malformed one.
@@ -201,7 +221,10 @@ pub fn fill(template: &str, values: &[(&str, String)]) -> Result<String, String>
         let after = &rest[i + 1..];
         let j = after.find('}').ok_or("unclosed placeholder")?;
         let name = &after[..j];
-        let v = values.iter().find(|(k, _)| *k == name).ok_or_else(|| format!("no value for {{{name}}}"))?;
+        let v = values
+            .iter()
+            .find(|(k, _)| *k == name)
+            .ok_or_else(|| format!("no value for {{{name}}}"))?;
         out.push_str(&v.1);
         rest = &after[j + 1..];
     }
@@ -214,7 +237,10 @@ type Table = toml::map::Map<String, toml::Value>;
 /// Known keys per table, for the unknown-key warnings.
 fn warn_unknown(t: &Table, known: &[&str], path: &str, file: &str, out: &mut Vec<Problem>) {
     for k in t.keys().filter(|k| !known.contains(&k.as_str())) {
-        out.push(Problem { file: file.into(), message: format!("unknown key \"{path}{k}\" is ignored") });
+        out.push(Problem {
+            file: file.into(),
+            message: format!("unknown key \"{path}{k}\" is ignored"),
+        });
     }
 }
 
@@ -243,31 +269,76 @@ pub fn parse_engine(text: &str, file: &str, warnings: &mut Vec<Problem>) -> Resu
     if u(&t, "format") != Some(u64::from(FORMAT)) {
         return Err(format!("\"format\" must be {FORMAT}"));
     }
-    warn_unknown(&t, &["format", "id", "name", "description", "version", "capabilities", "launch", "health", "memory", "download"], "", file, warnings);
-    let id = s(&t, "id").filter(|i| is_slug(i)).ok_or("\"id\" must be 1 to 64 letters, digits, - _ . ")?;
+    warn_unknown(
+        &t,
+        &[
+            "format",
+            "id",
+            "name",
+            "description",
+            "version",
+            "capabilities",
+            "launch",
+            "health",
+            "memory",
+            "download",
+        ],
+        "",
+        file,
+        warnings,
+    );
+    let id = s(&t, "id")
+        .filter(|i| is_slug(i))
+        .ok_or("\"id\" must be 1 to 64 letters, digits, - _ . ")?;
     if id == "llama.cpp" || id == "llamacpp" {
         return Err("\"id\" clashes with the built-in llama.cpp engine".into());
     }
-    let name = s(&t, "name").filter(|n| !n.trim().is_empty() && n.len() <= 80).ok_or("\"name\" is required (at most 80 characters)")?;
-    let version = s(&t, "version").filter(|v| is_file_name(v)).ok_or("\"version\" is required: pin the engine version")?;
+    let name = s(&t, "name")
+        .filter(|n| !n.trim().is_empty() && n.len() <= 80)
+        .ok_or("\"name\" is required (at most 80 characters)")?;
+    let version = s(&t, "version")
+        .filter(|v| is_file_name(v))
+        .ok_or("\"version\" is required: pin the engine version")?;
     let c = sub(&t, "capabilities").ok_or("[capabilities] is required")?;
     warn_unknown(c, &["chat", "embeddings", "vision", "tools"], "capabilities.", file, warnings);
-    let caps = EngineCaps { chat: b(c, "chat"), embeddings: b(c, "embeddings"), vision: b(c, "vision"), tools: b(c, "tools") };
+    let caps = EngineCaps {
+        chat: b(c, "chat"),
+        embeddings: b(c, "embeddings"),
+        vision: b(c, "vision"),
+        tools: b(c, "tools"),
+    };
     if !caps.chat && !caps.embeddings {
         return Err("[capabilities] must enable chat or embeddings".into());
     }
     let l = sub(&t, "launch").ok_or("[launch] is required")?;
-    warn_unknown(l, &["command", "args", "api_key_env", "start_timeout_secs"], "launch.", file, warnings);
-    let command = s(l, "command").filter(|c| !c.is_empty() && c.len() <= 300).ok_or("launch.command is required")?;
-    let args: Vec<String> = l.get("args").and_then(toml::Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+    warn_unknown(
+        l,
+        &["command", "args", "api_key_env", "start_timeout_secs"],
+        "launch.",
+        file,
+        warnings,
+    );
+    let command = s(l, "command")
+        .filter(|c| !c.is_empty() && c.len() <= 300)
+        .ok_or("launch.command is required")?;
+    let args: Vec<String> = l
+        .get("args")
+        .and_then(toml::Value::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
     if args.len() > MAX_ARGS || args.iter().any(|a| a.len() > 300 || a.chars().any(char::is_control)) {
-        return Err(format!("launch.args must have at most {MAX_ARGS} entries without control characters"));
+        return Err(format!(
+            "launch.args must have at most {MAX_ARGS} entries without control characters"
+        ));
     }
     let mut used: Vec<String> = vec![];
     for tpl in std::iter::once(&command).chain(args.iter()) {
         for p in placeholders(tpl)? {
             if !PLACEHOLDERS.contains(&p) {
-                return Err(format!("unknown placeholder {{{p}}}; use one of {}", PLACEHOLDERS.iter().map(|p| format!("{{{p}}}")).collect::<Vec<_>>().join(", ")));
+                return Err(format!(
+                    "unknown placeholder {{{p}}}; use one of {}",
+                    PLACEHOLDERS.iter().map(|p| format!("{{{p}}}")).collect::<Vec<_>>().join(", ")
+                ));
             }
             used.push(p.to_string());
         }
@@ -281,33 +352,95 @@ pub fn parse_engine(text: &str, file: &str, warnings: &mut Vec<Problem>) -> Resu
         return Err("launch.args must not bind all interfaces; use {host}".into());
     }
     let api_key_env = s(l, "api_key_env");
-    if api_key_env.as_deref().is_some_and(|e| e.is_empty() || !e.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')) {
+    if api_key_env
+        .as_deref()
+        .is_some_and(|e| e.is_empty() || !e.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
+    {
         return Err("launch.api_key_env must be an UPPER_CASE variable name".into());
     }
     let start_timeout_secs = u(l, "start_timeout_secs").unwrap_or(300).clamp(5, 1800);
     let h = sub(&t, "health").ok_or("[health] is required")?;
     warn_unknown(h, &["path"], "health.", file, warnings);
-    let health_path = s(h, "path").filter(|p| p.starts_with('/') && !p.contains(' ') && p.len() <= 100).ok_or("health.path must start with /")?;
+    let health_path = s(h, "path")
+        .filter(|p| p.starts_with('/') && !p.contains(' ') && p.len() <= 100)
+        .ok_or("health.path must start with /")?;
     let overhead_bytes = sub(&t, "memory").and_then(|m| u(m, "overhead_mib")).unwrap_or(512).min(1 << 20) << 20;
     if let Some(m) = sub(&t, "memory") {
         warn_unknown(m, &["overhead_mib"], "memory.", file, warnings);
     }
     let mut downloads = vec![];
-    for (i, d) in t.get("download").and_then(toml::Value::as_array).map(Vec::as_slice).unwrap_or_default().iter().enumerate() {
+    for (i, d) in t
+        .get("download")
+        .and_then(toml::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+    {
         let d = d.as_table().ok_or_else(|| format!("download #{} is not a table", i + 1))?;
-        warn_unknown(d, &["platform", "url", "sha256", "size", "archive", "binary"], "download.", file, warnings);
-        let platform = s(d, "platform").filter(|p| is_platform(p)).ok_or_else(|| format!("download #{}: \"platform\" must be windows-x64, windows-arm64, macos-arm64, macos-x64, linux-x64 or linux-arm64", i + 1))?;
-        let url = s(d, "url").ok_or_else(|| format!("download #{}: \"url\" is required", i + 1)).and_then(|u| DownloadUrl::parse(&u).map_err(|e| format!("download #{}: {e}", i + 1)))?;
-        let sha256 = s(d, "sha256").map(|h| h.to_ascii_lowercase()).filter(|h| is_sha256(h)).ok_or_else(|| format!("download #{}: \"sha256\" must be 64 hex characters: downloads are always verified", i + 1))?;
-        let size = u(d, "size").filter(|n| *n > 0).ok_or_else(|| format!("download #{}: \"size\" is required", i + 1))?;
-        let archive: Archive = d.get("archive").cloned().unwrap_or_else(|| toml::Value::String("none".into())).try_into().map_err(|_| format!("download #{}: \"archive\" must be none, zip or tar-gz", i + 1))?;
-        let binary = s(d, "binary").filter(|b| is_file_name(b)).ok_or_else(|| format!("download #{}: \"binary\" must be a plain file name", i + 1))?;
+        warn_unknown(
+            d,
+            &["platform", "url", "sha256", "size", "archive", "binary"],
+            "download.",
+            file,
+            warnings,
+        );
+        let platform = s(d, "platform").filter(|p| is_platform(p)).ok_or_else(|| {
+            format!(
+                "download #{}: \"platform\" must be windows-x64, windows-arm64, macos-arm64, macos-x64, linux-x64 or linux-arm64",
+                i + 1
+            )
+        })?;
+        let url = s(d, "url")
+            .ok_or_else(|| format!("download #{}: \"url\" is required", i + 1))
+            .and_then(|u| DownloadUrl::parse(&u).map_err(|e| format!("download #{}: {e}", i + 1)))?;
+        let sha256 = s(d, "sha256")
+            .map(|h| h.to_ascii_lowercase())
+            .filter(|h| is_sha256(h))
+            .ok_or_else(|| {
+                format!(
+                    "download #{}: \"sha256\" must be 64 hex characters: downloads are always verified",
+                    i + 1
+                )
+            })?;
+        let size = u(d, "size")
+            .filter(|n| *n > 0)
+            .ok_or_else(|| format!("download #{}: \"size\" is required", i + 1))?;
+        let archive: Archive = d
+            .get("archive")
+            .cloned()
+            .unwrap_or_else(|| toml::Value::String("none".into()))
+            .try_into()
+            .map_err(|_| format!("download #{}: \"archive\" must be none, zip or tar-gz", i + 1))?;
+        let binary = s(d, "binary")
+            .filter(|b| is_file_name(b))
+            .ok_or_else(|| format!("download #{}: \"binary\" must be a plain file name", i + 1))?;
         if downloads.iter().any(|x: &Download| x.platform == platform) {
             return Err(format!("download #{}: platform {platform} is listed twice", i + 1));
         }
-        downloads.push(Download { platform, url, sha256, size, archive, binary });
+        downloads.push(Download {
+            platform,
+            url,
+            sha256,
+            size,
+            archive,
+            binary,
+        });
     }
-    Ok(EnginePack { id, name, description: s(&t, "description").unwrap_or_default(), version, caps, command, args, api_key_env, health_path, overhead_bytes, start_timeout_secs, downloads })
+    Ok(EnginePack {
+        id,
+        name,
+        description: s(&t, "description").unwrap_or_default(),
+        version,
+        caps,
+        command,
+        args,
+        api_key_env,
+        health_path,
+        overhead_bytes,
+        start_timeout_secs,
+        downloads,
+    })
 }
 
 /// Parse a model catalog pack.
@@ -320,21 +453,42 @@ pub fn parse_models(text: &str, file: &str, warnings: &mut Vec<Problem>) -> Resu
         return Err(format!("\"format\" must be {FORMAT}"));
     }
     warn_unknown(&t, &["format", "id", "name", "model"], "", file, warnings);
-    s(&t, "id").filter(|i| is_slug(i)).ok_or("\"id\" must be 1 to 64 letters, digits, - _ .")?;
+    s(&t, "id")
+        .filter(|i| is_slug(i))
+        .ok_or("\"id\" must be 1 to 64 letters, digits, - _ .")?;
     let mut out: Vec<CatalogModel> = vec![];
-    let list = t.get("model").and_then(toml::Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let list = t
+        .get("model")
+        .and_then(toml::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     if list.len() > MAX_MODELS {
         return Err(format!("at most {MAX_MODELS} models per pack"));
     }
     for (i, m) in list.iter().enumerate() {
         let n = i + 1;
         let m = m.as_table().ok_or_else(|| format!("model #{n} is not a table"))?;
-        warn_unknown(m, &["id", "name", "repo", "context", "capabilities", "tags", "variants"], "model.", file, warnings);
-        let id = s(m, "id").filter(|i| is_slug(i)).ok_or_else(|| format!("model #{n}: \"id\" must be 1 to 64 letters, digits, - _ ."))?;
+        warn_unknown(
+            m,
+            &["id", "name", "repo", "context", "capabilities", "tags", "variants"],
+            "model.",
+            file,
+            warnings,
+        );
+        let id = s(m, "id")
+            .filter(|i| is_slug(i))
+            .ok_or_else(|| format!("model #{n}: \"id\" must be 1 to 64 letters, digits, - _ ."))?;
         let repo = s(m, "repo").ok_or_else(|| format!("model {id}: \"repo\" is required"))?;
         crate::hf::RepoId::parse(&repo).map_err(|e| format!("model {id}: {e}"))?;
-        let context = u(m, "context").filter(|c| (256..=10_000_000).contains(c)).ok_or_else(|| format!("model {id}: \"context\" must be 256 to 10000000"))? as u32;
-        let strings = |k: &str| -> Vec<String> { m.get(k).and_then(toml::Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default() };
+        let context = u(m, "context")
+            .filter(|c| (256..=10_000_000).contains(c))
+            .ok_or_else(|| format!("model {id}: \"context\" must be 256 to 10000000"))? as u32;
+        let strings = |k: &str| -> Vec<String> {
+            m.get(k)
+                .and_then(toml::Value::as_array)
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        };
         let mut capabilities = vec![];
         for c in strings("capabilities") {
             capabilities.push(Capability::parse(&c).ok_or_else(|| format!("model {id}: unknown capability \"{c}\""))?);
@@ -346,7 +500,11 @@ pub fn parse_models(text: &str, file: &str, warnings: &mut Vec<Problem>) -> Resu
         if tags.iter().any(|t| !is_slug(t)) {
             return Err(format!("model {id}: tags are lowercase words"));
         }
-        let vs = m.get("variants").and_then(toml::Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        let vs = m
+            .get("variants")
+            .and_then(toml::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         if vs.is_empty() || vs.len() > MAX_VARIANTS {
             return Err(format!("model {id}: \"variants\" needs 1 to {MAX_VARIANTS} entries"));
         }
@@ -354,18 +512,30 @@ pub fn parse_models(text: &str, file: &str, warnings: &mut Vec<Problem>) -> Resu
         for v in vs {
             let v = v.as_table().ok_or_else(|| format!("model {id}: a variant is not a table"))?;
             warn_unknown(v, &["quant", "file", "size_bytes"], "model.variants.", file, warnings);
-            let file_name = s(v, "file").filter(|f| crate::hf::valid_file_path(f) && f.ends_with(".gguf")).ok_or_else(|| format!("model {id}: a variant needs a \"file\" ending in .gguf"))?;
+            let file_name = s(v, "file")
+                .filter(|f| crate::hf::valid_file_path(f) && f.ends_with(".gguf"))
+                .ok_or_else(|| format!("model {id}: a variant needs a \"file\" ending in .gguf"))?;
             variants.push(CatalogVariant {
                 quant: s(v, "quant").unwrap_or_default(),
                 file: file_name,
-                size_bytes: u(v, "size_bytes").filter(|n| *n > 0).ok_or_else(|| format!("model {id}: a variant needs \"size_bytes\""))?,
+                size_bytes: u(v, "size_bytes")
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| format!("model {id}: a variant needs \"size_bytes\""))?,
             });
         }
         variants.sort_by_key(|v| v.size_bytes);
         if out.iter().any(|x| x.id == id) {
             return Err(format!("model {id} is listed twice"));
         }
-        out.push(CatalogModel { name: s(m, "name").unwrap_or_else(|| id.clone()), id, repo, context, capabilities, tags, variants });
+        out.push(CatalogModel {
+            name: s(m, "name").unwrap_or_else(|| id.clone()),
+            id,
+            repo,
+            context,
+            capabilities,
+            tags,
+            variants,
+        });
     }
     Ok(out)
 }
@@ -383,7 +553,10 @@ impl Packs {
                         p.engines.retain(|x| x.id != e.id);
                         p.engines.push(e);
                     }
-                    Err(m) => p.problems.push(Problem { file: name.into(), message: m }),
+                    Err(m) => p.problems.push(Problem {
+                        file: name.into(),
+                        message: m,
+                    }),
                 }
             } else if name.ends_with(".models.toml") {
                 match parse_models(text, name, &mut w) {
@@ -393,10 +566,16 @@ impl Packs {
                             p.models.push(m);
                         }
                     }
-                    Err(m) => p.problems.push(Problem { file: name.into(), message: m }),
+                    Err(m) => p.problems.push(Problem {
+                        file: name.into(),
+                        message: m,
+                    }),
                 }
             } else {
-                p.problems.push(Problem { file: name.into(), message: "pack files are named *.engine.toml or *.models.toml".into() });
+                p.problems.push(Problem {
+                    file: name.into(),
+                    message: "pack files are named *.engine.toml or *.models.toml".into(),
+                });
             }
             p.warnings.extend(w);
         }
@@ -405,7 +584,10 @@ impl Packs {
 
     /// The built-in packs.
     pub fn builtin() -> Packs {
-        Packs::load([("llamafile.engine.toml", include_str!("packs/llamafile.engine.toml")), ("starter.models.toml", include_str!("packs/starter.models.toml"))])
+        Packs::load([
+            ("llamafile.engine.toml", include_str!("packs/llamafile.engine.toml")),
+            ("starter.models.toml", include_str!("packs/starter.models.toml")),
+        ])
     }
 }
 
@@ -416,10 +598,26 @@ pub fn recommend(models: &[CatalogModel], tag: Option<&str>, room: &Room) -> Vec
     for m in models.iter().filter(|m| tag.is_none_or(|t| m.tags.iter().any(|x| x == t))) {
         let ctx = m.context.min(8192);
         let assess = |v: &CatalogVariant| fit::assess(Some(&ModelSize::from_file(v.size_bytes, Some(&v.quant))), ctx, room);
-        let fits = m.variants.iter().filter(|v| assess(v).verdict == Verdict::Fits).max_by_key(|v| v.size_bytes);
-        let tight = m.variants.iter().filter(|v| assess(v).verdict == Verdict::Tight).max_by_key(|v| v.size_bytes);
+        let fits = m
+            .variants
+            .iter()
+            .filter(|v| assess(v).verdict == Verdict::Fits)
+            .max_by_key(|v| v.size_bytes);
+        let tight = m
+            .variants
+            .iter()
+            .filter(|v| assess(v).verdict == Verdict::Tight)
+            .max_by_key(|v| v.size_bytes);
         if let Some((v, rank)) = fits.map(|v| (v, 0u8)).or(tight.map(|v| (v, 1))) {
-            out.push((rank, u64::MAX - v.size_bytes, Recommendation { model: m.clone(), variant: v.clone(), fit: assess(v) }));
+            out.push((
+                rank,
+                u64::MAX - v.size_bytes,
+                Recommendation {
+                    model: m.clone(),
+                    variant: v.clone(),
+                    fit: assess(v),
+                },
+            ));
         }
     }
     out.sort_by_key(|(r, s, _)| (*r, *s));
@@ -465,7 +663,10 @@ binary = "kobold"
     fn a_good_engine_pack_parses() {
         let mut w = vec![];
         let e = parse_engine(&engine(&format!("{DL}\n[memory]\noverhead_mib = 100\n")), "k.engine.toml", &mut w).unwrap();
-        assert_eq!((e.id.as_str(), e.version.as_str(), e.overhead_bytes, e.downloads[0].archive), ("kobold", "1.2.3", 100 << 20, Archive::TarGz));
+        assert_eq!(
+            (e.id.as_str(), e.version.as_str(), e.overhead_bytes, e.downloads[0].archive),
+            ("kobold", "1.2.3", 100 << 20, Archive::TarGz)
+        );
         assert_eq!(e.downloads[0].url.host(), "github.com");
         assert!(w.is_empty());
     }
@@ -537,20 +738,38 @@ variants = [{ quant = "Q4_K_M", file = "huge-q4.gguf", size_bytes = 90000000000 
         assert!(e(&MODELS.replace("o/tiny", "nonsense")).contains("repo") || e(&MODELS.replace("o/tiny", "nonsense")).contains("tiny"));
         assert!(e(&MODELS.replace("\"chat\"]\ntags", "\"telepathy\"]\ntags")).contains("capability"));
         assert!(e(&MODELS.replace("tiny-q8.gguf", "tiny-q8.bin")).contains(".gguf"));
-        assert!(e(&MODELS.replace("context = 4096\ncapabilities = [\"chat\"]", "context = 1\ncapabilities = [\"chat\"]")).contains("context"));
+        assert!(e(&MODELS.replace(
+            "context = 4096\ncapabilities = [\"chat\"]",
+            "context = 1\ncapabilities = [\"chat\"]"
+        ))
+        .contains("context"));
         assert!(e(&format!("{MODELS}[[model]]\nid = \"tiny\"\nrepo = \"o/x\"\ncontext = 4096\ncapabilities = [\"chat\"]\nvariants = [{{ file = \"a.gguf\", size_bytes = 1 }}]\n")).contains("twice"));
     }
 
     #[test]
     fn recommendations_respect_the_room_and_tags() {
         let ms = parse_models(MODELS, "m", &mut vec![]).unwrap();
-        let room = Room { ram_total: 16 * GIB, ram_available: 12 * GIB, ram_releasable: 0, vram_free: None, unified: false };
+        let room = Room {
+            ram_total: 16 * GIB,
+            ram_available: 12 * GIB,
+            ram_releasable: 0,
+            vram_free: None,
+            unified: false,
+        };
         let r = recommend(&ms, None, &room);
         assert_eq!(r.len(), 1, "the 90 GB model does not fit");
-        assert_eq!((r[0].model.id.as_str(), r[0].variant.quant.as_str()), ("tiny", "Q8_0"), "the largest variant that fits");
+        assert_eq!(
+            (r[0].model.id.as_str(), r[0].variant.quant.as_str()),
+            ("tiny", "Q8_0"),
+            "the largest variant that fits"
+        );
         assert!(recommend(&ms, Some("code"), &room).is_empty());
         assert_eq!(recommend(&ms, Some("small"), &room).len(), 1);
-        let none = Room { ram_total: GIB, ram_available: GIB / 4, ..room };
+        let none = Room {
+            ram_total: GIB,
+            ram_available: GIB / 4,
+            ..room
+        };
         assert!(recommend(&ms, None, &none).is_empty());
     }
 
@@ -612,7 +831,13 @@ variants = [{ quant = "Q4_K_M", file = "huge-q4.gguf", size_bytes = 90000000000 
     fn tight_fits_are_recommended_after_comfortable_ones() {
         let ms = parse_models(MODELS, "m", &mut vec![]).unwrap();
         // Room so small that the 400 MB variant is only a tight fit, and the 700 MB one does not.
-        let room = Room { ram_total: 2 * GIB, ram_available: 1100 * crate::MIB, ram_releasable: 0, vram_free: None, unified: false };
+        let room = Room {
+            ram_total: 2 * GIB,
+            ram_available: 1100 * crate::MIB,
+            ram_releasable: 0,
+            vram_free: None,
+            unified: false,
+        };
         for r in recommend(&ms, None, &room) {
             assert!(matches!(r.fit.verdict, Verdict::Fits | Verdict::Tight));
         }

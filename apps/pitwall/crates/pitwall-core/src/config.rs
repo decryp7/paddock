@@ -43,7 +43,11 @@ pub struct GeneralSettings {
 
 impl Default for GeneralSettings {
     fn default() -> Self {
-        GeneralSettings { start_at_login: false, theme: Theme::System, keep_serving_when_closed: true }
+        GeneralSettings {
+            start_at_login: false,
+            theme: Theme::System,
+            keep_serving_when_closed: true,
+        }
     }
 }
 
@@ -65,7 +69,13 @@ pub struct ServerSettings {
 
 impl Default for ServerSettings {
     fn default() -> Self {
-        ServerSettings { port: DEFAULT_PORT, max_request_bytes: 32 * MIB, request_timeout_secs: 600, max_concurrent: 4, allow_keyless_local: false }
+        ServerSettings {
+            port: DEFAULT_PORT,
+            max_request_bytes: 32 * MIB,
+            request_timeout_secs: 600,
+            max_concurrent: 4,
+            allow_keyless_local: false,
+        }
     }
 }
 
@@ -148,7 +158,11 @@ pub struct NetworkSettings {
 
 impl Default for NetworkSettings {
     fn default() -> Self {
-        NetworkSettings { offline: false, lan_enabled: false, lan_port: 11_443 }
+        NetworkSettings {
+            offline: false,
+            lan_enabled: false,
+            lan_port: 11_443,
+        }
     }
 }
 
@@ -164,7 +178,10 @@ pub struct PrivacySettings {
 
 impl Default for PrivacySettings {
     fn default() -> Self {
-        PrivacySettings { keep_request_content: false, metrics_retention_days: 30 }
+        PrivacySettings {
+            keep_request_content: false,
+            metrics_retention_days: 30,
+        }
     }
 }
 
@@ -196,7 +213,11 @@ pub struct ModelSettings {
 
 impl Default for ModelSettings {
     fn default() -> Self {
-        ModelSettings { default_model: None, default_context: 8192, prefs: BTreeMap::new() }
+        ModelSettings {
+            default_model: None,
+            default_context: 8192,
+            prefs: BTreeMap::new(),
+        }
     }
 }
 
@@ -212,7 +233,10 @@ pub struct EngineSettings {
 
 impl Default for EngineSettings {
     fn default() -> Self {
-        EngineSettings { build_choice: "auto".into(), previous_build: None }
+        EngineSettings {
+            build_choice: "auto".into(),
+            previous_build: None,
+        }
     }
 }
 
@@ -283,7 +307,14 @@ impl Settings {
 
     /// These settings with the UI's part replaced, validated.
     pub fn with_ui(&self, ui: UiSettings) -> Result<Settings, String> {
-        let s = Settings { general: ui.general, server: ui.server, memory: ui.memory, network: ui.network, privacy: ui.privacy, ..self.clone() };
+        let s = Settings {
+            general: ui.general,
+            server: ui.server,
+            memory: ui.memory,
+            network: ui.network,
+            privacy: ui.privacy,
+            ..self.clone()
+        };
         s.validate()?;
         Ok(s)
     }
@@ -291,7 +322,10 @@ impl Settings {
     /// Switches the memory settings to a preset.
     pub fn apply_preset(&mut self, p: Preset) {
         let notify = self.memory.notify_on_release;
-        self.memory = MemorySettings { notify_on_release: notify, ..MemorySettings::preset(p) };
+        self.memory = MemorySettings {
+            notify_on_release: notify,
+            ..MemorySettings::preset(p)
+        };
     }
 
     /// Checks every value's range; the message names the setting and the allowed range.
@@ -308,7 +342,12 @@ impl Settings {
         range("Server ▸ Request timeout (s)", self.server.request_timeout_secs, 5, 3600)?;
         range("Server ▸ Requests at once", self.server.max_concurrent, 1, 64)?;
         range("Memory ▸ Idle release (s)", self.memory.idle_unload_secs, 10, 7 * 24 * 3600)?;
-        range("Memory ▸ Release everything after (s)", self.memory.deep_idle_secs, self.memory.idle_unload_secs, 30 * 24 * 3600)?;
+        range(
+            "Memory ▸ Release everything after (s)",
+            self.memory.deep_idle_secs,
+            self.memory.idle_unload_secs,
+            30 * 24 * 3600,
+        )?;
         range("Memory ▸ Pressure threshold (%)", self.memory.pressure_available_percent, 1, 90)?;
         range("Memory ▸ Keep free (bytes)", self.memory.min_free_bytes, 0, 64 * GIB)?;
         range("Memory ▸ Models loaded at once", self.memory.max_hot_models, 1, 16)?;
@@ -354,10 +393,16 @@ fn parse(text: &str) -> Result<Settings, String> {
     }
     let s: Settings = toml::from_str(text).map_err(|e| format!("the settings file is damaged: {}", e.message()))?;
     if s.version > SCHEMA_VERSION {
-        return Err(format!("the settings file is from a newer Pitwall (version {}); using defaults", s.version));
+        return Err(format!(
+            "the settings file is from a newer Pitwall (version {}); using defaults",
+            s.version
+        ));
     }
     // Version 0 (no version key) and 1 share the schema: nothing to migrate yet.
-    let s = Settings { version: SCHEMA_VERSION, ..s };
+    let s = Settings {
+        version: SCHEMA_VERSION,
+        ..s
+    };
     s.validate()?;
     Ok(s)
 }
@@ -409,7 +454,14 @@ mod tests {
 
     #[test]
     fn damage_falls_back_to_the_backup_then_defaults() {
-        let good = Settings { server: ServerSettings { port: 12001, ..ServerSettings::default() }, ..Settings::default() }.to_toml();
+        let good = Settings {
+            server: ServerSettings {
+                port: 12001,
+                ..ServerSettings::default()
+            },
+            ..Settings::default()
+        }
+        .to_toml();
         let (s, how) = load(Some("[[[ not toml"), Some(&good));
         assert_eq!(s.server.port, 12001);
         assert!(matches!(how, Loaded::Backup(m) if m.contains("damaged")));
@@ -429,25 +481,151 @@ mod tests {
     fn validation_names_the_setting() {
         let base = Settings::default();
         let cases: Vec<(Settings, &str)> = vec![
-            (Settings { server: ServerSettings { max_concurrent: 0, ..base.server.clone() }, ..base.clone() }, "Requests at once"),
-            (Settings { server: ServerSettings { request_timeout_secs: 1, ..base.server.clone() }, ..base.clone() }, "timeout"),
-            (Settings { server: ServerSettings { max_request_bytes: 1, ..base.server.clone() }, ..base.clone() }, "Largest request"),
-            (Settings { memory: MemorySettings { idle_unload_secs: 1, ..base.memory.clone() }, ..base.clone() }, "Idle release"),
-            (Settings { memory: MemorySettings { deep_idle_secs: 10, ..base.memory.clone() }, ..base.clone() }, "Release everything"),
-            (Settings { memory: MemorySettings { pressure_available_percent: 95, ..base.memory.clone() }, ..base.clone() }, "Pressure"),
-            (Settings { memory: MemorySettings { min_free_bytes: 100 * GIB, ..base.memory.clone() }, ..base.clone() }, "Keep free"),
-            (Settings { memory: MemorySettings { max_hot_models: 0, ..base.memory.clone() }, ..base.clone() }, "Models loaded"),
-            (Settings { memory: MemorySettings { hot_cap_bytes: Some(1), ..base.memory.clone() }, ..base.clone() }, "Memory for models"),
-            (Settings { network: NetworkSettings { lan_port: 80, ..base.network.clone() }, ..base.clone() }, "LAN port"),
-            (Settings { network: NetworkSettings { lan_enabled: true, lan_port: DEFAULT_PORT, ..base.network.clone() }, ..base.clone() }, "must differ"),
-            (Settings { privacy: PrivacySettings { metrics_retention_days: 0, ..base.privacy.clone() }, ..base.clone() }, "metrics"),
-            (Settings { models: ModelSettings { default_context: 1, ..base.models.clone() }, ..base.clone() }, "Default context"),
+            (
+                Settings {
+                    server: ServerSettings {
+                        max_concurrent: 0,
+                        ..base.server.clone()
+                    },
+                    ..base.clone()
+                },
+                "Requests at once",
+            ),
+            (
+                Settings {
+                    server: ServerSettings {
+                        request_timeout_secs: 1,
+                        ..base.server.clone()
+                    },
+                    ..base.clone()
+                },
+                "timeout",
+            ),
+            (
+                Settings {
+                    server: ServerSettings {
+                        max_request_bytes: 1,
+                        ..base.server.clone()
+                    },
+                    ..base.clone()
+                },
+                "Largest request",
+            ),
+            (
+                Settings {
+                    memory: MemorySettings {
+                        idle_unload_secs: 1,
+                        ..base.memory.clone()
+                    },
+                    ..base.clone()
+                },
+                "Idle release",
+            ),
+            (
+                Settings {
+                    memory: MemorySettings {
+                        deep_idle_secs: 10,
+                        ..base.memory.clone()
+                    },
+                    ..base.clone()
+                },
+                "Release everything",
+            ),
+            (
+                Settings {
+                    memory: MemorySettings {
+                        pressure_available_percent: 95,
+                        ..base.memory.clone()
+                    },
+                    ..base.clone()
+                },
+                "Pressure",
+            ),
+            (
+                Settings {
+                    memory: MemorySettings {
+                        min_free_bytes: 100 * GIB,
+                        ..base.memory.clone()
+                    },
+                    ..base.clone()
+                },
+                "Keep free",
+            ),
+            (
+                Settings {
+                    memory: MemorySettings {
+                        max_hot_models: 0,
+                        ..base.memory.clone()
+                    },
+                    ..base.clone()
+                },
+                "Models loaded",
+            ),
+            (
+                Settings {
+                    memory: MemorySettings {
+                        hot_cap_bytes: Some(1),
+                        ..base.memory.clone()
+                    },
+                    ..base.clone()
+                },
+                "Memory for models",
+            ),
+            (
+                Settings {
+                    network: NetworkSettings {
+                        lan_port: 80,
+                        ..base.network.clone()
+                    },
+                    ..base.clone()
+                },
+                "LAN port",
+            ),
+            (
+                Settings {
+                    network: NetworkSettings {
+                        lan_enabled: true,
+                        lan_port: DEFAULT_PORT,
+                        ..base.network.clone()
+                    },
+                    ..base.clone()
+                },
+                "must differ",
+            ),
+            (
+                Settings {
+                    privacy: PrivacySettings {
+                        metrics_retention_days: 0,
+                        ..base.privacy.clone()
+                    },
+                    ..base.clone()
+                },
+                "metrics",
+            ),
+            (
+                Settings {
+                    models: ModelSettings {
+                        default_context: 1,
+                        ..base.models.clone()
+                    },
+                    ..base.clone()
+                },
+                "Default context",
+            ),
         ];
         for (s, needle) in cases {
             let e = s.validate().unwrap_err();
             assert!(e.contains(needle), "{e}");
         }
-        assert!(Settings { memory: MemorySettings { hot_cap_bytes: Some(8 * GIB), ..base.memory.clone() }, ..base.clone() }.validate().is_ok());
+        assert!(Settings {
+            memory: MemorySettings {
+                hot_cap_bytes: Some(8 * GIB),
+                ..base.memory.clone()
+            },
+            ..base.clone()
+        }
+        .validate()
+        .is_ok());
     }
 
     #[test]
@@ -458,9 +636,22 @@ mod tests {
         assert_eq!(s.memory.preset, Preset::LowMemory);
         assert_eq!(s.memory.max_hot_models, 1);
         assert!(s.memory.notify_on_release, "kept");
-        assert_eq!(s.memory.policy(), Policy { ..Policy::preset(Preset::LowMemory) });
+        assert_eq!(
+            s.memory.policy(),
+            Policy {
+                ..Policy::preset(Preset::LowMemory)
+            }
+        );
         let id = ModelId::parse("m").unwrap();
-        s.models.prefs.insert(id.clone(), ModelPrefs { pinned: true, idle_secs: Some(30), context: None, engine: None });
+        s.models.prefs.insert(
+            id.clone(),
+            ModelPrefs {
+                pinned: true,
+                idle_secs: Some(30),
+                context: None,
+                engine: None,
+            },
+        );
         let mut ui = s.ui();
         ui.server.port = 12345;
         let merged = s.with_ui(ui.clone()).unwrap();

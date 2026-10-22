@@ -133,7 +133,11 @@ pub struct Bucket {
 }
 
 fn count_key(map: &mut BTreeMap<String, u32>, key: &str, n: u32) {
-    let k = if map.contains_key(key) || map.len() < MAX_KEYS { key } else { "other" };
+    let k = if map.contains_key(key) || map.len() < MAX_KEYS {
+        key
+    } else {
+        "other"
+    };
     *map.entry(k.to_string()).or_default() += n;
 }
 
@@ -249,7 +253,11 @@ struct Tier {
 
 impl Tier {
     fn new(step: Millis, cap: usize) -> Tier {
-        Tier { step, cap, buckets: VecDeque::new() }
+        Tier {
+            step,
+            cap,
+            buckets: VecDeque::new(),
+        }
     }
 
     /// The bucket for `at`, creating it (and evicting the oldest) as needed; `None` for data older than the newest
@@ -257,7 +265,10 @@ impl Tier {
     fn bucket(&mut self, at: Millis) -> Option<&mut Bucket> {
         let start = at - at % self.step;
         if self.buckets.back().is_none_or(|b| b.start < start) {
-            self.buckets.push_back(Bucket { start, ..Bucket::default() });
+            self.buckets.push_back(Bucket {
+                start,
+                ..Bucket::default()
+            });
             if self.buckets.len() > self.cap {
                 self.buckets.pop_front();
             }
@@ -349,7 +360,10 @@ impl Metrics {
         let merged: Vec<Bucket> = buckets
             .chunks(group)
             .map(|c| {
-                let mut b = Bucket { start: c[0].start, ..Bucket::default() };
+                let mut b = Bucket {
+                    start: c[0].start,
+                    ..Bucket::default()
+                };
                 for x in c {
                     b.merge(x);
                 }
@@ -361,7 +375,12 @@ impl Metrics {
             let mut keys: Vec<String> = merged.iter().flat_map(|b| get(b).keys().cloned()).collect();
             keys.sort();
             keys.dedup();
-            keys.into_iter().map(|k| KeyedSeries { values: merged.iter().map(|b| get(b).get(&k).copied().unwrap_or(0)).collect(), key: k }).collect::<Vec<_>>()
+            keys.into_iter()
+                .map(|k| KeyedSeries {
+                    values: merged.iter().map(|b| get(b).get(&k).copied().unwrap_or(0)).collect(),
+                    key: k,
+                })
+                .collect::<Vec<_>>()
         };
         let by_app = keyed(|b| &b.by_app);
         let by_model = keyed(|b| &b.by_model);
@@ -386,7 +405,17 @@ mod tests {
     use crate::GIB;
 
     fn s(at: Millis, ram_gib: u64) -> Sample {
-        Sample { at, ram_used: ram_gib * GIB, ram_total: 32 * GIB, vram_used: Some(GIB), vram_total: Some(12 * GIB), pitwall_rss: GIB, cpu_percent: 10.0, prompt_tps: 100.0, gen_tps: 20.0 }
+        Sample {
+            at,
+            ram_used: ram_gib * GIB,
+            ram_total: 32 * GIB,
+            vram_used: Some(GIB),
+            vram_total: Some(12 * GIB),
+            pitwall_rss: GIB,
+            cpu_percent: 10.0,
+            prompt_tps: 100.0,
+            gen_tps: 20.0,
+        }
     }
 
     #[test]
@@ -469,7 +498,11 @@ mod tests {
     fn late_samples_and_missing_vram() {
         let mut m = Metrics::new(1);
         m.sample(&s(10 * SECOND, 1));
-        m.sample(&Sample { vram_used: None, vram_total: None, ..s(11 * SECOND, 3) });
+        m.sample(&Sample {
+            vram_used: None,
+            vram_total: None,
+            ..s(11 * SECOND, 3)
+        });
         m.sample(&s(SECOND, 50));
         let (_, pts, _, _) = m.history(Range::Hour, 20 * SECOND, 100);
         assert_eq!(pts.len(), 1, "the late sample had no bucket and was dropped");

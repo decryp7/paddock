@@ -30,7 +30,10 @@ pub struct CommandError {
 impl CommandError {
     /// An error.
     pub fn new(code: ErrorCode, message: impl Into<String>) -> CommandError {
-        CommandError { code, message: message.into() }
+        CommandError {
+            code,
+            message: message.into(),
+        }
     }
 }
 
@@ -941,17 +944,44 @@ mod tests {
     fn shapes_match_api_types_ts() {
         assert_eq!(serde_json::to_value(EngineKind::LlamaCpp).unwrap(), "llama.cpp");
         assert_eq!(serde_json::to_value(EngineKind::WhisperCpp).unwrap(), "whisper.cpp");
-        assert_eq!(serde_json::to_value(Availability::Available).unwrap(), json!({"state": "available"}));
-        assert_eq!(serde_json::to_value(Availability::NotAvailable { reason: "r".into() }).unwrap(), json!({"state": "notAvailable", "reason": "r"}));
-        let e = PlaygroundEvent::Done { prompt_tokens: 1, completion_tokens: 2, ttft_ms: 3, gen_tps: 4.0, cold_start_ms: None };
-        assert_eq!(serde_json::to_value(&e).unwrap(), json!({"kind": "done", "promptTokens": 1, "completionTokens": 2, "ttftMs": 3, "genTps": 4.0, "coldStartMs": null}));
-        let err = PlaygroundEvent::Error { error: CommandError::new(ErrorCode::InsufficientMemory, "m") };
+        assert_eq!(
+            serde_json::to_value(Availability::Available).unwrap(),
+            json!({"state": "available"})
+        );
+        assert_eq!(
+            serde_json::to_value(Availability::NotAvailable { reason: "r".into() }).unwrap(),
+            json!({"state": "notAvailable", "reason": "r"})
+        );
+        let e = PlaygroundEvent::Done {
+            prompt_tokens: 1,
+            completion_tokens: 2,
+            ttft_ms: 3,
+            gen_tps: 4.0,
+            cold_start_ms: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            json!({"kind": "done", "promptTokens": 1, "completionTokens": 2, "ttftMs": 3, "genTps": 4.0, "coldStartMs": null})
+        );
+        let err = PlaygroundEvent::Error {
+            error: CommandError::new(ErrorCode::InsufficientMemory, "m"),
+        };
         assert_eq!(serde_json::to_value(&err).unwrap()["error"]["code"], "insufficientMemory");
-        let t = LiveUpdate::Throughput { throughput: Throughput::default() };
+        let t = LiveUpdate::Throughput {
+            throughput: Throughput::default(),
+        };
         let v = serde_json::to_value(&t).unwrap();
         assert_eq!(v["kind"], "throughput");
         assert_eq!(v["throughput"]["ttftP50Ms"], 0.0);
-        assert_eq!(serde_json::to_value(Depth { interactive: 1, background: 2, batch: 3 }).unwrap(), json!({"interactive": 1, "background": 2, "batch": 3}));
+        assert_eq!(
+            serde_json::to_value(Depth {
+                interactive: 1,
+                background: 2,
+                batch: 3
+            })
+            .unwrap(),
+            json!({"interactive": 1, "background": 2, "batch": 3})
+        );
         assert_eq!(serde_json::to_value(HistoryRange::Day).unwrap(), "24h");
         assert_eq!(serde_json::to_value(ReleaseReason::DeepIdle).unwrap(), "deepIdle");
         assert_eq!(serde_json::to_value(Preset::LowMemory).unwrap(), "lowMemory");
@@ -959,7 +989,12 @@ mod tests {
         assert_eq!(serde_json::to_value(ApiFamily::OpenAi).unwrap(), "openai");
         assert_eq!(serde_json::to_value(ChosenBy::Capabilities).unwrap(), "capabilities");
         assert_eq!(serde_json::to_value(HotState::ReleasingContext).unwrap(), "releasingContext");
-        assert_eq!(serde_json::from_value::<PlaygroundMessage>(json!({"role": "user", "content": "x"})).unwrap().content, "x");
+        assert_eq!(
+            serde_json::from_value::<PlaygroundMessage>(json!({"role": "user", "content": "x"}))
+                .unwrap()
+                .content,
+            "x"
+        );
         let codes = [
             (ErrorCode::ServerUnavailable, 503),
             (ErrorCode::Unauthorized, 401),

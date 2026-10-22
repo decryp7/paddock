@@ -3,7 +3,10 @@
 //! (`pull`, `push`, `create`, `copy`, `delete`) is Pitwall's window's job and answered "not available".
 
 use super::{object, opt, opt_f32, opt_u32, stops, ApiError, ModelEntry};
-use crate::chat::{ChatEvent, ChatOutput, ChatRequest, EmbedOutput, EmbedRequest, Finish, Image, ImageMime, Message, ModelRef, OutputFormat, Part, Role, Tool, ToolCall};
+use crate::chat::{
+    ChatEvent, ChatOutput, ChatRequest, EmbedOutput, EmbedRequest, Finish, Image, ImageMime, Message, ModelRef, OutputFormat, Part, Role,
+    Tool, ToolCall,
+};
 use crate::time::{rfc3339, Millis};
 use serde_json::{json, Map, Value};
 
@@ -65,7 +68,9 @@ pub struct OllamaRequest {
 }
 
 fn images(o: &Map<String, Value>) -> Result<Vec<Part>, ApiError> {
-    let Some(list) = opt(o, "images", Value::as_array, "an array of base64 strings")? else { return Ok(vec![]) };
+    let Some(list) = opt(o, "images", Value::as_array, "an array of base64 strings")? else {
+        return Ok(vec![]);
+    };
     list.iter()
         .map(|i| {
             let data = i.as_str().ok_or_else(|| ApiError::invalid("`images` must hold base64 strings"))?;
@@ -104,7 +109,10 @@ fn options(o: &Map<String, Value>, req: &mut ChatRequest) -> Result<(), ApiError
     if let Some(list) = opt(o, "tools", Value::as_array, "an array")? {
         for t in list {
             let f = t.get("function").unwrap_or(t);
-            let name = f.get("name").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("a tool has no `name`"))?;
+            let name = f
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ApiError::invalid("a tool has no `name`"))?;
             req.tools.push(Tool {
                 name: name.into(),
                 description: f.get("description").and_then(Value::as_str).unwrap_or_default().into(),
@@ -129,7 +137,9 @@ pub fn parse_chat(v: &Value) -> Result<OllamaRequest, ApiError> {
             Some("tool") => Role::Tool,
             _ => return Err(ApiError::invalid("each message's `role` must be system, user, assistant or tool")),
         };
-        let mut parts = vec![Part::Text(mo.get("content").and_then(Value::as_str).unwrap_or_default().to_string())];
+        let mut parts = vec![Part::Text(
+            mo.get("content").and_then(Value::as_str).unwrap_or_default().to_string(),
+        )];
         parts.extend(images(mo)?);
         let tool_calls = mo
             .get("tool_calls")
@@ -143,14 +153,23 @@ pub fn parse_chat(v: &Value) -> Result<OllamaRequest, ApiError> {
                 arguments: c.pointer("/function/arguments").map_or_else(|| "{}".into(), Value::to_string),
             })
             .collect();
-        chat.messages.push(Message { role, parts, tool_calls, tool_call_id: mo.get("tool_name").and_then(Value::as_str).map(str::to_string) });
+        chat.messages.push(Message {
+            role,
+            parts,
+            tool_calls,
+            tool_call_id: mo.get("tool_name").and_then(Value::as_str).map(str::to_string),
+        });
     }
     let keep_alive = parse_keep_alive(o.get("keep_alive").unwrap_or(&Value::Null))?;
     let load_only = chat.messages.is_empty();
     if !load_only {
         chat.check()?;
     }
-    Ok(OllamaRequest { chat, keep_alive, load_only })
+    Ok(OllamaRequest {
+        chat,
+        keep_alive,
+        load_only,
+    })
 }
 
 /// Parses `POST /api/generate` (`raw` and `suffix` are not supported: the model's chat template always applies).
@@ -159,7 +178,10 @@ pub fn parse_generate(v: &Value) -> Result<OllamaRequest, ApiError> {
     let mut chat = ChatRequest::default();
     options(o, &mut chat)?;
     if o.get("suffix").and_then(Value::as_str).is_some_and(|s| !s.is_empty()) {
-        return Err(ApiError::new(super::ErrorKind::NotAvailable, "fill-in-the-middle (`suffix`) is not supported"));
+        return Err(ApiError::new(
+            super::ErrorKind::NotAvailable,
+            "fill-in-the-middle (`suffix`) is not supported",
+        ));
     }
     if let Some(s) = opt(o, "system", Value::as_str, "a string")?.filter(|s| !s.is_empty()) {
         chat.messages.push(Message::text(Role::System, s));
@@ -169,11 +191,20 @@ pub fn parse_generate(v: &Value) -> Result<OllamaRequest, ApiError> {
     parts.extend(images(o)?);
     let load_only = prompt.is_empty() && parts.len() == 1;
     if !load_only {
-        chat.messages.push(Message { role: Role::User, parts, tool_calls: vec![], tool_call_id: None });
+        chat.messages.push(Message {
+            role: Role::User,
+            parts,
+            tool_calls: vec![],
+            tool_call_id: None,
+        });
         chat.check()?;
     }
     let keep_alive = parse_keep_alive(o.get("keep_alive").unwrap_or(&Value::Null))?;
-    Ok(OllamaRequest { chat, keep_alive, load_only })
+    Ok(OllamaRequest {
+        chat,
+        keep_alive,
+        load_only,
+    })
 }
 
 /// Durations of an answer (nanoseconds in Ollama's final object).
@@ -223,7 +254,11 @@ pub struct Stream {
 impl Stream {
     /// A stream for `/api/chat` (`generate: false`) or `/api/generate`.
     pub fn new(model: &str, generate: bool) -> Stream {
-        Stream { model: model.into(), generate, out: ChatOutput::default() }
+        Stream {
+            model: model.into(),
+            generate,
+            out: ChatOutput::default(),
+        }
     }
 
     fn line(&self, now: Millis, text: &str, tool_calls: Option<Value>) -> Map<String, Value> {
@@ -289,9 +324,16 @@ pub fn parse_embed(v: &Value) -> Result<(EmbedRequest, bool), ApiError> {
     };
     let (input, legacy) = match (o.get("input"), o.get("prompt")) {
         (Some(Value::String(s)), _) => (vec![s.clone()], false),
-        (Some(Value::Array(a)), _) => {
-            (a.iter().map(|x| x.as_str().map(str::to_string).ok_or_else(|| ApiError::invalid("`input` must hold strings"))).collect::<Result<_, _>>()?, false)
-        }
+        (Some(Value::Array(a)), _) => (
+            a.iter()
+                .map(|x| {
+                    x.as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| ApiError::invalid("`input` must hold strings"))
+                })
+                .collect::<Result<_, _>>()?,
+            false,
+        ),
         (None, Some(Value::String(p))) => (vec![p.clone()], true),
         _ => return Err(ApiError::invalid("`input` is required")),
     };
@@ -419,13 +461,22 @@ mod tests {
         assert!(load.load_only);
         assert_eq!(load.keep_alive, Some(KeepAlive::Unload));
         assert_eq!(load.chat.format, OutputFormat::JsonObject);
-        assert_eq!(parse_chat(&json!({"model": "m", "format": ""})).unwrap().chat.format, OutputFormat::Text);
+        assert_eq!(
+            parse_chat(&json!({"model": "m", "format": ""})).unwrap().chat.format,
+            OutputFormat::Text
+        );
         for (v, needle) in [
             (json!({"messages": []}), "`model` is required"),
             (json!({"model": "m", "messages": [{"role": "robot"}]}), "role"),
             (json!({"model": "m", "messages": [5]}), "a message must be"),
-            (json!({"model": "m", "messages": [{"role": "user", "content": "x", "images": ["AAAA"]}]}), "not PNG"),
-            (json!({"model": "m", "messages": [{"role": "user", "images": [5]}]}), "base64 strings"),
+            (
+                json!({"model": "m", "messages": [{"role": "user", "content": "x", "images": ["AAAA"]}]}),
+                "not PNG",
+            ),
+            (
+                json!({"model": "m", "messages": [{"role": "user", "images": [5]}]}),
+                "base64 strings",
+            ),
             (json!({"model": "m", "format": 5}), "`format`"),
             (json!({"model": "m", "tools": [{}]}), "no `name`"),
             (json!({"model": "m", "options": 3}), "`options`"),
@@ -442,33 +493,80 @@ mod tests {
         assert!(!r.chat.stream && r.chat.has_images());
         let load = parse_generate(&json!({"model": "m"})).unwrap();
         assert!(load.load_only && load.chat.messages.is_empty());
-        assert!(parse_generate(&json!({"model": "m", "prompt": "a", "suffix": "b"})).unwrap_err().to_string().contains("suffix"));
+        assert!(parse_generate(&json!({"model": "m", "prompt": "a", "suffix": "b"}))
+            .unwrap_err()
+            .to_string()
+            .contains("suffix"));
         assert!(parse_generate(&json!({"model": "m", "prompt": 3})).is_err());
     }
 
     #[test]
     fn streams_and_answers() {
-        let st = Stats { total_ms: 10, load_ms: 2, prompt_ms: 3, eval_ms: 5 };
+        let st = Stats {
+            total_ms: 10,
+            load_ms: 2,
+            prompt_ms: 3,
+            eval_ms: 5,
+        };
         let mut s = Stream::new("m", false);
         let l = s.event(&ChatEvent::Delta("He".into()), 0, &st);
         let v: Value = serde_json::from_str(l[0].trim()).unwrap();
         assert_eq!((v["message"]["content"].as_str(), v["done"].as_bool()), (Some("He"), Some(false)));
         assert_eq!(v["created_at"], "1970-01-01T00:00:00.000Z");
-        assert!(s.event(&ChatEvent::ToolCall { index: 0, id: None, name: Some("f".into()), arguments: "{\"a\":2}".into() }, 0, &st).is_empty());
+        assert!(s
+            .event(
+                &ChatEvent::ToolCall {
+                    index: 0,
+                    id: None,
+                    name: Some("f".into()),
+                    arguments: "{\"a\":2}".into()
+                },
+                0,
+                &st
+            )
+            .is_empty());
         assert!(s.event(&ChatEvent::Reasoning("r".into()), 0, &st).is_empty());
-        let l = s.event(&ChatEvent::Done { finish: Finish::Stop, usage: Usage { prompt_tokens: 4, completion_tokens: 6 }, timings: None }, 0, &st);
+        let l = s.event(
+            &ChatEvent::Done {
+                finish: Finish::Stop,
+                usage: Usage {
+                    prompt_tokens: 4,
+                    completion_tokens: 6,
+                },
+                timings: None,
+            },
+            0,
+            &st,
+        );
         let v: Value = serde_json::from_str(l[0].trim()).unwrap();
         assert_eq!(v["done"], true);
         assert_eq!(v["message"]["tool_calls"][0]["function"]["arguments"]["a"], 2);
-        assert_eq!((v["eval_count"].as_u64(), v["total_duration"].as_u64(), v["load_duration"].as_u64()), (Some(6), Some(10_000_000), Some(2_000_000)));
+        assert_eq!(
+            (v["eval_count"].as_u64(), v["total_duration"].as_u64(), v["load_duration"].as_u64()),
+            (Some(6), Some(10_000_000), Some(2_000_000))
+        );
         let mut g = Stream::new("m", true);
         let l = g.event(&ChatEvent::Delta("x".into()), 0, &st);
         assert!(l[0].contains("\"response\":\"x\""));
-        let out = ChatOutput { text: "all".into(), finish: Some(Finish::Length), ..Default::default() };
+        let out = ChatOutput {
+            text: "all".into(),
+            finish: Some(Finish::Length),
+            ..Default::default()
+        };
         let r = response(&out, "m", true, 0, &st);
         assert_eq!((r["response"].as_str(), r["done_reason"].as_str()), (Some("all"), Some("length")));
-        let calls = ChatOutput { tool_calls: vec![ToolCall { id: "1".into(), name: "f".into(), arguments: "bad".into() }], ..Default::default() };
-        assert_eq!(response(&calls, "m", false, 0, &st)["message"]["tool_calls"][0]["function"]["arguments"], json!({}));
+        let calls = ChatOutput {
+            tool_calls: vec![ToolCall {
+                id: "1".into(),
+                name: "f".into(),
+                arguments: "bad".into(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            response(&calls, "m", false, 0, &st)["message"]["tool_calls"][0]["function"]["arguments"],
+            json!({})
+        );
         assert_eq!(load_response("m", false, 0, true)["done_reason"], "unload");
         assert_eq!(load_response("m", true, 0, false)["done_reason"], "load");
     }
@@ -483,10 +581,16 @@ mod tests {
         assert!(parse_embed(&json!({"input": "x"})).is_err());
         assert!(parse_embed(&json!({"model": "e"})).is_err());
         assert!(parse_embed(&json!({"model": "e", "input": [1]})).is_err());
-        let out = EmbedOutput { vectors: vec![vec![0.5]], prompt_tokens: 2 };
+        let out = EmbedOutput {
+            vectors: vec![vec![0.5]],
+            prompt_tokens: 2,
+        };
         assert_eq!(embed_response(&out, "e", false, &Stats::default())["embeddings"][0][0], 0.5);
         assert_eq!(embed_response(&out, "e", true, &Stats::default())["embedding"][0], 0.5);
-        assert_eq!(embed_response(&EmbedOutput::default(), "e", true, &Stats::default())["embedding"], json!([]));
+        assert_eq!(
+            embed_response(&EmbedOutput::default(), "e", true, &Stats::default())["embedding"],
+            json!([])
+        );
         let m = ModelEntry {
             id: ModelId::parse("qwen3-8b").unwrap(),
             size: 5,
@@ -495,9 +599,17 @@ mod tests {
             quant: Some("Q4_K_M".into()),
             modified: 0,
             sha256: Some("abc".into()),
-            loaded: Some(LoadedEntry { ram: 1, vram: 2, expires_at: None }),
+            loaded: Some(LoadedEntry {
+                ram: 1,
+                vram: 2,
+                expires_at: None,
+            }),
         };
-        let unloaded = ModelEntry { loaded: None, family: None, ..m.clone() };
+        let unloaded = ModelEntry {
+            loaded: None,
+            family: None,
+            ..m.clone()
+        };
         let t = tags(&[m.clone(), unloaded.clone()]);
         assert_eq!(t["models"][0]["details"]["quantization_level"], "Q4_K_M");
         assert_eq!(t["models"][1]["details"]["families"], json!([]));
@@ -506,7 +618,11 @@ mod tests {
         assert_eq!(p["models"][0]["size"], 3);
         assert_eq!(p["models"][0]["expires_at"], "0001-01-01T00:00:00Z");
         let mut soon = m.clone();
-        soon.loaded = Some(LoadedEntry { ram: 1, vram: 0, expires_at: Some(1000) });
+        soon.loaded = Some(LoadedEntry {
+            ram: 1,
+            vram: 0,
+            expires_at: Some(1000),
+        });
         assert_eq!(ps(&[soon])["models"][0]["expires_at"], "1970-01-01T00:00:01.000Z");
         assert_eq!(show(&m, &["completion", "vision"])["capabilities"][1], "vision");
         assert_eq!(version()["version"], COMPAT_VERSION);

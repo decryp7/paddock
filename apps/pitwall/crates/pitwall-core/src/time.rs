@@ -31,7 +31,13 @@ pub fn rfc3339(ms: Millis) -> String {
     let secs = ms / 1000;
     let (y, m, d) = civil(secs / 86_400);
     let rem = secs % 86_400;
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z", rem / 3600, rem % 3600 / 60, rem % 60, ms % 1000)
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60,
+        ms % 1000
+    )
 }
 
 /// The start of the UTC day `ms` falls in.

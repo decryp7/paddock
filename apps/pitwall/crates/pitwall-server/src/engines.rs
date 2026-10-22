@@ -368,10 +368,7 @@ pub fn unpack_with(archive: &Path, dest: &Path, name: &str, keep: &dyn Fn(&str) 
                 continue;
             }
             let Ok(zname) = e.name() else { continue };
-            let Some(flat) = runtimes::flat_name(&zname)
-                .filter(|n| keep(n))
-                .map(str::to_string)
-            else {
+            let Some(flat) = runtimes::flat_name(&zname).filter(|n| keep(n)).map(str::to_string) else {
                 continue;
             };
             if e.size() > MAX_FILE {

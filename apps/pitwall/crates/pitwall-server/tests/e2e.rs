@@ -408,20 +408,40 @@ async fn an_engine_pack_serves_a_model_through_a_real_child_process() {
     let ids: Vec<&str> = p["engines"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
     assert!(ids.contains(&"fakeoai") && ids.contains(&"llamafile"));
     let engines = h.rpc("engines", json!({})).await.json();
-    let fake = engines.as_array().unwrap().iter().find(|e| e["name"] == "Fake OpenAI engine").unwrap();
+    let fake = engines
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"] == "Fake OpenAI engine")
+        .unwrap();
     assert_eq!(fake["availability"]["state"], "available");
 
     // Route the model to the pack and chat through the real child process.
-    assert_eq!(h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "nope"})).await.status, 404);
-    assert_eq!(h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "fakeoai"})).await.status, 200);
-    let r = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]).await;
+    assert_eq!(
+        h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "nope"}))
+            .await
+            .status,
+        404
+    );
+    assert_eq!(
+        h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "fakeoai"}))
+            .await
+            .status,
+        200
+    );
+    let r = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
     assert_eq!(r.status, 200, "{}", r.body);
     assert_eq!(r.json()["choices"][0]["message"]["content"], "Hello world");
     assert_eq!(h.starts.load(Ordering::SeqCst), 0, "the built-in fake engine was not used");
     let loaded = h.rpc("overview", json!({})).await.json()["models"][0].clone();
     assert_eq!(loaded["engine"], "pack");
     assert_eq!(loaded["build"], "fakeoai");
-    assert!(h.rpc("unload_model", json!({"id": "tiny-q4_k_m"})).await.status == 200, "dropping the engine ends the child");
+    assert!(
+        h.rpc("unload_model", json!({"id": "tiny-q4_k_m"})).await.status == 200,
+        "dropping the engine ends the child"
+    );
 }
 
 #[tokio::test]
@@ -430,24 +450,58 @@ async fn recommendations_come_from_the_catalog_packs() {
     let p = h.rpc("packs", json!({"tag": "code"})).await.json();
     let rec = p["recommendations"].as_array().unwrap();
     assert!(rec.iter().all(|r| r["tags"].as_array().unwrap().iter().any(|t| t == "code")));
-    assert!(!h.rpc("packs", json!({})).await.json()["recommendations"].as_array().unwrap().is_empty());
+    assert!(!h.rpc("packs", json!({})).await.json()["recommendations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]
 async fn task_and_token_endpoints() {
     let h = harness(false).await;
     let key = h.make_key("Tasker").await;
-    let r = h.call("POST", "/x/v1/tasks/summarize", Some(&key), Some(json!({"text": "Long text here.", "style": "bullets"})), &[]).await;
+    let r = h
+        .call(
+            "POST",
+            "/x/v1/tasks/summarize",
+            Some(&key),
+            Some(json!({"text": "Long text here.", "style": "bullets"})),
+            &[],
+        )
+        .await;
     assert_eq!(r.status, 200, "{}", r.body);
     assert_eq!(r.json()["result"], "Hello world");
     assert_eq!(r.json()["template"], "summarize@1");
-    assert_eq!(h.call("POST", "/x/v1/tasks/nope", Some(&key), Some(json!({})), &[]).await.status, 404);
-    assert_eq!(h.call("POST", "/x/v1/tasks/summarize", Some(&key), Some(json!({})), &[]).await.status, 400);
-    let r = h.call("POST", "/x/v1/tokens/count", Some(&key), Some(json!({"text": "hello there"})), &[]).await;
+    assert_eq!(
+        h.call("POST", "/x/v1/tasks/nope", Some(&key), Some(json!({})), &[]).await.status,
+        404
+    );
+    assert_eq!(
+        h.call("POST", "/x/v1/tasks/summarize", Some(&key), Some(json!({})), &[])
+            .await
+            .status,
+        400
+    );
+    let r = h
+        .call("POST", "/x/v1/tokens/count", Some(&key), Some(json!({"text": "hello there"})), &[])
+        .await;
     assert!(r.json()["tokens"].as_u64().unwrap() > 0);
-    let r = h.call("POST", "/x/v1/tokens/truncate", Some(&key), Some(json!({"text": "word ".repeat(500), "maxTokens": 20, "keep": "middle"})), &[]).await;
+    let r = h
+        .call(
+            "POST",
+            "/x/v1/tokens/truncate",
+            Some(&key),
+            Some(json!({"text": "word ".repeat(500), "maxTokens": 20, "keep": "middle"})),
+            &[],
+        )
+        .await;
     assert_eq!(r.json()["truncated"], true);
-    assert_eq!(h.call("POST", "/x/v1/tokens/truncate", Some(&key), Some(json!({"text": "x"})), &[]).await.status, 400);
+    assert_eq!(
+        h.call("POST", "/x/v1/tokens/truncate", Some(&key), Some(json!({"text": "x"})), &[])
+            .await
+            .status,
+        400
+    );
 }
 
 #[tokio::test]
@@ -461,24 +515,32 @@ async fn a_model_that_cannot_fit_is_refused_with_a_typed_error_and_nothing_start
     b.truncate(70_000);
     std::fs::write(&p, &b).unwrap();
     std::fs::OpenOptions::new().write(true).open(&p).unwrap().set_len(4 << 40).unwrap();
-    let r = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("huge-q4_k_m", false)), &[]).await;
+    let r = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("huge-q4_k_m", false)), &[])
+        .await;
     assert_eq!(r.status, 503, "{}", r.body);
     assert!(r.json()["error"]["message"].as_str().unwrap().contains("needs about"), "{}", r.body);
     assert_eq!(h.starts.load(Ordering::SeqCst), 0, "no engine was started for it");
     let events = h.rpc("events", json!({"limit": 5})).await.json();
     assert!(events.as_array().unwrap().iter().any(|e| e["kind"] == "requestFailed"));
     let m = h.rpc("local_models", json!({})).await.json();
-    assert!(m.as_array().unwrap().iter().any(|x| x["id"] == "huge-q4_k_m" && x["fit"]["verdict"] == "wontFit"));
+    assert!(m
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|x| x["id"] == "huge-q4_k_m" && x["fit"]["verdict"] == "wontFit"));
 }
 
 #[tokio::test]
 async fn a_dead_engine_is_forgotten_and_reloaded() {
     let h = harness(false).await;
     let key = h.make_key("Phoenix").await;
-    h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]).await;
+    h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
     assert_eq!(h.st.serving.loaded().len(), 1);
     h.st.serving.release_all();
-    h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]).await;
+    h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
     assert_eq!(h.starts.load(Ordering::SeqCst), 2, "reloaded after release");
 }
 

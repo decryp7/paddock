@@ -67,7 +67,10 @@ pub struct ApiError {
 impl ApiError {
     /// An error of a kind.
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> ApiError {
-        ApiError { kind, message: message.into() }
+        ApiError {
+            kind,
+            message: message.into(),
+        }
     }
 
     /// A 400.
@@ -182,11 +185,17 @@ pub struct LoadedEntry {
 
 /// A JSON object or a 400 that says what was expected.
 pub(crate) fn object<'a>(v: &'a Value, what: &str) -> Result<&'a serde_json::Map<String, Value>, ApiError> {
-    v.as_object().ok_or_else(|| ApiError::invalid(format!("{what} must be a JSON object")))
+    v.as_object()
+        .ok_or_else(|| ApiError::invalid(format!("{what} must be a JSON object")))
 }
 
 /// An optional field of a type, with a 400 naming it when it has the wrong type.
-pub(crate) fn opt<'a, T>(o: &'a serde_json::Map<String, Value>, key: &str, f: impl Fn(&'a Value) -> Option<T>, want: &str) -> Result<Option<T>, ApiError> {
+pub(crate) fn opt<'a, T>(
+    o: &'a serde_json::Map<String, Value>,
+    key: &str,
+    f: impl Fn(&'a Value) -> Option<T>,
+    want: &str,
+) -> Result<Option<T>, ApiError> {
     match o.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => f(v).map(Some).ok_or_else(|| ApiError::invalid(format!("`{key}` must be {want}"))),
@@ -200,7 +209,12 @@ pub(crate) fn opt_f32(o: &serde_json::Map<String, Value>, key: &str) -> Result<O
 
 /// A non-negative integer field (saturating at `u32::MAX`).
 pub(crate) fn opt_u32(o: &serde_json::Map<String, Value>, key: &str) -> Result<Option<u32>, ApiError> {
-    opt(o, key, |v| v.as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32), "a non-negative integer")
+    opt(
+        o,
+        key,
+        |v| v.as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32),
+        "a non-negative integer",
+    )
 }
 
 /// `stop`: a string or an array of strings.
@@ -208,9 +222,14 @@ pub(crate) fn stops(o: &serde_json::Map<String, Value>, key: &str) -> Result<Vec
     match o.get(key) {
         None | Some(Value::Null) => Ok(vec![]),
         Some(Value::String(s)) => Ok(vec![s.clone()]),
-        Some(Value::Array(a)) => {
-            a.iter().map(|x| x.as_str().map(str::to_string).ok_or_else(|| ApiError::invalid(format!("`{key}` must hold strings")))).collect()
-        }
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|x| {
+                x.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| ApiError::invalid(format!("`{key}` must hold strings")))
+            })
+            .collect(),
         Some(_) => Err(ApiError::invalid(format!("`{key}` must be a string or an array of strings"))),
     }
 }
@@ -255,8 +274,14 @@ mod tests {
             assert_eq!(e.body(ApiFamily::Ollama)["error"], "msg");
             assert_eq!(e.body(ApiFamily::Extended)["error"]["code"], e.code());
         }
-        assert_eq!(ApiError::new(ErrorKind::RateLimit, "x").body(ApiFamily::OpenAi)["error"]["type"], "rate_limit_error");
-        assert_eq!(ApiError::new(ErrorKind::Overloaded, "x").body(ApiFamily::Anthropic)["error"]["type"], "overloaded_error");
+        assert_eq!(
+            ApiError::new(ErrorKind::RateLimit, "x").body(ApiFamily::OpenAi)["error"]["type"],
+            "rate_limit_error"
+        );
+        assert_eq!(
+            ApiError::new(ErrorKind::Overloaded, "x").body(ApiFamily::Anthropic)["error"]["type"],
+            "overloaded_error"
+        );
         let e: ApiError = ChatError::Invalid("bad".into()).into();
         assert_eq!((e.status(), e.to_string()), (400, "bad".to_string()));
         assert_eq!(serde_json::to_value(ApiFamily::OpenAi).unwrap(), "openai");
@@ -278,7 +303,10 @@ mod tests {
         assert!(stops(o, "none").unwrap().is_empty());
         assert_eq!(model_ref(o).unwrap(), crate::chat::ModelRef::Default);
         let o2 = json!({"model": " qwen "});
-        assert_eq!(model_ref(o2.as_object().unwrap()).unwrap(), crate::chat::ModelRef::Named("qwen".into()));
+        assert_eq!(
+            model_ref(o2.as_object().unwrap()).unwrap(),
+            crate::chat::ModelRef::Named("qwen".into())
+        );
         assert!(model_ref(json!({"model": 1}).as_object().unwrap()).is_err());
         assert_eq!(model_ref(json!({}).as_object().unwrap()).unwrap(), crate::chat::ModelRef::Default);
     }

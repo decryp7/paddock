@@ -574,15 +574,40 @@ fn engines(st: &AppState) -> Vec<mgmt::Engine> {
         mgmt::Engine {
             kind: EngineKind::Pack,
             name: pe.pack.name.clone(),
-            description: if pe.pack.description.is_empty() { "An engine pack.".into() } else { pe.pack.description.clone() },
+            description: if pe.pack.description.is_empty() {
+                "An engine pack.".into()
+            } else {
+                pe.pack.description.clone()
+            },
             availability: pe.availability(),
             build_choice: "auto".into(),
             builds: if installed {
-                vec![mgmt::InstalledBuild { id: pe.pack.id.clone(), tag: pe.pack.version.clone(), label: pe.pack.name.clone(), size_bytes: dl.map_or(0, |d| d.size), self_test: mgmt::SelfTest::NotRun, self_test_message: None, devices: vec![], active: true, outdated: false }]
+                vec![mgmt::InstalledBuild {
+                    id: pe.pack.id.clone(),
+                    tag: pe.pack.version.clone(),
+                    label: pe.pack.name.clone(),
+                    size_bytes: dl.map_or(0, |d| d.size),
+                    self_test: mgmt::SelfTest::NotRun,
+                    self_test_message: None,
+                    devices: vec![],
+                    active: true,
+                    outdated: false,
+                }]
             } else {
                 vec![]
             },
-            catalog: dl.map(|d| vec![mgmt::CatalogBuild { id: pe.pack.id.clone(), label: pe.pack.name.clone(), tag: pe.pack.version.clone(), download_bytes: d.size, suggested: false, installed }]).unwrap_or_default(),
+            catalog: dl
+                .map(|d| {
+                    vec![mgmt::CatalogBuild {
+                        id: pe.pack.id.clone(),
+                        label: pe.pack.name.clone(),
+                        tag: pe.pack.version.clone(),
+                        download_bytes: d.size,
+                        suggested: false,
+                        installed,
+                    }]
+                })
+                .unwrap_or_default(),
             processes: vec![],
             rollback_to: None,
         }
@@ -694,10 +719,31 @@ fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
 }
 
 fn install_pack(st: &Arc<AppState>, pe: crate::pack_engine::PackEngine) -> R<Value> {
-    let dl = pe.pack.downloads.iter().find(|d| d.platform == st.llama.platform()).ok_or_else(|| err(mgmt::ErrorCode::NotAvailable, format!("the {} pack has no build for this platform", pe.pack.name)))?;
+    let dl = pe
+        .pack
+        .downloads
+        .iter()
+        .find(|d| d.platform == st.llama.platform())
+        .ok_or_else(|| {
+            err(
+                mgmt::ErrorCode::NotAvailable,
+                format!("the {} pack has no build for this platform", pe.pack.name),
+            )
+        })?;
     let dl_id = format!("eng-{}", lock(&st.installs).len());
     let cancel = crate::egress::CancelFlag::default();
-    let entry = Download { id: dl_id.clone(), kind: DownloadKind::Engine, name: format!("{} {}", pe.pack.name, pe.pack.version), host: dl.url.host().to_string(), bytes_done: 0, bytes_total: dl.size, speed_bps: 0, state: DownloadState::Downloading, error: None, started_at: now_ms() };
+    let entry = Download {
+        id: dl_id.clone(),
+        kind: DownloadKind::Engine,
+        name: format!("{} {}", pe.pack.name, pe.pack.version),
+        host: dl.url.host().to_string(),
+        bytes_done: 0,
+        bytes_total: dl.size,
+        speed_bps: 0,
+        state: DownloadState::Downloading,
+        error: None,
+        started_at: now_ms(),
+    };
     lock(&st.installs).insert(dl_id.clone(), entry.clone());
     lock(&st.install_cancel).insert(dl_id.clone(), cancel.clone());
     let st2 = st.clone();
@@ -717,7 +763,11 @@ fn install_pack(st: &Arc<AppState>, pe: crate::pack_engine::PackEngine) -> R<Val
                     d.bytes_done = d.bytes_total;
                 }
                 Err(e) => {
-                    d.state = if matches!(e, crate::engines::EngineError::Download(crate::egress::DownloadError::Cancelled)) { DownloadState::Cancelled } else { DownloadState::Failed };
+                    d.state = if matches!(e, crate::engines::EngineError::Download(crate::egress::DownloadError::Cancelled)) {
+                        DownloadState::Cancelled
+                    } else {
+                        DownloadState::Failed
+                    };
                     d.error = Some(e.to_string());
                 }
             }

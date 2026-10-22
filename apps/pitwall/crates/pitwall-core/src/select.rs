@@ -155,7 +155,11 @@ pub struct Choice {
 
 /// Picks a model, or says what nothing offered.
 pub fn choose(req: &Requirements, candidates: &[Candidate]) -> Result<Choice, String> {
-    let needed: Vec<Capability> = if req.capabilities.is_empty() { vec![Capability::Chat] } else { req.capabilities.clone() };
+    let needed: Vec<Capability> = if req.capabilities.is_empty() {
+        vec![Capability::Chat]
+    } else {
+        req.capabilities.clone()
+    };
     let ok: Vec<&Candidate> = candidates
         .iter()
         .filter(|c| needed.iter().all(|n| c.capabilities.contains(n)))
@@ -164,7 +168,11 @@ pub fn choose(req: &Requirements, candidates: &[Candidate]) -> Result<Choice, St
         .collect();
     let speed = |c: &Candidate| c.gen_tps.unwrap_or(1e12 / (c.size.max(1) as f64));
     let best = match req.prefer {
-        Prefer::Balanced => ok.iter().max_by(|a, b| (a.loaded, speed(a)).partial_cmp(&(b.loaded, speed(b))).unwrap_or(std::cmp::Ordering::Equal)),
+        Prefer::Balanced => ok.iter().max_by(|a, b| {
+            (a.loaded, speed(a))
+                .partial_cmp(&(b.loaded, speed(b)))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
         Prefer::Fast => ok.iter().max_by(|a, b| speed(a).total_cmp(&speed(b))),
         Prefer::Quality => ok.iter().max_by_key(|c| c.size),
         Prefer::Small => ok.iter().min_by_key(|c| c.size),
@@ -184,8 +192,14 @@ pub fn choose(req: &Requirements, candidates: &[Candidate]) -> Result<Choice, St
         }
         None => Err(format!(
             "no installed model offers {}{}; download one in Pitwall ▸ Models",
-            needed.iter().map(|n| format!("{n:?}").to_ascii_lowercase()).collect::<Vec<_>>().join(", "),
-            req.min_context.map(|m| format!(" with at least {m} tokens of context")).unwrap_or_default()
+            needed
+                .iter()
+                .map(|n| format!("{n:?}").to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join(", "),
+            req.min_context
+                .map(|m| format!(" with at least {m} tokens of context"))
+                .unwrap_or_default()
         )),
     }
 }
@@ -195,20 +209,45 @@ mod tests {
     use super::*;
 
     fn cand(id: &str, caps: &[Capability], size: u64, loaded: bool, tps: Option<f64>) -> Candidate {
-        Candidate { id: ModelId::parse(id).unwrap(), capabilities: caps.to_vec(), context_max: Some(32768), size, loaded, gen_tps: tps, fit: Verdict::Fits }
+        Candidate {
+            id: ModelId::parse(id).unwrap(),
+            capabilities: caps.to_vec(),
+            context_max: Some(32768),
+            size,
+            loaded,
+            gen_tps: tps,
+            fit: Verdict::Fits,
+        }
     }
 
     #[test]
     fn capability_names_and_derivation() {
-        for (s, c) in [("vision", Capability::Vision), ("TOOLS", Capability::Tools), ("embed", Capability::Embeddings), ("rerank", Capability::Rerank), ("audio", Capability::Transcription), ("json", Capability::Json), ("chat", Capability::Chat)] {
+        for (s, c) in [
+            ("vision", Capability::Vision),
+            ("TOOLS", Capability::Tools),
+            ("embed", Capability::Embeddings),
+            ("rerank", Capability::Rerank),
+            ("audio", Capability::Transcription),
+            ("json", Capability::Json),
+            ("chat", Capability::Chat),
+        ] {
             assert_eq!(Capability::parse(s), Some(c));
         }
         assert_eq!(Capability::parse("telepathy"), None);
-        assert_eq!(capabilities_of(ModelKind::Embedding, false, None, "nomic-embed"), vec![Capability::Embeddings]);
-        assert_eq!(capabilities_of(ModelKind::Embedding, false, None, "bge-reranker"), vec![Capability::Rerank]);
+        assert_eq!(
+            capabilities_of(ModelKind::Embedding, false, None, "nomic-embed"),
+            vec![Capability::Embeddings]
+        );
+        assert_eq!(
+            capabilities_of(ModelKind::Embedding, false, None, "bge-reranker"),
+            vec![Capability::Rerank]
+        );
         let c = capabilities_of(ModelKind::Language, true, Some("{% if tools %}"), "m");
         assert_eq!(c, vec![Capability::Chat, Capability::Json, Capability::Tools, Capability::Vision]);
-        assert_eq!(capabilities_of(ModelKind::Language, false, None, "m"), vec![Capability::Chat, Capability::Json]);
+        assert_eq!(
+            capabilities_of(ModelKind::Language, false, None, "m"),
+            vec![Capability::Chat, Capability::Json]
+        );
         assert_eq!(serde_json::to_value(Capability::Embeddings).unwrap(), "embeddings");
     }
 
@@ -236,7 +275,15 @@ mod tests {
         let emb = cand("emb", &[Embeddings], 1, false, None);
         let all = [small.clone(), big.clone(), vis.clone(), emb.clone()];
         let pick = |caps: &[Capability], prefer: Prefer| {
-            choose(&Requirements { capabilities: caps.to_vec(), min_context: None, prefer }, &all).map(|c| c.id.to_string())
+            choose(
+                &Requirements {
+                    capabilities: caps.to_vec(),
+                    min_context: None,
+                    prefer,
+                },
+                &all,
+            )
+            .map(|c| c.id.to_string())
         };
         assert_eq!(pick(&[], Prefer::Balanced).unwrap(), "vis", "loaded first");
         assert_eq!(pick(&[Vision], Prefer::Fast).unwrap(), "vis");
@@ -247,16 +294,48 @@ mod tests {
         let e = pick(&[Rerank], Prefer::Balanced).unwrap_err();
         assert!(e.contains("rerank") && e.contains("Models"), "{e}");
         // Context and fit filters.
-        let short = Candidate { context_max: Some(4096), ..big.clone() };
-        let r = Requirements { capabilities: vec![Tools], min_context: Some(8192), prefer: Prefer::Balanced };
+        let short = Candidate {
+            context_max: Some(4096),
+            ..big.clone()
+        };
+        let r = Requirements {
+            capabilities: vec![Tools],
+            min_context: Some(8192),
+            prefer: Prefer::Balanced,
+        };
         assert!(choose(&r, &[short]).unwrap_err().contains("8192 tokens"));
-        let huge = Candidate { fit: Verdict::WontFit, ..big.clone() };
-        assert!(choose(&Requirements { capabilities: vec![Tools], ..Default::default() }, &[huge]).is_err());
+        let huge = Candidate {
+            fit: Verdict::WontFit,
+            ..big.clone()
+        };
+        assert!(choose(
+            &Requirements {
+                capabilities: vec![Tools],
+                ..Default::default()
+            },
+            &[huge]
+        )
+        .is_err());
         let c = choose(&Requirements::default(), &[vis]).unwrap();
         assert!(c.reason.contains("already loaded"));
         // Unknown speed: smaller is assumed faster.
-        assert_eq!(choose(&Requirements { prefer: Prefer::Fast, ..Default::default() }, &[small.clone(), Candidate { gen_tps: None, ..big }]).unwrap().id.as_str(), "small");
-        let nan = Candidate { gen_tps: Some(f64::NAN), ..small.clone() };
+        assert_eq!(
+            choose(
+                &Requirements {
+                    prefer: Prefer::Fast,
+                    ..Default::default()
+                },
+                &[small.clone(), Candidate { gen_tps: None, ..big }]
+            )
+            .unwrap()
+            .id
+            .as_str(),
+            "small"
+        );
+        let nan = Candidate {
+            gen_tps: Some(f64::NAN),
+            ..small.clone()
+        };
         assert!(choose(&Requirements::default(), &[nan, small]).is_ok());
     }
 }

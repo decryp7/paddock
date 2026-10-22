@@ -25,11 +25,17 @@ pub const DOWNLOAD_HOSTS: &[(&str, &str)] = &[
 
 /// Hosts whose every subdomain is allowed (Hugging Face's CDN picks a regional host such as `us.aws.cdn.hf.co` per
 /// redirect). The match is on whole labels, so `evilcdn.hf.co` does not match `cdn.hf.co`.
-pub const DOWNLOAD_HOST_SUFFIXES: &[(&str, &str)] = &[("cdn.hf.co", "Hugging Face CDN (regional hosts)"), ("xethub.hf.co", "Hugging Face Xet storage (regional hosts)")];
+pub const DOWNLOAD_HOST_SUFFIXES: &[(&str, &str)] = &[
+    ("cdn.hf.co", "Hugging Face CDN (regional hosts)"),
+    ("xethub.hf.co", "Hugging Face Xet storage (regional hosts)"),
+];
 
 /// Whether `host` is allowed: listed exactly, or a subdomain of a listed suffix.
 pub fn host_is_allowed(host: &str) -> bool {
-    DOWNLOAD_HOSTS.iter().any(|(h, _)| *h == host) || DOWNLOAD_HOST_SUFFIXES.iter().any(|(s, _)| host.strip_suffix(s).is_some_and(|p| p.ends_with('.') && p.len() > 1))
+    DOWNLOAD_HOSTS.iter().any(|(h, _)| *h == host)
+        || DOWNLOAD_HOST_SUFFIXES
+            .iter()
+            .any(|(s, _)| host.strip_suffix(s).is_some_and(|p| p.ends_with('.') && p.len() > 1))
 }
 
 /// Why a URL may not be fetched.
@@ -70,7 +76,10 @@ impl DownloadUrl {
         if !host_is_allowed(&host) {
             return Err(refuse());
         }
-        Ok(DownloadUrl { url: url.to_string(), host })
+        Ok(DownloadUrl {
+            url: url.to_string(),
+            host,
+        })
     }
 
     /// The URL.
@@ -157,7 +166,9 @@ pub fn origin_allowed_without_key(origin: Option<&str>) -> bool {
     if o == "tauri://localhost" {
         return true;
     }
-    let Some(rest) = o.strip_prefix("http://").or_else(|| o.strip_prefix("https://")) else { return false };
+    let Some(rest) = o.strip_prefix("http://").or_else(|| o.strip_prefix("https://")) else {
+        return false;
+    };
     is_loopback_host(host_only(rest.split('/').next().unwrap_or_default()))
 }
 
@@ -169,7 +180,12 @@ mod tests {
     fn hugging_face_regional_cdn_hosts_are_allowed_by_whole_label() {
         assert!(DownloadUrl::parse("https://us.aws.cdn.hf.co/xet-bridge-us/abc?x=1").is_ok());
         assert!(DownloadUrl::parse("https://cas-bridge.xethub.hf.co/x").is_ok());
-        for bad in ["https://evilcdn.hf.co/x", "https://cdn.hf.co.evil.com/x", "https://.cdn.hf.co/x", "https://cdn.hf.co/x"] {
+        for bad in [
+            "https://evilcdn.hf.co/x",
+            "https://cdn.hf.co.evil.com/x",
+            "https://.cdn.hf.co/x",
+            "https://cdn.hf.co/x",
+        ] {
             assert!(DownloadUrl::parse(bad).is_err(), "{bad}");
         }
         assert!(DOWNLOAD_HOST_SUFFIXES.iter().all(|(_, why)| !why.is_empty()));

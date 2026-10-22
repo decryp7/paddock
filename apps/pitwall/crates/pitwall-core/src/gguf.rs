@@ -33,7 +33,15 @@ const MIN_FILE: u64 = 1 << 16;
 /// Architectures that are not language models.
 const NOT_A_LANGUAGE_MODEL: &[&str] = &["clip", "mmproj", "whisper", "stable-diffusion", "sam", "vae", "t5encoder"];
 /// Encoder architectures Pitwall serves as embedding (or reranker) models.
-const EMBEDDING: &[&str] = &["bert", "nomic-bert", "nomic-bert-moe", "jina-bert-v2", "jina-bert-v3", "xlm-roberta", "modern-bert"];
+const EMBEDDING: &[&str] = &[
+    "bert",
+    "nomic-bert",
+    "nomic-bert-moe",
+    "jina-bert-v2",
+    "jina-bert-v3",
+    "xlm-roberta",
+    "modern-bert",
+];
 const KNOWN: &[&str] = &[
     "llama",
     "qwen2",

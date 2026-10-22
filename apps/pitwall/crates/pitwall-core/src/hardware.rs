@@ -66,7 +66,12 @@ pub fn parse_nvidia_smi(out: &str) -> Vec<Gpu> {
             if name.is_empty() {
                 return None;
             }
-            let mib = |s: &str| s.parse::<f64>().ok().filter(|v| v.is_finite() && *v >= 0.0).map(|v| (v * MIB as f64) as u64);
+            let mib = |s: &str| {
+                s.parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite() && *v >= 0.0)
+                    .map(|v| (v * MIB as f64) as u64)
+            };
             Some(Gpu {
                 name: (*name).to_string(),
                 vram_total: Some(mib(total)?),
@@ -98,9 +103,20 @@ pub fn is_nvidia(name: &str) -> bool {
 /// Whether a display adapter is a real GPU (virtual, remote and basic display adapters are not).
 pub fn is_real_gpu(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    !["basic display", "basic render", "remote display", "virtio", "vmware", "virtualbox", "hyper-v", "llvmpipe", "qxl", "cirrus"]
-        .iter()
-        .any(|k| n.contains(k))
+    ![
+        "basic display",
+        "basic render",
+        "remote display",
+        "virtio",
+        "vmware",
+        "virtualbox",
+        "hyper-v",
+        "llvmpipe",
+        "qxl",
+        "cirrus",
+    ]
+    .iter()
+    .any(|k| n.contains(k))
 }
 
 #[cfg(test)]
@@ -109,7 +125,8 @@ mod tests {
 
     #[test]
     fn nvidia_smi_output() {
-        let g = parse_nvidia_smi("NVIDIA GeForce RTX 4070, 12282, 1024, 37\nbroken line\n, 1, 1, 1\nX, [N/A], 0, 0\nY, 2048, [N/A], [N/A]\n");
+        let g =
+            parse_nvidia_smi("NVIDIA GeForce RTX 4070, 12282, 1024, 37\nbroken line\n, 1, 1, 1\nX, [N/A], 0, 0\nY, 2048, [N/A], [N/A]\n");
         assert_eq!(g.len(), 2);
         assert_eq!(g[0].name, "NVIDIA GeForce RTX 4070");
         assert_eq!(g[0].vram_total, Some(12282 * MIB));
@@ -124,13 +141,25 @@ mod tests {
         let mac = apple_silicon_gpu("macos", "aarch64", 16 * MIB).unwrap();
         assert!(mac.unified);
         assert!(apple_silicon_gpu("windows", "x86_64", 1).is_none());
-        let hw = Hardware { gpus: vec![mac.clone()], ..Hardware::default() };
+        let hw = Hardware {
+            gpus: vec![mac.clone()],
+            ..Hardware::default()
+        };
         assert!(hw.unified());
         assert_eq!(hw.vram_free(), None, "unified memory is not a separate budget");
-        let hw = Hardware { gpus: parse_nvidia_smi("A, 100, 10, 1\nB, 200, 10, 1"), ..Hardware::default() };
+        let hw = Hardware {
+            gpus: parse_nvidia_smi("A, 100, 10, 1\nB, 200, 10, 1"),
+            ..Hardware::default()
+        };
         assert_eq!(hw.vram_free(), Some(190 * MIB));
         assert!(!hw.unified());
-        let no = Gpu { name: "x".into(), vram_total: None, vram_used: None, utilisation: None, unified: false };
+        let no = Gpu {
+            name: "x".into(),
+            vram_total: None,
+            vram_used: None,
+            utilisation: None,
+            unified: false,
+        };
         assert_eq!(no.vram_free(), None);
     }
 

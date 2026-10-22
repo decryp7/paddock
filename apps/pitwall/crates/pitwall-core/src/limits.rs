@@ -37,7 +37,13 @@ pub struct AppPermissions {
 
 impl Default for AppPermissions {
     fn default() -> Self {
-        AppPermissions { models: None, max_priority: Priority::Interactive, tools: false, extended_apis: true, limits: AppLimits::default() }
+        AppPermissions {
+            models: None,
+            max_priority: Priority::Interactive,
+            tools: false,
+            extended_apis: true,
+            limits: AppLimits::default(),
+        }
     }
 }
 
@@ -136,11 +142,26 @@ mod tests {
     #[test]
     fn permissions() {
         let all = AppPermissions::default();
-        assert_eq!(all.authorize(Some(&m("x")), Priority::Interactive, false, true), Ok(Priority::Interactive));
-        let p = AppPermissions { models: Some(vec![m("a")]), max_priority: Priority::Background, tools: false, extended_apis: false, limits: AppLimits::default() };
-        assert_eq!(p.authorize(Some(&m("a")), Priority::Interactive, false, false), Ok(Priority::Background));
+        assert_eq!(
+            all.authorize(Some(&m("x")), Priority::Interactive, false, true),
+            Ok(Priority::Interactive)
+        );
+        let p = AppPermissions {
+            models: Some(vec![m("a")]),
+            max_priority: Priority::Background,
+            tools: false,
+            extended_apis: false,
+            limits: AppLimits::default(),
+        };
+        assert_eq!(
+            p.authorize(Some(&m("a")), Priority::Interactive, false, false),
+            Ok(Priority::Background)
+        );
         assert_eq!(p.authorize(None, Priority::Batch, false, false), Ok(Priority::Batch));
-        assert_eq!(p.authorize(Some(&m("b")), Priority::Batch, false, false), Err(Denied::Model(m("b"))));
+        assert_eq!(
+            p.authorize(Some(&m("b")), Priority::Batch, false, false),
+            Err(Denied::Model(m("b")))
+        );
         assert_eq!(p.authorize(None, Priority::Batch, true, false), Err(Denied::Tools));
         assert_eq!(p.authorize(None, Priority::Batch, false, true), Err(Denied::Extended));
         for d in [Denied::Model(m("b")), Denied::Tools, Denied::Extended] {

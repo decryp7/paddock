@@ -35,7 +35,15 @@ pub struct Discovery {
 impl Discovery {
     /// The record for a server on `port`.
     pub fn new(version: &str, pid: u32, port: u16, started_at: u64) -> Discovery {
-        Discovery { format: 1, version: version.into(), api_version: crate::API_VERSION, pid, port, base_url: format!("http://127.0.0.1:{port}"), started_at }
+        Discovery {
+            format: 1,
+            version: version.into(),
+            api_version: crate::API_VERSION,
+            pid,
+            port,
+            base_url: format!("http://127.0.0.1:{port}"),
+            started_at,
+        }
     }
 
     /// Parses the file as an app would: bounded, and only a loopback base URL is trusted.

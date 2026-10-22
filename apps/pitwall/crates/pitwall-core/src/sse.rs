@@ -46,7 +46,10 @@ impl Decoder {
             let line = line.trim_end_matches(['\n', '\r']);
             if line.is_empty() {
                 if !self.data.is_empty() || self.event.is_some() {
-                    out.push(Event { event: self.event.take(), data: std::mem::take(&mut self.data).join("\n") });
+                    out.push(Event {
+                        event: self.event.take(),
+                        data: std::mem::take(&mut self.data).join("\n"),
+                    });
                     self.pending = 0;
                 }
                 continue;
@@ -54,7 +57,9 @@ impl Decoder {
             if line.starts_with(':') {
                 continue;
             }
-            let (field, value) = line.split_once(':').map_or((line, ""), |(f, v)| (f, v.strip_prefix(' ').unwrap_or(v)));
+            let (field, value) = line
+                .split_once(':')
+                .map_or((line, ""), |(f, v)| (f, v.strip_prefix(' ').unwrap_or(v)));
             self.pending += value.len();
             match field {
                 "data" => self.data.push(value.to_string()),
@@ -116,10 +121,24 @@ mod tests {
     fn decodes_across_chunks() {
         let mut d = Decoder::new();
         assert!(d.feed(b"data: {\"a\"").unwrap().is_empty());
-        let e = d.feed(b":1}\r\n\r\n: comment\nevent: done\ndata: x\ndata:y\nid: 3\nnofield\n\n\n").unwrap();
+        let e = d
+            .feed(b":1}\r\n\r\n: comment\nevent: done\ndata: x\ndata:y\nid: 3\nnofield\n\n\n")
+            .unwrap();
         assert_eq!(e.len(), 2);
-        assert_eq!(e[0], Event { event: None, data: "{\"a\":1}".into() });
-        assert_eq!(e[1], Event { event: Some("done".into()), data: "x\ny".into() });
+        assert_eq!(
+            e[0],
+            Event {
+                event: None,
+                data: "{\"a\":1}".into()
+            }
+        );
+        assert_eq!(
+            e[1],
+            Event {
+                event: Some("done".into()),
+                data: "x\ny".into()
+            }
+        );
         let e = d.feed(b"event: only\n\n").unwrap();
         assert_eq!(e[0].data, "");
     }

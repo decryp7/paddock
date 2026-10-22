@@ -21,7 +21,13 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Limits { initial: SECOND, max: MINUTE, reset_after: 5 * MINUTE, max_crashes: 5, window: 10 * MINUTE }
+        Limits {
+            initial: SECOND,
+            max: MINUTE,
+            reset_after: 5 * MINUTE,
+            max_crashes: 5,
+            window: 10 * MINUTE,
+        }
     }
 }
 
@@ -46,7 +52,12 @@ pub struct Backoff {
 impl Backoff {
     /// A fresh history.
     pub fn new(limits: Limits) -> Backoff {
-        Backoff { limits, crashes: vec![], attempt: 0, healthy_since: None }
+        Backoff {
+            limits,
+            crashes: vec![],
+            attempt: 0,
+            healthy_since: None,
+        }
     }
 
     /// The process reported healthy at `now`.
@@ -66,7 +77,11 @@ impl Backoff {
         if self.crashes.len() > self.limits.max_crashes {
             return Decision::GiveUp;
         }
-        let delay = self.limits.initial.saturating_mul(1u64 << self.attempt.min(20)).min(self.limits.max);
+        let delay = self
+            .limits
+            .initial
+            .saturating_mul(1u64 << self.attempt.min(20))
+            .min(self.limits.max);
         self.attempt += 1;
         Decision::RestartIn(delay)
     }
@@ -92,7 +107,10 @@ mod tests {
         b.healthy(10);
         b.healthy(10 + 5 * MINUTE);
         assert_eq!(b.crashed(11 + 5 * MINUTE), Decision::RestartIn(SECOND));
-        let mut b = Backoff::new(Limits { max_crashes: 100, ..Limits::default() });
+        let mut b = Backoff::new(Limits {
+            max_crashes: 100,
+            ..Limits::default()
+        });
         let mut last = Decision::GiveUp;
         for i in 0..10 {
             last = b.crashed(i);

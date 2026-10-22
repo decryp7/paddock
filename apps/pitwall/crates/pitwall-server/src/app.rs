@@ -125,7 +125,11 @@ impl AppState {
         ));
         engines.push(planned(EngineKind::WhisperCpp, "whisper.cpp speech-to-text is planned."));
         let packs = load_packs(&dirs);
-        let pack_engines: Vec<crate::pack_engine::PackEngine> = packs.engines.iter().map(|p| crate::pack_engine::PackEngine::new(p.clone(), dirs.clone(), egress.clone())).collect();
+        let pack_engines: Vec<crate::pack_engine::PackEngine> = packs
+            .engines
+            .iter()
+            .map(|p| crate::pack_engine::PackEngine::new(p.clone(), dirs.clone(), egress.clone()))
+            .collect();
         let library = Library::new(dirs.clone(), egress.clone());
         let events = Arc::new(Mutex::new(EventLog::default()));
         let settings = Arc::new(RwLock::new(settings));
@@ -165,7 +169,11 @@ impl AppState {
         });
         st.event(EventKind::EngineStarted, Severity::Info, "Pitwall started".into());
         for p in st.packs.problems.iter() {
-            st.event(EventKind::RequestFailed, Severity::Warn, format!("Pack {} was skipped: {}", p.file, p.message));
+            st.event(
+                EventKind::RequestFailed,
+                Severity::Warn,
+                format!("Pack {} was skipped: {}", p.file, p.message),
+            );
         }
         match loaded {
             config::Loaded::Backup(why) | config::Loaded::Reset(why) => st.event(
@@ -584,16 +592,36 @@ pub fn load_packs(dirs: &Dirs) -> pitwall_core::packs::Packs {
         names.sort();
         for p in names.into_iter().take(64) {
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            match std::fs::metadata(&p).ok().filter(|m| m.len() as usize <= pitwall_core::packs::MAX_PACK_BYTES).and_then(|_| std::fs::read_to_string(&p).ok()) {
+            match std::fs::metadata(&p)
+                .ok()
+                .filter(|m| m.len() as usize <= pitwall_core::packs::MAX_PACK_BYTES)
+                .and_then(|_| std::fs::read_to_string(&p).ok())
+            {
                 Some(t) => files.push((name, t)),
                 None => unreadable.push(name),
             }
         }
     }
-    let builtin = [("llamafile.engine.toml", include_str!("../../pitwall-core/src/packs/llamafile.engine.toml")), ("starter.models.toml", include_str!("../../pitwall-core/src/packs/starter.models.toml"))];
-    let all: Vec<(&str, &str)> = builtin.iter().copied().chain(files.iter().map(|(a, b)| (a.as_str(), b.as_str()))).collect();
+    let builtin = [
+        (
+            "llamafile.engine.toml",
+            include_str!("../../pitwall-core/src/packs/llamafile.engine.toml"),
+        ),
+        (
+            "starter.models.toml",
+            include_str!("../../pitwall-core/src/packs/starter.models.toml"),
+        ),
+    ];
+    let all: Vec<(&str, &str)> = builtin
+        .iter()
+        .copied()
+        .chain(files.iter().map(|(a, b)| (a.as_str(), b.as_str())))
+        .collect();
     let mut p = pitwall_core::packs::Packs::load(all);
-    p.problems.extend(unreadable.into_iter().map(|file| pitwall_core::packs::Problem { file, message: "the file is unreadable or larger than 256 KB".into() }));
+    p.problems.extend(unreadable.into_iter().map(|file| pitwall_core::packs::Problem {
+        file,
+        message: "the file is unreadable or larger than 256 KB".into(),
+    }));
     p
 }
 

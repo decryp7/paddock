@@ -156,7 +156,13 @@ mod tests {
             total_ram: 16 << 30,
             gpus: gpus
                 .iter()
-                .map(|n| Gpu { name: n.to_string(), vram_total: None, vram_used: None, utilisation: None, unified: false })
+                .map(|n| Gpu {
+                    name: n.to_string(),
+                    vram_total: None,
+                    vram_used: None,
+                    utilisation: None,
+                    unified: false,
+                })
                 .collect(),
         }
     }

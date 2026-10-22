@@ -93,10 +93,12 @@ impl Image {
     /// Parses a `data:<mime>;base64,<data>` URL. Any other URL is refused with a message: remote images are never
     /// fetched.
     pub fn from_data_url(url: &str) -> Result<Image, ChatError> {
-        let rest = url.strip_prefix("data:").ok_or_else(|| {
-            ChatError::Invalid("images must be inline data: URLs (Pitwall never fetches remote content)".into())
-        })?;
-        let (meta, data) = rest.split_once(',').ok_or_else(|| ChatError::Invalid("the image data URL has no data".into()))?;
+        let rest = url
+            .strip_prefix("data:")
+            .ok_or_else(|| ChatError::Invalid("images must be inline data: URLs (Pitwall never fetches remote content)".into()))?;
+        let (meta, data) = rest
+            .split_once(',')
+            .ok_or_else(|| ChatError::Invalid("the image data URL has no data".into()))?;
         let mime = meta
             .strip_suffix(";base64")
             .and_then(ImageMime::parse)
@@ -111,7 +113,10 @@ impl Image {
         if data.is_empty() || base64::engine::general_purpose::STANDARD.decode(data).is_err() {
             return Err(ChatError::Invalid("an image is not valid base64".into()));
         }
-        Ok(Image { mime, data: data.to_string() })
+        Ok(Image {
+            mime,
+            data: data.to_string(),
+        })
     }
 
     /// As a data URL.
@@ -156,7 +161,12 @@ pub struct Message {
 impl Message {
     /// A text message.
     pub fn text(role: Role, text: impl Into<String>) -> Message {
-        Message { role, parts: vec![Part::Text(text.into())], tool_calls: vec![], tool_call_id: None }
+        Message {
+            role,
+            parts: vec![Part::Text(text.into())],
+            tool_calls: vec![],
+            tool_call_id: None,
+        }
     }
 
     /// All text parts joined.
@@ -391,14 +401,23 @@ impl ChatOutput {
         match e {
             ChatEvent::Delta(t) => self.text.push_str(t),
             ChatEvent::Reasoning(t) => self.reasoning.push_str(t),
-            ChatEvent::ToolCall { index, id, name, arguments } => {
+            ChatEvent::ToolCall {
+                index,
+                id,
+                name,
+                arguments,
+            } => {
                 let i = *index as usize;
                 if i >= MAX_TOOLS {
                     return;
                 }
                 while self.tool_calls.len() <= i {
                     let n = self.tool_calls.len();
-                    self.tool_calls.push(ToolCall { id: format!("call_{n}"), name: String::new(), arguments: String::new() });
+                    self.tool_calls.push(ToolCall {
+                        id: format!("call_{n}"),
+                        name: String::new(),
+                        arguments: String::new(),
+                    });
                 }
                 let c = &mut self.tool_calls[i];
                 if let Some(id) = id.as_ref().filter(|s| !s.is_empty()) {
@@ -410,7 +429,11 @@ impl ChatOutput {
                 c.arguments.push_str(arguments);
             }
             ChatEvent::Done { finish, usage, timings } => {
-                self.finish = Some(if *finish == Finish::Stop && !self.tool_calls.is_empty() { Finish::ToolCalls } else { *finish });
+                self.finish = Some(if *finish == Finish::Stop && !self.tool_calls.is_empty() {
+                    Finish::ToolCalls
+                } else {
+                    *finish
+                });
                 self.usage = *usage;
                 self.timings = *timings;
             }
@@ -466,7 +489,10 @@ mod tests {
     use super::*;
 
     fn req() -> ChatRequest {
-        ChatRequest { messages: vec![Message::text(Role::User, "hi")], ..Default::default() }
+        ChatRequest {
+            messages: vec![Message::text(Role::User, "hi")],
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -509,7 +535,10 @@ mod tests {
         };
         assert_eq!(m.text_content(), "ab");
         assert_eq!(m.images().count(), 1);
-        let r = ChatRequest { messages: vec![m], ..Default::default() };
+        let r = ChatRequest {
+            messages: vec![m],
+            ..Default::default()
+        };
         assert!(r.has_images());
         assert!(!req().has_images());
     }
@@ -519,18 +548,49 @@ mod tests {
         assert!(req().check().is_ok());
         let cases: Vec<(ChatRequest, &str)> = vec![
             (ChatRequest::default(), "no messages"),
-            (ChatRequest { messages: vec![Message::text(Role::User, "x"); MAX_MESSAGES + 1], ..Default::default() }, "too many messages"),
-            (ChatRequest { temperature: Some(3.0), ..req() }, "temperature"),
-            (ChatRequest { top_p: Some(1.5), ..req() }, "top_p"),
-            (ChatRequest { stop: vec!["x".into(); MAX_STOPS + 1], ..req() }, "stop"),
             (
                 ChatRequest {
-                    tools: vec![Tool { name: "t".into(), description: String::new(), parameters: Value::Null }; MAX_TOOLS + 1],
+                    messages: vec![Message::text(Role::User, "x"); MAX_MESSAGES + 1],
+                    ..Default::default()
+                },
+                "too many messages",
+            ),
+            (
+                ChatRequest {
+                    temperature: Some(3.0),
+                    ..req()
+                },
+                "temperature",
+            ),
+            (ChatRequest { top_p: Some(1.5), ..req() }, "top_p"),
+            (
+                ChatRequest {
+                    stop: vec!["x".into(); MAX_STOPS + 1],
+                    ..req()
+                },
+                "stop",
+            ),
+            (
+                ChatRequest {
+                    tools: vec![
+                        Tool {
+                            name: "t".into(),
+                            description: String::new(),
+                            parameters: Value::Null
+                        };
+                        MAX_TOOLS + 1
+                    ],
                     ..req()
                 },
                 "too many tools",
             ),
-            (ChatRequest { tool_choice: ToolChoice::Named("x".into()), ..req() }, "not among"),
+            (
+                ChatRequest {
+                    tool_choice: ToolChoice::Named("x".into()),
+                    ..req()
+                },
+                "not among",
+            ),
         ];
         for (r, needle) in cases {
             let e = r.check().unwrap_err().to_string();
@@ -543,9 +603,20 @@ mod tests {
             tool_calls: vec![],
             tool_call_id: None,
         };
-        assert!(ChatRequest { messages: vec![many], ..Default::default() }.check().unwrap_err().to_string().contains("images"));
+        assert!(ChatRequest {
+            messages: vec![many],
+            ..Default::default()
+        }
+        .check()
+        .unwrap_err()
+        .to_string()
+        .contains("images"));
         let named = ChatRequest {
-            tools: vec![Tool { name: "t".into(), description: String::new(), parameters: Value::Null }],
+            tools: vec![Tool {
+                name: "t".into(),
+                description: String::new(),
+                parameters: Value::Null,
+            }],
             tool_choice: ToolChoice::Named("t".into()),
             ..req()
         };
@@ -558,28 +629,76 @@ mod tests {
             ChatEvent::Reasoning("hm".into()),
             ChatEvent::Delta("Hel".into()),
             ChatEvent::Delta("lo".into()),
-            ChatEvent::ToolCall { index: 1, id: Some("b".into()), name: Some("two".into()), arguments: "{}".into() },
-            ChatEvent::ToolCall { index: 0, id: Some(String::new()), name: Some("one".into()), arguments: "{\"a\":".into() },
-            ChatEvent::ToolCall { index: 0, id: None, name: None, arguments: "1}".into() },
-            ChatEvent::ToolCall { index: 9999, id: None, name: None, arguments: "x".into() },
-            ChatEvent::Done { finish: Finish::Stop, usage: Usage { prompt_tokens: 3, completion_tokens: 2 }, timings: None },
+            ChatEvent::ToolCall {
+                index: 1,
+                id: Some("b".into()),
+                name: Some("two".into()),
+                arguments: "{}".into(),
+            },
+            ChatEvent::ToolCall {
+                index: 0,
+                id: Some(String::new()),
+                name: Some("one".into()),
+                arguments: "{\"a\":".into(),
+            },
+            ChatEvent::ToolCall {
+                index: 0,
+                id: None,
+                name: None,
+                arguments: "1}".into(),
+            },
+            ChatEvent::ToolCall {
+                index: 9999,
+                id: None,
+                name: None,
+                arguments: "x".into(),
+            },
+            ChatEvent::Done {
+                finish: Finish::Stop,
+                usage: Usage {
+                    prompt_tokens: 3,
+                    completion_tokens: 2,
+                },
+                timings: None,
+            },
         ];
         let o = ChatOutput::collect(&events);
         assert_eq!(o.text, "Hello");
         assert_eq!(o.reasoning, "hm");
         assert_eq!(o.tool_calls.len(), 2);
-        assert_eq!(o.tool_calls[0], ToolCall { id: "call_0".into(), name: "one".into(), arguments: "{\"a\":1}".into() });
+        assert_eq!(
+            o.tool_calls[0],
+            ToolCall {
+                id: "call_0".into(),
+                name: "one".into(),
+                arguments: "{\"a\":1}".into()
+            }
+        );
         assert_eq!(o.tool_calls[1].id, "b");
         assert_eq!(o.finish, Some(Finish::ToolCalls));
         assert_eq!(o.usage.completion_tokens, 2);
-        let plain = ChatOutput::collect(&[ChatEvent::Done { finish: Finish::Length, usage: Usage::default(), timings: None }]);
+        let plain = ChatOutput::collect(&[ChatEvent::Done {
+            finish: Finish::Length,
+            usage: Usage::default(),
+            timings: None,
+        }]);
         assert_eq!(plain.finish, Some(Finish::Length));
     }
 
     #[test]
     fn embed_limits() {
         assert!(EmbedRequest::default().check().is_err());
-        assert!(EmbedRequest { input: vec!["a".into()], ..Default::default() }.check().is_ok());
-        assert!(EmbedRequest { input: vec![String::new(); MAX_EMBED_INPUTS + 1], ..Default::default() }.check().is_err());
+        assert!(EmbedRequest {
+            input: vec!["a".into()],
+            ..Default::default()
+        }
+        .check()
+        .is_ok());
+        assert!(EmbedRequest {
+            input: vec![String::new(); MAX_EMBED_INPUTS + 1],
+            ..Default::default()
+        }
+        .check()
+        .is_err());
     }
 }

@@ -28,7 +28,11 @@ pub struct ModelSize {
 impl ModelSize {
     /// From a GGUF header.
     pub fn from_header(info: &GgufInfo, projector: u64) -> ModelSize {
-        ModelSize { weights: info.file_size, projector, kv_per_token: info.kv_bytes_per_token() }
+        ModelSize {
+            weights: info.file_size,
+            projector,
+            kv_per_token: info.kv_bytes_per_token(),
+        }
     }
 
     /// Before download: from the file size and quantisation alone (KV cache scaled from the parameter count, 128 KiB
@@ -37,7 +41,11 @@ impl ModelSize {
         let q = quant.and_then(Quant::parse).unwrap_or(Quant::Q4);
         let params_b = (weights as f64 / 1e9) / q.gb_per_b();
         let kv = (params_b / 8.0 * 128.0 * 1024.0).clamp(16.0 * 1024.0, 512.0 * 1024.0) as u64;
-        ModelSize { weights, projector: 0, kv_per_token: kv }
+        ModelSize {
+            weights,
+            projector: 0,
+            kv_per_token: kv,
+        }
     }
 
     /// Total bytes at a context length.
@@ -80,13 +88,31 @@ pub fn need(size: &ModelSize, context: u32, room: &Room) -> (Need, Offload) {
         Some(v) => {
             let usable = v - COMPUTE_OVERHEAD;
             if total <= usable + COMPUTE_OVERHEAD {
-                (Need { ram: HOST_OVERHEAD, vram: total }, Offload::All)
+                (
+                    Need {
+                        ram: HOST_OVERHEAD,
+                        vram: total,
+                    },
+                    Offload::All,
+                )
             } else {
                 let on_gpu = usable.min(total);
-                (Need { ram: total - on_gpu + HOST_OVERHEAD, vram: total }, Offload::Partial)
+                (
+                    Need {
+                        ram: total - on_gpu + HOST_OVERHEAD,
+                        vram: total,
+                    },
+                    Offload::Partial,
+                )
             }
         }
-        None => (Need { ram: total + HOST_OVERHEAD, vram: 0 }, Offload::None),
+        None => (
+            Need {
+                ram: total + HOST_OVERHEAD,
+                vram: 0,
+            },
+            Offload::None,
+        ),
     }
 }
 
@@ -152,9 +178,18 @@ pub fn assess(size: Option<&ModelSize>, context: u32, room: &Room) -> Fit {
         Offload::None => "on the CPU",
     };
     let (verdict, message) = if n.ram as f64 <= now as f64 * 0.8 {
-        (Verdict::Fits, format!("Fits: needs about {} and runs {where_}.", gib(n.ram.max(n.vram))))
+        (
+            Verdict::Fits,
+            format!("Fits: needs about {} and runs {where_}.", gib(n.ram.max(n.vram))),
+        )
     } else if n.ram <= releasable && n.ram as f64 <= room.ram_total as f64 * 0.85 {
-        (Verdict::Tight, format!("Tight: needs about {}; Pitwall releases idle models to make room. Runs {where_}.", gib(n.ram)))
+        (
+            Verdict::Tight,
+            format!(
+                "Tight: needs about {}; Pitwall releases idle models to make room. Runs {where_}.",
+                gib(n.ram)
+            ),
+        )
     } else {
         (
             Verdict::WontFit,
@@ -165,7 +200,15 @@ pub fn assess(size: Option<&ModelSize>, context: u32, room: &Room) -> Fit {
             ),
         )
     };
-    Fit { verdict, need_ram: n.ram, need_vram: n.vram, have_ram: releasable, have_vram, offload, message }
+    Fit {
+        verdict,
+        need_ram: n.ram,
+        need_vram: n.vram,
+        have_ram: releasable,
+        have_vram,
+        offload,
+        message,
+    }
 }
 
 #[cfg(test)]
@@ -173,7 +216,13 @@ mod tests {
     use super::*;
 
     fn room(ram_avail_gib: u64, vram_gib: Option<u64>) -> Room {
-        Room { ram_total: 32 * GIB, ram_available: ram_avail_gib * GIB, ram_releasable: 0, vram_free: vram_gib.map(|v| v * GIB), unified: false }
+        Room {
+            ram_total: 32 * GIB,
+            ram_available: ram_avail_gib * GIB,
+            ram_releasable: 0,
+            vram_free: vram_gib.map(|v| v * GIB),
+            unified: false,
+        }
     }
 
     #[test]
@@ -190,18 +239,46 @@ mod tests {
 
     #[test]
     fn offload_split() {
-        let s = ModelSize { weights: 4 * GIB, projector: 0, kv_per_token: 0 };
-        assert_eq!(need(&s, 0, &room(20, Some(12))), (Need { ram: HOST_OVERHEAD, vram: 4 * GIB + COMPUTE_OVERHEAD }, Offload::All));
+        let s = ModelSize {
+            weights: 4 * GIB,
+            projector: 0,
+            kv_per_token: 0,
+        };
+        assert_eq!(
+            need(&s, 0, &room(20, Some(12))),
+            (
+                Need {
+                    ram: HOST_OVERHEAD,
+                    vram: 4 * GIB + COMPUTE_OVERHEAD
+                },
+                Offload::All
+            )
+        );
         let (n, o) = need(&s, 0, &room(20, Some(3)));
         assert_eq!(o, Offload::Partial);
         assert_eq!(n.ram, 4 * GIB + COMPUTE_OVERHEAD - (3 * GIB - COMPUTE_OVERHEAD) + HOST_OVERHEAD);
         assert_eq!(need(&s, 0, &room(20, Some(1))).1, Offload::None, "too little VRAM to bother");
-        assert_eq!(need(&s, 0, &Room { unified: true, ..room(20, Some(12)) }).1, Offload::None);
+        assert_eq!(
+            need(
+                &s,
+                0,
+                &Room {
+                    unified: true,
+                    ..room(20, Some(12))
+                }
+            )
+            .1,
+            Offload::None
+        );
     }
 
     #[test]
     fn verdicts() {
-        let s = ModelSize { weights: 4 * GIB, projector: 0, kv_per_token: 128 * 1024 };
+        let s = ModelSize {
+            weights: 4 * GIB,
+            projector: 0,
+            kv_per_token: 128 * 1024,
+        };
         let f = assess(Some(&s), 8192, &room(20, None));
         assert_eq!(f.verdict, Verdict::Fits);
         assert!(f.message.contains("on the CPU"), "{}", f.message);
@@ -210,9 +287,19 @@ mod tests {
         assert_eq!(f.offload, Offload::All);
         let f = assess(Some(&s), 8192, &room(20, Some(3)));
         assert!(f.message.contains("partly"));
-        let f = assess(Some(&s), 8192, &Room { unified: true, ..room(20, None) });
+        let f = assess(
+            Some(&s),
+            8192,
+            &Room {
+                unified: true,
+                ..room(20, None)
+            },
+        );
         assert!(f.message.contains("shared GPU memory"));
-        let tight = Room { ram_releasable: 8 * GIB, ..room(4, None) };
+        let tight = Room {
+            ram_releasable: 8 * GIB,
+            ..room(4, None)
+        };
         let f = assess(Some(&s), 8192, &tight);
         assert_eq!(f.verdict, Verdict::Tight, "{}", f.message);
         assert_eq!(f.have_ram, 12 * GIB);
@@ -222,7 +309,10 @@ mod tests {
         assert!(f.message.contains("smaller quantisation"));
         let u = assess(None, 8192, &room(20, Some(12)));
         assert_eq!((u.verdict, u.have_vram), (Verdict::Unknown, 12 * GIB));
-        assert_eq!(assess(Some(&ModelSize { weights: 0, ..s }), 1, &room(1, None)).verdict, Verdict::Unknown);
+        assert_eq!(
+            assess(Some(&ModelSize { weights: 0, ..s }), 1, &room(1, None)).verdict,
+            Verdict::Unknown
+        );
         assert_eq!(serde_json::to_value(Verdict::WontFit).unwrap(), "wontFit");
     }
 }

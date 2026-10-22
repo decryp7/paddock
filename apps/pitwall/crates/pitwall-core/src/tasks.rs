@@ -63,9 +63,15 @@ fn system(task: Task, version: u32) -> Option<&'static str> {
 }
 
 fn text_of(v: &Value) -> Result<String, ApiError> {
-    let t = v.get("text").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("`text` is required"))?;
+    let t = v
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::invalid("`text` is required"))?;
     if t.len() > MAX_TASK_TEXT {
-        return Err(ApiError::new(crate::api::ErrorKind::TooLarge, format!("`text` is longer than {MAX_TASK_TEXT} bytes")));
+        return Err(ApiError::new(
+            crate::api::ErrorKind::TooLarge,
+            format!("`text` is longer than {MAX_TASK_TEXT} bytes"),
+        ));
     }
     Ok(t.to_string())
 }
@@ -75,11 +81,14 @@ pub fn build(task: Task, v: &Value) -> Result<(ChatRequest, String), ApiError> {
     let version = match v.get("template").and_then(Value::as_str) {
         None => task.latest(),
         Some(t) => {
-            let (name, ver) = t.split_once('@').ok_or_else(|| ApiError::invalid("`template` must be name@version"))?;
+            let (name, ver) = t
+                .split_once('@')
+                .ok_or_else(|| ApiError::invalid("`template` must be name@version"))?;
             if name != task.name() {
                 return Err(ApiError::invalid(format!("template {t:?} is not a {} template", task.name())));
             }
-            ver.parse().map_err(|_| ApiError::invalid("the template version must be a number"))?
+            ver.parse()
+                .map_err(|_| ApiError::invalid("the template version must be a number"))?
         }
     };
     let sys = system(task, version).ok_or_else(|| ApiError::invalid(format!("there is no {}@{version} template", task.name())))?;
@@ -91,8 +100,15 @@ pub fn build(task: Task, v: &Value) -> Result<(ChatRequest, String), ApiError> {
                 "headline" => "as one headline",
                 _ => "as one short paragraph",
             };
-            let words = v.get("maxWords").and_then(Value::as_u64).map(|w| format!(" in at most {w} words")).unwrap_or_default();
-            (format!("Summarise the following text {style}{words}.\n\n<text>\n{text}\n</text>"), OutputFormat::Text)
+            let words = v
+                .get("maxWords")
+                .and_then(Value::as_u64)
+                .map(|w| format!(" in at most {w} words"))
+                .unwrap_or_default();
+            (
+                format!("Summarise the following text {style}{words}.\n\n<text>\n{text}\n</text>"),
+                OutputFormat::Text,
+            )
         }
         Task::Classify => {
             let labels: Vec<String> = v
@@ -100,7 +116,11 @@ pub fn build(task: Task, v: &Value) -> Result<(ChatRequest, String), ApiError> {
                 .and_then(Value::as_array)
                 .ok_or_else(|| ApiError::invalid("`labels` is required"))?
                 .iter()
-                .map(|l| l.as_str().map(str::to_string).ok_or_else(|| ApiError::invalid("`labels` must hold strings")))
+                .map(|l| {
+                    l.as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| ApiError::invalid("`labels` must hold strings"))
+                })
                 .collect::<Result<_, _>>()?;
             if labels.is_empty() || labels.len() > MAX_LABELS {
                 return Err(ApiError::invalid(format!("give 1 to {MAX_LABELS} labels")));
@@ -111,17 +131,42 @@ pub fn build(task: Task, v: &Value) -> Result<(ChatRequest, String), ApiError> {
             } else {
                 json!({"type": "object", "properties": {"label": {"enum": labels}}, "required": ["label"]})
             };
-            let ask = if multi { "every label that applies" } else { "the one label that fits best" };
-            (format!("Choose {ask} from: {}.\n\n<text>\n{text}\n</text>", labels.join(", ")), OutputFormat::JsonSchema(schema))
+            let ask = if multi {
+                "every label that applies"
+            } else {
+                "the one label that fits best"
+            };
+            (
+                format!("Choose {ask} from: {}.\n\n<text>\n{text}\n</text>", labels.join(", ")),
+                OutputFormat::JsonSchema(schema),
+            )
         }
         Task::Extract => {
-            let schema = v.get("schema").filter(|s| s.is_object()).cloned().ok_or_else(|| ApiError::invalid("`schema` (a JSON schema object) is required"))?;
-            (format!("Extract the information as JSON matching this schema:\n{schema}\n\n<text>\n{text}\n</text>"), OutputFormat::JsonSchema(schema))
+            let schema = v
+                .get("schema")
+                .filter(|s| s.is_object())
+                .cloned()
+                .ok_or_else(|| ApiError::invalid("`schema` (a JSON schema object) is required"))?;
+            (
+                format!("Extract the information as JSON matching this schema:\n{schema}\n\n<text>\n{text}\n</text>"),
+                OutputFormat::JsonSchema(schema),
+            )
         }
         Task::Translate => {
-            let to = v.get("to").and_then(Value::as_str).filter(|s| !s.trim().is_empty() && s.len() <= 64).ok_or_else(|| ApiError::invalid("`to` (the target language) is required"))?;
-            let from = v.get("from").and_then(Value::as_str).map(|f| format!(" from {f}")).unwrap_or_default();
-            (format!("Translate the following text{from} into {to}.\n\n<text>\n{text}\n</text>"), OutputFormat::Text)
+            let to = v
+                .get("to")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty() && s.len() <= 64)
+                .ok_or_else(|| ApiError::invalid("`to` (the target language) is required"))?;
+            let from = v
+                .get("from")
+                .and_then(Value::as_str)
+                .map(|f| format!(" from {f}"))
+                .unwrap_or_default();
+            (
+                format!("Translate the following text{from} into {to}.\n\n<text>\n{text}\n</text>"),
+                OutputFormat::Text,
+            )
         }
     };
     let model = match v.get("model").and_then(Value::as_str) {
@@ -133,7 +178,10 @@ pub fn build(task: Task, v: &Value) -> Result<(ChatRequest, String), ApiError> {
         messages: vec![Message::text(Role::System, sys), Message::text(Role::User, user)],
         format,
         temperature: Some(0.0),
-        max_tokens: v.get("maxTokens").and_then(Value::as_u64).map(|n| n.min(u64::from(u32::MAX)) as u32),
+        max_tokens: v
+            .get("maxTokens")
+            .and_then(Value::as_u64)
+            .map(|n| n.min(u64::from(u32::MAX)) as u32),
         ..Default::default()
     };
     Ok((req, format!("{}@{version}", task.name())))
@@ -149,7 +197,11 @@ mod tests {
             assert_eq!(Task::parse(n).unwrap().name(), n);
         }
         assert_eq!(Task::parse("poem"), None);
-        let (r, t) = build(Task::Summarize, &json!({"text": "long text", "style": "bullets", "maxWords": 50, "model": "m"})).unwrap();
+        let (r, t) = build(
+            Task::Summarize,
+            &json!({"text": "long text", "style": "bullets", "maxWords": 50, "model": "m"}),
+        )
+        .unwrap();
         assert_eq!(t, "summarize@1");
         assert!(r.messages[1].text_content().contains("bullet points in at most 50 words"));
         assert_eq!(r.model, ModelRef::Named("m".into()));
@@ -157,15 +209,25 @@ mod tests {
         let (r, _) = build(Task::Summarize, &json!({"text": "x", "style": "headline", "model": "auto"})).unwrap();
         assert!(r.messages[1].text_content().contains("one headline"));
         assert_eq!(r.model, ModelRef::Default);
-        assert!(build(Task::Summarize, &json!({"text": "x"})).unwrap().0.messages[1].text_content().contains("paragraph"));
+        assert!(build(Task::Summarize, &json!({"text": "x"})).unwrap().0.messages[1]
+            .text_content()
+            .contains("paragraph"));
         let (r, _) = build(Task::Classify, &json!({"text": "x", "labels": ["bug", "feature"]})).unwrap();
         assert!(matches!(&r.format, OutputFormat::JsonSchema(s) if s["properties"]["label"]["enum"][1] == "feature"));
-        let (r, _) = build(Task::Classify, &json!({"text": "x", "labels": ["a"], "multiLabel": true, "maxTokens": 9})).unwrap();
+        let (r, _) = build(
+            Task::Classify,
+            &json!({"text": "x", "labels": ["a"], "multiLabel": true, "maxTokens": 9}),
+        )
+        .unwrap();
         assert!(matches!(&r.format, OutputFormat::JsonSchema(s) if s["properties"]["labels"]["type"] == "array"));
         assert_eq!(r.max_tokens, Some(9));
         let (r, _) = build(Task::Extract, &json!({"text": "x", "schema": {"type": "object"}})).unwrap();
         assert!(matches!(r.format, OutputFormat::JsonSchema(_)));
-        let (r, _) = build(Task::Translate, &json!({"text": "Hallo", "from": "German", "to": "English", "template": "translate@1"})).unwrap();
+        let (r, _) = build(
+            Task::Translate,
+            &json!({"text": "Hallo", "from": "German", "to": "English", "template": "translate@1"}),
+        )
+        .unwrap();
         assert!(r.messages[1].text_content().contains("from German into English"));
     }
 

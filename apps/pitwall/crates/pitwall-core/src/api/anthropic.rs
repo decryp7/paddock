@@ -12,32 +12,52 @@ fn blocks(v: &Value, role: Role) -> Result<Vec<Message>, ApiError> {
         Value::Array(a) => a,
         _ => return Err(ApiError::invalid("`content` must be a string or an array of content blocks")),
     };
-    let mut main = Message { role, parts: vec![], tool_calls: vec![], tool_call_id: None };
+    let mut main = Message {
+        role,
+        parts: vec![],
+        tool_calls: vec![],
+        tool_call_id: None,
+    };
     let mut results = vec![];
     for b in items {
         match b.get("type").and_then(Value::as_str).unwrap_or_default() {
-            "text" => main.parts.push(Part::Text(b.get("text").and_then(Value::as_str).unwrap_or_default().to_string())),
+            "text" => main
+                .parts
+                .push(Part::Text(b.get("text").and_then(Value::as_str).unwrap_or_default().to_string())),
             "image" => {
                 let src = b.get("source").ok_or_else(|| ApiError::invalid("an image block has no `source`"))?;
                 if src.get("type").and_then(Value::as_str) != Some("base64") {
-                    return Err(ApiError::invalid("images must be base64 sources (Pitwall never fetches remote content)"));
+                    return Err(ApiError::invalid(
+                        "images must be base64 sources (Pitwall never fetches remote content)",
+                    ));
                 }
                 let mime = src
                     .get("media_type")
                     .and_then(Value::as_str)
                     .and_then(ImageMime::parse)
                     .ok_or_else(|| ApiError::invalid("an image's media_type must be image/png, image/jpeg, image/webp or image/gif"))?;
-                main.parts.push(Part::Image(Image::from_base64(mime, src.get("data").and_then(Value::as_str).unwrap_or_default())?));
+                main.parts.push(Part::Image(Image::from_base64(
+                    mime,
+                    src.get("data").and_then(Value::as_str).unwrap_or_default(),
+                )?));
             }
             "tool_use" => main.tool_calls.push(ToolCall {
                 id: b.get("id").and_then(Value::as_str).unwrap_or_default().to_string(),
-                name: b.get("name").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("a tool_use block has no `name`"))?.to_string(),
+                name: b
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ApiError::invalid("a tool_use block has no `name`"))?
+                    .to_string(),
                 arguments: b.get("input").map_or_else(|| "{}".to_string(), Value::to_string),
             }),
             "tool_result" => {
                 let text = match b.get("content") {
                     Some(Value::String(s)) => s.clone(),
-                    Some(Value::Array(parts)) => parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join(""),
+                    Some(Value::Array(parts)) => parts
+                        .iter()
+                        .filter_map(|p| p.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join(""),
                     _ => String::new(),
                 };
                 results.push(Message {
@@ -49,7 +69,12 @@ fn blocks(v: &Value, role: Role) -> Result<Vec<Message>, ApiError> {
             }
             // Thinking blocks of earlier turns carry no instruction for a local model.
             "thinking" | "redacted_thinking" => {}
-            other => return Err(ApiError::new(ErrorKind::NotAvailable, format!("content blocks of type {other:?} are not supported"))),
+            other => {
+                return Err(ApiError::new(
+                    ErrorKind::NotAvailable,
+                    format!("content blocks of type {other:?} are not supported"),
+                ))
+            }
         }
     }
     let mut out = results;
@@ -62,7 +87,10 @@ fn blocks(v: &Value, role: Role) -> Result<Vec<Message>, ApiError> {
 /// Parses a `POST /v1/messages` body.
 pub fn parse_messages(v: &Value) -> Result<ChatRequest, ApiError> {
     let o = object(v, "the request")?;
-    let mut req = ChatRequest { model: model_ref(o)?, ..Default::default() };
+    let mut req = ChatRequest {
+        model: model_ref(o)?,
+        ..Default::default()
+    };
     match o.get("system") {
         None | Some(Value::Null) => {}
         Some(Value::String(s)) => req.messages.push(Message::text(Role::System, s.clone())),
@@ -89,9 +117,15 @@ pub fn parse_messages(v: &Value) -> Result<ChatRequest, ApiError> {
     req.stream = opt(o, "stream", Value::as_bool, "a boolean")?.unwrap_or(false);
     if let Some(list) = opt(o, "tools", Value::as_array, "an array")? {
         for t in list {
-            let name = t.get("name").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("a tool has no `name`"))?;
+            let name = t
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ApiError::invalid("a tool has no `name`"))?;
             if t.get("type").and_then(Value::as_str).is_some_and(|ty| ty != "custom") {
-                return Err(ApiError::new(ErrorKind::NotAvailable, format!("server tools such as {name:?} are not available in Pitwall")));
+                return Err(ApiError::new(
+                    ErrorKind::NotAvailable,
+                    format!("server tools such as {name:?} are not available in Pitwall"),
+                ));
             }
             req.tools.push(Tool {
                 name: name.to_string(),
@@ -106,7 +140,12 @@ pub fn parse_messages(v: &Value) -> Result<ChatRequest, ApiError> {
             Some("auto") => ToolChoice::Auto,
             Some("any") => ToolChoice::Required,
             Some("none") => ToolChoice::None,
-            Some("tool") => ToolChoice::Named(c.get("name").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("tool_choice names no tool"))?.to_string()),
+            Some("tool") => ToolChoice::Named(
+                c.get("name")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ApiError::invalid("tool_choice names no tool"))?
+                    .to_string(),
+            ),
             _ => return Err(ApiError::invalid("unknown tool_choice")),
         },
     };
@@ -167,12 +206,22 @@ pub struct MessagesStream {
 impl MessagesStream {
     /// A stream; `prompt_tokens` is reported in `message_start` when known.
     pub fn new(id: &str, model: &str, prompt_tokens: u32) -> MessagesStream {
-        MessagesStream { id: id.into(), model: model.into(), started: false, open: None, index: 0, prompt_tokens }
+        MessagesStream {
+            id: id.into(),
+            model: model.into(),
+            started: false,
+            open: None,
+            index: 0,
+            prompt_tokens,
+        }
     }
 
     fn close(&mut self, out: &mut Vec<String>) {
         if self.open.take().is_some() {
-            out.push(crate::sse::named("content_block_stop", &json!({"type": "content_block_stop", "index": self.index}).to_string()));
+            out.push(crate::sse::named(
+                "content_block_stop",
+                &json!({"type": "content_block_stop", "index": self.index}).to_string(),
+            ));
             self.index += 1;
         }
     }
@@ -199,7 +248,10 @@ impl MessagesStream {
                 "stop_reason": null, "stop_sequence": null,
                 "usage": {"input_tokens": self.prompt_tokens, "output_tokens": 0}
             });
-            out.push(crate::sse::named("message_start", &json!({"type": "message_start", "message": msg}).to_string()));
+            out.push(crate::sse::named(
+                "message_start",
+                &json!({"type": "message_start", "message": msg}).to_string(),
+            ));
         }
         match e {
             ChatEvent::Delta(t) => {
@@ -208,7 +260,12 @@ impl MessagesStream {
                 out.push(crate::sse::named("content_block_delta", &d.to_string()));
             }
             ChatEvent::Reasoning(_) => {}
-            ChatEvent::ToolCall { index, id, name, arguments } => {
+            ChatEvent::ToolCall {
+                index,
+                id,
+                name,
+                arguments,
+            } => {
                 let start = json!({
                     "type": "tool_use",
                     "id": id.clone().unwrap_or_else(|| format!("toolu_{index}")),
@@ -294,13 +351,35 @@ mod tests {
             (base(json!({"system": 5})), "`system` must be"),
             (base(json!({"messages": [{"role": "system", "content": "x"}]})), "role"),
             (base(json!({"messages": [{"role": "user", "content": 5}]})), "string or an array"),
-            (base(json!({"messages": [{"role": "user", "content": [{"type": "image"}]}]})), "no `source`"),
-            (base(json!({"messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "url", "url": "https://x"}}]}]})), "never fetches"),
-            (base(json!({"messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/bmp", "data": "AAAA"}}]}]})), "media_type"),
-            (base(json!({"messages": [{"role": "assistant", "content": [{"type": "tool_use"}]}]})), "no `name`"),
-            (base(json!({"messages": [{"role": "user", "content": [{"type": "document"}]}]})), "not supported"),
+            (
+                base(json!({"messages": [{"role": "user", "content": [{"type": "image"}]}]})),
+                "no `source`",
+            ),
+            (
+                base(
+                    json!({"messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "url", "url": "https://x"}}]}]}),
+                ),
+                "never fetches",
+            ),
+            (
+                base(
+                    json!({"messages": [{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/bmp", "data": "AAAA"}}]}]}),
+                ),
+                "media_type",
+            ),
+            (
+                base(json!({"messages": [{"role": "assistant", "content": [{"type": "tool_use"}]}]})),
+                "no `name`",
+            ),
+            (
+                base(json!({"messages": [{"role": "user", "content": [{"type": "document"}]}]})),
+                "not supported",
+            ),
             (base(json!({"tools": [{"description": "x"}]})), "no `name`"),
-            (base(json!({"tools": [{"type": "web_search_20250305", "name": "web_search"}]})), "server tools"),
+            (
+                base(json!({"tools": [{"type": "web_search_20250305", "name": "web_search"}]})),
+                "server tools",
+            ),
             (base(json!({"tool_choice": {"type": "tool"}})), "names no tool"),
             (base(json!({"tool_choice": {"type": "sometimes"}})), "unknown tool_choice"),
         ];
@@ -308,7 +387,11 @@ mod tests {
             let e = parse_messages(&v).unwrap_err().to_string();
             assert!(e.contains(needle), "{v}: {e}");
         }
-        for (c, want) in [("auto", ToolChoice::Auto), ("any", ToolChoice::Required), ("none", ToolChoice::None)] {
+        for (c, want) in [
+            ("auto", ToolChoice::Auto),
+            ("any", ToolChoice::Required),
+            ("none", ToolChoice::None),
+        ] {
             let r = parse_messages(&base(json!({"tool_choice": {"type": c}, "system": null}))).unwrap();
             assert_eq!(r.tool_choice, want);
         }
@@ -324,9 +407,23 @@ mod tests {
     fn responses_and_streams() {
         let out = ChatOutput {
             text: "hi".into(),
-            tool_calls: vec![ToolCall { id: "toolu_1".into(), name: "f".into(), arguments: "{\"a\":1}".into() }, ToolCall { id: "t2".into(), name: "g".into(), arguments: "not json".into() }],
+            tool_calls: vec![
+                ToolCall {
+                    id: "toolu_1".into(),
+                    name: "f".into(),
+                    arguments: "{\"a\":1}".into(),
+                },
+                ToolCall {
+                    id: "t2".into(),
+                    name: "g".into(),
+                    arguments: "not json".into(),
+                },
+            ],
             finish: Some(Finish::ToolCalls),
-            usage: Usage { prompt_tokens: 5, completion_tokens: 2 },
+            usage: Usage {
+                prompt_tokens: 5,
+                completion_tokens: 2,
+            },
             ..Default::default()
         };
         let r = messages_response(&out, "msg_1", "m");
@@ -336,7 +433,17 @@ mod tests {
         assert_eq!(r["content"][2]["input"], json!({}));
         assert_eq!(r["stop_reason"], "tool_use");
         assert_eq!(r["usage"]["input_tokens"], 5);
-        assert_eq!(messages_response(&ChatOutput { finish: Some(Finish::Length), ..Default::default() }, "x", "m")["stop_reason"], "max_tokens");
+        assert_eq!(
+            messages_response(
+                &ChatOutput {
+                    finish: Some(Finish::Length),
+                    ..Default::default()
+                },
+                "x",
+                "m"
+            )["stop_reason"],
+            "max_tokens"
+        );
         assert_eq!(messages_response(&ChatOutput::default(), "x", "m")["stop_reason"], "end_turn");
 
         let mut s = MessagesStream::new("msg_2", "m", 7);
@@ -346,12 +453,29 @@ mod tests {
         let f = s.event(&ChatEvent::Delta("y".into()));
         assert_eq!(f.len(), 1, "same block");
         assert!(s.event(&ChatEvent::Reasoning("r".into())).is_empty());
-        let f = s.event(&ChatEvent::ToolCall { index: 0, id: Some("toolu_9".into()), name: Some("f".into()), arguments: "{\"a\"".into() });
+        let f = s.event(&ChatEvent::ToolCall {
+            index: 0,
+            id: Some("toolu_9".into()),
+            name: Some("f".into()),
+            arguments: "{\"a\"".into(),
+        });
         assert!(f[0].contains("content_block_stop") && f[1].contains("\"type\":\"tool_use\"") && f[1].contains("\"index\":1"));
         assert!(f[2].contains("input_json_delta"));
-        let f = s.event(&ChatEvent::ToolCall { index: 1, id: None, name: None, arguments: String::new() });
+        let f = s.event(&ChatEvent::ToolCall {
+            index: 1,
+            id: None,
+            name: None,
+            arguments: String::new(),
+        });
         assert!(f[1].contains("toolu_1"), "generated id");
-        let f = s.event(&ChatEvent::Done { finish: Finish::ToolCalls, usage: Usage { prompt_tokens: 7, completion_tokens: 4 }, timings: None });
+        let f = s.event(&ChatEvent::Done {
+            finish: Finish::ToolCalls,
+            usage: Usage {
+                prompt_tokens: 7,
+                completion_tokens: 4,
+            },
+            timings: None,
+        });
         assert!(f[0].contains("content_block_stop"));
         assert!(f[1].contains("\"stop_reason\":\"tool_use\"") && f[1].contains("\"output_tokens\":4"));
         assert!(f[2].starts_with("event: message_stop"));

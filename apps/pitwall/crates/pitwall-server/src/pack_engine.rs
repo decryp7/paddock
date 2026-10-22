@@ -28,7 +28,12 @@ pub struct PackEngine {
 impl PackEngine {
     /// An adapter for `pack` on this platform.
     pub fn new(pack: EnginePack, dirs: Dirs, egress: Egress) -> PackEngine {
-        PackEngine { pack, dirs, egress, platform: runtimes::current_platform() }
+        PackEngine {
+            pack,
+            dirs,
+            egress,
+            platform: runtimes::current_platform(),
+        }
     }
 
     fn dir(&self) -> PathBuf {
@@ -45,7 +50,8 @@ impl PackEngine {
         if cmd.contains(['/', '\\']) {
             return std::path::Path::new(cmd).is_file();
         }
-        std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(cmd).is_file() || d.join(format!("{cmd}.exe")).is_file()))
+        std::env::var_os("PATH")
+            .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(cmd).is_file() || d.join(format!("{cmd}.exe")).is_file()))
     }
 
     fn download(&self) -> Option<&packs::Download> {
@@ -55,17 +61,23 @@ impl PackEngine {
     /// The installed executable, when present and installed at the pinned version.
     pub fn binary(&self) -> Option<PathBuf> {
         let d = self.download()?;
-        let ok = std::fs::read_to_string(self.dir().join("version")).ok().is_some_and(|v| v.trim() == self.pack.version);
+        let ok = std::fs::read_to_string(self.dir().join("version"))
+            .ok()
+            .is_some_and(|v| v.trim() == self.pack.version);
         let p = self.dir().join(&d.binary);
         (ok && p.is_file()).then_some(p)
     }
 
     /// Download, verify and unpack the pinned build.
     pub async fn install(&self, cancel: &CancelFlag, mut progress: impl FnMut(u64, u64) + Send) -> Result<(), EngineError> {
-        let d = self.download().ok_or_else(|| EngineError::NotAvailable(format!("the {} pack has no download for {}", self.pack.name, self.platform)))?;
+        let d = self
+            .download()
+            .ok_or_else(|| EngineError::NotAvailable(format!("the {} pack has no download for {}", self.pack.name, self.platform)))?;
         let part = self.dirs.partial().join(format!("pack-{}-{}", self.pack.id, self.pack.version));
         let size = d.size;
-        self.egress.download(&d.url, &part, Some(&d.sha256), cancel, |done, _| progress(done, size)).await?;
+        self.egress
+            .download(&d.url, &part, Some(&d.sha256), cancel, |done, _| progress(done, size))
+            .await?;
         let stage = self.dirs.engines().join(format!("pack-{}.new", self.pack.id));
         let _ = std::fs::remove_dir_all(&stage);
         std::fs::create_dir_all(&stage).map_err(|e| EngineError::Install(e.to_string()))?;
@@ -134,15 +146,24 @@ impl Engine for PackEngine {
             return if self.external_found() {
                 Availability::Available
             } else {
-                Availability::NotInstalled { reason: format!("{} is not installed on this machine: install it yourself so \"{}\" can be found", self.pack.name, self.pack.command) }
+                Availability::NotInstalled {
+                    reason: format!(
+                        "{} is not installed on this machine: install it yourself so \"{}\" can be found",
+                        self.pack.name, self.pack.command
+                    ),
+                }
             };
         }
         if self.download().is_none() && self.binary().is_none() {
-            Availability::NotAvailable { reason: format!("the {} pack has no build for {}", self.pack.name, self.platform) }
+            Availability::NotAvailable {
+                reason: format!("the {} pack has no build for {}", self.pack.name, self.platform),
+            }
         } else if self.binary().is_some() {
             Availability::Available
         } else {
-            Availability::NotInstalled { reason: format!("Install {} {} in Engines", self.pack.name, self.pack.version) }
+            Availability::NotInstalled {
+                reason: format!("Install {} {} in Engines", self.pack.name, self.pack.version),
+            }
         }
     }
 
@@ -150,12 +171,20 @@ impl Engine for PackEngine {
         Box::pin(async move {
             let (dir, name) = if self.external() {
                 if !self.external_found() {
-                    return Err(EngineError::NotAvailable(format!("{} is not installed on this machine", self.pack.name)));
+                    return Err(EngineError::NotAvailable(format!(
+                        "{} is not installed on this machine",
+                        self.pack.name
+                    )));
                 }
                 (std::env::temp_dir(), String::new())
             } else {
-                let bin = self.binary().ok_or_else(|| EngineError::NotAvailable(format!("{} is not installed. Install it in Engines.", self.pack.name)))?;
-                (self.dir(), bin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+                let bin = self
+                    .binary()
+                    .ok_or_else(|| EngineError::NotAvailable(format!("{} is not installed. Install it in Engines.", self.pack.name)))?;
+                (
+                    self.dir(),
+                    bin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                )
             };
             let (cmd, args) = self.command_line(l, &name, &dir.to_string_lossy()).map_err(EngineError::Start)?;
             let port = LoopbackPort::new(l.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
@@ -176,7 +205,10 @@ impl Engine for PackEngine {
                     break;
                 }
                 if tokio::time::Instant::now() > deadline {
-                    return Err(EngineError::Start(format!("{} did not become healthy within {} seconds", self.pack.name, self.pack.start_timeout_secs)));
+                    return Err(EngineError::Start(format!(
+                        "{} did not become healthy within {} seconds",
+                        self.pack.name, self.pack.start_timeout_secs
+                    )));
                 }
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
@@ -185,7 +217,11 @@ impl Engine for PackEngine {
                 guard: None,
                 client,
                 port: l.port,
-                props: pitwall_core::llama::Props { n_ctx: Some(l.context), vision: Some(self.pack.caps.vision && l.mmproj.is_some()), ..Default::default() },
+                props: pitwall_core::llama::Props {
+                    n_ctx: Some(l.context),
+                    vision: Some(self.pack.caps.vision && l.mmproj.is_some()),
+                    ..Default::default()
+                },
             })
         })
     }
@@ -207,12 +243,27 @@ mod tests {
 
     fn engine(extra: &str) -> (tempfile::TempDir, PackEngine) {
         let d = tempfile::tempdir().unwrap();
-        let e = PackEngine::new(pack(extra), Dirs::at(d.path()), Egress::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))));
+        let e = PackEngine::new(
+            pack(extra),
+            Dirs::at(d.path()),
+            Egress::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))),
+        );
         (d, e)
     }
 
     fn launch() -> Launch {
-        Launch { model: "/m/x.gguf".into(), mmproj: None, alias: "x".into(), port: 5555, context: 2048, gpu_layers: None, threads: 0, parallel: 1, kind: ServeKind::Chat, cache_ram_mib: 0 }
+        Launch {
+            model: "/m/x.gguf".into(),
+            mmproj: None,
+            alias: "x".into(),
+            port: 5555,
+            context: 2048,
+            gpu_layers: None,
+            threads: 0,
+            parallel: 1,
+            kind: ServeKind::Chat,
+            cache_ram_mib: 0,
+        }
     }
 
     #[test]

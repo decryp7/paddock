@@ -14,7 +14,8 @@ fn check(raw: &str, max: usize, what: &str, extra: &[char]) -> Result<String, Id
     let ok = !s.is_empty()
         && s.len() <= max
         && s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
-        && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || extra.contains(&c))
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || extra.contains(&c))
         && !s.contains("..");
     if ok {
         Ok(s)
@@ -87,7 +88,13 @@ impl ModelId {
         let mapped: String = stem
             .chars()
             .map(|c| c.to_ascii_lowercase())
-            .map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.') { c } else { '-' })
+            .map(|c| {
+                if c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.') {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect();
         let mut cleaned: String = mapped.trim_matches(|c: char| !c.is_ascii_alphanumeric()).chars().take(96).collect();
         while cleaned.contains("..") {
@@ -156,7 +163,10 @@ mod tests {
     #[test]
     fn model_ids_from_files() {
         assert_eq!(ModelId::from_file_name("Qwen3-8B-Q4_K_M.gguf").unwrap().as_str(), "qwen3-8b-q4_k_m");
-        assert_eq!(ModelId::from_file_name("dir/Big Model-00001-of-00003.gguf").unwrap().as_str(), "big-model");
+        assert_eq!(
+            ModelId::from_file_name("dir/Big Model-00001-of-00003.gguf").unwrap().as_str(),
+            "big-model"
+        );
         assert_eq!(ModelId::from_file_name("x...y.gguf").unwrap().as_str(), "x.y");
         assert!(ModelId::from_file_name("---.gguf").is_err());
     }

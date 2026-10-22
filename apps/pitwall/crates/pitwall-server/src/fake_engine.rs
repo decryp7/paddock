@@ -14,9 +14,20 @@ pub const SSE: &str = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\
 pub fn router() -> Router {
     Router::new()
         .route("/health", get(|| async { axum::Json(json!({"status": "ok"})) }))
-        .route("/props", get(|| async { axum::Json(json!({"default_generation_settings": {"n_ctx": 4096}, "modalities": {"vision": false}, "build_info": "fake"})) }))
-        .route("/v1/chat/completions", post(|| async { ([("content-type", "text/event-stream")], SSE).into_response() }))
-        .route("/v1/embeddings", post(|| async { axum::Json(json!({"data": [{"index": 0, "embedding": [0.5, 0.25]}], "usage": {"prompt_tokens": 3}})) }))
+        .route(
+            "/props",
+            get(|| async {
+                axum::Json(json!({"default_generation_settings": {"n_ctx": 4096}, "modalities": {"vision": false}, "build_info": "fake"}))
+            }),
+        )
+        .route(
+            "/v1/chat/completions",
+            post(|| async { ([("content-type", "text/event-stream")], SSE).into_response() }),
+        )
+        .route(
+            "/v1/embeddings",
+            post(|| async { axum::Json(json!({"data": [{"index": 0, "embedding": [0.5, 0.25]}], "usage": {"prompt_tokens": 3}})) }),
+        )
 }
 
 /// Serve on 127.0.0.1:`port` until the process ends.

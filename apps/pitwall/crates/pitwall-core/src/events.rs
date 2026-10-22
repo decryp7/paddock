@@ -86,7 +86,16 @@ impl EventLog {
         if self.events.len() >= MAX_EVENTS {
             self.events.pop_front();
         }
-        self.events.push_back(Event { id: self.next, at, kind, severity, message: message.into(), model_id: None, app_id: None, reason: None });
+        self.events.push_back(Event {
+            id: self.next,
+            at,
+            kind,
+            severity,
+            message: message.into(),
+            model_id: None,
+            app_id: None,
+            reason: None,
+        });
         let last = self.events.len() - 1;
         &mut self.events[last]
     }

@@ -199,7 +199,12 @@ impl Serving {
     fn engine_for(&self, id: Option<&str>) -> Result<Arc<dyn Engine>, ApiError> {
         match id {
             None | Some("llama.cpp") => Ok(self.inner.engine.clone()),
-            Some(i) => self.inner.packs.read().ok().and_then(|g| g.get(i).cloned()).ok_or_else(|| api(ErrorKind::NotAvailable, format!("the engine pack \"{i}\" is not loaded; fix or remove the model's engine choice in Models"))),
+            Some(i) => self.inner.packs.read().ok().and_then(|g| g.get(i).cloned()).ok_or_else(|| {
+                api(
+                    ErrorKind::NotAvailable,
+                    format!("the engine pack \"{i}\" is not loaded; fix or remove the model's engine choice in Models"),
+                )
+            }),
         }
     }
 

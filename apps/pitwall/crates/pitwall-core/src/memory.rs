@@ -326,11 +326,18 @@ pub fn plan_load(model: &ModelId, need: Need, models: &[Hot], sys: &System, poli
     if fits(available, &remaining) {
         let partial_offload = !vram_ok(vram_free);
         // Don't evict for video memory alone when it doesn't get us a full offload anyway.
-        let needed_for_ram: Vec<ModelId> = if partial_offload { trim_to_ram(&evict, models, need, sys, policy) } else { evict };
+        let needed_for_ram: Vec<ModelId> = if partial_offload {
+            trim_to_ram(&evict, models, need, sys, policy)
+        } else {
+            evict
+        };
         return if needed_for_ram.is_empty() {
             LoadPlan::Proceed { partial_offload }
         } else {
-            LoadPlan::Evict { models: needed_for_ram, partial_offload }
+            LoadPlan::Evict {
+                models: needed_for_ram,
+                partial_offload,
+            }
         };
     }
     let busy_ram: u64 = remaining.iter().filter(|m| !m.idle() || m.pinned).map(|m| m.ram).sum();
@@ -338,7 +345,11 @@ pub fn plan_load(model: &ModelId, need: Need, models: &[Hot], sys: &System, poli
     if busy_or_pinned_exist && need.ram <= usable(available.saturating_add(busy_ram)) {
         LoadPlan::Wait
     } else {
-        LoadPlan::Refuse(Refusal { model: model.clone(), need: need.ram + policy.min_free, have: available })
+        LoadPlan::Refuse(Refusal {
+            model: model.clone(),
+            need: need.ram + policy.min_free,
+            have: available,
+        })
     }
 }
 
@@ -350,7 +361,9 @@ fn trim_to_ram(evict: &[ModelId], models: &[Hot], need: Need, sys: &System, poli
     for id in evict {
         let ok = need.ram <= available.saturating_sub(policy.min_free)
             && remaining.len() < policy.max_hot.max(1)
-            && policy.hot_cap.is_none_or(|cap| remaining.iter().map(|m| m.ram).sum::<u64>() + need.ram <= cap);
+            && policy
+                .hot_cap
+                .is_none_or(|cap| remaining.iter().map(|m| m.ram).sum::<u64>() + need.ram <= cap);
         if ok {
             break;
         }
@@ -386,7 +399,11 @@ mod tests {
     }
 
     fn sys(total_gib: u64, available_gib: u64) -> System {
-        System { total: total_gib * GIB, available: available_gib * GIB, ..System::default() }
+        System {
+            total: total_gib * GIB,
+            available: available_gib * GIB,
+            ..System::default()
+        }
     }
 
     #[test]
@@ -408,7 +425,12 @@ mod tests {
         let mut loading = hot("loading", 8, 0);
         loading.loading = true;
         // Idle for days, deep idle, critical OS pressure, yield mode: still never touched.
-        let s = System { os_pressure: true, os_critical: true, foreground_busy: true, ..sys(16, 0) };
+        let s = System {
+            os_pressure: true,
+            os_critical: true,
+            foreground_busy: true,
+            ..sys(16, 0)
+        };
         let actions = plan_release(10 * 24 * HOUR, &[busy.clone(), loading.clone()], &s, &policy, 0);
         assert!(actions.is_empty(), "{actions:?}");
         assert_eq!(idle_release_at(&busy, &s, &policy), None);
@@ -428,7 +450,13 @@ mod tests {
         let mut short = hot("short", 4, 9 * MINUTE);
         short.idle_override = Some(30 * SECOND);
         let a = plan_release(10 * MINUTE, &[fresh.clone(), stale, pinned.clone(), short], &s, &p, 10 * MINUTE);
-        assert_eq!(a, vec![Action::Unload(id("stale"), ReleaseReason::Idle), Action::Unload(id("short"), ReleaseReason::Idle)]);
+        assert_eq!(
+            a,
+            vec![
+                Action::Unload(id("stale"), ReleaseReason::Idle),
+                Action::Unload(id("short"), ReleaseReason::Idle)
+            ]
+        );
         assert_eq!(a[0].model().as_str(), "stale");
         assert_eq!(idle_release_at(&fresh, &s, &p), Some(19 * MINUTE));
         assert_eq!(idle_release_at(&pinned, &s, &p), None);
@@ -436,15 +464,24 @@ mod tests {
 
     #[test]
     fn context_goes_first_when_asked() {
-        let p = Policy { release_context_first: true, ..Policy::default() };
+        let p = Policy {
+            release_context_first: true,
+            ..Policy::default()
+        };
         let s = sys(32, 20);
         let m = hot("m", 4, 0);
         let a = plan_release(6 * MINUTE, std::slice::from_ref(&m), &s, &p, 6 * MINUTE);
         assert_eq!(a, vec![Action::ReleaseContext(id("m"), ReleaseReason::Idle)]);
         assert_eq!(a[0].model().as_str(), "m");
-        let released = Hot { context_released: true, ..m.clone() };
+        let released = Hot {
+            context_released: true,
+            ..m.clone()
+        };
         assert!(plan_release(6 * MINUTE, &[released], &s, &p, 6 * MINUTE).is_empty());
-        assert_eq!(plan_release(10 * MINUTE, &[m], &s, &p, 10 * MINUTE), vec![Action::Unload(id("m"), ReleaseReason::Idle)]);
+        assert_eq!(
+            plan_release(10 * MINUTE, &[m], &s, &p, 10 * MINUTE),
+            vec![Action::Unload(id("m"), ReleaseReason::Idle)]
+        );
     }
 
     #[test]
@@ -466,12 +503,28 @@ mod tests {
     #[test]
     fn yield_mode_shortens_idle_times() {
         let p = Policy::default();
-        let s = System { foreground_busy: true, ..sys(32, 20) };
+        let s = System {
+            foreground_busy: true,
+            ..sys(32, 20)
+        };
         let m = hot("m", 4, 0);
-        assert_eq!(plan_release(3 * MINUTE, std::slice::from_ref(&m), &s, &p, 3 * MINUTE), vec![Action::Unload(id("m"), ReleaseReason::Yield)]);
-        let short = Hot { idle_override: Some(10 * SECOND), ..m.clone() };
-        assert_eq!(idle_release_at(&short, &s, &p), Some(10 * SECOND), "never longer than its own idle time");
-        let off = Policy { yield_to_foreground: false, ..p };
+        assert_eq!(
+            plan_release(3 * MINUTE, std::slice::from_ref(&m), &s, &p, 3 * MINUTE),
+            vec![Action::Unload(id("m"), ReleaseReason::Yield)]
+        );
+        let short = Hot {
+            idle_override: Some(10 * SECOND),
+            ..m.clone()
+        };
+        assert_eq!(
+            idle_release_at(&short, &s, &p),
+            Some(10 * SECOND),
+            "never longer than its own idle time"
+        );
+        let off = Policy {
+            yield_to_foreground: false,
+            ..p
+        };
         assert!(plan_release(3 * MINUTE, &[m], &s, &off, 3 * MINUTE).is_empty());
     }
 
@@ -496,13 +549,19 @@ mod tests {
             "stops once the threshold (4.8 GiB) is met"
         );
         // Pinned models go only under critical OS pressure, busy ones never.
-        let crit = System { os_critical: true, ..sys(32, 30) };
+        let crit = System {
+            os_critical: true,
+            ..sys(32, 30)
+        };
         let out = plan_release(300, &[pinned, busy], &crit, &p, 300);
         assert_eq!(out, vec![Action::Unload(id("pinned"), ReleaseReason::Pressure)]);
         assert!(crit.under_pressure(&p));
         assert!(!sys(32, 30).under_pressure(&p));
         // OS pressure without critical: unpinned only, one by one until the signal clears.
-        let warn = System { os_pressure: true, ..sys(32, 30) };
+        let warn = System {
+            os_pressure: true,
+            ..sys(32, 30)
+        };
         let mut p2 = hot("pin2", 1, 0);
         p2.pinned = true;
         let out = plan_release(300, &[hot("x", 1, 0), p2], &warn, &p, 300);
@@ -514,56 +573,119 @@ mod tests {
         let p = Policy::default(); // min_free 1.5 GiB, max_hot 3
         let need = Need { ram: 6 * GIB, vram: 0 };
         let m = id("new");
-        assert_eq!(plan_load(&m, need, &[], &sys(32, 20), &p), LoadPlan::Proceed { partial_offload: false });
+        assert_eq!(
+            plan_load(&m, need, &[], &sys(32, 20), &p),
+            LoadPlan::Proceed { partial_offload: false }
+        );
         // Evict LRU idle first.
         let a = hot("a", 4, 10);
         let b = hot("b", 4, 5);
         let plan = plan_load(&m, need, &[a.clone(), b.clone()], &sys(32, 6), &p);
-        assert_eq!(plan, LoadPlan::Evict { models: vec![id("b")], partial_offload: false });
+        assert_eq!(
+            plan,
+            LoadPlan::Evict {
+                models: vec![id("b")],
+                partial_offload: false
+            }
+        );
         // The hot-model limit.
         let c = hot("c", 1, 20);
         let plan = plan_load(&m, need, &[a.clone(), b.clone(), c.clone()], &sys(32, 20), &p);
-        assert_eq!(plan, LoadPlan::Evict { models: vec![id("b")], partial_offload: false });
+        assert_eq!(
+            plan,
+            LoadPlan::Evict {
+                models: vec![id("b")],
+                partial_offload: false
+            }
+        );
         // A hot cap.
-        let capped = Policy { hot_cap: Some(10 * GIB), ..p };
+        let capped = Policy {
+            hot_cap: Some(10 * GIB),
+            ..p
+        };
         let plan = plan_load(&m, need, &[a.clone(), b.clone()], &sys(32, 20), &capped);
-        assert_eq!(plan, LoadPlan::Evict { models: vec![id("b")], partial_offload: false });
+        assert_eq!(
+            plan,
+            LoadPlan::Evict {
+                models: vec![id("b")],
+                partial_offload: false
+            }
+        );
         // Busy models hold the memory: wait.
         let mut busy = hot("busy", 10, 0);
         busy.active = 1;
         assert_eq!(plan_load(&m, need, &[busy], &sys(16, 2), &p), LoadPlan::Wait);
         // Too big for this machine: refuse with numbers.
         let huge = Need { ram: 40 * GIB, vram: 0 };
-        let LoadPlan::Refuse(r) = plan_load(&m, huge, &[a], &sys(32, 20), &p) else { panic!("refused") };
+        let LoadPlan::Refuse(r) = plan_load(&m, huge, &[a], &sys(32, 20), &p) else {
+            panic!("refused")
+        };
         assert_eq!(r.model, m);
         let msg = r.to_string();
         assert!(msg.contains("needs about 41.5 GiB") && msg.contains("24.0 GiB"), "{msg}");
         // Reloading a model that is already in the list ignores its own entry.
-        assert_eq!(plan_load(&id("a"), need, &[hot("a", 4, 0)], &sys(32, 20), &p), LoadPlan::Proceed { partial_offload: false });
+        assert_eq!(
+            plan_load(&id("a"), need, &[hot("a", 4, 0)], &sys(32, 20), &p),
+            LoadPlan::Proceed { partial_offload: false }
+        );
     }
 
     #[test]
     fn video_memory_is_freed_when_it_buys_a_full_offload() {
         let p = Policy::default();
-        let need = Need { ram: 2 * GIB, vram: 6 * GIB };
+        let need = Need {
+            ram: 2 * GIB,
+            vram: 6 * GIB,
+        };
         let m = id("new");
         let mut g = hot("gpu", 1, 0);
         g.vram = 4 * GIB;
-        let s = System { vram_free: Some(3 * GIB), ..sys(32, 20) };
-        assert_eq!(plan_load(&m, need, &[g.clone()], &s, &p), LoadPlan::Evict { models: vec![id("gpu")], partial_offload: false });
+        let s = System {
+            vram_free: Some(3 * GIB),
+            ..sys(32, 20)
+        };
+        assert_eq!(
+            plan_load(&m, need, &[g.clone()], &s, &p),
+            LoadPlan::Evict {
+                models: vec![id("gpu")],
+                partial_offload: false
+            }
+        );
         // When even evicting can't give a full offload, nothing is evicted for video memory: partial offload.
-        let s = System { vram_free: Some(GIB), ..sys(32, 20) };
-        assert_eq!(plan_load(&m, need, &[g.clone()], &s, &p), LoadPlan::Proceed { partial_offload: true });
+        let s = System {
+            vram_free: Some(GIB),
+            ..sys(32, 20)
+        };
+        assert_eq!(
+            plan_load(&m, need, &[g.clone()], &s, &p),
+            LoadPlan::Proceed { partial_offload: true }
+        );
         // ...but evictions needed for system memory still happen.
-        let s = System { vram_free: Some(GIB), ..sys(32, 3) };
-        assert_eq!(plan_load(&m, need, &[g], &s, &p), LoadPlan::Evict { models: vec![id("gpu")], partial_offload: true });
+        let s = System {
+            vram_free: Some(GIB),
+            ..sys(32, 3)
+        };
+        assert_eq!(
+            plan_load(&m, need, &[g], &s, &p),
+            LoadPlan::Evict {
+                models: vec![id("gpu")],
+                partial_offload: true
+            }
+        );
         // Unknown video memory: assume it fits.
-        assert_eq!(plan_load(&m, need, &[], &sys(32, 20), &p), LoadPlan::Proceed { partial_offload: false });
+        assert_eq!(
+            plan_load(&m, need, &[], &sys(32, 20), &p),
+            LoadPlan::Proceed { partial_offload: false }
+        );
     }
 
     #[test]
     fn trim_handles_hot_limits_and_unknown_ids() {
-        let p = Policy { max_hot: 1, hot_cap: Some(100 * GIB), ..Policy::default() };
+        let p = Policy {
+            max_hot: 1,
+            hot_cap: Some(100 * GIB),
+            ..Policy::default()
+        };
         let need = Need { ram: GIB, vram: 0 };
         let out = trim_to_ram(&[id("a"), id("ghost")], &[hot("a", 1, 0)], need, &sys(32, 20), &p);
         assert_eq!(out, vec![id("a")]);

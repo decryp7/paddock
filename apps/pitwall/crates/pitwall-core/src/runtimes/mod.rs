@@ -16,7 +16,9 @@ pub fn safe_name(name: &str) -> bool {
         && name.len() <= 200
         && !name.starts_with('.')
         && !name.contains("..")
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
 }
 
 /// Whether an archive entry is one Pitwall keeps: `llama-server`, shared libraries and licences (no other tools).
@@ -77,7 +79,10 @@ impl Device {
 
     /// For the UI: `CUDA0: NVIDIA GeForce RTX 4070 (11034 of 12281 MiB free)`.
     pub fn label(&self) -> String {
-        format!("{}: {} ({} of {} MiB free)", self.name, self.description, self.free_mib, self.total_mib)
+        format!(
+            "{}: {} ({} of {} MiB free)",
+            self.name, self.description, self.free_mib, self.total_mib
+        )
     }
 }
 
@@ -96,8 +101,22 @@ fn parse_device_line(line: &str) -> Option<Device> {
     let open = rest.rfind('(')?;
     let (description, mem) = (rest[..open].trim(), &rest[open + 1..]);
     let (total, free) = mem.split_once(',')?;
-    let mib = |s: &str| s.trim().strip_suffix("free").unwrap_or(s).trim().strip_suffix("MiB")?.trim().parse::<u64>().ok();
-    Some(Device { name: name.to_string(), description: description.to_string(), total_mib: mib(total)?, free_mib: mib(free)? })
+    let mib = |s: &str| {
+        s.trim()
+            .strip_suffix("free")
+            .unwrap_or(s)
+            .trim()
+            .strip_suffix("MiB")?
+            .trim()
+            .parse::<u64>()
+            .ok()
+    };
+    Some(Device {
+        name: name.to_string(),
+        description: description.to_string(),
+        total_mib: mib(total)?,
+        free_mib: mib(free)?,
+    })
 }
 
 /// The GPU with the most free memory.
@@ -111,10 +130,26 @@ mod tests {
 
     #[test]
     fn archive_entries() {
-        for ok in ["llama-server", "llama-server.exe", "ggml-vulkan.dll", "libggml.so.1", "libllama.dylib", "LICENSE-curl", "libllama-server-impl.so"] {
+        for ok in [
+            "llama-server",
+            "llama-server.exe",
+            "ggml-vulkan.dll",
+            "libggml.so.1",
+            "libllama.dylib",
+            "LICENSE-curl",
+            "libllama-server-impl.so",
+        ] {
             assert!(is_expected(ok), "{ok}");
         }
-        for no in ["llama-cli.exe", "../x.dll", ".hidden.dll", "readme.md", "libllama-bench-impl.so", "a b.dll", ""] {
+        for no in [
+            "llama-cli.exe",
+            "../x.dll",
+            ".hidden.dll",
+            "readme.md",
+            "libllama-bench-impl.so",
+            "a b.dll",
+            "",
+        ] {
             assert!(!is_expected(no), "{no}");
         }
         assert_eq!(flat_name("./build/bin.dll"), Some("bin.dll"));

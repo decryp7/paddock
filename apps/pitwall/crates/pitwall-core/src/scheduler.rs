@@ -99,7 +99,12 @@ pub struct Caps {
 
 impl Default for Caps {
     fn default() -> Self {
-        Caps { max_running: 4, per_model: 2, max_waiting: 256, aging: 30_000 }
+        Caps {
+            max_running: 4,
+            per_model: 2,
+            max_waiting: 256,
+            aging: 30_000,
+        }
     }
 }
 
@@ -177,7 +182,12 @@ pub struct Depth {
 impl Scheduler {
     /// An empty queue.
     pub fn new(caps: Caps) -> Scheduler {
-        Scheduler { caps, next: 1, jobs: vec![], paused: false }
+        Scheduler {
+            caps,
+            next: 1,
+            jobs: vec![],
+            paused: false,
+        }
     }
 
     /// Changes the limits; running jobs are not affected.
@@ -206,7 +216,15 @@ impl Scheduler {
         }
         let id = self.next;
         self.next += 1;
-        self.jobs.push(Job { id, spec, state: JobState::Queued, submitted_at: now, started_at: None, progress: None, tokens: 0 });
+        self.jobs.push(Job {
+            id,
+            spec,
+            state: JobState::Queued,
+            submitted_at: now,
+            started_at: None,
+            progress: None,
+            tokens: 0,
+        });
         Ok(id)
     }
 
@@ -229,10 +247,15 @@ impl Scheduler {
             let pick = self
                 .waiting()
                 .filter(|j| {
-                    let model_ok = j.spec.model.as_ref().is_none_or(|m| {
-                        running.iter().filter(|r| r.spec.model.as_ref() == Some(m)).count() < self.caps.per_model
-                    });
-                    let app_ok = j.spec.app_cap.is_none_or(|cap| running.iter().filter(|r| r.spec.app == j.spec.app).count() < cap);
+                    let model_ok = j
+                        .spec
+                        .model
+                        .as_ref()
+                        .is_none_or(|m| running.iter().filter(|r| r.spec.model.as_ref() == Some(m)).count() < self.caps.per_model);
+                    let app_ok = j
+                        .spec
+                        .app_cap
+                        .is_none_or(|cap| running.iter().filter(|r| r.spec.app == j.spec.app).count() < cap);
                     model_ok && app_ok
                 })
                 .min_by_key(|j| (self.effective(j, now), j.submitted_at, j.id))
@@ -347,12 +370,22 @@ mod tests {
 
     #[test]
     fn interactive_goes_first_then_fifo() {
-        let mut s = Scheduler::new(Caps { max_running: 1, ..Caps::default() });
+        let mut s = Scheduler::new(Caps {
+            max_running: 1,
+            ..Caps::default()
+        });
         let b = s.submit(spec("a", None, Priority::Batch), 0).unwrap();
         let bg = s.submit(spec("a", None, Priority::Background), 1).unwrap();
         let i1 = s.submit(spec("a", None, Priority::Interactive), 2).unwrap();
         let i2 = s.submit(spec("a", None, Priority::Interactive), 3).unwrap();
-        assert_eq!(s.depth(), Depth { interactive: 2, background: 1, batch: 1 });
+        assert_eq!(
+            s.depth(),
+            Depth {
+                interactive: 2,
+                background: 1,
+                batch: 1
+            }
+        );
         assert_eq!(s.dispatch(10), vec![i1]);
         assert_eq!(s.dispatch(10), Vec::<JobId>::new(), "one slot");
         assert!(s.finish(i1));
@@ -367,21 +400,40 @@ mod tests {
 
     #[test]
     fn waiting_jobs_age_so_batch_never_starves() {
-        let mut s = Scheduler::new(Caps { max_running: 1, aging: 100, ..Caps::default() });
+        let mut s = Scheduler::new(Caps {
+            max_running: 1,
+            aging: 100,
+            ..Caps::default()
+        });
         let old = s.submit(spec("a", None, Priority::Batch), 0).unwrap();
         let fresh = s.submit(spec("a", None, Priority::Interactive), 250).unwrap();
         // After 250 ms the batch job has risen two levels and is older: it goes first.
         assert_eq!(s.dispatch(250), vec![old]);
         s.finish(old);
         assert_eq!(s.dispatch(251), vec![fresh]);
-        let z = Scheduler::new(Caps { aging: 0, ..Caps::default() });
-        let j = Job { id: 1, spec: spec("a", None, Priority::Batch), state: JobState::Queued, submitted_at: 0, started_at: None, progress: None, tokens: 0 };
+        let z = Scheduler::new(Caps {
+            aging: 0,
+            ..Caps::default()
+        });
+        let j = Job {
+            id: 1,
+            spec: spec("a", None, Priority::Batch),
+            state: JobState::Queued,
+            submitted_at: 0,
+            started_at: None,
+            progress: None,
+            tokens: 0,
+        };
         assert_eq!(z.effective(&j, 1_000_000), Priority::Batch, "aging 0 disables aging");
     }
 
     #[test]
     fn caps_per_model_and_per_app() {
-        let mut s = Scheduler::new(Caps { max_running: 10, per_model: 1, ..Caps::default() });
+        let mut s = Scheduler::new(Caps {
+            max_running: 10,
+            per_model: 1,
+            ..Caps::default()
+        });
         let a1 = s.submit(spec("a", Some("m"), Priority::Interactive), 0).unwrap();
         let a2 = s.submit(spec("a", Some("m"), Priority::Interactive), 1).unwrap();
         let other = s.submit(spec("a", Some("n"), Priority::Batch), 2).unwrap();
@@ -390,8 +442,14 @@ mod tests {
         s.finish(a1);
         assert_eq!(s.dispatch(4), vec![a2]);
 
-        let mut s = Scheduler::new(Caps { max_running: 10, ..Caps::default() });
-        let capped = |app: &str| JobSpec { app_cap: Some(1), ..spec(app, None, Priority::Interactive) };
+        let mut s = Scheduler::new(Caps {
+            max_running: 10,
+            ..Caps::default()
+        });
+        let capped = |app: &str| JobSpec {
+            app_cap: Some(1),
+            ..spec(app, None, Priority::Interactive)
+        };
         let x1 = s.submit(capped("x"), 0).unwrap();
         let _x2 = s.submit(capped("x"), 1).unwrap();
         let y1 = s.submit(capped("y"), 2).unwrap();
@@ -400,7 +458,11 @@ mod tests {
 
     #[test]
     fn full_paused_cancel_and_progress() {
-        let mut s = Scheduler::new(Caps { max_running: 1, max_waiting: 1, ..Caps::default() });
+        let mut s = Scheduler::new(Caps {
+            max_running: 1,
+            max_waiting: 1,
+            ..Caps::default()
+        });
         let a = s.submit(spec("a", None, Priority::Interactive), 0).unwrap();
         let e = s.submit(spec("a", None, Priority::Interactive), 0).unwrap_err();
         assert_eq!(e, QueueError::Full(1));
@@ -426,7 +488,10 @@ mod tests {
         s.set_paused(true);
         assert!(s.dispatch(3).is_empty(), "paused: nothing starts");
         s.set_paused(false);
-        s.set_caps(Caps { max_running: 0, ..Caps::default() });
+        s.set_caps(Caps {
+            max_running: 0,
+            ..Caps::default()
+        });
         assert!(s.dispatch(3).is_empty());
         s.set_caps(Caps::default());
         assert_eq!(s.dispatch(3), vec![c]);

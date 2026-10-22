@@ -65,7 +65,10 @@ fn is_label(t: &str) -> bool {
     let u = t.to_ascii_uppercase();
     let head = u.split('_').next().unwrap_or_default();
     matches!(head, "F16" | "BF16" | "F32")
-        || head.strip_prefix("IQ").or_else(|| head.strip_prefix('Q')).is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()))
+        || head
+            .strip_prefix("IQ")
+            .or_else(|| head.strip_prefix('Q'))
+            .is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()))
 }
 
 /// The quantisation label in a GGUF file name (`Qwen3-8B-Q4_K_M.gguf` → `Q4_K_M`), upper-cased; the last matching

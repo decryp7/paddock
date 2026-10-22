@@ -10,12 +10,12 @@ pub mod engines;
 pub mod fake_engine;
 pub mod http;
 pub mod library;
-pub mod pack_engine;
 pub mod mgmt;
+pub mod pack_engine;
 pub mod paths;
 pub mod process;
-pub mod serving;
 pub mod service;
+pub mod serving;
 pub mod system;
 
 /// Lock a mutex, recovering from poisoning.

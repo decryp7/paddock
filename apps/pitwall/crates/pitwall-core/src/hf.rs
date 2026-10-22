@@ -25,11 +25,18 @@ impl RepoId {
     pub fn parse(s: &str) -> Result<RepoId, String> {
         let s = s.trim();
         let ok_part = |p: &str| {
-            !p.is_empty() && p.len() <= 96 && !p.starts_with('.') && !p.contains("..") && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            !p.is_empty()
+                && p.len() <= 96
+                && !p.starts_with('.')
+                && !p.contains("..")
+                && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         };
         match s.split_once('/') {
             Some((a, b)) if ok_part(a) && ok_part(b) => Ok(RepoId(s.to_string())),
-            _ => Err(format!("{:?} is not a Hugging Face repository (owner/name)", s.chars().take(100).collect::<String>())),
+            _ => Err(format!(
+                "{:?} is not a Hugging Face repository (owner/name)",
+                s.chars().take(100).collect::<String>()
+            )),
         }
     }
 
@@ -60,7 +67,8 @@ pub fn valid_file_path(p: &str) -> bool {
         && !p.contains("..")
         && !p.contains('\\')
         && p.split('/').all(|seg| !seg.is_empty() && !seg.starts_with('.'))
-        && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '+'))
+        && p.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '+'))
 }
 
 fn encode(s: &str) -> String {
@@ -84,7 +92,10 @@ pub fn search_url(query: &str) -> Result<DownloadUrl, EgressError> {
 
 /// The recursive file list of a repository's main branch.
 pub fn tree_url(repo: &RepoId) -> Result<DownloadUrl, EgressError> {
-    DownloadUrl::parse(&format!("https://huggingface.co/api/models/{}/tree/main?recursive=true", repo.as_str()))
+    DownloadUrl::parse(&format!(
+        "https://huggingface.co/api/models/{}/tree/main?recursive=true",
+        repo.as_str()
+    ))
 }
 
 /// The model info (licence, gating).
@@ -154,7 +165,15 @@ pub fn parse_search(v: &Value) -> Result<Vec<HfModel>, String> {
                 downloads: m.get("downloads").and_then(Value::as_u64).unwrap_or(0),
                 likes: m.get("likes").and_then(Value::as_u64).unwrap_or(0),
                 updated_at: m.get("lastModified").and_then(Value::as_str).and_then(iso_day_ms),
-                tags: m.get("tags").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).take(12).map(str::to_string).collect(),
+                tags: m
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .take(12)
+                    .map(str::to_string)
+                    .collect(),
                 pipeline: m.get("pipeline_tag").and_then(Value::as_str).map(str::to_string),
                 repo: repo.0,
             })
@@ -209,7 +228,11 @@ pub fn parse_tree(v: &Value) -> Result<RepoFiles, String> {
         .filter_map(|f| {
             let path = f.get("path").and_then(Value::as_str).filter(|p| valid_file_path(p))?;
             let size = f.pointer("/lfs/size").or_else(|| f.get("size")).and_then(Value::as_u64)?;
-            Some(F { path: path.to_string(), size, sha: sha_of(f) })
+            Some(F {
+                path: path.to_string(),
+                size,
+                sha: sha_of(f),
+            })
         })
         .collect();
     let mut out = RepoFiles::default();
@@ -280,8 +303,14 @@ mod tests {
             assert!(!valid_file_path(bad), "{bad}");
         }
         assert!(file_url(&r, "../evil.gguf").is_err());
-        assert_eq!(file_url(&r, "x.gguf").unwrap().as_str(), "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/x.gguf");
-        assert!(search_url("qwen 3 & co/é").unwrap().as_str().contains("search=qwen+3+%26+co%2F%C3%A9&filter=gguf"));
+        assert_eq!(
+            file_url(&r, "x.gguf").unwrap().as_str(),
+            "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/x.gguf"
+        );
+        assert!(search_url("qwen 3 & co/é")
+            .unwrap()
+            .as_str()
+            .contains("search=qwen+3+%26+co%2F%C3%A9&filter=gguf"));
         assert!(tree_url(&r).unwrap().as_str().ends_with("/tree/main?recursive=true"));
         assert!(info_url(&r).unwrap().as_str().ends_with("/api/models/Qwen/Qwen3-8B-GGUF"));
     }
@@ -336,7 +365,10 @@ mod tests {
 
     #[test]
     fn info() {
-        assert_eq!(parse_info(&json!({"cardData": {"license": "apache-2.0"}, "gated": false})), (Some("apache-2.0".into()), false));
+        assert_eq!(
+            parse_info(&json!({"cardData": {"license": "apache-2.0"}, "gated": false})),
+            (Some("apache-2.0".into()), false)
+        );
         assert_eq!(parse_info(&json!({"gated": "manual"})), (None, true));
         assert_eq!(parse_info(&json!({"gated": "false"})), (None, false));
         assert!(parse_info(&json!({"gated": true})).1);

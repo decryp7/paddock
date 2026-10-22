@@ -18,7 +18,11 @@ pub fn cacheable(req: &ChatRequest) -> bool {
 
 /// The key of a request for a model (`stream` doesn't change the answer, so it is not part of the key).
 pub fn key(model: &str, req: &ChatRequest) -> Key {
-    let canonical = ChatRequest { stream: false, priority: None, ..req.clone() };
+    let canonical = ChatRequest {
+        stream: false,
+        priority: None,
+        ..req.clone()
+    };
     let mut h = Sha256::new();
     h.update(model.as_bytes());
     h.update([0]);
@@ -45,7 +49,13 @@ pub struct Cache {
 impl Cache {
     /// An empty cache.
     pub fn new(max_entries: usize, max_bytes: usize, ttl: Millis) -> Cache {
-        Cache { max_entries, max_bytes, ttl, bytes: 0, entries: HashMap::new() }
+        Cache {
+            max_entries,
+            max_bytes,
+            ttl,
+            bytes: 0,
+            entries: HashMap::new(),
+        }
     }
 
     /// A cached answer.
@@ -69,17 +79,28 @@ impl Cache {
     /// Stores an answer, evicting least recently used entries as needed. Answers larger than the whole cache are not
     /// stored.
     pub fn put(&mut self, k: Key, out: ChatOutput, now: Millis) {
-        let bytes = out.text.len() + out.reasoning.len() + out.tool_calls.iter().map(|c| c.arguments.len() + c.name.len()).sum::<usize>() + 64;
+        let bytes =
+            out.text.len() + out.reasoning.len() + out.tool_calls.iter().map(|c| c.arguments.len() + c.name.len()).sum::<usize>() + 64;
         if bytes > self.max_bytes || self.max_entries == 0 {
             return;
         }
         self.remove(&k);
         while self.entries.len() >= self.max_entries || self.bytes + bytes > self.max_bytes {
-            let Some(oldest) = self.entries.iter().min_by_key(|(_, e)| e.used).map(|(k, _)| *k) else { break };
+            let Some(oldest) = self.entries.iter().min_by_key(|(_, e)| e.used).map(|(k, _)| *k) else {
+                break;
+            };
             self.remove(&oldest);
         }
         self.bytes += bytes;
-        self.entries.insert(k, Entry { out, bytes, stored: now, used: now });
+        self.entries.insert(
+            k,
+            Entry {
+                out,
+                bytes,
+                stored: now,
+                used: now,
+            },
+        );
     }
 
     /// Entries held.
@@ -105,21 +126,47 @@ mod tests {
     use crate::chat::{Message, Role, Tool};
 
     fn req(t: Option<f32>) -> ChatRequest {
-        ChatRequest { messages: vec![Message::text(Role::User, "hi")], temperature: t, ..Default::default() }
+        ChatRequest {
+            messages: vec![Message::text(Role::User, "hi")],
+            temperature: t,
+            ..Default::default()
+        }
     }
 
     fn out(text: &str) -> ChatOutput {
-        ChatOutput { text: text.into(), ..Default::default() }
+        ChatOutput {
+            text: text.into(),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn what_is_cacheable() {
         assert!(cacheable(&req(Some(0.0))));
         assert!(!cacheable(&req(Some(0.7))));
-        assert!(cacheable(&ChatRequest { seed: Some(1), ..req(None) }));
-        let tools = ChatRequest { tools: vec![Tool { name: "t".into(), description: String::new(), parameters: serde_json::Value::Null }], ..req(Some(0.0)) };
+        assert!(cacheable(&ChatRequest {
+            seed: Some(1),
+            ..req(None)
+        }));
+        let tools = ChatRequest {
+            tools: vec![Tool {
+                name: "t".into(),
+                description: String::new(),
+                parameters: serde_json::Value::Null,
+            }],
+            ..req(Some(0.0))
+        };
         assert!(!cacheable(&tools));
-        assert_eq!(key("m", &req(Some(0.0))), key("m", &ChatRequest { stream: true, ..req(Some(0.0)) }));
+        assert_eq!(
+            key("m", &req(Some(0.0))),
+            key(
+                "m",
+                &ChatRequest {
+                    stream: true,
+                    ..req(Some(0.0))
+                }
+            )
+        );
         assert_ne!(key("m", &req(Some(0.0))), key("n", &req(Some(0.0))));
     }
 
