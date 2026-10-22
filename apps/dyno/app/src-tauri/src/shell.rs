@@ -42,6 +42,8 @@ pub struct Shell {
     /// `launchAtLogin` as last applied (None until the agent has told us).
     launch_at_login: Mutex<Option<bool>>,
     paused: Mutex<bool>,
+    /// The last agent status, replayed to windows that opened after it was pushed.
+    status: Mutex<Option<AgentStatus>>,
 }
 
 impl Shell {
@@ -55,6 +57,7 @@ impl Shell {
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
             paused: Mutex::new(false),
+            status: Mutex::new(None),
         })
     }
 
@@ -94,6 +97,18 @@ impl Shell {
                 }
                 result
             }
+        }
+    }
+
+    /// Pushes the current agent status again. A window that opens later (the tray dropdown, a reopened main window)
+    /// never saw the push that announced it, so a slow beat repeats it while any window is open.
+    pub fn replay_status(&self) {
+        if self.app.webview_windows().is_empty() {
+            return;
+        }
+        let status = self.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(s) = status {
+            self.emit(events::AGENT, s);
         }
     }
 
@@ -145,6 +160,7 @@ impl Sink for Shell {
             status.state,
             status.message.as_deref().map(|m| format!(" ({m})")).unwrap_or_default()
         ));
+        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
         if !matches!(status.state, crate::dto::AgentState::Running) {
             crate::tray::show_disconnected(&self.app);
         }

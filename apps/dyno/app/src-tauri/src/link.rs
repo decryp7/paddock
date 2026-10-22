@@ -21,6 +21,9 @@ use std::time::{Duration, Instant};
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a freshly started agent has to write `agent.json` and accept a connection.
 pub const SPAWN_WAIT: Duration = Duration::from_secs(5);
+/// A request made before the first connection waits this long for it (the window asks for data the moment it opens,
+/// usually before the agent has answered; after a first connection, requests fail fast instead).
+pub const CONNECT_GRACE: Duration = Duration::from_secs(8);
 /// Failed attempts in a row before the status says `failed` (it keeps trying).
 pub const FAILED_AFTER: u32 = 3;
 
@@ -130,6 +133,10 @@ pub struct AgentLink {
     /// The detail last sent over the current connection.
     sent: Mutex<Option<LiveDetail>>,
     started_by_us: AtomicBool,
+    /// The connection loop is running.
+    running: AtomicBool,
+    /// A connection has been made at least once.
+    ever_connected: AtomicBool,
     quit_done: AtomicBool,
     service_installed: AtomicBool,
     stopping: Mutex<bool>,
@@ -148,6 +155,8 @@ impl AgentLink {
             votes: Mutex::new(DetailVotes::default()),
             sent: Mutex::new(None),
             started_by_us: AtomicBool::new(false),
+            running: AtomicBool::new(false),
+            ever_connected: AtomicBool::new(false),
             quit_done: AtomicBool::new(false),
             service_installed: AtomicBool::new(false),
             stopping: Mutex::new(false),
@@ -158,6 +167,7 @@ impl AgentLink {
     /// Runs the connection loop on its own thread.
     pub fn spawn(self: &Arc<Self>) -> std::io::Result<std::thread::JoinHandle<()>> {
         let me = self.clone();
+        self.running.store(true, Ordering::SeqCst);
         std::thread::Builder::new().name("dyno-link".into()).spawn(move || me.run())
     }
 
@@ -195,16 +205,29 @@ impl AgentLink {
     /// Sends one request and returns the reply. A `Subscribe` is not forwarded as is: it is a window's wish
     /// ([`AgentLink::set_detail`]).
     pub fn call(&self, request: Request) -> Result<Reply, CommandError> {
-        let peer = lock(&self.peer)
-            .clone()
-            .filter(|p| !p.is_closed())
-            .ok_or_else(CommandError::unavailable)?;
+        let peer = self.peer_or_wait().ok_or_else(CommandError::unavailable)?;
         match peer.call(Message::Request(Box::new(request)), REQUEST_TIMEOUT) {
             Ok(Message::Reply(r)) => (*r).map_err(CommandError::from),
             Ok(_) => Err(CommandError::internal("The agent sent something unexpected.")),
             Err(IpcError::Timeout(_)) => Err(CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.")),
             Err(IpcError::Closed) => Err(CommandError::unavailable()),
             Err(e) => Err(CommandError::new(ErrorCode::Internal, format!("The agent link failed: {e}"))),
+        }
+    }
+
+    /// The connection; before the very first one has been made, waits for it up to [`CONNECT_GRACE`].
+    fn peer_or_wait(&self) -> Option<Arc<Peer<Message>>> {
+        let current = || lock(&self.peer).clone().filter(|p| !p.is_closed());
+        let end = Instant::now() + CONNECT_GRACE;
+        loop {
+            if let Some(p) = current() {
+                return Some(p);
+            }
+            let waiting = self.running.load(Ordering::SeqCst) && !self.ever_connected.load(Ordering::SeqCst) && !self.is_stopping();
+            if !waiting || Instant::now() >= end {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
@@ -248,6 +271,7 @@ impl AgentLink {
                     failures = 0;
                     *lock(&self.sent) = None;
                     *lock(&self.peer) = Some(peer.clone());
+                    self.ever_connected.store(true, Ordering::SeqCst);
                     if let Err(e) = self.sync_detail() {
                         logging::info(&format!("could not subscribe: {}", e.message));
                     }
@@ -694,6 +718,16 @@ mod tests {
         handle.join().unwrap();
         assert!(!r.link.dirs.discovery().exists(), "the agent removed its discovery file");
         assert_eq!(r.link.call(Request::Settings).unwrap_err().code, ErrorCode::AgentUnavailable);
+    }
+
+    #[test]
+    fn a_request_made_before_the_first_connection_waits_for_it() {
+        let r = rig(false);
+        let handle = r.link.spawn().unwrap();
+        // No waiting for the Running status: the window's first requests arrive while the agent is still starting.
+        assert!(matches!(r.link.call(Request::Settings), Ok(Reply::Settings(_))));
+        r.link.quit();
+        handle.join().unwrap();
     }
 
     #[test]

@@ -82,7 +82,7 @@ mod tests {
             w: 100.0,
             h: 100.0,
         };
-        assert_eq!(dropdown_position(icon(10.0, 10.0), (720.0, 1040.0), tiny), (10.0, 10.0));
+        assert_eq!(dropdown_position(icon(10.0, 10.0), (720.0, 1040.0), tiny), (10.0 + GAP, 10.0 + GAP));
     }
 
     #[test]

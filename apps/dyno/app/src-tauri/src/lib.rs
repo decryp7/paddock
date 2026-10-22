@@ -57,7 +57,7 @@ pub fn run() {
             let shell = shell::Shell::new(app.handle().clone());
             let launcher = ProcessLauncher::new(login::agent_program);
             let link = AgentLink::new(dirs, env!("CARGO_PKG_VERSION"), shell.clone(), Box::new(launcher));
-            app.manage(shell);
+            app.manage(shell.clone());
             app.manage(link.clone());
             if let Err(e) = tray::create(app.handle()) {
                 // Linux without a status-notifier host or libayatana-appindicator: the window is then the only way in,
@@ -70,6 +70,11 @@ pub fn run() {
                 }
             }
             link.spawn()?;
+            let beat = shell.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                beat.replay_status();
+            });
             if !window::start_hidden(background, window::has_tray(app.handle())) {
                 window::show_main(app.handle());
             }

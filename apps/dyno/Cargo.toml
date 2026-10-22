@@ -8,7 +8,7 @@ members = [
     "crates/dyno-agent",
     "crates/dyno-helper",
     "plugins/dyno-plugin-example",
-    # "app/src-tauri",
+    "app/src-tauri",
 ]
 resolver = "2"
 
