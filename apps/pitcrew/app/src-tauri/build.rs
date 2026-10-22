@@ -15,6 +15,18 @@ fn main() {
         windows = tauri_build::WindowsAttributes::new_without_app_manifest();
     }
     println!("cargo:rerun-if-env-changed=TAURI_UPDATER_PUBKEY");
+    // tauri-build requires the service sidecar (bundle.externalBin) to exist even for `cargo check` and tests.
+    // Bundles always build the real one first (scripts/sidecar.mjs in beforeBuildCommand); elsewhere an empty
+    // placeholder stands in, which the app reports as "missing" if it is ever asked to install it.
+    if let Ok(target) = std::env::var("TARGET") {
+        let ext = if target.contains("windows") { ".exe" } else { "" };
+        let dir = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default()).join("binaries");
+        let sidecar = dir.join(format!("pitcrew-service-{target}{ext}"));
+        if !sidecar.exists() {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(&sidecar, b"");
+        }
+    }
     if let Err(e) = tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(windows)) {
         panic!("tauri-build failed: {e:#}");
     }

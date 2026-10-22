@@ -2,10 +2,16 @@
 //!
 //! The public key comes from the build (CI secret `TAURI_UPDATER_PUBKEY`, read with `option_env!`) or from
 //! `plugins.updater.pubkey` in `tauri.conf.json` (empty in the repository). A build without a key never checks and
-//! says "Updates are not available in this build". Checking and installing are not built yet.
+//! says "Updates are not available in this build". Checks happen only when the user asks (Updates page).
 
-use crate::dto::AppUpdateStatusDto;
-use tauri::{AppHandle, Runtime};
+use crate::dto::{AppUpdateInfo, AppUpdateStatusDto, CommandError, CommandErrorCode};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager, Runtime};
+use tauri_plugin_updater::UpdaterExt;
+
+/// The update found by the last check, kept for the install.
+#[derive(Default)]
+pub struct Pending(Mutex<Option<tauri_plugin_updater::Update>>);
 
 /// The update public key given to this build. Cargo rebuilds when it changes (build.rs).
 const BUILD_PUBKEY: Option<&str> = option_env!("TAURI_UPDATER_PUBKEY");
@@ -29,8 +35,7 @@ fn looks_like_public_key(key: &str) -> bool {
     (80..=400).contains(&key.len()) && key.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
 }
 
-/// Whether this build can update itself.
-pub fn status<R: Runtime>(app: &AppHandle<R>) -> AppUpdateStatusDto {
+fn key<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     let configured = app
         .config()
         .plugins
@@ -39,10 +44,52 @@ pub fn status<R: Runtime>(app: &AppHandle<R>) -> AppUpdateStatusDto {
         .and_then(|c| c.get("pubkey"))
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    status_for(
-        resolve_pubkey(BUILD_PUBKEY, configured.as_deref()).is_some(),
-        app.package_info().version.to_string(),
-    )
+    resolve_pubkey(BUILD_PUBKEY, configured.as_deref())
+}
+
+/// Checks for a Pitcrew release (one HTTPS GET of latest.json; signatures are verified at install).
+pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<AppUpdateInfo>, CommandError> {
+    let Some(k) = key(app) else {
+        return Err(CommandError::new(
+            CommandErrorCode::NotImplemented,
+            "Updates are not available in this build.",
+        ));
+    };
+    let updater = app
+        .updater_builder()
+        .pubkey(k)
+        .build()
+        .map_err(|e| CommandError::internal(format!("the updater could not be set up: {e}")))?;
+    let found = updater
+        .check()
+        .await
+        .map_err(|e| CommandError::new(CommandErrorCode::ServiceUnavailable, format!("checking for updates failed: {e}")))?;
+    let info = found.as_ref().map(|u| AppUpdateInfo {
+        version: u.version.clone(),
+        notes: u.body.clone(),
+        date: u.date.map(|d| d.to_string()),
+    });
+    *app.state::<Pending>().0.lock().unwrap_or_else(|p| p.into_inner()) = found;
+    Ok(info)
+}
+
+/// Downloads, verifies and installs the update found by [`check`], then restarts Pitcrew (the service and the
+/// runners keep running).
+pub async fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), CommandError> {
+    let pending = app.state::<Pending>().0.lock().unwrap_or_else(|p| p.into_inner()).take();
+    let Some(update) = pending else {
+        return Err(CommandError::bad("check for updates first"));
+    };
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| CommandError::internal(format!("the update could not be installed: {e}")))?;
+    app.restart();
+}
+
+/// Whether this build can update itself.
+pub fn status<R: Runtime>(app: &AppHandle<R>) -> AppUpdateStatusDto {
+    status_for(key(app).is_some(), app.package_info().version.to_string())
 }
 
 fn status_for(has_key: bool, version: String) -> AppUpdateStatusDto {

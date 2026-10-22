@@ -21,12 +21,37 @@ pitcrew-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tauri = { version = "2.12.4", features = ["tray-icon"] }
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png"] }
 tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
 # >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version); see docs/releasing.md.
 # No "zip": Pitcrew publishes v2 updater artifacts (the installers themselves). "rustls-tls" with the platform verifier
 # trusts the OS certificate store, so update checks work behind TLS-inspecting proxies.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# The OS credential store (Windows Credential Manager, macOS Keychain) for the Gitea read token and, if the user
+# asks, the registration token (ADR 0005).
+keyring = "4.2"
+# The Gitea API (current job details, job outcomes) with the user's read token: HTTPS, OS certificate store.
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+# The diagnostics bundle.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[target.'cfg(windows)'.dependencies]
+# Asking the Service Control Manager whether the service is installed and running (no rights needed).
+windows-service = "0.8"
+# The taskbar's light/dark setting (for the tray icon), read only.
+winreg = "0.56"
+# Starting `pitcrew-service install` with Windows' own elevation prompt (ShellExecuteExW "runas").
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Registering the bundled launch agent with SMAppService (macOS 13+, ADR 0003).
+# Transparent window with vibrancy (tauri.macos.conf.json `macOSPrivateApi`).
+tauri = { version = "2.12.4", features = ["macos-private-api"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
 
 [lints]
 workspace = true
