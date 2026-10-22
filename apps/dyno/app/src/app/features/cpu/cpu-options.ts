@@ -38,9 +38,6 @@ export function coreHeatmapOption(history: History, kinds: readonly CoreKind[], 
   const { cells, labels, times } = heatCells(history, kinds);
   const short = history.range === 'hour' || history.range === 'day';
   const stamp = (at: number) => (short ? formatClock(at) : `${formatDate(at)} ${formatClock(at)}`);
-  const markLine = history.events
-    .filter((e) => times.length && e.at >= times[0]! && e.at <= times[times.length - 1]!)
-    .map((e) => ({ xAxis: nearestIndex(times, e.at), lineStyle: { color: EVENT_STYLE[e.kind].color(t), width: 1, opacity: 0.7, type: 'dashed' as const } }));
   return {
     animation: false,
     textStyle: { fontFamily: FONT },
@@ -85,7 +82,7 @@ export function coreHeatmapOption(history: History, kinds: readonly CoreKind[], 
         itemStyle: { borderColor: t.surface2, borderWidth: 0.5 },
         progressive: 0,
         // Event lines are left off the heatmap (they hide the cells); the dashboard history chart carries the events lane.
-        markLine: { symbol: 'none', silent: true, animation: false, label: { show: false }, data: [] as typeof markLine },
+        markLine: { symbol: 'none', silent: true, animation: false, label: { show: false }, data: [] },
         emphasis: { itemStyle: { borderColor: t.text1, borderWidth: 1 } },
       },
     ],
