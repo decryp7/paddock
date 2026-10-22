@@ -85,7 +85,14 @@ impl Page {
                 e.method == "Page.loadEventFired" && e.session.as_deref() == Some(&s)
             })
             .map(|_| ())
-            .ok_or(Error::Timeout("the page load"))
+            .ok_or_else(|| {
+                // A closed connection means the browser (or its page) went away, which is not a slow page: say so.
+                if self.conn.is_closed() {
+                    Error::Protocol("the browser closed the connection while the page was loading".into())
+                } else {
+                    Error::Timeout("the page load")
+                }
+            })
     }
 
     /// Evaluates a JavaScript expression in the page and returns its value.
