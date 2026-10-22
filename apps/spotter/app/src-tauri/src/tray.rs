@@ -397,6 +397,14 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>, route: Option<&str>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_taskbar_theme_has_a_default() {
+        // Read-only lookup; on platforms without a taskbar setting it is dark.
+        let _ = dark_taskbar();
+        #[cfg(not(windows))]
+        assert!(dark_taskbar());
+    }
+
     use super::*;
     use spotter_core::state::WatchStatus;
     use spotter_engine::view::ReleaseView;

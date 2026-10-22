@@ -303,6 +303,92 @@ mod tests {
         assert!(slow.unwrap_err().contains("stopped after"));
     }
 
+    fn engine_in(dir: &Path) -> Engine {
+        use spotter_engine::secrets::MemorySecrets;
+        use spotter_engine::{EngineConfig, Services};
+        Engine::open(EngineConfig::new(dir, "test"), Services::new(Arc::new(MemorySecrets::new()))).unwrap()
+    }
+
+    fn saved_watch(engine: &Engine, folder: &Path) -> String {
+        let mut spec = engine.presets()[0].spec.clone();
+        spec.name = "App".into();
+        spec.source = spotter_core::source::SourceConfig::new("folder", &[("path", folder.to_str().unwrap())]);
+        engine.save_watch(spec, &Default::default()).unwrap().id
+    }
+
+    #[tokio::test]
+    async fn downloads_are_journalled_and_feed_the_next_action() {
+        let share = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let file = share.path().join("app-1.2.0.zip");
+        std::fs::write(&file, b"payload").unwrap();
+        let engine = engine_in(data.path());
+        let id = saved_watch(&engine, share.path());
+        let toasts = Arc::new(Toasts::default());
+        let n = notifier(Arc::new(Opened::default()), toasts.clone());
+        n.attach(engine.clone());
+        n.attach(engine.clone()); // a second attach is ignored
+        let mut req = request(
+            vec![
+                Action::Download {
+                    folder: dest.path().display().to_string(),
+                    verify: false,
+                },
+                Action::RunCommand {
+                    program: "/nonexistent/prog".into(),
+                    args: vec!["{path}".into()],
+                },
+            ],
+            file.to_str().unwrap(),
+        );
+        req.watch_id = id.clone();
+        n.run(&req).await;
+        assert_eq!(std::fs::read(dest.path().join("app-1.2.0.zip")).unwrap(), b"payload");
+        let kinds: Vec<String> = engine.events(10, None).unwrap().into_iter().map(|e| e.kind).collect();
+        assert!(kinds.contains(&"download-finished".to_string()), "{kinds:?}");
+        assert!(
+            kinds.contains(&"action-failed".to_string()),
+            "the failed program is journalled: {kinds:?}"
+        );
+        assert!(toasts.0.lock().unwrap().iter().any(|(t, _)| t.contains("run-command failed")));
+        // A failed download is journalled once, by record_download, and toasted.
+        req.release.location = share.path().join("missing.zip").display().to_string();
+        n.run(&req).await;
+        assert!(toasts.0.lock().unwrap().iter().any(|(t, _)| t.contains("download failed")));
+    }
+
+    #[tokio::test]
+    async fn actions_requested_by_the_engine_run_on_their_own_task() {
+        let opened = Arc::new(Opened::default());
+        let n = notifier(opened.clone(), Arc::new(Toasts::default()));
+        n.run_actions(&request(vec![Action::OpenLocation], "https://example.org/x"));
+        for _ in 0..200 {
+            if !opened.seen.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(opened.seen.lock().unwrap().as_slice(), ["https://example.org/x"]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_program_gets_the_downloaded_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out.txt");
+        let n = notifier(Arc::new(Opened::default()), Arc::new(Toasts::default()));
+        n.run(&request(
+            vec![Action::RunCommand {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), format!("printf '%s' \"$0\" > {}", out.display()), "{location}".into()],
+            }],
+            "https://example.org/a",
+        ))
+        .await;
+        assert_eq!(std::fs::read_to_string(out).unwrap(), "https://example.org/a");
+    }
+
     #[test]
     fn only_urls_and_absolute_paths_are_openable() {
         assert!(openable("https://example.org/a"));

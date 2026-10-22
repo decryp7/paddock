@@ -990,6 +990,10 @@ mod tests {
             CommandErrorCode::NotFound
         );
         assert_eq!(
+            CommandError::from(EngineError::Internal("x".into())).code,
+            CommandErrorCode::Internal
+        );
+        assert_eq!(
             CommandError::from(EngineError::BadRequest("x".into())).code,
             CommandErrorCode::BadRequest
         );
@@ -1000,6 +1004,63 @@ mod tests {
         assert_eq!(CommandError::bad("b").code, CommandErrorCode::BadRequest);
         assert_eq!(CommandError::unavailable("u").code, CommandErrorCode::Unavailable);
         assert_eq!(CommandError::internal("i").code, CommandErrorCode::Internal);
+    }
+
+    #[test]
+    fn engine_views_convert_to_the_wire_shapes() {
+        use spotter_core::source::SourceConfig;
+        use spotter_engine::secrets::MemorySecrets;
+        use spotter_engine::{Engine, EngineConfig, Services};
+        use std::sync::Arc;
+
+        let data = tempfile::tempdir().unwrap();
+        let share = tempfile::tempdir().unwrap();
+        std::fs::write(share.path().join("app-1.2.0.zip"), b"x").unwrap();
+        let engine = Engine::open(
+            EngineConfig::new(data.path(), "test"),
+            Services::new(Arc::new(MemorySecrets::new())),
+        )
+        .unwrap();
+        let mut spec = WatchDraftDto::from(&engine.presets()[0].spec).into_spec(false);
+        spec.name = "Folder app".into();
+        spec.source = SourceConfig::new("folder", &[("path", share.path().to_str().unwrap()), ("pattern", "app-*.zip")]);
+        let saved = engine.save_watch(spec.clone(), &BTreeMap::new()).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(engine.check_one(&saved.id)).unwrap();
+
+        let summary = WatchSummaryDto::from(&engine.list_watches()[0]);
+        assert_eq!(summary.name, "Folder app");
+        assert_eq!(summary.latest.as_ref().map(|r| r.version.as_str()), Some("1.2.0"));
+        let detail = WatchDetailDto::from(&engine.get_watch(&saved.id).unwrap());
+        assert_eq!(detail.history.len(), 1);
+        assert_eq!(detail.checks.len(), 1);
+        assert!(detail.secrets_set.is_empty());
+        let j = serde_json::to_value(&detail).unwrap();
+        assert!(j["summary"]["sourceKind"] == "folder" && j["checks"][0]["tookMs"].is_u64());
+
+        let preview = SourcePreviewDto::from(&rt.block_on(engine.test_source(&spec, &BTreeMap::new())));
+        assert_eq!(preview.releases.len(), 1);
+        assert!(preview.problems.is_empty() && preview.error.is_none());
+        let preset = PresetDto::from(&engine.presets()[0]);
+        assert!(!preset.id.is_empty() && !preset.category.is_empty());
+        let feed = DiscoveredFeedDto::from(&spotter_core::source::web_page::DiscoveredFeed {
+            url: "https://a.b/f".into(),
+            title: "T".into(),
+        });
+        assert_eq!((feed.url.as_str(), feed.title.as_str()), ("https://a.b/f", "T"));
+
+        let dash = DashboardDto::from(&engine.dashboard("30d").unwrap());
+        assert_eq!(dash.range, "30d");
+        assert_eq!(dash.whats_new.len(), 1);
+        assert_eq!(dash.watches.len(), 1);
+        assert_eq!(dash.downloads.len(), dash.buckets_ms.len());
+        engine
+            .record_download(&saved.id, "1.2.0", Ok(("/x/app.zip".into(), 1, true)))
+            .unwrap();
+        let events: Vec<AppEventDto> = engine.events(10, None).unwrap().iter().map(Into::into).collect();
+        assert!(events.iter().any(|e| e.kind == "download-finished" && e.verified == Some(true)));
+        let release = ReleaseDto::from(&engine.get_watch(&saved.id).unwrap().history[0]);
+        assert_eq!(release.version, "1.2.0");
     }
 
     #[test]

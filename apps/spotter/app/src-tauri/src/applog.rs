@@ -11,7 +11,10 @@ pub const MAX_BYTES: u64 = 512 * 1024;
 /// The folder the log lives in: `~/Library/Logs/Spotter` on macOS, `%LOCALAPPDATA%\Spotter\logs` on Windows,
 /// `$XDG_STATE_HOME/Spotter` (or `~/.local/state/Spotter`) on Linux.
 pub fn dir() -> Option<PathBuf> {
-    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    dir_with(|k| std::env::var_os(k).map(PathBuf::from))
+}
+
+fn dir_with(env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
         env("HOME").map(|h| h.join("Library").join("Logs").join("Spotter"))
     } else if cfg!(windows) {
@@ -26,7 +29,8 @@ pub fn dir() -> Option<PathBuf> {
 
 /// Appends `message` with a UTC timestamp; failures are ignored (logging must never break the app).
 pub fn write(message: &str) {
-    if let Some(d) = dir() {
+    // Unit tests never write to the user's real log folder.
+    if let Some(d) = dir().filter(|_| !cfg!(test)) {
         append(&d.join("app.log"), message);
     }
     eprintln!("Spotter: {message}");
@@ -52,6 +56,32 @@ fn append(path: &std::path::Path, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_folder_follows_the_platform_and_never_the_real_environment_in_tests() {
+        let env = |k: &str| match k {
+            "HOME" => Some(PathBuf::from("/home/u")),
+            "LOCALAPPDATA" => Some(PathBuf::from("/local")),
+            "XDG_STATE_HOME" => Some(PathBuf::from("/state")),
+            _ => None,
+        };
+        let d = dir_with(env).unwrap();
+        if cfg!(target_os = "macos") {
+            assert_eq!(d, PathBuf::from("/home/u/Library/Logs/Spotter"));
+        } else if cfg!(windows) {
+            assert_eq!(d, PathBuf::from("/local/Spotter/logs"));
+        } else {
+            assert_eq!(d, PathBuf::from("/state/Spotter"));
+            let relative = |k: &str| match k {
+                "XDG_STATE_HOME" => Some(PathBuf::from("relative")),
+                "HOME" => Some(PathBuf::from("/home/u")),
+                _ => None,
+            };
+            assert_eq!(dir_with(relative).unwrap(), PathBuf::from("/home/u/.local/state/Spotter"));
+        }
+        assert_eq!(dir_with(|_| None), None);
+        write("a test line goes to stderr only");
+    }
 
     #[test]
     fn lines_are_appended_bounded_and_rotated() {

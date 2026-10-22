@@ -438,17 +438,36 @@ async fn a_changed_page_is_a_release_and_failures_recover() {
 }
 
 #[tokio::test]
-async fn invalid_watches_are_flagged_and_nothing_runs_twice() {
-    let f = fixture();
-    let server = Server::start(ok_feed(&["1.0.0"])).await;
-    let saved = f.engine.save_watch(spec(&server.url("/")), &none()).unwrap();
-    // A pack scheme that disappears makes the stored watch invalid without the file being damaged.
-    let mut broken = f.engine.get_watch(&saved.id).unwrap().spec;
-    broken.versions = "semver".into();
-    let (a, b) = tokio::join!(f.engine.check_one(&saved.id), f.engine.check_one(&saved.id));
-    let skipped = [a.unwrap().skipped, b.unwrap().skipped];
-    assert!(skipped.iter().any(|s| *s) || server.seen().len() >= 1);
-    let _ = broken;
+async fn a_watch_whose_scheme_disappeared_is_flagged_once() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("packs")).unwrap();
+    let pack = dir.path().join("packs/mine.toml");
+    std::fs::write(
+        &pack,
+        "[[scheme]]\nid = \"mine\"\nname = \"Mine\"\npattern = \"(?P<major>\\\\d+)\\\\.(?P<minor>\\\\d+)\"\n",
+    )
+    .unwrap();
+    let open = || Engine::open(EngineConfig::new(dir.path(), "t"), Services::new(Arc::new(MemorySecrets::new()))).unwrap();
+    let engine = open();
+    assert!(engine.warnings().is_empty(), "{:?}", engine.warnings());
+    assert!(!engine.presets().is_empty());
+    let mut s = spec("http://127.0.0.1:1/x");
+    s.versions = "mine".into();
+    let saved = engine.save_watch(s, &none()).unwrap();
+    drop(engine);
+    std::fs::remove_file(&pack).unwrap();
+    let engine = open();
+    for _ in 0..2 {
+        let r = engine.check_one(&saved.id).await.unwrap();
+        assert!(matches!(r.status, WatchStatus::Invalid(_)), "{:?}", r.status);
+    }
+    let failed = engine
+        .events(10, None)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "check-failed")
+        .count();
+    assert_eq!(failed, 1, "the same problem is journalled once");
 }
 
 #[tokio::test]

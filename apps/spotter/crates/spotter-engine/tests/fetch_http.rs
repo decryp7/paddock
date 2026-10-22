@@ -74,20 +74,20 @@ async fn redirects_are_followed_and_capped() {
     })
     .await;
     let f = fetcher(|_| {});
-    let (bytes, final_url, v) = body_of(f.get(&HttpRequest::get(&format!("{base}/a")), &local()).await.unwrap());
+    let (bytes, final_url, v) = body_of(f.get(&HttpRequest::get(format!("{base}/a")), &local()).await.unwrap());
     assert_eq!(bytes, b"hello");
     assert!(final_url.ends_with("/b"));
     assert_eq!(v.etag.as_deref(), Some("\"v1\""));
     assert!(v.last_modified.is_some() && !v.is_empty());
 
-    let e = f.get(&HttpRequest::get(&format!("{base}/loop1")), &local()).await.unwrap_err();
+    let e = f.get(&HttpRequest::get(format!("{base}/loop1")), &local()).await.unwrap_err();
     assert!(e.message().contains("circle"), "{}", e.message());
-    let e = f.get(&HttpRequest::get(&format!("{base}/nowhere")), &local()).await.unwrap_err();
+    let e = f.get(&HttpRequest::get(format!("{base}/nowhere")), &local()).await.unwrap_err();
     assert!(matches!(e, SourceError::InvalidResponse(_)));
-    assert!(f.get(&HttpRequest::get(&format!("{base}/gone")), &local()).await.is_err());
+    assert!(f.get(&HttpRequest::get(format!("{base}/gone")), &local()).await.is_err());
 
     let few = fetcher(|c| c.max_redirects = 0);
-    let e = few.get(&HttpRequest::get(&format!("{base}/a")), &local()).await.unwrap_err();
+    let e = few.get(&HttpRequest::get(format!("{base}/a")), &local()).await.unwrap_err();
     assert!(e.message().contains("too often"), "{}", e.message());
     assert_eq!(f.config().max_redirects, FetchConfig::new("x").max_redirects);
     let _ = f.client();
@@ -106,24 +106,24 @@ async fn validators_give_not_modified_and_bad_requests_fail_early() {
         credentials: None,
     };
     assert!(matches!(
-        f.get(&HttpRequest::get(&format!("{base}/")), &opts).await.unwrap(),
+        f.get(&HttpRequest::get(format!("{base}/")), &opts).await.unwrap(),
         Fetched::NotModified
     ));
     let req = seen.lock().unwrap()[0].to_lowercase();
     assert!(req.contains("if-none-match: \"x\"") && req.contains("if-modified-since"), "{req}");
     // A 304 nobody asked for is an error, not "unchanged".
-    assert!(f.get(&HttpRequest::get(&format!("{base}/")), &local()).await.is_err());
+    assert!(f.get(&HttpRequest::get(format!("{base}/")), &local()).await.is_err());
 
     assert!(matches!(
         f.get(&HttpRequest::get("not a url"), &local()).await,
         Err(SourceError::InvalidConfig(_))
     ));
-    let bad_name = HttpRequest::get(&format!("{base}/")).header("bad header", "x");
+    let bad_name = HttpRequest::get(format!("{base}/")).header("bad header", "x");
     assert!(matches!(f.get(&bad_name, &local()).await, Err(SourceError::InvalidConfig(_))));
-    let bad_value = HttpRequest::get(&format!("{base}/")).header("X-Token", "line\nbreak");
+    let bad_value = HttpRequest::get(format!("{base}/")).header("X-Token", "line\nbreak");
     assert!(matches!(f.get(&bad_value, &local()).await, Err(SourceError::InvalidConfig(_))));
     let e = f
-        .get(&HttpRequest::get(&format!("{base}/")), &FetchOptions::default())
+        .get(&HttpRequest::get(format!("{base}/")), &FetchOptions::default())
         .await
         .unwrap_err();
     assert!(matches!(e, SourceError::InvalidConfig(_)), "loopback is refused by default");
@@ -133,7 +133,7 @@ async fn validators_give_not_modified_and_bad_requests_fail_early() {
 async fn bodies_are_capped() {
     let (base, _) = serve(|_, _| reply(200, "", &"x".repeat(5000))).await;
     let f = fetcher(|c| c.max_body = 1000);
-    assert!(f.get(&HttpRequest::get(&format!("{base}/")), &local()).await.is_err());
+    assert!(f.get(&HttpRequest::get(format!("{base}/")), &local()).await.is_err());
 }
 
 #[tokio::test]
@@ -169,7 +169,7 @@ async fn registries_hand_out_tokens_once() {
         credentials: Some(("user".into(), "pw".into())),
     };
     // The server keeps answering 401 (it only checks nothing): the second 401 is the final answer.
-    let e = f.get(&HttpRequest::get(&format!("{base}/v2/x")), &opts).await.unwrap_err();
+    let e = f.get(&HttpRequest::get(format!("{base}/v2/x")), &opts).await.unwrap_err();
     assert!(!e.message().is_empty(), "{e:?}");
     let log = seen.lock().unwrap().join("\n").to_lowercase();
     assert!(
@@ -177,11 +177,11 @@ async fn registries_hand_out_tokens_once() {
         "{log}"
     );
     assert!(log.contains("authorization: bearer tok-1"), "{log}");
-    assert!(f.get(&HttpRequest::get(&format!("{base}/v2/bad")), &opts).await.is_err());
-    assert!(f.get(&HttpRequest::get(&format!("{base}/v2/plain")), &opts).await.is_err());
+    assert!(f.get(&HttpRequest::get(format!("{base}/v2/bad")), &opts).await.is_err());
+    assert!(f.get(&HttpRequest::get(format!("{base}/v2/plain")), &opts).await.is_err());
     assert!(f
         .get(
-            &HttpRequest::get(&format!("{base}/v2/denied")),
+            &HttpRequest::get(format!("{base}/v2/denied")),
             &FetchOptions {
                 credentials: None,
                 ..local()
@@ -191,7 +191,7 @@ async fn registries_hand_out_tokens_once() {
         .is_err());
     // The token endpoint is guarded as well.
     assert!(f
-        .get(&HttpRequest::get(&format!("{base}/v2/denied")), &FetchOptions::default())
+        .get(&HttpRequest::get(format!("{base}/v2/denied")), &FetchOptions::default())
         .await
         .is_err());
 }
@@ -202,7 +202,7 @@ async fn one_host_is_asked_politely() {
     let f = fetcher(|c| c.min_host_interval = Duration::from_millis(150));
     let started = std::time::Instant::now();
     for _ in 0..3 {
-        f.get(&HttpRequest::get(&format!("{base}/")), &local()).await.unwrap();
+        f.get(&HttpRequest::get(format!("{base}/")), &local()).await.unwrap();
     }
     assert!(started.elapsed() >= Duration::from_millis(280), "{:?}", started.elapsed());
 }
@@ -214,7 +214,7 @@ async fn a_dead_server_is_unreachable() {
     drop(l);
     let f = fetcher(|c| c.request_timeout = Duration::from_secs(2));
     let e = f
-        .get(&HttpRequest::get(&format!("http://127.0.0.1:{port}/")), &local())
+        .get(&HttpRequest::get(format!("http://127.0.0.1:{port}/")), &local())
         .await
         .unwrap_err();
     assert!(matches!(e, SourceError::Unreachable(_)), "{e:?}");
