@@ -48,6 +48,13 @@ impl Probe {
         );
     }
 
+    /// The processes of the last refresh, without threads: on Linux sysinfo lists every thread (task) as an entry of
+    /// its own, with the process's executable and parent, so a thread id could be taken for a process id (and
+    /// signalled, adopted or counted twice).
+    fn processes(&self) -> impl Iterator<Item = (&Pid, &sysinfo::Process)> {
+        self.sys.processes().iter().filter(|(_, p)| p.thread_kind().is_none())
+    }
+
     /// Logical cores of the machine (the denominator of every CPU share).
     pub fn cpus(&self) -> usize {
         self.cpus
@@ -55,9 +62,7 @@ impl Probe {
 
     /// The process table as of the last refresh: ids, parents, process groups, CPU time and resident memory.
     pub fn process_table(&self) -> Vec<ProcessInfo> {
-        self.sys
-            .processes()
-            .iter()
+        self.processes()
             .map(|(pid, p)| ProcessInfo {
                 pid: pid.as_u32(),
                 ppid: p.parent().map(Pid::as_u32),
@@ -71,18 +76,14 @@ impl Probe {
     /// Whether `pid` has child processes that belong to a job (its console host does not).
     pub fn has_job_children(&self, pid: u32) -> bool {
         let parent = Pid::from_u32(pid);
-        self.sys
-            .processes()
-            .values()
-            .any(|p| p.parent() == Some(parent) && is_job_process(&p.name().to_string_lossy()))
+        self.processes()
+            .any(|(_, p)| p.parent() == Some(parent) && is_job_process(&p.name().to_string_lossy()))
     }
 
     /// A running process (other than `except`) whose executable is `exe`.
     pub fn running_binary(&self, exe: &Path, except: Option<u32>) -> Option<u32> {
         let want = normalise(exe);
-        self.sys
-            .processes()
-            .iter()
+        self.processes()
             .filter(|(pid, _)| Some(pid.as_u32()) != except)
             .find(|(_, p)| p.exe().is_some_and(|e| normalise(e) == want))
             .map(|(pid, _)| pid.as_u32())
@@ -188,5 +189,41 @@ mod tests {
     #[test]
     fn paths_compare_loosely() {
         assert_eq!(normalise(Path::new(r"\\?\C:\x\y")), normalise(Path::new("C:/x/y")));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn threads_are_not_processes() {
+        // Regression: on Linux sysinfo lists each thread as an entry with the same exe; `running_binary` returned a
+        // thread id and the usage tree counted a process once per thread.
+        let (stop, rx) = std::sync::mpsc::channel::<()>();
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let rx = rx.clone();
+                std::thread::spawn(move || {
+                    let _ = rx.lock().map(|r| r.recv());
+                })
+            })
+            .collect();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let me = std::process::id();
+        let tids: Vec<u32> = std::fs::read_dir("/proc/self/task")
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
+            .filter(|t| *t != me)
+            .collect();
+        assert!(tids.len() >= 4, "{tids:?}");
+        let probe = Probe::new();
+        let table = probe.process_table();
+        assert_eq!(table.iter().filter(|p| p.pid == me).count(), 1);
+        assert!(table.iter().all(|p| !tids.contains(&p.pid)), "a thread is listed as a process");
+        let exe = std::env::current_exe().unwrap();
+        let found = probe.running_binary(&exe, None).unwrap();
+        assert!(!tids.contains(&found), "{found} is a thread id");
+        drop(stop);
+        for t in threads {
+            let _ = t.join();
+        }
     }
 }

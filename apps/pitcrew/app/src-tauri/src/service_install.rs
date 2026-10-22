@@ -258,6 +258,9 @@ mod imp {
     /// Runs `pitcrew-service <verb>`, waiting at most 90 s; its standard error becomes the message.
     fn run_verb(verb: &str) -> Result<(), CommandError> {
         let exe = service_exe()?;
+        // The one place the app starts a program: it is our own service, bounded by the wait loop below (no console
+        // window exists on Linux).
+        #[allow(clippy::disallowed_methods)]
         let mut child = Command::new(&exe)
             .arg(verb)
             .stdin(Stdio::null())
