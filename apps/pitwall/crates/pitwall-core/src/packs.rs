@@ -577,4 +577,44 @@ variants = [{ quant = "Q4_K_M", file = "huge-q4.gguf", size_bytes = 90000000000 
         assert!(p.engines[0].downloads.len() >= 5);
         assert!(p.models.iter().any(|m| m.tags.iter().any(|t| t == "code")));
     }
+
+    #[test]
+    fn structural_mistakes_are_named() {
+        let base = engine("");
+        let e = |t: &str| err(t);
+        assert!(e(&base.replace("[capabilities]\nchat = true\n", "")).contains("[capabilities]"));
+        assert!(e(&base.replace("[launch]", "[xlaunch]")).contains("[launch]"));
+        assert!(e(&base.replace("[health]\npath = \"/health\"\n", "")).contains("[health]"));
+        assert!(e(&base.replace("command = \"{engine_dir}/{binary}\"", "")).contains("launch.command"));
+        assert!(e(&base.replace("name = \"KoboldCpp\"\n", "")).contains("name"));
+        assert!(e(&base.replace("id = \"kobold\"", "id = \"-bad\"")).contains("id"));
+        assert!(e(&base.replace("args = [", "args = [\"a\\u0001\", ")).contains("control"));
+        assert!(e(&base.replace("[capabilities]", "download = [1]\n[capabilities]")).contains("not a table"));
+        let many: Vec<String> = (0..70).map(|i| format!("\"{{host}}{{port}}{{model}}{i}\"")).collect();
+        assert!(e(&base.replace("args = [", &format!("args = [{}, ", many.join(", ")))).contains("at most"));
+        let ok = |t: &str| parse_models(t, "m", &mut vec![]).unwrap_err();
+        assert!(ok("format = 2").contains("format"));
+        assert!(ok("not toml [").contains("TOML"));
+        assert!(ok(&"x".repeat(MAX_PACK_BYTES + 1)).contains("large"));
+        assert!(ok("format = 1\nid = \"-\"\n").contains("id"));
+        assert!(ok(&MODELS.replace("tags = [\"Small\"]", "tags = [\"has space\"]")).contains("tags"));
+        assert!(ok(&MODELS.replace("capabilities = [\"chat\"]\ntags", "capabilities = []\ntags")).contains("capabilities"));
+        assert!(ok(&MODELS.replace("variants = [{ quant = \"Q8_0\", file = \"tiny-q8.gguf\", size_bytes = 700000000 }, { quant = \"Q4_K_M\", file = \"tiny-q4.gguf\", size_bytes = 400000000 }]", "variants = []")).contains("variants"));
+        assert!(ok(&MODELS.replace("size_bytes = 700000000", "size_bytes = 0")).contains("size_bytes"));
+        assert!(ok(&MODELS.replace("model]]\nid = \"tiny\"", "model]]\nid = \"-\"")).contains("id"));
+        assert!(ok(&MODELS.replace("repo = \"o/huge\"\n", "")).contains("repo"));
+        assert!(ok("format = 1\nid = \"x\"\nmodel = [1]\n").contains("not a table"));
+        let p = Packs::load([("x.txt", "")]);
+        assert!(p.problems[0].message.contains("named"));
+    }
+
+    #[test]
+    fn tight_fits_are_recommended_after_comfortable_ones() {
+        let ms = parse_models(MODELS, "m", &mut vec![]).unwrap();
+        // Room so small that the 400 MB variant is only a tight fit, and the 700 MB one does not.
+        let room = Room { ram_total: 2 * GIB, ram_available: 1100 * crate::MIB, ram_releasable: 0, vram_free: None, unified: false };
+        for r in recommend(&ms, None, &room) {
+            assert!(matches!(r.fit.verdict, Verdict::Fits | Verdict::Tight));
+        }
+    }
 }

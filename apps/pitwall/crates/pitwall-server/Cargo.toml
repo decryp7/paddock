@@ -34,7 +34,7 @@ tar = "0.4"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs", "io-util", "sync", "signal"] }
 toml.workspace = true
-zip = { version = "5", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile.workspace = true

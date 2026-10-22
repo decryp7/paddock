@@ -190,3 +190,70 @@ impl Engine for PackEngine {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pitwall_core::llama::ServeKind;
+    use pitwall_core::packs::{parse_engine, Problem};
+
+    fn pack(extra: &str) -> EnginePack {
+        let text = format!(
+            "format = 1\nid = \"p\"\nname = \"P\"\nversion = \"1\"\n[capabilities]\nchat = true\n[launch]\ncommand = \"{{engine_dir}}/{{binary}}\"\nargs = [\"--host\", \"{{host}}\", \"--port\", \"{{port}}\", \"-m\", \"{{model}}\", \"-c\", \"{{context}}\"]\n[health]\npath = \"/health\"\n{extra}"
+        );
+        let mut w: Vec<Problem> = vec![];
+        parse_engine(&text, "p.engine.toml", &mut w).unwrap()
+    }
+
+    fn engine(extra: &str) -> (tempfile::TempDir, PackEngine) {
+        let d = tempfile::tempdir().unwrap();
+        let e = PackEngine::new(pack(extra), Dirs::at(d.path()), Egress::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))));
+        (d, e)
+    }
+
+    fn launch() -> Launch {
+        Launch { model: "/m/x.gguf".into(), mmproj: None, alias: "x".into(), port: 5555, context: 2048, gpu_layers: None, threads: 0, parallel: 1, kind: ServeKind::Chat, cache_ram_mib: 0 }
+    }
+
+    #[test]
+    fn the_command_line_binds_loopback_on_pitwalls_port() {
+        let (_d, e) = engine("");
+        let (cmd, args) = e.command_line(&launch(), "bin", "/eng").unwrap();
+        assert_eq!(cmd, "/eng/bin");
+        assert_eq!(args, ["--host", "127.0.0.1", "--port", "5555", "-m", "/m/x.gguf", "-c", "2048"]);
+    }
+
+    #[tokio::test]
+    async fn an_uninstalled_pack_says_how_to_install_and_will_not_start() {
+        let platform = runtimes::current_platform();
+        let dl = format!(
+            "[[download]]\nplatform = \"{platform}\"\nurl = \"https://github.com/x/y/releases/download/1/p\"\nsha256 = \"{}\"\nsize = 5\narchive = \"none\"\nbinary = \"p\"\n",
+            "0".repeat(64)
+        );
+        let (d, e) = engine(&dl);
+        assert!(matches!(e.availability(), Availability::NotInstalled { .. }));
+        assert!(e.start(&launch()).await.is_err());
+        // Offline: the install refuses before connecting and leaves nothing behind.
+        assert!(e.install(&CancelFlag::default(), |_, _| {}).await.is_err());
+        assert!(!d.path().join("engines/pack-p.new").exists());
+        // Installed at the pinned version it is available; another version is not.
+        let dir = d.path().join("engines/pack-p");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("p"), b"x").unwrap();
+        std::fs::write(dir.join("version"), "0").unwrap();
+        assert!(e.binary().is_none());
+        std::fs::write(dir.join("version"), "1").unwrap();
+        assert!(e.binary().is_some() && matches!(e.availability(), Availability::Available));
+        e.remove().unwrap();
+        assert!(e.binary().is_none());
+        assert_eq!((e.kind(), e.id().as_str()), (EngineKind::Pack, "p"));
+    }
+
+    #[tokio::test]
+    async fn an_external_pack_is_available_only_when_its_command_exists() {
+        let (_d, ext) = engine("");
+        // External engines (no downloads): available only when the command can be found.
+        assert!(matches!(ext.availability(), Availability::NotInstalled { .. }));
+        assert!(matches!(ext.start(&launch()).await, Err(EngineError::NotAvailable(_))));
+    }
+}

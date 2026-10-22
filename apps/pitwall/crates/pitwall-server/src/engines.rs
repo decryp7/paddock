@@ -367,8 +367,9 @@ pub fn unpack_with(archive: &Path, dest: &Path, name: &str, keep: &dyn Fn(&str) 
             if e.is_dir() {
                 continue;
             }
-            let Some(flat) = runtimes::flat_name(e.name())
-                .filter(|n| runtimes::is_expected(n))
+            let Ok(zname) = e.name() else { continue };
+            let Some(flat) = runtimes::flat_name(&zname)
+                .filter(|n| keep(n))
                 .map(str::to_string)
             else {
                 continue;
