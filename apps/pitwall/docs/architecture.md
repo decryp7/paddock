@@ -56,7 +56,7 @@ in `lib.rs`):
 | Serving | `scheduler`, `memory`, `select`, `backoff` | The priority queue and caps; when to release models and whether a load fits; capability-based model choice; restart delays |
 | Models and engines | `gguf`, `quant`, `fit`, `hf`, `runtimes`, `hardware` | GGUF header reading with limits; "will this fit?"; Hugging Face answers; the pinned llama.cpp builds, the automatic build order, engine pins and rollback, and the capability matrix; GPU and RAM facts |
 | Security and privacy | `privacy`, `keys`, `limits` | The download allow-list and `DownloadUrl`; `Host`/`Origin` rules; key generation and hashing; per-app permissions, rate and token budgets |
-| State | `config`, `metrics`, `events`, `usage`, `discovery`, `mgmt`, `packs`, `tasks`, `tokens`, `cache` | Versioned settings; time series with bounded retention; the events feed; per-app counters; the discovery file; the UI's wire contract; declarative packs; versioned task prompts, token estimates and a cache policy |
+| State | `config`, `metrics`, `events`, `usage`, `discovery`, `mgmt`, `packs`, `tasks`, `tokens`, `cache` | Versioned settings; time series with bounded retention; the events feed; per-app counters; the discovery file; the UI's wire contract; declarative packs; versioned task prompts, token estimates, and the cache rules (keys, expiry, eviction, slot affinity; ADR 0019) |
 
 Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missing_docs` on, parse-don't-validate
 (`DownloadUrl`, `ModelId`, `AppId`, `RepoId`, `Priority::parse` return typed values or errors).
@@ -73,6 +73,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 | `http.rs` | The router: standard APIs, `/x/v1`, and the merged management routes. The gate (Host, Origin, credential), one function per endpoint, streaming in SSE or NDJSON, provenance headers |
 | `mgmt.rs` | The management API for Pitwall's own window: `POST /mgmt/v1/rpc/{method}`, the live feed `GET /mgmt/v1/live`, and the playground stream `POST /mgmt/v1/chat`. Admin key only |
 | `app.rs` | `AppState` (everything shared), the request pipeline `start_chat`, the background tasks (release loop, live pushes, metrics sampling), packs loading |
+| `cache.rs`, `cache_store.rs` | The cache layer (ADR 0019): lookup and store around `start_chat` and the embeddings path, the memory and SQLite stores behind one trait, the writer thread, the sweep (startup, hourly, idle; 5,000 entries a pass), `cache_info` and `clear_cache` |
 | `serving.rs` | The scheduler wrapped for async use, the hot-model table, `ensure` (plan a load, evict, start the engine, wait until healthy), the release `tick`, chat and embedding calls to engines |
 | `engines.rs` | The `Engine` trait, `LlamaCpp` (catalog, install, self-test, defensive unpacking, start), `Planned` (placeholder engines that say why they are unavailable) |
 | `pack_engine.rs` | `PackEngine`: one generic adapter that runs any engine described by an engine pack |
@@ -138,6 +139,8 @@ real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.m
 | Declarative engine and model packs | [ADR 0011](adr/0011-declarative-packs.md) |
 | Parallel slots per model, KV memory per slot, the fit solver | [ADR 0016](adr/0016-parallel-slots.md) |
 | Model update notices: ask Hugging Face for repository ids you downloaded, never fetch | [ADR 0017](adr/0017-model-update-notices.md) |
+| Engine pins, rollback and capability gating | [ADR 0018](adr/0018-engine-pins-and-capability-gating.md) |
+| Caching: prompt-prefix reuse with slot affinity, an opt-in response cache, an embeddings cache; memory or `cache.sqlite`, expiry, size caps, sweep | [ADR 0019](adr/0019-caching.md) |
 
 ## Behaviour in text
 
@@ -146,6 +149,8 @@ real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.m
 ![Chat request: admit and queue](diagrams/svg/uml-seq-chat-admit.svg)
 
 ![Chat request: load and answer](diagrams/svg/uml-seq-chat-serve.svg)
+
+![Chat request: response cache and slot affinity](diagrams/svg/uml-seq-chat-cache.svg)
 
 1. **The gate** (`http::gate`). The `Host` header must name this machine (loopback names, or none); a browser
    `Origin` must be loopback or Pitwall's own window; the credential is `Authorization: Bearer pw_...` or
@@ -161,18 +166,25 @@ real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.m
    engine go to the load (`Serving::ensure_for`).
 4. **Authorize** (`AppPermissions::authorize`, the per-minute rate window, the daily token budget). Denials are 403
    or 429 with a message that says what to change.
+4a. **Cache lookup** (ADR 0019). A deterministic request (temperature 0 or a seed, no tools) from an app or preset that opted in
+   is keyed (`cache::key`: engine fingerprint plus the canonical request) and looked up before the queue. A hit is replayed (in
+   pieces when streamed) with `X-Pitwall-Cache: hit`, loads no model and waits for nothing; `Cache-Control: no-cache` or
+   `no-store` bypasses. Embeddings are looked up per input text, and only the missing ones are computed.
 5. **Queue** (`Serving::acquire`). The job enters the scheduler with its priority (the `X-Pitwall-Priority` header,
    capped by the app's maximum). It waits until the global, per-model and per-app caps allow it.
 6. **Load if needed** (`Serving::ensure`). If the model is not hot, the core's `plan_load` says proceed, evict idle
    models first, wait for busy ones, or refuse with `insufficient_memory`. The server starts the engine process on a
    free loopback port, polls `/health` for up to five minutes, and reads `/props`. The time this took is the
    *cold start* and is reported in `X-Pitwall-Cold-Start-Ms`.
-7. **Generate.** The server sends the request to the engine's own `/v1/chat/completions` over loopback, always
+7. **Generate.** For llama.cpp the server first picks the slot (`slots::affinity`: the conversation's slot if free, else the one
+   idle longest, else none) and sends `id_slot` so the engine's prompt cache is hit. It sends the request to the engine's own
+   `/v1/chat/completions` over loopback, always
    streamed, and converts the engine's events back into the caller's format (SSE for OpenAI and Anthropic, NDJSON
    for Ollama; a single JSON body when the client did not ask to stream).
 8. **Record.** A `Recorder` writes request metadata (never the text unless the user enabled
    `keepRequestContent`) into a bounded list (500), per-app usage and the metrics series. Closing the connection
-   cancels the job and frees the slot.
+   cancels the job and frees the slot. A completed deterministic answer is handed to the cache's writer thread (never on the
+   request path); `timings.cache_n` becomes `cachedTokens` and `prefixTokens`.
 
 ### Model selection
 
@@ -280,12 +292,17 @@ Everything is in one per-user data folder (override with `PITWALL_HOME`): `%APPD
 | `model-updates.json` | Model update notices, dismissals and when the checks ran (`pitwall_core::update_state`) | Versioned, atomic write with `.bak`, 1 MB cap, at most 200 notices and 500 dismissals, damage falls back to the backup, then empty |
 | `models/<repo>/<file>.gguf.origin.json` | Where a downloaded model came from: repository, file, size, SHA-256 per part, repository commit | Written when a download finishes; ignored when damaged or when it no longer matches the file |
 | `usage.json` | Per-app usage over time (`pitwall_core::usage`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; hourly buckets 7 days, daily buckets 90 days, at most 256 apps per bucket (the rest count as `other`), saved every 30 s |
+| `cache.sqlite` | Disk store of the response and embeddings caches (ADR 0019) | `rusqlite` bundled, WAL, versioned schema, owner-only (0600); a corrupt or older or newer file is renamed aside and recreated; if it cannot be opened the caches fall back to memory and say why. Rows: key hash, value, created and last-used times, size, hits, model id, app id (never the API key) |
+| `slots/` | Saved llama-server slot state for presets with keep warm | Bounded; saved on unload, restored on load, dropped when model, engine or preset changes or after `keepWarmDays` (30) unused |
 | `logs/` | Service log | Never prompts or answers by default |
 
 The events feed (2000 entries) and the request list (500 entries) live in memory.
 
 ## Security and robustness
 
+- **Cached content stays local and opt-in.** Answers are cached only for apps and presets that opted in, are never keyed by API key,
+  live in memory or in an owner-only `cache.sqlite`, expire (an expired entry is never served) and can be cleared per app, model or
+  entirely; embeddings follow the same storage and clearing rules (ADR 0019).
 - **Local only**, as a property of the code: one outbound client, clippy forbids HTTP clients and raw process
   spawning elsewhere, a test fails if a request handler can reach the network, and a CI script greps for
   `reqwest` outside `egress.rs`.
@@ -318,7 +335,7 @@ Said plainly, so nothing in this document is read as a promise:
 
 - Sharing on the local network (LAN with TLS and certificate pinning): the setting and the status fields exist, the
   listener does not.
-- The response cache (`pitwall_core::cache` is only the policy; prompt-prefix caching is llama-server's own), knowledge
+- Caching (ADR 0019) is specified and being built (slot affinity, `--cache-ram` sizing, the response cache, the embeddings cache); see the roadmap for what has shipped; knowledge
   collections (RAG), MCP and tool hosting, batch jobs as a resumable feature.
 - The task endpoints (`/x/v1/tasks/{task}`: summarize, classify, extract, translate) and token helpers
   (`/x/v1/tokens/count`, `/x/v1/tokens/truncate`) exist and are covered by the server's tests over a fake engine; they

@@ -20,6 +20,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 - [Choosing a model by capability, priority and provenance](#choosing-a-model-by-capability-priority-and-provenance)
 - [Model presets and aliases](#model-presets-and-aliases)
 - [Parallel slots per model](#parallel-slots-per-model)
+- [Caching](#caching)
 - [Model update notices](#model-update-notices)
 - [Memory presets and idle release](#memory-presets-and-idle-release)
 - [Offline mode](#offline-mode)
@@ -177,6 +178,7 @@ Per app (the permissions editor in **Apps & keys**):
 | Tokens per month | 429 "this app has used its N tokens for this month; the budget resets on the 1st at midnight UTC". |
 | Memory share | 403 "the model needs N MiB but this app may use at most P% of the machine's memory ...". The share is a percentage of the machine's RAM; it is checked against the footprint (RAM plus video memory) of the model that would serve the request. |
 | Concurrent requests | The app's extra requests wait in the queue. |
+| Cache responses | Off by default. On: repeated deterministic requests from this app may be answered from the [response cache](#caching). |
 
 Every budget is optional (leave the field empty for no limit) and exists next to the others; a request is refused by the first
 one it exceeds. Days and months count in UTC. When an app reaches 80 % of a budget, Pitwall adds a warning to the Dashboard's
@@ -426,6 +428,60 @@ The context you set is the context of one slot: with 4 slots of 8,192 tokens Pit
 slot is an estimate, and the panel says so. Requests beyond a model's slots wait in the queue. In **Discover**, each variant
 also says how many requests at once the machine could run.
 
+## Caching
+
+Pitwall can avoid repeating work. There are three kinds of caching; everything stays on this computer.
+
+| What | Default | What it does |
+|---|---|---|
+| Prompt reuse | Always on (llama.cpp) | Turns of one conversation go to the same model slot, so the engine does not recompute the start of the prompt. Request details show "cached tokens"; usage shows "prefix tokens". |
+| Response cache | **Off** | Answers an exact repeat of a request without running the model. |
+| Embeddings cache | On | Remembers the vector of each text, so indexing the same text again is instant. |
+
+**What the response cache stores.** Only deterministic requests: temperature 0 (or a fixed seed) and no tools. Streamed and
+non-streamed requests both work; a streamed hit is replayed in pieces. A hit needs no model load and does not wait in the queue.
+Only a finished answer is stored (it stopped on its own or reached the length limit; errors and tool calls are not). The key
+includes the model file (its size and modification time), the engine and its build, every generation setting and the whole
+conversation, so changing any of them is a miss. The app that asked is **not** part of the key: apps that have opted in share
+answers.
+
+**Opting in.** Turn on **Cache responses** for an app (Apps & keys > the app > permissions), or for a preset (Models > Presets >
+the preset). Either one enables the cache for that request. Nothing else is cached.
+
+**How long.** A cached answer expires 7 days after it was stored. Choose 1 hour, 1 day, 7 days, 30 days, 90 days or Never in
+Settings > Caching; with Never only the size limit (256 MiB by default) removes entries, oldest-unused first. Embeddings
+expire 90 days after they were last used (using one renews it) and have a 512 MiB limit. An expired entry is never served, even
+before the background clean-up deletes it. The clean-up runs when Pitwall starts, every hour and when it is idle.
+
+**Where.** Each cache is kept in **Memory only** (gone when Pitwall stops) or **On disk** (the default for embeddings, and for
+answers once you enable them): one file, `cache.sqlite` in the data folder, readable only by you. If the file is damaged Pitwall
+renames it aside and starts a new one; if it cannot be opened at all it uses memory and says why in Settings > Caching.
+
+**Seeing and controlling it.** Settings > Caching shows the size in use, the oldest entry, when entries expire and the next
+clean-up. **Clear now** empties a cache; you can also clear the entries of one app, one model, or everything. Removing a model,
+changing the engine build or pin, or editing a preset drops the entries that depended on it at once. The Dashboard shows the hit
+rate and the tokens saved, and each app's page shows its hits.
+
+**Per request.**
+
+```sh
+curl -si http://127.0.0.1:11435/v1/chat/completions -H "Authorization: Bearer $PITWALL_API_KEY" -H 'content-type: application/json' \
+  -d '{"model":"qwen3-8b-instruct-q4_k_m","temperature":0,"messages":[{"role":"user","content":"Name three primes."}]}' | grep -i x-pitwall-cache
+# x-pitwall-cache: miss      (the first time)  ...  hit  (the second time)
+# Add -H 'Cache-Control: no-cache' to skip the cache for one request: x-pitwall-cache: bypass
+```
+
+`X-Pitwall-Cache` is `hit`, `miss` or `bypass` (the cache was off for the app and preset, the request was not deterministic, or it
+carried `Cache-Control: no-cache` or `no-store`).
+
+**Keep warm (optional).** In a preset, Keep warm saves the model's slot state when the model unloads and restores it when it loads,
+so the first request after a reload is fast. The saved files are bounded, kept in `slots/`, and dropped when the model, engine
+build or preset changes or after 30 days unused (`keepWarmDays`).
+
+**Privacy.** Cached answers contain what your apps asked and what the model replied, so they are cached only for apps and presets
+you opted in, never leave this computer, and never include an API key. Turn on Memory only to keep them off the disk, or clear
+them whenever you like.
+
 ## Model update notices
 
 ![The Library with two update notices](screenshots/models-library-light.png)
@@ -588,6 +644,8 @@ recommended, and models that will not fit this machine are left out. Up to 500 m
 | `apps.json` (+ backup) | Apps and the hashes of their keys |
 | `presets.json` (+ backup) | Model presets and aliases |
 | `engine-pins.json` (+ backup) | Engine build pins and the builds used before (for roll back) |
+| `cache.sqlite` | The disk store of the response and embeddings caches (see [Caching](#caching)); deleting it only empties the caches |
+| `slots/` | Saved model state for presets with Keep warm |
 | `admin.key` | The secret Pitwall's own window uses; owner-only. Do not share it |
 | `discovery.json` | Written while the server runs: pid, port, base URL |
 | `models/<owner>/<repo>/` | Downloaded models |

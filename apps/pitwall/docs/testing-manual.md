@@ -74,6 +74,29 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 28e | Use a build older than the floors in `capabilities.json` (edit a build's `build.json` tag to `b4000` for the test) and send a request with tools, an image, or a JSON schema. | 503 `engine_build_too_old` in the OpenAI, Anthropic (`overloaded_error`) and Ollama shapes, naming the build needed. **Features** on that build lists them as "Needs bNNNN". `GET /x/v1/models` moves those capabilities to `unavailable`. |
 | 28f | Corrupt `engine-pins.json`, restart. | Pitwall starts; the backup is used (or no pins) and the Events list says the pins file was damaged. |
 
+## Caching
+
+Needs a build with caching (ADR 0019) and a small real model. Use `temperature: 0` for every request below.
+
+| # | Steps | Expected |
+|---|-------|----------|
+| C1 | Send the same chat request twice with an app that has Cache responses off. | Both answers carry `X-Pitwall-Cache: bypass`; Requests shows two model runs. |
+| C2 | Turn Cache responses on for the app; send the request twice, once streamed and once not. | First `miss`, then `hit` with the same text; a streamed hit arrives in several chunks; the hit shows no queue time and no model load (unload the model first to check); the Dashboard shows one hit and one miss. |
+| C3 | Add `Cache-Control: no-cache` (then `no-store`). | `bypass`; the model runs; nothing new is stored. |
+| C4 | Send with temperature 0.8 and no seed, then with a seed. | Without a seed `bypass`; with a seed the second identical request is a `hit`. A request with tools is always `bypass`. |
+| C5 | Enable the cache on a preset instead (app off) and use the preset's name as the model. | `miss` then `hit`. |
+| C6 | Two apps, both opted in, send the same request. | The second app gets a `hit` (answers are shared). An app that has not opted in gets `bypass`. |
+| C7 | Cancel a streamed request midway, then repeat it. | `miss` (a cancelled answer is not stored); the repeat completes and the next one is a `hit`. |
+| C8 | Settings > Caching: set the response expiry to 1 hour, check "Expires after"; with a debug clock or by editing `created` in a copy of `cache.sqlite`, make an entry older than that and repeat the request. | The expired entry is not served (`miss`) even before the clean-up; "Next clean-up" shows a time; after it ran the entry count drops. |
+| C9 | Set a tiny size limit (for example 1 MiB), then make many distinct requests. | The size in use stays under the limit; the oldest-unused entries go first. |
+| C10 | Delete the model (or change the engine pin) and repeat a cached request after reinstalling. | `miss`: entries for the removed model or old build are gone or unused. Editing the preset drops its entries at once. |
+| C11 | Clear now; clear for one app; clear for one model. | The entry count and size drop; other apps' entries stay for the per-app and per-model clears. |
+| C12 | Embeddings: send `input` with 3 texts, then 5 texts including those 3. | The second call computes only 2 (check the engine log or Requests) and returns 5 vectors in order; the vectors of the 3 are identical. |
+| C13 | Switch storage to Memory only and restart; switch back to On disk. | Memory entries are gone after restart; with disk they survive a restart. `cache.sqlite` has owner-only permissions (`ls -l`). |
+| C14 | Quit Pitwall, overwrite `cache.sqlite` with garbage, start it. | It starts; the damaged file is renamed aside (`cache.sqlite.corrupt-...`); the cache is empty and works. Make the data folder read-only for the file: the cache uses memory and Settings says why. |
+| C15 | Slot affinity: with 2 or more slots, hold a conversation of 3 turns with a long system prompt (cache responses off). | Request details show `cachedTokens` growing on turns 2 and 3; usage shows prefix tokens. A parallel unrelated request does not evict it. |
+| C16 | Keep warm on a preset: chat, unload the model, chat again. | The second load restores slot state (`slots/` has a file); the first answer has cached tokens. Changing the preset removes the file. |
+
 ## Pairing and security
 
 | # | Steps | Expected |

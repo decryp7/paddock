@@ -85,13 +85,16 @@ Every feature, with its status, is in [docs/features.md](docs/features.md).
   much context or concurrency fits.
 - **Model update notices.** Off until you turn it on: Pitwall asks Hugging Face, for the repositories you downloaded from only, whether
   a file changed or a better quantisation fits, and tells you. It never downloads by itself.
+- **Caching.** Prompt prefixes are reused across turns (slot affinity), exact repeats of deterministic requests can be answered
+  from an opt-in response cache, and embeddings are cached; all stored on this computer only, with expiry, size caps and
+  clear buttons ([ADR 0019](docs/adr/0019-caching.md), [user guide](docs/user-guide.md#caching)).
 - **Memory management.** Presets (Low memory, Balanced, Performance), idle and deep-idle release, pressure release,
   pinned models, a countdown on the dashboard.
 - **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits (with usage over time per app), an offline mode.
 - **Packs.** Add engines and model lists with TOML files, no code ([user guide](docs/user-guide.md#packs-add-an-engine-or-a-model-list)).
 - **The app.** Dashboard, models, engines, apps, requests, playground, benchmarks, settings, tray.
 
-Not built yet: LAN sharing with TLS, a response cache, knowledge collections (RAG), MCP and tool hosting, speech to
+Not built yet: LAN sharing with TLS, knowledge collections (RAG), MCP and tool hosting, speech to
 text. See the [roadmap](docs/roadmap.md).
 
 ## Install

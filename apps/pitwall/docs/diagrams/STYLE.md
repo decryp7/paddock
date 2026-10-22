@@ -21,7 +21,7 @@ Rules that matter most here:
 
 - Amber is never a role colour; engine processes are neutral.
 - Planned work is the role's colour, dashed on white, **with a "planned" tag**; it is never a different box style. Planned today:
-  LAN sharing with TLS, MLX / vLLM / whisper.cpp engines, the response cache wiring (and, not drawn yet, RAG and MCP).
+  LAN sharing with TLS, MLX / vLLM / whisper.cpp engines (and, not drawn yet, RAG and MCP).
 - Pitwall is strictly local: no cloud, no telemetry. The only arrows that leave the machine are downloads the user asked for
   (Hugging Face, GitHub releases).
 - A diagram has at most 12 edges and fits 1600 × 1200 (sequences 1800 tall), so large ones are split: core in four, server

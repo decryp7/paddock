@@ -18,6 +18,7 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 - [Serving: load on first use and release](#serving-load-on-first-use-and-release)
 - [The standard APIs](#the-standard-apis)
 - [Extras for apps (`/x/v1`)](#extras-for-apps-xv1)
+- [Caching](#caching)
 - [Apps, keys and pairing](#apps-keys-and-pairing)
 - [Command line](#command-line)
 - [Queue and priorities](#queue-and-priorities)
@@ -174,8 +175,33 @@ Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR
   loaded, `X-Pitwall-Cold-Start-Ms`. Works.
 - **Planned, not built**: resumable batch jobs with progress events, knowledge collections (local retrieval: store, chunk,
   embed, rerank, query), task endpoints (`/x/summarize`, `/x/classify`, `/x/extract`, `/x/translate`) with versioned prompt
-  templates, token counting helpers beyond Anthropic's `count_tokens`, a response cache and prompt-prefix cache management,
-  and hosting of MCP servers and tools.
+  templates, token counting helpers beyond Anthropic's `count_tokens`, and hosting of MCP servers and tools. (Caching is specified in
+  [ADR 0019](adr/0019-caching.md) and described under [Caching](#caching).)
+
+## Caching
+
+Three layers, specified in [ADR 0019](adr/0019-caching.md); the engine work is in progress, so each item says what it is.
+Everything cached stays on this computer.
+
+- **Prompt-prefix reuse** (always on, llama.cpp only). Requests of one app and conversation go to the same llama-server slot
+  (`id_slot`), so the engine's prompt cache skips the shared start; with no free matching slot the slot idle longest is used,
+  and with all busy the engine chooses. `--cache-ram` is 1/16 of the RAM clamped to 256 MiB..4 GiB unless set in Settings;
+  `--cache-reuse 256` stays. Request details show `cachedTokens` and usage shows `prefixTokens`. Optional per-preset *keep warm*
+  saves slot state on unload and restores it on load (`slots/`, bounded, dropped after 30 days unused).
+- **Response cache** (exact repeats, **off by default**). Deterministic requests only (temperature 0 or a fixed seed, no tools),
+  streaming or not; a hit needs no model load and no queue. Enabled per app and per preset; `X-Pitwall-Cache: hit|miss|bypass`;
+  `Cache-Control: no-cache` or `no-store` bypasses. Only completed answers are stored. Expires 7 days after storing by default
+  (1 h, 1 day, 7 days, 30 days, 90 days, never); 256 MiB by default.
+- **Embeddings cache** (on by default). One vector per input text, 512 MiB, expiry 90 days since last use; a partly cached batch
+  computes only the missing inputs.
+- **Storage and upkeep.** Memory only or on disk (`cache.sqlite`, owner-only; a damaged file is renamed aside; if it cannot open
+  the cache uses memory and says why). Least-recently-used eviction on the size cap; a background sweep at start, hourly and
+  when idle; an expired entry is never served. A changed model file, engine or build gives different keys; removing a model,
+  changing the engine build or pin, or changing a preset drops the affected entries.
+- **Controls.** Settings > Caching: sizes, storage, expiry, oldest entry, expires after, next clean-up, Clear now, and clear per
+  app, per model or all. Management commands `cache_info` and `clear_cache`.
+- **Statistics.** `cacheHits`, `cacheMisses`, `prefixTokens`, `savedTokens`; the Dashboard shows the hit rate and tokens saved,
+  and each app shows its hits.
 
 ## Apps, keys and pairing
 
@@ -325,6 +351,8 @@ the window quits the app, but the service keeps running. The shell and the popov
 - **Network**: offline mode. The LAN switch and port are stored but sharing on the local network is **planned** and does nothing
   yet.
 - **Privacy**: keep request content (off), how long metrics and history are kept (30 days).
+- **Caching**: the three caches (embeddings on, response cache off), sizes, storage (memory or disk), expiry, the oldest entry, when
+  entries expire, the next clean-up, Clear now and clear per app, model or all ([Caching](#caching)).
 
 Settings are in `settings.toml`: versioned, every key optional with a default, written atomically with a backup, and damage
 falls back to the backup and then the defaults. Works.

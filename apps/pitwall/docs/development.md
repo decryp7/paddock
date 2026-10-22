@@ -129,6 +129,7 @@ changes, change the diagram in the same commit.
 | Add an engine with its own protocol | Implement `Engine` in `crates/pitwall-server/src/engines.rs` (or a new file), register it in `AppState::open`, add the pure parts to `pitwall-core`, an ADR, and tests with the fake engine |
 | Add or change an endpoint | Parse and format in `pitwall_core::api::<family>` (pure, with a contract test), add the route and handler in `http.rs`, keep `/x/v1` changes additive ([ADR 0003](adr/0003-api-surface-and-compatibility.md)) |
 | Add a management operation | DTO in `pitwall_core::mgmt` and `app/src/app/core/api.types.ts` in the same commit, a method in `mgmt.rs`'s `call`, a method on the UI `Backend` and the mock |
+| Change a cache rule (keys, expiry, eviction, affinity) | `pitwall_core::cache` and `slots::affinity` (pure, failing test first); the stores and the sweep are in the server; update [ADR 0019](adr/0019-caching.md) |
 | Change a memory or queue rule | `pitwall_core::memory` or `scheduler` with a failing test first; update [ADR 0006](adr/0006-memory-policy.md) or [0005](adr/0005-queue-and-scheduling.md) |
 | Add a setting | `pitwall_core::config` (optional key with a default, validation), the UI settings page, tests; a breaking change bumps `SCHEMA_VERSION` with a migration |
 | Update the pinned llama.cpp release | Edit `crates/pitwall-core/src/runtimes/llama-runtimes.json` (URLs, sizes, SHA-256); a reviewed change, verify with the manual install flow |

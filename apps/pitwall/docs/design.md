@@ -50,7 +50,7 @@ Source: [c4-2-containers.drawio](diagrams/c4-2-containers.drawio)
 
 `pitwall-core` has no I/O. It is shown in four parts so each stays readable.
 
-Wire formats: the three API families, the neutral request, the llama protocol and the (not yet wired) response cache.
+Wire formats: the three API families, the neutral request, the llama protocol and the cache rules (keys, expiry, eviction, slot affinity).
 
 ![C4 core wire formats](diagrams/svg/c4-3-core-wire.svg)
 
@@ -79,7 +79,8 @@ Source: [c4-3-core-state.drawio](diagrams/c4-3-core-state.drawio)
 ### Level 3 — server components
 
 `pitwall-server` in two parts: the request path (gate, pipeline, auth, serving), then library, engines, egress and the
-thin OS layer.
+thin OS layer. The request path includes the cache layer (ADR 0019): lookup before the queue, a writer thread after a
+completed answer, and `cache.sqlite` or memory behind it.
 
 ![C4 server request path](diagrams/svg/c4-3-server-requests.svg)
 
@@ -107,7 +108,7 @@ Source: [c4-3-ui-state.drawio](diagrams/c4-3-ui-state.drawio)
 Per OS the server is a supervised background process so it keeps serving with no window open: a Windows service, a
 macOS launch agent registered through `SMAppService`, a Linux systemd user service (`pitwall.service`, with
 `Restart=always`). The app and tray run in the user's session; the server starts engine processes as its children.
-The data folder differs per OS (`PITWALL_HOME` overrides it). See the per-OS guides:
+The data folder (`PITWALL_HOME` overrides it; it also holds `cache.sqlite` and `slots/`) differs per OS. See the per-OS guides:
 [Windows](windows.md), [macOS](macos.md), [Linux](linux.md).
 
 ![Deployment on Windows](diagrams/svg/uml-deployment-windows.svg)
@@ -170,6 +171,16 @@ Source: [uml-seq-chat-admit.drawio](diagrams/uml-seq-chat-admit.drawio)
 ![Chat request: load and answer](diagrams/svg/uml-seq-chat-serve.svg)
 
 Source: [uml-seq-chat-serve.drawio](diagrams/uml-seq-chat-serve.drawio)
+
+### Response cache and slot affinity
+
+After the gate, a deterministic request from an opted-in app or preset is looked up before it is queued; a hit needs no model
+and no queue. A miss runs on the slot that served the conversation before (`id_slot`) and the completed answer is stored off
+the request path. See [ADR 0019](adr/0019-caching.md).
+
+![Chat request: response cache and slot affinity](diagrams/svg/uml-seq-chat-cache.svg)
+
+Source: [uml-seq-chat-cache.drawio](diagrams/uml-seq-chat-cache.drawio)
 
 ### Pairing an app
 
@@ -241,6 +252,15 @@ forgotten and reloaded by the next request.
 ![Hot model states](diagrams/svg/uml-state-hot-model.svg)
 
 Source: [uml-state-hot-model.drawio](diagrams/uml-state-hot-model.drawio)
+
+### Cache entry
+
+Stored, possibly used, then expired and swept, evicted over the size cap, or dropped when its model, engine build or preset
+changes. An expired entry is never served, even before the sweep removes it.
+
+![Cache entry states](diagrams/svg/uml-state-cache-entry.svg)
+
+Source: [uml-state-cache-entry.drawio](diagrams/uml-state-cache-entry.drawio)
 
 ### Download
 

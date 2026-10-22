@@ -55,7 +55,7 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | --- | --- |
 | Task endpoints (`/x/v1/tasks/...`: summarise, classify, extract, translate) with versioned prompts | Implemented and tested over a fake engine; **not verified** against a real model |
 | Token counting and truncation helpers (`/x/v1/tokens/...`) | Implemented as estimates (no tokenizer call yet); **partial** |
-| Response cache and prompt-prefix policy | Policy in the core (`cache.rs`); **not wired** into the server |
+| Caching (ADR 0019): slot affinity and `--cache-ram` sizing, an opt-in response cache, an embeddings cache, `cache.sqlite`, sweep, Settings > Caching | **Specified; engine in progress.** Replaces the old unwired policy in `cache.rs`. Verify against a real model before calling it built |
 | Stored benchmarks feeding "fast" selection | A benchmark run works and results are kept in memory; not written to disk, not used by selection; **partial** |
 | OS memory-pressure signals and foreground-app yielding | **Built.** Linux PSI, macOS `sysctl` and `pmset`, Windows memory notification and `SHQueryUserNotificationState`; foreground detection is not available on Linux. Verified on macOS; Windows and Linux are checked by their CI runners |
 | Releasing a model's context before its weights | **Built.** At half the idle time the engine's slots are erased (KV and prompt cache); the weights go at the full idle time. The KV buffer itself is only returned on unload |
