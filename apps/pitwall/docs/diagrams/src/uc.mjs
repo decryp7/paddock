@@ -2,7 +2,7 @@ import { useCases } from './uc-lib.mjs';
 useCases('uml-use-cases-library', {
   title: 'Use cases — models and engines', desc: 'What the machine owner does to get models running: engines, models, names for them and what they cost in memory.', bound: 'Pitwall', owner: 'Machine owner',
   rows: ['Install or update an engine', 'Download a model', 'Review model update notices', 'Set a preset or alias', 'Set parallel slots and see their cost', 'Pin or roll back an engine build', 'Delete or keep-loaded a model', 'Add an engine or model pack'],
-  hubRow: 1, sats: [{ text: 'Self-test the build', from: 0, row: 0, kind: '«include»' }, { text: 'Check that it fits', from: 1, row: 1, kind: '«include»' }, { text: 'Gate features by build', from: 5, row: 5, kind: '«include»' }],
+  hubRow: 1, sats: [{ text: 'Self-test the build', from: 0, row: 0, kind: '«include»' }, { text: 'Check that it fits', from: 1, row: 1, kind: '«include»' }, { text: 'Show features per build', from: 5, row: 5, kind: '«include»' }],
 });
 useCases('uml-use-cases-operate', {
   title: 'Use cases — running Pitwall', desc: 'Day to day: who may use it, how much memory it may take, what it has done and how to drive it from a terminal.', bound: 'Pitwall', owner: 'Machine owner',

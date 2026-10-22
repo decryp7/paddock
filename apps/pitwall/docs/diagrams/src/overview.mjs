@@ -52,25 +52,26 @@ group(AX, top, AW, ph, 'Pitwall app and CLI: see and control');
 
 // service
 box(SX + 24, 208, SW - 48, 128, 'accent', 'One gate', 'OpenAI, Anthropic and Ollama APIs plus /x/v1 on 127.0.0.1:11435. Every call passes Host, Origin and key checks; the window uses the admin key.');
-box(SX + 24, 352, SW - 48, 104, 'accent', 'Queue and serving', 'Aliases and presets pick the model; priorities and caps queue it; it loads on first use with its parallel slots and is released when idle or under pressure.');
-box(SX + 24, 472, SW - 48, 96, 'accent', 'Model library', 'Search, fit check, resumable verified downloads, and update notices that only ever check.');
-box(SX + 24, 584, SW - 48, 80, 'accent', 'Engines', 'llama.cpp builds: self-test, pin, roll back; features gated by the build.');
-box(SX + 24, 680, SW - 48, 80, 'accent', 'Keys, limits and usage', 'Per-app keys and limits; tokens, requests and memory over time.');
+box(SX + 24, 352, SW - 48, 104, 'accent', 'Queue and serving', 'Aliases and presets pick the model; priorities and caps queue it; it loads on first use with its parallel slots (context per slot) and is released when idle or under pressure.');
+box(SX + 24, 472, SW - 48, 96, 'accent', 'Model library', 'Search, fit check, resumable verified downloads with their origin, and opt-in update notices that only ever check.');
+box(SX + 24, 584, SW - 48, 80, 'accent', 'Engines', 'llama.cpp builds: self-test, pin, roll back; missing features are refused with a reason.');
+box(SX + 24, 680, SW - 48, 80, 'accent', 'Keys, limits and usage', 'Per-app keys and limits; tokens, requests and attributed memory over time.');
 box(SX + 24, 776, SW - 48, 72, 'process', 'Engine processes', 'llama-server, one child per loaded model.');
 // outside
 box(OX + 24, 208, OW - 48, 80, 'process', 'Apps and AI tools', 'Suite apps, editors, SDK scripts.');
 planned(OX + 24, 304, OW - 48, 88, 'external', 'Other computers', 'Shared use over TLS with a pinned certificate.');
-box(OX + 24, 432, OW - 48, 112, 'external', 'Download hosts', 'Hugging Face for models and update checks, GitHub releases for engine builds. Only what you ask for.');
+box(OX + 24, 432, OW - 48, 112, 'external', 'Download hosts', 'Hugging Face for models, GitHub releases for engine builds. Only what you ask for; the opt-in update check is read-only.');
 box(OX + 24, 576, OW - 48, 88, 'process', 'OS service manager', 'Starts the server at login or boot and restarts it.');
 // app
 box(AX + 24, 208, AW - 48, 88, 'ui', 'Window', 'Dashboard, models, engines, apps, usage, settings.');
 box(AX + 24, 312, AW - 48, 96, 'accent', 'Rust shell and tray', 'Validates every request; keeps the admin key in the OS store.');
-box(AX + 24, 424, AW - 48, 88, 'accent', 'pitwall CLI', 'Status, load, pull, keys, chat.');
+box(AX + 24, 424, AW - 48, 88, 'accent', 'pitwall CLI', 'status, load, pull, keys, presets, chat, bench.');
 box(AX + 24, 528, AW - 48, 88, 'process', 'Close it, crash it', 'The server goes on serving; quitting never stops it.');
 // arrows (horizontal, in the gutters)
 arrow(OX + OW - 24, 240, SX + 24, 240, 'ask', 1);
 arrow(OX + OW - 24, 320, SX + 24, 320, 'ask', 1, true);
-arrow(SX + 24, 500, OX + OW - 24, 500, 'downloads');
+arrow(SX + 24, 490, OX + OW - 24, 490, 'downloads');
+arrow(SX + 24, 530, OX + OW - 24, 530, 'check only, opt-in', 1, true);
 arrow(OX + OW - 24, 624, SX + 24, 624, 'restarts', 1);
 arrow(SX + SW - 24, 250, AX + 24, 250, 'live feed');
 arrow(AX + 24, 330, SX + SW - 24, 330, 'manages');
@@ -79,7 +80,7 @@ arrow(AX + 24, 440, SX + SW - 24, 440, 'asks');
 // core bar
 out.push(`<rect x="48" y="904" width="1232" height="88" rx="6" class="n core"/>`);
 text(64, 932, 'pitwall-core: pure Rust, no I/O, no clock', 'h');
-text(64, 956, 'API translation, scheduler, memory policy, fit check, model choice, presets, keys, limits, usage, privacy allow-list, settings.', 't');
+text(64, 956, 'API translation, scheduler, memory policy, fit check, model choice, presets, slots, keys, limits, usage, update rules, engine pins, privacy allow-list, settings.', 't');
 text(64, 976, 'Time and readings come in as values. The server and the app both use it.', 't');
 // legend
 let lx = 64; const ly = 1048;
@@ -91,7 +92,7 @@ for (const [r, label] of [['external', 'Outside'], ['accent', 'Pitwall'], ['ui',
 }
 out.push(`<rect x="${lx + 4}" y="${ly - 8}" width="28" height="16" rx="4" class="n pl exts"/>`);
 text(lx + 40, ly + 4, 'Planned (tagged)', 'm');
-text(1280, ly + 4, 'Pitwall · updated 2026-10-22', 'foot');
+text(1280, ly + 4, 'Pitwall · updated 2026-10-23', 'foot');
 text(48, 1112, 'The window and CLI reach the server only on 127.0.0.1: management calls with the admin key, standard APIs with an app key.', 'desc');
 const H = 1136;
 
@@ -110,7 +111,7 @@ const css = `
     .e{stroke:var(--line);stroke-width:1.5;fill:none}.ed{stroke-dasharray:6 4}.ah{fill:var(--line)}`;
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">
   <title id="t">Pitwall architecture overview</title>
-  <desc id="d">Apps and AI tools call one local Pitwall server on 127.0.0.1 through the OpenAI, Anthropic and Ollama APIs. The server queues requests, loads a model into a llama.cpp engine process when it fits, releases it when idle, keeps per-app keys, limits and usage, and manages engines and the model library. The window, tray and command line manage it. Only downloads the user asked for leave the machine, from Hugging Face and GitHub releases. A pure Rust core holds all the rules. Sharing on the LAN is planned.</desc>
+  <desc id="d">Apps and AI tools call one local Pitwall server on 127.0.0.1 through the OpenAI, Anthropic and Ollama APIs. The server queues requests, loads a model into a llama.cpp engine process when it fits, releases it when idle, keeps per-app keys, limits and usage, and manages engines and the model library. The window, tray and command line manage it. Only downloads the user asked for leave the machine, from Hugging Face and GitHub releases, plus an opt-in, read-only update query to Hugging Face for models already downloaded. A pure Rust core holds all the rules. Sharing on the LAN is planned.</desc>
   <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker></defs>
   <style>${css}
   </style>

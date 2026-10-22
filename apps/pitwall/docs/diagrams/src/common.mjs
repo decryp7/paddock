@@ -3,7 +3,7 @@ import { sequence, dot, cls } from '../../../../paddock/diagrams/tools/uml.mjs';
 import { writeFileSync } from 'node:fs';
 export { link, g8, sequence, dot, cls };
 export const OUT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
-export const P = (o) => new Diagram({ app: 'pitwall', date: '2026-10-22', ...o });
+export const P = (o) => new Diagram({ app: 'pitwall', date: '2026-10-23', ...o });
 export const save = (name, d, bottom) => writeFileSync(`${OUT}/${name}.drawio`, d.finish(bottom));
 /** Port fraction on rect `id` for the vertical centre of rect `other` (for straight links from a tall hub). */
 export function tOf(d, hub, other, axis = 1) {
@@ -19,4 +19,9 @@ export function hub(d, h, sh, n, sn, opts = {}) {
   const ta = opts.rev ? 0.5 : t, tb = opts.rev ? t : 0.5;
   const rest = { ...opts }; delete rest.rev;
   return link(d, a, sa, b, sb, { ...rest, t: [ta, tb] });
+}
+/** Straight link from a tall hub to a node beside it, meeting the node at fraction `frac` of its height (two links to one node). */
+export function hubAt(d, h, sh, n, sn, frac, opts = {}) {
+  const [, y, , hh] = d.rect[h], [, ny, , nh] = d.rect[n];
+  return link(d, h, sh, n, sn, { ...opts, t: [(ny + nh * frac - y) / hh, frac] });
 }

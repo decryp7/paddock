@@ -61,7 +61,7 @@ const states = (d, list) => list.forEach(([id, c, r, name, desc, h = H, w = W, r
   const yp = Y + (H + 96) + H / 2;
   E(d, 'pn', 'L', 0.5, 'nl', 'B', 0.3, [[Math.round(cx(0) + W * 0.3), yp]]);
   d.lbl('Critical pressure, unload', cx(1) - 24, yp, 'a', { maxw: 160 });
-  d.note('n', cx(3), Y + (H + 96), W, 'Busy and Loading models are skipped by every release rule. Slots are chosen at load time; their memory is part of the fit check.', 128);
+  d.note('n', cx(3), Y + (H + 96), W, 'Busy and Loading models are skipped by every release rule. A model keeps the slots, context per slot and engine build it was loaded with; a changed setting or pin applies on its next load.', 128);
   d.legend([{ kind: 'accent', label: 'State' }, { kind: 'line', label: 'Event' }]);
   save('uml-state-hot-model', d, d.rect.pn[1] + d.rect.pn[3]);
 }
