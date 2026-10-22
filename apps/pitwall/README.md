@@ -62,7 +62,9 @@ loaded model in its own engine process; a Tauri app with a tray and an Angular U
 Every feature, with its status, is in [docs/features.md](docs/features.md).
 
 - **Engines.** llama.cpp with pinned, checksummed builds chosen for your hardware (Metal, CUDA, Vulkan, CPU, ...), a
-  self-test after every install and discard of a build that fails it. Planned: MLX, vLLM, whisper.cpp.
+  self-test after every install and discard of a build that fails it, version pins (all models or one), one-click rollback to the
+  last good build, and capability gating (vision, tools, embeddings, rerank, JSON schema) by what the active build supports.
+  Planned: MLX, vLLM, whisper.cpp.
 - **Model library.** Search and download GGUF models from Hugging Face, a "will this fit?" check before you download,
   resumable downloads verified against the published SHA-256, quantisation variants, delete and disk usage.
 - **Standard APIs** on `127.0.0.1:11435`: OpenAI (`/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`,

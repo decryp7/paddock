@@ -56,7 +56,15 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 - **Checksummed install with a self-test and roll back.** Each archive is verified against its SHA-256 before it is unpacked
   (defensively: flat file names, size caps, safe links only), the new build must pass `--version` and `--list-devices`, and only
   then replaces the old one. A build that fails its self-test is discarded and the previous build stays active; the Engines page
-  can also switch back to the previous build. Works.
+  can also go back to an earlier build (see the next item). Works.
+- **Engine version pins, rollback and capability gating.** Pin a build for all models or for one model; selection is the model's
+  pin, then the global pin, then automatic. A pin to a build that is not installed or failed its self-test is refused with
+  "Install it in Engines". Roll back goes to the previous installed build that passed its self-test (never a failed one) and
+  pins it; a loaded model keeps its engine until it is loaded again and the page says so. A capability matrix
+  (`capabilities.json`: minimum llama.cpp release and unsupported backends per feature) gates vision, tools, JSON-schema output,
+  embeddings and rerank: a request the build cannot serve is refused before the queue with a typed error naming the build
+  needed (503 `engine_build_too_old`, 400 `capability_unsupported`, 503 `engine_pin_unavailable`; OpenAI, Anthropic and Ollama
+  shapes), and `GET /x/v1/models` and `auto:` selection leave out what the build cannot serve. ADR 0018. Works.
 - **One process per model.** Each model runs in its own `llama-server` child process on a loopback port with a private key,
   started with a scrubbed environment and killed with Pitwall. A crashing engine never takes Pitwall down: it is restarted
   after 1 s, 2 s, 4 s and so on (at most 60 s); after five crashes in ten minutes Pitwall stops, the Dashboard shows the model
@@ -152,7 +160,7 @@ Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR
   weights + slots x context x KV bytes per token (from the GGUF header, or a documented estimate). Models > Slots shows what each
   step adds and a fit table (longest context at 1, 2, 4, 8 slots; the most slots at a context; fits, tight, won't fit);
   requests beyond the slots wait in the queue; a change applies on the next load and never interrupts a busy model. Works.
-- **Models and jobs**: `GET /x/v1/models` (capabilities, maximum context, loaded), `GET /x/v1/jobs` (the queue),
+- **Models and jobs**: `GET /x/v1/models` (capabilities the serving engine build can provide, `unavailable` with the reason and the build needed, maximum context, loaded), `GET /x/v1/jobs` (the queue),
   `DELETE /x/v1/jobs/{id}` (cancel; an app can cancel only its own). Works.
 - **Provenance on every answer**: `X-Pitwall-Model`, `X-Pitwall-Engine`, `X-Pitwall-Chosen-By` and, when the model had to be
   loaded, `X-Pitwall-Cold-Start-Ms`. Works.
@@ -239,8 +247,10 @@ host and the verification state, with cancel. Works.
 ![Engines](screenshots/engines-light.png)
 
 One card per engine: availability and why, the installed builds with their tag, devices found by the self-test and
-self-test result, the catalog of builds to install (the suggested one first), select, remove and roll back, and install progress
-with cancel. The pack engines appear here too. Works for llama.cpp and packs; MLX, vLLM and whisper.cpp show as planned.
+self-test result, the catalog of builds to install (the suggested one first), select, remove, **pin** (a Version pin toggle per
+build, accent plus the word "Pinned"), **Features** (what each build supports in words: Supported, Needs bNNNN, Not supported,
+with the upgrade hint), **Roll back** (names the build it goes to and asks first), and install progress with cancel. Models
+shows `pinned to <build>` with a small build menu per model. The pack engines appear here too. Works for llama.cpp and packs; MLX, vLLM and whisper.cpp show as planned.
 
 ## Apps and keys page
 

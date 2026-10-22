@@ -63,6 +63,17 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 27 | Put a broken `bad.engine.toml` (for example no `[health]`) and a valid `*.models.toml` in `packs/`; restart the server. | The Engines page shows the problem for `bad.engine.toml` naming what to fix; the models pack still loads. |
 | 28 | Put the [example engine pack](user-guide.md#an-engine-pack) in `packs/` with a real OpenAI-compatible server on `PATH` (llamafile works). Set a model's engine to it. | The engine appears as installed/available; a request starts it on a loopback port and answers; the response header names the engine. |
 
+### Engine pins, rollback and capability gating
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 28a | On Engines, click **Pin** on an installed build. | The button turns violet and says **Pinned**; the card says automatic choice is off; a toast names loaded models that keep their engine until loaded again. Click it again: back to automatic. |
+| 28b | In Models, pin one model to a different build with its build menu. | The row shows "pinned to <build> <tag>". Unload and load it: the Dashboard process uses that build. Choose "follows global choice": back to normal. |
+| 28c | Pin a build, then delete its folder under `engines/` (or remove it from Engines) and restart. | Engines shows "Install it in Engines, or remove the pin"; a chat request answers 503 `engine_pin_unavailable` with that message; unpinning fixes it. |
+| 28d | Install a second build, select it, then click **Roll back**. | The button names the earlier build and asks first; after confirming it is pinned for all models. Damage a build's `build.json` to `"self_test":"failed"` and the button is gone with the reason shown. |
+| 28e | Use a build older than the floors in `capabilities.json` (edit a build's `build.json` tag to `b4000` for the test) and send a request with tools, an image, or a JSON schema. | 503 `engine_build_too_old` in the OpenAI, Anthropic (`overloaded_error`) and Ollama shapes, naming the build needed. **Features** on that build lists them as "Needs bNNNN". `GET /x/v1/models` moves those capabilities to `unavailable`. |
+| 28f | Corrupt `engine-pins.json`, restart. | Pitwall starts; the backup is used (or no pins) and the Events list says the pins file was damaged. |
+
 ## Pairing and security
 
 | # | Steps | Expected |

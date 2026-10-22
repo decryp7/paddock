@@ -54,7 +54,7 @@ in `lib.rs`):
 | --- | --- | --- |
 | Wire formats | `api` (`openai`, `anthropic`, `ollama`), `chat`, `llama`, `sse` | Parse each API's requests once into the neutral `ChatRequest`; format answers, stream chunks and errors in each family's own shape; build llama-server's arguments and request bodies |
 | Serving | `scheduler`, `memory`, `select`, `backoff` | The priority queue and caps; when to release models and whether a load fits; capability-based model choice; restart delays |
-| Models and engines | `gguf`, `quant`, `fit`, `hf`, `runtimes`, `hardware` | GGUF header reading with limits; "will this fit?"; Hugging Face answers; the pinned llama.cpp builds and the automatic build order; GPU and RAM facts |
+| Models and engines | `gguf`, `quant`, `fit`, `hf`, `runtimes`, `hardware` | GGUF header reading with limits; "will this fit?"; Hugging Face answers; the pinned llama.cpp builds, the automatic build order, engine pins and rollback, and the capability matrix; GPU and RAM facts |
 | Security and privacy | `privacy`, `keys`, `limits` | The download allow-list and `DownloadUrl`; `Host`/`Origin` rules; key generation and hashing; per-app permissions, rate and token budgets |
 | State | `config`, `metrics`, `events`, `usage`, `discovery`, `mgmt`, `packs`, `tasks`, `tokens`, `cache` | Versioned settings; time series with bounded retention; the events feed; per-app counters; the discovery file; the UI's wire contract; declarative packs; versioned task prompts, token estimates and a cache policy |
 
@@ -209,8 +209,12 @@ The pinned catalog (`runtimes/llama-runtimes.json`, release tag `b11669` today) 
 size and SHA-256 checked, hosts allow-listed), unpacks it defensively into `engines/<id>.new` (flat names, only the
 files Pitwall expects, bounded sizes, symlinks only to plain siblings), runs `--version` and `--list-devices` under a
 30-second timeout, and only when that passes swaps it in, keeping the old copy until the rename succeeds. A failed
-self-test discards the new build and the previous one stays active. The user can also select an earlier build
-(`rollback_build`). The automatic build order is Metal, then CUDA (newest first), then Vulkan, then CPU; ROCm, SYCL
+self-test discards the new build and the previous one stays active. Pins and rollback sit on top (ADR 0018):
+the model's pin, then the global pin, then the automatic order choose the build when a model loads (`pitwall_core::runtimes::pins`,
+pure); `rollback_build` pins the previous installed build that passed its self-test. A capability matrix
+(`runtimes/capabilities.json`, `runtimes::capabilities::Matrix::gate`, pure) says what each build can serve; the server's
+`CapabilityGate` refuses a request the serving build cannot handle with a typed error, and listings and `auto:` selection
+leave those capabilities out. The automatic build order is Metal, then CUDA (newest first), then Vulkan, then CPU; ROCm, SYCL
 and OpenVINO are only used when chosen.
 
 ### Model download
@@ -259,6 +263,7 @@ Everything is in one per-user data folder (override with `PITWALL_HOME`): `%APPD
 | `partial/` | Engine archives being downloaded | |
 | `packs/` | The user's engine and model packs | At most 64 files of 256 KB |
 | `metrics.json` | Time series | Versioned, bounded retention (default 30 days) |
+| `engine-pins.json` | Engine build pins and rollback history (`pitwall_core::runtimes::pins`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then no pins; one damaged entry is skipped, at most 256 model pins, 8 remembered builds |
 | `presets.json` | Model presets and aliases (`pitwall_core::presets`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; one damaged entry is skipped, at most 64 presets |
 | `usage.json` | Per-app usage over time (`pitwall_core::usage`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; hourly buckets 7 days, daily buckets 90 days, at most 256 apps per bucket (the rest count as `other`), saved every 30 s |
 | `logs/` | Service log | Never prompts or answers by default |

@@ -62,6 +62,26 @@ An engine is the program that runs a model. Pitwall's own is **llama.cpp**.
 3. If the self-test fails, the new build is **discarded** and the previous one stays active; the message says why. You can
    also switch back to the previous build later with **Roll back**.
 
+### Pin a build, roll back, and what a build supports
+
+- **Pin.** In the installed builds table, **Pin** makes a build the one every model uses, even when a better one is installed;
+  the button turns violet and says **Pinned**, and the card says automatic choice is off until you unpin. Only builds that passed
+  their self-test can be pinned. In **Models**, each model has a build menu to pin just that model (the row then says
+  "pinned to cuda-13 b11669"). The order is: the model's pin, then the global pin, then automatic.
+- **A pin never silently falls back.** If the pinned build is removed, the Engines page says "Install it in Engines, or remove
+  the pin", and requests for the affected models answer 503 `engine_pin_unavailable` with that message.
+- **Roll back** appears when an earlier installed build passed its self-test. It names the build ("Roll back to Vulkan
+  b11669"), asks first, and pins that build for all models until you unpin it. A build that failed its self-test is never offered;
+  the card says why roll back is not available.
+- **Loaded models keep their engine.** Pinning, unpinning and rolling back never restart a model that is in use; they apply
+  the next time the model is loaded, and the message names the models that are still on the old build.
+- **Features.** The **Features** button of a build lists vision, tools, JSON-schema output, embeddings and reranking as
+  Supported, "Needs b5600" (with what to install) or Not supported. A request that needs something the build lacks is refused
+  up front, for example 503 "... needs tool calling, which needs llama.cpp b4600 or newer; the engine build in use (cpu, b4300)
+  is older. Install llama.cpp b4600 or newer in Engines, or unpin the old build." Models whose features the build cannot serve are
+  left out of `capabilities` in `GET /x/v1/models` (they appear under `unavailable`) and of `auto:` selection. The limits live in
+  `capabilities.json` (embedded in the app, next to the pinned catalog); they are reviewed when the catalog moves.
+
 Keep **Build: auto** unless a build misbehaves: automatic order is Metal, then CUDA (newest toolkit first), then Vulkan, then
 CPU. Only installed builds that work on this machine are considered.
 
@@ -535,6 +555,7 @@ recommended, and models that will not fit this machine are left out. Up to 500 m
 | `settings.toml` (+ backup) | Settings; edit in the app |
 | `apps.json` (+ backup) | Apps and the hashes of their keys |
 | `presets.json` (+ backup) | Model presets and aliases |
+| `engine-pins.json` (+ backup) | Engine build pins and the builds used before (for roll back) |
 | `admin.key` | The secret Pitwall's own window uses; owner-only. Do not share it |
 | `discovery.json` | Written while the server runs: pid, port, base URL |
 | `models/<owner>/<repo>/` | Downloaded models |
@@ -556,6 +577,9 @@ The messages below are what Pitwall actually says.
 | 404 "there is no model named ... Installed: ..." | Use an id from `GET /v1/models`. |
 | 404 "the preset ... points to the model ..., which is no longer installed" (code `preset_target_unavailable`) | The preset's model was deleted. Edit the preset in Models > Presets. |
 | 404 "no installed model offers ...; download one in Pitwall > Models" | No installed model has the capabilities in `auto:...`. |
+| 503 "... needs ..., which needs llama.cpp bNNNN or newer; the engine build in use (...) is older." (code `engine_build_too_old`) | The active engine build is too old for the feature in the request. Install a newer build in Engines, or unpin the old one. |
+| 400 "... cannot serve: ..." (code `capability_unsupported`) | No build of that kind (for example that backend) provides the feature. Use another build or model. |
+| 503 "The engine build ... is pinned for ... but is not installed. Install it in Engines, or remove the pin." (code `engine_pin_unavailable`) | The pinned build was removed or failed its self-test. |
 | 400 "the model ... cannot read images. Choose a vision model (one downloaded with its mmproj file)." | Get the model's projector file too. |
 | 400 "... is not a capability (chat, vision, tools, json, embeddings, rerank), a context like 8k, or fast/quality/small" | A typo in `auto:...`. |
 | 400 "`max_tokens` is required" | Anthropic requests must have it. |
