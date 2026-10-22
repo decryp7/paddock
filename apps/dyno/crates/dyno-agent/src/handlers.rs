@@ -1,6 +1,5 @@
 //! Answers the app's requests (command–query separation: queries only read; open, act, undo, save and the like
-//! mutate). Every argument is validated here even though the app validated it too. Requests that belong to features
-//! not built yet answer `Unsupported` with a message saying so.
+//! mutate). Every argument is validated here even though the app validated it too.
 
 use crate::agent::{lock, now, Shared, FACTS_TTL};
 use dyno_core::activity::{inverse, undo_state, ActivityEntry, ActivityKind, Previous, UndoRecord, UndoState};
@@ -34,10 +33,6 @@ fn bad(msg: impl Into<String>) -> AgentError {
 
 fn internal(msg: impl std::fmt::Display) -> AgentError {
     AgentError::new(ErrorCode::Internal, msg.to_string())
-}
-
-fn not_built(what: &str) -> AgentError {
-    AgentError::new(ErrorCode::Unsupported, format!("{what} is not built yet."))
 }
 
 /// What a connection can change about itself.
@@ -504,10 +499,8 @@ fn undo(shared: &Arc<Shared>, id: &str) -> Result<ActivityEntry, AgentError> {
             startup.set_state(e, *previous)?;
         }
         UndoRecord::Quarantine { id: q, .. } => crate::handlers_cleanup::restore(shared, q)?,
-        UndoRecord::None | UndoRecord::Tuning { .. } => return Err(bad("That cannot be undone here yet.")),
-        Request::Tuning => crate::tuning::list(shared).map(Reply::Tuning),
-        Request::ApplyTuning { id } => crate::tuning::apply(shared, &id).map(Reply::Activity),
-        Request::RevertTuning { id, force } => crate::tuning::revert(shared, &id, force).map(Reply::Activity),
+        UndoRecord::Tuning { .. } => crate::tuning::undo_record(shared, &record, false)?,
+        UndoRecord::None => return Err(bad("That cannot be undone here yet.")),
     }
     let core = lock(&shared.core);
     core.store.mark_undone(id).map_err(internal)?;

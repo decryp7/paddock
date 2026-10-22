@@ -197,11 +197,11 @@ fn history_comes_back_in_the_shape_the_app_expects() {
 }
 
 #[test]
-fn unbuilt_features_say_so_and_unknown_things_are_not_found() {
+fn unknown_things_are_not_found() {
     let h = Harness::start();
     let peer = h.client();
-    let e = ask(&peer, Request::WeeklyReport).unwrap_err();
-    assert!(e.contains("not built yet"), "{e}");
+    let e = ask(&peer, Request::WeeklyReport { weeks_ago: 500 }).unwrap_err();
+    assert!(e.contains("at most"), "{e}");
     assert!(matches!(ask(&peer, Request::Lockers { path: "relative/path".into() }), Err(m) if m.contains("full path")));
     assert!(ask(
         &peer,
@@ -663,6 +663,7 @@ fn cleanup_scans_without_deleting_runs_only_what_was_chosen_and_undoes() {
         panic!("tree")
     };
     assert_eq!(tree.bytes, 6);
+}
 
 #[test]
 fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html() {

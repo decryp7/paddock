@@ -22,7 +22,7 @@ fn os_of(host: TuningHost) -> Os {
     match host {
         TuningHost::Windows => Os::Windows,
         TuningHost::Macos => Os::Macos,
-        TuningHost::Linux => Os::Any,
+        TuningHost::Linux => Os::Linux,
     }
 }
 
