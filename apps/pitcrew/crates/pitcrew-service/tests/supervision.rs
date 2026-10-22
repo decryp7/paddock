@@ -60,6 +60,11 @@ impl Harness {
 
     /// `runner_toml` is appended to the runner's table (e.g. an `[runners.env]` table).
     fn with_runner_toml(test: &str, fake: &str, registered: bool, runner_toml: &str) -> Harness {
+        Harness::build(test, fake, registered, runner_toml, None)
+    }
+
+    /// `state_json` is written as the service's `state.json` before it starts.
+    fn build(test: &str, fake: &str, registered: bool, runner_toml: &str, state_json: Option<&str>) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
         let root = std::env::temp_dir().join(format!("pitcrew-it-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -79,6 +84,9 @@ impl Harness {
             runner_dir.display()
         );
         std::fs::write(data.join("pitcrew.toml"), toml).unwrap();
+        if let Some(state) = state_json {
+            std::fs::write(data.join("state.json"), state).unwrap();
+        }
         let clock = Arc::new(AtomicU64::new(pitcrew_service::cleanup::now().0));
         let c = clock.clone();
         let exe = Arc::new(AtomicU64::new(1));
@@ -1019,4 +1027,107 @@ fn a_label_mismatch_after_the_restart_is_reported_and_a_stopped_runner_just_save
         "{r:?}"
     );
     let _ = std::fs::remove_dir_all(&h.root);
+}
+
+fn set_defaults(h: &mut Harness, f: impl FnOnce(&mut pitcrew_core::config::Defaults)) {
+    let Response::Settings { mut config, .. } = h.ask(Request::GetSettings) else {
+        panic!()
+    };
+    f(&mut config.defaults);
+    assert_eq!(h.ask(Request::SaveSettings { config }), Response::Ok);
+}
+
+#[test]
+fn a_nearly_full_disk_drains_the_runner_and_it_resumes_when_space_recovers() {
+    let mut h = Harness::new("diskguard", "mode=idle\n", true);
+    h.until("running", Duration::from_millis(200), |h| h.status().running_since.is_some());
+    assert!(h.status().hold.is_none());
+    // Any real disk is "nearly full" against these thresholds.
+    set_defaults(&mut h, |d| {
+        d.disk_guard.drain_below_mb = 1_000_000_000;
+        d.disk_guard.resume_above_mb = 2_000_000_000;
+        d.disk_guard.reserve_mb = 0;
+    });
+    h.until("held", Duration::from_secs(6), |h| h.status().hold.is_some());
+    let s = h.status();
+    assert_eq!(s.hold.as_ref().unwrap().reasons, vec![pitcrew_core::hold::HoldReason::LowDisk]);
+    h.until("paused", Duration::from_secs(6), |h| h.status().status == RunnerStatus::Paused);
+    assert!(count(&h.history(), |k| matches!(k, HistoryKind::Held { .. })) == 1);
+    // Space "recovers": the thresholds drop below the real free space. The disk is read at most once a minute.
+    set_defaults(&mut h, |d| {
+        d.disk_guard.drain_below_mb = 2;
+        d.disk_guard.resume_above_mb = 3;
+        d.disk_guard.reserve_mb = 1;
+    });
+    h.pump(Duration::from_secs(61));
+    h.until("resumed", Duration::from_secs(6), |h| {
+        h.status().hold.is_none() && h.status().status != RunnerStatus::Paused
+    });
+    assert_eq!(count(&h.history(), |k| matches!(k, HistoryKind::Released { .. })), 1);
+    h.finish();
+}
+
+#[test]
+fn a_pause_the_user_made_is_not_lifted_by_a_hold_that_ends() {
+    let mut h = Harness::new("userpause", "mode=idle\n", true);
+    h.until("running", Duration::from_millis(200), |h| h.status().running_since.is_some());
+    set_defaults(&mut h, |d| {
+        d.pause.mode = pitcrew_core::pause::PauseMode::Schedule;
+        // The harness clock reads Monday 12:00.
+        d.pause.windows = vec![pitcrew_core::update::UpdateWindow {
+            days: vec![],
+            start: pitcrew_core::update::TimeOfDay::new(11, 0).unwrap(),
+            end: pitcrew_core::update::TimeOfDay::new(13, 0).unwrap(),
+        }];
+    });
+    h.until("held by the window", Duration::from_secs(6), |h| {
+        h.status()
+            .hold
+            .is_some_and(|x| x.reasons == vec![pitcrew_core::hold::HoldReason::Schedule])
+    });
+    assert_eq!(h.status().hold.unwrap().minutes_left, Some(60));
+    h.until("paused", Duration::from_secs(6), |h| h.status().status == RunnerStatus::Paused);
+    // The user resumes by hand inside the window: Pitcrew leaves it running.
+    assert_eq!(h.ask(Request::Resume { runner: h.name.clone() }), Response::Ok);
+    h.until("running again", Duration::from_secs(6), |h| {
+        h.status().status != RunnerStatus::Paused
+    });
+    for _ in 0..3 {
+        h.pump(Duration::from_secs(6));
+        let evs: Vec<String> = h.history().iter().map(|e| format!("{:?}", e.kind)).collect();
+        assert_ne!(h.status().status, RunnerStatus::Paused, "{:?} {evs:?}", h.status().hold);
+    }
+    // And a pause of the user's own stays when the window closes.
+    assert_eq!(h.ask(Request::Drain { runner: h.name.clone() }), Response::Ok);
+    h.until("paused", Duration::from_secs(6), |h| h.status().status == RunnerStatus::Paused);
+    set_defaults(&mut h, |d| d.pause.mode = pitcrew_core::pause::PauseMode::Off);
+    h.pump(Duration::from_secs(6));
+    h.pump(Duration::from_secs(6));
+    assert_eq!(h.status().status, RunnerStatus::Paused);
+    assert_eq!(count(&h.history(), |k| matches!(k, HistoryKind::Released { .. })), 0);
+    h.finish();
+}
+
+#[test]
+fn an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
+    let now = pitcrew_service::cleanup::now().0;
+    let failed = |i: u64| {
+        format!(
+            r#"{{"at":{},"kind":"updateFinished","outcome":{{"result":"failed","plan":{{"from":"1.0.0","to":"1.1.0"}},"reason":"no space left","needsAttention":false}}}}"#,
+            now - i * 60_000
+        )
+    };
+    let state = format!(
+        r#"{{"version":1,"runners":{{"loopy":{{"latest":"1.1.0","history":[{},{},{}]}}}}}}"#,
+        failed(3),
+        failed(2),
+        failed(1)
+    );
+    let mut h = Harness::build("loopy", "mode=idle\n", true, "", Some(&state));
+    h.pump(Duration::from_secs(6));
+    let s = h.status();
+    let l = s.update_loop.expect("a loop is reported");
+    assert_eq!(l.target.to_string(), "1.1.0");
+    assert!(l.cause.contains("no space left"), "{}", l.cause);
+    h.finish();
 }

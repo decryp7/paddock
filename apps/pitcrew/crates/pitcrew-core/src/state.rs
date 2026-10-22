@@ -6,6 +6,7 @@
 //! others load.
 
 use crate::history::{History, HistoryEvent};
+use crate::hold::HoldTracker;
 use crate::housekeeping::CleanupReport;
 use crate::metrics::{MetricsStore, SizeSeries, UsageStore};
 use crate::process_track::KeepRecord;
@@ -49,6 +50,14 @@ pub struct RunnerState {
     /// "Keep longer" extensions of leftover processes, so they survive a service restart. A damaged record is skipped.
     #[serde(deserialize_with = "lenient_keeps")]
     pub keeps: Vec<KeepRecord>,
+    /// Whether the pause in force is Pitcrew's own hold (low disk, pause windows), so it is lifted after a restart too.
+    pub hold: HoldTracker,
+    /// Since when a newer release than the installed version has been available (ADR 0014).
+    pub behind_since: Option<Timestamp>,
+    /// The deadline warnings already announced: 0 none, 1 soon, 2 overdue (reset when the runner catches up).
+    pub deadline_notified: u8,
+    /// The target whose update loop was announced (announced once).
+    pub loop_notified: Option<RunnerVersion>,
 }
 
 /// Reads the records one by one: a damaged one is dropped, the rest load.
@@ -79,6 +88,10 @@ impl Default for RunnerState {
             usage: UsageStore::for_runner(),
             pid: None,
             keeps: Vec::new(),
+            hold: HoldTracker::default(),
+            behind_since: None,
+            deadline_notified: 0,
+            loop_notified: None,
         }
     }
 }

@@ -153,6 +153,9 @@ pub struct UpdatePolicy {
     pub channel: Channel,
     /// Versions the user chose to skip (never offered; a pin still wins).
     pub skipped: Vec<RunnerVersion>,
+    /// Remind the owner when a newer release has been available for this many days (0: no reminder). Neither Gitea
+    /// nor Forgejo enforces a deadline (ADR 0014); this is the owner's own.
+    pub deadline_days: u32,
 }
 
 impl Default for UpdatePolicy {
@@ -164,6 +167,7 @@ impl Default for UpdatePolicy {
             check_every_hours: 24,
             channel: Channel::Stable,
             skipped: vec![],
+            deadline_days: 30,
         }
     }
 }

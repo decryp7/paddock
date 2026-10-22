@@ -5,10 +5,12 @@
 //! while the rest loads. A file written by a newer Pitcrew is read as far as it is understood and never overwritten.
 //! The service keeps the damaged file aside for the user (see `docs/adr/0001-architecture.md`).
 
+use crate::disk_guard::DiskGuardPolicy;
 use crate::distribution::RunnerKind;
 use crate::housekeeping::CleanupPolicy;
 use crate::logs::RotationPolicy;
 use crate::names::RunnerName;
+use crate::pause::PausePolicy;
 use crate::process_policy::{self, ProcessOverride, ProcessPolicy};
 use crate::restart::RestartPolicy;
 use crate::session::LoggedOffMode;
@@ -70,6 +72,10 @@ pub struct Defaults {
     pub cleanup: CleanupPolicy,
     /// What happens to the processes a finished job leaves behind (ADR 0012).
     pub processes: ProcessPolicy,
+    /// Drain runners before the disk is full, resume when space recovers (ADR 0013).
+    pub disk_guard: DiskGuardPolicy,
+    /// Pause windows and only-when-idle (ADR 0013).
+    pub pause: PausePolicy,
 }
 
 /// Where a runner runs on Windows (macOS always runs runners in the user's session, see ADR 0003).
@@ -424,6 +430,22 @@ fn parse_defaults(value: Option<toml::Value>, problems: &mut Vec<ConfigProblem>)
             reason,
         });
         d.processes = ProcessPolicy::default();
+    }
+    section(&mut t, "disk_guard", &mut d.disk_guard, problems);
+    if let Err(reason) = d.disk_guard.validate() {
+        problems.push(ConfigProblem::SectionIgnored {
+            section: "disk_guard".into(),
+            reason,
+        });
+        d.disk_guard = DiskGuardPolicy::default();
+    }
+    section(&mut t, "pause", &mut d.pause, problems);
+    if let Err(reason) = d.pause.validate() {
+        problems.push(ConfigProblem::SectionIgnored {
+            section: "pause".into(),
+            reason,
+        });
+        d.pause = PausePolicy::default();
     }
     d
 }
@@ -902,5 +924,22 @@ dir = "/r/b"
             None,
         );
         assert!(matches!(bad.problems[0], ConfigProblem::RunnerSkipped { .. }));
+    }
+
+    #[test]
+    fn disk_guard_and_pause_settings_load_and_bad_ones_fall_back() {
+        let text = "schema_version = 1\n[defaults.disk_guard]\ndrain_below_mb = 2048\nresume_above_mb = 3072\nreserve_mb = 256\n[defaults.pause]\nmode = \"schedule\"\n[[defaults.pause.windows]]\nstart = \"22:00\"\nend = \"06:00\"\n";
+        let l = load(Some(text), None);
+        assert!(l.problems.is_empty(), "{:?}", l.problems);
+        assert_eq!(l.config.defaults.disk_guard.drain_below_mb, 2048);
+        assert_eq!(l.config.defaults.pause.windows.len(), 1);
+        let back = load(Some(&to_toml(&l.config).unwrap()), None);
+        assert_eq!(back.config.defaults.pause, l.config.defaults.pause);
+        let bad =
+            "schema_version = 1\n[defaults.disk_guard]\ndrain_below_mb = 100\nresume_above_mb = 50\n[defaults.pause]\nquiet_minutes = 0\n";
+        let l = load(Some(bad), None);
+        assert_eq!(l.problems.len(), 2, "{:?}", l.problems);
+        assert_eq!(l.config.defaults.disk_guard, DiskGuardPolicy::default());
+        assert_eq!(l.config.defaults.pause, PausePolicy::default());
     }
 }

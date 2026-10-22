@@ -4,6 +4,7 @@
 //! notifications to the app, which shows them.
 
 use crate::health::RunnerStatus;
+use crate::hold::HoldReason;
 use crate::housekeeping::CleanupReport;
 use crate::names::RunnerName;
 use crate::time::Timestamp;
@@ -39,6 +40,14 @@ pub enum NotificationKind {
     CleanupProblems,
     /// After a configuration change the runner declared other labels than the file asks for.
     LabelMismatch,
+    /// Pitcrew paused a runner by itself (low disk, a pause window).
+    Held,
+    /// Pitcrew resumed a runner it had paused.
+    Released,
+    /// A runner version must be installed before a deadline (ADR 0014).
+    UpdateDeadline,
+    /// Updates keep repeating or failing the same way (ADR 0014).
+    UpdateLoop,
 }
 
 /// How serious.
@@ -173,6 +182,68 @@ pub fn disk_low(runner: &RunnerName, free_bytes: u64, at: Timestamp) -> Notifica
             "{} free on {runner}'s disk. Pitcrew cleans up between jobs; check the Disk page.",
             human_bytes(free_bytes)
         ),
+        at,
+    )
+}
+
+/// Pitcrew drained a runner for `reason`.
+pub fn held(runner: &RunnerName, reason: HoldReason, free_bytes: Option<u64>, at: Timestamp) -> Notification {
+    let extra = match (reason, free_bytes) {
+        (HoldReason::LowDisk, Some(f)) => format!(" ({} free)", human_bytes(f)),
+        _ => String::new(),
+    };
+    n(
+        NotificationKind::Held,
+        Severity::Warning,
+        runner,
+        format!("{runner} takes no new jobs"),
+        format!(
+            "Pitcrew paused it because {}{extra}. It finishes its current job and resumes by itself.",
+            reason.words()
+        ),
+        at,
+    )
+}
+
+/// Pitcrew resumed a runner after `reason` was gone.
+pub fn released(runner: &RunnerName, reason: HoldReason, at: Timestamp) -> Notification {
+    n(
+        NotificationKind::Released,
+        Severity::Info,
+        runner,
+        format!("{runner} takes jobs again"),
+        format!("The reason for the pause is gone: it was held because {}.", reason.words()),
+        at,
+    )
+}
+
+/// The runner has been behind the latest release for long (or past the owner's deadline).
+pub fn update_deadline(runner: &RunnerName, version: &RunnerVersion, d: &crate::update::watch::Deadline, at: Timestamp) -> Notification {
+    use crate::update::watch::DeadlineState;
+    let (severity, title, body) = if d.state == DeadlineState::Overdue {
+        (
+            Severity::Warning,
+            format!("{runner}: update to {version} is overdue"),
+            format!("It has been behind for longer than your limit. Install {version} from the Updates page."),
+        )
+    } else {
+        (
+            Severity::Info,
+            format!("{runner}: update to {version} due in {} days", d.days_left),
+            "Install it from the Updates page, between jobs.".to_string(),
+        )
+    };
+    n(NotificationKind::UpdateDeadline, severity, runner, title, body, at)
+}
+
+/// Updates keep going round in circles.
+pub fn update_loop(runner: &RunnerName, l: &crate::update::watch::UpdateLoop, at: Timestamp) -> Notification {
+    n(
+        NotificationKind::UpdateLoop,
+        Severity::Warning,
+        runner,
+        format!("{runner}: updating to {} keeps failing", l.target),
+        l.cause.clone(),
         at,
     )
 }

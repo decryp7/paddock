@@ -11,6 +11,7 @@ use crate::controller::Pending;
 use crate::distribution::RunnerKind;
 use crate::health::RunnerStatus;
 use crate::history::{HistoryEvent, HistorySummary};
+use crate::hold::HoldReason;
 use crate::housekeeping::{CleanupPlan, CleanupPolicy, CleanupReport, DiskScan};
 use crate::jobs::CurrentJob;
 use crate::logs::LogLine;
@@ -22,6 +23,7 @@ use crate::process_track::ProcessEntry;
 use crate::runner_config::{ConfigEdit, ConfigView, Preview};
 use crate::session::SessionState;
 use crate::time::Timestamp;
+use crate::update::watch::{Deadline, UpdateLoop};
 use crate::update::{UpdateOutcome, UpdatePhase, UpdatePolicy};
 use crate::usage::Usage;
 use crate::version::RunnerVersion;
@@ -355,6 +357,27 @@ pub struct RunnerSnapshot {
     /// How many processes a finished job left behind are still alive.
     #[serde(default)]
     pub leftovers: u32,
+    /// Why Pitcrew itself holds the runner now (low disk, a pause window, a busy machine).
+    #[serde(default)]
+    pub hold: Option<HoldInfo>,
+    /// The countdown to the owner's update deadline (only while behind the latest release).
+    #[serde(default)]
+    pub deadline: Option<Deadline>,
+    /// Updates going round in circles, with the likely cause.
+    #[serde(default)]
+    pub update_loop: Option<UpdateLoop>,
+}
+
+/// A hold Pitcrew applied or is applying (see [`crate::hold`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HoldInfo {
+    /// The reasons in force, the first is the headline.
+    pub reasons: Vec<HoldReason>,
+    /// The runner takes no new jobs now (false while the current job finishes).
+    pub paused: bool,
+    /// Minutes until the pause window closes (only for a window).
+    pub minutes_left: Option<u32>,
 }
 
 /// Disk use from the last scan.

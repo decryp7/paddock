@@ -4,6 +4,7 @@
 //! The service keeps a bounded list of events per runner ([`MAX_EVENTS`]) in its state file; summaries are computed
 //! here, so the UI only draws them.
 
+use crate::hold::HoldReason;
 use crate::housekeeping::CleanupTrigger;
 use crate::jobs::FinishedJob;
 use crate::time::Timestamp;
@@ -56,6 +57,16 @@ pub enum HistoryKind {
     Paused,
     /// The user resumed it after maintenance.
     Resumed,
+    /// Pitcrew drained it by itself (low disk, a pause window); it resumes when the reason is gone.
+    Held {
+        /// Why.
+        reason: HoldReason,
+    },
+    /// Pitcrew resumed it after the reason for the hold was gone.
+    Released {
+        /// What the hold was for.
+        reason: HoldReason,
+    },
     /// A job ended.
     JobFinished {
         /// The job.
@@ -392,6 +403,8 @@ pub fn summarize(history: &History, now: Timestamp, days: u32, utc_offset_minute
             HistoryKind::Stopped
             | HistoryKind::Paused
             | HistoryKind::Resumed
+            | HistoryKind::Held { .. }
+            | HistoryKind::Released { .. }
             | HistoryKind::ConfigSaved { .. }
             | HistoryKind::LabelsVerified { .. }
             | HistoryKind::LabelsMismatch { .. }

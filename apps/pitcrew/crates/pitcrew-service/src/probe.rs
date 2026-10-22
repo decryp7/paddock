@@ -12,12 +12,14 @@ use std::path::Path;
 
 /// Most processes of one runner described with names and command lines per tick (the rest still count in the usage).
 pub const MAX_DESCRIBED: usize = 512;
+use pitcrew_core::disk_guard::SpaceCache;
 use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 
 /// The process and machine snapshot.
 pub struct Probe {
     sys: System,
     disks: Disks,
+    space: SpaceCache,
     cpus: usize,
 }
 
@@ -34,6 +36,7 @@ impl Probe {
         let mut p = Probe {
             sys,
             disks: Disks::new_with_refreshed_list(),
+            space: SpaceCache::default(),
             cpus: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
         };
         p.refresh_processes();
@@ -158,7 +161,7 @@ impl Probe {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
         let cpu = permille(self.sys.global_cpu_usage() / 100.0);
-        let (free, total) = self.disk_space(disk_of).unwrap_or((0, 0));
+        let (free, total) = self.disk_space(disk_of, now).unwrap_or((0, 0));
         MachineSample {
             at: now,
             cpu_permille: cpu,
@@ -171,17 +174,22 @@ impl Probe {
         }
     }
 
-    /// Free and total bytes of the disk holding `path`.
-    pub fn disk_space(&mut self, path: &Path) -> Option<(u64, u64)> {
-        self.disks.refresh(true);
-        let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let target = normalise(&target);
-        self.disks
-            .list()
-            .iter()
-            .filter(|d| target.starts_with(&normalise(d.mount_point())))
-            .max_by_key(|d| d.mount_point().as_os_str().len())
-            .map(|d| (d.available_space(), d.total_space()))
+    /// Free and total bytes of the disk holding `path`. The OS is asked at most once a minute per disk
+    /// ([`SpaceCache`]); in between the last reading is returned.
+    pub fn disk_space(&mut self, path: &Path, now: Timestamp) -> Option<(u64, u64)> {
+        let disks = &mut self.disks;
+        let key = path.to_string_lossy().to_string();
+        self.space.get(&key, now, || {
+            disks.refresh(true);
+            let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let target = normalise(&target);
+            disks
+                .list()
+                .iter()
+                .filter(|d| target.starts_with(&normalise(d.mount_point())))
+                .max_by_key(|d| d.mount_point().as_os_str().len())
+                .map(|d| (d.available_space(), d.total_space()))
+        })
     }
 
     /// The service's own CPU (per mille of the whole machine) and memory.

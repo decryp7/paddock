@@ -54,6 +54,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod config_requests;
+mod holds;
 mod processes;
 
 /// The service's version, reported in the hello.
@@ -253,6 +254,16 @@ struct Runner {
     watch: ProcessWatch,
     /// After a configuration change: the labels the runner must declare when it starts again (ADR 0011).
     label_check: Option<LabelCheck>,
+    /// Whether the pause in force is Pitcrew's own hold (ADR 0013).
+    hold: pitcrew_core::hold::HoldTracker,
+    /// The low-disk hold is on (hysteresis).
+    disk_hold: bool,
+    /// Why the runner is held now.
+    hold_reasons: Vec<pitcrew_core::hold::HoldReason>,
+    /// Minutes until the open pause window closes.
+    hold_minutes_left: Option<u32>,
+    /// The reason of the hold Pitcrew applied last (for the release record).
+    last_hold_reason: Option<pitcrew_core::hold::HoldReason>,
 }
 
 /// Labels to verify when the restarted runner declares itself.
@@ -290,6 +301,8 @@ pub struct Supervisor {
     pending_notes: Vec<Notification>,
     /// Asks processes to stop (replaceable in tests of the supervisor's own logic).
     terminator: Box<dyn Terminator>,
+    /// Machine-wide hold inputs (ADR 0013).
+    holds: holds::Holds,
 }
 
 fn err(code: ErrorCode, message: impl Into<String>) -> Response {
@@ -357,6 +370,7 @@ impl Supervisor {
             console,
             pending_notes: vec![],
             terminator: Box::new(OsTerminator),
+            holds: holds::Holds::default(),
             env,
         };
         for r in loaded.config.runners {
@@ -414,6 +428,11 @@ impl Supervisor {
             usage_period: UsageAcc::default(),
             watch: ProcessWatch::new(),
             label_check: None,
+            hold: st.hold,
+            disk_hold: false,
+            hold_reasons: Vec::new(),
+            hold_minutes_left: None,
+            last_hold_reason: None,
             cfg,
         };
         runner.watch.restore_keeps(&st.keeps);
@@ -516,6 +535,10 @@ impl Supervisor {
             self.last_probe = now;
             self.probe.refresh_processes();
             self.sample_usage(now);
+            let held: Vec<RunnerName> = self.runners.keys().cloned().collect();
+            for name in &held {
+                self.tick_hold(name, now);
+            }
             let console = self.env.launcher.console().session;
             if console != self.console {
                 self.console = console;
@@ -530,6 +553,7 @@ impl Supervisor {
             self.last_sample = now;
             let mut sample = self.probe.machine(now, &self.env.data_dir);
             sample.runners = self.usage_total.take().unwrap_or_default();
+            self.observe_idle(now, sample.cpu_permille, sample.runners.cpu_permille);
             self.state.metrics.push(sample);
             for r in self.runners.values_mut() {
                 if let Some(usage) = r.usage_period.take() {
@@ -625,6 +649,9 @@ impl Supervisor {
             self.spawn_restore(name);
         }
         self.update_event(name, UpdateEvent::Tick, now);
+        if probe {
+            self.watch_updates(name, now);
+        }
         self.maybe_check(name, now);
         self.maybe_housekeep(name, now);
 
@@ -891,6 +918,80 @@ impl Supervisor {
         Some(policy.decide(r.current_version.as_ref(), &latest, self.local(now).0))
     }
 
+    /// The update loop of a runner, when its history shows one.
+    fn update_loop_of(&self, name: &str, now: Timestamp) -> Option<pitcrew_core::update::watch::UpdateLoop> {
+        let st = self.state.runners.get(name)?;
+        let outcomes = st.history.events().filter_map(|e| match &e.kind {
+            HistoryKind::UpdateFinished { outcome } => Some((e.at, outcome)),
+            _ => None,
+        });
+        pitcrew_core::update::watch::detect_loop(outcomes, now)
+    }
+
+    /// The decision for updates Pitcrew starts by itself: a target that goes round in circles is not tried again (the
+    /// owner can still install it by hand), it is offered instead.
+    fn auto_decision(&self, r: &Runner, now: Timestamp) -> Option<UpdateDecision> {
+        let d = self.decision(r, now)?;
+        match (&d, self.update_loop_of(r.cfg.name.as_str(), now)) {
+            (UpdateDecision::Apply { target } | UpdateDecision::WaitForWindow { target }, Some(l)) if &l.target == target => {
+                Some(UpdateDecision::Available {
+                    target: target.clone(),
+                    notify: false,
+                })
+            }
+            _ => Some(d),
+        }
+    }
+
+    /// Keeps the "behind since" mark, and announces a deadline that is near or passed and a loop (each once).
+    fn watch_updates(&mut self, name: &RunnerName, now: Timestamp) {
+        use pitcrew_core::update::watch::{deadline, next_behind_since, DeadlineState};
+        let Some(r) = self.runners.get(name) else { return };
+        let policy = r.cfg.update_policy(&self.config.defaults).clone();
+        let current = r.current_version.clone();
+        let l = self.update_loop_of(name.as_str(), now);
+        let st = self.state.runners.entry(name.to_string()).or_default();
+        let Some(latest) = st.latest.clone() else { return };
+        let behind = if policy.pinned.is_some() {
+            None
+        } else {
+            next_behind_since(st.behind_since, current.as_ref(), &latest, now)
+        };
+        if behind != st.behind_since {
+            st.behind_since = behind;
+            st.deadline_notified = 0;
+            self.dirty = true;
+        }
+        let d = deadline(policy.deadline_days, behind, now);
+        let mut notes = Vec::new();
+        if let Some(d) = d {
+            let level = match d.state {
+                DeadlineState::Ok => 0,
+                DeadlineState::Soon => 1,
+                DeadlineState::Overdue => 2,
+            };
+            if level > st.deadline_notified {
+                st.deadline_notified = level;
+                self.dirty = true;
+                notes.push(notify::update_deadline(name, &latest, &d, now));
+            }
+        }
+        if let Some(l) = l {
+            if st.loop_notified.as_ref() != Some(&l.target) {
+                st.loop_notified = Some(l.target.clone());
+                self.dirty = true;
+                notes.push(notify::update_loop(name, &l, now));
+            }
+        }
+        for n in notes {
+            self.notify(n);
+        }
+    }
+
+    fn runner_policy_deadline(&self, r: &Runner) -> u32 {
+        r.cfg.update_policy(&self.config.defaults).deadline_days
+    }
+
     fn maybe_check(&mut self, name: &RunnerName, now: Timestamp) {
         let Some(r) = self.runners.get(name) else { return };
         if r.checking || !matches!(r.update.phase(), UpdatePhase::Idle) {
@@ -904,7 +1005,7 @@ impl Supervisor {
         let due = checked.is_none_or(|t| now.since(t) >= every);
         if policy.scheduled_checks() && due && r.cfg.binary_path.is_none() {
             self.spawn_check(name);
-        } else if let Some(UpdateDecision::Apply { target }) = self.decision(r, now) {
+        } else if let Some(UpdateDecision::Apply { target }) = self.auto_decision(r, now) {
             // The window opened (or a pin was set) since the check.
             if layout::binary(&r.cfg, self.env.platform.os, |p| p.exists()).managed && r.current_version.is_some() {
                 self.begin_update(name, target, now);
@@ -1069,7 +1170,7 @@ impl Supervisor {
                         let Some(r) = self.runners.get(name) else { return };
                         let managed = self.binary(&r.cfg).managed;
                         let installed = r.current_version.is_some();
-                        match self.decision(r, now) {
+                        match self.auto_decision(r, now) {
                             Some(UpdateDecision::Apply { target }) if installed && managed => self.begin_update(name, target, now),
                             Some(UpdateDecision::Available { target, notify: true }) if fresh => {
                                 self.state.runners.entry(name.to_string()).or_default().announced = Some(v);
@@ -1249,7 +1350,7 @@ impl Supervisor {
         r.scanning = true;
         let cfg = r.cfg.clone();
         let bin = layout::binary(&cfg, self.env.platform.os, |p| p.exists()).path;
-        let free = self.probe.disk_space(&cfg.dir).map(|(f, _)| f);
+        let free = self.probe.disk_space(&cfg.dir, (self.env.clock)()).map(|(f, _)| f);
         self.worker(name, move || Done::Scanned(cleanup::scan(&cfg, &bin, free), reply));
     }
 
@@ -1410,7 +1511,7 @@ impl Supervisor {
                 let bin = layout::binary(&cfg, self.env.platform.os, |p| p.exists()).path;
                 let policy = cfg.cleanup_policy(&self.config.defaults);
                 let keep = self.config.defaults.logs.keep;
-                let free = self.probe.disk_space(&cfg.dir).map(|(f, _)| f);
+                let free = self.probe.disk_space(&cfg.dir, (self.env.clock)()).map(|(f, _)| f);
                 r.cleaning = true;
                 let clock = self.env.clock.clone();
                 self.worker(&runner, move || {
@@ -1516,8 +1617,10 @@ impl Supervisor {
         if input == Input::Start && !r.registered {
             return err(ErrorCode::BadRequest, "the runner is not registered yet; register it first");
         }
+        let resumes = matches!(input, Input::Resume | Input::Start);
         let actions = r.ctl.handle(input, now);
         self.act(runner, actions, now);
+        self.user_acted(runner, resumes);
         Response::Ok
     }
 
@@ -1727,6 +1830,9 @@ impl Supervisor {
             next_cleanup_at,
             usage: r.usage_now,
             leftovers: r.watch.leftovers(),
+            hold: self.hold_info(r),
+            deadline: pitcrew_core::update::watch::deadline(self.runner_policy_deadline(r), st.behind_since, now),
+            update_loop: self.update_loop_of(r.cfg.name.as_str(), now),
         }
     }
 
