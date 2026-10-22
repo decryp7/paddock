@@ -1,12 +1,17 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import type { Hint, HintKind, MemoryArray } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatCount } from '../../shared/format';
+import { formatBytes, formatCount, formatGhz } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import type { IconName } from '../../shared/icons';
 import { InventoryStore } from '../../state/inventory.store';
+import { ChipPackage } from './chip-package';
+import { DeviceArt, type DeviceArtKind } from './device-art';
+import { driveKind } from './device-geometry';
 import { MemorySlots } from './memory-slots';
-import { kindLabel, slotModel, speedLabel } from './slot-model';
+import { isAppleSilicon } from './package-geometry';
+import { toDimmSlots, toSocPackage } from './hardware-adapter';
+import { describeSlots, kindLabel, slotModel, speedLabel } from './slot-model';
 
 const HINT_ICON: Record<HintKind, IconName> = {
   mismatchedSpeed: 'alert',
@@ -34,7 +39,7 @@ const HINT_TONE: Record<HintKind, string> = {
 /** What is installed: the memory (slots drawn as sockets, or Apple silicon's unified memory) with upgrade hints from the engine. */
 @Component({
   selector: 'dy-inventory-page',
-  imports: [AsyncState, Icon, MemorySlots],
+  imports: [AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -67,7 +72,7 @@ const HINT_TONE: Record<HintKind, string> = {
                 <div><dt>Board maximum</dt><dd class="num">{{ a.maxCapacityBytes ? bytes(a.maxCapacityBytes) : 'Not reported' }}</dd></div>
               </dl>
               @if (!table()) {
-                <div class="drawing"><dy-memory-slots [array]="a" [hints]="inv.hints" /></div>
+                <div class="drawing"><dy-memory-slots [slots]="dimmSlots()" [alt]="alt()" /></div>
               } @else {
                 <div class="tablewrap">
                   <table class="table">
@@ -90,20 +95,10 @@ const HINT_TONE: Record<HintKind, string> = {
               }
             } @else if (unified(); as u) {
               <div class="chipwrap">
-                <svg viewBox="0 0 320 170" role="img" [attr.aria-label]="'Unified memory, ' + bytes(u.total) + ' ' + kind(u.kind) + ', part of the chip'">
-                  <rect class="die" x="70" y="10" width="180" height="150" rx="22" />
-                  <rect class="mem" x="90" y="30" width="60" height="110" rx="10" /><rect class="mem" x="170" y="30" width="60" height="110" rx="10" />
-                  <text x="120" y="82" text-anchor="middle" class="big">{{ bytes(u.total) }}</text>
-                  <text x="120" y="102" text-anchor="middle" class="small">{{ kind(u.kind) }}</text>
-                  <text x="200" y="82" text-anchor="middle" class="big">SoC</text>
-                  <text x="200" y="102" text-anchor="middle" class="small">CPU · GPU</text>
-                  @for (i of pins; track i) {
-                    <rect class="pin" [attr.x]="82 + i * 22" y="2" width="8" height="8" rx="2" /><rect class="pin" [attr.x]="82 + i * 22" y="160" width="8" height="8" rx="2" />
-                  }
-                </svg>
+                <dy-chip-package class="soc" [model]="soc()!" />
                 <div class="txt">
-                  <strong>Unified memory</strong>
-                  <p>{{ bytes(u.total) }} {{ kind(u.kind) }}{{ u.manufacturer ? ' by ' + u.manufacturer : '' }}, shared by the CPU and the GPU. It is part of the chip package{{ u.upgradeable ? '.' : ' and cannot be upgraded.' }}</p>
+                  <strong>{{ u.upgradeable ? 'Memory' : isApple(inv.cpu.name) ? 'Unified memory' : 'Soldered memory' }}</strong>
+                  <p>{{ bytes(u.total) }} {{ kind(u.kind) }}{{ u.manufacturer ? ' by ' + u.manufacturer : '' }}{{ isApple(inv.cpu.name) ? ', shared by the CPU and the GPU. It is part of the chip package' : ', soldered to the mainboard' }}{{ u.upgradeable ? '.' : ' and cannot be upgraded.' }}</p>
                 </div>
               </div>
             } @else if (totalOnly(); as t) {
@@ -127,38 +122,54 @@ const HINT_TONE: Record<HintKind, string> = {
 
           <section class="card" aria-label="This PC">
             <div class="card-head"><h2><dy-icon name="cpu" /> Processor and storage</h2></div>
-            <dl class="stats two">
-              <div><dt>Processor</dt><dd>{{ inv.cpu.name }}</dd></div>
-              <div><dt>Cores</dt><dd class="num">{{ n(inv.cpu.physicalCores) }} physical, {{ n(inv.cpu.logicalCores) }} logical</dd></div>
+            <div class="devices">
+              <article class="device">
+                <dy-device-art class="art" data-art="cpu" kind="cpu" />
+                <div class="meta">
+                  <span class="k">Processor</span>
+                  <strong>{{ inv.cpu.name }}</strong>
+                  <span class="sub"><span class="num">{{ n(inv.cpu.physicalCores) }}</span> physical, <span class="num">{{ n(inv.cpu.logicalCores) }}</span> logical cores · <span class="num">{{ ghz(inv.cpu.frequencyMhz) }}</span></span>
+                </div>
+              </article>
               @for (d of inv.disks; track d.name) {
-                <div><dt>Drive</dt><dd>{{ d.name }} · <span class="num">{{ bytes(d.totalBytes) }}</span>{{ d.removable ? ' · removable' : '' }}</dd></div>
+                <article class="device">
+                  <dy-device-art class="art" [attr.data-art]="art(d)" [kind]="art(d)" [totalBytes]="d.totalBytes" />
+                  <div class="meta">
+                    <span class="k">Drive</span>
+                    <strong>{{ d.name }}</strong>
+                    <span class="sub"><span class="num">{{ bytes(d.totalBytes) }}</span>{{ d.removable ? ' · removable' : '' }}</span>
+                  </div>
+                </article>
               }
-            </dl>
+            </div>
           </section>
         }
       </dy-async>
     </div>
   `,
   styles: `
-    :host { display: block; }
+    :host { display: block; --hw-focus: var(--focus); }
     .page { display: grid; gap: var(--sp-4); align-content: start; max-width: 980px; }
     .page-head { margin-bottom: 0; }
     .card { padding-bottom: var(--sp-4); }
     .stats { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-2); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
-    .stats.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .stats dt { color: var(--text-3); font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: uppercase; }
     .stats dd { margin: 2px 0 0; font: var(--fw-semibold) var(--fs-lg) / 1.3 var(--font-display); }
-    .two dd { font-size: var(--fs-base); font-weight: var(--fw-medium); }
+    .devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) 0; }
+    .device { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); background: var(--surface-inset); min-width: 0; }
+    .device .art { flex: none; width: 112px; display: grid; place-items: center; }
+    .device .art[data-art='nvme'] { width: 144px; }
+    .device .art[data-art='cpu'] { width: 72px; margin-inline: 20px; }
+    .device .art[data-art='sata'] { width: 88px; margin-inline: 12px; }
+    .device .meta { display: grid; gap: 2px; min-width: 0; }
+    .device .k { color: var(--text-3); font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: uppercase; line-height: 16px; }
+    .device strong { font: var(--fw-semibold) var(--fs-base) / 20px var(--font-sans); overflow-wrap: anywhere; }
+    .device .sub { color: var(--text-2); font-size: var(--fs-sm); line-height: 18px; }
     .drawing { padding: var(--sp-3) var(--sp-4); }
     .tablewrap { padding: var(--sp-2) var(--sp-4); overflow-x: auto; }
     .faint { color: var(--text-3); }
     .chipwrap { display: flex; align-items: center; gap: var(--sp-6); padding: var(--sp-4); flex-wrap: wrap; }
-    .chipwrap svg { width: 320px; max-width: 100%; font-family: var(--font-sans); }
-    .die { fill: var(--surface-3); stroke: var(--border-strong); stroke-width: 1.5; }
-    .mem { fill: var(--chart-1); fill-opacity: 0.2; stroke: var(--chart-1); stroke-width: 1.5; }
-    .pin { fill: var(--surface-active); }
-    .big { font-size: 20px; font-weight: 600; fill: var(--text-1); }
-    .small { font-size: 11px; fill: var(--text-2); }
+    .chipwrap .soc { flex: 1 1 520px; min-width: 0; }
     .txt { display: grid; gap: var(--sp-1); max-width: 44ch; }
     .txt p, .na p { color: var(--text-2); }
     .na { display: grid; gap: var(--sp-1); padding: var(--sp-4); }
@@ -175,7 +186,9 @@ const HINT_TONE: Record<HintKind, string> = {
 export class InventoryPage implements OnInit {
   protected readonly store = inject(InventoryStore);
   protected readonly table = signal(false);
-  protected readonly pins = [0, 1, 2, 3, 4, 5, 6];
+  protected readonly ghz = formatGhz;
+  protected readonly isApple = isAppleSilicon;
+  protected readonly art = (d: { name: string; removable: boolean }): DeviceArtKind => driveKind(d.name, d.removable);
   protected readonly bytes = formatBytes;
   protected readonly n = formatCount;
   protected readonly kind = kindLabel;
@@ -193,6 +206,13 @@ export class InventoryPage implements OnInit {
     return m && 'totalOnly' in m ? m.totalOnly : null;
   });
   protected readonly model = computed(() => slotModel(this.slots() ?? { slots: 0, maxCapacityBytes: null, modules: [] }, this.store.inventory()?.hints ?? []));
+  protected readonly dimmSlots = computed(() => toDimmSlots(this.model()));
+  protected readonly alt = computed(() => describeSlots(this.model()));
+  protected readonly soc = computed(() => {
+    const inv = this.store.inventory();
+    const u = this.unified();
+    return inv && u ? toSocPackage(inv.cpu, u) : null;
+  });
   protected readonly icon = (h: Hint) => HINT_ICON[h.kind];
   protected readonly tone = (h: Hint) => HINT_TONE[h.kind];
 

@@ -33,7 +33,8 @@ describe('InventoryPage', () => {
     const f = await render('macos');
     const el = f.nativeElement as HTMLElement;
     expect(el.textContent).toContain('cannot be upgraded');
-    expect(el.querySelector('svg')!.getAttribute('aria-label')).toContain('Unified memory');
+    expect(el.querySelector('svg[role=img]')!.getAttribute('aria-label')).toContain('Unified memory');
+    expect(el.querySelectorAll('dy-device-art')).toHaveLength(2);
   });
 
   it('says why the modules are unknown when only the total is available', async () => {

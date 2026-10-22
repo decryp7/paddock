@@ -60,6 +60,10 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     path: '/#/inventory',
     ready: async (page) => void (await expect(page.getByRole('img', { name: /Unified memory/ })).toBeVisible()),
   },
+  { name: 'inventory-ddr5', path: '/#/inventory', mock: 'windows&inv=ddr5', ready: async (page) => void (await expect(page.getByRole('img', { name: /memory slots filled/ })).toBeVisible()) },
+  { name: 'inventory-laptop', path: '/#/inventory', mock: 'linux', ready: async (page) => void (await expect(page.getByRole('img', { name: /1 of 2 memory slots filled/ })).toBeVisible()) },
+  { name: 'inventory-soldered', path: '/#/inventory', mock: 'windows&inv=soldered', ready: async (page) => void (await expect(page.getByRole('img', { name: /Soldered memory/ })).toBeVisible()) },
+  { name: 'inventory-generic', path: '/#/inventory', mock: 'windows&inv=generic', ready: async (page) => void (await expect(page.getByRole('img', { name: /memory slots filled/ })).toBeVisible()) },
   {
     name: 'widgets-overview',
     path: '/#/',
