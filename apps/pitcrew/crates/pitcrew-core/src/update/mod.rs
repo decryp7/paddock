@@ -4,4 +4,4 @@ pub mod machine;
 pub mod policy;
 
 pub use machine::{UpdateCommand, UpdateEvent, UpdateMachine, UpdateOutcome, UpdatePhase, UpdatePlan, UpdateTimeouts};
-pub use policy::{LocalMoment, TimeOfDay, UpdateDecision, UpdateMode, UpdatePolicy, UpdateWindow, Weekday};
+pub use policy::{Channel, LocalMoment, TimeOfDay, UpdateDecision, UpdateMode, UpdatePolicy, UpdateWindow, Weekday};

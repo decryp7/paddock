@@ -103,6 +103,36 @@ impl RunnerKind {
         RunnerVersion::parse(text).map_err(|e| DistributionError::BadResponse(e.to_string()))
     }
 
+    /// The URL that lists recent releases, pre-releases included (parsed by [`RunnerKind::parse_releases`]).
+    pub fn releases_url(self) -> &'static str {
+        match self {
+            RunnerKind::GiteaRunner => "https://gitea.com/api/v1/repos/gitea/runner/releases?limit=20",
+            RunnerKind::ForgejoRunner => "https://code.forgejo.org/api/v1/repos/forgejo/runner/releases?limit=20",
+        }
+    }
+
+    /// The versions of a Gitea/Forgejo releases list (`[{"tag_name": "v5.3.0-rc.1", "draft": false, …}]`), drafts
+    /// and unparsable tags left out, newest first.
+    pub fn parse_releases(self, body: &str) -> Result<Vec<RunnerVersion>, DistributionError> {
+        if body.len() > MAX_RELEASE_BODY * 4 {
+            return Err(DistributionError::BadResponse("the response is too large".into()));
+        }
+        let json: serde_json::Value = serde_json::from_str(body).map_err(|e| DistributionError::BadResponse(e.to_string()))?;
+        let list = json
+            .as_array()
+            .ok_or_else(|| DistributionError::BadResponse("the response is not a list of releases".into()))?;
+        let mut out: Vec<RunnerVersion> = list
+            .iter()
+            .filter(|r| !r.get("draft").and_then(serde_json::Value::as_bool).unwrap_or(false))
+            .filter_map(|r| r.get("tag_name").and_then(|t| t.as_str()))
+            .filter_map(|t| RunnerVersion::parse(t).ok())
+            .collect();
+        out.sort();
+        out.reverse();
+        out.dedup();
+        Ok(out)
+    }
+
     /// The files of `version` for `platform`.
     pub fn release_files(self, version: &RunnerVersion, platform: Platform) -> Result<ReleaseFiles, DistributionError> {
         let v = version.to_string();
@@ -171,6 +201,19 @@ impl RunnerKind {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn release_lists_give_versions_newest_first() {
+        let k = RunnerKind::GiteaRunner;
+        assert!(k.releases_url().contains("gitea/runner/releases"));
+        assert!(RunnerKind::ForgejoRunner.releases_url().contains("forgejo"));
+        let body = r#"[{"tag_name":"v5.2.0","draft":false},{"tag_name":"v5.3.0-rc.1","prerelease":true},{"tag_name":"v9.0.0","draft":true},{"tag_name":"nightly"},{"name":"x"}]"#;
+        let v = k.parse_releases(body).unwrap();
+        assert_eq!(v.iter().map(ToString::to_string).collect::<Vec<_>>(), vec!["5.3.0-rc.1", "5.2.0"]);
+        assert!(k.parse_releases("{}").is_err());
+        assert!(k.parse_releases("nope").is_err());
+        assert!(k.parse_releases(&" ".repeat(MAX_RELEASE_BODY * 4 + 1)).is_err());
+    }
+
     use super::*;
 
     fn v(s: &str) -> RunnerVersion {

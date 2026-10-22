@@ -115,7 +115,7 @@ pub enum PostponeReason {
 
 /// How an update ended (kept as "last update" and shown with the current and latest version).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "result", rename_all = "camelCase")]
+#[serde(tag = "result", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum UpdateOutcome {
     /// The new version runs and was accepted by the server.
     Updated {

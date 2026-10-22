@@ -28,6 +28,12 @@ pub struct HealthFacts {
     pub crash_loop: bool,
     /// An update is in progress.
     pub updating: bool,
+    /// Drained for maintenance and paused (not running until resumed).
+    pub paused: bool,
+    /// Draining: it finishes its job, then pauses (or stops, restarts, updates).
+    pub draining: bool,
+    /// It needs a logged-on user and nobody is logged on.
+    pub waiting_for_logon: bool,
 }
 
 /// The one-word status of a runner.
@@ -36,6 +42,12 @@ pub struct HealthFacts {
 pub enum RunnerStatus {
     /// Stopped by the user.
     Stopped,
+    /// Paused for maintenance (drained); resumes when the user says so.
+    Paused,
+    /// Waiting for a user to log on (it runs in the user's session).
+    WaitingForLogon,
+    /// Finishing its current job, then it pauses, stops or restarts.
+    Draining,
     /// Not registered with a server yet (or the server forgot it).
     NotRegistered,
     /// Exited too often; restarts are paused.
@@ -70,6 +82,9 @@ pub const POLL_GRACE: Duration = Duration::from_secs(5 * 60);
 
 /// Sums up the facts. The order of the checks is the order of importance: the most actionable state wins.
 pub fn status(f: &HealthFacts, now: Timestamp) -> RunnerStatus {
+    if f.paused && !f.process_alive {
+        return RunnerStatus::Paused;
+    }
     if !f.wanted && !f.process_alive {
         return RunnerStatus::Stopped;
     }
@@ -83,7 +98,14 @@ pub fn status(f: &HealthFacts, now: Timestamp) -> RunnerStatus {
         return RunnerStatus::CrashLoop;
     }
     if !f.process_alive {
-        return RunnerStatus::Starting;
+        return if f.waiting_for_logon {
+            RunnerStatus::WaitingForLogon
+        } else {
+            RunnerStatus::Starting
+        };
+    }
+    if f.draining {
+        return RunnerStatus::Draining;
     }
     if f.job_running {
         return RunnerStatus::Busy;
@@ -227,6 +249,31 @@ mod tests {
             ),
             RunnerStatus::Starting
         );
+    }
+
+    #[test]
+    fn maintenance_and_log_on_states() {
+        let now = Timestamp(1000);
+        let paused = HealthFacts {
+            wanted: false,
+            process_alive: false,
+            paused: true,
+            ..healthy()
+        };
+        assert_eq!(status(&paused, now), RunnerStatus::Paused);
+        let draining = HealthFacts {
+            draining: true,
+            job_running: true,
+            ..healthy()
+        };
+        assert_eq!(status(&draining, now), RunnerStatus::Draining);
+        let logon = HealthFacts {
+            process_alive: false,
+            waiting_for_logon: true,
+            ..healthy()
+        };
+        assert_eq!(status(&logon, now), RunnerStatus::WaitingForLogon);
+        assert!(!RunnerStatus::Paused.needs_attention());
     }
 
     #[test]

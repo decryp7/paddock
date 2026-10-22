@@ -6,9 +6,11 @@
 //! The service keeps the damaged file aside for the user (see `docs/adr/0001-architecture.md`).
 
 use crate::distribution::RunnerKind;
+use crate::housekeeping::CleanupPolicy;
 use crate::logs::RotationPolicy;
 use crate::names::RunnerName;
 use crate::restart::RestartPolicy;
+use crate::session::LoggedOffMode;
 use crate::update::{UpdatePolicy, UpdateTimeouts};
 use crate::watchdog::StallRule;
 use serde::{Deserialize, Serialize};
@@ -63,6 +65,8 @@ pub struct Defaults {
     pub restart: RestartPolicy,
     /// Log rotation.
     pub logs: RotationPolicy,
+    /// Disk housekeeping.
+    pub cleanup: CleanupPolicy,
 }
 
 /// Where a runner runs on Windows (macOS always runs runners in the user's session, see ADR 0003).
@@ -95,6 +99,13 @@ pub struct RunnerConfig {
     /// Where it runs on Windows.
     #[serde(default)]
     pub session: SessionMode,
+    /// What an `interactive` runner does while nobody is logged on.
+    #[serde(default)]
+    pub logged_off: LoggedOffMode,
+    /// The server it is registered with (shown in the window and used for links; the registration itself is the
+    /// runner's `.runner` file, which Pitcrew never reads).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_url: Option<String>,
     /// Whether Pitcrew keeps it running.
     #[serde(default = "yes")]
     pub enabled: bool,
@@ -107,6 +118,54 @@ pub struct RunnerConfig {
     /// Overrides the default stall rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watchdog: Option<StallRule>,
+    /// Overrides the default disk housekeeping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleanup: Option<CleanupPolicy>,
+}
+
+/// Longest server URL Pitcrew keeps.
+pub const MAX_URL_LEN: usize = 512;
+
+impl RunnerConfig {
+    /// The update policy in effect (the runner's own, else the default).
+    pub fn update_policy<'a>(&'a self, d: &'a Defaults) -> &'a UpdatePolicy {
+        self.update.as_ref().unwrap_or(&d.update)
+    }
+
+    /// The stall rule in effect.
+    pub fn stall_rule(&self, d: &Defaults) -> StallRule {
+        self.watchdog.unwrap_or(d.watchdog)
+    }
+
+    /// The cleanup policy in effect.
+    pub fn cleanup_policy(&self, d: &Defaults) -> CleanupPolicy {
+        self.cleanup.unwrap_or(d.cleanup)
+    }
+}
+
+/// Checks a server URL typed by the user: HTTPS (or HTTP for internal servers), a host, no credentials, bounded.
+pub fn check_server_url(url: &str) -> Result<String, String> {
+    let u = url.trim().trim_end_matches('/');
+    if u.len() > MAX_URL_LEN {
+        return Err(format!("the server URL is longer than {MAX_URL_LEN} characters"));
+    }
+    let rest = u
+        .strip_prefix("https://")
+        .or_else(|| u.strip_prefix("http://"))
+        .ok_or_else(|| "the server URL must start with https:// (or http:// for an internal server)".to_string())?;
+    let host = rest.split('/').next().unwrap_or("");
+    if host.is_empty() {
+        return Err("the server URL has no host name".into());
+    }
+    if host.contains('@') {
+        return Err("the server URL must not contain a user name or password".into());
+    }
+    if u.chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '"' || c == '<' || c == '>')
+    {
+        return Err("the server URL contains spaces or characters that are not allowed".into());
+    }
+    Ok(u.to_string())
 }
 
 fn yes() -> bool {
@@ -342,6 +401,7 @@ fn parse_defaults(value: Option<toml::Value>, problems: &mut Vec<ConfigProblem>)
     section(&mut t, "watchdog", &mut d.watchdog, problems);
     section(&mut t, "restart", &mut d.restart, problems);
     section(&mut t, "logs", &mut d.logs, problems);
+    section(&mut t, "cleanup", &mut d.cleanup, problems);
     d
 }
 
@@ -403,6 +463,9 @@ fn check_runner(r: &RunnerConfig) -> Result<(), String> {
         if is_absolute_anywhere(&s) || s.split(['/', '\\']).any(|part| part == "..") {
             return Err(format!("config_file {cf:?} must be a path inside the runner's dir"));
         }
+    }
+    if let Some(u) = &r.server_url {
+        check_server_url(u)?;
     }
     if r.labels.len() > MAX_LABELS {
         return Err(format!("it has more than {MAX_LABELS} labels"));
@@ -685,6 +748,54 @@ dir = "/srv/j"
         assert_eq!(l.config.runners.len(), 2);
         let via_backup = load(Some("broken ="), Some(&text));
         assert!(via_backup.read_only && !via_backup.needs_save);
+    }
+
+    #[test]
+    fn server_urls_are_checked() {
+        assert_eq!(check_server_url(" https://git.example.com/ ").unwrap(), "https://git.example.com");
+        assert!(check_server_url("http://10.0.0.5:3000").is_ok());
+        for bad in [
+            "git.example.com",
+            "https://",
+            "https://u:p@git.example.com",
+            "https://a b",
+            &format!("https://{}", "a".repeat(600)),
+        ] {
+            assert!(check_server_url(bad).is_err(), "{bad}");
+        }
+        let text = "schema_version = 1
+[[runners]]
+name = \"a\"
+kind = \"gitea-runner\"
+dir = \"/r/a\"
+server_url = \"ftp://x\"
+";
+        let l = load(Some(text), None);
+        assert!(l.config.runners.is_empty());
+    }
+
+    #[test]
+    fn effective_policies_fall_back_to_the_defaults() {
+        let text = "schema_version = 1
+[defaults.cleanup]
+cache_cap_mb = 5
+[[runners]]
+name = \"a\"
+kind = \"gitea-runner\"
+dir = \"/r/a\"
+logged_off = \"service-account\"
+[runners.cleanup]
+automatic = false
+";
+        let l = load(Some(text), None);
+        assert!(l.problems.is_empty(), "{:?}", l.problems);
+        let r = &l.config.runners[0];
+        let d = &l.config.defaults;
+        assert_eq!(d.cleanup.cache_cap_mb, 5);
+        assert!(!r.cleanup_policy(d).automatic);
+        assert_eq!(r.stall_rule(d), d.watchdog);
+        assert_eq!(r.update_policy(d), &d.update);
+        assert_eq!(r.logged_off, LoggedOffMode::ServiceAccount);
     }
 
     #[test]

@@ -123,6 +123,20 @@ fn previous(d: Weekday) -> Weekday {
     }
 }
 
+/// Which releases are offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Channel {
+    /// Stable releases only.
+    #[default]
+    Stable,
+    /// Pre-releases too (release candidates).
+    Prerelease,
+}
+
+/// Most skipped versions kept.
+pub const MAX_SKIPPED: usize = 32;
+
 /// The update policy of one runner (the defaults apply to every runner; a runner may override them).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -135,6 +149,10 @@ pub struct UpdatePolicy {
     pub window: Option<UpdateWindow>,
     /// Hours between scheduled checks (at least 1).
     pub check_every_hours: u32,
+    /// Which releases are offered.
+    pub channel: Channel,
+    /// Versions the user chose to skip (never offered; a pin still wins).
+    pub skipped: Vec<RunnerVersion>,
 }
 
 impl Default for UpdatePolicy {
@@ -144,6 +162,8 @@ impl Default for UpdatePolicy {
             pinned: None,
             window: None,
             check_every_hours: 24,
+            channel: Channel::Stable,
+            skipped: vec![],
         }
     }
 }
@@ -174,6 +194,17 @@ pub enum UpdateDecision {
 }
 
 impl UpdatePolicy {
+    /// This policy with `version` skipped (bounded: the oldest skips are forgotten first).
+    pub fn skip(&self, version: RunnerVersion) -> UpdatePolicy {
+        let mut p = self.clone();
+        if !p.skipped.contains(&version) {
+            p.skipped.push(version);
+        }
+        let extra = p.skipped.len().saturating_sub(MAX_SKIPPED);
+        p.skipped.drain(..extra);
+        p
+    }
+
     /// Whether the service checks on a schedule.
     pub fn scheduled_checks(&self) -> bool {
         self.mode != UpdateMode::Manual
@@ -186,7 +217,8 @@ impl UpdatePolicy {
         let target = match &self.pinned {
             Some(pin) if current == Some(pin) => return UpdateDecision::UpToDate,
             Some(pin) => pin.clone(),
-            None if latest.is_prerelease() => return UpdateDecision::UpToDate,
+            None if latest.is_prerelease() && self.channel == Channel::Stable => return UpdateDecision::UpToDate,
+            None if self.skipped.contains(latest) => return UpdateDecision::UpToDate,
             None if current.is_some_and(|c| c >= latest) => return UpdateDecision::UpToDate,
             None => latest.clone(),
         };
@@ -215,6 +247,34 @@ mod tests {
 
     fn at(weekday: Weekday, time: &str) -> LocalMoment {
         LocalMoment { weekday, time: t(time) }
+    }
+
+    #[test]
+    fn channels_and_skipped_versions() {
+        let now = at(Weekday::Mon, "12:00");
+        let p = UpdatePolicy::default();
+        assert_eq!(p.decide(Some(&v("5.1.0")), &v("5.3.0-rc.1"), now), UpdateDecision::UpToDate);
+        let pre = UpdatePolicy {
+            channel: Channel::Prerelease,
+            ..UpdatePolicy::default()
+        };
+        assert_eq!(
+            pre.decide(Some(&v("5.1.0")), &v("5.3.0-rc.1"), now),
+            UpdateDecision::Apply { target: v("5.3.0-rc.1") }
+        );
+        let skipped = p.skip(v("5.2.0")).skip(v("5.2.0"));
+        assert_eq!(skipped.skipped, vec![v("5.2.0")]);
+        assert_eq!(skipped.decide(Some(&v("5.1.0")), &v("5.2.0"), now), UpdateDecision::UpToDate);
+        assert_eq!(
+            skipped.decide(Some(&v("5.1.0")), &v("5.2.1"), now),
+            UpdateDecision::Apply { target: v("5.2.1") }
+        );
+        let mut many = UpdatePolicy::default();
+        for i in 0..40 {
+            many = many.skip(v(&format!("1.0.{i}")));
+        }
+        assert_eq!(many.skipped.len(), MAX_SKIPPED);
+        assert_eq!(many.skipped[0], v("1.0.8"));
     }
 
     #[test]

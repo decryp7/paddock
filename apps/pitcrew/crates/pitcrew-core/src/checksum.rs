@@ -101,6 +101,29 @@ impl Sha256Digest {
     }
 }
 
+/// A SHA-256 computed piece by piece (while a download streams to disk).
+#[derive(Debug, Clone, Default)]
+pub struct Hasher(Sha256);
+
+impl Hasher {
+    /// A new hasher.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds bytes.
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    /// The digest of everything added.
+    pub fn finish(self) -> Sha256Digest {
+        let mut a = [0u8; 32];
+        a.copy_from_slice(&self.0.finalize());
+        Sha256Digest(a)
+    }
+}
+
 fn hex_value(b: u8) -> Option<u8> {
     match b {
         b'0'..=b'9' => Some(b - b'0'),
@@ -198,6 +221,14 @@ pub fn verify(expected: Sha256Digest, actual: Sha256Digest) -> Result<(), Checks
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hashing_in_pieces_equals_hashing_at_once() {
+        let mut h = Hasher::new();
+        h.update(b"gitea-");
+        h.update(b"runner");
+        assert_eq!(h.finish(), Sha256Digest::of_bytes(b"gitea-runner"));
+    }
 
     // SHA-256 of "abc" (FIPS 180-2 test vector).
     const ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";

@@ -85,6 +85,53 @@ pub fn classify(line: &str) -> RunnerLogEvent {
     }
 }
 
+/// Most `key=value` fields [`fields`] returns from one line.
+pub const MAX_FIELDS: usize = 64;
+
+/// The `key=value` fields of a logrus text line, in order (quoted values unescaped), e.g. the `job`,
+/// `repository` and `run_id` of a "task started" line. Bounded by [`MAX_FIELDS`] and [`MAX_LINE_LEN`].
+pub fn fields(line: &str) -> Vec<(String, String)> {
+    let mut out = vec![];
+    let mut rest = cut(line).trim_start();
+    while !rest.is_empty() && out.len() < MAX_FIELDS {
+        let key_end = rest.find(|c: char| c == '=' || c.is_whitespace()).unwrap_or(rest.len());
+        let key = &rest[..key_end];
+        rest = &rest[key_end..];
+        let Some(after_eq) = rest.strip_prefix('=') else {
+            rest = rest.trim_start();
+            continue;
+        };
+        let (value, remaining) = if let Some(quoted) = after_eq.strip_prefix('"') {
+            let mut value = String::new();
+            let mut end = quoted.len();
+            let mut chars = quoted.char_indices();
+            while let Some((i, c)) = chars.next() {
+                match c {
+                    '\\' => {
+                        if let Some((_, n)) = chars.next() {
+                            value.push(n);
+                        }
+                    }
+                    '"' => {
+                        end = i + 1;
+                        break;
+                    }
+                    _ => value.push(c),
+                }
+            }
+            (value, &quoted[end.min(quoted.len())..])
+        } else {
+            let end = after_eq.find(char::is_whitespace).unwrap_or(after_eq.len());
+            (after_eq[..end].to_string(), &after_eq[end..])
+        };
+        if !key.is_empty() {
+            out.push((key.to_string(), value));
+        }
+        rest = remaining.trim_start();
+    }
+    out
+}
+
 fn cut(line: &str) -> &str {
     if line.len() <= MAX_LINE_LEN {
         return line;
@@ -140,9 +187,29 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_fields_of_a_task_started_line() {
+        let l = r#"time="2026-10-22T13:36:25+08:00" level=info msg="task started" actions_url="https://github.com" address="https://git.example.com" job=tauri-smoke job_id=8288 repository=owner/repo run_id=5983 run_number=215 task_id=8271"#;
+        let f = fields(l);
+        let get = |k: &str| f.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("msg"), Some("task started"));
+        assert_eq!(get("address"), Some("https://git.example.com"));
+        assert_eq!(get("job"), Some("tauri-smoke"));
+        assert_eq!(get("run_number"), Some("215"));
+        assert_eq!(get("task_id"), Some("8271"));
+        assert_eq!(
+            fields(r#"a="x \"y\"" lone b= c"#),
+            vec![("a".into(), r#"x "y""#.into()), ("b".into(), String::new())]
+        );
+        assert_eq!(fields(r#"=v k="unterminated"#), vec![("k".into(), "unterminated".into())]);
+        assert!(fields(&"k=v ".repeat(500)).len() <= MAX_FIELDS);
+        assert!(fields("").is_empty());
+    }
+
+    #[test]
     fn never_panics_on_odd_input() {
-        for odd in ["", "msg=", "msg=\"", "msg=\"\\", "\u{0}\u{ff}", "msg=\"é\\\u{1F600}"] {
+        for odd in ["", "msg=", "msg=\"", "msg=\"\\", "\u{0}\u{ff}", "msg=\"é\\\u{1F600}", "a=\"é\\"] {
             let _ = classify(odd);
+            let _ = fields(odd);
         }
         let huge = format!("{}é{}", "a".repeat(MAX_LINE_LEN - 1), "fetching a task timed out");
         assert_eq!(classify(&huge), RunnerLogEvent::Other);

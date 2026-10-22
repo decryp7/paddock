@@ -1,30 +1,80 @@
-//! The protocol between the Pitcrew app and the Pitcrew service (ADR 0001).
+//! The protocol between the Pitcrew app and the Pitcrew service (ADR 0001, ADR 0004).
 //!
-//! One request, one response, over a private local stream (a named pipe on Windows, a Unix socket on macOS).
-//! Each frame is a 4-byte little-endian length followed by that many bytes of JSON. The first request on a
-//! connection is [`Request::Hello`]; the service refuses other protocol versions with
-//! [`ErrorCode::ProtocolMismatch`]. Frames are bounded by [`MAX_FRAME`], so neither side can be made to allocate
-//! without limit.
+//! Over a private local stream (a named pipe on Windows, a Unix socket on macOS). Each frame is a 4-byte
+//! little-endian length followed by that many bytes of JSON. The first request on a connection is
+//! [`Request::Hello`]; the service refuses other protocol versions with [`ErrorCode::ProtocolMismatch`]. Then either
+//! one request, one response, repeated; or, after [`Request::Subscribe`], a stream of [`Response::Event`]s pushed by
+//! the service. Frames are bounded by [`MAX_FRAME`], so neither side can be made to allocate without limit.
 
+use crate::config::{Config, RunnerConfig, SessionMode};
+use crate::controller::Pending;
 use crate::distribution::RunnerKind;
 use crate::health::RunnerStatus;
+use crate::history::{HistoryEvent, HistorySummary};
+use crate::housekeeping::{CleanupPlan, CleanupPolicy, CleanupReport, DiskScan};
+use crate::jobs::CurrentJob;
 use crate::logs::LogLine;
+use crate::metrics::MachineSample;
 use crate::names::RunnerName;
+use crate::notify::Notification;
+use crate::session::SessionState;
 use crate::time::Timestamp;
-use crate::update::{UpdateOutcome, UpdatePhase};
+use crate::update::{UpdateOutcome, UpdatePhase, UpdatePolicy};
 use crate::version::RunnerVersion;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-/// The protocol version this build speaks.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// The protocol version this build speaks. 2: push events, maintenance, settings, registration, history, disk.
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Largest frame either side sends or accepts.
 pub const MAX_FRAME: usize = 1024 * 1024;
+/// Longest secret (registration token) accepted.
+pub const MAX_SECRET_LEN: usize = 256;
+
+/// A secret passed through Pitcrew (a registration token): never printed, never logged, never stored by Pitcrew.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Secret(String);
+
+impl Secret {
+    /// A secret from text: 1-256 visible ASCII characters (surrounding white space is dropped).
+    pub fn new(s: &str) -> Result<Self, String> {
+        let t = s.trim();
+        if t.is_empty() || t.len() > MAX_SECRET_LEN || !t.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err(format!("the token must be 1-{MAX_SECRET_LEN} characters without spaces"));
+        }
+        Ok(Secret(t.to_string()))
+    }
+
+    /// The secret itself, for the one place that passes it on.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(..)")
+    }
+}
+
+impl TryFrom<String> for Secret {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Secret::new(&s)
+    }
+}
+
+impl From<Secret> for String {
+    fn from(s: Secret) -> Self {
+        s.0
+    }
+}
 
 /// A request from the app.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Request {
     /// Opens the conversation.
     Hello {
@@ -33,18 +83,31 @@ pub enum Request {
     },
     /// Every runner's status.
     Status,
-    /// Start a runner (clears a crash loop).
+    /// Turns this connection into an event stream: the service answers [`Response::Ok`], then pushes
+    /// [`Response::Event`] frames (a status at once and on every change, and notifications) until it closes.
+    Subscribe,
+    /// Start a runner (clears a crash loop and a pause).
     Start {
         /// The runner.
         runner: RunnerName,
     },
-    /// Stop a runner (gracefully: a running job finishes first).
+    /// Stop a runner after its current job.
     Stop {
         /// The runner.
         runner: RunnerName,
     },
-    /// Restart a runner.
+    /// Restart a runner after its current job.
     Restart {
+        /// The runner.
+        runner: RunnerName,
+    },
+    /// Maintenance: finish the current job, take no more, then pause.
+    Drain {
+        /// The runner.
+        runner: RunnerName,
+    },
+    /// Leave maintenance.
+    Resume {
         /// The runner.
         runner: RunnerName,
     },
@@ -81,6 +144,96 @@ pub enum Request {
         /// The runner.
         runner: RunnerName,
     },
+    /// Never offer this version.
+    SkipVersion {
+        /// The runner.
+        runner: RunnerName,
+        /// The version.
+        version: RunnerVersion,
+    },
+    /// Stay on (or go to) this version; `None` follows the latest release again.
+    PinVersion {
+        /// The runner.
+        runner: RunnerName,
+        /// The version.
+        version: Option<RunnerVersion>,
+    },
+    /// The runner's history over the last `days` local days.
+    History {
+        /// The runner.
+        runner: RunnerName,
+        /// How many days (capped by the core).
+        days: u32,
+        /// The app's time zone, minutes east of UTC (days are local days).
+        utc_offset_minutes: i32,
+    },
+    /// The runner folder's disk use and what a cleanup would delete (a dry run).
+    Disk {
+        /// The runner.
+        runner: RunnerName,
+    },
+    /// Clean the runner's folder now (between jobs).
+    CleanDisk {
+        /// The runner.
+        runner: RunnerName,
+    },
+    /// The configuration.
+    GetSettings,
+    /// Replace the configuration (validated by the service like a file it loads).
+    SaveSettings {
+        /// The new configuration.
+        config: Config,
+    },
+    /// Add a runner (adopt a registered runner folder, or one to register next).
+    AddRunner {
+        /// Its configuration.
+        runner: RunnerConfig,
+    },
+    /// Stop a runner (after its job) and forget it; its folder stays.
+    RemoveRunner {
+        /// The runner.
+        runner: RunnerName,
+    },
+    /// Register a runner with a server: installs the runner binary if needed, runs its `register` command with the
+    /// token (passed on, never stored) and starts it.
+    Register {
+        /// The runner (it must have been added).
+        runner: RunnerName,
+        /// The server, e.g. `https://git.example.com`.
+        server_url: String,
+        /// The registration token from the server's runner settings.
+        token: Secret,
+        /// The name the server shows (default: the runner's name).
+        display_name: Option<String>,
+    },
+    /// Redacted diagnostics for a support bundle.
+    Diagnostics,
+    /// Machine metrics (and a runner folder's size) over the last `range_hours`.
+    Metrics {
+        /// The runner whose folder size to include.
+        runner: Option<RunnerName>,
+        /// How far back (capped at 90 days).
+        range_hours: u32,
+    },
+}
+
+impl Request {
+    /// Whether the request changes anything (status, logs, history, disk and settings queries do not).
+    pub fn mutates(&self) -> bool {
+        !matches!(
+            self,
+            Request::Hello { .. }
+                | Request::Status
+                | Request::Subscribe
+                | Request::Logs { .. }
+                | Request::SearchLogs { .. }
+                | Request::History { .. }
+                | Request::Disk { .. }
+                | Request::GetSettings
+                | Request::Diagnostics
+                | Request::Metrics { .. }
+        )
+    }
 }
 
 /// What the app shows about one runner.
@@ -93,14 +246,62 @@ pub struct RunnerSnapshot {
     pub kind: RunnerKind,
     /// Its status.
     pub status: RunnerStatus,
+    /// The user wants it running (not stopped or paused).
+    pub enabled: bool,
+    /// What happens after the current job (stop, pause, restart).
+    pub pending: Option<Pending>,
+    /// Where it runs.
+    pub session: SessionState,
+    /// Since when the current process runs.
+    pub running_since: Option<Timestamp>,
+    /// When it starts again (backoff or crash-loop cool-down).
+    pub next_start_at: Option<Timestamp>,
+    /// Unplanned exits and stall restarts in the last 24 hours.
+    pub restarts_24h: u32,
+    /// The last problem worth showing (a failed start), for the user.
+    pub problem: Option<String>,
+    /// The job running now.
+    pub current_job: Option<CurrentJob>,
     /// The installed version, when known.
     pub current_version: Option<RunnerVersion>,
     /// The latest version found by the last check.
     pub latest_version: Option<RunnerVersion>,
+    /// When the last check ran.
+    pub checked_at: Option<Timestamp>,
+    /// The version the policy would install now or in its window.
+    pub update_target: Option<RunnerVersion>,
     /// How the last update ended.
     pub last_update: Option<UpdateRecord>,
     /// The update in progress.
     pub update_phase: UpdatePhase,
+    /// The update policy in effect.
+    pub update_policy: UpdatePolicy,
+    /// Pitcrew may update its binary (false for a user-provided binary).
+    pub managed_binary: bool,
+    /// Its folder.
+    pub dir: String,
+    /// Its labels.
+    pub labels: Vec<String>,
+    /// Its server, when known.
+    pub server_url: Option<String>,
+    /// Where it runs on Windows.
+    pub session_mode: SessionMode,
+    /// The size of its folder and the free space of its disk, from the last scan.
+    pub disk: Option<DiskUse>,
+    /// When the next automatic cleanup is due (`None`: automatic cleanup is off).
+    pub next_cleanup_at: Option<Timestamp>,
+}
+
+/// Disk use from the last scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskUse {
+    /// The runner folder's size.
+    pub folder_bytes: u64,
+    /// Free space on its disk.
+    pub free_bytes: Option<u64>,
+    /// Below the free-space minimum.
+    pub low: bool,
 }
 
 /// A finished update, as kept by the service.
@@ -113,9 +314,59 @@ pub struct UpdateRecord {
     pub finished_at: Timestamp,
 }
 
+/// About the service itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceInfo {
+    /// Its version.
+    pub version: String,
+    /// When it started.
+    pub started_at: Timestamp,
+    /// Its data folder.
+    pub data_dir: String,
+    /// Problems with the configuration, for the user.
+    pub config_problems: Vec<String>,
+    /// The configuration is from a newer Pitcrew and cannot be saved.
+    pub read_only: bool,
+    /// The machine now.
+    pub machine: Option<MachineSample>,
+    /// The service's own CPU use, per mille of one machine.
+    pub own_cpu_permille: u32,
+    /// The service's own memory use.
+    pub own_mem_bytes: u64,
+}
+
+/// Something the service pushes to subscribers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ServiceEvent {
+    /// Every runner's status (sent at once and whenever it changes).
+    Status {
+        /// The runners.
+        runners: Vec<RunnerSnapshot>,
+        /// The service.
+        service: ServiceInfo,
+    },
+    /// Tell the user.
+    Notification {
+        /// What.
+        notification: Notification,
+    },
+}
+
+/// A named part of the diagnostics (already redacted by the service).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsSection {
+    /// A file name for it in the bundle, e.g. `config.toml`.
+    pub name: String,
+    /// Its text.
+    pub text: String,
+}
+
 /// A response from the service.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Response {
     /// The service's answer to [`Request::Hello`].
     Hello {
@@ -128,11 +379,62 @@ pub enum Response {
     Status {
         /// The runners.
         runners: Vec<RunnerSnapshot>,
+        /// The service.
+        service: ServiceInfo,
     },
     /// Log lines.
     Logs {
         /// The lines, oldest first.
         lines: Vec<LogLine>,
+    },
+    /// A history summary.
+    History {
+        /// The summary.
+        summary: HistorySummary,
+        /// The newest events, newest first (at most 200).
+        events: Vec<HistoryEvent>,
+    },
+    /// Disk use and the cleanup preview.
+    Disk {
+        /// The scan.
+        scan: DiskScan,
+        /// What a cleanup would delete now.
+        preview: CleanupPlan,
+        /// The last cleanup.
+        last_cleanup: Option<CleanupReport>,
+        /// The policy in effect.
+        policy: CleanupPolicy,
+    },
+    /// A cleanup ran.
+    Cleaned {
+        /// How it went.
+        report: CleanupReport,
+    },
+    /// The configuration.
+    Settings {
+        /// It.
+        config: Config,
+        /// Problems with it, for the user.
+        problems: Vec<String>,
+        /// It cannot be saved (written by a newer Pitcrew).
+        read_only: bool,
+    },
+    /// Redacted diagnostics.
+    Diagnostics {
+        /// The sections.
+        sections: Vec<DiagnosticsSection>,
+    },
+    /// Machine metrics.
+    Metrics {
+        /// The machine's points, oldest first.
+        machine: Vec<MachineSample>,
+        /// The runner folder's size, `[time, bytes]`, oldest first.
+        folder: Vec<(Timestamp, u64)>,
+    },
+    /// A pushed event (only on a subscribed connection).
+    Event {
+        /// The event.
+        event: ServiceEvent,
     },
     /// Done.
     Ok,
@@ -144,15 +446,15 @@ pub enum Response {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorCode {
-    /// The feature is not built yet (the skeleton's honest answer).
+    /// The feature is not built (on this platform).
     NotImplemented,
     /// The app and the service speak different protocol versions.
     ProtocolMismatch,
     /// No runner has this name.
     UnknownRunner,
-    /// The request is malformed.
+    /// The request is malformed or its values are not allowed.
     BadRequest,
-    /// The caller may not do this (e.g. a non-administrator changing a machine-wide runner).
+    /// The caller may not do this.
     PermissionDenied,
     /// Something else is in progress (e.g. an update).
     Busy,
@@ -172,11 +474,16 @@ pub struct ServiceError {
 }
 
 impl ServiceError {
-    /// A "not implemented yet" error for `what`.
+    /// A "not implemented" error for `what`.
     pub fn not_implemented(what: &str) -> Self {
+        ServiceError::new(ErrorCode::NotImplemented, format!("{what} is not available on this platform yet"))
+    }
+
+    /// An error with a code and a message.
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
         ServiceError {
-            code: ErrorCode::NotImplemented,
-            message: format!("{what} is not implemented yet"),
+            code,
+            message: message.into(),
         }
     }
 }
@@ -195,30 +502,48 @@ pub enum FrameError {
     Malformed(String),
 }
 
-/// Writes one message as a frame.
-pub fn write_frame<T: Serialize>(w: &mut impl Write, message: &T) -> Result<(), FrameError> {
+/// One message as a frame (length prefix and JSON body), for async transports.
+pub fn encode_frame<T: Serialize>(message: &T) -> Result<Vec<u8>, FrameError> {
     let body = serde_json::to_vec(message).map_err(|e| FrameError::Malformed(e.to_string()))?;
     if body.len() > MAX_FRAME {
         return Err(FrameError::TooLarge(body.len()));
     }
     let len = u32::try_from(body.len()).map_err(|_| FrameError::TooLarge(body.len()))?;
-    w.write_all(&len.to_le_bytes())?;
-    w.write_all(&body)?;
+    let mut out = Vec::with_capacity(body.len() + 4);
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(&body);
+    Ok(out)
+}
+
+/// The body length a frame header announces, refused beyond [`MAX_FRAME`].
+pub fn frame_len(header: [u8; 4]) -> Result<usize, FrameError> {
+    let len = usize::try_from(u32::from_le_bytes(header)).unwrap_or(usize::MAX);
+    if len > MAX_FRAME {
+        return Err(FrameError::TooLarge(len));
+    }
+    Ok(len)
+}
+
+/// Parses a frame body.
+pub fn decode_body<T: DeserializeOwned>(body: &[u8]) -> Result<T, FrameError> {
+    serde_json::from_slice(body).map_err(|e| FrameError::Malformed(e.to_string()))
+}
+
+/// Writes one message as a frame.
+pub fn write_frame<T: Serialize>(w: &mut impl Write, message: &T) -> Result<(), FrameError> {
+    w.write_all(&encode_frame(message)?)?;
     w.flush()?;
     Ok(())
 }
 
 /// Reads one frame and parses it as a message.
 pub fn read_frame<T: DeserializeOwned>(r: &mut impl Read) -> Result<T, FrameError> {
-    let mut len = [0u8; 4];
-    r.read_exact(&mut len)?;
-    let len = usize::try_from(u32::from_le_bytes(len)).unwrap_or(usize::MAX);
-    if len > MAX_FRAME {
-        return Err(FrameError::TooLarge(len));
-    }
+    let mut header = [0u8; 4];
+    r.read_exact(&mut header)?;
+    let len = frame_len(header)?;
     let mut body = vec![0u8; len];
     r.read_exact(&mut body)?;
-    serde_json::from_slice(&body).map_err(|e| FrameError::Malformed(e.to_string()))
+    decode_body(&body)
 }
 
 /// The service's answer to a hello.
@@ -254,6 +579,7 @@ mod tests {
                 protocol: PROTOCOL_VERSION,
             },
             Request::Status,
+            Request::Subscribe,
             Request::Logs {
                 runner: name("a"),
                 after: Some(3),
@@ -263,6 +589,11 @@ mod tests {
                 runner: name("a"),
                 query: "timed out".into(),
                 limit: 10,
+            },
+            Request::History {
+                runner: name("a"),
+                days: 7,
+                utc_offset_minutes: 480,
             },
         ];
         let mut buf = vec![];
@@ -280,11 +611,19 @@ mod tests {
     fn the_wire_format_is_camel_case_json_with_a_type_tag() {
         let json = serde_json::to_string(&Request::CheckUpdate { runner: name("build-pc") }).unwrap();
         assert_eq!(json, r#"{"type":"checkUpdate","runner":"build-pc"}"#);
-        let err = Response::Error(ServiceError::not_implemented("Starting runners"));
+        let json = serde_json::to_string(&Request::History {
+            runner: name("a"),
+            days: 7,
+            utc_offset_minutes: -60,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"type":"history","runner":"a","days":7,"utcOffsetMinutes":-60}"#);
+        let err = Response::Error(ServiceError::new(ErrorCode::Busy, "later"));
         assert_eq!(
             serde_json::to_string(&err).unwrap(),
-            r#"{"type":"error","code":"notImplemented","message":"Starting runners is not implemented yet"}"#
+            r#"{"type":"error","code":"busy","message":"later"}"#
         );
+        assert!(ServiceError::not_implemented("Registration").message.contains("Registration"));
     }
 
     #[test]
@@ -314,6 +653,48 @@ mod tests {
             limit: 1,
         };
         assert!(matches!(write_frame(&mut vec![], &too_big), Err(FrameError::TooLarge(_))));
+    }
+
+    #[test]
+    fn secrets_never_show_and_are_validated() {
+        let s = Secret::new("  abc123  ").unwrap();
+        assert_eq!(s.expose(), "abc123");
+        assert_eq!(format!("{s:?}"), "Secret(..)");
+        let r = Request::Register {
+            runner: name("a"),
+            server_url: "https://g".into(),
+            token: s,
+            display_name: None,
+        };
+        assert!(!format!("{r:?}").contains("abc123"));
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains(r#""serverUrl":"https://g""#), "{json}");
+        assert_eq!(serde_json::from_str::<Request>(&json).unwrap(), r);
+        for bad in ["", "a b", &"x".repeat(MAX_SECRET_LEN + 1)] {
+            assert!(Secret::new(bad).is_err());
+        }
+        assert!(serde_json::from_str::<Secret>("\"\"").is_err());
+        assert_eq!(String::from(Secret::new("k").unwrap()), "k");
+    }
+
+    #[test]
+    fn queries_do_not_mutate() {
+        for q in [Request::Status, Request::Subscribe, Request::Diagnostics, Request::GetSettings] {
+            assert!(!q.mutates(), "{q:?}");
+        }
+        assert!(Request::Drain { runner: name("a") }.mutates());
+        assert!(Request::CleanDisk { runner: name("a") }.mutates());
+        assert!(!Request::Disk { runner: name("a") }.mutates());
+    }
+
+    #[test]
+    fn async_framing_helpers_agree_with_the_stream_ones() {
+        let f = encode_frame(&Request::Status).unwrap();
+        let len = frame_len([f[0], f[1], f[2], f[3]]).unwrap();
+        assert_eq!(len, f.len() - 4);
+        assert_eq!(decode_body::<Request>(&f[4..]).unwrap(), Request::Status);
+        assert!(frame_len(u32::MAX.to_le_bytes()).is_err());
+        assert!(decode_body::<Request>(b"{").is_err());
     }
 
     #[test]
