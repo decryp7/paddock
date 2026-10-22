@@ -46,6 +46,13 @@ async fn main() {
     eprintln!("Pitwall {} serving on http://127.0.0.1:{bound}", env!("CARGO_PKG_VERSION"));
     let app = http::router(st.clone());
     let shutdown = async {
+        #[cfg(unix)]
+        {
+            if let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {} }
+                return;
+            }
+        }
         let _ = tokio::signal::ctrl_c().await;
     };
     if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {

@@ -23,6 +23,15 @@ pub const DOWNLOAD_HOSTS: &[(&str, &str)] = &[
     ("release-assets.githubusercontent.com", "GitHub release downloads"),
 ];
 
+/// Hosts whose every subdomain is allowed (Hugging Face's CDN picks a regional host such as `us.aws.cdn.hf.co` per
+/// redirect). The match is on whole labels, so `evilcdn.hf.co` does not match `cdn.hf.co`.
+pub const DOWNLOAD_HOST_SUFFIXES: &[(&str, &str)] = &[("cdn.hf.co", "Hugging Face CDN (regional hosts)"), ("xethub.hf.co", "Hugging Face Xet storage (regional hosts)")];
+
+/// Whether `host` is allowed: listed exactly, or a subdomain of a listed suffix.
+pub fn host_is_allowed(host: &str) -> bool {
+    DOWNLOAD_HOSTS.iter().any(|(h, _)| *h == host) || DOWNLOAD_HOST_SUFFIXES.iter().any(|(s, _)| host.strip_suffix(s).is_some_and(|p| p.ends_with('.') && p.len() > 1))
+}
+
 /// Why a URL may not be fetched.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EgressError {
@@ -58,7 +67,7 @@ impl DownloadUrl {
             None => authority,
         }
         .to_ascii_lowercase();
-        if !DOWNLOAD_HOSTS.iter().any(|(h, _)| *h == host) {
+        if !host_is_allowed(&host) {
             return Err(refuse());
         }
         Ok(DownloadUrl { url: url.to_string(), host })
@@ -155,6 +164,16 @@ pub fn origin_allowed_without_key(origin: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hugging_face_regional_cdn_hosts_are_allowed_by_whole_label() {
+        assert!(DownloadUrl::parse("https://us.aws.cdn.hf.co/xet-bridge-us/abc?x=1").is_ok());
+        assert!(DownloadUrl::parse("https://cas-bridge.xethub.hf.co/x").is_ok());
+        for bad in ["https://evilcdn.hf.co/x", "https://cdn.hf.co.evil.com/x", "https://.cdn.hf.co/x", "https://cdn.hf.co/x"] {
+            assert!(DownloadUrl::parse(bad).is_err(), "{bad}");
+        }
+        assert!(DOWNLOAD_HOST_SUFFIXES.iter().all(|(_, why)| !why.is_empty()));
+    }
 
     #[test]
     fn only_listed_https_hosts() {
