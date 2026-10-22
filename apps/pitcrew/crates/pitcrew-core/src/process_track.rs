@@ -219,23 +219,26 @@ pub fn prune_extensions(ext: &mut Extensions, alive: &[ProcessMeta]) {
     ext.retain(|(pid, started), _| alive.iter().any(|m| m.pid == *pid && m.started_ms == Some(*started)));
 }
 
-/// Processes started within this long of the runner process belong to the runner itself (its console host).
-pub const RUNNER_OWN_MS: u64 = 2_000;
+/// Helpers the OS starts for the runner process itself, not for a job: Windows gives every console program a
+/// `conhost.exe` child. A direct child of the runner with one of these names is never a job's leftover.
+pub const RUNNER_OWN_HELPERS: &[&str] = &["conhost.exe"];
+
+/// Whether `m` is a helper the OS started for the runner itself (see [`RUNNER_OWN_HELPERS`]).
+fn is_runner_helper(m: &ProcessMeta, runner_pid: u32) -> bool {
+    m.ppid == Some(runner_pid) && RUNNER_OWN_HELPERS.iter().any(|n| m.name.eq_ignore_ascii_case(n))
+}
 
 /// Classifies the runner's processes. `runner_pid` is the runner process itself.
 pub fn classify(runner_pid: u32, procs: &[ProcessMeta], spans: &[JobSpan], policy: &ProcessPolicy, ext: &Extensions) -> Vec<Tracked> {
-    // What started with the runner process belongs to it, not to a job: Windows gives every console program a
-    // `conhost.exe` child, and a runner restarted while a job's window was open must not lose its own to cleanup.
-    let runner_start = procs.iter().find(|m| m.pid == runner_pid).and_then(|m| m.started_ms);
-    let belongs_to_runner = |started: u64| runner_start.is_some_and(|r| started <= r.saturating_add(RUNNER_OWN_MS));
     procs
         .iter()
         .map(|m| {
             let is_runner = m.pid == runner_pid;
-            let span = if is_runner {
+            // The runner's own console host is the runner's, even when a restart put its start inside a job's window.
+            let span = if is_runner || is_runner_helper(m, runner_pid) {
                 None
             } else {
-                m.started_ms.filter(|s| !belongs_to_runner(*s)).and_then(|s| job_of(s, spans))
+                m.started_ms.and_then(|s| job_of(s, spans))
             };
             let job = span.map(|s| s.label.clone());
             let finished = span.and_then(|s| s.finished);
@@ -502,8 +505,8 @@ mod tests {
 
     #[test]
     fn what_starts_with_the_runner_is_never_a_leftover() {
-        // The runner was restarted (pid 50, started at 10_000) inside a job's window that never got its end in
-        // time; its console host (pid 51) starts with it and must not be stopped as that job's leftover.
+        // The runner was restarted (pid 50, started at 10_000) inside a job's window; its console host (pid 51) must
+        // not be stopped as that job's leftover, while a job's process started right after the runner still is.
         let meta = |pid: u32, started: u64, name: &str| ProcessMeta {
             pid,
             ppid: Some(50),

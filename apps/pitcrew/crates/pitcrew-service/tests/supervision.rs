@@ -200,6 +200,24 @@ impl Harness {
     }
 }
 
+impl Drop for Harness {
+    /// A failing test never leaves its fake runner (or the processes it started) running: everything whose program
+    /// or command line lives in this test's folder is killed, then the folder is removed.
+    fn drop(&mut self) {
+        let root = self.root.to_string_lossy().to_string();
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        for p in sys.processes().values() {
+            let exe = p.exe().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+            let cmd = p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ");
+            if exe.starts_with(&root) || cmd.contains(&root) {
+                p.kill();
+            }
+        }
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 fn count(h: &[HistoryEvent], f: impl Fn(&HistoryKind) -> bool) -> usize {
     h.iter().filter(|e| f(&e.kind)).count()
 }
@@ -299,19 +317,20 @@ fn stop_waits_for_the_running_job() {
 #[test]
 fn usage_follows_the_runner_and_the_processes_it_started() {
     let mut h = Harness::new("meter", "mode=job\njob_secs=6\n", true);
+    // The runner alone is one process; on Windows its console host (`conhost.exe`) makes two.
+    let base = if cfg!(windows) { 2 } else { 1 };
     // The job's child (the stand-in for a compiler) is counted with the runner.
     h.until("the job's process is counted", Duration::from_secs(6), |h| {
-        h.status().usage.is_some_and(|u| u.processes >= 2)
+        h.status().usage.is_some_and(|u| u.processes > base)
     });
     let during = h.status().usage.unwrap();
     assert!(during.mem_bytes > 0, "{during:?}");
     assert!(during.cpu_permille <= 1000);
     // It exits, and drops out of the count while the runner stays. The child lives `job_secs` (on Windows `ping -n 7`
     // takes about 7 s, and a loaded runner is slower), so the deadline leaves room. On Windows the runner also has its
-    // console host (`conhost.exe`), so the count falls by one rather than to one.
-    let busy = during.processes;
+    // console host, which stays.
     h.until("the exited child is no longer counted", Duration::from_secs(20), |h| {
-        h.status().usage.is_some_and(|u| u.processes == busy - 1)
+        h.status().usage.is_some_and(|u| u.processes == base)
     });
     // The history has the runner's series and the machine series carries the runners' share.
     let name = h.name.clone();
