@@ -1,10 +1,10 @@
 import type { FieldSpec, SourceKind } from '../../core/api.types';
 import { SOURCE_KINDS } from '../../core/mock/mock-data';
 import { blankDraft } from '../../core/draft';
-import { defaultValues, draftFor, findAction, missingFields, parseArgs, replaceAction, suggestName, toggleAction } from './draft-utils';
+import { EXTENSION_CHIPS, defaultValues, draftFor, extensionList, findAction, missingFields, parseArgs, patchProduct, replaceAction, suggestName, toggleAction, toggleExtension, toggleTracked } from './draft-utils';
 
 const field = (key: string, over: Partial<FieldSpec> = {}): FieldSpec => ({
-  key, label: key, help: '', kind: 'text', required: true, default: '', placeholder: '', min: null, max: null, options: [], ...over,
+  key, label: key, help: '', kind: 'text', required: true, default: '', placeholder: '', min: null, max: null, options: [], advanced: false, ...over,
 });
 const kind = (fields: FieldSpec[]): SourceKind => ({ id: 'k', label: 'Kind label', description: '', group: 'files', fields } as SourceKind);
 
@@ -40,7 +40,7 @@ describe('draft utils', () => {
     expect(findAction(actions, 'open-location')).toEqual({ kind: 'open-location' });
     expect(findAction(actions, 'download')).toBeNull();
     const on = toggleAction(actions, 'download', true);
-    expect(findAction(on, 'download')).toEqual({ kind: 'download', folder: '', verify: true });
+    expect(findAction(on, 'download')).toEqual({ kind: 'download', folder: '', verify: true, variant: '', extension: '' });
     expect(findAction(toggleAction(on, 'run-command', true), 'run-command')).toEqual({ kind: 'run-command', program: '', args: [] });
     expect(toggleAction(on, 'open-location', true)).toHaveLength(2);
     expect(toggleAction(on, 'download', false).map((a) => a.kind)).toEqual(['open-location']);
@@ -52,5 +52,39 @@ describe('draft utils', () => {
   it('parses arguments one per line', () => {
     expect(parseArgs(' a \r\n\n b c\n')).toEqual(['a', 'b c']);
     expect(parseArgs('')).toEqual([]);
+  });
+});
+
+describe('product and extension helpers', () => {
+  it('toggles extensions in a comma list, keeping custom ones', () => {
+    expect(extensionList(' ISO, .exe;*.msi  tar.gz')).toEqual(['iso', 'exe', 'msi', 'tar.gz']);
+    expect(toggleExtension('iso, exe', 'zip', true)).toBe('iso, exe, zip');
+    expect(toggleExtension('iso, exe, zip', 'exe', false)).toBe('iso, zip');
+    expect(toggleExtension('', 'iso', true)).toBe('iso');
+    expect(toggleExtension('iso', 'iso', false)).toBe('');
+    expect(EXTENSION_CHIPS).toContain('dmg');
+  });
+
+  it('narrows and widens the product list', () => {
+    const all = ['PRO', 'QA', 'LITE'];
+    expect(toggleTracked([], all, 'QA', false)).toEqual(['PRO', 'LITE']);
+    expect(toggleTracked(['PRO', 'LITE'], all, 'QA', true)).toEqual([]);
+    expect(toggleTracked(['PRO'], all, 'QA', true)).toEqual(['PRO', 'QA']);
+    expect(toggleTracked(['PRO'], all, 'PRO', false)).toEqual([]);
+    expect(toggleTracked([], [], 'X', false)).toEqual([]);
+  });
+
+  it('keeps only the product settings that differ from the defaults', () => {
+    const t = blankDraft().tracking;
+    const named = patchProduct(t, 'PRO', { name: 'Acme Installer Pro' });
+    expect(named.products.settings['PRO']).toEqual({ name: 'Acme Installer Pro', muted: false, soakHours: null });
+    const muted = patchProduct(named, 'PRO', { muted: true, soakHours: 6 });
+    expect(muted.products.settings['PRO']).toEqual({ name: 'Acme Installer Pro', muted: true, soakHours: 6 });
+    expect(patchProduct(patchProduct(named, 'PRO', { name: '  ' }), 'PRO', {}).products.settings).toEqual({});
+  });
+
+  it('adds the artifact choice to new actions', () => {
+    expect(toggleAction([], 'open-location', true)).toEqual([{ kind: 'open-location', variant: '', extension: '' }]);
+    expect(toggleAction([], 'download', true)).toEqual([{ kind: 'download', folder: '', verify: true, variant: '', extension: '' }]);
   });
 });

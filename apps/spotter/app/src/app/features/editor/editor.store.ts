@@ -1,12 +1,12 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { DiscoveredFeed, ImportFormat, ImportResult, Preset, SourceKind, SourcePreview, WatchDraft, WatchSummary } from '../../core/api.types';
+import type { DiscoveredFeed, ImportFormat, ImportResult, LatestBy, Preset, ProductSetting, SchemePreset, SourceKind, SourcePreview, WatchDraft, WatchSummary } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { blankDraft } from '../../core/draft';
 import { SettingsStore } from '../../state/settings.store';
 import { idle, pending, settle, type Loadable } from '../../state/loadable';
-import { draftFor, missingFields, suggestName } from './draft-utils';
+import { draftFor, missingFields, patchProduct, suggestName, toggleTracked } from './draft-utils';
 
 export type EditorStep = 'source' | 'configure' | 'versions' | 'notify' | 'review';
 export const STEPS: { id: EditorStep; label: string }[] = [
@@ -25,6 +25,7 @@ interface EditorState {
   editing: boolean;
   kinds: Loadable<SourceKind[]>;
   presets: Loadable<Preset[]>;
+  schemes: Loadable<SchemePreset[]>;
   draft: WatchDraft;
   secrets: Record<string, string>;
   secretsSet: string[];
@@ -47,6 +48,7 @@ export const EditorStore = signalStore(
     editing: false,
     kinds: idle<SourceKind[]>(),
     presets: idle<Preset[]>(),
+    schemes: idle<SchemePreset[]>(),
     draft: blankDraft(),
     secrets: {},
     secretsSet: [],
@@ -63,10 +65,19 @@ export const EditorStore = signalStore(
   }),
   withComputed((s) => {
     const kind = computed(() => s.kinds().value?.find((k) => k.id === s.draft().source.kind) ?? null);
+    const extraction = computed(() => s.preview().value?.extraction ?? null);
     return {
       kind,
       missing: computed(() => missingFields(kind(), s.draft().source.values)),
       stepIndex: computed(() => STEPS.findIndex((x) => x.id === s.step())),
+      /** What the pattern read from the source's names (null until the test has run). */
+      extraction,
+      /** Names to offer the pattern helper as examples. */
+      examples: computed(() => (extraction()?.rows ?? []).map((r) => r.text).filter((t, i, all) => all.indexOf(t) === i).slice(0, 12)),
+      /** The product ids found in the names, for the product checkboxes. */
+      discovered: computed(() => (extraction()?.products ?? []).flatMap((p) => (p.id === null ? [] : [p.id]))),
+      /** The source does not report creation times, so "latest by created time" cannot work. */
+      createdUnavailable: computed(() => extraction()?.createdAvailable === false),
     };
   }),
   withMethods((store) => {
@@ -98,8 +109,13 @@ export const EditorStore = signalStore(
       update,
       async loadCatalog(): Promise<void> {
         patchState(store, { kinds: pending(store.kinds()), presets: pending(store.presets()) });
-        const [kinds, presets] = await Promise.all([settle(store.kinds(), () => backend.sourceKinds()), settle(store.presets(), () => backend.presets())]);
-        patchState(store, { kinds, presets });
+        patchState(store, { schemes: pending(store.schemes()) });
+        const [kinds, presets, schemes] = await Promise.all([
+          settle(store.kinds(), () => backend.sourceKinds()),
+          settle(store.presets(), () => backend.presets()),
+          settle(store.schemes(), () => backend.versionSchemes()),
+        ]);
+        patchState(store, { kinds, presets, schemes });
       },
       /** Loads an existing watch for editing (and starts at the source's form). */
       async loadWatch(id: string): Promise<void> {
@@ -136,6 +152,27 @@ export const EditorStore = signalStore(
         const interval = settings.settings().value?.defaultIntervalSecs ?? p.draft.intervalSecs;
         patchState(store, { draft: { ...structuredClone(p.draft), id: null, intervalSecs: interval }, secrets: {}, preview: idle(), step: 'configure' });
         if (kind) schedule();
+      },
+      /** Sets the version pattern (which makes the scheme a custom one). */
+      setPattern(pattern: string): void {
+        update((d) => ({ ...d, versions: 'custom', versionPattern: pattern }));
+      },
+      setLatestBy(latestBy: LatestBy): void {
+        update((d) => ({ ...d, tracking: { ...d.tracking, latestBy } }));
+      },
+      setMissingOlder(missingOlder: boolean): void {
+        update((d) => ({ ...d, tracking: { ...d.tracking, missingOlder } }));
+      },
+      setAnnounceNew(announceNew: boolean): void {
+        update((d) => ({ ...d, tracking: { ...d.tracking, products: { ...d.tracking.products, announceNew } } }));
+      },
+      /** Ticks or unticks a product found in the names. */
+      setTracked(id: string, on: boolean): void {
+        const discovered = store.discovered();
+        update((d) => ({ ...d, tracking: { ...d.tracking, products: { ...d.tracking.products, only: toggleTracked(d.tracking.products.only, discovered, id, on) } } }));
+      },
+      setProduct(id: string, patch: Partial<ProductSetting>): void {
+        update((d) => ({ ...d, tracking: patchProduct(d.tracking, id, patch) }));
       },
       setValue(key: string, value: string): void {
         update((d) => ({ ...d, source: { ...d.source, values: { ...d.source.values, [key]: value } } }));

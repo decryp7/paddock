@@ -15,6 +15,22 @@ export interface WatchStatus {
   message: string | null;
 }
 
+/** One file of a release (`spotter_core::release::Artifact`). */
+export interface Artifact {
+  name: string;
+  location: string;
+  /** Lower-case extension (`iso`, `exe`, `tar.gz`). */
+  kind: string;
+  /** `x64`, `lite`, ... or empty. */
+  variant: string;
+  size: number | null;
+  modifiedMs: number | null;
+  /** Null where the source does not report creation times. */
+  createdMs: number | null;
+  /** The checksum file next to it, by name. */
+  checksumFile: string | null;
+}
+
 /** One release. */
 export interface Release {
   /** The version as the watch's scheme shows it (`1.4.2-rc.1`, `R1.01.00T10`). */
@@ -28,6 +44,16 @@ export interface Release {
   firstSeenMs: number;
   size: number | null;
   sha256: string | null;
+  /** The product (`id` group of the pattern); null for a watch of one thing. */
+  product: string | null;
+  /** The channel label as written (`beta`), empty for none. */
+  channel: string;
+  /** Other named groups of the pattern, for display. */
+  fields: Record<string, string>;
+  /** Every file of the release, the primary one first. */
+  artifacts: Artifact[];
+  /** The same file name came back with new contents. */
+  updatedInPlace: boolean;
 }
 
 /** Version schemes (`spotter_core::version::VersionScheme`). */
@@ -66,9 +92,34 @@ export interface VersionFilter {
 }
 
 export type WatchAction =
-  | { kind: 'open-location' }
-  | { kind: 'download'; folder: string; verify: boolean }
+  | { kind: 'open-location'; variant?: string; extension?: string }
+  | { kind: 'download'; folder: string; verify: boolean; variant?: string; extension?: string }
   | { kind: 'run-command'; program: string; args: string[] };
+
+/** How the newest release is decided (`spotter_core::release::LatestBy`). */
+export type LatestBy = 'version' | 'modified' | 'created' | 'name';
+
+export interface ProductSetting {
+  /** Display name; empty for the id itself. */
+  name: string;
+  muted: boolean;
+  /** Own soak time; null uses the watch's. */
+  soakHours: number | null;
+}
+
+/** Which release is the latest, and which products are tracked (`spotter_core::tracking::Tracking`). */
+export interface Tracking {
+  latestBy: LatestBy;
+  /** A number group the name leaves out counts as older than any number (default: as zero). */
+  missingOlder: boolean;
+  products: {
+    /** Track only these ids; empty for every product found. */
+    only: string[];
+    /** Announce a product that appears after the first check (off: it is a new baseline). */
+    announceNew: boolean;
+    settings: Record<string, ProductSetting>;
+  };
+}
 
 /** A watch as edited and stored (`spotter_core::watch::WatchSpec`). */
 export interface WatchDraft {
@@ -87,6 +138,7 @@ export interface WatchDraft {
   channels: NotificationChannel[];
   filter: VersionFilter;
   paused: boolean;
+  tracking: Tracking;
 }
 
 /** One row of the watch list, the tiles and the tray. */
@@ -114,6 +166,8 @@ export interface WatchSummary {
   nextCheckMs: number | null;
   failures: number;
   intervalSecs: number;
+  /** How many products the watch tracks (0 for a watch of one thing). */
+  productCount: number;
 }
 
 export interface CheckRecord {
@@ -133,6 +187,20 @@ export interface WatchDetail {
   checks: CheckRecord[];
   /** Keys of secret fields that have a value in the credential store (values are never sent to the UI). */
   secretsSet: string[];
+  /** The products of a watch whose pattern has an `id` group. */
+  products: Product[];
+}
+
+/** One product of a watch: its own latest release, new state and history. */
+export interface Product {
+  id: string;
+  /** Renamed or the id. */
+  name: string;
+  muted: boolean;
+  latest: Release | null;
+  unseen: boolean;
+  /** Newest first. */
+  history: Release[];
 }
 
 export type FieldKind = 'text' | 'url' | 'folder' | 'secret' | 'integer' | 'toggle' | 'choice';
@@ -151,6 +219,8 @@ export interface FieldSpec {
   max: number | null;
   /** For choices. */
   options: { value: string; label: string }[];
+  /** Shown under "More options". */
+  advanced: boolean;
 }
 
 export type SourceGroup = 'files' | 'web' | 'forge' | 'registry';
@@ -177,6 +247,111 @@ export interface SourcePreview {
   prereleasesSkipped: number;
   namesSkipped: number;
   tookMs: number;
+  /** What the pattern read from the names; null when nothing was found. */
+  extraction: ExtractionPreview | null;
+}
+
+/** Where a named group matched, in UTF-16 code units (what a JavaScript string indexes by). */
+export interface GroupSpan {
+  group: string;
+  start: number;
+  end: number;
+}
+
+/** What was read from one name. */
+export interface ReadResult {
+  id: string | null;
+  version: string;
+  channel: string;
+  variant: string;
+  prerelease: boolean;
+  fields: Record<string, string>;
+  spans: GroupSpan[];
+}
+
+/** One row of the wizard's table of names. */
+export interface NameRow {
+  /** The text the pattern ran on (name, folder name or relative path). */
+  text: string;
+  fileName: string;
+  size: number | null;
+  modifiedMs: number | null;
+  /** What was read; null when the name was ignored. */
+  read: ReadResult | null;
+  /** Why it was ignored (`ignored: no match: ...`). */
+  ignored: string | null;
+}
+
+export interface VersionPreview {
+  version: string;
+  /** Would be the latest for its product. */
+  latest: boolean;
+  prerelease: boolean;
+  artifacts: Artifact[];
+}
+
+export interface ProductPreview {
+  /** Null for a watch of one thing. */
+  id: string | null;
+  /** The watch tracks it (no product list, or it is on the list). */
+  tracked: boolean;
+  /** In the chosen order, newest first. */
+  versions: VersionPreview[];
+}
+
+/** How a folder scan went. */
+export interface ScanStats {
+  scanned: number;
+  matched: number;
+  folders: number;
+  tookMs: number;
+  /** The previous listing was reused because no folder changed. */
+  reused: boolean;
+  /** Files still changing (left out until they settle). */
+  settling: number;
+}
+
+/** What the wizard shows about the names a source holds (`spotter_engine::view::ExtractionPreview`). */
+export interface ExtractionPreview {
+  /** Matches first, then a sample of the ignored names (at most 300 rows). */
+  rows: NameRow[];
+  products: ProductPreview[];
+  scan: ScanStats | null;
+  /** Names left out before or by the pattern. */
+  ignoredCount: number;
+  /** The pattern has an `id` group. */
+  hasId: boolean;
+  /** The source reports creation times (needed for "latest by created time"). */
+  createdAvailable: boolean;
+  /** How the latest is decided, in words (the tooltip). */
+  orderNote: string;
+  warnings: string[];
+}
+
+/** The result of trying a pattern on one name (the Test field). */
+export interface PatternTest {
+  /** The pattern is not valid: what to fix. */
+  error: string | null;
+  read: ReadResult | null;
+  ignored: string | null;
+}
+
+/** A part of an example name the user selected for the pattern helper. */
+export interface PatternSelection {
+  role: 'id' | 'major' | 'minor' | 'patch' | 'build' | 'channel' | 'variant';
+  /** First UTF-16 code unit. */
+  start: number;
+  /** One past the last. */
+  end: number;
+}
+
+/** A pattern to start from (a declarative pack scheme). */
+export interface SchemePreset {
+  id: string;
+  name: string;
+  pattern: string;
+  /** A name it reads. */
+  example: string;
 }
 
 /** A ready-made watch for well-known software (a declarative pack). */

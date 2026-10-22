@@ -65,6 +65,12 @@
     grid-template-columns: 1fr;
   }
 }
+.product-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 140px) 1fr auto minmax(80px, 120px);
+  gap: var(--pd-space-2);
+  align-items: center;
+}
 .stack {
   display: grid;
   gap: var(--pd-space-4);

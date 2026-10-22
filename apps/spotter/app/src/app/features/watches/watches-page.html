@@ -64,6 +64,9 @@
                   </td>
                   <td>
                     <span class="ver">{{ w.latest?.version ?? '—' }}</span>
+                    @if (w.productCount) {
+                      <span class="chip" [title]="'The newest release of ' + w.latest?.product">{{ w.productCount }} products</span>
+                    }
                     @if (w.unseen) {
                       <span class="chip accent">New</span>
                     }
@@ -93,7 +96,7 @@
                         <mat-icon [svgIcon]="w.paused ? 'sp:play' : 'sp:pause'" aria-hidden="true" />
                       </button>
                       @if (w.latest) {
-                        <button type="button" class="btn ghost icon sm" (click)="store.openRelease(w.id, w.latest.version)" [attr.aria-label]="'Open the latest release of ' + w.name">
+                        <button type="button" class="btn ghost icon sm" (click)="store.openRelease(w.id, w.latest.version, { product: w.latest.product })" [attr.aria-label]="'Open the latest release of ' + w.name">
                           <mat-icon svgIcon="sp:external" aria-hidden="true" />
                         </button>
                       }

@@ -17,14 +17,22 @@ pub mod checker {
     use spotter_core::release::Candidate;
     use spotter_core::source::{BoxFuture, FolderSource, HttpRequest, Parser, Plan, ReleaseSource, SourceError};
 
-    /// Lists a folder source.
+    /// Lists a folder source (without remembering anything between checks; the engine uses [`crate::folder::scan`]
+    /// directly to keep a snapshot).
     pub struct FolderChecker(pub FolderSource);
 
     impl ReleaseSource for FolderChecker {
         fn list(&self, limit: usize) -> BoxFuture<'_, Result<Vec<Candidate>, SourceError>> {
             Box::pin(async move {
-                let entries = crate::folder::list(&self.0.path, crate::folder::LIST_TIMEOUT).await?;
-                let mut c = self.0.candidates(entries);
+                let scan = crate::folder::scan(crate::folder::ScanRequest {
+                    source: self.0.clone(),
+                    readable: None,
+                    previous: None,
+                    sample_ignored: 0,
+                    settle: true,
+                })
+                .await?;
+                let mut c = scan.candidates;
                 c.truncate(limit);
                 Ok(c)
             })

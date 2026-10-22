@@ -5,6 +5,7 @@
 //! part (missing parts count as zero), and a pre-release orders before its release, with semver's rules between
 //! pre-release labels (`alpha < alpha.1 < beta < rc.1 < rc.2`).
 
+use crate::extract::{self, Extracted, GroupSpan, Ignored};
 use crate::user_regex;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -133,8 +134,9 @@ pub enum VersionScheme {
     BuildNumber,
     /// Dates (`2026.10.22`, `2026-10-22`, `20261022`), optionally followed by a build number (`2026.10.22.3`).
     Date,
-    /// A regular expression with named groups `major`, `minor`, `patch`, `build` (numbers, at least one) and
-    /// optionally `pre` (a pre-release label).
+    /// A regular expression with named groups: `major`, `minor`, `patch`, `build` (numbers), `id` (the product),
+    /// `channel` or `pre` (a release channel such as beta), `variant` (x64, lite) and any other name for display
+    /// fields. At least a number group or an `id` is needed.
     Custom(CustomScheme),
 }
 
@@ -149,9 +151,11 @@ impl PartialEq for VersionScheme {
 pub struct CustomScheme {
     pattern: String,
     regex: Regex,
+    /// A declared number group that did not take part sorts older than a present one (even `0`).
+    missing_older: bool,
 }
 
-const GROUPS: [&str; 4] = ["major", "minor", "patch", "build"];
+const GROUPS: [&str; 4] = extract::NUMERIC_GROUPS;
 
 impl VersionScheme {
     /// From a stored id (`semver`, `numeric`, `build-number`, `date`, `custom`) and, for `custom`, the pattern.
@@ -175,13 +179,44 @@ impl VersionScheme {
         }
         let regex = user_regex::compile(pattern, true)?;
         let names: Vec<&str> = regex.capture_names().flatten().collect();
-        if !GROUPS.iter().any(|g| names.contains(g)) {
-            return Err("The pattern needs at least one of the named groups (?<major>…), (?<minor>…), (?<patch>…) or (?<build>…).".into());
+        if !GROUPS.iter().any(|g| names.contains(g)) && !names.contains(&"id") {
+            return Err(
+                "The pattern needs at least one of the named groups (?<major>…), (?<minor>…), (?<patch>…), (?<build>…) or (?<id>…).".into(),
+            );
         }
         Ok(VersionScheme::Custom(CustomScheme {
             pattern: pattern.to_string(),
             regex,
+            missing_older: false,
         }))
+    }
+
+    /// Makes a custom scheme sort a missing number group older than a present one (other schemes are unchanged).
+    pub fn with_missing_older(mut self, missing_older: bool) -> VersionScheme {
+        if let VersionScheme::Custom(c) = &mut self {
+            c.missing_older = missing_older;
+        }
+        self
+    }
+
+    /// Whether the pattern has an `id` group, so one watch tracks several products.
+    pub fn has_id(&self) -> bool {
+        self.group_names().contains(&"id")
+    }
+
+    /// The compiled regular expression of a custom scheme, for prefiltering names before anything else is done.
+    pub fn custom_regex(&self) -> Option<&Regex> {
+        match self {
+            VersionScheme::Custom(c) => Some(&c.regex),
+            _ => None,
+        }
+    }
+
+    fn group_names(&self) -> Vec<&str> {
+        match self {
+            VersionScheme::Custom(c) => c.regex.capture_names().flatten().collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// The stored id.
@@ -205,17 +240,33 @@ impl VersionScheme {
 
     /// Reads the version in `text`; `None` when there is none.
     pub fn extract(&self, text: &str) -> Option<Version> {
+        self.extract_full(text).ok().map(|x| x.version)
+    }
+
+    /// Reads everything the scheme can read in `text` (the version, and for a custom scheme the id, channel, variant,
+    /// extra fields and where each group matched), or says why there is nothing.
+    pub fn extract_full(&self, text: &str) -> Result<Extracted, Ignored> {
         let text = text.trim();
         if text.is_empty() || text.len() > 1024 {
-            return None;
+            return Err(Ignored::NoMatch);
         }
-        match self {
+        let version = match self {
             VersionScheme::Semver => dotted(text, 2, 3),
             VersionScheme::Numeric => dotted(text, 1, MAX_PARTS),
             VersionScheme::BuildNumber => build_number(text),
             VersionScheme::Date => date(text),
-            VersionScheme::Custom(c) => custom(&c.regex, text),
-        }
+            VersionScheme::Custom(c) => return custom(c, text),
+        };
+        version.map_or(Err(Ignored::NoMatch), |version| {
+            Ok(Extracted {
+                id: None,
+                channel: version.pre.clone(),
+                version,
+                variant: String::new(),
+                fields: Default::default(),
+                spans: Vec::new(),
+            })
+        })
     }
 }
 
@@ -302,19 +353,98 @@ fn date(text: &str) -> Option<Version> {
     None
 }
 
-fn custom(regex: &Regex, text: &str) -> Option<Version> {
-    let c = regex.captures(text)?;
+/// Reads a custom scheme's groups out of `text`.
+fn custom(scheme: &CustomScheme, text: &str) -> Result<Extracted, Ignored> {
+    let regex = &scheme.regex;
+    let c = regex.captures(text).ok_or(Ignored::NoMatch)?;
+    let declared = |g: &str| regex.capture_names().flatten().any(|n| n == g);
     let mut parts = Vec::new();
+    let mut spans = Vec::new();
+    let (mut first, mut last): (Option<usize>, usize) = (None, 0);
     for g in GROUPS {
         if let Some(m) = c.name(g) {
-            parts.push(m.as_str().parse::<u64>().ok()?);
-        } else if regex.capture_names().flatten().any(|n| n == g) {
-            // A declared group that did not take part counts as zero, so versions stay comparable.
+            let n = m.as_str().parse::<u64>().map_err(|_| Ignored::NoVersion)?;
+            parts.push(if scheme.missing_older { n.saturating_add(1) } else { n });
+            first = Some(first.map_or(m.start(), |f: usize| f.min(m.start())));
+            last = last.max(m.end());
+        } else if declared(g) {
+            // A declared group that did not take part counts as zero (or as older), so versions stay comparable.
             parts.push(0);
         }
     }
-    let pre = c.name("pre").map_or("", |m| m.as_str()).to_string();
-    Some(Version::new(c.get(0).map_or("", |m| m.as_str()).to_string(), parts, pre))
+    let group_text = |g: &str| c.name(g).map(|m| m.as_str().trim());
+    let id = match group_text("id") {
+        Some(i) if !i.is_empty() => Some(i.chars().take(extract::MAX_ID_LEN).collect::<String>()),
+        _ if declared("id") => return Err(Ignored::NoId),
+        _ => None,
+    };
+    let channel = group_text("channel").or_else(|| group_text("pre")).unwrap_or("").to_string();
+    let pre = if extract::is_release_channel(&channel) {
+        String::new()
+    } else {
+        channel.clone()
+    };
+    let variant = group_text("variant").unwrap_or("").to_string();
+    let mut fields = std::collections::BTreeMap::new();
+    for name in regex.capture_names().flatten() {
+        if extract::RESERVED_GROUPS.contains(&name) {
+            continue;
+        }
+        if let Some(m) = c.name(name) {
+            if fields.len() < extract::MAX_FIELDS {
+                fields.insert(
+                    name.to_string(),
+                    m.as_str().chars().take(extract::MAX_FIELD_LEN).collect::<String>(),
+                );
+            }
+        }
+    }
+    for name in regex.capture_names().flatten() {
+        if let Some(m) = c.name(name) {
+            spans.push(GroupSpan {
+                group: name.to_string(),
+                start: extract::utf16_offset(text, m.start()),
+                end: extract::utf16_offset(text, m.end()),
+            });
+        }
+    }
+    let shown = match first {
+        Some(f) => display_text(text, &c, f, last, c.get(0).map_or(0, |m| m.start()), &pre),
+        None if parts.is_empty() => String::new(),
+        None => c.get(0).map_or("", |m| m.as_str()).to_string(),
+    };
+    Ok(Extracted {
+        id,
+        version: Version::new(shown, parts, pre),
+        channel,
+        variant,
+        fields,
+        spans,
+    })
+}
+
+/// The version as written: from the first number group to the last (so `R3.10.00T32` keeps its letters and zeros),
+/// one attached letter before it (`R`, `v`), and the pre-release label after it.
+fn display_text(text: &str, c: &regex::Captures<'_>, first: usize, last: usize, match_start: usize, pre: &str) -> String {
+    let mut start = first;
+    if let Some((i, ch)) = text[..first].char_indices().next_back() {
+        let before = text[..i].chars().next_back();
+        if i >= match_start && ch.is_ascii_alphabetic() && before.is_none_or(|b| !b.is_ascii_alphanumeric()) {
+            start = i;
+        }
+    }
+    let mut shown = text[start..last].to_string();
+    if !pre.is_empty() {
+        let inside = ["channel", "pre"]
+            .iter()
+            .filter_map(|g| c.name(g))
+            .any(|m| m.start() >= start && m.end() <= last);
+        if !inside {
+            shown.push('-');
+            shown.push_str(pre);
+        }
+    }
+    shown
 }
 
 #[cfg(test)]
@@ -390,7 +520,7 @@ mod tests {
         let x = v(&s, "my-build-7_123-beta.zip");
         assert_eq!(
             (x.parts.clone(), x.pre.as_str(), x.text.as_str()),
-            (vec![7, 123], "beta", "build-7_123-beta")
+            (vec![7, 123], "beta", "7_123-beta")
         );
         let opt = VersionScheme::custom(r"r(?<major>\d+)(?:\.(?<minor>\d+))?").unwrap();
         assert_eq!(v(&opt, "r5").parts, vec![5, 0]);
@@ -399,8 +529,71 @@ mod tests {
         assert_eq!(s.extract("nothing"), None);
         assert!(VersionScheme::custom("").is_err());
         assert!(VersionScheme::custom(r"(\d+)").unwrap_err().contains("named groups"));
+        assert!(VersionScheme::custom(r"(?<id>\w+)").is_ok(), "an id alone is enough");
         assert!(VersionScheme::custom("(").is_err());
         assert_eq!(s.custom_pattern(), Some(r"build-(?<major>\d+)_(?<build>\d+)(?:-(?<pre>\w+))?"));
+    }
+
+    #[test]
+    fn custom_schemes_read_ids_channels_variants_and_fields() {
+        let s = VersionScheme::custom(
+            r"Acme-(?<id>[A-Z]+)-R(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)T(?<build>\d+)(?:_(?<variant>x64|arm64))?(?:-(?<channel>beta|rc\d*))?(?<ext>\.\w+)$",
+        )
+        .unwrap();
+        assert!(s.has_id());
+        let x = s.extract_full("Acme-PRO-R3.10.00T32_x64-rc2.iso").unwrap();
+        assert_eq!(x.id.as_deref(), Some("PRO"));
+        assert_eq!(x.version.text, "R3.10.00T32-rc2", "letters and zeros stay as written");
+        assert_eq!(x.version.parts, vec![3, 10, 0, 32]);
+        assert_eq!(
+            (x.channel.as_str(), x.version.pre.as_str(), x.variant.as_str()),
+            ("rc2", "rc2", "x64")
+        );
+        assert_eq!(x.fields.get("ext").map(String::as_str), Some(".iso"));
+        let id = x.spans.iter().find(|s| s.group == "id").unwrap();
+        assert_eq!((id.start, id.end), (5, 8));
+        // Zeros do not change the order; the numbers do.
+        let a = s.extract("Acme-PRO-R3.9.00T32.zip").unwrap();
+        let b = s.extract("Acme-PRO-R3.10.00T01.zip").unwrap();
+        assert!(a < b);
+        assert_eq!(s.extract("Acme-PRO-R3.10.00T32.zip").unwrap().text, "R3.10.00T32");
+        // Stable channels are not pre-releases.
+        let t = VersionScheme::custom(r"(?<major>\d+)-(?<channel>stable|beta)").unwrap();
+        assert!(!t.extract("5-stable").unwrap().is_prerelease());
+        assert!(t.extract("5-beta").unwrap().is_prerelease());
+        assert_eq!(t.extract_full("5-stable").unwrap().channel, "stable");
+        // No match, no version, no id.
+        assert_eq!(s.extract_full("readme.txt"), Err(Ignored::NoMatch));
+        assert_eq!(
+            VersionScheme::custom(r"(?<major>\d+)")
+                .unwrap()
+                .extract_full("99999999999999999999"),
+            Err(Ignored::NoVersion)
+        );
+        let opt = VersionScheme::custom(r"(?:(?<id>[a-z]+)-)?(?<major>\d+)").unwrap();
+        assert_eq!(opt.extract_full("7"), Err(Ignored::NoId));
+        // Only an id: no numbers.
+        let only = VersionScheme::custom(r"^(?<id>[a-z]+)\.exe$").unwrap();
+        let x = only.extract_full("setup.exe").unwrap();
+        assert!(x.version.parts.is_empty() && x.version.text.is_empty() && x.id.as_deref() == Some("setup"));
+        // Non-custom schemes also answer extract_full.
+        let x = VersionScheme::Semver.extract_full("app-1.2.0-rc.1.zip").unwrap();
+        assert_eq!((x.id, x.channel.as_str()), (None, "rc.1"));
+        assert_eq!(VersionScheme::Semver.extract_full("zzz"), Err(Ignored::NoMatch));
+        assert_eq!(VersionScheme::Semver.custom_regex().map(|_| ()), None);
+        assert!(!VersionScheme::Semver.has_id());
+    }
+
+    #[test]
+    fn missing_groups_count_as_zero_or_older() {
+        let p = r"v(?<major>\d+)(?:\.(?<minor>\d+))?";
+        let zero = VersionScheme::custom(p).unwrap();
+        assert_eq!(zero.extract("v2").unwrap(), zero.extract("v2.0").unwrap());
+        let older = VersionScheme::custom(p).unwrap().with_missing_older(true);
+        assert!(older.extract("v2").unwrap() < older.extract("v2.0").unwrap());
+        assert!(older.extract("v2.0").unwrap() < older.extract("v2.1").unwrap());
+        assert_eq!(VersionScheme::Semver.with_missing_older(true), VersionScheme::Semver);
+        assert!(older.custom_regex().is_some());
     }
 
     #[test]

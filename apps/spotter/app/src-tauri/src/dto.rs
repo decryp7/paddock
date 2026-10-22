@@ -4,16 +4,20 @@
 
 use serde::{Deserialize, Serialize};
 use spotter_core::action::Action;
+use spotter_core::extract::{GroupSpan, Selection};
 use spotter_core::filter::VersionFilter;
 use spotter_core::notify::{DigestMode, NotificationChannel, NotificationPolicy, NotifyMode};
-use spotter_core::pack::Preset;
+use spotter_core::pack::{Preset, SchemeDef};
+use spotter_core::release::LatestBy;
 use spotter_core::schema::{FieldKind, FieldSpec, SourceKindSpec};
 use spotter_core::source::web_page::DiscoveredFeed;
 use spotter_core::source::SourceConfig;
 use spotter_core::state::{CheckRecord, WatchStatus};
 use spotter_core::time::QuietHours;
+use spotter_core::tracking::{ProductSetting, ProductsSpec, Tracking};
 use spotter_core::watch::{Settings, Theme, WatchSpec};
 use spotter_engine::error::EngineError;
+use spotter_engine::preview::PatternTest;
 use spotter_engine::view::{self, EventView, ReleaseView};
 use std::collections::BTreeMap;
 
@@ -65,6 +69,53 @@ pub struct ReleaseDto {
     pub size: Option<u64>,
     /// SHA-256 in hex.
     pub sha256: Option<String>,
+    /// The product (`id` group).
+    pub product: Option<String>,
+    /// The channel label.
+    pub channel: String,
+    /// Other named groups of the pattern.
+    pub fields: BTreeMap<String, String>,
+    /// Every file of the release, the primary one first.
+    pub artifacts: Vec<ArtifactDto>,
+    /// The same file name came back with new contents.
+    pub updated_in_place: bool,
+}
+
+/// `Artifact`: one file of a release.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactDto {
+    /// File name.
+    pub name: String,
+    /// Where it is.
+    pub location: String,
+    /// Extension.
+    pub kind: String,
+    /// Variant.
+    pub variant: String,
+    /// Size in bytes.
+    pub size: Option<u64>,
+    /// Last change.
+    pub modified_ms: Option<i64>,
+    /// Creation time, where reported.
+    pub created_ms: Option<i64>,
+    /// The checksum file next to it.
+    pub checksum_file: Option<String>,
+}
+
+impl From<&view::ArtifactView> for ArtifactDto {
+    fn from(a: &view::ArtifactView) -> Self {
+        ArtifactDto {
+            name: a.name.clone(),
+            location: a.location.clone(),
+            kind: a.kind.clone(),
+            variant: a.variant.clone(),
+            size: a.size,
+            modified_ms: a.modified_ms,
+            created_ms: a.created_ms,
+            checksum_file: a.checksum_file.clone(),
+        }
+    }
 }
 
 impl From<&ReleaseView> for ReleaseDto {
@@ -78,6 +129,11 @@ impl From<&ReleaseView> for ReleaseDto {
             first_seen_ms: r.first_seen_ms,
             size: r.size,
             sha256: r.sha256.clone(),
+            product: r.product.clone(),
+            channel: r.channel.clone(),
+            fields: r.fields.iter().cloned().collect(),
+            artifacts: r.artifacts.iter().map(Into::into).collect(),
+            updated_in_place: r.updated_in_place,
         }
     }
 }
@@ -154,6 +210,110 @@ pub struct WatchDraftDto {
     pub filter: VersionFilterDto,
     /// Not checked while paused.
     pub paused: bool,
+    /// Which release is the latest, and which products are tracked.
+    #[serde(default)]
+    pub tracking: TrackingDto,
+}
+
+/// `ProductSetting`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductSettingDto {
+    /// Display name; empty for the id.
+    #[serde(default)]
+    pub name: String,
+    /// No notifications.
+    #[serde(default)]
+    pub muted: bool,
+    /// Own soak time.
+    #[serde(default)]
+    pub soak_hours: Option<u32>,
+}
+
+/// `ProductsSpec`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductsDto {
+    /// Track only these ids.
+    #[serde(default)]
+    pub only: Vec<String>,
+    /// Announce products that appear later.
+    #[serde(default)]
+    pub announce_new: bool,
+    /// Overrides by id.
+    #[serde(default)]
+    pub settings: BTreeMap<String, ProductSettingDto>,
+}
+
+/// `Tracking`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackingDto {
+    /// `version`, `modified`, `created` or `name`.
+    #[serde(default)]
+    pub latest_by: LatestBy,
+    /// A missing number group is older than any number.
+    #[serde(default)]
+    pub missing_older: bool,
+    /// Products.
+    #[serde(default)]
+    pub products: ProductsDto,
+}
+
+impl From<&Tracking> for TrackingDto {
+    fn from(t: &Tracking) -> Self {
+        TrackingDto {
+            latest_by: t.latest_by,
+            missing_older: t.missing_older,
+            products: ProductsDto {
+                only: t.products.only.clone(),
+                announce_new: t.products.announce_new,
+                settings: t
+                    .products
+                    .settings
+                    .iter()
+                    .map(|(k, s)| {
+                        (
+                            k.clone(),
+                            ProductSettingDto {
+                                name: s.name.clone(),
+                                muted: s.muted,
+                                soak_hours: s.soak_hours,
+                            },
+                        )
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl From<TrackingDto> for Tracking {
+    fn from(t: TrackingDto) -> Self {
+        Tracking {
+            latest_by: t.latest_by,
+            missing_older: t.missing_older,
+            products: ProductsSpec {
+                only: t.products.only,
+                announce_new: t.products.announce_new,
+                settings: t
+                    .products
+                    .settings
+                    .into_iter()
+                    .map(|(k, s)| {
+                        (
+                            k,
+                            ProductSetting {
+                                name: s.name,
+                                muted: s.muted,
+                                soak_hours: s.soak_hours,
+                            },
+                        )
+                    })
+                    .collect(),
+            },
+        }
+    }
 }
 
 impl WatchDraftDto {
@@ -177,6 +337,7 @@ impl WatchDraftDto {
             },
             allow_local,
             paused: self.paused,
+            tracking: self.tracking.into(),
         }
     }
 }
@@ -200,6 +361,7 @@ impl From<&WatchSpec> for WatchDraftDto {
                 soak_hours: s.version_filter.soak_hours,
             },
             paused: s.paused,
+            tracking: (&s.tracking).into(),
         }
     }
 }
@@ -242,6 +404,8 @@ pub struct WatchSummaryDto {
     pub failures: u32,
     /// Seconds between checks.
     pub interval_secs: u32,
+    /// How many products the watch tracks.
+    pub product_count: u32,
 }
 
 impl From<&view::WatchSummary> for WatchSummaryDto {
@@ -264,6 +428,7 @@ impl From<&view::WatchSummary> for WatchSummaryDto {
             next_check_ms: w.next_check_ms,
             failures: w.failures,
             interval_secs: w.interval_secs,
+            product_count: w.product_count,
         }
     }
 }
@@ -307,6 +472,39 @@ pub struct WatchDetailDto {
     pub checks: Vec<CheckRecordDto>,
     /// Keys of secret fields that have a value (never the values).
     pub secrets_set: Vec<String>,
+    /// The products of a watch whose pattern has an `id` group.
+    pub products: Vec<ProductDto>,
+}
+
+/// `Product`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductDto {
+    /// The id.
+    pub id: String,
+    /// The name to show.
+    pub name: String,
+    /// Notifications are off.
+    pub muted: bool,
+    /// Its newest release.
+    pub latest: Option<ReleaseDto>,
+    /// Newer than what was seen.
+    pub unseen: bool,
+    /// Newest first.
+    pub history: Vec<ReleaseDto>,
+}
+
+impl From<&view::ProductView> for ProductDto {
+    fn from(p: &view::ProductView) -> Self {
+        ProductDto {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            muted: p.muted,
+            latest: p.latest.as_ref().map(Into::into),
+            unseen: p.unseen,
+            history: p.history.iter().map(Into::into).collect(),
+        }
+    }
 }
 
 impl From<&view::WatchDetail> for WatchDetailDto {
@@ -317,6 +515,7 @@ impl From<&view::WatchDetail> for WatchDetailDto {
             history: d.history.iter().map(Into::into).collect(),
             checks: d.checks.iter().map(Into::into).collect(),
             secrets_set: d.secrets_set.clone(),
+            products: d.products.iter().map(Into::into).collect(),
         }
     }
 }
@@ -354,6 +553,8 @@ pub struct FieldSpecDto {
     pub max: Option<i64>,
     /// Choices.
     pub options: Vec<ChoiceDto>,
+    /// Shown under "More options".
+    pub advanced: bool,
 }
 
 impl From<&FieldSpec> for FieldSpecDto {
@@ -388,6 +589,7 @@ impl From<&FieldSpec> for FieldSpecDto {
             min,
             max,
             options,
+            advanced: f.advanced,
         }
     }
 }
@@ -448,6 +650,264 @@ pub struct SourcePreviewDto {
     pub names_skipped: usize,
     /// How long it took.
     pub took_ms: u64,
+    /// What the pattern read from the names.
+    pub extraction: Option<ExtractionPreviewDto>,
+}
+
+/// `GroupSpan`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GroupSpanDto {
+    /// Group name.
+    pub group: String,
+    /// First UTF-16 code unit.
+    pub start: usize,
+    /// One past the last.
+    pub end: usize,
+}
+
+impl From<&GroupSpan> for GroupSpanDto {
+    fn from(s: &GroupSpan) -> Self {
+        GroupSpanDto {
+            group: s.group.clone(),
+            start: s.start,
+            end: s.end,
+        }
+    }
+}
+
+/// `ReadResult`: what was read from one name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadResultDto {
+    /// Product.
+    pub id: Option<String>,
+    /// Version as written.
+    pub version: String,
+    /// Channel label.
+    pub channel: String,
+    /// Variant.
+    pub variant: String,
+    /// A pre-release.
+    pub prerelease: bool,
+    /// Other named groups.
+    pub fields: BTreeMap<String, String>,
+    /// Where each group matched.
+    pub spans: Vec<GroupSpanDto>,
+}
+
+impl From<&view::ReadView> for ReadResultDto {
+    fn from(r: &view::ReadView) -> Self {
+        ReadResultDto {
+            id: r.id.clone(),
+            version: r.version.clone(),
+            channel: r.channel.clone(),
+            variant: r.variant.clone(),
+            prerelease: r.prerelease,
+            fields: r.fields.iter().cloned().collect(),
+            spans: r.spans.iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// `NameRow`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NameRowDto {
+    /// The text the pattern ran on.
+    pub text: String,
+    /// The file name.
+    pub file_name: String,
+    /// Size.
+    pub size: Option<u64>,
+    /// Last change.
+    pub modified_ms: Option<i64>,
+    /// What was read.
+    pub read: Option<ReadResultDto>,
+    /// Why it was ignored.
+    pub ignored: Option<String>,
+}
+
+/// `VersionPreview`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionPreviewDto {
+    /// Version as written.
+    pub version: String,
+    /// Would be the latest.
+    pub latest: bool,
+    /// A pre-release.
+    pub prerelease: bool,
+    /// Files.
+    pub artifacts: Vec<ArtifactDto>,
+}
+
+/// `ProductPreview`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductPreviewDto {
+    /// The id; null for a watch of one thing.
+    pub id: Option<String>,
+    /// The watch tracks it.
+    pub tracked: bool,
+    /// Newest first.
+    pub versions: Vec<VersionPreviewDto>,
+}
+
+/// `ScanStats`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanStatsDto {
+    /// Entries looked at.
+    pub scanned: u64,
+    /// Entries kept.
+    pub matched: u64,
+    /// Folders walked.
+    pub folders: u64,
+    /// Milliseconds.
+    pub took_ms: u64,
+    /// The previous listing was reused.
+    pub reused: bool,
+    /// Files still changing.
+    pub settling: u64,
+}
+
+/// `ExtractionPreview`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractionPreviewDto {
+    /// Matches first, then a sample of the ignored names.
+    pub rows: Vec<NameRowDto>,
+    /// Products with versions and files.
+    pub products: Vec<ProductPreviewDto>,
+    /// How the folder scan went.
+    pub scan: Option<ScanStatsDto>,
+    /// Names left out.
+    pub ignored_count: u64,
+    /// The pattern has an `id` group.
+    pub has_id: bool,
+    /// Creation times are reported.
+    pub created_available: bool,
+    /// How the latest is decided, in words.
+    pub order_note: String,
+    /// Things to know.
+    pub warnings: Vec<String>,
+}
+
+impl From<&view::ExtractionPreview> for ExtractionPreviewDto {
+    fn from(x: &view::ExtractionPreview) -> Self {
+        ExtractionPreviewDto {
+            rows: x
+                .rows
+                .iter()
+                .map(|r| NameRowDto {
+                    text: r.text.clone(),
+                    file_name: r.file_name.clone(),
+                    size: r.size,
+                    modified_ms: r.modified_ms,
+                    read: r.read.as_ref().map(Into::into),
+                    ignored: r.ignored.clone(),
+                })
+                .collect(),
+            products: x
+                .products
+                .iter()
+                .map(|p| ProductPreviewDto {
+                    id: p.id.clone(),
+                    tracked: p.tracked,
+                    versions: p
+                        .versions
+                        .iter()
+                        .map(|v| VersionPreviewDto {
+                            version: v.version.clone(),
+                            latest: v.latest,
+                            prerelease: v.prerelease,
+                            artifacts: v.artifacts.iter().map(Into::into).collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            scan: x.scan.map(|s| ScanStatsDto {
+                scanned: s.scanned,
+                matched: s.matched,
+                folders: s.folders,
+                took_ms: s.took_ms,
+                reused: s.reused,
+                settling: s.settling,
+            }),
+            ignored_count: x.ignored_count,
+            has_id: x.has_id,
+            created_available: x.created_available,
+            order_note: x.order_note.clone(),
+            warnings: x.warnings.clone(),
+        }
+    }
+}
+
+/// `PatternTest`: the result of trying a pattern on one name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatternTestDto {
+    /// The pattern is not valid.
+    pub error: Option<String>,
+    /// What was read.
+    pub read: Option<ReadResultDto>,
+    /// Why nothing was read.
+    pub ignored: Option<String>,
+}
+
+impl From<&PatternTest> for PatternTestDto {
+    fn from(t: &PatternTest) -> Self {
+        PatternTestDto {
+            error: t.error.clone(),
+            read: t.read.as_ref().map(Into::into),
+            ignored: t.ignored.clone(),
+        }
+    }
+}
+
+/// `PatternSelection`: a part of an example name the user selected.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PatternSelectionDto {
+    /// `id`, `major`, `minor`, `patch`, `build`, `channel` or `variant`.
+    pub role: String,
+    /// First UTF-16 code unit.
+    pub start: usize,
+    /// One past the last.
+    pub end: usize,
+}
+
+impl From<PatternSelectionDto> for Selection {
+    fn from(s: PatternSelectionDto) -> Self {
+        Selection {
+            role: s.role,
+            start: s.start,
+            end: s.end,
+        }
+    }
+}
+
+/// `SchemePreset`: a pattern to start from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchemePresetDto {
+    /// Id.
+    pub id: String,
+    /// Name.
+    pub name: String,
+    /// The pattern.
+    pub pattern: String,
+    /// A name it reads.
+    pub example: String,
+}
+
+impl From<&SchemeDef> for SchemePresetDto {
+    fn from(s: &SchemeDef) -> Self {
+        SchemePresetDto {
+            id: s.id.clone(),
+            name: s.name.clone(),
+            pattern: s.pattern.clone(),
+            example: s.example.clone(),
+        }
+    }
 }
 
 impl From<&view::SourcePreview> for SourcePreviewDto {
@@ -460,6 +920,7 @@ impl From<&view::SourcePreview> for SourcePreviewDto {
             prereleases_skipped: p.prereleases_skipped,
             names_skipped: p.names_skipped,
             took_ms: p.took_ms,
+            extraction: p.extraction.as_ref().map(Into::into),
         }
     }
 }
@@ -886,10 +1347,14 @@ mod tests {
             "versions": "semver", "versionPattern": null, "includePrereleases": false, "nameFilter": "",
             "intervalSecs": 3600,
             "notify": {"mode": "newer-than-installed", "nag": true, "quietHours": {"start": "22:00", "end": "07:00"}},
-            "actions": [{"kind": "open-location"}, {"kind": "download", "folder": "/tmp/x", "verify": true},
+            "actions": [{"kind": "open-location", "variant": "", "extension": ""},
+                        {"kind": "download", "folder": "/tmp/x", "verify": true, "variant": "x64", "extension": "iso"},
                         {"kind": "run-command", "program": "/bin/echo", "args": ["{path}"]}],
             "channels": [{"kind": "ntfy", "target": "topic_1"}],
-            "filter": {"prefix": "1.", "soakHours": 24}, "paused": false
+            "filter": {"prefix": "1.", "soakHours": 24}, "paused": false,
+            "tracking": {"latestBy": "modified", "missingOlder": true,
+                         "products": {"only": ["PRO"], "announceNew": true,
+                                      "settings": {"PRO": {"name": "Acme Installer Pro", "muted": true, "soakHours": 6}}}}
         })
     }
 
@@ -903,6 +1368,19 @@ mod tests {
         let back = WatchDraftDto::from(&spec);
         assert_eq!(back, dto);
         assert_eq!(serde_json::to_value(&back).unwrap(), draft_json());
+    }
+
+    #[test]
+    fn a_draft_without_tracking_or_artifact_choices_still_loads() {
+        let mut j = draft_json();
+        j.as_object_mut().unwrap().remove("tracking");
+        let dto: WatchDraftDto = serde_json::from_value(j).unwrap();
+        assert_eq!(dto.tracking, TrackingDto::default());
+        let spec = dto.into_spec(false);
+        assert_eq!(spec.tracking, Tracking::default());
+        let mut bad = draft_json();
+        bad["tracking"]["latestBy"] = json!("whenever");
+        assert!(serde_json::from_value::<WatchDraftDto>(bad).is_err());
     }
 
     #[test]

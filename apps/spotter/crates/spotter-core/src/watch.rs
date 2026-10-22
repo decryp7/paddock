@@ -10,6 +10,7 @@ use crate::schedule::clamp_interval;
 use crate::source::web_page::PageMode;
 use crate::source::{Source, SourceConfig};
 use crate::time::QuietHours;
+use crate::tracking::Tracking;
 use crate::version::VersionScheme;
 use serde::{Deserialize, Serialize};
 
@@ -108,6 +109,9 @@ pub struct WatchSpec {
     /// Not checked while paused.
     #[serde(default)]
     pub paused: bool,
+    /// Which release is the latest, and which products are tracked.
+    #[serde(default)]
+    pub tracking: Tracking,
 }
 
 /// A parsed watch.
@@ -137,6 +141,8 @@ pub struct Watch {
     pub allow_local: bool,
     /// Not checked while paused.
     pub paused: bool,
+    /// Which release is the latest, and which products are tracked.
+    pub tracking: Tracking,
     /// The stored form.
     pub spec: WatchSpec,
 }
@@ -154,8 +160,10 @@ impl Watch {
         }
         let source = Source::parse(&spec.source).map_err(|e| problems.extend(e)).ok();
         let scheme = VersionScheme::parse(&spec.versions, spec.version_pattern.as_deref())
+            .map(|s| s.with_missing_older(spec.tracking.missing_older))
             .map_err(|e| problems.push(e))
             .ok();
+        problems.extend(spec.tracking.products.check().err());
         let name_filter = NamePattern::new(PatternSyntax::Glob, &spec.name_filter)
             .map_err(|e| problems.push(e))
             .ok();
@@ -182,6 +190,8 @@ impl Watch {
                 filter: ReleaseFilter {
                     include_prereleases: spec.include_prereleases,
                     name: name_filter,
+                    latest_by: spec.tracking.latest_by,
+                    products: spec.tracking.products.only.clone(),
                 },
                 interval_secs: clamp_interval(spec.interval_secs),
                 notify: spec.notify,
@@ -190,6 +200,7 @@ impl Watch {
                 version_filter: spec.version_filter.clone(),
                 allow_local: spec.allow_local,
                 paused: spec.paused,
+                tracking: spec.tracking.clone(),
                 spec: spec.clone(),
             }),
             _ => Err(problems),
@@ -290,6 +301,7 @@ pub(crate) mod tests {
             version_filter: VersionFilter::default(),
             allow_local: false,
             paused: false,
+            tracking: Default::default(),
         }
     }
 
@@ -358,15 +370,12 @@ pub(crate) mod tests {
         s.name = " ".into();
         s.source = SourceConfig::new("folder", &[]);
         s.versions = "custom".into();
-        s.actions = vec![Action::Download {
-            folder: "".into(),
-            verify: true,
-        }];
+        s.actions = vec![Action::download("", true)];
         let problems = Watch::parse(&s).unwrap_err();
         assert_eq!(problems.len(), 5, "{problems:?}");
         let mut long = spec("x");
         long.name = "n".repeat(MAX_NAME_CHARS + 1);
-        long.actions = vec![Action::OpenLocation; MAX_ACTIONS + 1];
+        long.actions = vec![Action::open_location(); MAX_ACTIONS + 1];
         assert_eq!(Watch::parse(&long).unwrap_err().len(), 2);
     }
 

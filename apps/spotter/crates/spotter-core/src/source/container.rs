@@ -96,6 +96,7 @@ impl ContainerSource {
                     size: None,
                     sha256: None,
                     prerelease: false,
+                    created_at: None,
                 }
             })
             .collect())

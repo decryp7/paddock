@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// The schema this build writes.
-pub const STATE_SCHEMA: u32 = 1;
+pub const STATE_SCHEMA: u32 = 2;
 
 /// Everything in `state.json`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -102,6 +102,24 @@ mod tests {
         let (d, _) = parse_state(r#"{"watches":{"c":{}}}"#);
         assert_eq!(d.watches.len(), 1);
         assert!(parse_state("garbage").1[0].contains("could not be read"));
+        // A schema 1 file (no products, no artifacts) loads and is written back as the current schema.
+        let old = r#"{"schema":1,"watches":{"a":{"latest":{"version":{"text":"1.0","parts":[1]},"name":"n","location":"l","first_seen":5},"history":[]}},"journal":{}}"#;
+        let (d, w) = parse_state(old);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(d.watches.len(), 1);
+        assert!(d
+            .watches
+            .values()
+            .next()
+            .unwrap()
+            .latest
+            .as_ref()
+            .unwrap()
+            .release
+            .detail
+            .artifacts
+            .is_empty());
+        assert!(render_state(&d).contains(&format!("\"schema\":{STATE_SCHEMA}")));
         assert!(parse_state(r#"{"schema":9}"#).1[0].contains("newer"));
         assert!(parse_state(&" ".repeat(MAX_STATE_BYTES + 1)).1[0].contains("too large"));
     }

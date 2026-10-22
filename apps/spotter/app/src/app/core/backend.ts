@@ -7,15 +7,19 @@ import type {
   Dashboard,
   DashboardRange,
   OpenTarget,
+  PatternSelection,
+  PatternTest,
   DiscoveredFeed,
   ImportFormat,
   ImportResult,
   Preset,
   RendererStatus,
+  SchemePreset,
   Settings,
   SourceKind,
   SourcePreview,
   StatePush,
+  VersionSchemeId,
   WatchDetail,
   WatchDraft,
   WatchSummary,
@@ -26,6 +30,14 @@ import type {
  * Tauri backend in the app (`tauri-backend.ts`, commands in `app/src-tauri/src/commands.rs`) and the mock in the
  * browser build and tests. Every method rejects with a `CommandError`.
  */
+/** Which release of a watch with products, and which of its files, a command acts on. */
+export interface ReleaseTarget {
+  /** The product (`id` group); null for a watch of one thing. */
+  product?: string | null;
+  /** A file name from the release's artifacts; null for the primary file. */
+  artifact?: string | null;
+}
+
 export interface SpotterBackend {
   appInfo(): Promise<AppInfo>;
 
@@ -45,10 +57,18 @@ export interface SpotterBackend {
   acknowledge(id: string, version: string | null): Promise<void>;
   resetAcknowledgement(id: string): Promise<void>;
   setInstalled(id: string, version: string | null): Promise<void>;
-  /** Opens a release's location with the system's handler. */
-  openRelease(id: string, version: string): Promise<void>;
+  /** Marks the latest release of one product of a watch as seen. */
+  acknowledgeProduct(id: string, product: string): Promise<void>;
+  /** Opens a release's location with the system's handler (a chosen file of the release, or the primary one). */
+  openRelease(id: string, version: string, target?: ReleaseTarget): Promise<void>;
   /** Downloads (or copies) a release into the downloads folder, verifying its checksum; resolves with the file path. */
-  downloadRelease(id: string, version: string): Promise<string>;
+  downloadRelease(id: string, version: string, target?: ReleaseTarget): Promise<string>;
+  /** Writes a regular expression from an example name and the parts the user selected (computed in Rust). */
+  suggestPattern(example: string, selections: PatternSelection[]): Promise<string>;
+  /** Tries a version scheme on one name (computed in Rust). */
+  testPattern(versions: VersionSchemeId, versionPattern: string | null, missingOlder: boolean, text: string): Promise<PatternTest>;
+  /** The patterns the helper offers to start from. */
+  versionSchemes(): Promise<SchemePreset[]>;
 
   // Dashboard
   dashboard(range: DashboardRange): Promise<Dashboard>;

@@ -181,6 +181,7 @@ fn release(location: &str) -> Release {
         published_at: None,
         size: None,
         sha256: None,
+        detail: Default::default(),
     }
 }
 

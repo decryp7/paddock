@@ -82,6 +82,58 @@ pub fn builtin_kinds() -> Vec<SourceKindSpec> {
                     ]),
                 )
                 .default_value("files"),
+            )
+            .with_field(
+                FieldSpec::new(
+                    "matchAgainst",
+                    "Read the version from",
+                    FieldKind::Choice(vec![
+                        ChoiceOption::new("name", "The file name"),
+                        ChoiceOption::new("folder", "The folder the file is in"),
+                        ChoiceOption::new("path", "The path below the folder"),
+                    ]),
+                )
+                .help(r"Folder: for drops like \\server\drops\R3.10.00T32\setup.exe. Path: the version pattern sees the whole relative path.")
+                .default_value("name"),
+            )
+            .with_field(
+                FieldSpec::new("depth", "Folder levels", FieldKind::Integer { min: 0, max: 8 })
+                    .help("0 looks only in this folder; higher numbers also look inside sub-folders (slower on big shares).")
+                    .default_value("0"),
+            )
+            .with_field(
+                FieldSpec::new("extensions", "File types", FieldKind::Text)
+                    .help("Optional: only these extensions, separated by commas (iso, exe, msi, zip, dmg, pkg). Checksum files travel with their file.")
+                    .placeholder("iso, exe, msi, zip"),
+            )
+            .with_field(
+                FieldSpec::new("maxEntries", "Most entries per check", FieldKind::Integer { min: 100, max: 5_000_000 })
+                    .help("A check that meets more entries stops with \"too many files\" instead of missing releases silently.")
+                    .default_value("200000")
+                    .advanced(),
+            )
+            .with_field(
+                FieldSpec::new("scanSeconds", "Longest listing (seconds)", FieldKind::Integer { min: 5, max: 1800 })
+                    .default_value("60")
+                    .advanced(),
+            )
+            .with_field(
+                FieldSpec::new("settleSeconds", "Settle time (seconds)", FieldKind::Integer { min: 0, max: 300 })
+                    .help("A new or changed file is announced once its size and time stay the same this long (it may still be copying).")
+                    .default_value("5")
+                    .advanced(),
+            )
+            .with_field(
+                FieldSpec::new("relistEvery", "Full listing every N checks", FieldKind::Integer { min: 1, max: 1000 })
+                    .help("In between, folders whose modified time did not change are not listed again.")
+                    .default_value("12")
+                    .advanced(),
+            )
+            .with_field(
+                FieldSpec::new("hashBelowMib", "Hash files up to (MiB)", FieldKind::Integer { min: 0, max: 256 })
+                    .help("0 never hashes. A changed small file is hashed to tell real changes from a touched timestamp.")
+                    .default_value("0")
+                    .advanced(),
             ),
             "names",
         ),

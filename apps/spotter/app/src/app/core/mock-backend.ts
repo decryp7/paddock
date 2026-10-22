@@ -12,9 +12,13 @@ import type {
   ImportFormat,
   ImportResult,
   OpenTarget,
+  PatternSelection,
+  PatternTest,
+  Product,
   Preset,
   Release,
   RendererStatus,
+  SchemePreset,
   Settings,
   SourceKind,
   SourcePreview,
@@ -26,11 +30,12 @@ import type {
   WatchStatus,
   WatchSummary,
 } from './api.types';
-import type { SpotterBackend } from './backend';
+import type { ReleaseTarget, SpotterBackend } from './backend';
 import { blankDraft } from './draft';
 import { DAY, HOUR, MINUTE, PRESETS, SOURCE_KINDS, makeReleases, rng } from './mock/mock-data';
+import { MOCK_SCHEMES, mockExtraction, mockSuggest, mockTest, patternProblem } from './mock/mock-extraction';
 
-export type MockScenario = 'demo' | 'empty' | 'broken';
+export type MockScenario = 'demo' | 'empty' | 'broken' | 'products';
 
 export interface MockOptions {
   scenario?: MockScenario;
@@ -51,6 +56,8 @@ interface MockWatch {
   lastCheckMs: number | null;
   failures: number;
   secrets: string[];
+  /** Only in the 'products' scenario. */
+  products?: Product[];
 }
 
 const OK: WatchStatus = { kind: 'ok', message: null };
@@ -117,6 +124,62 @@ function demoWatches(now: number): MockWatch[] {
   return [acme, lumen, fjord, orbit, image, pkg, vendor, docs];
 }
 
+/** A watch whose pattern has an `id` group: three products, each with its own releases and files (invented names). */
+function productWatch(now: number): MockWatch {
+  const file = (name: string, variant: string, at: number): Release['artifacts'][number] => ({
+    name,
+    location: `/srv/drops/${name}`,
+    kind: name.split('.').pop() ?? '',
+    variant,
+    size: 600_000_000,
+    modifiedMs: at,
+    createdMs: null,
+    checksumFile: variant === 'x64' ? `${name}.sha256` : null,
+  });
+  const rel = (product: string, version: string, ago: number, variants: string[]): Release => {
+    const at = now - ago;
+    const artifacts = variants.map((v) => file(`Acme-${product}-${version}${v ? '_' + v : ''}.${v ? 'exe' : 'iso'}`, v, at));
+    return {
+      version,
+      prerelease: false,
+      name: artifacts[0]!.name,
+      location: artifacts[0]!.location,
+      publishedAtMs: at,
+      firstSeenMs: at + 5 * MINUTE,
+      size: 600_000_000,
+      sha256: null,
+      product,
+      channel: '',
+      fields: {},
+      artifacts,
+      updatedInPlace: false,
+    };
+  };
+  const pro = [rel('PRO', 'R3.10.00T32', 3 * HOUR, ['', 'x64']), rel('PRO', 'R3.09.00T40', 9 * DAY, [''])];
+  const qa = [rel('QA', 'R1.01.00T07', 2 * DAY, [''])];
+  const product = (id: string, name: string, history: Release[], unseen: boolean): Product => ({ id, name, muted: false, latest: history[0] ?? null, unseen, history });
+  const products = [product('PRO', 'Acme Installer Pro', pro, true), product('QA', 'QA', qa, false)];
+  return {
+    spec: blankDraft({
+      id: 'w-9',
+      name: 'Acme Installer Suite',
+      source: { kind: 'folder', values: { path: '/srv/drops/acme-suite', depth: '1' } },
+      versions: 'custom',
+      versionPattern: 'Acme-(?<id>[A-Z]+)-R(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)T(?<build>\\d+)(?:_(?<variant>x64|arm64))?',
+    }),
+    releases: [...pro, ...qa].sort((a, b) => b.firstSeenMs - a.firstSeenMs),
+    checks: [{ atMs: now - 20 * MINUTE, tookMs: 2400, error: null, found: 3 }],
+    ack: null,
+    installed: null,
+    status: OK,
+    checking: false,
+    lastCheckMs: now - 20 * MINUTE,
+    failures: 0,
+    secrets: [],
+    products,
+  };
+}
+
 const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   notifications: true,
@@ -154,7 +217,7 @@ export class MockBackend implements SpotterBackend {
     this.latency = options.latencyMs ?? 0;
     this.scenario = options.scenario ?? 'demo';
     this.platform = options.platform ?? 'macos';
-    this.watches = this.scenario === 'empty' ? [] : demoWatches(this.now());
+    this.watches = this.scenario === 'empty' ? [] : this.scenario === 'products' ? [...demoWatches(this.now()), productWatch(this.now())] : demoWatches(this.now());
   }
 
   /** Test helper: delivers a pushed state to subscribers. */
@@ -214,7 +277,17 @@ export class MockBackend implements SpotterBackend {
       nextCheckMs: w.spec.paused || w.lastCheckMs === null ? null : w.lastCheckMs + w.spec.intervalSecs * 1000,
       failures: w.failures,
       intervalSecs: w.spec.intervalSecs,
+      productCount: w.products?.length ?? 0,
     };
+  }
+
+  private release(id: string, version: string, target?: ReleaseTarget): Release {
+    const w = this.find(id);
+    const pool = target?.product ? (w.products?.find((p) => p.id === target.product)?.history ?? []) : w.releases;
+    const r = pool.find((x) => x.version === version);
+    if (!r) throw problem('notFound', 'That release is gone.');
+    if (target?.artifact && !r.artifacts.some((a) => a.name === target.artifact)) throw problem('badRequest', `The release has no file called "${target.artifact}".`);
+    return r;
   }
 
   private summaries(): WatchSummary[] {
@@ -253,7 +326,7 @@ export class MockBackend implements SpotterBackend {
   getWatch(id: string): Promise<WatchDetail> {
     return this.call('getWatch', () => {
       const w = this.find(id);
-      return { summary: this.summary(w), spec: structuredClone(w.spec), history: w.releases, checks: w.checks, secretsSet: w.secrets };
+      return { summary: this.summary(w), spec: structuredClone(w.spec), history: w.releases, checks: w.checks, secretsSet: w.secrets, products: structuredClone(w.products ?? []) };
     });
   }
 
@@ -271,8 +344,13 @@ export class MockBackend implements SpotterBackend {
         if (f.required && f.kind !== 'secret' && !(draft.source.values[f.key] ?? '').trim()) problems.push(`${f.label} is required.`);
       }
       if (draft.versions === 'custom' && !(draft.versionPattern ?? '').trim()) problems.push('A custom version scheme needs a pattern.');
-      const empty: SourcePreview = { problems, error: null, releases: [], withoutVersion: [], prereleasesSkipped: 0, namesSkipped: 0, tookMs: 0 };
+      if (draft.versions === 'custom' && draft.versionPattern?.trim()) {
+        const bad = patternProblem(draft.versionPattern);
+        if (bad) problems.push(bad);
+      }
+      const empty: SourcePreview = { problems, error: null, releases: [], withoutVersion: [], prereleasesSkipped: 0, namesSkipped: 0, tookMs: 0, extraction: null };
       if (problems.length) return empty;
+      if (draft.source.kind === 'folder') return { ...empty, extraction: mockExtraction(draft, this.now()), tookMs: 2400 };
       const target = Object.values(draft.source.values).join(' ');
       if (/unreachable|offline/i.test(target)) {
         return { ...empty, error: { kind: 'unreachable', message: 'The server did not answer. Check the address and your connection.' }, tookMs: 20_000 };
@@ -323,7 +401,7 @@ export class MockBackend implements SpotterBackend {
       }
       spec.id = `w-${this.nextId++}`;
       const releases = makeReleases(this.nextId * 31, spec.versions, 9, this.now(), 120, '').reverse();
-      const w: MockWatch = { spec, releases, checks: [], ack: null, installed: null, status: { kind: 'pending', message: null }, checking: false, lastCheckMs: null, failures: 0, secrets: [] };
+      const w: MockWatch = { spec, releases, checks: [], ack: null, installed: null, status: { kind: 'pending', message: null }, checking: false, lastCheckMs: null, failures: 0, secrets: [], products: [] };
       clean(w);
       this.watches = [...this.watches, w];
       this.emit();
@@ -380,20 +458,48 @@ export class MockBackend implements SpotterBackend {
     });
   }
 
-  openRelease(id: string, version: string): Promise<void> {
-    return this.call('openRelease', () => {
-      const w = this.find(id);
-      if (!w.releases.some((r) => r.version === version)) throw problem('notFound', 'That release is gone.');
+  acknowledgeProduct(id: string, product: string): Promise<void> {
+    return this.call('acknowledgeProduct', () => {
+      const p = this.find(id).products?.find((x) => x.id === product);
+      if (!p) throw problem('notFound', 'That product no longer exists.');
+      p.unseen = false;
+      this.emit();
     });
   }
 
-  downloadRelease(id: string, version: string): Promise<string> {
-    return this.call('downloadRelease', () => {
-      const w = this.find(id);
-      const r = w.releases.find((x) => x.version === version);
-      if (!r) throw problem('notFound', 'That release is gone.');
-      return `/home/demo/Downloads/Spotter-demo/${r.name}`;
+  openRelease(id: string, version: string, target?: ReleaseTarget): Promise<void> {
+    return this.call('openRelease', () => {
+      this.release(id, version, target);
     });
+  }
+
+  downloadRelease(id: string, version: string, target?: ReleaseTarget): Promise<string> {
+    return this.call('downloadRelease', () => {
+      const r = this.release(id, version, target);
+      const file = target?.artifact ?? r.name;
+      return `/home/demo/Downloads/Spotter-demo/${file}`;
+    });
+  }
+
+  suggestPattern(example: string, selections: PatternSelection[]): Promise<string> {
+    return this.call('suggestPattern', () => {
+      try {
+        return mockSuggest(example, selections);
+      } catch (e) {
+        throw problem('invalid', (e as Error).message, [(e as Error).message]);
+      }
+    });
+  }
+
+  testPattern(versions: VersionSchemeId, versionPattern: string | null, missingOlder: boolean, text: string): Promise<PatternTest> {
+    return this.call('testPattern', () => {
+      void missingOlder;
+      return mockTest({ versions, versionPattern }, text);
+    });
+  }
+
+  versionSchemes(): Promise<SchemePreset[]> {
+    return this.call('versionSchemes', () => MOCK_SCHEMES);
   }
 
   dashboard(range: DashboardRange): Promise<Dashboard> {

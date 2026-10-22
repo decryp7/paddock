@@ -15,8 +15,8 @@ class Host {
   reruns = 0;
 }
 
-const rel = (v: string, over = {}) => ({ version: v, prerelease: false, name: `tool-${v}`, location: 'x', publishedAtMs: Date.UTC(2026, 5, 15, 12), firstSeenMs: Date.UTC(2026, 5, 16, 12), size: 2048, sha256: null, ...over });
-const preview = (over: Partial<SourcePreview> = {}): SourcePreview => ({ problems: [], error: null, releases: [], withoutVersion: [], prereleasesSkipped: 0, namesSkipped: 0, tookMs: 380, ...over });
+const rel = (v: string, over = {}) => ({ version: v, prerelease: false, name: `tool-${v}`, location: 'x', publishedAtMs: Date.UTC(2026, 5, 15, 12), firstSeenMs: Date.UTC(2026, 5, 16, 12), size: 2048, sha256: null, product: null, channel: '', fields: {}, artifacts: [], updatedInPlace: false, ...over });
+const preview = (over: Partial<SourcePreview> = {}): SourcePreview => ({ problems: [], error: null, releases: [], withoutVersion: [], prereleasesSkipped: 0, namesSkipped: 0, tookMs: 380, extraction: null, ...over });
 const value = (v: SourcePreview, loading = false): Loadable<SourcePreview> => ({ value: v, loading, error: null });
 
 function make() {

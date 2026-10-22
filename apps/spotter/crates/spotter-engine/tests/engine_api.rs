@@ -92,6 +92,7 @@ fn spec(url: &str) -> WatchSpec {
         version_filter: Default::default(),
         allow_local: true,
         paused: false,
+        tracking: Default::default(),
     }
 }
 
@@ -485,7 +486,7 @@ async fn new_releases_notify_run_actions_and_deliver_channels() {
     })
     .await;
     let mut s = spec(&feed_server.url("/"));
-    s.actions = vec![Action::OpenLocation];
+    s.actions = vec![Action::open_location()];
     s.channels = vec![
         NotificationChannel {
             kind: ChannelKind::Webhook,

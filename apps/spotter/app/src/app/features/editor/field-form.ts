@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import type { FieldSpec, SourceKind } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -11,10 +12,23 @@ export interface FieldChange {
 /** The form of a source kind, rendered from its `FieldSpec`s: the engine decides which fields exist. */
 @Component({
   selector: 'sp-field-form',
-  imports: [MatIcon],
+  imports: [MatIcon, NgTemplateOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @for (f of kind().fields; track f.key) {
+    @for (f of main(); track f.key) {
+      <ng-container *ngTemplateOutlet="one; context: { $implicit: f }" />
+    }
+    @if (advanced().length) {
+      <details class="more">
+        <summary>More options</summary>
+        <div class="more-fields">
+          @for (f of advanced(); track f.key) {
+            <ng-container *ngTemplateOutlet="one; context: { $implicit: f }" />
+          }
+        </div>
+      </details>
+    }
+    <ng-template #one let-f>
       <div class="field">
         @if (f.kind === 'toggle') {
           <label class="check">
@@ -64,7 +78,7 @@ export interface FieldChange {
           <span class="help">{{ f.help }}</span>
         }
       </div>
-    }
+    </ng-template>
   `,
   styles: `
     :host {
@@ -78,6 +92,15 @@ export interface FieldChange {
     .req {
       color: var(--pd-danger);
     }
+    .more summary {
+      cursor: pointer;
+      color: var(--pd-text-muted);
+    }
+    .more-fields {
+      display: grid;
+      gap: var(--pd-space-4);
+      margin-top: var(--pd-space-3);
+    }
   `,
 })
 export class FieldForm {
@@ -88,6 +111,8 @@ export class FieldForm {
   readonly secretChange = output<FieldChange>();
   readonly secretClear = output<string>();
   private readonly backend = inject(BACKEND);
+  protected readonly main = computed(() => this.kind().fields.filter((f) => !f.advanced));
+  protected readonly advanced = computed(() => this.kind().fields.filter((f) => f.advanced));
 
   protected stored(f: FieldSpec): boolean {
     return this.secretsSet().includes(f.key);

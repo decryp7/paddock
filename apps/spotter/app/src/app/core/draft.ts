@@ -1,4 +1,9 @@
-import type { WatchDraft } from './api.types';
+import type { Tracking, WatchDraft } from './api.types';
+
+/** The defaults for how the latest release is decided and which products are tracked. */
+export function blankTracking(): Tracking {
+  return { latestBy: 'version', missingOlder: false, products: { only: [], announceNew: false, settings: {} } };
+}
 
 /** A new watch with the defaults every watch starts from (the user's default interval is applied by the editor). */
 export function blankDraft(over: Partial<WatchDraft> = {}): WatchDraft {
@@ -16,6 +21,7 @@ export function blankDraft(over: Partial<WatchDraft> = {}): WatchDraft {
     channels: [],
     filter: { prefix: '', soakHours: 0 },
     paused: false,
+    tracking: blankTracking(),
     ...over,
   };
 }

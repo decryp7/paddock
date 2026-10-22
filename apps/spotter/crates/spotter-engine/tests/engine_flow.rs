@@ -67,6 +67,7 @@ fn spec(url: &str, allow_local: bool) -> WatchSpec {
         version_filter: Default::default(),
         allow_local,
         paused: false,
+        tracking: Default::default(),
     }
 }
 

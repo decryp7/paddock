@@ -10,8 +10,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Action {
-    /// Open the release's location (folder, file or page) with the system's default handler.
-    OpenLocation,
+    /// Open the release's location (folder, file or page) with the system's default handler. With a release that has
+    /// several files, `variant` and `extension` choose which one (empty: the primary file).
+    OpenLocation {
+        /// The variant to open (`x64`).
+        #[serde(default)]
+        variant: String,
+        /// The extension to open (`iso`).
+        #[serde(default)]
+        extension: String,
+    },
     /// Copy or download the release into a folder.
     Download {
         /// The destination folder.
@@ -19,6 +27,12 @@ pub enum Action {
         /// Verify the publisher's SHA-256 (or a `.sha256` file next to it) and refuse the file when it differs.
         #[serde(default = "yes")]
         verify: bool,
+        /// The variant to download (`x64`); empty for the primary file.
+        #[serde(default)]
+        variant: String,
+        /// The extension to download (`iso`); empty for the primary file.
+        #[serde(default)]
+        extension: String,
     },
     /// Run a program (opt-in; the user picked it). `{path}` is the downloaded file (or the location when nothing was
     /// downloaded), `{version}`, `{name}` and `{location}` the release's.
@@ -36,10 +50,28 @@ fn yes() -> bool {
 }
 
 impl Action {
+    /// Opens the primary file of a release.
+    pub fn open_location() -> Action {
+        Action::OpenLocation {
+            variant: String::new(),
+            extension: String::new(),
+        }
+    }
+
+    /// Downloads the primary file of a release.
+    pub fn download(folder: &str, verify: bool) -> Action {
+        Action::Download {
+            folder: folder.into(),
+            verify,
+            variant: String::new(),
+            extension: String::new(),
+        }
+    }
+
     /// Checks an action; the message says what to fix.
     pub fn check(&self) -> Result<(), String> {
         match self {
-            Action::OpenLocation => Ok(()),
+            Action::OpenLocation { .. } => Ok(()),
             Action::Download { folder, .. } if folder.trim().is_empty() => Err("Choose a folder to download into.".into()),
             Action::Download { .. } => Ok(()),
             Action::RunCommand { program, .. } if !is_absolute(program) => {
@@ -131,24 +163,16 @@ mod tests {
             published_at: None,
             size: None,
             sha256: None,
+            detail: Default::default(),
         }
     }
 
     #[test]
     fn actions_check_their_settings() {
-        assert!(Action::OpenLocation.check().is_ok());
-        assert!(Action::Download {
-            folder: " ".into(),
-            verify: true
-        }
-        .check()
-        .is_err());
-        assert!(Action::Download {
-            folder: "D:\\x".into(),
-            verify: false
-        }
-        .check()
-        .is_ok());
+        assert!(Action::open_location().check().is_ok());
+        assert!(Action::OpenLocation { variant: "x64".into(), extension: "iso".into() }.check().is_ok());
+        assert!(Action::download(" ", true).check().is_err());
+        assert!(Action::download("D:\\x", false).check().is_ok());
         let run = |p: &str, args: Vec<String>| Action::RunCommand { program: p.into(), args }.check();
         assert!(run("C:\\Tools\\install.exe", vec![]).is_ok());
         assert!(run("/usr/local/bin/x", vec![]).is_ok());
@@ -161,10 +185,7 @@ mod tests {
         let toml_text = "kind = \"download\"\nfolder = \"/d\"";
         assert_eq!(
             toml::from_str::<Action>(toml_text).unwrap(),
-            Action::Download {
-                folder: "/d".into(),
-                verify: true
-            }
+            Action::download("/d", true)
         );
     }
 

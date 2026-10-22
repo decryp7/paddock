@@ -1,4 +1,4 @@
-import type { FieldSpec, SourceKind, WatchAction, WatchDraft } from '../../core/api.types';
+import type { FieldSpec, ProductSetting, SourceKind, Tracking, WatchAction, WatchDraft } from '../../core/api.types';
 
 /** The form's starting values: every field's default. */
 export function defaultValues(kind: SourceKind): Record<string, string> {
@@ -38,13 +38,46 @@ export function toggleAction(actions: readonly WatchAction[], kind: ActionKind, 
   const rest = actions.filter((a) => a.kind !== kind);
   if (!on) return rest;
   const added: WatchAction =
-    kind === 'open-location' ? { kind } : kind === 'download' ? { kind, folder: '', verify: true } : { kind, program: '', args: [] };
+    kind === 'open-location' ? { kind, variant: '', extension: '' } : kind === 'download' ? { kind, folder: '', verify: true, variant: '', extension: '' } : { kind, program: '', args: [] };
   return [...rest, added];
 }
 
 /** Replaces one action of its kind. */
 export function replaceAction(actions: readonly WatchAction[], action: WatchAction): WatchAction[] {
   return actions.map((a) => (a.kind === action.kind ? action : a));
+}
+
+/** The file types offered as chips. */
+export const EXTENSION_CHIPS = ['iso', 'exe', 'msi', 'zip', 'dmg', 'pkg'] as const;
+
+/** The extensions in a comma separated list, as typed. */
+export function extensionList(value: string): string[] {
+  return value
+    .split(/[,;\s]+/)
+    .map((e) => e.trim().replace(/^[.*]+/, '').toLowerCase())
+    .filter(Boolean);
+}
+
+/** Adds or removes one extension in the list, keeping the rest (including custom ones) in order. */
+export function toggleExtension(value: string, ext: string, on: boolean): string {
+  const list = extensionList(value).filter((e) => e !== ext);
+  return (on ? [...list, ext] : list).join(', ');
+}
+
+/** The product list after ticking or unticking `id`: an empty list means every product, so unticking one narrows it. */
+export function toggleTracked(only: readonly string[], discovered: readonly string[], id: string, on: boolean): string[] {
+  const current = only.length ? [...only] : [...discovered];
+  const next = on ? [...new Set([...current, id])] : current.filter((p) => p !== id);
+  return discovered.length > 0 && discovered.every((p) => next.includes(p)) && next.every((p) => discovered.includes(p)) ? [] : next;
+}
+
+/** One product's settings changed; settings that are all defaults are dropped. */
+export function patchProduct(tracking: Tracking, id: string, patch: Partial<ProductSetting>): Tracking {
+  const next: ProductSetting = { name: '', muted: false, soakHours: null, ...tracking.products.settings[id], ...patch };
+  const settings = { ...tracking.products.settings };
+  if (next.name.trim() === '' && !next.muted && next.soakHours === null) delete settings[id];
+  else settings[id] = { ...next, name: next.name };
+  return { ...tracking, products: { ...tracking.products, settings } };
 }
 
 /** Arguments typed one per line; empty lines are dropped. */
