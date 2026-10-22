@@ -203,6 +203,34 @@
   @include dark-vibrancy;
 }
 
+/* Popover (tray / menu-bar window): the page is transparent, the shell supplies the material. */
+:root {
+  --popover-bg: color-mix(in srgb, #ffffff 80%, transparent);
+  --popover-border: rgb(0 0 0 / 10%);
+  --popover-shadow: 0 8px 28px rgb(16 17 26 / 18%), 0 1px 0 rgb(255 255 255 / 40%) inset;
+}
+
+@mixin dark-popover {
+  --popover-bg: color-mix(in srgb, #1b1c20 78%, transparent);
+  --popover-border: rgb(255 255 255 / 10%);
+  --popover-shadow: 0 10px 32px rgb(0 0 0 / 45%), 0 1px 0 rgb(255 255 255 / 6%) inset;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    @include dark-popover;
+  }
+}
+
+:root[data-theme='dark'] {
+  @include dark-popover;
+}
+
+html[data-surface='popover'],
+html[data-surface='popover'] body {
+  background: transparent;
+}
+
 /* macOS: overlay title bar with inset traffic lights. */
 :root[data-platform='macos'] {
   --titlebar-inset: 28px;

@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject } from '@angular/core';
 import { MatTooltip } from '@angular/material/tooltip';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
@@ -6,6 +7,7 @@ import { formatBytes, formatPercent, formatRate } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { Notifier, Toasts } from '../../shared/notifier';
+import { Popover } from '../../shared/popover';
 import { Sparkline } from '../../shared/sparkline';
 import { ProfileSwitcher } from '../../shell/profile-switcher';
 import { HealthStore } from '../../state/health.store';
@@ -19,103 +21,106 @@ import { SettingsStore } from '../../state/settings.store';
  */
 @Component({
   selector: 'dy-tray',
-  imports: [Icon, Sparkline, ProfileSwitcher, Toasts, MatTooltip],
+  imports: [Icon, Sparkline, Popover, ProfileSwitcher, Toasts, MatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <main class="tray">
-      <header>
-        <img src="dyno-logo.svg" alt="" width="22" height="22" />
-        <strong>Dyno</strong>
-        <span class="spacer"></span>
-        @if (health.report(); as r) {
-          <span class="grade-pill" [attr.data-tone]="tone()" [matTooltip]="'Health score ' + score(r.score) + ' of 100'"><strong class="num">{{ score(r.score) }}</strong> {{ grade() }}</span>
-        }
-        <span class="agent" [attr.data-state]="live.agent().state" role="status"><span class="pulse"></span>{{ agentText() }}</span>
-      </header>
-
-      <section class="spark" aria-label="Live">
-        <div class="cell">
-          <span class="k"><dy-icon name="cpu" /> CPU</span>
-          <span class="v num">{{ pct(cpu()) }}</span>
-          <dy-sparkline [values]="live.series().cpu" [max]="100" label="CPU" style="--spark-h: 28px" />
-        </div>
-        <div class="cell">
-          <span class="k"><dy-icon name="memory" /> Memory</span>
-          <span class="v num">{{ pct(mem()) }}</span>
-          <dy-sparkline [values]="live.series().memory" [max]="100" color="var(--chart-2)" label="Memory" style="--spark-h: 28px" />
-        </div>
-        <div class="cell">
-          <span class="k"><dy-icon name="disk" /> Disk</span>
-          <span class="v num">{{ rate(disk()) }}</span>
-          <dy-sparkline [values]="live.series().diskRead" [values2]="live.series().diskWrite" color="var(--chart-1)" color2="var(--chart-2)" label="Disk" style="--spark-h: 28px" />
-        </div>
-        <div class="cell">
-          <span class="k"><dy-icon name="network" /> Network</span>
-          <span class="v num">{{ rate(net()) }}</span>
-          <dy-sparkline [values]="live.series().netRx" [values2]="live.series().netTx" color="var(--chart-1)" color2="var(--chart-2)" label="Network" style="--spark-h: 28px" />
-        </div>
-      </section>
-
-      <section class="top" aria-label="Top apps">
-        <span class="eyebrow">Top apps by CPU</span>
-        <ol>
-          @for (g of top(); track g.id) {
-            <li><span class="truncate">{{ g.name }}</span><span class="num">{{ pct(g.cpu) }}</span><span class="num faint">{{ bytes(g.memory) }}</span></li>
-          } @empty {
-            <li class="faint">Waiting for the first reading…</li>
+    <dy-popover [maxHeight]="560">
+      <main class="tray">
+        <header>
+          <img src="dyno-logo.svg" alt="" width="20" height="20" />
+          <strong>Dyno</strong>
+          <span class="spacer"></span>
+          @if (health.report(); as r) {
+            <span class="grade-pill" [attr.data-tone]="tone()" [matTooltip]="'Health score ' + score(r.score) + ' of 100'"><strong class="num">{{ score(r.score) }}</strong> {{ grade() }}</span>
           }
-        </ol>
-      </section>
+          <span class="agent" [attr.data-state]="live.agent().state" role="status"><span class="pulse"></span>{{ agentText() }}</span>
+        </header>
 
-      <footer>
-        <dy-profile-switcher [compact]="true" />
-        <button type="button" class="btn sm icon" [disabled]="!rules.loaded() || rules.saving()" (click)="rules.pause(!rules.paused())" [attr.aria-label]="rules.paused() ? 'Resume rules' : 'Pause rules'" [matTooltip]="rules.paused() ? 'Resume rules' : 'Pause all rules'"><dy-icon [name]="rules.paused() ? 'play' : 'pause'" /></button>
-        <span class="spacer"></span>
-        <button type="button" class="btn sm primary" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
-        <button type="button" class="btn sm icon" (click)="quit()" aria-label="Quit Dyno" matTooltip="Quit the Dyno app (the background agent keeps measuring)"><dy-icon name="power" /></button>
-      </footer>
-    </main>
+        <section class="metrics" aria-label="Live">
+          <div class="cell">
+            <span class="k"><dy-icon name="cpu" /> CPU</span>
+            <span class="v num">{{ pct(cpu()) }}</span>
+            <dy-sparkline [values]="live.series().cpu" [max]="100" label="CPU" style="--spark-h: 28px" />
+          </div>
+          <div class="cell">
+            <span class="k"><dy-icon name="memory" /> Memory</span>
+            <span class="v num">{{ pct(mem()) }}</span>
+            <dy-sparkline [values]="live.series().memory" [max]="100" color="var(--chart-2)" label="Memory" style="--spark-h: 28px" />
+          </div>
+          <div class="cell">
+            <span class="k"><dy-icon name="disk" /> Disk</span>
+            <span class="v num">{{ rate(disk()) }}</span>
+            <dy-sparkline [values]="live.series().diskRead" [values2]="live.series().diskWrite" color="var(--chart-1)" color2="var(--chart-2)" label="Disk" style="--spark-h: 28px" />
+          </div>
+          <div class="cell">
+            <span class="k"><dy-icon name="network" /> Network</span>
+            <span class="v num">{{ rate(net()) }}</span>
+            <dy-sparkline [values]="live.series().netRx" [values2]="live.series().netTx" color="var(--chart-1)" color2="var(--chart-2)" label="Network" style="--spark-h: 28px" />
+          </div>
+        </section>
+
+        <section class="top" aria-label="Top apps">
+          <span class="eyebrow">Top apps by CPU</span>
+          <ol>
+            @for (g of top(); track g.id) {
+              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ pct(g.cpu) }}</span><span class="num faint">{{ bytes(g.memory) }}</span></li>
+            } @empty {
+              <li class="faint">Waiting for the first reading…</li>
+            }
+          </ol>
+        </section>
+
+        <footer>
+          <dy-profile-switcher [compact]="true" />
+          <button type="button" class="btn sm icon ghost" [disabled]="!rules.loaded() || rules.saving()" (click)="rules.pause(!rules.paused())" [attr.aria-label]="rules.paused() ? 'Resume rules' : 'Pause rules'" [matTooltip]="rules.paused() ? 'Resume rules' : 'Pause all rules'"><dy-icon [name]="rules.paused() ? 'play' : 'pause'" /></button>
+          <span class="spacer"></span>
+          <button type="button" class="btn sm primary" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
+          <button type="button" class="btn sm icon ghost" (click)="quit()" aria-label="Quit Dyno" matTooltip="Quit the Dyno app (the background agent keeps measuring)"><dy-icon name="power" /></button>
+        </footer>
+      </main>
+    </dy-popover>
     <dy-toasts />
   `,
   styles: `
-    :host { display: block; width: 100vw; height: 100vh; background: var(--overlay-bg); }
-    .tray { height: 100%; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) var(--sp-3); overflow: hidden; }
-    header { display: flex; align-items: center; gap: var(--sp-2); }
+    :host { display: block; }
+    .tray { display: grid; gap: var(--sp-3); padding: var(--sp-3) var(--sp-3) var(--sp-2); }
+    header { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-1); }
+    header strong:first-of-type { font-weight: var(--fw-semibold); }
     .spacer { flex: 1; }
-    .agent { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: var(--fs-xs); }
+    .agent { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--fs-xs); }
     .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
     .agent[data-state='failed'] .pulse { background: var(--bad); }
     .agent[data-state='starting'] .pulse, .agent[data-state='restarting'] .pulse { background: var(--warn); }
     .grade-pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 var(--sp-2); border-radius: var(--r-pill); font-size: var(--fs-xs); background: var(--ok-soft); color: var(--ok); }
     .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
     .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
-    .score { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-inset); }
-    .score .n { font: var(--fw-semibold) var(--fs-lg) / 1 var(--font-display); }
-    .score small { display: block; color: var(--text-3); }
-    .grade { font: var(--fw-semibold) var(--fs-lg) / 1.2 var(--font-display); }
-    .grade[data-tone='ok'] { color: var(--ok); } .grade[data-tone='warn'] { color: var(--warn); } .grade[data-tone='bad'] { color: var(--bad); }
-    .spark { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
-    .cell { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
+    .metrics { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: var(--sp-2); }
+    .cell { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 28px; align-items: center; gap: 4px var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--popover-border); border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface-2) 55%, transparent); min-width: 0; }
     .cell dy-sparkline { grid-column: 1 / -1; }
-    .k { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: var(--fs-xs); }
+    .k { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-size: var(--fs-xs); }
     .k dy-icon { --icon-size: 13px; }
-    .v { font-weight: var(--fw-semibold); font-size: var(--fs-md); white-space: nowrap; }
-    .top { display: grid; gap: var(--sp-1); min-height: 0; }
+    .v { font-weight: var(--fw-semibold); font-size: var(--fs-md); text-align: right; white-space: nowrap; }
+    .top { display: grid; gap: 2px; }
+    .top .eyebrow { padding: 0 var(--sp-1); margin-bottom: 2px; }
     ol { list-style: none; margin: 0; padding: 0; display: grid; }
-    li { display: grid; grid-template-columns: minmax(0, 1fr) 52px 70px; gap: var(--sp-2); padding: 5px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
-    li .num:nth-of-type(1) { text-align: right; font-weight: var(--fw-medium); }
-    li .faint { text-align: right; }
+    li { display: grid; grid-template-columns: minmax(0, 1fr) 52px 70px; gap: var(--sp-2); padding: 5px var(--sp-2); border-radius: var(--r-md); font-size: var(--fs-sm); }
+    li:hover { background: var(--surface-hover); }
+    li .num { text-align: right; }
+    li .num:nth-of-type(1) { font-weight: var(--fw-medium); }
     .faint { color: var(--text-3); }
-    footer { margin-top: auto; display: flex; align-items: center; gap: var(--sp-2); }
+    footer { display: flex; align-items: center; gap: var(--sp-1); padding-top: var(--sp-2); border-top: 1px solid var(--popover-border); }
+    footer .btn { height: 28px; }
+    footer .btn.icon { width: 28px; }
   `,
 })
-export class Tray implements OnInit {
+export class Tray implements OnInit, OnDestroy {
   protected readonly live = inject(LiveStore);
   protected readonly rules = inject(RulesStore);
   protected readonly health = inject(HealthStore);
   private readonly settings = inject(SettingsStore);
   private readonly backend = inject(BACKEND);
   private readonly notifier = inject(Notifier);
+  private readonly root = inject(DOCUMENT).documentElement;
 
   protected readonly pct = formatPercent;
   protected readonly rate = formatRate;
@@ -134,11 +139,17 @@ export class Tray implements OnInit {
   protected readonly agentText = computed(() => (this.live.agent().state === 'running' ? 'Monitoring' : this.live.agent().state === 'failed' ? 'Agent stopped' : 'Connecting…'));
 
   ngOnInit(): void {
+    // The popover page is transparent: the shell supplies the material behind it.
+    this.root.dataset['surface'] = 'popover';
     // Theme first, then the rest; nothing here blocks the first paint.
     void this.settings.load();
     void this.rules.ensure();
     // A score the engine does not provide yet is simply left out (the card only renders with a report).
     void this.health.loadReport();
+  }
+
+  ngOnDestroy(): void {
+    delete this.root.dataset['surface'];
   }
 
   protected async openMain(): Promise<void> {

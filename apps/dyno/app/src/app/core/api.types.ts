@@ -727,3 +727,83 @@ export interface CommandError {
   code: ErrorCode;
   message: string;
 }
+
+// ===================================================================================================================
+// BEGIN rust-agent additions (crates/dyno-core: inventory, widgets, alarms, recorder, diagnostics). Mirrors the Rust DTOs.
+// ===================================================================================================================
+
+// ------------------------------------------------------------------------------------------------------- inventory
+
+export type MemoryKind = 'ddr2' | 'ddr3' | 'ddr4' | 'ddr5' | 'lpddr3' | 'lpddr4' | 'lpddr5' | 'other' | 'unknown';
+export type MemoryFormFactor = 'dimm' | 'soDimm' | 'soldered' | 'other' | 'unknown';
+
+export interface MemoryModule {
+  slot: string;
+  bank: string | null;
+  capacityBytes: number;
+  speedMts: number | null;
+  configuredSpeedMts: number | null;
+  kind: MemoryKind;
+  formFactor: MemoryFormFactor;
+  manufacturer: string | null;
+  partNumber: string | null;
+}
+
+export interface MemoryArray {
+  /** 0 when unknown. */
+  slots: number;
+  maxCapacityBytes: number | null;
+  modules: MemoryModule[];
+}
+
+export interface InventoryUnavailable {
+  reason: string;
+  /** Reading it needs the privileged helper (a later work package). */
+  needsHelper: boolean;
+}
+
+/** Externally tagged, like Rust's serde default. */
+export type MemoryLayout =
+  | { slots: MemoryArray }
+  | { unified: { total: number; kind: MemoryKind; manufacturer: string | null; upgradeable: boolean } }
+  | { totalOnly: { total: number; reason: InventoryUnavailable } };
+
+export interface CpuInfo {
+  name: string;
+  physicalCores: number;
+  logicalCores: number;
+  frequencyMhz: number;
+}
+
+export interface DiskInfo {
+  name: string;
+  totalBytes: number;
+  removable: boolean;
+}
+
+export type HintKind =
+  | 'mismatchedSpeed'
+  | 'belowRated'
+  | 'mismatchedSize'
+  | 'singleChannel'
+  | 'multiChannel'
+  | 'freeSlots'
+  | 'maxCapacity'
+  | 'notUpgradeable'
+  | 'unknown';
+
+export interface Hint {
+  kind: HintKind;
+  message: string;
+  slot: string | null;
+}
+
+/** Reply of `inventory` (the shell command returns it as is). */
+export interface SystemInventory {
+  os: string;
+  hostName: string | null;
+  cpu: CpuInfo;
+  memory: MemoryLayout;
+  disks: DiskInfo[];
+  hints: Hint[];
+}

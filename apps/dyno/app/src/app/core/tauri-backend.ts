@@ -319,6 +319,10 @@ export class TauriBackend implements DynoBackend {
     return this.command<void>('tray_open_main');
   }
 
+  popoverResize(height: number): Promise<void> {
+    return this.command<void>('popover_resize', { height });
+  }
+
   trayQuit(): Promise<void> {
     return this.command<void>('tray_quit');
   }

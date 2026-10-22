@@ -105,6 +105,8 @@ export interface DynoBackend {
   // The tray dropdown window.
   /** Shows and focuses the main window (and hides the tray dropdown). */
   trayOpenMain(): Promise<void>;
+  /** Tells the shell how tall the tray popover's content is (CSS pixels) so it can size the window to fit; no-op in the browser. */
+  popoverResize(height: number): Promise<void>;
   /** Quits the Dyno app (the background agent keeps its own lifecycle). */
   trayQuit(): Promise<void>;
 }

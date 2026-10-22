@@ -865,6 +865,10 @@ export class MockBackend implements DynoBackend {
     return this.reply('trayOpenMain', () => undefined);
   }
 
+  popoverResize(_height: number): Promise<void> {
+    return Promise.resolve();
+  }
+
   trayQuit(): Promise<void> {
     return this.reply('trayQuit', () => undefined);
   }

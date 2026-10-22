@@ -66,6 +66,12 @@ describe('TauriBackend: request shapes', () => {
     expect(invoke).toHaveBeenCalledWith('dyno', { request });
   });
 
+  it('popoverResize sends the measured height to popover_resize', async () => {
+    const { backend, invoke } = fake();
+    await backend.popoverResize(342);
+    expect(invoke.mock.calls).toEqual([['popover_resize', { height: 342 }]]);
+  });
+
   it('appInfo and the tray use their own commands without arguments', async () => {
     const { backend, invoke } = fake();
     await backend.appInfo();
