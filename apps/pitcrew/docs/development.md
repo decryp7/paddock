@@ -46,10 +46,11 @@ component styles under Tauri's CSP; `inlineCritical` stays `false`, see [macos.m
 ```sh
 cd app
 npx playwright test                                   # flows against `ng serve` with the mock backend (port 4310; PW_PORT overrides)
-SCREENSHOTS=1 npx playwright test --project=screenshots   # rewrites ../docs/screenshots (every screen, dark and light)
+SCREENSHOTS=1 npx playwright test --project=screenshots   # rewrites ../docs/screenshots/<theme>/ (every screen, 1440x900 at 2x, dark and light)
 ```
 
-Review the images before committing them.
+Review the images before committing them. Nothing may be cut mid-card: the capture covers the page below the last block that
+fits completely (`coverCutBlocks` in `e2e/screenshots.spec.ts`), and a shot of a long page can use a taller window or a clip.
 
 ### On a Mac
 
