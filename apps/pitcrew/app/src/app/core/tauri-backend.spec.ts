@@ -171,3 +171,39 @@ describe('TauriBackend.watch', () => {
     expect(seen).toEqual([]);
   });
 });
+
+describe('TauriBackend.navigations', () => {
+  const flush = () => new Promise((r) => setTimeout(r));
+
+  it('delivers the routes the shell asks for and unsubscribes', async () => {
+    let handler: ((e: { payload: string }) => void) | null = null;
+    const unlisten = vi.fn();
+    const listen = vi.fn(async (_e: string, h: (e: { payload: string }) => void) => {
+      handler = h;
+      return unlisten;
+    });
+    const backend = new TauriBackend(vi.fn() as unknown as CommandCall, listen as unknown as EventListen);
+    const seen: string[] = [];
+    const stop = backend.navigations((r) => seen.push(r));
+    await flush();
+    expect(listen).toHaveBeenCalledWith('pitcrew://navigate', expect.any(Function));
+    handler!({ payload: '/logs/a' });
+    expect(seen).toEqual(['/logs/a']);
+    stop();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('unsubscribes at once when stopped before listen resolved, and survives a failing listen', async () => {
+    const unlisten = vi.fn();
+    const slow = vi.fn(() => Promise.resolve(unlisten));
+    const stop = new TauriBackend(vi.fn() as unknown as CommandCall, slow as unknown as EventListen).navigations(() => undefined);
+    stop();
+    await flush();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    const failing = vi.fn(async () => {
+      throw new Error('no');
+    });
+    expect(() => new TauriBackend(vi.fn() as unknown as CommandCall, failing as unknown as EventListen).navigations(() => undefined)()).not.toThrow();
+    await flush();
+  });
+});

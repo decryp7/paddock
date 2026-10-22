@@ -32,6 +32,8 @@ export type RunnerAction = 'start' | 'stop' | 'restart' | 'drain' | 'resume' | '
 
 /** The event the shell pushes `BackendEvent`s on. */
 export const EVENT_NAME = 'pitcrew://event';
+/** The event the shell asks the UI to show a page on (payload: a route such as `/logs/build-pc`). */
+export const NAVIGATE_EVENT = 'pitcrew://navigate';
 
 /**
  * The real backend: the Tauri commands of `app/src-tauri/src/commands.rs`. Argument keys are camelCase; Tauri maps
@@ -84,6 +86,22 @@ export class TauriBackend implements PitcrewBackend {
           },
           () => undefined,
         );
+      },
+      () => undefined,
+    );
+    return () => {
+      closed = true;
+      unlisten?.();
+    };
+  }
+
+  navigations(listener: (route: string) => void): () => void {
+    let unlisten: UnlistenFn | null = null;
+    let closed = false;
+    this.listenTo<string>(NAVIGATE_EVENT, (e) => listener(e.payload)).then(
+      (fn) => {
+        if (closed) fn();
+        else unlisten = fn;
       },
       () => undefined,
     );

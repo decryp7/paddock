@@ -26,7 +26,11 @@ describe('the Copy menu', () => {
     const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
     expect(button.textContent).toContain('Copy');
     expect(fixture.nativeElement.querySelector('.menu').style.left).toBe('10px');
-    fixture.nativeElement.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    const inside = document.createElement('pc-copy-menu');
+    inside.appendChild(document.createElement('span'));
+    document.body.appendChild(inside);
+    inside.firstElementChild!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    inside.remove();
     expect(menu.state()).not.toBeNull();
     document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     expect(menu.state()).toBeNull();

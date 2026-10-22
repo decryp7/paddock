@@ -40,6 +40,18 @@ describe('DashboardPage', () => {
     expect(text(el.querySelector('pc-events-feed'))).not.toBe('');
   });
 
+  it('shows jobs per hour in the 24 h range', async () => {
+    configure();
+    const { f, el } = await mount();
+    const page = f.componentInstance as unknown as { store: { setRange(r: '24h' | '7d' | '30d'): Promise<void> } };
+    await page.store.setRange('24h');
+    await settle(f, 6);
+    expect(text(el)).toContain('Jobs per hour');
+    await page.store.setRange('7d');
+    await settle(f, 6);
+    expect(text(el)).toContain('Jobs per day');
+  });
+
   it('loads details of the running job into its tile', async () => {
     configure();
     const { el } = await mount();

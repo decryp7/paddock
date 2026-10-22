@@ -85,7 +85,7 @@ impl Harness {
             launcher: Box::new(OsLauncher),
             sources: Sources::public(),
             platform: pitcrew_core::platform::Platform::current().unwrap(),
-            base_path: Arc::new(|| Some("/pitcrew/test-path:/usr/bin".to_string())),
+            base_path: Arc::new(|| Some("/pitcrew/test-path:/usr/bin:/bin".to_string())),
             clock: Arc::new(move || Timestamp(c.load(Ordering::SeqCst))),
             local: Arc::new(|_| {
                 (
@@ -228,7 +228,7 @@ fn runners_start_with_the_login_path_and_their_own_env() {
     let dump = h.runner_dir.join("env.txt");
     h.until("the runner wrote its environment", Duration::from_millis(100), |_| dump.exists());
     let text = std::fs::read_to_string(&dump).unwrap();
-    assert!(text.contains("PATH=/pitcrew/test-path:/usr/bin\n"), "{text}");
+    assert!(text.contains("PATH=/pitcrew/test-path:/usr/bin:/bin\n"), "{text}");
     assert!(text.contains("CI_FLAG=yes\n"), "{text}");
     h.finish();
     // A runner's own PATH replaces the login one.

@@ -2,7 +2,7 @@
 
 **A runner manager for Gitea and Forgejo.** Pitcrew installs, runs, watches and updates the CI runners on your build
 machines — Gitea's runner (`gitea-runner`, formerly `act_runner`) first, Forgejo's runner next, and later GitHub's
-self-hosted runner — on **Windows and macOS** (Linux later).
+self-hosted runner — on **Windows, macOS and Linux**.
 
 A pit crew keeps the car going without stopping the race: Pitcrew restarts a runner that crashed or stalled, and
 updates it between jobs, so the builds keep running.
@@ -90,6 +90,15 @@ Stop whatever supervised that folder before (a launchd job: `launchctl bootout g
 supervisor script: kill it). The full walk-through, permissions and a verification script are in
 [docs/macos.md](docs/macos.md).
 
+### Linux (systemd, x86-64 or ARM64)
+
+Install the `.deb` (`sudo apt install ./Pitcrew_<version>_amd64.deb`) or run the AppImage, then **Settings > Service >
+Turn on**: Pitcrew installs a systemd **user** service (`~/.config/systemd/user/pitcrew.service`), no root needed. To
+keep the runners going when nobody is logged in, run `loginctl enable-linger $USER` once (your decision; Pitcrew never
+runs it). Jobs get your login shell's `PATH` (so `node`, `cargo`... are found), and a runner can set its own variables in
+`pitcrew.toml` (`[runners.env]`). The tray needs a status-notifier host (GNOME: the AppIndicator extension). Build,
+verification script and details: [docs/linux.md](docs/linux.md).
+
 ## Architecture
 
 A pure core, a privileged service and an unprivileged app that talk over one local IPC.
@@ -97,13 +106,15 @@ A pure core, a privileged service and an unprivileged app that talk over one loc
 | Part | Where | Role |
 | --- | --- | --- |
 | Core | `crates/pitcrew-core` | Pure rules, no I/O, time passed in: controller (start, stop, backoff, stalls, drain), jobs, update policy and state machine, housekeeping, history, metrics, notifications, config, protocol. |
-| Service | `crates/pitcrew-service` | One supervisor thread, workers for slow work, launch adapters, the IPC server (named pipe with ACL / 0600 Unix socket), the SCM and launchd integration. |
+| Service | `crates/pitcrew-service` | One supervisor thread, workers for slow work, launch adapters, the IPC server (named pipe with ACL / 0600 Unix socket), the SCM, launchd and systemd integration. |
 | App | `app/src-tauri`, `app/src` | Tauri 2 shell (tray, window, commands, credentials, updater) and the Angular UI over a `BACKEND` token (Tauri or mock). |
 
 Decisions: [0001 architecture](docs/adr/0001-architecture.md), [0002 runner auto-update](docs/adr/0002-runner-auto-update.md),
 [0003 service model](docs/adr/0003-service-model.md), [0004 IPC protocol and ACL](docs/adr/0004-ipc-protocol-and-acl.md),
 [0005 credential storage](docs/adr/0005-credential-storage.md), [0006 supervision and housekeeping](docs/adr/0006-supervision-and-housekeeping.md),
-[0007 runner-scoped metrics](docs/adr/0007-runner-scoped-metrics.md).
+[0007 runner-scoped metrics](docs/adr/0007-runner-scoped-metrics.md), [0008 native feel](docs/adr/0008-native-feel.md),
+[0009 Linux service and runner environment](docs/adr/0009-linux-service-and-runner-environment.md),
+[0010 design system](docs/adr/0010-design-system.md).
 
 ## Status
 
@@ -112,16 +123,18 @@ Decisions: [0001 architecture](docs/adr/0001-architecture.md), [0002 runner auto
 | Core | Built and unit-tested (rules, update state machine with roll-back, config migration, protocol). |
 | Service | Supervisor, IPC, session launch, updates and cleanup built; end-to-end tests drive the real supervisor with a fake runner. Windows service and macOS launch agent have their own CI jobs. |
 | App | Dashboard, runners, activity, logs, updates, settings and the register wizard against the real service. The Pitcrew self-update UI (check, download, restart) is not built yet: the updater plugin is wired and About reports whether the build can update. |
-| macOS | Verified on a real Mac on 2026-10-22 (bundle, `SMAppService`, adopting a runner folder). |
+| macOS | Verified on a real Mac on 2026-10-22 (bundle, `SMAppService`, adopting a runner folder). Jobs get the login shell's `PATH` since the launchd start-up fix of the same day. |
+| Linux | systemd user service, XDG paths, `.deb` and AppImage bundles, `scripts/linux-bootstrap.sh` / `linux-verify.sh`. Rust tests, the service against a fake runner and the unit text run in a Linux container and on the `ubuntu-latest` CI jobs; the `systemctl` calls, the tray and the bundles are not yet verified on a real desktop. |
 | Windows | Built and tested on the Windows CI runner; not yet verified end to end on a dedicated build machine. |
 | Installers | CI builds a Windows NSIS installer and a macOS `.dmg` on tags, nightly and manual runs. Not yet published. |
 
 ## Roadmap
 
 1. Pitcrew self-update UI (check, download, restart) on top of the wired updater plugin.
-2. Forgejo's runner (user-provided binary on Windows/macOS, OpenPGP-verified updates on Linux); Linux (systemd).
+2. Forgejo's runner (user-provided binary on Windows/macOS, OpenPGP-verified updates on Linux).
 3. Developer ID signing and notarisation for the macOS build.
-4. Later: GitHub's self-hosted runner, LaunchDaemon mode for headless Macs.
+4. Later: GitHub's self-hosted runner, LaunchDaemon mode for headless Macs and a systemd system unit for headless Linux
+   hosts, the per-runner `env` on Windows.
 
 Dedicated build Macs: since the macOS service is a launch agent, enable automatic log-in for the CI user so the
 runners start after a reboot.
@@ -141,7 +154,8 @@ cargo run -p pitcrew-service -- check-config
 ```
 
 On a Mac, `bash scripts/macos-bootstrap.sh` checks the prerequisites and builds the `.app` and `.dmg`
-([docs/macos.md](docs/macos.md)).
+([docs/macos.md](docs/macos.md)); on Linux, `bash scripts/linux-bootstrap.sh` builds the `.deb` and the AppImage
+([docs/linux.md](docs/linux.md)).
 
 More in [docs/development.md](docs/development.md); releasing and the update signing key in
 [docs/releasing.md](docs/releasing.md); engineering rules in [AGENTS.md](AGENTS.md).

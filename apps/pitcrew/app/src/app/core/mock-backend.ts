@@ -133,6 +133,18 @@ export class MockBackend implements PitcrewBackend {
     return structuredClone({ runners: this.runners, service: this.serviceInfo() });
   }
 
+  private readonly navigationListeners = new Set<(route: string) => void>();
+
+  navigations(listener: (route: string) => void): () => void {
+    this.navigationListeners.add(listener);
+    return () => this.navigationListeners.delete(listener);
+  }
+
+  /** Simulates the shell asking the UI to show a page (tests, development). */
+  requestNavigation(route: string): void {
+    for (const l of [...this.navigationListeners]) l(route);
+  }
+
   watch(listener: (event: BackendEvent) => void): () => void {
     this.listeners.add(listener);
     queueMicrotask(() => listener({ kind: 'connection', connection: this.connection() }));
@@ -301,6 +313,18 @@ export class MockBackend implements PitcrewBackend {
           : { start, success: 0, failure: 0, cancelled: 0, unknown: dj.length, avgQueuedMs: null },
       );
     }
+    const HOUR = 3_600_000;
+    const hourFrom = Math.floor(now / HOUR) * HOUR - 23 * HOUR;
+    const jobHours: JobDay[] = [];
+    for (let start = hourFrom; start <= now; start += HOUR) {
+      const hj = h.jobs.filter((j) => j.finishedAt >= start && j.finishedAt < start + HOUR);
+      const count = (o: string) => hj.filter((j) => j.outcome === o).length;
+      jobHours.push(
+        hasApiToken
+          ? { start, success: count('success'), failure: count('failure'), cancelled: count('cancelled'), unknown: 0, avgQueuedMs: hj.length ? Math.round(hj.reduce((a, j) => a + j.queuedMs, 0) / hj.length) : null }
+          : { start, success: 0, failure: 0, cancelled: 0, unknown: hj.length, avgQueuedMs: null },
+      );
+    }
     const upMs = up.reduce((a, s) => a + s.to - s.from, 0);
     return structuredClone({
       summary: {
@@ -314,9 +338,10 @@ export class MockBackend implements PitcrewBackend {
         busy,
         marks: h.marks.filter((m) => m.at >= from),
         updates: h.updates.filter((u) => u.at >= from),
-        recentJobs: jobs.slice(-40).map(({ info, startedAt, finishedAt }) => ({ info, startedAt, finishedAt })).reverse(),
+        recentJobs: jobs.slice(-40).map(({ info, startedAt, finishedAt, outcome }) => ({ info, startedAt, finishedAt, ...(hasApiToken ? { outcome } : {}) })).reverse(),
       },
       jobDays,
+      jobHours,
       events: h.events.filter((e) => e.at >= from).slice(0, 200),
       hasApiToken,
     });

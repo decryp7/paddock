@@ -64,20 +64,17 @@ fn connect() -> Result<Box<dyn Stream>, ClientError> {
     }
     #[cfg(unix)]
     {
-        let home = std::env::var_os("HOME").ok_or_else(|| ClientError::Unavailable("HOME is not set".into()))?;
-        let base = std::path::PathBuf::from(home);
-        let dir = if cfg!(target_os = "macos") {
-            base.join("Library/Application Support/Pitcrew")
+        let os = if cfg!(target_os = "macos") {
+            pitcrew_core::platform::Os::Macos
         } else {
-            std::env::var_os("XDG_CONFIG_HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| base.join(".config"))
-                .join("pitcrew")
+            pitcrew_core::platform::Os::Linux
         };
-        let s = std::os::unix::net::UnixStream::connect(dir.join("pitcrew.sock")).map_err(|e| {
+        let path = pitcrew_core::service_paths::socket_path(os, &|k| std::env::var_os(k).map(std::path::PathBuf::from))
+            .ok_or_else(|| ClientError::Unavailable("HOME is not set".into()))?;
+        let s = std::os::unix::net::UnixStream::connect(path).map_err(|e| {
             if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) {
                 ClientError::Unavailable(
-                    "it is not running. Turn it on in Settings ▸ Service (macOS asks you to allow it in Login Items)".into(),
+                    "it is not running. Turn it on in Settings ▸ Service (macOS asks you to allow it in Login Items; on Linux it is a systemd user service)".into(),
                 )
             } else {
                 ClientError::Unavailable(e.to_string())

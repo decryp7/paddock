@@ -114,3 +114,35 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await expect(page.getByRole('link', { name: 'build-win' }).first()).toBeVisible();
   });
 });
+
+test.describe('native feel (ADR 0008)', () => {
+  test('chrome cannot be selected, log text can, browser keys do nothing', async ({ page }) => {
+    await page.goto(`${APP}/logs`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Logs' })).toBeVisible();
+    const selectable = async (loc: ReturnType<typeof page.locator>) => loc.evaluate((e) => getComputedStyle(e).userSelect);
+    expect(await selectable(page.getByRole('heading', { level: 1, name: 'Logs' }))).toBe('none');
+    const line = page.locator('[role=log] .line .msg').first();
+    await expect(line).toBeVisible();
+    expect(await selectable(line)).toBe('text');
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorX)).toBe('none');
+
+    // The browser menu is suppressed on chrome.
+    const prevented = await page.evaluate(() => {
+      const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.querySelector('h1')!.dispatchEvent(e);
+      return e.defaultPrevented;
+    });
+    expect(prevented).toBe(true);
+
+    // Reload and zoom keys are swallowed: the page is not reloaded.
+    await page.evaluate(() => ((window as unknown as { __alive: boolean }).__alive = true));
+    for (const key of ['F5', 'Control+r', 'Control+=', 'Control+-', 'Control+0', 'Control+p']) await page.keyboard.press(key);
+    await page.mouse.move(400, 400);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -200);
+    await page.keyboard.up('Control');
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => (window as unknown as { __alive?: boolean }).__alive)).toBe(true);
+    expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+  });
+});

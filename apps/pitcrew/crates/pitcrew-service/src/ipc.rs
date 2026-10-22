@@ -5,7 +5,7 @@
 //!   rejected, with the security descriptor [`PIPE_SDDL`]: full access for SYSTEM, Administrators and the pipe's
 //!   owner, read/write for interactive users (the logged-on user's app), nothing for anyone else (services, network
 //!   logons, other sessions' non-interactive tokens).
-//! - Unix: `<data>/pitcrew.sock` in a 0700 folder, the socket itself 0600: only the user who runs the agent.
+//! - Unix: `<socket folder>/pitcrew.sock` (the data folder, or `$XDG_RUNTIME_DIR/pitcrew` on Linux) in a 0700 folder, the socket itself 0600: only the user who runs the agent.
 //! - Every connection starts with a hello; frames are bounded by `MAX_FRAME`; at most [`MAX_CONNECTIONS`] at once.
 //!   A subscribed connection receives pushed events until either side closes it.
 
@@ -20,7 +20,7 @@ use tokio::sync::Semaphore;
 /// The pipe's name on Windows.
 pub const PIPE_NAME: &str = r"\\.\pipe\pitcrew";
 /// The socket's file name in the data folder elsewhere.
-pub const SOCKET_FILE: &str = "pitcrew.sock";
+pub const SOCKET_FILE: &str = pitcrew_core::service_paths::SOCKET_FILE;
 /// Most connections at once.
 pub const MAX_CONNECTIONS: usize = 32;
 /// The pipe's security descriptor (SDDL): SYSTEM, Administrators and the owner full access; interactive users
@@ -139,9 +139,9 @@ async fn subscribed<S: AsyncRead + AsyncWrite + Unpin + Send>(stream: S, tx: Sen
 }
 
 /// Accepts connections until the runtime shuts down.
-pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf) -> Result<(), String> {
+pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf) -> Result<(), String> {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
-    platform::serve(tx, data_dir, permits).await
+    platform::serve(tx, socket_dir, permits).await
 }
 
 #[cfg(windows)]
@@ -215,10 +215,10 @@ mod platform {
     use tokio::net::UnixListener;
     use tokio::sync::Semaphore;
 
-    pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf, permits: Arc<Semaphore>) -> Result<(), String> {
-        std::fs::create_dir_all(&data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))?;
-        let _ = std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700));
-        let path = data_dir.join(SOCKET_FILE);
+    pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf, permits: Arc<Semaphore>) -> Result<(), String> {
+        std::fs::create_dir_all(&socket_dir).map_err(|e| format!("{}: {e}", socket_dir.display()))?;
+        let _ = std::fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o700));
+        let path = socket_dir.join(SOCKET_FILE);
         // A socket left by a previous run.
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).map_err(|e| format!("{}: {e}", path.display()))?;

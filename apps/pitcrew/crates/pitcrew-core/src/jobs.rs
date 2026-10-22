@@ -6,6 +6,7 @@
 //! last time it had any: in host mode the runner starts a fresh shell per step, so a short gap between two steps must
 //! not look like the end of the job (an update or a drain would then stop a busy runner).
 
+use crate::gitea_api::Conclusion;
 use crate::logline;
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -102,6 +103,10 @@ pub struct FinishedJob {
     pub started_at: Timestamp,
     /// When it ended (when the runner was last seen working on it).
     pub finished_at: Timestamp,
+    /// How the server says it ended. The service never knows (it sees processes and log lines): the app fills it in
+    /// from the Gitea API when a read token is set (`gitea_api::with_outcomes`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Conclusion>,
 }
 
 /// Whether a child process of the runner belongs to a job. The console host Windows attaches to every console
@@ -177,6 +182,7 @@ impl JobTracker {
             info: job.info,
             started_at: job.started_at,
             finished_at,
+            outcome: None,
         })
     }
 }

@@ -73,14 +73,16 @@ export class DashboardPage {
     return out;
   });
 
-  protected readonly jobDays = computed(() => sumJobDays(Object.values(this.replies()).map((r) => r?.jobDays ?? [])));
+  protected readonly jobDays = computed(() => sumJobDays(Object.values(this.replies()).map((r) => (this.hourly() ? r?.jobHours : r?.jobDays) ?? [])));
+  /** The 24 h range shows jobs per hour. */
+  protected readonly hourly = computed(() => this.store.range() === '24h');
   protected readonly jobTotal = computed(() => this.jobDays().reduce((a, d) => a + d.success + d.failure + d.cancelled + d.unknown, 0));
   protected readonly noToken = computed(() =>
     Object.entries(this.replies())
       .filter(([, r]) => r && !r.hasApiToken)
       .map(([n]) => n),
   );
-  protected readonly jobsOption = computed(() => jobsPerDayOption(this.jobDays(), this.theme.chartTokens(), this.store.range() === '30d'));
+  protected readonly jobsOption = computed(() => jobsPerDayOption(this.jobDays(), this.theme.chartTokens(), this.store.range() === '30d', this.hourly()));
   protected readonly durationOpt = computed(() =>
     durationOption(
       Object.entries(this.replies()).map(([name, r]) => ({ name, points: (r?.summary.days ?? []).map((d) => [d.start + 12 * 3_600_000, d.avgJobMs] as [number, number]) })),

@@ -3035,6 +3035,7 @@ dependencies = [
  "tauri-plugin-updater",
  "thiserror 2.0.21",
  "ureq",
+ "webview2-com",
  "windows 0.62.2",
  "windows-service",
  "winreg",

@@ -20,6 +20,12 @@ impl Host {
     /// Starts supervising the runners configured in `data_dir` and serving the app. `on_fatal` is called when the
     /// IPC server cannot run (e.g. another service owns the pipe).
     pub fn start(data_dir: PathBuf, on_fatal: impl FnOnce(String) + Send + 'static) -> Result<Host, Error> {
+        let socket_dir = data_dir.clone();
+        Host::start_at(data_dir, socket_dir, on_fatal)
+    }
+
+    /// [`Host::start`] with the Unix socket in `socket_dir` (Linux: the user's runtime folder).
+    pub fn start_at(data_dir: PathBuf, socket_dir: PathBuf, on_fatal: impl FnOnce(String) + Send + 'static) -> Result<Host, Error> {
         std::fs::create_dir_all(&data_dir).map_err(|source| Error::Io {
             path: data_dir.display().to_string(),
             source,
@@ -45,7 +51,7 @@ impl Host {
         let ipc_tx = tx.clone();
         let stop_tx = tx.clone();
         runtime.spawn(async move {
-            if let Err(e) = ipc::serve(ipc_tx, data_dir).await {
+            if let Err(e) = ipc::serve(ipc_tx, socket_dir).await {
                 on_fatal(e);
                 let _ = stop_tx.send(Msg::Shutdown);
             }
@@ -81,8 +87,9 @@ impl Host {
 
 /// `run`: supervise in the foreground until Ctrl+C / SIGTERM (launchd stops agents with SIGTERM).
 pub fn run_foreground(data_dir: PathBuf) -> Result<(), Error> {
+    let socket_dir = crate::paths::socket_dir().unwrap_or_else(|| data_dir.clone());
     let (fatal_tx, fatal_rx) = std::sync::mpsc::channel::<String>();
-    let host = Host::start(data_dir, move |e| {
+    let host = Host::start_at(data_dir, socket_dir, move |e| {
         let _ = fatal_tx.send(e);
     })?;
     let signals = tokio::runtime::Builder::new_current_thread()

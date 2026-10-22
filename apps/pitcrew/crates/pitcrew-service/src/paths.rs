@@ -3,6 +3,7 @@
 //! - Windows: `%ProgramData%\Pitcrew` (machine-wide; the service runs as LocalSystem, the folder is writable by
 //!   administrators only).
 //! - macOS: `~/Library/Application Support/Pitcrew` (the service is the user's launch agent, ADR 0003).
+//! - Linux: `$XDG_DATA_HOME/Pitcrew`, default `~/.local/share/Pitcrew` (the service is the user's systemd service).
 
 use std::path::PathBuf;
 
@@ -18,14 +19,22 @@ pub fn data_dir() -> Option<PathBuf> {
 
 /// [`data_dir`] with the environment as a function (testable).
 pub fn data_dir_from(env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
+    pitcrew_core::service_paths::data_dir(this_os(), &env)
+}
+
+/// The folder holding the Unix socket (Linux: `$XDG_RUNTIME_DIR/pitcrew` when set, else the data folder).
+pub fn socket_dir() -> Option<PathBuf> {
+    pitcrew_core::service_paths::socket_dir(this_os(), &|k| std::env::var_os(k).map(PathBuf::from))
+}
+
+fn this_os() -> pitcrew_core::platform::Os {
+    use pitcrew_core::platform::Os;
     if cfg!(windows) {
-        env("ProgramData").map(|p| p.join("Pitcrew"))
+        Os::Windows
     } else if cfg!(target_os = "macos") {
-        env("HOME").map(|h| h.join("Library").join("Application Support").join("Pitcrew"))
+        Os::Macos
     } else {
-        env("XDG_CONFIG_HOME")
-            .or_else(|| env("HOME").map(|h| h.join(".config")))
-            .map(|c| c.join("pitcrew"))
+        Os::Linux
     }
 }
 
@@ -41,7 +50,7 @@ mod tests {
             _ => None,
         };
         let dir = data_dir_from(env).unwrap();
-        assert!(dir.ends_with("Pitcrew") || dir.ends_with("pitcrew"), "{dir:?}");
+        assert!(dir.ends_with("Pitcrew"), "{dir:?}");
         assert_eq!(data_dir_from(|_| None), None);
     }
 }

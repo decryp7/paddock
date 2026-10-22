@@ -35,6 +35,9 @@ export interface PitcrewBackend {
   /** Subscribes to pushed events (status changes, notifications, the connection); returns the unsubscribe. */
   watch(listener: (event: BackendEvent) => void): () => void;
 
+  /** Subscribes to requests from the shell to show a page (tray actions, `pitcrew://navigate`); returns the unsubscribe. */
+  navigations(listener: (route: string) => void): () => void;
+
   // Runner actions (the service waits for the current job where needed).
   start(runner: string): Promise<void>;
   stop(runner: string): Promise<void>;

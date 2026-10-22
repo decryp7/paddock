@@ -12,24 +12,30 @@ pub mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{dispatch, install, uninstall};
 
-#[cfg(not(any(windows, target_os = "macos")))]
+// Compiled on every Unix so its pure parts are tested on the Mac too; used on Linux.
+#[cfg(unix)]
+pub mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::{dispatch, install, uninstall};
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 mod other {
     use crate::error::Error;
 
-    /// Linux support is planned (systemd user or system unit).
+    /// No service manager on this platform.
     pub fn dispatch() -> Result<(), Error> {
         Err(Error::Unsupported("Running as a service"))
     }
 
-    /// Linux support is planned.
+    /// No service manager on this platform.
     pub fn install() -> Result<(), Error> {
         Err(Error::Unsupported("Installing the service"))
     }
 
-    /// Linux support is planned.
+    /// No service manager on this platform.
     pub fn uninstall() -> Result<(), Error> {
         Err(Error::Unsupported("Removing the service"))
     }
 }
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub use other::{dispatch, install, uninstall};

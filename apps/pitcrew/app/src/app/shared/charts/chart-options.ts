@@ -1,7 +1,7 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { JobDay } from '../../core/api.types';
 import type { ChartTokens } from '../../core/theme.service';
-import { formatAxisDuration, formatBytes, formatDay, formatDuration, formatShortDate, formatTime } from '../format';
+import { formatAxisDuration, formatBytes, formatDay, formatDuration, formatHour, formatShortDate, formatTime } from '../format';
 
 /**
  * Pure builders of ECharts options from what the backend returned and the theme's chart tokens. Shaping only: sums
@@ -142,7 +142,7 @@ const OUTCOMES = [
 ] as const;
 
 /** Jobs per day stacked by outcome. Outcomes: blue (succeeded) and orange (failed) stay apart under every CVD. */
-export function jobsPerDayOption(days: JobDay[], t: ChartTokens, withZoom: boolean): EChartsCoreOption {
+export function jobsPerDayOption(days: JobDay[], t: ChartTokens, withZoom: boolean, hourly = false): EChartsCoreOption {
   const colors: Record<(typeof OUTCOMES)[number]['key'], string> = { success: t.series[0], failure: t.series[1], cancelled: t.muted, unknown: t.faint };
   const present = OUTCOMES.filter((o) => days.some((d) => d[o.key] > 0));
   const shown = present.length > 0 ? present : OUTCOMES.slice(0, 1);
@@ -161,12 +161,12 @@ export function jobsPerDayOption(days: JobDay[], t: ChartTokens, withZoom: boole
         const d = days[params[0]?.dataIndex ?? 0];
         if (!d) return '';
         const total = d.success + d.failure + d.cancelled + d.unknown;
-        return tooltipHtml(`${formatDay(d.start)} · ${total} ${total === 1 ? 'job' : 'jobs'}`, shown.map((s) => ({ color: colors[s.key], label: s.label, value: String(d[s.key]) })));
+        return tooltipHtml(`${hourly ? formatHour(d.start) : formatDay(d.start)} · ${total} ${total === 1 ? 'job' : 'jobs'}`, shown.map((s) => ({ color: colors[s.key], label: s.label, value: String(d[s.key]) })));
       },
     },
     xAxis: {
       type: 'category',
-      data: days.map((d) => (days.length > 14 ? formatShortDate(d.start) : formatDay(d.start))),
+      data: days.map((d) => (hourly ? formatHour(d.start) : days.length > 14 ? formatShortDate(d.start) : formatDay(d.start))),
       axisLabel: { color: t.text3, hideOverlap: true },
       axisLine: { lineStyle: { color: t.axis } },
       axisTick: { show: false },

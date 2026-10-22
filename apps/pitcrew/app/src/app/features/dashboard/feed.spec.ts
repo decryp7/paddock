@@ -5,6 +5,7 @@ function reply(events: HistoryEvent[]): ActivityReply {
   return {
     events,
     jobDays: [],
+    jobHours: [],
     hasApiToken: false,
     summary: { from: 0, to: 0, days: [], uptimePermille: 0, restarts: 0, jobs: 0, up: [], busy: [], marks: [], updates: [], recentJobs: [] },
   };

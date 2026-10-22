@@ -1,5 +1,6 @@
 //! Registering the Pitcrew service with the OS from the app (ADR 0003). Elevation and approval are always the OS's
-//! own: UAC on Windows (the installer does this once; the app can repeat it), the Login Items approval on macOS.
+//! own: UAC on Windows (the installer does this once; the app can repeat it), the Login Items approval on macOS;
+//! on Linux nothing is elevated (a systemd user service).
 //! Pitcrew never asks for or handles a password.
 
 use crate::dto::{CommandError, CommandErrorCode, ServiceInstall};
@@ -214,30 +215,95 @@ mod imp {
 
 #[cfg(not(any(windows, target_os = "macos")))]
 mod imp {
+    //! A systemd **user** service (ADR 0009): the app runs `pitcrew-service install` / `uninstall` (as the user, no
+    //! elevation), which writes `~/.config/systemd/user/pitcrew.service` and runs `systemctl --user`. The service
+    //! program has the timeouts; this side only bounds the wait for it.
     use super::*;
+    use crate::service_client::ServiceClient;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    const UNIT: &str = pitcrew_core::service_spec::SYSTEMD_UNIT;
+
+    fn unit_file() -> Option<std::path::PathBuf> {
+        let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
+        env("XDG_CONFIG_HOME")
+            .filter(|p| p.is_absolute())
+            .or_else(|| env("HOME").map(|h| h.join(".config")))
+            .map(|c| c.join("systemd").join("user").join(UNIT))
+    }
 
     /// Whether the service is registered and running.
     pub fn state() -> ServiceInstall {
+        let installed = unit_file().is_some_and(|p| p.exists());
+        let running = crate::service_client::LocalServiceClient
+            .request(pitcrew_core::protocol::Request::Status)
+            .is_ok();
+        let message = match (installed, running) {
+            (true, false) => Some(format!(
+                "installed but not running: run `systemctl --user status {UNIT}` for the reason"
+            )),
+            (false, true) => Some("running outside systemd (started by hand)".to_string()),
+            _ => None,
+        };
         ServiceInstall {
             platform: "linux",
-            installed: false,
-            running: false,
-            can_install: false,
-            message: Some("run `pitcrew-service run` (systemd units are planned)".into()),
+            installed,
+            running,
+            can_install: true,
+            message,
         }
     }
 
-    /// Registers and starts the service (the OS asks the user).
+    /// Runs `pitcrew-service <verb>`, waiting at most 90 s; its standard error becomes the message.
+    fn run_verb(verb: &str) -> Result<(), CommandError> {
+        let exe = service_exe()?;
+        let mut child = Command::new(&exe)
+            .arg(verb)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| CommandError::internal(format!("the service program could not be started: {e}")))?;
+        let started = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(s)) => break s,
+                Ok(None) if started.elapsed() > Duration::from_secs(90) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(CommandError::internal(format!(
+                        "pitcrew-service {verb} took too long and was stopped"
+                    )));
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Err(e) => return Err(CommandError::internal(format!("waiting for pitcrew-service {verb} failed: {e}"))),
+            }
+        };
+        if status.success() {
+            return Ok(());
+        }
+        let mut message = String::new();
+        if let Some(mut err) = child.stderr.take() {
+            use std::io::Read;
+            let _ = err.by_ref().take(2048).read_to_string(&mut message);
+        }
+        let reason = message.trim();
+        Err(CommandError::internal(if reason.is_empty() {
+            format!("pitcrew-service {verb} failed")
+        } else {
+            reason.to_string()
+        }))
+    }
+
+    /// Registers and starts the service (as the user).
     pub fn install() -> Result<(), CommandError> {
-        Err(CommandError::new(
-            CommandErrorCode::NotImplemented,
-            "installing the service is not available on Linux yet",
-        ))
+        run_verb("install")
     }
 
     /// Stops and removes the service.
     pub fn uninstall() -> Result<(), CommandError> {
-        install()
+        run_verb("uninstall")
     }
 }
 

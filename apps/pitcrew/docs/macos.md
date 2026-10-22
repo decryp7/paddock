@@ -76,6 +76,23 @@ registers it and starts it. The Dashboard shows it as **Idle** once the server a
 Optional: **Settings ▸ Gitea API** — a read token (scopes `read:repository`) shows workflow names, job outcomes and
 queue times on the dashboard. It is kept in your Keychain.
 
+### The environment jobs get
+
+launchd starts the agent, and so the runners and every job, with a minimal `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`):
+`node`, Homebrew tools or `~/.cargo/bin` would not be found ("Cannot find: node in PATH"). Pitcrew therefore asks your
+login shell (`$SHELL -l -i -c`, 5 s timeout, so `~/.zshrc` and nvm run) for the `PATH` a terminal has and gives it to
+every runner at each start and restart. When the shell does not answer, a fallback is used (nvm's newest Node,
+`~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, system folders). To set variables for one runner, add a table to
+`pitcrew.toml` (validated: at most 32 variables; `PITCREW_*` and `GITEA_RUNNER_*` are reserved):
+
+```toml
+[runners.env]
+NODE_ENV = "ci"
+PATH = "/opt/toolchain/bin:/usr/bin:/bin"   # replaces the login shell's PATH for this runner
+```
+
+A stopgap `runner.envs: PATH` entry in the runner's `config.yaml` is no longer needed; remove it.
+
 ## 4. A dedicated build Mac
 
 The agent runs while you are logged in. For a Mac that only builds:

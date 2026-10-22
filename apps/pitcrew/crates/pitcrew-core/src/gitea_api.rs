@@ -161,10 +161,45 @@ pub fn job_days(
             .0
             .saturating_sub(u64::from(days - 1) * DAY_MS),
     );
-    let mut out: Vec<(JobDay, u64, u64)> = (0..days)
+    buckets(jobs, details, now, first, days, DAY_MS)
+}
+
+/// Longest hourly range.
+pub const MAX_HOURS: u32 = 48;
+
+/// Groups `jobs` by the local hour they ended in, over the last `hours` hours (the current one included), for the
+/// 24 h view. Buckets start on local hour boundaries (so zones with half-hour offsets line up with the wall clock).
+pub fn job_hours(
+    jobs: &[FinishedJob],
+    details: &HashMap<u64, JobDetails>,
+    now: Timestamp,
+    hours: u32,
+    utc_offset_minutes: i32,
+) -> Vec<JobDay> {
+    let hours = hours.clamp(1, MAX_HOURS);
+    let offset = i128::from(utc_offset_minutes) * 60_000;
+    let hour = i128::from(HOUR_MS);
+    let this_hour = (i128::from(now.0) + offset).div_euclid(hour) * hour - offset;
+    let first = (this_hour - i128::from(hours - 1) * hour).max(0);
+    buckets(jobs, details, now, Timestamp(u64::try_from(first).unwrap_or(0)), hours, HOUR_MS)
+}
+
+/// One hour in milliseconds.
+const HOUR_MS: u64 = 3_600_000;
+
+/// Fills `count` buckets of `step` milliseconds from `first`.
+fn buckets(
+    jobs: &[FinishedJob],
+    details: &HashMap<u64, JobDetails>,
+    now: Timestamp,
+    first: Timestamp,
+    count: u32,
+    step: u64,
+) -> Vec<JobDay> {
+    let mut out: Vec<(JobDay, u64, u64)> = (0..count)
         .map(|d| {
             let day = JobDay {
-                start: Timestamp(first.0 + u64::from(d) * DAY_MS),
+                start: Timestamp(first.0 + u64::from(d) * step),
                 success: 0,
                 failure: 0,
                 cancelled: 0,
@@ -178,7 +213,7 @@ pub fn job_days(
         if j.finished_at < first || j.finished_at > now {
             continue;
         }
-        let index = usize::try_from((j.finished_at.0 - first.0) / DAY_MS).unwrap_or(usize::MAX);
+        let index = usize::try_from((j.finished_at.0 - first.0) / step).unwrap_or(usize::MAX);
         let Some(slot) = out.get_mut(index) else { continue };
         let d = j.info.job_id.and_then(|id| details.get(&id));
         match d.map(|d| d.conclusion) {
@@ -196,6 +231,24 @@ pub fn job_days(
         .map(|(mut day, sum, n)| {
             day.avg_queued_ms = (n > 0).then(|| sum / n);
             day
+        })
+        .collect()
+}
+
+/// The jobs with the server's outcome filled in where it is known (by job id); the rest stay as they are.
+pub fn with_outcomes(jobs: &[FinishedJob], details: &HashMap<u64, JobDetails>) -> Vec<FinishedJob> {
+    jobs.iter()
+        .map(|j| {
+            let known = j
+                .info
+                .job_id
+                .and_then(|id| details.get(&id))
+                .map(|d| d.conclusion)
+                .filter(|c| *c != Conclusion::Unknown);
+            FinishedJob {
+                outcome: known.or(j.outcome),
+                ..j.clone()
+            }
         })
         .collect()
 }
@@ -241,6 +294,7 @@ mod tests {
             },
             started_at: Timestamp(at - 1000),
             finished_at: Timestamp(at),
+            outcome: None,
         };
         let jobs = vec![
             fin(Some(1), 100 * DAY_MS + 10),
@@ -260,6 +314,34 @@ mod tests {
         assert_eq!((days[0].failure, days[0].avg_queued_ms), (1, None));
         assert_eq!((days[1].success, days[1].cancelled, days[1].unknown), (1, 1, 2));
         assert_eq!(days[1].avg_queued_ms, Some(2000));
+
+        // Hourly buckets: now is 01:00 on day 100, so the last two hours are 00:00 and 01:00.
+        let hours = job_hours(&jobs, &details, now, 2, 0);
+        assert_eq!(hours.len(), 2);
+        assert_eq!(hours[0].start, Timestamp(100 * DAY_MS));
+        assert_eq!((hours[0].success, hours[0].cancelled, hours[0].unknown), (1, 1, 2));
+        assert_eq!(hours[1].start, Timestamp(100 * DAY_MS + HOUR_MS));
+        assert_eq!(hours[1].success + hours[1].unknown, 0);
+        // A +05:30 zone: boundaries are on local hours; the range is capped.
+        let ist = job_hours(&jobs, &details, now, 3, 330);
+        assert_eq!(ist.len(), 3);
+        assert_eq!((ist[2].start.0 + 330 * 60_000) % HOUR_MS, 0);
+        assert_eq!(job_hours(&jobs, &details, now, 999, 0).len(), MAX_HOURS as usize);
+        assert_eq!(job_hours(&jobs, &details, Timestamp(10), 3, 0).len(), 3);
+
+        // Outcomes are filled in where the server told, else left alone.
+        let mut known = fin(Some(7), 5_000);
+        known.outcome = Some(Conclusion::Cancelled);
+        let filled = with_outcomes(&[jobs[0].clone(), jobs[1].clone(), jobs[2].clone(), known], &details);
+        assert_eq!(
+            filled.iter().map(|j| j.outcome).collect::<Vec<_>>(),
+            vec![
+                Some(Conclusion::Success),
+                Some(Conclusion::Failure),
+                None,
+                Some(Conclusion::Cancelled)
+            ]
+        );
     }
 
     fn job() -> JobInfo {

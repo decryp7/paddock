@@ -9,7 +9,7 @@ use std::path::Path;
 trait Stream: Read + Write {}
 impl<T: Read + Write> Stream for T {}
 
-fn connect(_data_dir: &Path) -> Result<Box<dyn Stream>, Error> {
+fn connect(_socket_dir: &Path) -> Result<Box<dyn Stream>, Error> {
     let unavailable = |e: std::io::Error| Error::Os {
         what: "Connecting to the Pitcrew service",
         reason: format!("{e} (is it running?)"),
@@ -25,7 +25,7 @@ fn connect(_data_dir: &Path) -> Result<Box<dyn Stream>, Error> {
     }
     #[cfg(unix)]
     {
-        let s = std::os::unix::net::UnixStream::connect(_data_dir.join(crate::ipc::SOCKET_FILE)).map_err(unavailable)?;
+        let s = std::os::unix::net::UnixStream::connect(_socket_dir.join(crate::ipc::SOCKET_FILE)).map_err(unavailable)?;
         s.set_read_timeout(Some(std::time::Duration::from_secs(30))).map_err(unavailable)?;
         Ok(Box::new(s))
     }
@@ -54,8 +54,8 @@ pub fn line(r: &RunnerSnapshot) -> String {
 }
 
 /// Prints the service's status; fails when it is not running.
-pub fn print(data_dir: &Path) -> Result<(), Error> {
-    let mut s = connect(data_dir)?;
+pub fn print(socket_dir: &Path) -> Result<(), Error> {
+    let mut s = connect(socket_dir)?;
     let frame = |e: pitcrew_core::protocol::FrameError| Error::Os {
         what: "Talking to the Pitcrew service",
         reason: e.to_string(),
