@@ -200,6 +200,8 @@ pub enum Request {
     Plugins,
     /// Asks the agent to exit (the app does this to restart an agent from an older build). Appended; answers `Ok`.
     Shutdown,
+    /// The hardware inventory (memory slots, CPU, disks); read once and cached by the agent. Appended.
+    Inventory,
 }
 
 /// Dyno's own cost.
@@ -411,6 +413,8 @@ pub enum Reply {
     Settings(Box<Settings>),
     /// Plugins.
     Plugins(Vec<PluginInfo>),
+    /// The hardware inventory. Appended.
+    Inventory(Box<crate::inventory::SystemInventory>),
 }
 
 impl Reply {
@@ -442,6 +446,7 @@ impl Reply {
             Reply::Alerts(x) => v(x),
             Reply::Settings(x) => v(x),
             Reply::Plugins(x) => v(x),
+            Reply::Inventory(x) => v(x),
         }
     }
 }
@@ -593,6 +598,7 @@ mod tests {
             Reply::Startup(vec![]),
             Reply::Alerts(vec![]),
             Reply::Plugins(vec![]),
+            Reply::Inventory(Box::new(crate::inventory::SystemInventory::new(String::new(), None, Default::default(), crate::inventory::MemoryLayout::unified(1, Default::default(), None), vec![]))),
             Reply::Rules(Box::default()),
         ];
         for r in all {

@@ -100,6 +100,8 @@ pub struct Core {
     pub facts: Option<(std::time::Instant, SystemFacts)>,
     /// Activity ids made this run.
     pub counter: u64,
+    /// The hardware inventory, read once (at start or on first request).
+    pub inventory: Option<dyno_core::inventory::SystemInventory>,
 }
 
 impl Core {
@@ -248,6 +250,7 @@ impl Shared {
             previous_priority: HashMap::new(),
             facts: None,
             counter: 0,
+            inventory: None,
         };
         for n in notes {
             core.log(

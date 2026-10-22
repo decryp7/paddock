@@ -250,3 +250,18 @@ fn a_wrong_token_is_refused_and_the_agent_keeps_serving() {
     let peer = h.client();
     ask(&peer, Request::Settings).unwrap();
 }
+
+#[test]
+fn the_inventory_is_read_once_and_cached() {
+    let h = Harness::start();
+    let peer = h.client();
+    let Reply::Inventory(a) = ask(&peer, Request::Inventory).unwrap() else {
+        panic!("inventory")
+    };
+    assert!(!a.os.is_empty());
+    assert!(a.memory.total() > 0);
+    let Reply::Inventory(b) = ask(&peer, Request::Inventory).unwrap() else {
+        panic!("inventory")
+    };
+    assert_eq!(*a, *b);
+}

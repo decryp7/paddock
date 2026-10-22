@@ -128,6 +128,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             Ok(Reply::Settings(Box::new(s)))
         }
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
+        Request::Inventory => Ok(Reply::Inventory(Box::new(crate::inventory::get(shared)))),
         Request::Health => Ok(Reply::Health(Box::new(health(shared)?))),
         Request::StartupEntries => Ok(Reply::Startup(lock(&shared.ports.startup).list()?)),
         Request::SetStartupState { id, state } => set_startup(shared, &id, state).map(Reply::Activity),

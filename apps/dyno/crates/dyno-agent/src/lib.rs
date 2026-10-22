@@ -8,6 +8,7 @@ pub mod cli;
 pub mod discovery;
 pub mod files;
 pub mod handlers;
+pub mod inventory;
 pub mod paths;
 pub mod rollup;
 pub mod sampler;
@@ -45,6 +46,7 @@ impl Running {
                 .spawn(move || sampler::Sampler::new(sensors, processes).run(&s))
                 .map_err(|e| format!("could not start the sampler: {e}"))?,
         );
+        inventory::warm(&shared);
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
