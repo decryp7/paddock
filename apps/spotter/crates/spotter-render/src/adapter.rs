@@ -3,9 +3,10 @@
 use crate::discover::{self, Browser};
 use crate::launch::{Chromium, EndedBy, LaunchOptions, Mode};
 use crate::page::Outcome;
-use crate::port::{PageRenderer, RenderError, RenderedPage};
 use crate::ready::{Readiness, Rule};
 use crate::Error;
+use spotter_core::render::{PageRenderer, RenderError, RenderedPage};
+use spotter_core::source::BoxFuture;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -114,8 +115,8 @@ fn blocking_render(
     }
 }
 
-impl PageRenderer for ChromiumRenderer {
-    async fn render(&self, url: &str, wait_selector: Option<&str>, timeout: Duration) -> Result<RenderedPage, RenderError> {
+impl ChromiumRenderer {
+    async fn render_page(&self, url: &str, wait_selector: Option<&str>, timeout: Duration) -> Result<RenderedPage, RenderError> {
         check_url(url)?;
         let Some(exe) = self.resolve() else {
             return Err(RenderError::Unavailable(Error::NotFound.to_string()));
@@ -129,6 +130,17 @@ impl PageRenderer for ChromiumRenderer {
         tokio::task::spawn_blocking(move || blocking_render(exe, opts, url, sel, timeout))
             .await
             .map_err(|e| RenderError::Failed(format!("the renderer stopped unexpectedly: {e}")))?
+    }
+}
+
+impl PageRenderer for ChromiumRenderer {
+    fn render<'a>(
+        &'a self,
+        url: &'a str,
+        wait_selector: Option<&'a str>,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<RenderedPage, RenderError>> {
+        Box::pin(self.render_page(url, wait_selector, timeout))
     }
 }
 

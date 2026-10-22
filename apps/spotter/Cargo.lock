@@ -1732,6 +1732,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "spotter-core",
  "sysinfo",
  "tempfile",
  "thiserror",

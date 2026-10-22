@@ -1,4 +1,4 @@
-//! Spotter's renderer: a small, self-contained Chromium driver (ADR 0002) behind the [`port::PageRenderer`] trait.
+//! Spotter's renderer: a small, self-contained Chromium driver (ADR 0002) behind `spotter_core::render::PageRenderer`.
 //!
 //! The driver modules ([`cdp`], [`launch`], [`page`], [`process`], [`discover`], [`ready`], [`challenge`],
 //! [`install`], [`manifest`]) know nothing of Spotter and will move to the shared paddock repo; only [`adapter`]
@@ -17,13 +17,12 @@ pub mod install;
 pub mod launch;
 pub mod manifest;
 pub mod page;
-pub mod port;
 pub mod process;
 pub mod ready;
 pub mod status;
 
 pub use adapter::ChromiumRenderer;
-pub use port::{PageRenderer, RenderError, RenderedPage};
+pub use spotter_core::render::{PageRenderer, RenderError, RenderedPage};
 pub use status::{renderer_status, RendererKind, RendererStatus};
 
 /// Everything that can go wrong in the driver; messages tell the user what to do.
