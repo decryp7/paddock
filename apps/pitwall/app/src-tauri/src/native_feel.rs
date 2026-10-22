@@ -77,6 +77,7 @@ fn apply_settings<R: Runtime>(window: &WebviewWindow<R>, feel: WebviewFeel) {
 /// Turns off WebView2's browser accelerator keys (applies from the next navigation commit: the app's first page
 /// load, as this runs right after the window is built). The UI guard covers the keys it can in between.
 #[cfg(windows)]
+#[allow(unsafe_code)] // one COM call, justified below
 fn disable_browser_accelerator_keys(webview: &tauri::webview::PlatformWebview) -> windows::core::Result<()> {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
     use windows::core::Interface;

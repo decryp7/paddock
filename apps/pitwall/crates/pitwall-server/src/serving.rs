@@ -651,6 +651,7 @@ impl Serving {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(5)).await;
+                crate::os_signals::refresh().await;
                 me.tick();
             }
         })

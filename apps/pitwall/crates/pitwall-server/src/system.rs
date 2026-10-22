@@ -33,18 +33,20 @@ async fn nvidia_gpus() -> Vec<Gpu> {
     }
 }
 
-/// Live memory for the release policy; `vram_free` comes from the hardware's GPUs when known.
+/// Live memory for the release policy; `vram_free` comes from the hardware's GPUs when known, the pressure and
+/// foreground flags from the OS signals the release loop keeps current (`os_signals`).
 pub fn read_system(hw: &Hardware) -> System {
     let mut s = sysinfo::System::new();
     s.refresh_memory();
-    System {
+    let sys = System {
         total: s.total_memory(),
         available: s.available_memory(),
         vram_free: hw.vram_free(),
         os_pressure: false,
         os_critical: false,
         foreground_busy: false,
-    }
+    };
+    crate::os_signals::current().apply(sys)
 }
 
 /// The room a fit check has right now.

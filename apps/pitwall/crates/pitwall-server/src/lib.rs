@@ -11,6 +11,7 @@ pub mod fake_engine;
 pub mod http;
 pub mod library;
 pub mod mgmt;
+pub mod os_signals;
 pub mod pack_engine;
 pub mod paths;
 pub mod process;
