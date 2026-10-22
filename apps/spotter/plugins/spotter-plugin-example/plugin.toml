@@ -1,0 +1,5 @@
+# Installed as <Spotter data folder>/plugins/manifest-file/ with the built program next to this file.
+id = "manifest-file"
+executable = "spotter-plugin-example"
+memory_limit_mb = 64
+timeout_secs = 15

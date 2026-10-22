@@ -1,0 +1,6 @@
+# Copy this folder to <Spotter data folder>/plugins/<id>/ together with the built program.
+id = "my-plugin"
+executable = "spotter-plugin-template"
+# Optional limits (defaults: 512 MiB, 60 s per request).
+# memory_limit_mb = 256
+# timeout_secs = 30
