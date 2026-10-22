@@ -67,7 +67,7 @@ async fn an_old_build_refuses_tools_in_every_api_family_naming_the_build_needed(
     );
     let m = e["message"].as_str().unwrap();
     assert!(
-        m.contains("b4600") && m.contains("vulkan b4000") && m.contains("Engines") && m.contains(TINY),
+        m.contains("b4599") && m.contains("vulkan b4000") && m.contains("Engines") && m.contains(TINY),
         "{m}"
     );
 
@@ -76,13 +76,13 @@ async fn an_old_build_refuses_tools_in_every_api_family_naming_the_build_needed(
     let r = h.call("POST", "/v1/messages", Some(&key), Some(anthropic), &[]).await;
     assert_eq!(r.status, 503, "{}", r.body);
     assert_eq!(r.json()["error"]["type"], "overloaded_error");
-    assert!(r.json()["error"]["message"].as_str().unwrap().contains("b4600"));
+    assert!(r.json()["error"]["message"].as_str().unwrap().contains("b4599"));
 
     let ollama = json!({"model": TINY, "stream": false, "messages": [{"role": "user", "content": "hi"}],
                         "tools": [{"type": "function", "function": {"name": "f", "description": "d", "parameters": {"type": "object", "properties": {}}}}]});
     let r = h.call("POST", "/api/chat", Some(&key), Some(ollama), &[]).await;
     assert_eq!(r.status, 503, "{}", r.body);
-    assert!(r.json()["error"].as_str().unwrap().contains("b4600"));
+    assert!(r.json()["error"].as_str().unwrap().contains("b4599"));
 
     // The model never loaded: the request was refused before the queue.
     assert_eq!(h.starts.load(std::sync::atomic::Ordering::SeqCst), 0);
@@ -98,20 +98,20 @@ async fn an_old_build_refuses_tools_in_every_api_family_naming_the_build_needed(
 #[tokio::test]
 async fn json_schema_vision_and_embeddings_are_gated_too() {
     let h = fresh().await;
-    install(&h, "cpu", "b2500", "passed");
+    install(&h, "cpu", "b1900", "passed");
     let key = key(&h).await;
     let schema = json!({"model": TINY, "messages": [{"role": "user", "content": "hi"}],
         "response_format": {"type": "json_schema", "json_schema": {"name": "o", "schema": {"type": "object"}}}});
     let r = h.call("POST", "/v1/chat/completions", Some(&key), Some(schema), &[]).await;
     assert_eq!(r.status, 503, "{}", r.body);
-    assert!(r.json()["error"]["message"].as_str().unwrap().contains("b3000"));
+    assert!(r.json()["error"]["message"].as_str().unwrap().contains("b2487"));
 
     let png = "data:image/png;base64,iVBORw0KGgo=";
     let vision = json!({"model": TINY, "messages": [{"role": "user", "content": [
         {"type": "text", "text": "what"}, {"type": "image_url", "image_url": {"url": png}}]}]});
     let r = h.call("POST", "/v1/chat/completions", Some(&key), Some(vision), &[]).await;
     assert_eq!(r.status, 503, "{}", r.body);
-    assert!(r.json()["error"]["message"].as_str().unwrap().contains("b5600"));
+    assert!(r.json()["error"]["message"].as_str().unwrap().contains("b5331"));
 
     let emb = h.dir.path().join("models/e/m");
     std::fs::create_dir_all(&emb).unwrap();
@@ -167,7 +167,7 @@ async fn the_model_list_and_capability_selection_leave_out_what_the_build_cannot
     let emb = h.dir.path().join("models/e/m");
     std::fs::create_dir_all(&emb).unwrap();
     std::fs::write(emb.join("embed-Q8_0.gguf"), common::gguf("bert")).unwrap();
-    install(&h, "cpu", "b2500", "passed");
+    install(&h, "cpu", "b1900", "passed");
     let models = h.call("GET", "/x/v1/models", Some(&key), None, &[]).await.json();
     let e = models["models"]
         .as_array()
@@ -178,7 +178,7 @@ async fn the_model_list_and_capability_selection_leave_out_what_the_build_cannot
         .clone();
     assert_eq!(e["capabilities"], json!([]));
     assert_eq!(e["unavailable"][0]["capability"], "embeddings");
-    assert_eq!(e["unavailable"][0]["minBuild"], 3000);
+    assert_eq!(e["unavailable"][0]["minBuild"], 2004);
     assert!(e["unavailable"][0]["reason"].as_str().unwrap().contains("Engines"));
     // Selection by capability finds nothing for embeddings on this build...
     let r = h

@@ -154,11 +154,11 @@ jobs:
 
       - name: Clippy (core, loopback, server incl. Windows service code)
         shell: bash
-        run: cargo clippy -p pitwall-core -p pitwall-loopback -p pitwall-server --all-targets -- -D warnings
+        run: cargo clippy -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli --all-targets -- -D warnings
 
       - name: Tests (core, loopback, server)
         shell: bash
-        run: cargo test -p pitwall-core -p pitwall-loopback -p pitwall-server
+        run: cargo test -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli
 
   # The macOS code for real: clippy and the tests of the engine and the server on the Mac host runner. Host toolchains
   # are used as they are (Rust and Node are installed there); nothing is installed.
@@ -177,10 +177,10 @@ jobs:
           cargo clippy --version || { echo "::error::clippy is missing on the Mac runner (rustup component add clippy)"; exit 1; }
 
       - name: Clippy (macOS)
-        run: cargo clippy -p pitwall-core -p pitwall-loopback -p pitwall-server --all-targets -- -D warnings
+        run: cargo clippy -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli --all-targets -- -D warnings
 
       - name: Tests (macOS)
-        run: cargo test -p pitwall-core -p pitwall-loopback -p pitwall-server
+        run: cargo test -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli
 
       - name: Clean up test processes and temp dirs
         if: always()

@@ -38,8 +38,8 @@ are not kept side by side.
   selection would move, and the toast says "Loaded models keep their current engine until they are loaded again".
 - **A capability matrix as data** (`runtimes/capabilities.json`, embedded next to `llama-runtimes.json`): per capability a
   label, a minimum llama.cpp release number (`minBuild`) and optional `unsupportedBackends` (build id to reason). The floors
-  are deliberately conservative (a little after the feature reached `llama-server`) and are reviewed when the catalog pin
-  moves. **`Matrix::gate(needed, build)`** is pure: `Allowed`, `NeedsBuild { capability, min_build, have, hint }` or
+  are the first release containing the change that brought the feature to `llama-server` (verified, see "Verified floors" below)
+  and are reviewed when the catalog pin moves. **`Matrix::gate(needed, build)`** is pure: `Allowed`, `NeedsBuild { capability, min_build, have, hint }` or
   `NotSupported { capability, reason }`. A backend that can never serve a capability wins over "too old"; among too-old
   answers the newest requirement is reported so one upgrade fixes everything; a build of unknown number (a custom
   `llama-server`) is trusted.
@@ -70,3 +70,22 @@ are not kept side by side.
   (`b11669`) satisfies every entry (a test checks it).
 - Gating is by release number, not by probing the binary; probing (`--help` flags) was rejected as slower, platform specific
   and still needing a table for what the flags mean.
+
+## Verified floors
+
+Checked on 2026-10-23 against the ggml-org/llama.cpp git history: each pull request's merge commit was mapped to the first
+`bNNNN` release tag that contains it (`git describe --contains --tags --match 'b[0-9]*' <commit>`). The earlier numbers were
+estimates; these replace them. The documentation (`tools/server/README.md`, `docs/multimodal.md`) names the pull requests but
+no build numbers, so the numbers come from the tags.
+
+| Capability | Change | Merged | First release (floor) |
+|---|---|---|---|
+| JSON-schema output | #5978 json-schema-to-grammar improvements, added to the server | 2024-03-21 | b2487 |
+| Tool calling | #9639 tool call support (generic and native templates) with lazy grammars | 2025-01-30 | b4599 |
+| Vision (mtmd) | #12898 server: vision support via libmtmd | 2025-05-09 | b5331 |
+| Embeddings | #5190 server: OpenAI-compatible embeddings | 2024-01-29 | b2004 |
+| Reranking | #9510 llama: add reranking support (`/rerank` in the server) | 2024-09-28 | b3841 |
+
+These are the first releases that contain the feature, not releases known to be free of its early bugs (for example the
+embedding normalisation fix #5956 and the TEI rerank format #11942, b4738, came later); raise a floor in the data file if a
+real build proves unreliable. Hardware backends are not verified here; `unsupportedBackends` stays empty.

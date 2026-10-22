@@ -15,7 +15,7 @@ Numbered, with status, context, decision and consequences. ADRs are not renumber
 | [0009](0009-app-integration-contract.md) | How apps (Debrief first) find, pair with and use Pitwall | accepted; Debrief side not built |
 | [0010](0010-no-plugin-system.md) | No plugin system | accepted |
 | [0011](0011-declarative-packs.md) | Extend through declarative packs, not code | accepted |
-| 0012 | Native feel (after Debrief ADR 0028), written by another agent | in progress |
+| [0012](0012-native-feel.md) | Native feel: windows behave like a desktop application | accepted |
 | [0013](0013-usage-over-time.md) | Per-app usage over time, and limits that explain themselves | accepted (number provisional) |
 | [0014](0014-model-presets-and-aliases.md) | Model presets and aliases | accepted (number provisional) |
 | [0015](0015-command-line-tool.md) | The `pitwall` command-line tool | accepted (number provisional) |

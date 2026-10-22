@@ -910,11 +910,11 @@ mod tests {
         assert!(m.blocked("m", &tools).is_empty());
         put(&dirs, "cpu", "b4000", "passed", true);
         let e = m.check("m", &tools).unwrap_err();
-        assert!(e.message.contains("b5600") && e.message.contains("cpu b4000"), "{}", e.message);
+        assert!(e.message.contains("b5331") && e.message.contains("cpu b4000"), "{}", e.message);
         let b = m.blocked("m", &[Capability::Chat, Capability::Tools, Capability::Vision]);
         assert_eq!(
             b.iter().map(|x| (x.capability, x.min_build)).collect::<Vec<_>>(),
-            vec![(Capability::Tools, Some(4600)), (Capability::Vision, Some(5600))]
+            vec![(Capability::Tools, Some(4599)), (Capability::Vision, Some(5331))]
         );
         // A pin to something that is not installed is a typed pin error, not a capability error.
         let mut p = EnginePins::default();

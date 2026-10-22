@@ -1537,4 +1537,19 @@ mod tests {
         };
         assert_eq!(serde_json::to_value(caps).unwrap()["buildId"], "cpu");
     }
+
+    #[test]
+    fn a_model_from_an_older_reply_loads_with_one_slot() {
+        let v = serde_json::json!({
+            "id": "m", "repo": "r", "file": "f.gguf", "name": "m", "quant": null, "sizeBytes": 1, "paramsB": null,
+            "contextMax": null, "architecture": null, "capabilities": [], "projector": null, "addedAt": 0,
+            "lastUsedAt": null, "loaded": false, "pinned": false, "idleSecs": null,
+            "fit": {"verdict": "fits", "needRam": 0, "needVram": 0, "haveRam": 0, "haveVram": 0, "offload": "all", "message": ""}
+        });
+        let m: LocalModel = serde_json::from_value(v).unwrap();
+        assert_eq!(m.slots, 1);
+        assert!(!m.slots_custom);
+        assert_eq!(m.loaded_slots, None);
+        assert_eq!(m.engine, None);
+    }
 }

@@ -132,10 +132,8 @@ pub fn max_context(size: &ModelSize, slots: Slots, room: &Room, cap: u32, comfor
         return 0;
     }
     // The memory need only grows with the context, so the answer is a boundary: binary search the steps.
+    // `cap` is at least MIN_CONTEXT, so `hi >= lo` always holds.
     let (mut lo, mut hi) = (MIN_CONTEXT.div_ceil(CONTEXT_STEP), cap / CONTEXT_STEP);
-    if hi < lo {
-        return MIN_CONTEXT;
-    }
     while lo < hi {
         let mid = lo + (hi - lo).div_ceil(2);
         if ok(mid * CONTEXT_STEP) {

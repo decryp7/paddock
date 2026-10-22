@@ -224,6 +224,12 @@ mod tests {
         ])
     }
 
+    #[test]
+    fn facts_come_from_the_id_and_the_release_tag() {
+        assert_eq!(BuildFacts::new("vulkan", "b11669"), b("vulkan", Some(11669)));
+        assert_eq!(BuildFacts::new("cpu", "nightly"), b("cpu", None));
+    }
+
     fn b(id: &str, n: Option<u64>) -> BuildFacts {
         BuildFacts { id: id.into(), number: n }
     }
