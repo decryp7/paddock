@@ -1,0 +1,167 @@
+# Builds the installers on all three platforms for a v* tag and publishes a Gitea release with them, the release
+# notes and latest.json (the updater's release information). See docs/releasing.md.
+#
+# Secrets (all optional; without the signing ones the installers are built unsigned and latest.json is not published):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, TAURI_UPDATER_PUBKEY - signed updater artifacts
+#   RELEASE_TOKEN - a Gitea access token with write:repository scope, used to publish the release
+# The Tauri shell (app/src-tauri) is built by another change; bundle steps skip while it is missing, and the release
+# job then fails with a clear message rather than publishing an empty release.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bundle:
+    name: bundle (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bundles: deb,appimage
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: app,dmg
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'catthehacker/ubuntu:act-latest' || '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Linux dependencies for Tauri and the bundles
+        if: runner.os == 'Linux'
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf file xdg-utils
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: runner.os == 'Linux'
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.pitwall-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - name: Build folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_TARGET_DIR=${{ github.workspace }}/../.pitwall-ci-target-release" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: runner.os != 'macOS'
+
+      - name: Host Node matches app/.nvmrc
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+          if ! command -v node >/dev/null; then
+            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/nodejs:$PATH"
+            else
+              echo "::error::Node.js is not installed on this runner: install Node $want (app/.nvmrc)."
+              exit 1
+            fi
+          fi
+          have=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$have" != "$want" ]; then
+            echo "::error::The runner has Node $(node --version) but app/.nvmrc asks for Node $want."
+            exit 1
+          fi
+
+      - name: Build installers
+        shell: bash
+        env:
+          CI: "true"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: bash scripts/ci/tauri-bundle.sh "${{ matrix.bundles }}"
+
+      - name: Verify the .app (ad-hoc signature, run path)
+        if: runner.os == 'macOS' && hashFiles('app/src-tauri/Cargo.toml') != ''
+        run: bash scripts/ci/macos-verify-bundle.sh
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: hashFiles('app/src-tauri/Cargo.toml') != ''
+        with:
+          name: pitwall-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Clean up (macOS)
+        if: always() && runner.os == 'macOS'
+        run: bash scripts/ci/macos-cleanup.sh --build-outputs
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [bundle]
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
+        with:
+          path: artifacts
+
+      - name: Installers are present
+        run: |
+          if ! find artifacts -type f | grep -q .; then
+            echo "::error::No installers were built (app/src-tauri missing?): nothing to release."
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Release notes (git-cliff)
+        run: |
+          cargo install git-cliff --locked
+          git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+
+      # latest.json: version, notes, pub_date and, per platform, the installer's URL, signature and size. Installed
+      # apps fetch releases/download/latest/latest.json (the latest non-pre-release).
+      - name: Updater manifest (latest.json)
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          node --test scripts/release/latest-json.test.mjs
+          if ! find artifacts -name '*.sig' | grep -q .; then
+            echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
+            exit 0
+          fi
+          node scripts/release/latest-json.mjs --dir artifacts --version "$TAG" --notes artifacts/RELEASE_NOTES.md \
+            --base-url "$BASE_URL" --out artifacts/latest.json
+          find artifacts -name '*.sig' -delete
+          cat artifacts/latest.json
+
+      - uses: https://gitea.com/actions/release-action@main
+        with:
+          files: artifacts/**/*
+          api_key: ${{ secrets.RELEASE_TOKEN }}

@@ -25,6 +25,11 @@
       "groupSlug": "weekly"
     },
     {
+      "description": "Node follows app/.nvmrc, which CI and the host runners must match; bump it by hand",
+      "matchPackageNames": ["node"],
+      "enabled": false
+    },
+    {
       "description": "Gitea Actions only supports v3 of the artifact actions",
       "matchPackageNames": ["actions/upload-artifact", "actions/download-artifact"],
       "allowedVersions": "<4"
