@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { ComingDialog } from '../../shell/coming-dialog';
+import { Dialogs } from '../../shared/dialog';
 import type { Suggestion } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { formatCount, formatFraction } from '../../shared/format';
@@ -39,12 +41,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
               <div class="txt">
                 <strong>{{ c.title }}</strong>
                 <span>{{ c.explanation }}</span>
-                <div class="evidence">
-                  @for (e of c.evidence; track e.label) {
-                    <span class="chip"><span class="k">{{ e.label }}</span><span class="v">{{ e.value }}</span></span>
-                  }
-                  <span class="chip"><span class="k">Confidence</span><span class="v">{{ conf(c.confidence) }}</span></span>
-                </div>
+                <p class="evidence num">@for (e of c.evidence; track e.label) {<span>{{ e.label }} {{ e.value }}</span>}<span>Confidence {{ conf(c.confidence) }}</span></p>
               </div>
             </div>
             @if (c.suggestions.length) {
@@ -79,11 +76,12 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
     .body { padding: var(--sp-3) var(--sp-4) var(--sp-4); display: grid; gap: var(--sp-3); align-content: start; }
     .idle { color: var(--text-2); max-width: 62ch; }
     .headline { font: var(--fw-semibold) var(--fs-lg) / 1.3 var(--font-display); }
-    .cause { display: flex; gap: var(--sp-3); padding: var(--sp-3); border-radius: var(--r-md); background: var(--surface-inset); }
-    .ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--r-md); background: var(--accent-soft); color: var(--accent-text); flex: none; }
+    .cause { display: flex; gap: var(--sp-3); padding: var(--sp-1) 0 var(--sp-1) var(--sp-3); border-left: 3px solid var(--warn); }
+    .ic { display: grid; place-items: center; width: 28px; height: 28px; color: var(--text-2); flex: none; }
     .txt { display: grid; gap: var(--sp-1); min-width: 0; }
     .txt > span { color: var(--text-2); font-size: var(--fs-sm); }
-    .evidence { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-1); }
+    .evidence { margin: var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-sm); }
+    .evidence span + span::before { content: ' · '; }
     .actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
     .more { justify-self: start; }
     .others { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-sm); }
@@ -99,6 +97,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
 export class DiagnosisCard {
   protected readonly store = inject(DiagnosisStore);
   protected readonly router = inject(Router);
+  private readonly dialogs = inject(Dialogs);
   protected readonly cause = computed(() => this.store.diagnosis()?.causes[0] ?? null);
   protected readonly hint = computed(() => {
     const e = this.store.error();
@@ -113,7 +112,7 @@ export class DiagnosisCard {
   protected take(s: Suggestion): void {
     const a = s.action;
     if (typeof a === 'object') void this.store.act(a.process.target, a.process.action);
-    else if (a === 'openCleanup') void this.router.navigateByUrl('/cleanup');
+    else if (a === 'openCleanup') this.dialogs.open(ComingDialog);
     else if (a === 'openTaskManager') void this.router.navigateByUrl('/processes');
     else if (a === 'openStartup') void this.router.navigateByUrl('/health');
   }

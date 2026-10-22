@@ -7,7 +7,7 @@ import type { Priority } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { Dialogs } from '../../shared/dialog';
 import { formatBytes, formatCount, formatPercent, formatRate, plural } from '../../shared/format';
-import { heat } from '../../shared/heat';
+import { bar } from '../../shared/heat';
 import { Icon } from '../../shared/icon';
 import { PRIORITIES, PRIORITY_LABEL } from '../../shared/labels';
 import { LiveStore } from '../../state/live.store';
@@ -113,9 +113,9 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                     <span class="badge" data-tone="warn">Suspended</span>
                   }
                 </span>
-                <span role="gridcell" class="r num heat" [style.background]="heat(r.cpu, 40)">{{ pct(r.cpu) }}</span>
-                <span role="gridcell" class="r num heat" [style.background]="heat(r.memory, 2147483648)">{{ bytes(r.memory) }}</span>
-                <span role="gridcell" class="r num heat" [style.background]="heat(r.disk, 52428800)">{{ rate(r.disk) }}</span>
+                <span role="gridcell" class="r num heat" [style.background]="bar(r.cpu, 40, sortKey() === 'cpu')">{{ pct(r.cpu) }}</span>
+                <span role="gridcell" class="r num heat" [style.background]="bar(r.memory, 2147483648, sortKey() === 'memory')">{{ bytes(r.memory) }}</span>
+                <span role="gridcell" class="r num heat" [style.background]="bar(r.disk, 52428800, sortKey() === 'disk')">{{ rate(r.disk) }}</span>
                 <span role="gridcell" class="truncate faint">{{ r.user ?? '' }}</span>
                 <span role="gridcell" class="r num faint">{{ pid(r) }}</span>
                 <span role="gridcell" class="act">
@@ -183,7 +183,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
     .row > span { padding: 0 var(--sp-2); min-width: 0; }
     .row > .r { text-align: right; }
     .head-row { height: 32px; flex: none; border-bottom: 1px solid var(--border); background: var(--surface-2); }
-    .head-row button { all: unset; display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: 0.03em; text-transform: uppercase; cursor: default; }
+    .head-row button { all: unset; display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-semibold); cursor: default; }
     .head-row button:hover { color: var(--text-1); } .head-row button:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
     .head-row dy-icon { --icon-size: 12px; }
     .vp { flex: 1; min-height: 0; }
@@ -224,7 +224,8 @@ export class ProcessesPage implements OnInit, OnDestroy {
   protected readonly pct = formatPercent;
   protected readonly bytes = formatBytes;
   protected readonly rate = formatRate;
-  protected readonly heat = heat;
+  protected readonly bar = bar;
+  protected readonly sortKey = computed(() => this.store.sort().key);
   protected readonly prioLabel = (p: Priority) => PRIORITY_LABEL[p];
   protected readonly hint = computed(() => {
     const e = this.store.actionError();

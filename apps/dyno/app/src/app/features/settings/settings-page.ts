@@ -17,7 +17,7 @@ import { TrayItemsEditor } from './tray-items-editor';
   imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="page">
+    <div class="page narrow">
       <header class="page-head">
         <div class="titles">
           <h1>Settings</h1>
@@ -32,14 +32,7 @@ import { TrayItemsEditor } from './tray-items-editor';
       <dy-async [loaded]="!!draft()" [error]="store.error()" what="settings" [rows]="4" (retry)="store.load()">
         @if (draft(); as d) {
           <div class="stack">
-            <section class="card posture" aria-label="What Dyno changes">
-              <span class="ic"><dy-icon name="shield-check" /></span>
-              <div class="txt">
-                <h2>Observe-only by default</h2>
-                <p>Dyno only reads what your PC is doing. It never ends, throttles, cleans or tunes anything on its own: a change happens only when a rule you enabled fires or you click an action, and every change is logged and undoable where the OS allows.</p>
-                <p>Changes that need administrator rights go through a small privileged helper. Dyno installs it the first time you approve such an action, with the operating system's own prompt; until then nothing runs elevated.</p>
-              </div>
-            </section>
+            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads until you enable a rule or click an action; every change is logged and undoable where the OS allows. Admin changes use a small helper installed on first approval.</p>
 
             <section class="card" aria-label="Appearance">
               <h2>Appearance</h2>
@@ -187,7 +180,7 @@ import { TrayItemsEditor } from './tray-items-editor';
   `,
   styles: `
     :host { display: block; }
-    .page { max-width: 860px; display: grid; gap: var(--sp-4); }
+    .page { display: grid; gap: var(--sp-4); }
     .page-head { margin-bottom: 0; }
     .stack { display: grid; gap: var(--sp-4); }
     .card { padding: var(--sp-4) var(--sp-5); }
@@ -199,15 +192,14 @@ import { TrayItemsEditor } from './tray-items-editor';
     .problem { color: var(--bad); font-size: var(--fs-sm); }
     .lbl { display: grid; gap: 2px; min-width: 0; }
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
-    .num-in { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); white-space: nowrap; }
-    .num-in .input { width: 80px; text-align: right; }
+    .num-in { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control-h); padding: 0 var(--sp-3) 0 var(--sp-1); border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-3); white-space: nowrap; }
+    .num-in:focus-within { border-color: var(--focus); outline: 1px solid var(--focus); }
+    .num-in .input { width: 56px; height: 100%; padding: 0 var(--sp-1); border: 0; background: none; outline: none; text-align: right; font-variant-numeric: tabular-nums; }
     .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }
     .checks { display: flex; gap: var(--sp-3); flex-wrap: wrap; justify-content: flex-end; }
     .check { display: inline-flex; align-items: center; gap: 6px; }
-    .posture { display: flex; gap: var(--sp-4); border-color: color-mix(in srgb, var(--ok) 30%, var(--border)); }
-    .posture .ic { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: var(--r-md); background: var(--ok-soft); color: var(--ok); }
-    .posture .txt { display: grid; gap: var(--sp-2); }
-    .posture p { color: var(--text-2); max-width: 70ch; }
+    .posture { display: flex; gap: var(--sp-2); align-items: flex-start; margin: 0; color: var(--text-2); font-size: var(--fs-sm); }
+    .posture dy-icon { --icon-size: 16px; color: var(--text-3); flex: none; margin-top: 1px; }
     .plugins { list-style: none; margin: 0; padding: 0; display: grid; }
     .plugins li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); }
     .plugins .txt { flex: 1; display: grid; }

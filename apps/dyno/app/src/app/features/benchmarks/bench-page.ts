@@ -191,7 +191,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
   styles: `
     :host { display: block; }
     dy-async { display: grid; gap: var(--sp-4); }
-    .page { display: grid; gap: var(--sp-4); align-content: start; max-width: 980px; }
+    .page { display: grid; gap: var(--sp-4); align-content: start; }
     .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
     .kind { position: relative; display: flex; align-items: center; gap: var(--sp-3); padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); cursor: pointer; }
     .kind[data-on='true'] { border-color: var(--border-strong); background: var(--surface-2); }

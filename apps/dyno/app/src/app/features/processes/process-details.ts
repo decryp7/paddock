@@ -48,7 +48,16 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
             @switch (tab()) {
               @case ('overview') {
                 <dl class="dy-selectable">
-                  <dt>Command line</dt><dd class="mono wrap">{{ x.commandLine.join(' ') || 'Not available' }}</dd>
+                  <dt>Command line</dt>
+                  <dd>
+                    <span class="mono wrap cmd" [class.open]="cmdOpen()" [title]="x.commandLine.join(' ')">{{ x.commandLine.join(' ') || 'Not available' }}</span>
+                    @if (x.commandLine.length) {
+                      <span class="cmd-acts">
+                        @if (x.commandLine.join(' ').length > 120) { <button type="button" class="btn link" (click)="cmdOpen.set(!cmdOpen())">{{ cmdOpen() ? 'Show less' : 'Show more' }}</button> }
+                        <button type="button" class="btn link" (click)="copyCommand(x.commandLine)">Copy</button>
+                      </span>
+                    }
+                  </dd>
                   <dt>Folder</dt><dd class="mono wrap">{{ x.cwd ?? 'Not available' }}</dd>
                   <dt>Signed by</dt>
                   <dd>
@@ -134,7 +143,10 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
     dl { margin: 0; display: grid; gap: 2px var(--sp-3); grid-template-columns: 96px minmax(0, 1fr); font-size: var(--fs-sm); }
     dt { color: var(--text-3); padding: 3px 0; }
     dd { margin: 0; padding: 3px 0; }
-    .wrap { word-break: break-all; font-size: var(--fs-xs); }
+    .wrap { word-break: break-all; font-size: var(--fs-sm); }
+    .cmd { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .cmd.open { display: block; -webkit-line-clamp: unset; }
+    .cmd-acts { display: flex; gap: var(--sp-3); }
     .chain, .plain { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); font-size: var(--fs-sm); }
     .chain li::before { content: '↑ '; color: var(--text-3); }
     .chain li.me::before { content: ''; }
@@ -152,6 +164,7 @@ export class ProcessDetailsPanel {
   protected readonly store = inject(ProcessesStore);
   private readonly live = inject(LiveStore);
   protected readonly tab = signal<Tab>('overview');
+  protected readonly cmdOpen = signal(false);
   protected readonly tabs: { id: Tab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'parents', label: 'Parents' },
@@ -177,6 +190,10 @@ export class ProcessDetailsPanel {
   }
   protected conns(l: ListOrReason<import('../../core/api.types').Connection>) {
     return 'unavailable' in l ? { reason: l.unavailable, items: [] } : { reason: null, items: l.items.items };
+  }
+
+  protected copyCommand(line: string[]): void {
+    void navigator.clipboard?.writeText(line.join(' ')).catch(() => undefined);
   }
 
   protected close(): void {

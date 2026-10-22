@@ -168,7 +168,7 @@ interface RowArt {
 
     .group { position: relative; display: grid; gap: 2px; }
     .group + .group { margin-top: 8px; }
-    .channel { margin: 0 0 2px; display: flex; align-items: center; gap: 8px; font: 500 11px / 16px var(--hw-font, system-ui, sans-serif); letter-spacing: 0.04em; text-transform: uppercase; color: var(--hw-text-subtle); }
+    .channel { margin: 0 0 2px; display: flex; align-items: center; gap: 8px; font: 500 11px / 16px var(--hw-font, system-ui, sans-serif); color: var(--hw-text-subtle); }
     .channel::after { content: ''; flex: 1; height: 1px; background: var(--hw-board-edge); }
 
     .slot { position: relative; display: grid; grid-template-columns: minmax(0, var(--art-w)) minmax(0, 1fr); gap: 16px; align-items: center; padding: 6px 8px 6px 0; border-radius: 7px; outline: none; }
@@ -207,7 +207,6 @@ interface RowArt {
     .size.free { font-size: 14px; font-weight: 500; color: var(--hw-text-muted); line-height: 22px; }
     .type { font: 600 12px / 16px var(--hw-font, system-ui, sans-serif); color: var(--hw-text-muted); }
     .speed { font: 400 13px / 20px var(--hw-font, system-ui, sans-serif); font-variant-numeric: tabular-nums; color: var(--hw-text); }
-    .speed.below { color: var(--hw-tone-warn); }
     .maker { font-size: 12px; line-height: 16px; color: var(--hw-text-subtle); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
     .tags:empty { display: none; }

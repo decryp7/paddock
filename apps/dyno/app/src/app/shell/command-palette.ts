@@ -111,7 +111,7 @@ export function rankItems<T extends { label: string; keywords: string }>(items: 
     .q { flex: 1; border: 0; background: none; color: var(--text-1); font: var(--fs-lg) var(--font-sans); outline: none; min-width: 0; }
     .q::placeholder { color: var(--text-3); }
     ul { list-style: none; margin: 0; padding: var(--sp-2); max-height: min(420px, 60vh); overflow: auto; }
-    .section { padding: var(--sp-2) var(--sp-2) var(--sp-1); font-size: var(--fs-xs); color: var(--text-3); font-weight: var(--fw-semibold); letter-spacing: 0.04em; text-transform: uppercase; }
+    .section { padding: var(--sp-2) var(--sp-2) var(--sp-1); font-size: var(--fs-xs); color: var(--text-3); font-weight: var(--fw-semibold); }
     .item { display: flex; align-items: center; gap: var(--sp-3); height: 36px; padding: 0 var(--sp-3); border-radius: var(--r-md); cursor: pointer; }
     .item dy-icon { --icon-size: 16px; color: var(--text-2); }
     .item[aria-selected='true'] { background: var(--accent-soft); }

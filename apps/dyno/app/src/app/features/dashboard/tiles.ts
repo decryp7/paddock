@@ -78,7 +78,7 @@ const parts = splitValue;
     .cores { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; height: 12px; }
     .core { border-radius: 2px; background-color: var(--surface-active); }
     .groups { display: grid; gap: var(--sp-3); }
-    h3 { font-size: var(--fs-xs); color: var(--text-3); font-weight: var(--fw-semibold); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: var(--sp-1); }
+    h3 { font-size: var(--fs-xs); color: var(--text-3); font-weight: var(--fw-semibold); margin-bottom: var(--sp-1); }
     ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px var(--sp-4); }
     li { display: grid; grid-template-columns: 22px minmax(0, 1fr) 38px; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); }
     .lbl { color: var(--text-3); }

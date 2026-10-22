@@ -4,7 +4,7 @@ import { BACKEND } from '../core/backend';
 import { MockBackend } from '../core/mock-backend';
 import { provideIcons } from '../shared/icons';
 import { LiveStore } from '../state/live.store';
-import { NAV } from './nav';
+import { COMING, NAV } from './nav';
 import { Shell } from './shell';
 
 const NOW = 1_700_000_000_000;
@@ -21,10 +21,13 @@ async function make() {
 }
 
 describe('NAV', () => {
-  it('has unique paths, starts at the dashboard and marks the unbuilt screens', () => {
+  it('has unique paths and starts at the dashboard', () => {
     expect(new Set(NAV.map((n) => n.path)).size).toBe(NAV.length);
     expect(NAV[0]!.path).toBe('/');
-    expect(NAV.filter((n) => n.planned).map((n) => n.label)).toEqual(['Why slow', 'CPU taming', 'Cleanup', 'Reports & alerts']);
+  });
+  it('lists unbuilt features only in the Coming list, never as routes', () => {
+    expect(COMING.map((c) => c.label)).toEqual(['Why slow', 'Cleanup', 'Weekly report']);
+    expect(NAV.some((n) => COMING.some((c) => c.label === n.label))).toBe(false);
   });
 });
 
@@ -37,18 +40,15 @@ describe('Shell', () => {
     }
   });
 
-  it('lists the built screens, and keeps the planned ones behind a "Coming" disclosure', async () => {
+  it('lists the built screens and opens the Coming list as a dialog', async () => {
     const { f, el } = await make();
     const label = (a: Element) => a.querySelector('.label')?.textContent?.trim();
-    const built = NAV.filter((n) => !n.planned).map((n) => n.label);
-    expect([...el.querySelectorAll('nav ul:not(.planned) a')].map(label)).toEqual(built);
-    expect(el.querySelector('ul.planned')).toBeNull();
+    expect([...el.querySelectorAll('nav ul a')].map(label)).toEqual(NAV.map((n) => n.label));
     const toggle = el.querySelector<HTMLButtonElement>('button.more')!;
-    expect(toggle.textContent).toContain(`Coming (${NAV.filter((n) => n.planned).length})`);
+    expect(toggle.textContent).toContain(`Coming (${COMING.length})`);
     toggle.click();
     f.detectChanges();
-    expect([...el.querySelectorAll('ul.planned a')].map(label)).toEqual(NAV.filter((n) => n.planned).map((n) => n.label));
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.body.textContent).toContain('Not built yet');
   });
   it('has a skip link, a main landmark and a search button', async () => {
     const { el } = await make();
@@ -77,7 +77,7 @@ describe('Shell', () => {
     expect(el.querySelector('.agent')!.getAttribute('data-state')).toBe('running'); // the mock reports running soon after subscribing
     live.receive(mock.liveUpdate('summary'));
     f.detectChanges();
-    expect(el.querySelector('.overhead')!.textContent).toMatch(/\d/);
+    expect(el.querySelector('.agent')).not.toBeNull();
     live.setAgent({ state: 'stopped', message: 'gone' } as never);
     f.detectChanges();
     expect(el.querySelector('.agent')!.textContent).toContain('Agent stopped');

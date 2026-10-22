@@ -297,7 +297,9 @@ export class MockBackend implements DynoBackend {
       return Math.round(lo + ((hi - lo) * load) / 100);
     });
     const memTotal = this.profile.memoryTotal;
-    const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + s.memory, 0) + 2.9 * GB);
+    // A slow swell on top of the processes' own memory (caches, compression) so the live line moves like a real machine's.
+    const swell = (0.8 + 0.7 * wobble(t, 810, 22)) * GB + 0.18 * GB * wobble(t, 811, 3);
+    const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + s.memory, 0) + 2.9 * GB + swell);
     const diskRead = samples.reduce((a, s) => a + s.diskReadBps, 0);
     const diskWrite = samples.reduce((a, s) => a + s.diskWriteBps, 0);
     const building = samples.some((s) => s.name === this.profile.names.rustc && s.cpu > 1);

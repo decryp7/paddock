@@ -42,6 +42,31 @@ describe('dy-health-page', () => {
     expect(el.querySelectorAll('[aria-label="Startup manager"] tbody tr').length).toBe(store.startup().length);
   });
 
+  it('"Apply all safe" applies every suggestion that needs no administrator approval, in one click', async () => {
+    const { f, el } = render();
+    await settle(f);
+    const store = TestBed.inject(HealthStore);
+    const safe = store.tuning().filter((t) => !t.applied && !t.needsAdmin).length;
+    expect(safe).toBeGreaterThan(0);
+    const all = [...el.querySelectorAll<HTMLButtonElement>('button.primary')].find((b) => b.textContent?.includes(`Apply all safe (${safe})`));
+    expect(all).toBeDefined();
+    all!.click();
+    await settle(f);
+    await settle(f);
+    expect(store.tuning().filter((t) => !t.applied && !t.needsAdmin)).toHaveLength(0);
+    expect(store.tuning().filter((t) => t.needsAdmin && t.applied)).toHaveLength(0);
+  });
+
+  it('lists the startup items with the highest impact first', async () => {
+    const { f, el } = render();
+    await settle(f);
+    const order = { notMeasured: 0, low: 1, medium: 2, high: 3 } as const;
+    const store = TestBed.inject(HealthStore);
+    const names = [...el.querySelectorAll('[aria-label="Startup manager"] tbody tr td:first-child strong')].map((n) => n.textContent);
+    const ranks = names.map((n) => order[store.startup().find((e) => e.name === n)!.impact.rating]);
+    expect(ranks).toEqual([...ranks].sort((a, b) => b - a));
+  });
+
   it('turns a startup item off and on with its switch and delays it with one click', async () => {
     const { f, el } = render();
     await settle(f);

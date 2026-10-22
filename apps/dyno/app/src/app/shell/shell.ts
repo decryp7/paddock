@@ -11,7 +11,8 @@ import { Notifier, Toasts } from '../shared/notifier';
 import { LiveStore } from '../state/live.store';
 import { SettingsStore } from '../state/settings.store';
 import { CommandPalette } from './command-palette';
-import { NAV } from './nav';
+import { ComingDialog } from './coming-dialog';
+import { COMING, NAV } from './nav';
 import { ProfileSwitcher } from './profile-switcher';
 
 const COLLAPSED_KEY = 'dyno.sidebarCollapsed';
@@ -63,21 +64,9 @@ function readCollapsed(): boolean {
             </li>
           }
         </ul>
-        <button type="button" class="more label" [attr.aria-expanded]="showPlanned()" aria-controls="planned-nav" (click)="showPlanned.set(!showPlanned())">
-          <dy-icon [name]="showPlanned() ? 'chevron-down' : 'chevron-right'" /> Coming ({{ planned_.length }})
+        <button type="button" class="more label" aria-haspopup="dialog" (click)="openComing()">
+          <dy-icon name="info" /> Coming ({{ coming.length }})
         </button>
-        @if (showPlanned()) {
-          <ul id="planned-nav" class="planned">
-            @for (item of planned_; track item.path) {
-              <li>
-                <a [routerLink]="item.path" routerLinkActive="active" ariaCurrentWhenActive="page" [matTooltip]="collapsed() ? item.label : ''" matTooltipPosition="right" [attr.aria-label]="collapsed() ? item.label : null">
-                  <dy-icon [name]="item.icon" />
-                  <span class="label">{{ item.label }}</span>
-                </a>
-              </li>
-            }
-          </ul>
-        }
       </nav>
       <div class="side-foot">
         <button type="button" class="btn ghost collapse" (click)="toggle()" [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [attr.aria-expanded]="!collapsed()">
@@ -95,12 +84,8 @@ function readCollapsed(): boolean {
           <span class="keys"><kbd>{{ platform.mod }}</kbd><kbd>K</kbd></span>
         </button>
         <span class="spacer" [attr.data-tauri-drag-region]="platform.overlayTitleBar ? '' : null"></span>
-        <div class="overhead num" [matTooltip]="overheadTip()" role="status" aria-label="Dyno's own resource use">
-          <dy-icon name="gauge" />
-          <span>{{ overheadText() }}</span>
-        </div>
         <dy-profile-switcher />
-        <div class="agent" [attr.data-state]="live.agent().state" role="status" [matTooltip]="live.agent().message ?? ''">
+        <div class="agent" [attr.data-state]="live.agent().state" role="status" [matTooltip]="agentTip()">
           <span class="pulse"></span>
           <span>{{ agentText() }}</span>
         </div>
@@ -129,12 +114,9 @@ function readCollapsed(): boolean {
     nav a.active dy-icon { color: var(--accent-text); }
     nav a dy-icon { --icon-size: 18px; }
     .side-foot { margin-top: auto; display: grid; gap: var(--sp-1); }
-    .overhead { display: flex; align-items: center; gap: 6px; height: var(--control-h-sm); padding: 0 var(--sp-2); border-radius: var(--r-pill); background: var(--surface-inset); border: 1px solid var(--border); color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
-    .overhead dy-icon { --icon-size: 13px; color: var(--text-3); }
-    .more { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: 26px; margin-top: var(--sp-3); padding: 0 10px; border: 0; background: none; color: var(--text-3); font: var(--fw-medium) var(--fs-xs) var(--font-sans); letter-spacing: 0.03em; cursor: default; }
+    .more { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: 26px; margin-top: var(--sp-3); padding: 0 10px; border: 0; background: none; color: var(--text-3); font: var(--fw-medium) var(--fs-sm) var(--font-sans); cursor: default; }
     .more:hover { color: var(--text-1); }
     .more dy-icon { --icon-size: 13px; }
-    nav ul.planned a { color: var(--text-3); }
     .soon { margin-left: auto; font-size: var(--fs-2xs); font-weight: var(--fw-medium); color: var(--text-3); letter-spacing: 0.02em; }
     .collapse { justify-content: flex-start; gap: var(--sp-3); padding: 0 10px; color: var(--text-3); }
     :host(.collapsed) .label, :host(.collapsed) .word, :host(.collapsed) .more { display: none; }
@@ -155,7 +137,6 @@ function readCollapsed(): boolean {
     .agent[data-state='failed'] .pulse { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
     .content { flex: 1; overflow: auto; min-height: 0; outline: none; scrollbar-gutter: stable; }
     @media (max-width: 1100px) { .agent span:last-child { display: none; } }
-    @media (max-width: 1040px) { .overhead span { display: none; } .overhead { padding: 0 6px; } }
   `,
 })
 export class Shell implements OnInit {
@@ -165,21 +146,19 @@ export class Shell implements OnInit {
   private readonly dialogs = inject(Dialogs);
   private readonly notifier = inject(Notifier);
   private readonly backend = inject(BACKEND);
-  protected readonly live_ = NAV.filter((n) => !n.planned);
-  protected readonly planned_ = NAV.filter((n) => n.planned);
-  /** The unbuilt screens stay out of the way until asked for (or while one of them is open). */
-  protected readonly showPlanned = signal(this.planned_.some((n) => location.hash.startsWith(`#${n.path}`)));
+  protected readonly live_ = NAV;
+  protected readonly coming = COMING;
   protected readonly collapsed = signal(readCollapsed());
   private paletteOpen = false;
 
-  /** Dyno's own cost, measured by the agent and always on screen: "Dyno: 0.4% CPU · 38 MB". */
-  protected readonly overheadText = computed(() => {
+  /** Dyno's own cost, measured by the agent, lives in the status tooltip: "Dyno uses 0.4% CPU · 38 MB". */
+  protected readonly agentTip = computed(() => {
     const o = this.live.overhead();
-    return o ? `Dyno: ${formatPercent(o.agentCpu)} CPU · ${formatBytes(o.agentMemory)}` : 'Dyno: measuring…';
-  });
-  protected readonly overheadTip = computed(() => {
-    const o = this.live.overhead();
-    return o ? `Dyno's own use, measured by its agent (CPU is a share of one core). Sampling every ${formatDuration(o.samplingIntervalMs / 1000)}, processes every ${formatDuration(o.processIntervalMs / 1000)}.` : '';
+    const own = o
+      ? `Dyno uses ${formatPercent(o.agentCpu)} CPU (a share of one core) and ${formatBytes(o.agentMemory)}. Sampling every ${formatDuration(o.samplingIntervalMs / 1000)}, processes every ${formatDuration(o.processIntervalMs / 1000)}.`
+      : 'Dyno is measuring its own use.';
+    const msg = this.live.agent().message;
+    return msg ? `${msg} ${own}` : own;
   });
 
   protected readonly agentText = computed(() => {
@@ -212,6 +191,10 @@ export class Shell implements OnInit {
     } catch {
       // Private mode or blocked storage: the sidebar just forgets.
     }
+  }
+
+  protected openComing(): void {
+    this.dialogs.open(ComingDialog, undefined, { ariaLabelledBy: 'dy-dialog-title' });
   }
 
   protected openPalette(): void {

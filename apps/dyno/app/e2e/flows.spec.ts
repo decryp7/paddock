@@ -8,15 +8,10 @@ test.describe('screens', () => {
     await page.goto(url());
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
     const nav = page.getByRole('navigation', { name: /./ }).or(page.locator('aside nav'));
-    await page.getByRole('button', { name: /Coming/ }).click();
     for (const [label, heading] of [
       ['Processes', 'Processes'],
       ['Inventory', 'Inventory'],
-      ['Why slow', 'Why slow'],
-      ['CPU taming', 'CPU taming'],
-      ['Cleanup', 'Cleanup'],
       ['Health & tuning', 'Health & tuning'],
-      ['Reports & alerts', 'Reports & alerts'],
       ['Settings', 'Settings'],
       ['Dashboard', 'Dashboard'],
     ] as const) {
@@ -25,10 +20,13 @@ test.describe('screens', () => {
     }
   });
 
-  test('planned screens say what is coming and show no fake data', async ({ page }) => {
+  test('unbuilt features are listed in one dialog and have no route', async ({ page }) => {
+    await page.goto(url());
+    await page.getByRole('button', { name: /Coming/ }).click();
+    await expect(page.getByRole('dialog').getByText('Cleanup')).toBeVisible();
+    await page.keyboard.press('Escape');
     await page.goto(url('/cleanup'));
-    await expect(page.getByText('Planned', { exact: true })).toBeVisible();
-    await expect(page.getByText('This screen is not built yet')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
   });
 
   test('the tray dropdown renders its compact dashboard', async ({ page }) => {

@@ -734,17 +734,20 @@ input[type='radio'] {
 }
 
 .eyebrow {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
   color: var(--text-3);
 }
 
 .page {
   padding: var(--sp-6) var(--sp-6) var(--sp-10);
-  max-width: 1480px;
+  max-width: 1440px;
   margin: 0 auto;
+}
+
+/* Forms and settings are narrower than data pages. */
+.page.narrow {
+  max-width: 880px;
 }
 
 .page-head {
@@ -761,8 +764,14 @@ input[type='radio'] {
     gap: var(--sp-1);
   }
 
+  h1 {
+    font-size: 18px;
+    font-weight: var(--fw-semibold);
+  }
+
   p {
-    color: var(--text-2);
+    color: var(--text-3);
+    font-size: var(--fs-sm);
   }
 }
 
@@ -906,9 +915,7 @@ kbd,
     border-bottom: 1px solid var(--border);
     color: var(--text-3);
     font-size: var(--fs-xs);
-    font-weight: var(--fw-semibold);
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
+    font-weight: var(--fw-medium);
     text-align: left;
     white-space: nowrap;
   }
@@ -1176,9 +1183,7 @@ kbd,
   padding: var(--sp-2) var(--sp-2) var(--sp-1);
   font-size: var(--fs-xs);
   color: var(--text-3);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: var(--fw-medium);
 }
 
 .mat-mdc-tooltip {

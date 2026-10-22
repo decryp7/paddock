@@ -145,12 +145,12 @@ const HINT_TONE: Record<HintKind, string> = {
   `,
   styles: `
     :host { display: block; --hw-focus: var(--focus); }
-    .page { display: grid; gap: var(--sp-4); align-content: start; max-width: 980px; }
+    .page { display: grid; gap: var(--sp-4); align-content: start; }
     .page-head { margin-bottom: 0; }
     .card { padding-bottom: var(--sp-4); }
     .stats { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-2); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
-    .stats dt { color: var(--text-3); font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: uppercase; }
-    .stats dd { margin: 2px 0 0; font: var(--fw-semibold) var(--fs-lg) / 1.3 var(--font-display); }
+    .stats dt { color: var(--text-3); font-size: var(--fs-sm); }
+    .stats dd { margin: 2px 0 0; font: var(--fw-semibold) 28px / 1.2 var(--font-display); }
     .devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) 0; }
     .device { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-lg); background: var(--surface-inset); min-width: 0; }
     .device .art { flex: none; width: 112px; display: grid; place-items: center; }
@@ -158,7 +158,7 @@ const HINT_TONE: Record<HintKind, string> = {
     .device .art[data-art='cpu'] { width: 72px; margin-inline: 20px; }
     .device .art[data-art='sata'] { width: 88px; margin-inline: 12px; }
     .device .meta { display: grid; gap: 2px; min-width: 0; }
-    .device .k { color: var(--text-3); font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: uppercase; line-height: 16px; }
+    .device .k { color: var(--text-3); font-size: var(--fs-xs); line-height: 16px; }
     .device strong { font: var(--fw-semibold) var(--fs-base) / 20px var(--font-sans); overflow-wrap: anywhere; }
     .device .sub { color: var(--text-2); font-size: var(--fs-sm); line-height: 18px; }
     .drawing { padding: var(--sp-3) var(--sp-4); }
@@ -169,13 +169,12 @@ const HINT_TONE: Record<HintKind, string> = {
     .txt { display: grid; gap: var(--sp-1); max-width: 44ch; }
     .txt p, .na p { color: var(--text-2); }
     .na { display: grid; gap: var(--sp-1); padding: var(--sp-4); }
-    .hints { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-4) 0; display: grid; gap: var(--sp-2); }
-    .hints li { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
-    .hints .ic { display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--r-sm); flex: none; background: var(--surface-active); color: var(--text-2); }
-    .hints [data-tone='warn'] .ic { background: var(--warn-soft); color: var(--warn); }
-    .hints [data-tone='ok'] .ic { background: var(--ok-soft); color: var(--ok); }
-    .hints [data-tone='info'] .ic { background: var(--info-soft); color: var(--info); }
-    .hints [data-tone='accent'] .ic { background: var(--accent-soft); color: var(--accent-text); }
+    .hints { list-style: none; margin: var(--sp-2) var(--sp-4) 0; padding: 0; display: grid; border: 1px solid var(--border); border-left: 3px solid var(--text-3); border-radius: var(--r-md); background: var(--surface-inset); }
+    .hints:has([data-tone='warn']) { border-left-color: var(--warn); }
+    .hints li { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-sm); }
+    .hints li + li { border-top: 1px solid var(--border-subtle); }
+    .hints .ic { display: grid; place-items: center; width: 18px; height: 18px; flex: none; color: var(--text-3); }
+    .hints [data-tone='warn'] .ic { color: var(--warn); }
     @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   `,
 })

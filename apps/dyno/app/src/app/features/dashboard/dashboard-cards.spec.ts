@@ -116,7 +116,7 @@ describe('DiagnosisCard', () => {
     await settle(f);
     expect(el.querySelector('.headline')?.textContent).toBe('A build is busy');
     expect(el.querySelector('.cause strong')?.textContent).toBe('Compiler hogs CPU');
-    expect([...el.querySelectorAll('.chip')].map((c) => c.textContent)).toEqual(['CPU90%', 'Confidence80%']);
+    expect([...el.querySelectorAll('.evidence span')].map((c) => c.textContent)).toEqual(['CPU 90%', 'Confidence 80%']);
     expect(byText(el, 'Check again')).toBeTruthy();
   });
 
@@ -132,7 +132,9 @@ describe('DiagnosisCard', () => {
     byText(el, 'Open tasks').click();
     byText(el, 'Open cleanup').click();
     byText(el, 'Open startup').click();
-    expect(nav.mock.calls.map((c) => c[0])).toEqual(['/processes', '/cleanup', '/health']);
+    expect(nav.mock.calls.map((c) => c[0])).toEqual(['/processes', '/health']);
+    await settle(f);
+    expect(document.body.textContent).toContain('Not built yet');
     byText(el, 'Lower').click();
     await settle(f);
     expect(act).toHaveBeenCalledWith({ pid: 7, started: 1 }, { setPriority: 'belowNormal' });
@@ -246,7 +248,6 @@ describe('HealthHero', () => {
   });
 
   it.each([
-    ['openCleanup', '/cleanup'],
     ['openStartup', '/health'],
     ['openTaskManager', '/processes'],
   ] as const)('a confirmed %s fix navigates to %s', async (kind, url) => {
@@ -262,6 +263,19 @@ describe('HealthHero', () => {
     [...dlg.querySelectorAll('button.primary')][0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle(f);
     expect(nav).toHaveBeenCalledWith(url);
+  });
+
+  it('a confirmed openCleanup fix lists what is coming instead of a route that does not exist', async () => {
+    const { mock, nav } = env();
+    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, 'openCleanup', { needsAdmin: false, undoable: false, preview: [] })]));
+    const f = TestBed.createComponent(HealthHero);
+    await settle(f);
+    byText(f.nativeElement, 'Fix a').click();
+    await settle(f);
+    [...(document.querySelector('dy-fix-dialog') as HTMLElement).querySelectorAll('button.primary')][0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle(f);
+    expect(nav).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Not built yet');
   });
 
   it('a confirmed restart fix only advises, it never restarts anything', async () => {

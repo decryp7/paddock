@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 import type { HealthReason } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { Dialogs } from '../../shared/dialog';
+import { ComingDialog } from '../../shell/coming-dialog';
 import { formatSigned } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE, SEVERITY_LABEL, SEVERITY_TONE } from '../../shared/labels';
@@ -133,7 +134,7 @@ export class HealthHero implements OnInit {
     if ((await firstValueFrom(ref.closed)) !== true) return;
     const kind = fix.kind;
     if (typeof kind === 'object') await this.store.setTuning(kind.tuning, true);
-    else if (kind === 'openCleanup') void this.router.navigateByUrl('/cleanup');
+    else if (kind === 'openCleanup') this.dialogs.open(ComingDialog);
     else if (kind === 'openStartup') void this.router.navigateByUrl('/health');
     else if (kind === 'openTaskManager') void this.router.navigateByUrl('/processes');
     else this.notifier.show('Restart when it suits you. Dyno never restarts your PC for you.');

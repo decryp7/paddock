@@ -9,3 +9,14 @@ export function heat(value: number, full: number): string | null {
   const alpha = Math.round((0.03 + Math.sqrt(level) * 0.27) * 100) / 100;
   return `rgb(var(--heat) / ${alpha})`;
 }
+
+/**
+ * A neutral data bar behind a cell (for ranking many rows): a left-aligned fill proportional to `value / full` in a
+ * quiet grey, or in the accent on the column the table is sorted by. The number is always printed too.
+ */
+export function bar(value: number, full: number, accent = false): string | null {
+  if (!Number.isFinite(value) || value <= 0 || full <= 0) return null;
+  const pct = Math.round(Math.min(1, value / full) * 100);
+  const colour = accent ? 'rgb(var(--heat) / 0.26)' : 'color-mix(in srgb, var(--text-3) 22%, transparent)';
+  return `linear-gradient(to right, ${colour} ${pct}%, transparent ${pct}%)`;
+}

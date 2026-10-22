@@ -93,7 +93,7 @@ import { coreHeatmapOption } from './cpu-options';
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
     .now, .apps { padding-bottom: var(--sp-4); }
     .groups { display: grid; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4) 0; }
-    h3 { font-size: var(--fs-xs); color: var(--text-3); font-weight: var(--fw-semibold); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: var(--sp-2); }
+    h3 { font-size: var(--fs-xs); color: var(--text-3); font-weight: var(--fw-semibold); margin-bottom: var(--sp-2); }
     ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px var(--sp-5); }
     li { display: grid; grid-template-columns: 26px minmax(0, 1fr) 44px 70px; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
     .lbl { color: var(--text-3); }

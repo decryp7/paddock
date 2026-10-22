@@ -16,6 +16,10 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
   // A fake clock starting at a fixed time: the mock's live values are a function of the clock, so every run is identical.
   await page.clock.install({ time: FROZEN });
   await page.emulateMedia({ colorScheme: theme });
+  // Every screenshot shows the macOS chrome and shortcut glyphs, whatever machine the mock imitates.
+  await page.addInitScript(() => {
+    document.documentElement.dataset['platform'] = 'macos';
+  });
   void mock;
 }
 
@@ -171,9 +175,6 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
       await page.clock.runFor(2_000);
     },
   },
-  { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why slow' })).toBeVisible()) },
-  { name: 'rules', path: '/#/rules', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'CPU taming' })).toBeVisible()) },
-  { name: 'cleanup', path: '/#/cleanup', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Cleanup' })).toBeVisible()) },
   {
     name: 'health',
     path: '/#/health',
@@ -183,8 +184,15 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
       await expect(page.getByRole('region', { name: 'Startup manager' }).getByRole('table')).toBeVisible();
     },
   },
-  { name: 'reports', path: '/#/reports', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Reports & alerts' })).toBeVisible()) },
   { name: 'settings', path: '/#/settings', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()) },
+  {
+    name: 'coming',
+    path: '/#/',
+    ready: async (page) => {
+      await page.getByRole('button', { name: /Coming/ }).click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+    },
+  },
   {
     name: 'tray',
     path: '/#/tray',

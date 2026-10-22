@@ -95,11 +95,12 @@ import { SettingsStore } from '../../state/settings.store';
     .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
     .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
     .metrics { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: var(--sp-2); }
-    .cell { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 28px; align-items: center; gap: 4px var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--popover-border); border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface-2) 55%, transparent); min-width: 0; }
-    .cell dy-sparkline { grid-column: 1 / -1; }
-    .k { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-size: var(--fs-xs); }
+    .cell { display: grid; grid-template-columns: max-content minmax(24px, 1fr); grid-template-rows: auto 28px; align-items: center; gap: 4px var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--popover-border); border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface-2) 55%, transparent); min-width: 0; }
+    .cell .k { grid-column: 1 / -1; }
+    .k { display: inline-flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--text-2); font-size: var(--fs-xs); }
+    .k dy-icon { flex: none; }
     .k dy-icon { --icon-size: 13px; }
-    .v { font: var(--fw-semibold) 20px / 1.1 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    .v { font: var(--fw-semibold) 18px / 1.1 var(--font-display); font-variant-numeric: tabular-nums; text-align: left; white-space: nowrap; }
     .top { display: grid; gap: 2px; }
     .top .eyebrow { padding: 0 var(--sp-1); margin-bottom: 2px; }
     ol { list-style: none; margin: 0; padding: 0; display: grid; }

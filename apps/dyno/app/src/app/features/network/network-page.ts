@@ -16,6 +16,7 @@ import {
   initial,
   listenerLine,
   lookupBlockedReason,
+  middleEllipsis,
   ownerName,
   ownerReason,
   portService,
@@ -62,12 +63,14 @@ function readCollapsed(): Set<string> {
       </header>
 
       @if (store.snapshot(); as s) {
-        <div class="summary" role="group" aria-label="Summary">
-          <button type="button" class="tile" (click)="showConnections()"><b class="num">{{ sum().connections }}</b> connections</button>
-          <span class="tile static"><b class="num">{{ sum().programs }}</b> programs</span>
-          <span class="tile static"><b class="num">{{ sum().hosts }}</b> remote hosts</span>
-          <button type="button" class="tile" [attr.data-tone]="sum().exposed ? 'warn' : null" (click)="showExposed()"><b class="num">{{ sum().exposed }}</b> exposed listeners</button>
-        </div>
+        <p class="summary num" role="group" aria-label="Summary">
+          @if (tab() === 'connections') {
+            <button type="button" class="lnk" (click)="showConnections()"><b>{{ sum().connections }}</b> connections</button><span>·</span><span><b>{{ sum().programs }}</b> programs</span><span>·</span><span><b>{{ sum().hosts }}</b> remote hosts</span>
+          } @else {
+            <span><b>{{ sum().listening }}</b> listening</span><span>·</span><button type="button" class="lnk" (click)="showExposed()"><b>{{ sum().exposed }}</b> exposed</button>@if (sum().unknown > 0) {<span>·</span><span><b>{{ sum().unknown }}</b> unknown owner</span>}
+          }
+          @if (thisPc(); as ip) { <span class="this-pc">This PC {{ ip }}</span> }
+        </p>
       }
 
       <div class="bar" role="group" aria-label="Filters">
@@ -97,8 +100,8 @@ function readCollapsed(): Set<string> {
 
       <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5" (retry)="store.load()">
         @if (store.snapshot(); as s) {
-          @if (s.unknownOwners > 0) {
-            <p class="note"><dy-icon name="info" /> {{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket belongs' : 'sockets belong' }} to programs the OS will not name without elevated rights (other users or the system); they show as “Owner unknown”. Dyno never asks for administrator rights for this page.</p>
+          @if (s.unknownOwners > 0 && !noteDismissed()) {
+            <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without elevated rights.</span> <button type="button" class="ib" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
           }
           @if (s.truncated > 0) {
             <p class="note"><dy-icon name="info" /> {{ s.truncated }} more rows are hidden. Narrow the search.</p>
@@ -137,7 +140,7 @@ function readCollapsed(): Set<string> {
                     @if (group() !== 'process') {
                       <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(c.owner)) }}</span><span class="truncate" [title]="reason(c.owner) ?? ''">{{ name(c.owner) }}</span></span>
                     }
-                    <span class="cell remote" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [title]="c.remote">{{ c.remote }}</span><span class="addr">:{{ c.remotePort }}</span></span>
+                    <span class="cell remote" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [title]="c.remote">{{ short(c.remote) }}</span><span class="addr">:{{ c.remotePort }}</span></span>
                     <span class="cell" role="gridcell">{{ service(c.remotePort) }}</span>
                     <span class="cell muted" role="gridcell">{{ protoText(c.proto, c.ipv6) }}</span>
                     <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="state(c).tone" aria-hidden="true"></span>{{ state(c).text }}</span>
@@ -210,21 +213,20 @@ function readCollapsed(): Set<string> {
     :host { display: block; }
     .page { display: grid; gap: var(--sp-3); align-content: start; }
     dy-async { display: grid; gap: var(--sp-3); }
-    .summary { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-    .tile { display: inline-flex; gap: var(--sp-2); align-items: baseline; padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); color: var(--text-2); font: inherit; font-size: var(--fs-sm); }
-    button.tile { cursor: pointer; }
-    button.tile:hover { background: var(--surface-hover); }
-    .tile b { color: var(--text-1); font: var(--fw-semibold) var(--fs-md) / 1 var(--font-sans); }
-    .tile[data-tone='warn'] b { color: var(--warn); }
+    .summary { margin: 0; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
+    .summary b { color: var(--text-1); font-weight: var(--fw-semibold); }
+    .summary .lnk { all: unset; cursor: pointer; }
+    .summary .lnk:hover { text-decoration: underline; }
+    .summary .this-pc { margin-left: auto; color: var(--text-3); }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
     .tog { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-pill); background: var(--surface-2); color: var(--text-2); font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; }
-    .tog dy-icon { --icon-size: 13px; visibility: hidden; }
+    .tog dy-icon { --icon-size: 13px; display: none; }
     .tog[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
-    .tog[aria-pressed='true'] dy-icon { visibility: visible; }
+    .tog[aria-pressed='true'] dy-icon { display: inline-block; }
     .reach { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
     .reach dy-icon { --icon-size: 13px; }
     .reach[data-tone='warn'] { color: var(--warn); }
-    .search { position: relative; display: block; min-width: 220px; }
+    .search { position: relative; display: block; flex: 1 1 200px; min-width: 160px; max-width: 320px; }
     .search dy-icon { position: absolute; left: 8px; top: 7px; --icon-size: 15px; color: var(--text-3); }
     .search input { padding-left: 30px; width: 100%; }
     .chk { display: inline-flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); color: var(--text-2); }
@@ -233,7 +235,7 @@ function readCollapsed(): Set<string> {
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
     .grid { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); overflow: hidden; outline-offset: 2px; }
     .head, .row { display: grid; grid-template-columns: var(--cols); align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
-    .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: uppercase; position: sticky; top: 0; z-index: 1; }
+    .head { height: 30px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 1; }
     .row { height: 36px; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); cursor: default; }
     .row.group-row { background: var(--surface-inset); }
     .row.group-row .gname { grid-column: 1 / -1; }
@@ -279,6 +281,10 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly showLocal = signal(false);
   protected readonly collapsed = signal<ReadonlySet<string>>(readCollapsed());
   protected readonly selectedKey = signal<string | null>(null);
+  /** The machine's own address as the connections see it (constant, so it is shown once here rather than on every row). */
+  protected readonly thisPc = computed(() => this.connections().find((c) => c.local !== '127.0.0.1' && c.local !== '::1' && !c.local.startsWith('fe80'))?.local ?? null);
+  protected readonly noteDismissed = signal(false);
+  protected readonly short = (a: string) => middleEllipsis(a);
   protected readonly rowHeight = ROW_H;
   private readonly viewport = viewChild(CdkVirtualScrollViewport);
 

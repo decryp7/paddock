@@ -125,6 +125,9 @@ export function tableRows<T extends Socketish>(items: readonly T[], by: GroupBy,
 
 /** The strip above the table. */
 export interface Summary {
+  listening: number;
+  /** Listeners whose owner the OS would not name. */
+  unknown: number;
   connections: number;
   programs: number;
   hosts: number;
@@ -133,6 +136,8 @@ export interface Summary {
 
 export function summarise(connections: readonly ConnectionRow[], listeners: readonly ListenerRow[]): Summary {
   return {
+    listening: listeners.length,
+    unknown: listeners.filter((l) => l.owner.kind === 'unknown').length,
     connections: connections.length,
     programs: new Set([...connections.map((c) => ownerName(c.owner)), ...listeners.map((l) => ownerName(l.owner))]).size,
     hosts: new Set(connections.map((c) => c.remote)).size,
@@ -154,4 +159,13 @@ export function initial(name: string): string {
 /** Warning colour only where it means something: an exposed listener whose owner nobody can name. Plain "Exposed" is neutral. */
 export function reachTone(l: ListenerRow): 'warn' | null {
   return l.exposure === 'allInterfaces' && l.owner.kind === 'unknown' ? 'warn' : null;
+}
+
+/** A long address shortened in the middle (`2a00:1450:4001:…:200e`), never cut at the end; the full value belongs in a tooltip. */
+export function middleEllipsis(text: string, max = 26): string {
+  if (text.length <= max) return text;
+  const keep = max - 1;
+  const head = Math.ceil(keep / 2);
+  const tail = keep - head;
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
 }

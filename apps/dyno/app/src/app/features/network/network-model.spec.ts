@@ -1,5 +1,5 @@
 import type { ConnectionRow, ListenerRow } from '../../core/api.types';
-import { reachTone, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, ownerName, ownerReason, portService, protoText, sortListeners, stateView, summarise, tableRows } from './network-model';
+import { reachTone, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, ownerName, ownerReason, portService, protoText, middleEllipsis, sortListeners, stateView, summarise, tableRows } from './network-model';
 
 const owner = { kind: 'process', pid: 1, name: 'node', path: null } as const;
 const unknown = { kind: 'unknown', reason: 'because' } as const;
@@ -62,7 +62,7 @@ describe('network model', () => {
 
   it('summarises and sorts exposed listeners first', () => {
     const s = summarise([c('1.1.1.1'), c('1.1.1.1', unknown), c('2.2.2.2')], [l(1, 'loopback'), l(2, 'allInterfaces')]);
-    expect(s).toEqual({ connections: 3, programs: 2, hosts: 2, exposed: 1 });
+    expect(s).toEqual({ connections: 3, programs: 2, hosts: 2, exposed: 1, listening: 2, unknown: 0 });
     expect(sortListeners([l(1, 'loopback'), l(9, 'interface'), l(5, 'allInterfaces'), l(3, 'allInterfaces')]).map((x) => x.port)).toEqual([3, 5, 9, 1]);
   });
 
@@ -79,5 +79,17 @@ describe('network model', () => {
     expect(connectionLine(c('8.8.8.8'))).toBe('tcp 1.1.1.1:1 -> 8.8.8.8:443 Established (node)');
     expect(initial(' node')).toBe('N');
     expect(initial('')).toBe('?');
+  });
+});
+
+describe('middleEllipsis', () => {
+  it('keeps short addresses and shortens long ones in the middle, never at the end', () => {
+    expect(middleEllipsis('10.0.0.8')).toBe('10.0.0.8');
+    const v6 = '2001:db8:1:2:3:4:5:6:7:8:9:a';
+    const short = middleEllipsis(v6, 20);
+    expect(short).toHaveLength(20);
+    expect(short.startsWith('2001:db8:')).toBe(true);
+    expect(short.endsWith(':9:a')).toBe(true);
+    expect(short).toContain('…');
   });
 });
