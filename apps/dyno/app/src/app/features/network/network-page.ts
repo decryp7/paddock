@@ -20,6 +20,7 @@ import {
   ownerReason,
   portService,
   protoText,
+  reachTone,
   sortListeners,
   stateView,
   summarise,
@@ -75,22 +76,22 @@ function readCollapsed(): Set<string> {
           <button type="button" [attr.aria-pressed]="tab() === 'listening'" (click)="setTab('listening')">Listening</button>
         </div>
         <label class="search"><dy-icon name="search" /><input class="input" type="search" placeholder="Port, address or program" aria-label="Search the network table" [value]="store.query().search" (input)="search($any($event.target).value)" /></label>
-        <label class="chk"><input type="checkbox" [checked]="store.query().showLoopback" (change)="store.setQuery({ showLoopback: $any($event.target).checked })" /> Show loopback</label>
-        <label class="chk"><input type="checkbox" [checked]="store.query().exposedOnly" (change)="store.setQuery({ exposedOnly: $any($event.target).checked })" /> Exposed only</label>
-        <select class="select sm" aria-label="Protocol" (change)="proto($any($event.target).value)">
-          <option value="">TCP and UDP</option>
-          <option value="tcp">TCP</option>
-          <option value="udp">UDP</option>
-        </select>
-        <select class="select sm" aria-label="Group by" [value]="group()" (change)="setGroup($any($event.target).value)">
-          <option value="process">Group by program</option>
+        <button type="button" class="tog" [attr.aria-pressed]="store.query().showLoopback" (click)="store.setQuery({ showLoopback: !store.query().showLoopback })"><dy-icon name="check" /> Show loopback</button>
+        <button type="button" class="tog" [attr.aria-pressed]="store.query().exposedOnly" (click)="store.setQuery({ exposedOnly: !store.query().exposedOnly })"><dy-icon name="check" /> Exposed only</button>
+        <div class="seg" role="group" aria-label="Protocol">
+          <button type="button" [attr.aria-pressed]="!store.query().proto" (click)="proto('')">All</button>
+          <button type="button" [attr.aria-pressed]="store.query().proto === 'tcp'" (click)="proto('tcp')">TCP</button>
+          <button type="button" [attr.aria-pressed]="store.query().proto === 'udp'" (click)="proto('udp')">UDP</button>
+        </div>
+        <div class="seg" role="group" aria-label="Group by">
+          <button type="button" [attr.aria-pressed]="group() === 'none'" (click)="setGroup('none')">None</button>
+          <button type="button" [attr.aria-pressed]="group() === 'process'" (click)="setGroup('process')">Program</button>
           @if (tab() === 'connections') {
-            <option value="host">Group by remote host</option>
+            <button type="button" [attr.aria-pressed]="group() === 'host'" (click)="setGroup('host')">Remote host</button>
           }
-          <option value="none">No grouping</option>
-        </select>
+        </div>
         @if (tab() === 'connections') {
-          <label class="chk"><input type="checkbox" [checked]="showLocal()" (change)="showLocal.set($any($event.target).checked)" /> Local address</label>
+          <button type="button" class="tog" [attr.aria-pressed]="showLocal()" (click)="showLocal.set(!showLocal())"><dy-icon name="check" /> Local address</button>
         }
       </div>
 
@@ -148,7 +149,7 @@ function readCollapsed(): Set<string> {
                       <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(l.owner)) }}</span><span class="truncate" [title]="reason(l.owner) ?? ''">{{ name(l.owner) }}</span></span>
                     }
                     <span class="cell" role="gridcell" [class.indent]="group() === 'process'">{{ service(l.port) }}</span>
-                    <span class="cell" role="gridcell"><span class="addr">{{ l.local }}</span> <span class="badge" [attr.data-tone]="badge(l).tone" [title]="badge(l).hint">{{ badge(l).label }}</span></span>
+                    <span class="cell" role="gridcell"><span class="addr">{{ l.local }}</span> <span class="reach" [attr.data-tone]="reachTone(l)" [title]="badge(l).hint"><dy-icon [name]="l.exposure === 'allInterfaces' ? 'globe' : l.exposure === 'loopback' ? 'lock' : 'network'" /> {{ badge(l).label }}</span></span>
                     <span class="cell muted" role="gridcell">{{ protoText(l.proto, l.ipv6) }}</span>
                     <span class="cell muted" role="gridcell">{{ since(l.firstSeen) }}</span>
                   }
@@ -216,6 +217,13 @@ function readCollapsed(): Set<string> {
     .tile b { color: var(--text-1); font: var(--fw-semibold) var(--fs-md) / 1 var(--font-sans); }
     .tile[data-tone='warn'] b { color: var(--warn); }
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
+    .tog { display: inline-flex; align-items: center; gap: 4px; height: var(--control-h); padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r-pill); background: var(--surface-2); color: var(--text-2); font: var(--fw-medium) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; }
+    .tog dy-icon { --icon-size: 13px; visibility: hidden; }
+    .tog[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+    .tog[aria-pressed='true'] dy-icon { visibility: visible; }
+    .reach { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
+    .reach dy-icon { --icon-size: 13px; }
+    .reach[data-tone='warn'] { color: var(--warn); }
     .search { position: relative; display: block; min-width: 220px; }
     .search dy-icon { position: absolute; left: 8px; top: 7px; --icon-size: 15px; color: var(--text-3); }
     .search input { padding-left: 30px; width: 100%; }
@@ -288,7 +296,7 @@ export class NetworkPage implements OnInit, OnDestroy {
     const prog = this.group() !== 'process' ? 'minmax(130px, 1.2fr) ' : '';
     return this.tab() === 'connections'
       ? `${prog}minmax(160px, 2fr) minmax(90px, 1fr) 80px 110px ${this.showLocal() ? 'minmax(150px, 1.2fr) ' : ''}80px 84px`
-      : `${prog}minmax(120px, 1.4fr) minmax(200px, 2fr) 80px 80px 84px`;
+      : `${prog}minmax(240px, 2fr) minmax(220px, 2fr) 80px 90px 84px`;
   });
   protected readonly selectedItem = computed(() => {
     const k = this.selectedKey();
@@ -307,6 +315,7 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly blocked = lookupBlockedReason;
   protected readonly state = (c: ConnectionRow) => stateView(c.state);
   protected readonly badge = (l: ListenerRow) => exposureBadge(l.exposure);
+  protected readonly reachTone = reachTone;
   protected readonly rowKey = (_: number, r: Row) => r.key;
   protected readonly conn = (r: Row) => (r as { item: ConnectionRow }).item;
   protected readonly lis = (r: Row) => (r as { item: ListenerRow }).item;

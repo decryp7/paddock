@@ -300,7 +300,7 @@ test.describe('network', () => {
     await page.getByRole('button', { name: 'Collapse Google Chrome' }).click();
     await expect(page.getByRole('row', { name: /142.250.74.46/ })).toHaveCount(0);
     await page.getByRole('button', { name: 'Expand Google Chrome' }).click();
-    await page.getByLabel('Group by').selectOption('none');
+    await page.getByRole('group', { name: 'Group by' }).getByRole('button', { name: 'None' }).click();
     await expect(page.getByRole('button', { name: 'Collapse Slack' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Look up IP 10.0.0.8' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Look up IP 142.250.74.46' })).toBeEnabled();
@@ -312,7 +312,7 @@ test.describe('network', () => {
     const grid = page.getByRole('grid', { name: 'Listening ports' });
     await expect(grid.getByText('Exposed').first()).toBeVisible();
     await expect(grid.getByText('postgres')).toHaveCount(0);
-    await page.getByLabel('Show loopback').check();
+    await page.getByRole('button', { name: 'Show loopback' }).click();
     await expect(grid.getByText('postgres').first()).toBeVisible();
     await grid.focus();
     await page.keyboard.press('ArrowDown');

@@ -150,3 +150,8 @@ export function sortListeners(rows: readonly ListenerRow[]): ListenerRow[] {
 export function initial(name: string): string {
   return (name.trim()[0] ?? '?').toUpperCase();
 }
+
+/** Warning colour only where it means something: an exposed listener whose owner nobody can name. Plain "Exposed" is neutral. */
+export function reachTone(l: ListenerRow): 'warn' | null {
+  return l.exposure === 'allInterfaces' && l.owner.kind === 'unknown' ? 'warn' : null;
+}

@@ -42,20 +42,22 @@ describe('dy-health-page', () => {
     expect(el.querySelectorAll('[aria-label="Startup manager"] tbody tr').length).toBe(store.startup().length);
   });
 
-  it('changes a startup item through the segmented control and ignores a click on the current setting', async () => {
+  it('turns a startup item off and on with its switch and delays it with one click', async () => {
     const { f, el } = render();
     await settle(f);
     const store = TestBed.inject(HealthStore);
     const first = store.startup()[0]!;
-    const group = el.querySelector<HTMLElement>(`[aria-label="Sign-in setting of ${first.name}"]`)!;
-    const buttons = group.querySelectorAll('button');
-    const current = ['enabled', 'delayed', 'disabled'].indexOf(startupChoice(first.state));
-    (buttons[current] as HTMLButtonElement).click();
+    const sw = el.querySelector<HTMLElement>(`[aria-label="Start ${first.name} at sign-in"]`)!;
+    expect(sw).not.toBeNull();
+    sw.click();
     await settle(f);
-    expect(startupChoice(store.startup()[0]!.state)).toBe(startupChoice(first.state));
-    (buttons[current === 2 ? 0 : 2] as HTMLButtonElement).click();
-    await settle(f);
-    expect(startupChoice(store.startup()[0]!.state)).not.toBe(startupChoice(first.state));
+    expect(startupChoice(store.startup()[0]!.state)).toBe(startupChoice(first.state) === 'disabled' ? 'enabled' : 'disabled');
+    const delay = el.querySelector<HTMLButtonElement>(`button[aria-label="Delay ${store.startup()[1]!.name} at sign-in"]`);
+    if (delay) {
+      delay.click();
+      await settle(f);
+      expect(startupChoice(store.startup()[1]!.state)).toBe('delayed');
+    }
   });
 
   it('a failed list shows its own error with Retry and leaves the other section alone', async () => {

@@ -4,6 +4,7 @@ import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatSeconds } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { LOCATION_LABEL } from '../../shared/labels';
+import { Switch } from '../../shared/switch';
 import { HealthStore } from '../../state/health.store';
 import { HealthHero } from '../dashboard/health-hero';
 
@@ -18,7 +19,7 @@ export function startupChoice(s: StartupState): 'enabled' | 'delayed' | 'disable
 /** Health and tuning: the score and its reasons, reversible tuning suggestions and the startup manager. Changes happen only on a click and are logged and undoable. */
 @Component({
   selector: 'dy-health-page',
-  imports: [AsyncState, HealthHero, Icon],
+  imports: [AsyncState, HealthHero, Icon, Switch],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -45,7 +46,7 @@ export function startupChoice(s: StartupState): 'enabled' | 'delayed' | 'disable
                     <p class="admin"><dy-icon name="lock" /> Changing this asks for administrator approval through the Dyno helper.</p>
                   }
                 </div>
-                <button type="button" class="btn" [class.primary]="!t.applied" [disabled]="busy(t.id)" [attr.aria-label]="(t.applied ? 'Revert ' : 'Apply ') + t.title" (click)="store.setTuning(t.id, !t.applied)">
+                <button type="button" class="btn" [disabled]="busy(t.id)" [attr.aria-label]="(t.applied ? 'Revert ' : 'Apply ') + t.title" (click)="store.setTuning(t.id, !t.applied)">
                   {{ t.applied ? 'Revert' : 'Apply' }}
                 </button>
               </li>
@@ -67,10 +68,15 @@ export function startupChoice(s: StartupState): 'enabled' | 'delayed' | 'disable
                   <td>{{ where(e) }}@if (e.needsAdmin) { <span class="badge outline" title="Changing it needs the Dyno helper">Admin</span> }</td>
                   <td><span class="badge" [attr.data-tone]="tone(e)">{{ impact(e) }}</span>@if (e.impact.rating !== 'notMeasured') { <small class="faint num"> {{ secs(e.impact.cpuSecs) }} CPU · {{ bytes(e.impact.diskBytes) }}</small> }</td>
                   <td>
-                    <span class="seg sm" role="group" [attr.aria-label]="'Sign-in setting of ' + e.name">
-                      <button type="button" [attr.aria-pressed]="choice(e) === 'enabled'" [disabled]="busy(e.id)" (click)="set(e, 'enabled')">On</button>
-                      <button type="button" [attr.aria-pressed]="choice(e) === 'delayed'" [disabled]="busy(e.id)" (click)="set(e, { delayed: 60 })">Delayed</button>
-                      <button type="button" [attr.aria-pressed]="choice(e) === 'disabled'" [disabled]="busy(e.id)" (click)="set(e, 'disabled')">Off</button>
+                    <span class="signin">
+                      <dy-switch [checked]="choice(e) !== 'disabled'" [label]="'Start ' + e.name + ' at sign-in'" (changed)="set(e, $event ? 'enabled' : 'disabled')" />
+                      @if (choice(e) === 'delayed') {
+                        <button type="button" class="btn sm ghost" [disabled]="busy(e.id)" [attr.aria-label]="'Start ' + e.name + ' without a delay'" (click)="set(e, 'enabled')">Delayed · undo</button>
+                      } @else if (choice(e) === 'enabled') {
+                        <button type="button" class="btn sm ghost" [disabled]="busy(e.id)" [attr.aria-label]="'Delay ' + e.name + ' at sign-in'" (click)="set(e, { delayed: 60 })">Delay</button>
+                      } @else {
+                        <small class="faint">Off</small>
+                      }
                     </span>
                   </td>
                 </tr>
@@ -94,6 +100,7 @@ export function startupChoice(s: StartupState): 'enabled' | 'delayed' | 'disable
     .admin dy-icon { --icon-size: 13px; }
     .table { margin: 0 var(--sp-4) var(--sp-3); width: calc(100% - 2 * var(--sp-4)); }
     .faint { color: var(--text-3); }
+    .signin { display: inline-flex; align-items: center; gap: var(--sp-3); }
     .badge.outline { margin-left: var(--sp-2); }
   `,
 })

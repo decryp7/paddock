@@ -8,7 +8,7 @@ import { Sparkline } from '../../shared/sparkline';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
-import { ANOMALY_LABEL } from '../../shared/labels';
+import { ANOMALY_ICON, ANOMALY_LABEL } from '../../shared/labels';
 import type { Widget, WidgetKind } from '../../core/api.types';
 import { AnimatedNumber } from './animated-number';
 import { HealthHero } from '../dashboard/health-hero';
@@ -65,7 +65,7 @@ const ICON: Record<WidgetKind, IconName> = {
       @case ('graph') {
         <div class="hero" [attr.data-tone]="tone()"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
         @if (series(); as s) {
-          <dy-sparkline [values]="s.values" [values2]="s.values2" [max]="percent() ? 100 : null" [fill]="widget().options.fill" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" style="--spark-h: 48px" />
+          <dy-sparkline [values]="s.values" [values2]="s.values2" [max]="percent() ? 100 : null" [zoom]="zoomed() && percent()" [fill]="widget().options.fill" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" style="--spark-h: 48px" />
         } @else {
           <p class="note">{{ reading().reason ?? 'No live history is kept for this metric.' }}</p>
         }
@@ -75,12 +75,18 @@ const ICON: Record<WidgetKind, IconName> = {
         <div class="bar-track" [attr.data-tone]="barTone()" role="img" [attr.aria-label]="title() + ' ' + reading().text.join(' ')"><span [style.width.%]="reading().percent ?? 0"></span></div>
       }
       @case ('ring') {
+        @if (widget().metric === 'battery') {
+          <div class="hero" [attr.data-tone]="tone()"><b><dy-animated-number [value]="reading().text[0]" /></b><small>{{ reading().text[1] }}</small></div>
+          <div class="bar-track" [attr.data-tone]="barTone()" role="img" [attr.aria-label]="title() + ' ' + reading().text.join(' ')"><span [style.width.%]="reading().percent ?? 0"></span></div>
+          <p class="note">{{ reading().reason ?? 'Charge level' }}</p>
+        } @else {
         <div class="ringrow">
           <dy-ring [value]="reading().percent ?? 0" [tone]="ringTone()" [label]="title() + ' ' + reading().text.join('')" style="--ring-size: 84px">
             <span class="rn"><dy-animated-number [value]="reading().text[0]" /></span>
           </dy-ring>
           <p class="note">{{ reading().reason ?? title() }}</p>
         </div>
+        }
       }
       @case ('heatmap') {
         <div class="cells" role="img" [attr.aria-label]="'Per-core load: ' + cores().map(pct).join(', ')">
@@ -103,9 +109,12 @@ const ICON: Record<WidgetKind, IconName> = {
         @if (anomalies().length === 0) {
           <p class="note ok"><dy-icon name="check" /> Nothing unusual found.</p>
         }
-        <ul>
+        <ul class="issues">
           @for (a of anomalies(); track a.id) {
-            <li><b>{{ label(a.kind) }}</b> <span class="truncate">{{ a.title }}</span></li>
+            <li>
+              <span class="ic" aria-hidden="true"><dy-icon [name]="anomalyIcon(a.kind)" /></span>
+              <span class="tx"><strong class="truncate">{{ a.title }}</strong><small class="truncate">{{ label(a.kind) }} · {{ a.app }}</small></span>
+            </li>
           }
         </ul>
       }
@@ -133,6 +142,8 @@ const ICON: Record<WidgetKind, IconName> = {
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; min-height: 132px; padding: var(--sp-4); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
+    :host(.own-card) > * { display: block; height: 100%; min-width: 0; }
+    :host(.own-card) { display: block; }
     :host(.own-card) { padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; min-height: 0; }
     header { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); }
     header dy-icon { --icon-size: 16px; color: var(--text-3); }
@@ -152,7 +163,12 @@ const ICON: Record<WidgetKind, IconName> = {
     ol, ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--fs-sm); }
     ol li { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 4px 0; border-bottom: 1px solid var(--border-subtle); }
     ul li { display: flex; gap: var(--sp-2); min-width: 0; }
-    ul li b { font-weight: var(--fw-medium); }
+    .issues { gap: var(--sp-2); }
+    .issues li { align-items: center; gap: var(--sp-3); }
+    .issues .ic { display: grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-sm); background: var(--warn-soft); color: var(--warn); flex: none; }
+    .issues .tx { display: grid; min-width: 0; line-height: 1.3; }
+    .issues strong { font-size: var(--fs-base); font-weight: var(--fw-semibold); }
+    .issues small { color: var(--text-3); font-size: var(--fs-xs); }
   `,
 })
 export class WidgetView {
@@ -184,6 +200,9 @@ export class WidgetView {
   protected readonly pct = formatPercent;
   protected readonly round = (v: number) => Math.round(v).toString();
   protected readonly label = (k: keyof typeof ANOMALY_LABEL) => ANOMALY_LABEL[k];
+  protected readonly anomalyIcon = (k: keyof typeof ANOMALY_ICON) => ANOMALY_ICON[k];
+  /** Slow-moving levels are drawn zoomed so a steady 50% still shows its line. */
+  protected readonly zoomed = computed(() => ['memory', 'swap', 'gpuLoad', 'diskFree', 'battery'].includes(String(this.widget().metric)));
   protected readonly topValue = (g: { cpu: number; memory: number }) => (this.widget().metric === 'memory' ? formatBytes(g.memory) : formatPercent(g.cpu));
   protected readonly cellColor = (v: number) => `color-mix(in srgb, var(--accent) ${Math.round(Math.min(100, Math.max(0, v)) * 0.85)}%, var(--surface-active))`;
 }

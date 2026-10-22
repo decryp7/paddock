@@ -1,5 +1,5 @@
 import type { ConnectionRow, ListenerRow } from '../../core/api.types';
-import { connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, ownerName, ownerReason, portService, protoText, sortListeners, stateView, summarise, tableRows } from './network-model';
+import { reachTone, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, ownerName, ownerReason, portService, protoText, sortListeners, stateView, summarise, tableRows } from './network-model';
 
 const owner = { kind: 'process', pid: 1, name: 'node', path: null } as const;
 const unknown = { kind: 'unknown', reason: 'because' } as const;
@@ -64,6 +64,12 @@ describe('network model', () => {
     const s = summarise([c('1.1.1.1'), c('1.1.1.1', unknown), c('2.2.2.2')], [l(1, 'loopback'), l(2, 'allInterfaces')]);
     expect(s).toEqual({ connections: 3, programs: 2, hosts: 2, exposed: 1 });
     expect(sortListeners([l(1, 'loopback'), l(9, 'interface'), l(5, 'allInterfaces'), l(3, 'allInterfaces')]).map((x) => x.port)).toEqual([3, 5, 9, 1]);
+  });
+
+  it('only an exposed listener with an unknown owner is a warning', () => {
+    expect(reachTone(l(1, 'allInterfaces'))).toBeNull();
+    expect(reachTone({ ...l(1, 'allInterfaces'), owner: unknown })).toBe('warn');
+    expect(reachTone({ ...l(1, 'loopback'), owner: unknown })).toBeNull();
   });
 
   it('formats endpoints and copyable lines', () => {

@@ -6,7 +6,7 @@ import { Icon } from '../../shared/icon';
 import { BenchStore } from '../../state/bench.store';
 import { DeviceArt } from '../inventory/device-art';
 import { BenchArt } from './bench-art';
-import { barFraction, bestValues, kindTitle, statusNote, verdictWord } from './bench-model';
+import { barPair, bestValues, kindTitle, statusNote, verdictWord } from './bench-model';
 
 const KINDS: { kind: BenchKind; text: string }[] = [
   { kind: 'cpu', text: 'Integer work on one core and on all of them' },
@@ -55,15 +55,8 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                 @for (k of kinds; track k.kind) {
                   <label class="kind" [attr.data-on]="chosen().has(k.kind)">
                     <input type="checkbox" [checked]="chosen().has(k.kind)" (change)="toggle(k.kind)" [attr.aria-label]="title(k.kind)" />
-                    <span class="art" aria-hidden="true">
-                      @switch (k.kind) {
-                        @case ('cpu') { <dy-device-art kind="cpu" /> }
-                        @case ('disk') { <dy-device-art kind="nvme" [totalBytes]="0" /> }
-                        @default { <dy-bench-art [kind]="k.kind === 'gpu' ? 'gpu' : 'memory'" /> }
-                      }
-                    </span>
-                    <strong>{{ title(k.kind) }}</strong>
-                    <span class="sub">{{ k.text }}</span>
+                    <dy-icon [name]="icons[k.kind]" />
+                    <span class="kt"><strong>{{ title(k.kind) }}</strong><span class="sub">{{ k.text }}</span></span>
                   </label>
                 }
               </div>
@@ -78,10 +71,12 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                 <div class="field grow">
                   <label for="bench-change">Before and after a change</label>
                   <input id="bench-change" class="input" type="text" maxlength="80" placeholder="What you are about to change, e.g. Power mode: High performance" [value]="change()" (input)="change.set($any($event.target).value)" />
-                  <span class="hint">Measure before, make the change, then measure after. Dyno compares the two.</span>
                 </div>
-                <button type="button" class="btn" [disabled]="store.busy() || chosen().size === 0 || !change().trim()" (click)="run('before')">1 · Measure before</button>
-                <button type="button" class="btn" [disabled]="store.busy() || chosen().size === 0 || !change().trim() || !hasBefore()" (click)="run('after')">2 · Measure after</button>
+                <ol class="stepper" aria-label="Before and after steps">
+                  <li><button type="button" class="btn" [class.primary]="!!change().trim() && !hasBefore()" [disabled]="store.busy() || chosen().size === 0 || !change().trim()" (click)="run('before')">1 · Measure before</button></li>
+                  <li class="mid">2 · Make the change</li>
+                  <li><button type="button" class="btn" [class.primary]="hasBefore()" [disabled]="store.busy() || chosen().size === 0 || !change().trim() || !hasBefore()" (click)="run('after')">3 · Measure after</button></li>
+                </ol>
               </div>
             }
           </section>
@@ -115,7 +110,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
                             <li>
                               <span class="label">{{ m.label }}</span>
                               <span class="value num">{{ metric(m.value) }} <small>{{ m.unit }}</small></span>
-                              <span class="bar" role="presentation"><i [style.width.%]="bar(m)"></i></span>
+                              <span class="bar" role="presentation"><i [style.width.%]="pair(m).fill * 100"></i>@if (pair(m).marker !== null) { <b class="mk" [style.left.%]="pair(m).marker! * 100" title="Best earlier run"></b> }</span>
                             </li>
                           }
                         </ul>
@@ -197,14 +192,17 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     :host { display: block; }
     dy-async { display: grid; gap: var(--sp-4); }
     .page { display: grid; gap: var(--sp-4); align-content: start; max-width: 980px; }
-    .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) 0; }
-    .kind { position: relative; display: grid; gap: var(--sp-1); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-inset); cursor: pointer; }
-    .kind[data-on='true'] { border-color: var(--accent); background: var(--accent-soft); }
-    .kind input { position: absolute; top: var(--sp-3); right: var(--sp-3); }
-    .kind .art { display: grid; place-items: center; height: 64px; margin-bottom: var(--sp-1); }
-    .kind .art > * { width: 100%; max-height: 64px; }
-    .kind .art dy-device-art { width: 64px; }
-    .kind .art dy-device-art[kind='nvme'], .result .art dy-device-art[kind='nvme'] { width: 100%; }
+    .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-2); padding: var(--sp-3) var(--sp-4) 0; }
+    .kind { position: relative; display: flex; align-items: center; gap: var(--sp-3); padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); cursor: pointer; }
+    .kind[data-on='true'] { border-color: var(--border-strong); background: var(--surface-2); }
+    .kind dy-icon { --icon-size: 20px; color: var(--text-3); flex: none; }
+    .kind[data-on='true'] dy-icon { color: var(--text-1); }
+    .kind input { order: 3; margin-left: auto; }
+    .kt { display: grid; min-width: 0; }
+    .stepper { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+    .stepper .mid { color: var(--text-3); font-size: var(--fs-sm); padding: 0 var(--sp-1); }
+    .bar { position: relative; }
+    .bar .mk { position: absolute; top: -2px; width: 2px; height: 9px; background: var(--text-3); border-radius: 1px; }
     .sub { color: var(--text-2); font-size: var(--fs-sm); }
     .runbar, .pair { display: flex; gap: var(--sp-3); align-items: flex-end; padding: var(--sp-3) var(--sp-4) 0; flex-wrap: wrap; }
     .pair { padding-bottom: var(--sp-4); border-top: 1px solid var(--border-subtle); margin-top: var(--sp-4); }
@@ -230,7 +228,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .metrics .label { color: var(--text-2); font-size: var(--fs-sm); }
     .metrics .value { font: var(--fw-semibold) var(--fs-lg) / 1.2 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; }
     .metrics .value small { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-sans); color: var(--text-3); }
-    .bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--surface-active); overflow: hidden; }
+    .bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--surface-active); }
     .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; min-width: 2px; }
     .took { display: block; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .why { margin: 0; display: flex; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
@@ -254,7 +252,9 @@ export class BenchPage implements OnInit, OnDestroy {
   protected readonly note = statusNote;
   protected readonly word = (d: MetricDelta) => verdictWord(d.verdict);
   protected readonly latest = computed(() => this.store.overview()?.runs[0] ?? null);
-  protected readonly best = computed(() => bestValues(this.store.overview()?.runs ?? []));
+  /** The best value of each metric over the runs before the latest one. */
+  protected readonly others = computed(() => bestValues((this.store.overview()?.runs ?? []).slice(1)));
+  protected readonly icons: Record<BenchKind, 'cpu' | 'memory' | 'disk' | 'gpu'> = { cpu: 'cpu', memory: 'memory', disk: 'disk', gpu: 'gpu' };
   protected readonly hasBefore = computed(() => {
     const g = this.change().trim();
     return !!g && (this.store.overview()?.runs ?? []).some((r) => r.group === g && r.phase === 'before');
@@ -299,8 +299,8 @@ export class BenchPage implements OnInit, OnDestroy {
     return s.state === 'done' ? s.metrics : null;
   }
 
-  protected bar(m: BenchMetric): number {
-    return barFraction(m, this.best()) * 100;
+  protected pair(m: BenchMetric): { fill: number; marker: number | null } {
+    return barPair(m, this.others().get(m.id));
   }
 
   protected seconds(ms: number): string {

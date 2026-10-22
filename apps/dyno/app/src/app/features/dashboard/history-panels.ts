@@ -215,7 +215,7 @@ export class ConsumersPanel implements OnInit {
   private readonly theme = inject(ThemeService);
   protected readonly consumers = computed(() => this.store.history()?.topConsumers ?? []);
   protected readonly option = computed(() => (this.consumers().length ? consumersOption(this.consumers(), this.theme.tokens()) : null));
-  protected readonly rangeShort = computed(() => RANGES.find((r) => r.id === this.store.range())?.id ?? '24h');
+  protected readonly rangeShort = computed(() => RANGES.find((r) => r.id === this.store.range())?.label ?? '24h');
   protected readonly view = signal<'now' | 'range'>('range');
   private readonly live = inject(LiveStore);
   protected readonly now = computed(() => (this.live.update()?.topCpu ?? []).slice(0, 6));

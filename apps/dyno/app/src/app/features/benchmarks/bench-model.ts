@@ -48,3 +48,16 @@ export function barFraction(m: BenchMetric, best: Map<string, number>): number {
   const f = m.higherIsBetter ? m.value / b : b / m.value;
   return Math.min(1, Math.max(0, f));
 }
+
+/**
+ * The bar of one result against the best earlier run: `fill` is the current value, `marker` the earlier best (null when
+ * there is none), both on one scale so the gap between them is visible. Latency is inverted (shorter is better).
+ */
+export function barPair(m: BenchMetric, ref: number | undefined): { fill: number; marker: number | null } {
+  if (!Number.isFinite(m.value) || m.value <= 0) return { fill: 0, marker: null };
+  const cur = m.higherIsBetter ? m.value : 1 / m.value;
+  if (ref === undefined || !Number.isFinite(ref) || ref <= 0) return { fill: 1, marker: null };
+  const old = m.higherIsBetter ? ref : 1 / ref;
+  const top = Math.max(cur, old);
+  return { fill: cur / top, marker: old / top };
+}

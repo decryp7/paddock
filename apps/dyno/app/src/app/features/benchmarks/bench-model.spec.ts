@@ -1,6 +1,6 @@
 import type { BenchMetric, BenchRun } from '../../core/api.types';
 import { mockRun } from '../../core/mock/bench';
-import { barFraction, bestValues, kindTitle, statusNote, verdictWord } from './bench-model';
+import { barPair, barFraction, bestValues, kindTitle, statusNote, verdictWord } from './bench-model';
 
 const metric = (id: string, value: number, higherIsBetter = true): BenchMetric => ({ id, label: id, value, unit: 'u', higherIsBetter });
 
@@ -35,5 +35,13 @@ describe('bench model', () => {
     expect(barFraction(metric('x', 0), best)).toBe(0);
     expect(barFraction(metric('x', NaN), best)).toBe(0);
     expect(barFraction(metric('x', 50), best)).toBe(1);
+  });
+
+  it('a bar and its earlier-best marker share one scale, inverted for latency', () => {
+    expect(barPair(metric('x', 120), 100)).toEqual({ fill: 1, marker: 100 / 120 });
+    expect(barPair(metric('x', 80), 100)).toEqual({ fill: 0.8, marker: 1 });
+    expect(barPair(metric('lat', 50, false), 100)).toEqual({ fill: 1, marker: 0.5 });
+    expect(barPair(metric('x', 5), undefined)).toEqual({ fill: 1, marker: null });
+    expect(barPair(metric('x', 0), 5)).toEqual({ fill: 0, marker: null });
   });
 });
