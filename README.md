@@ -8,6 +8,7 @@ Everything the Paddock app family shares: **Debrief, Pitcrew, Pitwall, Dyno, Spo
 | UI package `@decryp7/paddock-ui` | [`ui/`](ui/README.md) | design tokens (dark/light, five accents, three densities), base styles, Angular components, ECharts theme, gallery | npm dependency from the Gitea npm registry |
 | Rust crates | [`crates/`](crates/README.md) | Cargo workspace for shared Rust code (empty until the first crate is extracted) | git dependency pinned to a repo tag |
 | Design guide | [`docs/design-guide.md`](docs/design-guide.md) | the Paddock design guide (principles, layout, type, colour, charts, components, motion, microcopy, polish checklist) | read; `ui/` is its executable form |
+| Diagram kit | [`diagrams/`](diagrams/README.md) | the diagram style spec, draw.io shape library, starting templates, canonical export script | copy a template and the export script; apply the app's accent |
 | Lessons | [`docs/lessons.md`](docs/lessons.md) | what Debrief and Pitcrew taught (build, window, service, native feel, tests, process) | read before starting an app |
 
 ## Consuming the UI package
@@ -44,6 +45,7 @@ published" and is not an error. `cd ui && npm run release` is a local dry run (b
 ```
 ui/                Angular workspace: projects/paddock-ui (library, scss, css), projects/gallery (demo), test/tokens, e2e
 crates/            Cargo workspace (no members yet)
+diagrams/          diagram kit: STYLE.md, paddock.xml (draw.io library), templates/, scripts/, tools/
 docs/              design guide, lessons
 .gitea/workflows/  ci.yml: UI tests and contrast checks now, Rust jobs later
 ```

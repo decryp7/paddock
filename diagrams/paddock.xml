@@ -1,0 +1,170 @@
+<mxlibrary>[
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Name&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Person]&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;What it does, in one line.&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);fillColor=light-dark(#F0F2F5,#1B1E23);align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"96\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c10\" value=\"\" style=\"shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);fillColor=none;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"208\" y=\"10\" width=\"14\" height=\"20\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 96,
+  "aspect": "fixed",
+  "title": "Person"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Name&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Technology]&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;What it does, in one line.&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#E7F1F4,#17353D);align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"96\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 96,
+  "aspect": "fixed",
+  "title": "Own container (accent)"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Name&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Technology]&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;What it does, in one line.&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#007A5E,#2EC4A0);fillColor=light-dark(#E6F2EF,#193330);align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"96\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 96,
+  "aspect": "fixed",
+  "title": "Core library"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Name&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Technology]&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;What it does, in one line.&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#4C5BD4,#8FA3FF);fillColor=light-dark(#EDEFFB,#292D3F);align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"96\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 96,
+  "aspect": "fixed",
+  "title": "UI (window, webview)"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Name&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Technology]&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;What it does, in one line.&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#B0508A,#D98BC0);fillColor=light-dark(#F7EEF3,#342A35);align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"96\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 96,
+  "aspect": "fixed",
+  "title": "Plugin or extension"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Name&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Technology]&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;What it does, in one line.&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);fillColor=light-dark(#F0F2F5,#1B1E23);align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"96\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 96,
+  "aspect": "fixed",
+  "title": "Separate process"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Name&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Technology]&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;What it does, in one line.&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#6B7380,#7F8794);fillColor=light-dark(#F4F5F7,#17191E);dashed=1;dashPattern=6 4;align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"96\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 96,
+  "aspect": "fixed",
+  "title": "External system (dashed)"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Name&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Technology]&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;What it does, in one line.&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#FFFFFF,#15171B);dashed=1;dashPattern=6 4;align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"96\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c10\" value=\"&amp;lt;span style=&amp;quot;font-size:11px;font-weight:600&amp;quot;&amp;gt;planned&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=10;strokeWidth=1;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#FFFFFF,#15171B);fontColor=light-dark(#0E7490,#22D3EE);align=center;verticalAlign=middle;spacing=0;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"173\" y=\"8\" width=\"59\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 96,
+  "aspect": "fixed",
+  "title": "Planned container"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:12px;font-weight:600&amp;quot;&amp;gt;Boundary&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=10;strokeWidth=1;strokeColor=light-dark(#C4C7CD,#353A42);fillColor=light-dark(#F8F9FA,#121418);align=left;verticalAlign=top;spacingLeft=14;spacingTop=8;fontColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"480\" height=\"240\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 480,
+  "h": 240,
+  "aspect": "fixed",
+  "title": "Group or boundary"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:12px;font-weight:600&amp;quot;&amp;gt;Process&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=10;strokeWidth=1;strokeColor=light-dark(#C4C7CD,#353A42);fillColor=light-dark(#F8F9FA,#121418);dashed=1;dashPattern=6 4;align=left;verticalAlign=top;spacingLeft=14;spacingTop=8;fontColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"480\" height=\"240\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 480,
+  "h": 240,
+  "aspect": "fixed",
+  "title": "OS process boundary (dashed)"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:12px&amp;quot;&amp;gt;A note that explains one thing.&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1;strokeColor=light-dark(#C4C7CD,#353A42);fillColor=light-dark(#F0F2F5,#1B1E23);align=left;verticalAlign=middle;spacingLeft=14;spacingRight=14;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"240\" height=\"40\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 240,
+  "h": 56,
+  "aspect": "fixed",
+  "title": "Note"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"c10\" value=\"&amp;lt;span style=&amp;quot;font-size:11px;font-weight:600&amp;quot;&amp;gt;planned&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=10;strokeWidth=1;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#FFFFFF,#15171B);fontColor=light-dark(#0E7490,#22D3EE);align=center;verticalAlign=middle;spacing=0;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"5\" y=\"0\" width=\"59\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 64,
+  "h": 18,
+  "aspect": "fixed",
+  "title": "Planned tag"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"legend\" value=\"\" style=\"rounded=1;absoluteArcSize=1;arcSize=14;strokeWidth=1;strokeColor=light-dark(#C4C7CD,#353A42);fillColor=none;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"48\" y=\"0\" width=\"375\" height=\"40\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c10\" value=\"\" style=\"rounded=1;absoluteArcSize=1;arcSize=4;strokeWidth=1.5;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#E7F1F4,#17353D);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"64\" y=\"12\" width=\"28\" height=\"16\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c11\" value=\"&amp;lt;span style=&amp;quot;font-size:12px;font-weight:400&amp;quot;&amp;gt;Own container&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"100\" y=\"11\" width=\"94\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c12\" value=\"\" style=\"rounded=1;absoluteArcSize=1;arcSize=4;strokeWidth=1.5;strokeColor=light-dark(#6B7380,#7F8794);fillColor=light-dark(#F4F5F7,#17191E);dashed=1;dashPattern=6 4;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"218\" y=\"12\" width=\"28\" height=\"16\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c13\" value=\"&amp;lt;span style=&amp;quot;font-size:12px;font-weight:400&amp;quot;&amp;gt;External&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"254\" y=\"11\" width=\"59\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c14\" value=\"\" style=\"edgeStyle=none;rounded=1;html=1;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);endArrow=block;endFill=1;endSize=6;\" edge=\"1\" parent=\"1\"&gt;&lt;mxGeometry relative=\"1\" as=\"geometry\"&gt;&lt;mxPoint x=\"337\" y=\"20\" as=\"sourcePoint\"/&gt;&lt;mxPoint x=\"365\" y=\"20\" as=\"targetPoint\"/&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c15\" value=\"&amp;lt;span style=&amp;quot;font-size:12px;font-weight:400&amp;quot;&amp;gt;Uses&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"373\" y=\"11\" width=\"34\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"footer\" value=\"&amp;lt;span style=&amp;quot;font-size:11px;font-weight:400&amp;quot;&amp;gt;Paddock kit · updated 2026-10-22&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=right;verticalAlign=top;spacing=0;fontColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"392\" y=\"11\" width=\"360\" height=\"18\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 640,
+  "h": 40,
+  "aspect": "fixed",
+  "title": "Legend and footer"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"t1\" value=\"&amp;lt;span style=&amp;quot;font-size:24px;font-weight:600&amp;quot;&amp;gt;Diagram title&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontColor=light-dark(#14171C,#ECEEF1);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"640\" height=\"32\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"t2\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:400&amp;quot;&amp;gt;C4 · Level 2 — Containers&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"32\" width=\"640\" height=\"24\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"t3\" value=\"&amp;lt;span style=&amp;quot;font-size:12px;font-weight:400&amp;quot;&amp;gt;One sentence about what this diagram shows.&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacing=0;fontColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"56\" width=\"640\" height=\"20\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 640,
+  "h": 80,
+  "aspect": "fixed",
+  "title": "Title block"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;Participant&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;span style=&amp;quot;font-size:12px;color:light-dark(#565E6B,#A0A7B2)&amp;quot;&amp;gt;[Tech]&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#E7F1F4,#17353D);align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"160\" height=\"56\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 160,
+  "h": 56,
+  "aspect": "fixed",
+  "title": "Sequence participant"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"c10\" value=\"\" style=\"edgeStyle=none;rounded=1;html=1;strokeWidth=1;strokeColor=light-dark(#565E6B,#A0A7B2);endArrow=none;endFill=0;endSize=6;dashed=1;dashPattern=6 4;\" edge=\"1\" parent=\"1\"&gt;&lt;mxGeometry relative=\"1\" as=\"geometry\"&gt;&lt;mxPoint x=\"4\" y=\"0\" as=\"sourcePoint\"/&gt;&lt;mxPoint x=\"4\" y=\"240\" as=\"targetPoint\"/&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 8,
+  "h": 240,
+  "aspect": "fixed",
+  "title": "Lifeline"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"act\" value=\"\" style=\"rounded=0;strokeWidth=1.5;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#E7F1F4,#17353D);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry width=\"12\" height=\"64\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 12,
+  "h": 64,
+  "aspect": "fixed",
+  "title": "Activation"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600&amp;quot;&amp;gt;State&amp;lt;/span&amp;gt;&amp;lt;br&amp;gt;&amp;lt;div style=&amp;quot;margin-top:4px;font-size:12px&amp;quot;&amp;gt;entry: action&amp;lt;/div&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#E7F1F4,#17353D);align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"200\" height=\"80\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 200,
+  "h": 80,
+  "aspect": "fixed",
+  "title": "State"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"\" style=\"ellipse;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);fillColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"16\" height=\"16\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 16,
+  "h": 16,
+  "aspect": "fixed",
+  "title": "Start"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"\" style=\"ellipse;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);fillColor=none;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"24\" height=\"24\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c10\" value=\"\" style=\"ellipse;strokeWidth=0;fillColor=light-dark(#565E6B,#A0A7B2);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"6\" y=\"6\" width=\"12\" height=\"12\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 24,
+  "h": 24,
+  "aspect": "fixed",
+  "title": "End"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"\" style=\"rhombus;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);fillColor=light-dark(#FFFFFF,#15171B);\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"32\" height=\"32\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 32,
+  "h": 32,
+  "aspect": "fixed",
+  "title": "Choice"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"x\" value=\"&amp;lt;span style=&amp;quot;font-size:14px;font-weight:600;font-family:ui-monospace,SF Mono,Cascadia Mono,Consolas,monospace&amp;quot;&amp;gt;ClassName&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1.5;strokeColor=light-dark(#0E7490,#22D3EE);fillColor=light-dark(#E7F1F4,#17353D);align=center;verticalAlign=top;spacingTop=6;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"0\" width=\"280\" height=\"112\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c10\" value=\"\" style=\"endArrow=none;html=1;strokeWidth=1;strokeColor=light-dark(#0E7490,#22D3EE);\" edge=\"1\" parent=\"1\"&gt;&lt;mxGeometry relative=\"1\" as=\"geometry\"&gt;&lt;mxPoint x=\"0\" y=\"32\" as=\"sourcePoint\"/&gt;&lt;mxPoint x=\"280\" y=\"32\" as=\"targetPoint\"/&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c11\" value=\"&amp;lt;span style=&amp;quot;font-family:ui-monospace,SF Mono,Cascadia Mono,Consolas,monospace;font-size:12px&amp;quot;&amp;gt;field:&amp;amp;nbsp;Type&amp;lt;br&amp;gt;other:&amp;amp;nbsp;Type&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=12;spacingTop=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"32\" width=\"280\" height=\"48\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c12\" value=\"\" style=\"endArrow=none;html=1;strokeWidth=1;strokeColor=light-dark(#0E7490,#22D3EE);\" edge=\"1\" parent=\"1\"&gt;&lt;mxGeometry relative=\"1\" as=\"geometry\"&gt;&lt;mxPoint x=\"0\" y=\"80\" as=\"sourcePoint\"/&gt;&lt;mxPoint x=\"280\" y=\"80\" as=\"targetPoint\"/&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;&lt;mxCell id=\"c13\" value=\"&amp;lt;span style=&amp;quot;font-family:ui-monospace,SF Mono,Cascadia Mono,Consolas,monospace;font-size:12px&amp;quot;&amp;gt;method(arg):&amp;amp;nbsp;Type&amp;lt;/span&amp;gt;\" style=\"html=1;whiteSpace=wrap;fontFamily=-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;fontSize=12;fontColor=light-dark(#14171C,#ECEEF1);text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=12;spacingTop=8;\" vertex=\"1\" parent=\"1\"&gt;&lt;mxGeometry x=\"0\" y=\"80\" width=\"280\" height=\"32\" as=\"geometry\"/&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 280,
+  "h": 128,
+  "aspect": "fixed",
+  "title": "Class box"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"c10\" value=\"\" style=\"edgeStyle=none;rounded=1;html=1;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);endArrow=block;endFill=1;endSize=6;\" edge=\"1\" parent=\"1\"&gt;&lt;mxGeometry relative=\"1\" as=\"geometry\"&gt;&lt;mxPoint x=\"0\" y=\"4\" as=\"sourcePoint\"/&gt;&lt;mxPoint x=\"120\" y=\"4\" as=\"targetPoint\"/&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 120,
+  "h": 8,
+  "aspect": "fixed",
+  "title": "Edge (orthogonal, rounded)"
+ },
+ {
+  "xml": "&lt;mxGraphModel&gt;&lt;root&gt;&lt;mxCell id=\"0\"/&gt;&lt;mxCell id=\"1\" parent=\"0\"/&gt;&lt;mxCell id=\"c10\" value=\"\" style=\"edgeStyle=none;rounded=1;html=1;strokeWidth=1.5;strokeColor=light-dark(#565E6B,#A0A7B2);endArrow=open;endFill=0;endSize=6;dashed=1;dashPattern=6 4;\" edge=\"1\" parent=\"1\"&gt;&lt;mxGeometry relative=\"1\" as=\"geometry\"&gt;&lt;mxPoint x=\"0\" y=\"4\" as=\"sourcePoint\"/&gt;&lt;mxPoint x=\"120\" y=\"4\" as=\"targetPoint\"/&gt;&lt;/mxGeometry&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;",
+  "w": 120,
+  "h": 8,
+  "aspect": "fixed",
+  "title": "Edge (reply, dashed)"
+ }
+]</mxlibrary>
