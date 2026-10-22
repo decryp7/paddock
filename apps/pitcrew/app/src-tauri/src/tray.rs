@@ -92,7 +92,21 @@ pub fn tooltip(runners: &[RunnerSnapshot], connected: bool) -> String {
     if attention > 0 {
         s.push_str(&format!(", {attention} need{} attention", if attention == 1 { "s" } else { "" }));
     }
+    if let Some(load) = load_text(runners.iter().filter_map(|r| r.usage.as_ref())) {
+        s.push_str(&format!(" — {load}"));
+    }
     s
+}
+
+/// What the runners use together, for the tooltip: `CPU 12% · 4.2 GB` (`None` when none of them runs).
+pub fn load_text<'a>(usages: impl Iterator<Item = &'a pitcrew_core::usage::Usage>) -> Option<String> {
+    let usage = pitcrew_core::usage::Usage::sum(usages);
+    if usage.processes == 0 {
+        return None;
+    }
+    let pct = f64::from(usage.cpu_permille) / 10.0;
+    let gb = usage.mem_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+    Some(format!("CPU {pct:.0}% · {gb:.1} GB"))
 }
 
 /// The icon for a state (PNG bytes built into the app).
@@ -310,5 +324,14 @@ mod tests {
         assert_eq!(parse_action_id("open"), None);
         assert_eq!(tooltip(&[], false), "Pitcrew — the service is not running");
         assert_eq!(tooltip(&[], true), "Pitcrew — no runners yet");
+    }
+
+    #[test]
+    fn the_tooltip_adds_what_the_runners_use() {
+        use pitcrew_core::usage::Usage;
+        assert_eq!(load_text([].iter()), None, "nothing runs");
+        let a = Usage::tick(120, 2 * 1024 * 1024 * 1024, 4);
+        let b = Usage::tick(60, 1024 * 1024 * 1024 + 512 * 1024 * 1024, 2);
+        assert_eq!(load_text([a, b].iter()).as_deref(), Some("CPU 18% · 3.5 GB"));
     }
 }

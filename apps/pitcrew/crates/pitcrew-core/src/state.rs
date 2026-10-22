@@ -7,7 +7,7 @@
 
 use crate::history::{History, HistoryEvent};
 use crate::housekeeping::CleanupReport;
-use crate::metrics::{MetricsStore, SizeSeries};
+use crate::metrics::{MetricsStore, SizeSeries, UsageStore};
 use crate::protocol::UpdateRecord;
 use crate::time::Timestamp;
 use crate::version::RunnerVersion;
@@ -41,6 +41,8 @@ pub struct RunnerState {
     pub last_cleanup: Option<CleanupReport>,
     /// The folder's size over time.
     pub folder_sizes: SizeSeries,
+    /// What the runner and its processes used over time (ADR 0007).
+    pub usage: UsageStore,
     /// The process id of the runner the service last started (to adopt it after a service restart).
     pub pid: Option<u32>,
 }
@@ -57,6 +59,7 @@ impl Default for RunnerState {
             announced: None,
             last_cleanup: None,
             folder_sizes: SizeSeries::default(),
+            usage: UsageStore::for_runner(),
             pid: None,
         }
     }

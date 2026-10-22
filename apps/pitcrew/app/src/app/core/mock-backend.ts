@@ -45,6 +45,8 @@ import {
   lastCleanup,
   logLines,
   machineSamples,
+  usageSeries,
+  demoUsage,
   startOfLocalDay,
 } from './mock/mock-data';
 
@@ -327,7 +329,7 @@ export class MockBackend implements PitcrewBackend {
     const hours = Math.min(Math.max(1, rangeHours), 24 * 30);
     const r = runner === null ? null : this.find(runner);
     const base = r?.disk ? (r.disk.folderBytes / GB) * 0.75 : 0;
-    return { machine: machineSamples(now, hours), folder: r ? folderSeries(r.name, now, hours, base) : [] };
+    return { machine: machineSamples(now, hours), folder: r ? folderSeries(r.name, now, hours, base) : [], usage: r ? usageSeries(r.name, now, hours, r.status === 'busy' ? 0.7 : 0.25) : [] };
   }
 
   async disk(runner: string): Promise<DiskReply> {
@@ -435,7 +437,7 @@ export class MockBackend implements PitcrewBackend {
     this.config.runners.push(conf);
     const snap = demoSnapshots(this.now(), [{ ...conf, name: 'ui-tests' }], this.config.defaults)[0];
     if (!snap) return;
-    const r: RunnerSnapshot = { ...snap, name: request.runner, dir, labels: [...request.labels], latestVersion: '5.3.0', updateTarget: null, currentVersion: '5.3.0', lastUpdate: null, restarts24h: 0, disk: { folderBytes: 0.2 * GB, freeBytes: 196 * GB, low: false } };
+    const r: RunnerSnapshot = { ...snap, name: request.runner, dir, labels: [...request.labels], latestVersion: '5.3.0', updateTarget: null, currentVersion: '5.3.0', lastUpdate: null, restarts24h: 0, disk: { folderBytes: 0.2 * GB, freeBytes: 196 * GB, low: false }, usage: null };
     this.runners.push(r);
     this.boot(r);
   }
@@ -589,11 +591,12 @@ export class MockBackend implements PitcrewBackend {
   }
 
   private boot(r: RunnerSnapshot): void {
-    Object.assign(r, { status: 'starting', session: { kind: 'userSession' }, runningSince: this.now(), nextStartAt: null, problem: null, pending: null });
+    Object.assign(r, { status: 'starting', session: { kind: 'userSession' }, runningSince: this.now(), nextStartAt: null, problem: null, pending: null, usage: null });
     this.pushStatus();
     this.later(1_500, () => {
       if (r.status !== 'starting') return;
       r.status = 'idle';
+      r.usage = demoUsage(4, 0.06, 1);
       this.appendLog(r.name, 'info', `runner: ${r.name}, with version: v${r.currentVersion ?? '5.2.0'}, with labels: [${r.labels.join(' ')}], declare successfully`);
       this.pushStatus();
     });

@@ -30,5 +30,6 @@ pub mod session;
 pub mod state;
 pub mod time;
 pub mod update;
+pub mod usage;
 pub mod version;
 pub mod watchdog;

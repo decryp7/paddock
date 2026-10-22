@@ -14,12 +14,13 @@ use crate::history::{HistoryEvent, HistorySummary};
 use crate::housekeeping::{CleanupPlan, CleanupPolicy, CleanupReport, DiskScan};
 use crate::jobs::CurrentJob;
 use crate::logs::LogLine;
-use crate::metrics::MachineSample;
+use crate::metrics::{MachineSample, UsagePoint};
 use crate::names::RunnerName;
 use crate::notify::Notification;
 use crate::session::SessionState;
 use crate::time::Timestamp;
 use crate::update::{UpdateOutcome, UpdatePhase, UpdatePolicy};
+use crate::usage::Usage;
 use crate::version::RunnerVersion;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -208,7 +209,7 @@ pub enum Request {
     },
     /// Redacted diagnostics for a support bundle.
     Diagnostics,
-    /// Machine metrics (and a runner folder's size) over the last `range_hours`.
+    /// Machine metrics (and a runner's folder size, CPU and memory) over the last `range_hours`.
     Metrics {
         /// The runner whose folder size to include.
         runner: Option<RunnerName>,
@@ -290,6 +291,9 @@ pub struct RunnerSnapshot {
     pub disk: Option<DiskUse>,
     /// When the next automatic cleanup is due (`None`: automatic cleanup is off).
     pub next_cleanup_at: Option<Timestamp>,
+    /// What the runner and the processes it started use now (`None`: it is not running).
+    #[serde(default)]
+    pub usage: Option<Usage>,
 }
 
 /// Disk use from the last scan.
@@ -430,6 +434,9 @@ pub enum Response {
         machine: Vec<MachineSample>,
         /// The runner folder's size, `[time, bytes]`, oldest first.
         folder: Vec<(Timestamp, u64)>,
+        /// The runner's own CPU and memory (with its processes), oldest first; empty without a runner.
+        #[serde(default)]
+        usage: Vec<UsagePoint>,
     },
     /// A pushed event (only on a subscribed connection).
     Event {

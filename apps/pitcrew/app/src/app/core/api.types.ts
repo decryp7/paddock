@@ -158,6 +158,26 @@ export interface RunnerSnapshot {
   sessionMode: SessionMode;
   disk: DiskUse | null;
   nextCleanupAt: Timestamp | null;
+  /** Use now by the runner and its processes; `null` while it is not running. */
+  usage: Usage | null;
+}
+
+/**
+ * What a runner and every process it started used (`usage::Usage`). CPU is per mille of the whole machine's
+ * capacity; as a sample or bucket the values are averages with the peaks next to them. ADR 0007.
+ */
+export interface Usage {
+  cpuPermille: number;
+  cpuPeakPermille: number;
+  memBytes: number;
+  memPeakBytes: number;
+  /** Most processes counted at one moment. */
+  processes: number;
+}
+
+/** One runner's use at a time (`metrics::UsagePoint`). */
+export interface UsagePoint extends Usage {
+  at: Timestamp;
 }
 
 /** One machine sample or aggregated point (`metrics::MachineSample`). */
@@ -169,6 +189,8 @@ export interface MachineSample {
   memTotalBytes: number;
   diskFreeBytes: number;
   diskTotalBytes: number;
+  /** All runners together: their processes and everything those started. Older history has zeros. */
+  runners: Usage;
 }
 
 /** About the service (`protocol::ServiceInfo`). */
@@ -306,6 +328,8 @@ export interface MetricsReply {
   machine: MachineSample[];
   /** `[time, bytes]` pairs. */
   folder: [Timestamp, number][];
+  /** The requested runner's own CPU and memory; empty without a runner. */
+  usage: UsagePoint[];
 }
 
 /** `housekeeping::EntryKind`. */

@@ -9,6 +9,8 @@ import type {
   HistoryEvent,
   JobInfo,
   MachineSample,
+  Usage,
+  UsagePoint,
   Mark,
   RunnerConfig,
   RunnerSnapshot,
@@ -313,9 +315,38 @@ export function machineSamples(now: number, rangeHours: number): MachineSample[]
       memTotalBytes: memTotal,
       diskFreeBytes: Math.round((214 - (sinceCleanup / DAY) * 38 + noise * 1.5) * GB),
       diskTotalBytes: diskTotal,
+      runners: {
+        cpuPermille: Math.round(cpu * 0.55),
+        cpuPeakPermille: Math.min(1000, Math.round(cpu * 0.55) + Math.round(100 + noise * 300)),
+        memBytes: Math.round((3.2 + (weekend ? 0.3 : 1) * work * 5.5 + noise * 0.8) * GB),
+        memPeakBytes: Math.round((4.6 + (weekend ? 0.3 : 1) * work * 6.2 + noise * 0.8) * GB),
+        processes: Math.round(3 + work * 14 + noise * 4),
+      },
     });
   }
   return out;
+}
+
+/** One demo runner's CPU and memory over the range; `scale` sets how busy it is (1 = the busiest). */
+export function usageSeries(name: string, now: number, rangeHours: number, scale: number): UsagePoint[] {
+  const seed = [...name].reduce((a, c) => a + c.charCodeAt(0), 0);
+  return machineSamples(now, rangeHours).map((m, i) => {
+    const n = hashNoise(i + seed);
+    const cpu = Math.round(m.runners.cpuPermille * scale * (0.6 + n * 0.8));
+    return {
+      at: m.at,
+      cpuPermille: cpu,
+      cpuPeakPermille: Math.min(1000, cpu + Math.round(60 + n * 200)),
+      memBytes: Math.round(m.runners.memBytes * scale * (0.7 + n * 0.6)),
+      memPeakBytes: Math.round(m.runners.memPeakBytes * scale * (0.8 + n * 0.6)),
+      processes: Math.max(1, Math.round(m.runners.processes * scale)),
+    };
+  });
+}
+
+/** The use now of a demo runner. */
+export function demoUsage(cpuPermille: number, memGb: number, processes: number): Usage {
+  return { cpuPermille, cpuPeakPermille: Math.min(1000, cpuPermille + 90), memBytes: Math.round(memGb * GB), memPeakBytes: Math.round(memGb * 1.2 * GB), processes };
 }
 
 /** A runner folder's size over the range: it grows with jobs and drops at the nightly cleanup. */
@@ -445,6 +476,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
     sessionMode: c.session,
     disk: { folderBytes: 24 * GB, freeBytes: 196 * GB, low: false },
     nextCleanupAt: startOfLocalDay(now) + DAY + 3 * HOUR,
+    usage: demoUsage(4, 0.06, 1),
   });
   const byName = new Map(configs.map((c) => [c.name, c]));
   const out: RunnerSnapshot[] = [];
@@ -459,6 +491,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
       },
       lastUpdate: { outcome: { result: 'updated', plan: { from: '5.1.1', to: '5.2.0' } }, finishedAt: startOfLocalDay(now) - 4 * DAY + 3 * HOUR + 20 * MINUTE },
       disk: { folderBytes: 38.4 * GB, freeBytes: 196 * GB, low: false },
+      usage: demoUsage(310, 4.2, 23),
     });
   }
   const ui = byName.get('ui-tests');
@@ -471,6 +504,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
       updateTarget: '5.3.0',
       lastUpdate: { outcome: { result: 'updated', plan: { from: '5.1.1', to: '5.2.0' } }, finishedAt: startOfLocalDay(now) - 3 * DAY + 3 * HOUR + 20 * MINUTE },
       disk: { folderBytes: 17.9 * GB, freeBytes: 196 * GB, low: false },
+      usage: demoUsage(8, 0.4, 3),
     });
   }
   const docker = byName.get('docker-lab');
@@ -492,6 +526,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
       },
       disk: { folderBytes: 71.2 * GB, freeBytes: 18.6 * GB, low: true },
       nextCleanupAt: now + 4 * MINUTE,
+      usage: null,
     });
   }
   const legacy = byName.get('legacy-ci');
@@ -505,6 +540,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
       latestVersion: null,
       checkedAt: null,
       disk: { folderBytes: 9.3 * GB, freeBytes: 196 * GB, low: false },
+      usage: null,
     });
   }
   return out;

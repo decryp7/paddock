@@ -68,6 +68,11 @@
         }
       </div>
     }
+    @if (load(); as l) {
+      <div class="load faint small" [attr.aria-label]="'CPU ' + l.cpu + ', memory ' + l.mem + ', ' + l.processes">
+        <span class="num">{{ l.cpu }}</span> CPU · <span class="num">{{ l.mem }}</span> · {{ l.processes }}
+      </div>
+    }
     @if (phase(); as ph) {
       <div class="phase">
         <mat-icon svgIcon="pc:download" aria-hidden="true" />

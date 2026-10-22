@@ -40,7 +40,10 @@ runners per machine and macOS support.
    automatically if it does not. Per runner: automatic, ask first or manual; pin or skip a version; an update window.
 4. **Housekeeping.** Cleans each runner's work and cache folders on a schedule or on demand, warns when the disk is
    low, and records what it freed.
-5. **Dashboard.** Live runner cards, machine tiles (CPU, memory, free disk, Pitcrew itself), jobs per day, an uptime
+5. **Dashboard** ([ADR 0007](docs/adr/0007-runner-scoped-metrics.md)). Live runner cards, tiles for what the runners use
+   (CPU and memory of each runner and every process it started, not the whole machine; free disk stays machine-wide;
+   a muted line gives the machine's totals), CPU and memory history with the runners stacked on the rest of the
+   machine, per-runner trends on the runner page, jobs per day, an uptime
    timeline with restarts, stalls and updates marked, an events feed and quick actions. With a read-only Gitea token
    (kept in the OS credential store) it also shows job outcomes. History is local and bounded.
 6. **Tray and notifications.** The tray icon (Windows notification area, macOS menu bar) shows the worst state of all
@@ -99,7 +102,8 @@ A pure core, a privileged service and an unprivileged app that talk over one loc
 
 Decisions: [0001 architecture](docs/adr/0001-architecture.md), [0002 runner auto-update](docs/adr/0002-runner-auto-update.md),
 [0003 service model](docs/adr/0003-service-model.md), [0004 IPC protocol and ACL](docs/adr/0004-ipc-protocol-and-acl.md),
-[0005 credential storage](docs/adr/0005-credential-storage.md), [0006 supervision and housekeeping](docs/adr/0006-supervision-and-housekeeping.md).
+[0005 credential storage](docs/adr/0005-credential-storage.md), [0006 supervision and housekeeping](docs/adr/0006-supervision-and-housekeeping.md),
+[0007 runner-scoped metrics](docs/adr/0007-runner-scoped-metrics.md).
 
 ## Status
 

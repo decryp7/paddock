@@ -24,7 +24,7 @@ use pitcrew_core::jobs::{FinishedJob, JobInfo, JobTracker};
 use pitcrew_core::layout::{self, LOG_FILE};
 use pitcrew_core::logline::{classify, RunnerLogEvent};
 use pitcrew_core::logs::{LogTail, RotationPolicy, MAX_QUERY_LEN};
-use pitcrew_core::metrics::SAMPLE_EVERY;
+use pitcrew_core::metrics::{UsagePoint, SAMPLE_EVERY};
 use pitcrew_core::names::RunnerName;
 use pitcrew_core::notify::{self, Notification};
 use pitcrew_core::platform::Platform;
@@ -38,6 +38,7 @@ use pitcrew_core::time::Timestamp;
 use pitcrew_core::update::{
     LocalMoment, TimeOfDay, UpdateCommand, UpdateDecision, UpdateEvent, UpdateMachine, UpdatePhase, UpdatePlan, Weekday,
 };
+use pitcrew_core::usage::{tree_members, Usage, UsageAcc, UsageTracker};
 use pitcrew_core::version::RunnerVersion;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -215,6 +216,12 @@ struct Runner {
     checking: bool,
     removing: bool,
     session_problem: Option<String>,
+    /// CPU time of the runner's processes between probe ticks (ADR 0007).
+    usage_tracker: UsageTracker,
+    /// The runner's use at the last probe tick; `None` while it is not running.
+    usage_now: Option<Usage>,
+    /// The probe ticks of the current sample period.
+    usage_period: UsageAcc,
 }
 
 /// The supervisor.
@@ -232,6 +239,8 @@ pub struct Supervisor {
     started_at: Timestamp,
     last_probe: Timestamp,
     last_sample: Timestamp,
+    /// All runners together, per probe tick, for the current sample period.
+    usage_total: UsageAcc,
     last_save: Timestamp,
     dirty: bool,
     service_log: LogWriter,
@@ -293,6 +302,7 @@ impl Supervisor {
             started_at: now,
             last_probe: Timestamp(0),
             last_sample: Timestamp(0),
+            usage_total: UsageAcc::default(),
             last_save: now,
             dirty: false,
             service_log,
@@ -350,6 +360,9 @@ impl Supervisor {
             checking: false,
             removing: false,
             session_problem: None,
+            usage_tracker: UsageTracker::new(),
+            usage_now: None,
+            usage_period: UsageAcc::default(),
             cfg,
         };
         // A runner the previous service instance started and that still runs: adopt it instead of starting a second.
@@ -423,6 +436,7 @@ impl Supervisor {
         if probe {
             self.last_probe = now;
             self.probe.refresh_processes();
+            self.sample_usage(now);
             let console = self.env.launcher.console().session;
             if console != self.console {
                 self.console = console;
@@ -435,14 +449,46 @@ impl Supervisor {
         }
         if now.since(self.last_sample) >= SAMPLE_EVERY {
             self.last_sample = now;
-            let sample = self.probe.machine(now, &self.env.data_dir);
+            let mut sample = self.probe.machine(now, &self.env.data_dir);
+            sample.runners = self.usage_total.take().unwrap_or_default();
             self.state.metrics.push(sample);
+            for r in self.runners.values_mut() {
+                if let Some(usage) = r.usage_period.take() {
+                    self.state
+                        .runners
+                        .entry(r.cfg.name.to_string())
+                        .or_default()
+                        .usage
+                        .push(UsagePoint { at: now, usage });
+                }
+            }
             self.dirty = true;
         }
         if self.dirty && now.since(self.last_save) >= SAVE_EVERY {
             self.save_state(now);
         }
         self.publish(now);
+    }
+
+    /// Reads the process table once and records what each runner's process tree uses (ADR 0007).
+    fn sample_usage(&mut self, now: Timestamp) {
+        let table = self.probe.process_table();
+        let cpus = self.probe.cpus();
+        let mut all = Vec::with_capacity(self.runners.len());
+        for r in self.runners.values_mut() {
+            let root = r.process.as_ref().map(|p| p.pid());
+            let members = root.map(|pid| tree_members(pid, &table)).unwrap_or_default();
+            if members.is_empty() {
+                r.usage_tracker.reset();
+                r.usage_now = None;
+                continue;
+            }
+            let usage = r.usage_tracker.observe(now.0, &members, cpus);
+            r.usage_period.add(&usage);
+            r.usage_now = Some(usage);
+            all.push(usage);
+        }
+        self.usage_total.add(&Usage::sum(all.iter()));
     }
 
     fn tick_runner(&mut self, name: &RunnerName, now: Timestamp, probe: bool) {
@@ -1205,9 +1251,15 @@ impl Supervisor {
                     .and_then(|n| self.state.runners.get(n.as_str()))
                     .map(|s| s.folder_sizes.query(now, range))
                     .unwrap_or_default();
+                let usage = runner
+                    .as_ref()
+                    .and_then(|n| self.state.runners.get(n.as_str()))
+                    .map(|s| s.usage.query(now, range))
+                    .unwrap_or_default();
                 Response::Metrics {
                     machine: self.state.metrics.query(now, range),
                     folder,
+                    usage,
                 }
             }
             Request::Disk { runner } => {
@@ -1494,7 +1546,8 @@ impl Supervisor {
         let updating = !matches!(r.update.phase(), UpdatePhase::Idle);
         let facts = r.ctl.facts(now, r.registered, updating);
         let status = health::status(&facts, now);
-        let st = self.state.runners.get(r.cfg.name.as_str()).cloned().unwrap_or_default();
+        let fallback = state::RunnerState::default();
+        let st = self.state.runners.get(r.cfg.name.as_str()).unwrap_or(&fallback);
         let policy = r.cfg.update_policy(&self.config.defaults).clone();
         let cleanup_policy = r.cfg.cleanup_policy(&self.config.defaults);
         let update_target = match self.decision(r, now) {
@@ -1555,6 +1608,7 @@ impl Supervisor {
             session_mode: r.cfg.session,
             disk,
             next_cleanup_at,
+            usage: r.usage_now,
         }
     }
 

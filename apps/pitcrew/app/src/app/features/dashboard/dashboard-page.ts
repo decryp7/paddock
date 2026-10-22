@@ -6,8 +6,8 @@ import { ClockService } from '../../core/clock.service';
 import { ThemeService } from '../../core/theme.service';
 import { RegisterLauncher } from '../../layout/register-launcher';
 import { Chart } from '../../shared/charts/chart';
-import { diskOption, durationOption, jobsPerDayOption, queueOption, sumJobDays } from '../../shared/charts/chart-options';
-import { formatDateTime, plural } from '../../shared/format';
+import { diskOption, durationOption, jobsPerDayOption, loadOption, queueOption, sumJobDays } from '../../shared/charts/chart-options';
+import { formatBytes, formatDateTime, formatPermille, plural } from '../../shared/format';
 import { outcomeLook } from '../../shared/labels';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { LoadState } from '../../shared/ui/load-state';
@@ -100,6 +100,25 @@ export class DashboardPage {
       .map((m) => m.at);
     return diskOption(series, [...new Set(cleanups)], this.theme.chartTokens(), this.hours());
   });
+  private readonly samples = computed(() => this.store.machine().value?.machine ?? []);
+  protected readonly cpuOpt = computed(() =>
+    loadOption(
+      this.samples().map((x) => ({ at: x.at, runners: x.runners.cpuPermille, machine: x.cpuPermille })),
+      (v) => formatPermille(v),
+      1000,
+      this.theme.chartTokens(),
+      this.hours(),
+    ),
+  );
+  protected readonly memOpt = computed(() =>
+    loadOption(
+      this.samples().map((x) => ({ at: x.at, runners: x.runners.memBytes, machine: x.memUsedBytes })),
+      (v) => formatBytes(v, 0),
+      this.samples().at(-1)?.memTotalBytes,
+      this.theme.chartTokens(),
+      this.hours(),
+    ),
+  );
   protected readonly diskState = computed(() => {
     const all = this.shown().map((n) => this.store.folders()[n]);
     return { hasValue: all.some((l) => l?.value), error: all.find((l) => l?.error)?.error ?? null };

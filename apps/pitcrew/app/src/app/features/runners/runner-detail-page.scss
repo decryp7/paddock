@@ -74,3 +74,25 @@
   align-items: center;
   gap: var(--space-2);
 }
+
+.use {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+.trends {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+.trends pc-sparkline {
+  height: 40px;
+  margin-top: var(--space-1);
+}
+@media (max-width: 760px) {
+  .use,
+  .trends {
+    grid-template-columns: 1fr;
+  }
+}

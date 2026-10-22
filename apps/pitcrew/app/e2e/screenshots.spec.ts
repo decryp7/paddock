@@ -24,6 +24,14 @@ const scrollMain = (y: number) => async (page: Page) => {
 const SHOTS: Shot[] = [
   { name: 'dashboard', path: '/' },
   { name: 'dashboard-history', path: '/', prepare: scrollMain(640) },
+  {
+    name: 'dashboard-load',
+    path: '/',
+    prepare: async (page) => {
+      await page.getByRole('heading', { name: 'CPU', exact: true }).scrollIntoViewIfNeeded();
+      await page.evaluate(() => document.querySelector('main')?.scrollBy({ top: 120 }));
+    },
+  },
   { name: 'runners', path: '/runners' },
   { name: 'runner-detail', path: '/runners/build-win' },
   { name: 'runner-updates', path: '/runners/ui-tests?tab=updates' },
