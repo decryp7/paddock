@@ -21,10 +21,12 @@ describe('colour math', () => {
 
   it('measures perceptual distance, also under simulated deficiencies', () => {
     expect(deltaE('#123456', '#123456')).toBe(0);
-    // Red and green collapse for protanopes and deuteranopes far more than for normal vision.
+    // Red and green lose their hue difference for protanopes and deuteranopes. The OKLab distance keeps the lightness
+    // difference between these two (so it drops by about a third, not by half); an equal-lightness pair collapses fully.
     const normal = deltaE('#d62728', '#2ca02c');
-    expect(deltaE('#d62728', '#2ca02c', 'protan')).toBeLessThan(normal / 2);
-    expect(deltaE('#d62728', '#2ca02c', 'deutan')).toBeLessThan(normal / 2);
+    expect(deltaE('#d62728', '#2ca02c', 'protan')).toBeLessThan(normal * 0.75);
+    expect(deltaE('#d62728', '#2ca02c', 'deutan')).toBeLessThan(normal * 0.75);
+    expect(deltaE('#b8592f', '#4f8a2b', 'protan')).toBeLessThan(deltaE('#b8592f', '#4f8a2b') * 0.5);
     // Blue and yellow collapse for tritanopes less than red/green do for the others, but they do move.
     expect(simulate('#ffffff', 'tritan').every((c) => c >= 0 && c <= 1)).toBe(true);
     expect(worstAdjacent(['#000000', '#ffffff', '#000000'])).toBeCloseTo(100, 0);

@@ -158,7 +158,7 @@ describe('MockBackend', () => {
 
   it('refuses to load a model that will not fit', async () => {
     const mock = new MockBackend({ now: clock });
-    const d = await mock.downloadModel('Qwen/Qwen3-32B-Instruct-GGUF', 'Qwen3-32B-Instruct-F16.gguf', null);
+    const d = await mock.downloadModel('Qwen/Qwen3-32B-Instruct-GGUF', 'Qwen3-32B-Instruct-F16-00001-of-00002.gguf', null);
     for (let i = 0; i < 400; i++) mock.tick();
     const big = (await mock.localModels()).find((m) => m.file === d.name)!;
     await expect(mock.loadModel(big.id)).rejects.toMatchObject({ code: 'insufficientMemory' });
