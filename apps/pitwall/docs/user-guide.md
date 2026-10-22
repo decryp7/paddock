@@ -267,7 +267,7 @@ level every 30 seconds so it never starves. An app cannot go above its permissio
 | Header | Meaning |
 |---|---|
 | `X-Pitwall-Model` | The model that answered. |
-| `X-Pitwall-Engine` | The engine (`llama.cpp`). |
+| `X-Pitwall-Engine` | The engine that served it: `llama.cpp`, or the id of the engine pack. |
 | `X-Pitwall-Chosen-By` | `explicit` (named), `capabilities` (`auto:`) or `default`. |
 | `X-Pitwall-Cold-Start-Ms` | Present when the model had to be loaded first. |
 

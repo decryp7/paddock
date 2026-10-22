@@ -60,7 +60,6 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | OS memory-pressure signals and foreground-app yielding | Rules in the core; the server does not read the signals yet |
 | Releasing a model's context before its weights | Planned in the policy; the server only unloads |
 | Engine restart with backoff | Policy in the core; the server reloads on the next request instead; **partial** |
-| `X-Pitwall-Engine` naming pack engines | Always reports `llama.cpp` today |
 | Request inspector with prompts on demand | Metadata only; content not kept yet |
 | LAN sharing with TLS and certificate pinning | Settings and status fields exist; **not built** |
 | Knowledge collections (local RAG: store, chunk, embed, rerank, query) | **Not built** |

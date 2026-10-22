@@ -117,7 +117,7 @@ fn json_body(b: &Bytes) -> Result<Value, ApiError> {
     serde_json::from_slice(b).map_err(|e| ApiError::invalid(format!("the request body is not valid JSON: {e}")))
 }
 
-fn provenance(r: &mut Response, run_model: &str, by: pitwall_core::mgmt::ChosenBy, cold: Option<u64>) {
+fn provenance(r: &mut Response, run_model: &str, engine: &str, by: pitwall_core::mgmt::ChosenBy, cold: Option<u64>) {
     let h = r.headers_mut();
     let mut put = |k: &'static str, v: String| {
         if let Ok(v) = HeaderValue::from_str(&v) {
@@ -125,7 +125,7 @@ fn provenance(r: &mut Response, run_model: &str, by: pitwall_core::mgmt::ChosenB
         }
     };
     put("x-pitwall-model", run_model.to_string());
-    put("x-pitwall-engine", "llama.cpp".into());
+    put("x-pitwall-engine", engine.to_string());
     put(
         "x-pitwall-chosen-by",
         serde_json::to_value(by)
@@ -185,7 +185,7 @@ fn meta(family: ApiFamily, endpoint: &str, h: &HeaderMap, kind: JobKind) -> Resu
 type Fmt = Box<dyn FnMut(&ChatEvent) -> Vec<String> + Send>;
 
 fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'static str) -> Response {
-    let (model, by, cold) = (run.resolved.id.to_string(), run.resolved.chosen_by, run.cold_start_ms);
+    let (model, by, cold, engine) = (run.resolved.id.to_string(), run.resolved.chosen_by, run.cold_start_ms, run.engine.clone());
     struct St {
         run: Run,
         pending: VecDeque<String>,
@@ -232,7 +232,7 @@ fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'st
         .header("x-accel-buffering", "no")
         .body(Body::from_stream(stream))
         .unwrap_or_default();
-    provenance(&mut r, &model, by, cold);
+    provenance(&mut r, &model, &engine, by, cold);
     r
 }
 
@@ -271,7 +271,7 @@ async fn collect(mut run: Run) -> Result<(ChatOutput, Run), ApiError> {
 
 fn json_response(v: Value, run: &Run) -> Response {
     let mut r = axum::Json(v).into_response();
-    provenance(&mut r, run.resolved.id.as_str(), run.resolved.chosen_by, run.cold_start_ms);
+    provenance(&mut r, run.resolved.id.as_str(), &run.engine, run.resolved.chosen_by, run.cold_start_ms);
     r
 }
 

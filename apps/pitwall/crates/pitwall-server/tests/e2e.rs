@@ -438,6 +438,7 @@ async fn an_engine_pack_serves_a_model_through_a_real_child_process() {
     let loaded = h.rpc("overview", json!({})).await.json()["models"][0].clone();
     assert_eq!(loaded["engine"], "pack");
     assert_eq!(loaded["build"], "fakeoai");
+    assert_eq!(r.header("x-pitwall-engine"), Some("fakeoai"), "the header names the pack engine");
     assert!(
         h.rpc("unload_model", json!({"id": "tiny-q4_k_m"})).await.status == 200,
         "dropping the engine ends the child"

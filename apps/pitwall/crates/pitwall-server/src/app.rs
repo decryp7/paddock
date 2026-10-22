@@ -411,11 +411,13 @@ impl AppState {
         let job = permit.id();
         let chosen_by = resolved.chosen_by;
         let stream = req.stream;
+        let engine = busy.model().engine.0.clone();
         let rx = self.serving.chat(busy, permit, req, timeout);
         Ok(Run {
             rx,
             resolved,
             cold_start_ms: cold,
+            engine,
             job,
             rec: Recorder {
                 st: self.clone(),
@@ -467,6 +469,8 @@ pub struct Run {
     pub resolved: Resolved,
     /// Set when the model had to be loaded.
     pub cold_start_ms: Option<u64>,
+    /// The engine that serves it (`llama.cpp`, or the id of the engine pack).
+    pub engine: String,
     /// The queue job id.
     pub job: u64,
     /// Records the outcome when finished.

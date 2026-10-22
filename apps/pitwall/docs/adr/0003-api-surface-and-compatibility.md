@@ -58,8 +58,8 @@ choose (`select::Requirements::parse_auto`; unknown words are refused so a typo 
 **Request headers.** `X-Pitwall-Priority: interactive | background | batch` (default interactive, capped by the app's
 permissions, ADR 0005). Credentials: `Authorization: Bearer <key>` or `x-api-key` (ADR 0007).
 
-**Provenance** on every successful chat response: `X-Pitwall-Model`, `X-Pitwall-Engine` (currently always written as
-`llama.cpp`), `X-Pitwall-Chosen-By` (`explicit | capabilities | default`) and, when the model had to be loaded first,
+**Provenance** on every successful chat response: `X-Pitwall-Model`, `X-Pitwall-Engine` (`llama.cpp`, or the id of the engine
+pack that served the model), `X-Pitwall-Chosen-By` (`explicit | capabilities | default`) and, when the model had to be loaded first,
 `X-Pitwall-Cold-Start-Ms`.
 
 **Versioning.** `/x/v1` and `apiVersion: 1` (`API_VERSION`) change only additively; a breaking change is `/x/v2` served
