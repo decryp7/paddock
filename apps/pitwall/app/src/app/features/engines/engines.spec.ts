@@ -97,6 +97,14 @@ describe('EnginesPage', () => {
     return { el: fixture.nativeElement as HTMLElement, settle, live: TestBed.inject(LiveStore) };
   }
 
+  /** Opens a build's "..." menu and runs one item. */
+  async function menu(el: HTMLElement, settle: () => Promise<void>, build: string, item: string) {
+    (el.querySelector(`button[aria-label="More actions for ${build}"]`) as HTMLButtonElement).click();
+    await settle();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    await settle();
+  }
+
   it('names models in the process table', () => {
     expect(modelLabel('qwen3-8b-instruct-q4_k_m')).toBe('qwen3-8b-instruct');
     expect(modelLabel('nomic-embed-text-v1.5-f16')).toBe('nomic-embed-text-v1.5');
@@ -108,13 +116,18 @@ describe('EnginesPage', () => {
     expect(el.textContent).toContain('CUDA 13 (NVIDIA)');
     expect(el.textContent).toContain('Self-test passed');
     expect(el.textContent).toContain('Not tested');
-    expect(el.querySelector('.build.suggested')?.textContent).toContain('Suggested');
+    expect(el.querySelector('.catalog')!.querySelectorAll('li').length).toBe(4);
+    expect(el.querySelector('.catalog li .rec')?.textContent).toContain('Suggested');
+    expect(Array.from(el.querySelectorAll('.catalog button')).every((b) => !b.classList.contains('primary'))).toBe(true);
+    expect(el.textContent).not.toContain('Healthy');
+    expect(el.querySelector('.tag.upd')).toBeNull();
+    expect(el.querySelector('.section-head .link')?.textContent).toContain('Update available');
     expect(el.textContent).toContain('Roll back to Vulkan b11669');
-    expect(el.textContent).toContain('Healthy');
     const planned = el.querySelectorAll('.planned li');
     expect(planned.length).toBe(3);
     expect(planned[1]!.textContent).toContain('MLX runs on Apple silicon only');
-    expect((el.querySelector('button[aria-label="Remove CUDA 13 (NVIDIA) b11669"]') as HTMLButtonElement).disabled).toBe(true);
+    // Remove is only in the row menu: nothing destructive at rest.
+    expect(el.querySelector('button[aria-label="Remove CUDA 13 (NVIDIA) b11669"]')).toBeNull();
   });
 
   it('chooses a build, installs, removes and rolls back', async () => {
@@ -138,9 +151,8 @@ describe('EnginesPage', () => {
     expect(el.textContent).toContain('b11702');
     live.disconnect();
 
-    (el.querySelector('button[aria-label="Remove CPU (AVX2) b4300"]') as HTMLButtonElement).click();
-    await settle();
-    expect(el.querySelector('button[aria-label="Remove CPU (AVX2) b4300"]')).toBeNull();
+    await menu(el, settle, 'CPU (AVX2) b4300', 'Remove…');
+    expect(el.querySelector('button[aria-label="More actions for CPU (AVX2) b4300"]')).toBeNull();
 
     const rollback = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Roll back'))!;
     rollback.click();
@@ -151,12 +163,12 @@ describe('EnginesPage', () => {
 
   it('does nothing when a confirmation is declined', async () => {
     const { el, settle } = await render(new MockBackend(), false);
-    (el.querySelector('button[aria-label="Remove CPU (AVX2) b4300"]') as HTMLButtonElement).click();
+    await menu(el, settle, 'CPU (AVX2) b4300', 'Remove…');
     Array.from(el.querySelectorAll('button'))
       .find((b) => b.textContent?.includes('Roll back'))!
       .click();
     await settle();
-    expect(el.querySelector('button[aria-label="Remove CPU (AVX2) b4300"]')).not.toBeNull();
+    expect(el.querySelector('button[aria-label="More actions for CPU (AVX2) b4300"]')).not.toBeNull();
     expect(el.textContent).toContain('Roll back to Vulkan b11669');
   });
 

@@ -6,7 +6,10 @@ import { LiveStore } from '../../core/live.store';
 import { ago, bytes, percent } from '../../shared/format';
 import { availabilityLook, capabilityLook, downloadActive, healthLook, selfTestLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
+import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { RowMenu } from '../../shared/ui/row-menu';
+import { isMenuKey } from '../../shared/ui/row-nav';
 import { EnginesStore } from './engines.store';
 
 /** A readable model name from its id, for the process table. */
@@ -19,21 +22,24 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
   return downloadName.startsWith(`${engineName} `);
 }
 
-/** An engine that can serve: its build choice, rollback, installed builds, the pinned catalog and its processes. */
+/**
+ * An engine that can serve, laid out on the page (no card around the lot): its build choice, the installed builds, the
+ * pinned catalog and its processes, each its own surface.
+ */
 @Component({
   selector: 'pw-engine-card',
-  imports: [MatIconModule, MatTooltipModule, EmptyState],
+  imports: [MatIconModule, MatTooltipModule, EmptyState, RowMenu],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let e = engine();
-    <section class="card" [attr.aria-labelledby]="'eng-' + e.kind">
+    <section class="engine" [attr.aria-labelledby]="'eng-' + e.kind">
       <header class="head">
         <div class="logo" aria-hidden="true"><mat-icon svgIcon="pw:engines" /></div>
         <div class="title">
           <h2 [id]="'eng-' + e.kind">{{ e.name }}</h2>
-          <p class="muted">{{ e.description }}</p>
+          <p class="muted" [matTooltip]="e.description" matTooltipShowDelay="600">{{ e.description }}</p>
         </div>
-        <span class="pill dot" [attr.data-tone]="look().tone">{{ look().label }}</span>
+        <span class="status" [attr.data-tone]="look().tone">{{ look().label }}</span>
       </header>
 
       <div class="choice">
@@ -55,101 +61,104 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       </div>
 
       @if (pinnedLabel(); as p) {
-        <p class="pinned-note" role="status"><mat-icon svgIcon="pw:pin" aria-hidden="true" />{{ p }}</p>
+        <p class="callout pinned-note" data-tone="info" role="status"><mat-icon svgIcon="pw:pin" aria-hidden="true" />{{ p }}</p>
       }
       @for (problem of problems(); track problem) {
-        <p class="pin-problem" role="alert">{{ problem }}</p>
+        <p class="callout pin-problem" data-tone="bad" role="alert"><mat-icon svgIcon="pw:alert" aria-hidden="true" />{{ problem }}</p>
       }
 
-      <h3>Installed builds</h3>
+      <div class="section-head">
+        <h3>Installed builds</h3>
+        @if (hasUpdate()) {
+          <button type="button" class="link" (click)="toCatalog()" matTooltip="A newer pinned release is in the catalog">Update available</button>
+        }
+      </div>
       @if (e.builds.length === 0) {
         <pw-empty-state icon="engines" heading="No build installed" text="Install one from the catalog below; the suggested one suits this machine." />
       } @else {
-        <table class="table">
-          <thead>
-            <tr>
-              <th scope="col">Build</th>
-              <th scope="col">Release</th>
-              <th scope="col" class="right">Size</th>
-              <th scope="col">Self-test</th>
-              <th scope="col">Devices</th>
-              @if (canPin()) {
-                <th scope="col">Version pin</th>
-              }
-              <th scope="col"><span class="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (b of e.builds; track b.id + b.tag) {
+        <div class="surface">
+          <table class="table">
+            <thead>
               <tr>
-                <td>
-                  <span class="bname">{{ b.label }}</span>
-                  @if (b.active) {
-                    <span class="pill" data-tone="info">Active</span>
-                  }
-                </td>
-                <td>
-                  <span class="mono">{{ b.tag }}</span>
-                  @if (b.outdated) {
-                    <span class="tag upd" matTooltip="A newer pinned release is in the catalog">update</span>
-                  }
-                </td>
-                <td class="right num">{{ size(b.sizeBytes) }}</td>
-                <td><span class="pill dot" [attr.data-tone]="test(b).tone" [matTooltip]="b.selfTestMessage ?? ''">{{ test(b).label }}</span></td>
-                <td class="devices" [matTooltip]="b.devices.join(', ')">{{ b.devices.join(', ') || '—' }}</td>
-                @if (canPin()) {
-                  <td>
-                    <button
-                      type="button"
-                      class="btn sm pin"
-                      [class.pinned]="isPinned(b)"
-                      [attr.aria-pressed]="isPinned(b)"
-                      [attr.aria-label]="(isPinned(b) ? 'Unpin ' : 'Pin ') + b.label + ' ' + b.tag + ' for all models'"
-                      [matTooltip]="isPinned(b) ? 'Pinned for all models: automatic choice is off. Click to unpin.' : b.selfTest === 'passed' ? 'Use this build for all models, even when a better one is installed' : 'Only builds that passed their self-test can be pinned'"
-                      [disabled]="store.isBusy()('pin') || (!isPinned(b) && b.selfTest !== 'passed')"
-                      (click)="store.togglePin(b)"
-                    >
-                      <mat-icon [svgIcon]="isPinned(b) ? 'pw:pin' : 'pw:unpin'" aria-hidden="true" />{{ isPinned(b) ? 'Pinned' : 'Pin' }}
-                    </button>
-                  </td>
-                }
-                <td class="right">
-                  <button type="button" class="btn ghost sm caps-toggle" [attr.aria-expanded]="capsOpen().has(b.id)" [attr.aria-controls]="'caps-' + b.id" [attr.aria-label]="'What ' + b.label + ' ' + b.tag + ' supports'" (click)="toggleCaps(b.id)">
-                    Features
-                  </button>
-                  <button type="button" class="btn ghost icon sm del" [attr.aria-label]="'Remove ' + b.label + ' ' + b.tag" [matTooltip]="b.active ? 'In use: choose another build first' : 'Remove'" [disabled]="b.active || store.isBusy()('remove:' + b.id + ':' + b.tag)" (click)="remove(b)">
-                    <mat-icon svgIcon="pw:trash" aria-hidden="true" />
-                  </button>
-                </td>
+                <th scope="col">Build</th>
+                <th scope="col">Release</th>
+                <th scope="col" class="right">Size</th>
+                <th scope="col">Self-test</th>
+                <th scope="col">Devices</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
               </tr>
-              @if (capsOpen().has(b.id)) {
-                <tr class="caps-row">
-                  <td [id]="'caps-' + b.id" [attr.colspan]="canPin() ? 7 : 6">
-                    @if (capsOf(b); as list) {
-                      <ul class="caps" [attr.aria-label]="'Features of ' + b.label + ' ' + b.tag">
-                        @for (c of list; track c.capability) {
-                          <li>
-                            <span class="pill dot" [attr.data-tone]="capLook(c).tone">{{ capLook(c).label }}</span>
-                            <span class="cap-name">{{ c.label }}</span>
-                            @if (c.hint) {
-                              <span class="faint">{{ c.hint }}</span>
-                            }
-                          </li>
-                        }
-                      </ul>
-                    } @else {
-                      <p class="faint">The engine did not report what this build supports.</p>
+            </thead>
+            <tbody>
+              @for (b of e.builds; track b.id + b.tag) {
+                <tr tabindex="0" [attr.aria-expanded]="capsOpen().has(b.id)" (keydown)="onRowKey(b, $event)" (contextmenu)="onRowMenu(b, $event)">
+                  <td>
+                    <span class="bname">{{ b.label }}</span>
+                    @if (b.active) {
+                      <span class="active"><mat-icon svgIcon="pw:check" aria-hidden="true" />Active</span>
+                    }
+                    @if (isPinned(b)) {
+                      <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned for all models" matTooltip="Pinned for all models: automatic choice is off" />
                     }
                   </td>
+                  <td><span class="mono">{{ b.tag }}</span></td>
+                  <td class="right num">{{ size(b.sizeBytes) }}</td>
+                  <td><span class="status" [attr.data-tone]="test(b).tone" [matTooltip]="b.selfTestMessage ?? ''">{{ test(b).label }}</span></td>
+                  <td class="devices"><span class="dev" [matTooltip]="b.devices.join(', ')">{{ b.devices.join(', ') || '—' }}</span></td>
+                  <td class="act">
+                    <span class="row-actions">
+                      @if (canPin()) {
+                        <button
+                          type="button"
+                          class="btn ghost icon sm reveal"
+                          [class.on]="isPinned(b)"
+                          [attr.aria-pressed]="isPinned(b)"
+                          [attr.aria-label]="(isPinned(b) ? 'Unpin ' : 'Pin ') + b.label + ' ' + b.tag + ' for all models'"
+                          [matTooltip]="isPinned(b) ? 'Pinned for all models: automatic choice is off. Click to unpin.' : b.selfTest === 'passed' ? 'Use this build for all models, even when a better one is installed' : 'Only builds that passed their self-test can be pinned'"
+                          [disabled]="store.isBusy()('pin') || (!isPinned(b) && b.selfTest !== 'passed')"
+                          (click)="store.togglePin(b)"
+                        >
+                          <mat-icon [svgIcon]="isPinned(b) ? 'pw:pin' : 'pw:unpin'" aria-hidden="true" />
+                        </button>
+                      }
+                      <button type="button" class="btn ghost icon sm reveal" [attr.aria-expanded]="capsOpen().has(b.id)" [attr.aria-controls]="'caps-' + b.id" [attr.aria-label]="'What ' + b.label + ' ' + b.tag + ' supports'" matTooltip="Features" (click)="toggleCaps(b.id)">
+                        <mat-icon [svgIcon]="capsOpen().has(b.id) ? 'pw:chevron-down' : 'pw:chevron-right'" aria-hidden="true" />
+                      </button>
+                      <pw-row-menu [items]="menuItems(b)" [label]="'More actions for ' + b.label + ' ' + b.tag" />
+                    </span>
+                  </td>
                 </tr>
+                @if (capsOpen().has(b.id)) {
+                  <tr class="caps-row">
+                    <td [id]="'caps-' + b.id" colspan="6">
+                      @if (capsOf(b); as list) {
+                        <ul class="caps" [attr.aria-label]="'Features of ' + b.label + ' ' + b.tag">
+                          @for (c of list; track c.capability) {
+                            <li>
+                              <span class="status" [attr.data-tone]="capLook(c).tone">{{ capLook(c).label }}</span>
+                              <span class="cap-name">{{ c.label }}</span>
+                              @if (c.hint) {
+                                <span class="faint">{{ c.hint }}</span>
+                              }
+                            </li>
+                          }
+                        </ul>
+                      } @else {
+                        <p class="faint">The engine did not report what this build supports.</p>
+                      }
+                    </td>
+                  </tr>
+                }
               }
-            }
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       }
 
       @if (e.catalog.length) {
-        <h3>Catalog <span class="faint">pinned releases, verified by SHA-256</span></h3>
+        <div class="section-head" id="catalog">
+          <h3>Catalog</h3>
+          <span class="faint">pinned releases, verified by SHA-256</span>
+        </div>
         @if (installing().length) {
           <ul class="installing" aria-label="Installing">
             @for (d of installing(); track d.id) {
@@ -161,66 +170,68 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             }
           </ul>
         }
-        <div class="catalog">
+        <ul class="catalog surface" aria-label="Catalog">
           @for (c of e.catalog; track c.id + c.tag) {
-            <div class="build" [class.suggested]="c.suggested">
-              <div class="btop">
-                <span class="bname">{{ c.label }}</span>
-                @if (c.suggested) {
-                  <span class="pill" data-tone="info"><mat-icon svgIcon="pw:sparkles" aria-hidden="true" />Suggested</span>
-                }
-              </div>
+            <li>
+              <span class="bname">{{ c.label }}</span>
               <span class="faint num"><span class="mono">{{ c.tag }}</span> · {{ size(c.downloadBytes) }} download</span>
+              <span class="rec">
+                @if (c.suggested) {
+                  <mat-icon svgIcon="pw:sparkles" aria-hidden="true" />Suggested
+                }
+              </span>
               @if (c.installed) {
-                <span class="pill" data-tone="ok"><mat-icon svgIcon="pw:check" aria-hidden="true" />Installed</span>
+                <span class="status" data-tone="ok">Installed</span>
               } @else {
-                <button type="button" class="btn sm" [class.primary]="c.suggested" [disabled]="store.isBusy()('install:' + c.id)" [attr.aria-label]="'Install ' + c.label + ' ' + c.tag" (click)="store.install(c)">
+                <button type="button" class="btn sm" [disabled]="store.isBusy()('install:' + c.id)" [attr.aria-label]="'Install ' + c.label + ' ' + c.tag" (click)="store.install(c)">
                   <mat-icon svgIcon="pw:download" aria-hidden="true" />Install
                 </button>
               }
-            </div>
+            </li>
           }
-        </div>
+        </ul>
       }
 
-      <h3>Processes</h3>
+      <div class="section-head"><h3>Processes</h3></div>
       @if (e.processes.length === 0) {
         <p class="faint none">No process running. One starts when a model loads.</p>
       } @else {
-        <table class="table">
-          <thead>
-            <tr>
-              <th scope="col">Model</th>
-              <th scope="col">PID</th>
-              <th scope="col">Health</th>
-              <th scope="col" class="right">Restarts</th>
-              <th scope="col" class="right">Memory</th>
-              <th scope="col">Started</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (p of e.processes; track p.pid) {
+        <div class="surface">
+          <table class="table">
+            <thead>
               <tr>
-                <td class="bname">{{ model(p.modelId) }}</td>
-                <td class="mono faint">{{ p.pid }}</td>
-                <td><span class="pill dot" [attr.data-tone]="health(p.health).tone">{{ health(p.health).label }}</span></td>
-                <td class="right num" [class.warn]="p.restarts > 0">{{ p.restarts }}</td>
-                <td class="right num">{{ size(p.rssBytes) }}</td>
-                <td class="faint">{{ when(p.startedAt, now()) }}</td>
+                <th scope="col">Model</th>
+                <th scope="col">PID</th>
+                <th scope="col" class="right">Restarts</th>
+                <th scope="col" class="right">Memory</th>
+                <th scope="col">Started</th>
               </tr>
-            }
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              @for (p of e.processes; track p.pid) {
+                <tr>
+                  <td>
+                    <span class="bname">{{ model(p.modelId) }}</span>
+                    @if (p.health !== 'healthy') {
+                      <span class="status" [attr.data-tone]="health(p.health).tone">{{ health(p.health).label }}</span>
+                    }
+                  </td>
+                  <td class="mono faint">{{ p.pid }}</td>
+                  <td class="right num" [class.warn]="p.restarts > 0">{{ p.restarts }}</td>
+                  <td class="right num">{{ size(p.rssBytes) }}</td>
+                  <td class="faint">{{ when(p.startedAt, now()) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
       }
     </section>
   `,
   styles: `
-    .card {
-      padding: var(--sp-5);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-1), var(--card-highlight);
+    .engine {
+      display: grid;
+      gap: var(--sp-3);
     }
     .head {
       display: flex;
@@ -230,9 +241,9 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     .logo {
       display: grid;
       place-items: center;
-      width: 36px;
-      height: 36px;
-      border-radius: var(--r-lg);
+      width: 32px;
+      height: 32px;
+      border-radius: var(--r-md);
       background: var(--accent-soft);
       color: var(--accent);
       flex: none;
@@ -245,23 +256,29 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       }
       p {
         margin-top: 2px;
+        overflow: hidden;
         font-size: var(--fs-sm);
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
+    }
+    .surface {
+      overflow-x: auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-1), var(--card-highlight);
     }
     .choice {
       display: flex;
       align-items: flex-end;
+      flex-wrap: wrap;
       gap: var(--sp-4);
-      margin: var(--sp-5) 0 var(--sp-2);
-      padding: var(--sp-3) var(--sp-4);
-      background: var(--bg-sunken);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-md);
       .field {
         display: grid;
         gap: 4px;
         label {
-          font-size: var(--fs-xs);
+          font-size: var(--fs-sm);
           font-weight: var(--fw-medium);
           color: var(--text-2);
         }
@@ -271,80 +288,128 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       }
       .hint {
         flex: 1;
+        min-width: 240px;
         padding-bottom: 6px;
         font-size: var(--fs-sm);
-        color: var(--text-3);
+        color: var(--text-2);
       }
     }
-    h3 {
-      margin: var(--sp-5) 0 var(--sp-2);
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-semibold);
-      color: var(--text-2);
-      .faint {
-        margin-left: var(--sp-2);
-        font-weight: var(--fw-regular);
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      gap: var(--sp-3);
+      margin-top: var(--sp-3);
+      h3 {
+        font-size: var(--fs-md);
+        font-weight: var(--fw-semibold);
       }
+      .faint {
+        font-size: var(--fs-sm);
+      }
+    }
+    .link {
+      padding: 0;
+      font: inherit;
+      font-size: var(--fs-sm);
+      font-weight: var(--fw-medium);
+      color: var(--accent);
+      background: none;
+      border: none;
+      cursor: default;
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+    .table th:first-child,
+    .table td:first-child {
+      padding-left: var(--sp-4);
+    }
+    .table th:last-child,
+    .table td:last-child {
+      padding-right: var(--sp-3);
     }
     .bname {
-      font-weight: var(--fw-medium);
+      font-weight: var(--fw-semibold);
       margin-right: var(--sp-2);
     }
-    .upd {
-      margin-left: var(--sp-2);
+    .active {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-right: var(--sp-2);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      mat-icon {
+        width: 13px;
+        height: 13px;
+        color: var(--ok);
+      }
+    }
+    .pinned {
+      width: 13px;
+      height: 13px;
+      vertical-align: -2px;
       color: var(--accent);
-      border-color: color-mix(in srgb, var(--accent) 35%, transparent);
     }
     .devices {
       max-width: 260px;
-      overflow: hidden;
-      text-overflow: ellipsis;
       font-size: var(--fs-sm);
       color: var(--text-2);
     }
-    .del:hover:not(:disabled) {
-      color: var(--bad);
+    .dev {
+      display: block;
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .table td.act {
+      width: 1%;
     }
     .warn {
       color: var(--warn);
       font-weight: var(--fw-medium);
     }
     .catalog {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: var(--sp-3);
-    }
-    .build {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: var(--sp-2);
-      padding: var(--sp-3) var(--sp-4);
-      border: 1px solid var(--border);
-      border-radius: var(--r-md);
-      &.suggested {
-        background: linear-gradient(180deg, var(--accent-soft), transparent 80%);
-        border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      li {
+        display: grid;
+        grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr) 110px 92px;
+        align-items: center;
+        gap: var(--sp-3);
+        min-height: 44px;
+        padding: 0 var(--sp-4);
+        border-top: 1px solid var(--border-soft);
+        &:first-child {
+          border-top: none;
+        }
       }
       .faint {
-        font-size: var(--fs-xs);
+        font-size: var(--fs-sm);
+      }
+      .btn {
+        justify-self: end;
+      }
+      .status {
+        justify-self: end;
       }
     }
-    .btop {
-      display: flex;
+    .rec {
+      display: inline-flex;
       align-items: center;
-      justify-content: space-between;
-      gap: var(--sp-2);
-      width: 100%;
-    }
-    .pill mat-icon {
-      width: 11px;
-      height: 11px;
+      gap: 4px;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      mat-icon {
+        width: 12px;
+        height: 12px;
+      }
     }
     .installing {
       display: grid;
       gap: var(--sp-2);
-      margin: 0 0 var(--sp-3);
+      margin: 0;
       padding: 0;
       list-style: none;
       li {
@@ -358,27 +423,8 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     .none {
       font-size: var(--fs-sm);
     }
-    .btn.pin.pinned {
-      color: var(--accent);
-      border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-      background: var(--accent-soft);
-    }
-    .pinned-note {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-      margin: var(--sp-2) 0 0;
-      font-size: var(--fs-sm);
-      color: var(--accent);
-      mat-icon {
-        width: 14px;
-        height: 14px;
-      }
-    }
-    .pin-problem {
-      margin: var(--sp-2) 0 0;
-      font-size: var(--fs-sm);
-      color: var(--bad);
+    .callout p {
+      margin: 0;
     }
     .caps-row td {
       padding-top: 0;
@@ -397,8 +443,11 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         gap: var(--sp-3);
         font-size: var(--fs-sm);
       }
+      .status {
+        min-width: 150px;
+      }
       .cap-name {
-        min-width: 220px;
+        min-width: 200px;
         font-weight: var(--fw-medium);
       }
     }
@@ -410,6 +459,7 @@ export class EngineCard {
   protected readonly store = inject(EnginesStore);
   private readonly live = inject(LiveStore);
   private readonly confirm = inject(Confirm);
+  private readonly menu = inject(ContextMenuService);
   protected readonly size = bytes;
   protected readonly when = ago;
   protected readonly pct = percent;
@@ -443,6 +493,41 @@ export class EngineCard {
     const b = id ? this.engine().builds.find((x) => x.id === id) : null;
     return id ? `Pinned to ${b ? `${b.label} ${b.tag}` : id} for all models. Automatic choice is off until you unpin it.` : null;
   });
+
+  /** An installed build is older than a pinned release in the catalog: one note in the section header, not a tag on every row. */
+  protected readonly hasUpdate = computed(() => this.engine().builds.some((b) => b.outdated));
+
+  protected toCatalog(): void {
+    document.getElementById('catalog')?.scrollIntoView({ block: 'center' });
+  }
+
+  /** The one list behind a build's "..." button, right-click and Shift+F10. Remove is only here, and asks first. */
+  protected menuItems(b: InstalledBuild): ContextMenuItem[] {
+    const items: ContextMenuItem[] = [{ label: this.capsOpen().has(b.id) ? 'Hide features' : 'Features', run: () => this.toggleCaps(b.id) }];
+    if (this.canPin()) {
+      const pinned = this.isPinned(b);
+      items.push({ label: pinned ? 'Unpin for all models' : 'Pin for all models', run: () => void this.store.togglePin(b), disabled: this.store.isBusy()('pin') || (!pinned && b.selfTest !== 'passed') });
+    }
+    items.push({ label: 'Remove…', run: () => void this.remove(b), danger: true, divider: true, disabled: b.active || this.store.isBusy()('remove:' + b.id + ':' + b.tag) });
+    return items;
+  }
+
+  protected onRowKey(b: InstalledBuild, e: KeyboardEvent): void {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.toggleCaps(b.id);
+    } else if (isMenuKey(e)) {
+      e.preventDefault();
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      this.menu.open(r.left + 48, r.bottom - 8, this.menuItems(b));
+    }
+  }
+
+  protected onRowMenu(b: InstalledBuild, e: MouseEvent): void {
+    e.preventDefault();
+    this.menu.open(e.clientX, e.clientY, this.menuItems(b));
+  }
 
   protected isPinned(b: InstalledBuild): boolean {
     return this.store.pins()?.global === b.id;

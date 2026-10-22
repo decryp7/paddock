@@ -87,10 +87,12 @@ describe('Engine pins on the Engines page', () => {
 
   it('offers a pin button per build, with the unpinned ones saying Pin', async () => {
     const { el, btn } = await render();
-    expect(el.textContent).toContain('Version pin');
+    // The pin is an icon on the row (shown on hover and focus), not a labelled button on every row.
+    expect(el.textContent).not.toContain('Version pin');
     const b = btn('Pin Vulkan b11669 for all models');
     expect(b.getAttribute('aria-pressed')).toBe('false');
-    expect(b.textContent).toContain('Pin');
+    expect(b.textContent!.trim()).toBe('');
+    expect(b.classList.contains('reveal')).toBe(true);
     // A build that did not pass its self-test cannot be pinned.
     expect(btn('Pin CPU (AVX2) b4300 for all models').disabled).toBe(true);
   });
@@ -101,8 +103,9 @@ describe('Engine pins on the Engines page', () => {
     await settle();
     const pinned = btn('Unpin Vulkan b11669 for all models');
     expect(pinned.getAttribute('aria-pressed')).toBe('true');
-    expect(pinned.classList.contains('pinned')).toBe(true);
-    expect(pinned.textContent).toContain('Pinned');
+    // Pinned stays visible on the row, with a name for screen readers.
+    expect(pinned.classList.contains('on')).toBe(true);
+    expect(el.querySelector('tbody mat-icon.pinned')?.getAttribute('aria-label')).toBe('Pinned for all models');
     expect(el.querySelector('.pinned-note')?.textContent).toContain('Pinned to Vulkan b11669 for all models');
     pinned.click();
     await settle();

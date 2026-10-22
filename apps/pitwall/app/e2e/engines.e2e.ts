@@ -27,7 +27,7 @@ test.describe('engines', () => {
     await page.getByRole('button', { name: 'Pin Vulkan b11669 for all models' }).click();
     const pinned = page.getByRole('button', { name: 'Unpin Vulkan b11669 for all models' });
     await expect(pinned).toHaveAttribute('aria-pressed', 'true');
-    await expect(pinned).toContainText('Pinned');
+    await expect(pinned).toHaveClass(/\bon\b/);
     await expect(page.getByRole('status').filter({ hasText: 'Pinned to Vulkan b11669 for all models' })).toBeVisible();
     // Roll back names its target and asks first.
     await page.getByRole('button', { name: /^Roll back to CUDA 13/ }).click();
@@ -40,8 +40,9 @@ test.describe('engines', () => {
   test('pins a model to a build from the library', async ({ page }) => {
     await openApp(page, '/models');
     await page.getByRole('tab', { name: /Library/ }).click();
+    await page.getByRole('row', { name: /Qwen3 8B Instruct/ }).click();
     const menu = page.locator('select[id^="pin-"]').first();
     await menu.selectOption('vulkan');
-    await expect(page.getByText(/pinned to vulkan b11669/).first()).toBeVisible();
+    await expect(page.getByText(/Pinned to vulkan b11669/).first()).toBeVisible();
   });
 });

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, effect, inject, untracked } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Engine } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { availabilityLook } from '../../shared/labels';
@@ -11,7 +12,7 @@ import { EnginesStore } from './engines.store';
 /** Engines: llama.cpp builds, catalog and processes; planned engines with the honest reason they aren't here yet. */
 @Component({
   selector: 'pw-engines-page',
-  imports: [MatIconModule, Panel, EngineCard],
+  imports: [MatIconModule, MatTooltipModule, Panel, EngineCard],
   providers: [EnginesStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -19,10 +20,10 @@ import { EnginesStore } from './engines.store';
       <header class="page-head">
         <div>
           <h1>Engines</h1>
-          <p class="sub">The runtimes that serve models. Builds are pinned releases, verified and self-tested on this machine.</p>
+          <p class="sub">The runtimes that serve models: pinned releases, verified and self-tested here.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" />Refresh</button>
+          <button type="button" class="btn ghost icon" aria-label="Refresh" matTooltip="Refresh" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -33,7 +34,7 @@ import { EnginesStore } from './engines.store';
           <pw-panel heading="Engines" icon="engines" [error]="err" [ready]="false" (retry)="store.load()" />
         }
         @if (store.packProblems().length || store.packWarnings().length) {
-          <section class="pack-notice" role="status" aria-label="Pack problems">
+          <section class="pack-notice callout" data-tone="warn" role="status" aria-label="Pack problems">
             <mat-icon svgIcon="pw:alert" aria-hidden="true" />
             <div>
               <p class="head">
@@ -66,12 +67,9 @@ import { EnginesStore } from './engines.store';
           <ul class="planned" aria-label="Planned engines">
             @for (e of store.planned(); track e.kind) {
               <li>
-                <div class="ptop">
-                  <span class="pname">{{ e.name }}</span>
-                  <span class="pill" [attr.data-tone]="look(e).tone">{{ look(e).label }}</span>
-                </div>
-                <p class="desc">{{ e.description }}</p>
-                <p class="reason"><mat-icon svgIcon="pw:info" aria-hidden="true" />{{ reason(e) }}</p>
+                <span class="pname">{{ e.name }}</span>
+                <span class="desc" [matTooltip]="e.description + ' ' + reason(e)" matTooltipShowDelay="500">{{ reason(e) || e.description }}</span>
+                <span class="status" [attr.data-tone]="look(e).tone">{{ look(e).label }}</span>
               </li>
             }
           </ul>
@@ -80,19 +78,17 @@ import { EnginesStore } from './engines.store';
     </div>
   `,
   styles: `
-    .pack-notice {
+    :host {
+      display: block;
+    }
+    .page {
       display: flex;
-      gap: var(--sp-3);
-      padding: var(--sp-3) var(--sp-4);
-      background: var(--warn-soft);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      font-size: var(--fs-sm);
-      mat-icon {
-        flex: none;
-        width: 16px;
-        height: 16px;
-        color: var(--warn);
+      flex-direction: column;
+      gap: var(--sp-4);
+    }
+    .pack-notice {
+      p {
+        margin: 0;
       }
       .head {
         font-weight: var(--fw-semibold);
@@ -103,56 +99,51 @@ import { EnginesStore } from './engines.store';
         list-style: none;
         color: var(--text-2);
       }
-      li.warn {
-        color: var(--text-3);
+      .mono {
+        font-size: var(--fs-sm);
       }
     }
     .stack {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--sp-6);
+    }
+    .section-title {
+      margin: var(--sp-2) 0 0;
+      font-size: var(--fs-md);
+      color: var(--text);
     }
     .planned {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: var(--sp-3);
-      margin: 0;
+      margin: calc(-1 * var(--sp-1)) 0 0;
       padding: 0;
       list-style: none;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
       li {
-        display: flex;
-        flex-direction: column;
-        gap: var(--sp-2);
-        padding: var(--sp-4);
-        background: var(--bg-card);
-        border: 1px dashed var(--border-strong);
-        border-radius: var(--r-lg);
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr) 110px;
+        align-items: center;
+        gap: var(--sp-3);
+        min-height: 44px;
+        padding: 0 var(--sp-4);
+        border-top: 1px solid var(--border-soft);
+        &:first-child {
+          border-top: none;
+        }
       }
-    }
-    .ptop {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--sp-2);
+      .status {
+        justify-self: end;
+      }
     }
     .pname {
       font-weight: var(--fw-semibold);
     }
     .desc {
+      overflow: hidden;
       font-size: var(--fs-sm);
       color: var(--text-2);
-    }
-    .reason {
-      display: flex;
-      gap: 6px;
-      margin-top: auto;
-      font-size: var(--fs-sm);
-      color: var(--text-3);
-      mat-icon {
-        flex: none;
-        width: 14px;
-        height: 14px;
-        margin-top: 2px;
-      }
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
   `,
 })
