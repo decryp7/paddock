@@ -114,7 +114,7 @@ export class HealthHero implements OnInit {
   protected readonly top = computed(() => [...(this.store.report()?.reasons ?? [])].sort((a, b) => b.impact - a.impact).slice(0, 3));
   protected readonly trend = computed(() => {
     const w = this.store.weekly();
-    return w ? `${formatSigned(w.scoreChange)} vs last week` : null;
+    return w && w.score !== null ? `${formatSigned(w.scoreChange)} vs last week` : null;
   });
   protected readonly hint = computed(() => {
     const e = this.store.reportError();

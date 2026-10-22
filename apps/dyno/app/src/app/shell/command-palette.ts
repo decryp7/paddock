@@ -154,7 +154,7 @@ export class CommandPalette {
         keywords: 'diagnose slow cause',
         run: () => {
           void this.diagnosis.run();
-          void this.router.navigateByUrl('/');
+          void this.router.navigateByUrl('/why-slow');
         },
       },
       {

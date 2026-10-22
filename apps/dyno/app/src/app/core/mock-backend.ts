@@ -54,6 +54,8 @@ import type {
   Timestamp,
   TuningSuggestion,
   WeeklyReport,
+  ReportFormat,
+  SavedReport,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import {
@@ -600,10 +602,11 @@ export class MockBackend implements DynoBackend {
       const io = this.system(t, samples).diskIo;
       const queue = 'available' in io.queue ? io.queue.available : 0;
       if (rustc.length === 0 || rustcCpu < 5) {
-        return { at: now, headline: 'Nothing is slowing your PC down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], suggestions: [] }] };
+        return { at: now, windowSecs: 55, headline: 'Nothing is slowing your PC down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], suggestions: [], involved: [] }] };
       }
       return {
         at: now,
+        windowSecs: 55,
         headline: 'A Rust build is using most of your CPU',
         causes: [
           {
@@ -622,6 +625,10 @@ export class MockBackend implements DynoBackend {
                   { label: 'Open the task manager', action: 'openTaskManager' },
                 ]
               : [{ label: 'Open the task manager', action: 'openTaskManager' }],
+            involved: [
+              { id: this.profile.names.rustc, name: this.profile.names.rustc, share: `${Math.round(rustcCpu)}% CPU` },
+              { id: this.profile.names.cargo, name: this.profile.names.cargo, share: '2% CPU' },
+            ],
           },
           {
             kind: 'diskQueue',
@@ -634,6 +641,7 @@ export class MockBackend implements DynoBackend {
               { label: 'Writes', value: `121 MB/s by ${this.profile.names.rustc}` },
             ],
             suggestions: [{ label: 'Wait for the build to finish', action: 'wait' }],
+            involved: [{ id: this.profile.names.rustc, name: this.profile.names.rustc, share: '121 MB/s' }],
           },
           {
             kind: 'antivirusScan',
@@ -645,6 +653,7 @@ export class MockBackend implements DynoBackend {
               { label: 'Scanning', value: `${this.profile.projectDir}${this.profile.os === 'windows' ? '\\' : '/'}target` },
             ],
             suggestions: [{ label: 'See tuning suggestions', action: 'openStartup' }],
+            involved: [{ id: this.profile.names.indexer, name: this.profile.names.indexer, share: '4% CPU' }],
           },
           {
             kind: 'lowDiskSpace',
@@ -653,6 +662,7 @@ export class MockBackend implements DynoBackend {
             confidence: 0.22,
             evidence: [{ label: 'Free', value: '210 GB of 953 GB' }],
             suggestions: [{ label: 'Free up space', action: 'openCleanup' }],
+            involved: [],
           },
         ],
       };
@@ -1066,27 +1076,61 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  weeklyReport(): Promise<WeeklyReport> {
-    return this.reply('weeklyReport', () => ({
-      from: this.start - 7 * DAY,
-      to: this.start,
-      score: 74,
-      scoreChange: 3,
-      avgCpu: 17.4,
-      peakCpu: 99,
-      avgMemory: 58.2,
-      topApps: mockHistory('week', null, this.now()).topConsumers.slice(0, 5),
-      ruleActions: 41,
-      cleanedBytes: Math.round(10.7 * GB),
-      crashes: 9,
-      alerts: 4,
-      highlights: [
-        'Rules tamed 23 long builds; your apps stayed responsive.',
-        'Cleanup freed 10.7 GB (temp files, crash dumps, npm cache).',
-        'Docker’s backend crashed 6 times today: check its WSL integration.',
-        'Sign-in takes 9 s longer than a month ago: 2 new startup apps.',
-      ],
-    }));
+  weeklyReport(weeksAgo: number): Promise<WeeklyReport> {
+    return this.reply('weeklyReport', () => {
+      if (weeksAgo < 0 || weeksAgo > 52) throw err('badRequest', 'Dyno keeps at most 52 weeks; choose a more recent one.');
+      const to = this.start - weeksAgo * 7 * DAY;
+      const from = to - 7 * DAY;
+      // Dyno has been collecting for about five weeks: older weeks are empty and say so.
+      if (weeksAgo >= 5) {
+        return { from, to, score: null, scoreChange: 0, avgCpu: 0, peakCpu: 0, avgMemory: 0, topApps: [], ruleActions: 0, cleanedBytes: 0, crashes: 0, alerts: 0, highlights: ['Dyno has no history for this week yet.'], scoreTrend: [], disks: [], issues: [], changes: [], nothingToReport: true };
+      }
+      const issueAt = (h: number): number => to - h * 60 * MIN;
+      return {
+        from,
+        to,
+        score: 74 - weeksAgo,
+        scoreChange: 3,
+        avgCpu: 17.4,
+        peakCpu: 99,
+        avgMemory: 58.2,
+        topApps: mockHistory('week', null, this.now()).topConsumers.slice(0, 5),
+        ruleActions: 41,
+        cleanedBytes: Math.round(10.7 * GB),
+        crashes: 9,
+        alerts: 2,
+        highlights: [
+          'Rules tamed 23 long builds; your apps stayed responsive.',
+          'Cleanup freed 10.7 GB (temp files, crash dumps, npm cache).',
+          'Docker’s backend crashed 6 times today: check its WSL integration.',
+          'Sign-in takes 9 s longer than a month ago: 2 new startup apps.',
+        ],
+        scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),
+        disks: [
+          { disk: this.profile.os === 'windows' ? 'C:' : '/', total: 953 * GB, free: 210 * GB, forecast: { fullInDays: 41 } },
+          { disk: this.profile.os === 'windows' ? 'D:' : '/Volumes/Data', total: 2048 * GB, free: 1500 * GB, forecast: 'notFilling' },
+        ],
+        issues: [
+          { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: '210 GB free of 953 GB; at this rate it is full in about 41 days.' },
+          { at: issueAt(30 * 60), severity: 'info', title: 'A build used a lot of CPU for a long time', detail: 'rustc averaged 74% for 32 minutes.' },
+        ],
+        changes: [
+          { at: issueAt(4 * 60), title: 'Cleanup removed temp files', detail: '10.7 GB freed; you can undo this from Activity.' },
+          { at: issueAt(20 * 60), title: 'Turned off Updater at login', detail: 'You changed this in the startup manager.' },
+        ],
+        nothingToReport: false,
+      };
+    });
+  }
+
+  /** The reports the mock "saved", for tests. */
+  readonly savedReports: { format: ReportFormat; weeksAgo: number }[] = [];
+
+  saveReport(format: ReportFormat, weeksAgo: number): Promise<SavedReport | null> {
+    return this.reply('saveReport', () => {
+      this.savedReports.push({ format, weeksAgo });
+      return { path: `/Users/me/dyno-weekly-report.${format === 'html' ? 'html' : 'md'}`, bytes: 2_048 };
+    });
   }
 
   alerts(limit: number): Promise<Alert[]> {

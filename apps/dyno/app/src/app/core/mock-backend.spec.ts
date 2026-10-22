@@ -566,10 +566,35 @@ describe('health, tuning, startup', () => {
 
 describe('reports, settings, plugins, tray', () => {
   it('weeklyReport covers the last week', async () => {
-    const r = await make().weeklyReport();
+    const r = await make().weeklyReport(0);
     expect(r.to - r.from).toBe(7 * 86_400_000);
     expect(r.topApps).toHaveLength(5);
     expect(r.highlights.length).toBeGreaterThan(0);
+    expect(r.nothingToReport).toBe(false);
+    expect(r.issues.length).toBeGreaterThan(0);
+  });
+  it('weeklyReport: an older week ends a week earlier, a week with no history is empty, too far back is refused', async () => {
+    const b = make();
+    const now = await b.weeklyReport(0);
+    const before = await b.weeklyReport(1);
+    expect(before.to).toBe(now.from);
+    const empty = await b.weeklyReport(6);
+    expect(empty).toMatchObject({ nothingToReport: true, score: null, issues: [], changes: [] });
+    await expect(b.weeklyReport(53)).rejects.toMatchObject({ code: 'badRequest' });
+  });
+  it('saveReport records the format and the week and answers the path', async () => {
+    const b = make();
+    expect(await b.saveReport('html', 2)).toEqual({ path: '/Users/me/dyno-weekly-report.html', bytes: 2_048 });
+    expect((await b.saveReport('markdown', 0))!.path).toMatch(/\.md$/);
+    expect(b.savedReports).toEqual([
+      { format: 'html', weeksAgo: 2 },
+      { format: 'markdown', weeksAgo: 0 },
+    ]);
+  });
+  it('whySlow names the apps behind a cause and how long it looked', async () => {
+    const d = await make().whySlow();
+    expect(d.windowSecs).toBeGreaterThan(0);
+    expect(d.causes[0]!.involved[0]!.share).toMatch(/CPU/);
   });
   it('saveSettings validates and persists', async () => {
     const b = make();

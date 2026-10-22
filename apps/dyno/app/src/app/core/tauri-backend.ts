@@ -49,6 +49,8 @@ import type {
   Timestamp,
   TuningSuggestion,
   WeeklyReport,
+  ReportFormat,
+  SavedReport,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -413,8 +415,12 @@ export class TauriBackend implements DynoBackend {
     return this.request({ compareBenchmarks: { before, after } });
   }
 
-  weeklyReport(): Promise<WeeklyReport> {
-    return this.request('weeklyReport');
+  weeklyReport(weeksAgo: number): Promise<WeeklyReport> {
+    return this.request({ weeklyReport: { weeksAgo } });
+  }
+
+  saveReport(format: ReportFormat, weeksAgo: number): Promise<SavedReport | null> {
+    return this.command<SavedReport | null>('save_report', { format, weeksAgo }, DIALOG_TIMEOUT_MS);
   }
 
   alerts(limit: number): Promise<Alert[]> {

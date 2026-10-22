@@ -63,14 +63,15 @@ describe('AnomaliesCallout', () => {
     expect(el.querySelector('ul')).toBeNull();
   });
 
-  it('pluralises for several and shows a chip per anomaly', async () => {
+  it('pluralises for several and names the kinds in one quiet line, not a chip each', async () => {
     const { mock } = env();
     vi.spyOn(mock, 'anomalies').mockResolvedValue([anomaly('a', 'memoryGrowth'), anomaly('b', 'restartLoop')]);
     const f = TestBed.createComponent(AnomaliesCallout);
     await settle(f);
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('strong')?.textContent).toBe('Dyno noticed 2 unusual patterns');
-    expect([...el.querySelectorAll('.chip')].map((c) => c.textContent?.trim())).toEqual(['Memory growth', 'Restart loop']);
+    expect(el.querySelector('.chip')).toBeNull();
+    expect(el.querySelector('.kinds')?.textContent?.trim()).toBe('Memory growth · Restart loop');
   });
 
   it('stays hidden when loading the anomalies fails', async () => {
@@ -85,6 +86,7 @@ describe('AnomaliesCallout', () => {
 
 const diagnosis = (extra: Diagnosis['causes'] = []): Diagnosis => ({
   at: NOW,
+  windowSecs: 55,
   headline: 'A build is busy',
   causes: [
     {
@@ -99,6 +101,7 @@ const diagnosis = (extra: Diagnosis['causes'] = []): Diagnosis => ({
         { label: 'Open startup', action: 'openStartup' },
         { label: 'Lower', action: { process: { target: { pid: 7, started: 1 }, name: 'x', action: { setPriority: 'belowNormal' } } } },
       ],
+      involved: [{ id: 'cc', name: 'Compiler', share: '90% CPU' }],
     },
     ...extra,
   ],
@@ -118,6 +121,18 @@ describe('DiagnosisCard', () => {
     expect(el.querySelector('.cause strong')?.textContent).toBe('Compiler hogs CPU');
     expect([...el.querySelectorAll('.evidence span')].map((c) => c.textContent)).toEqual(['CPU 90%', 'Confidence 80%']);
     expect(byText(el, 'Check again')).toBeTruthy();
+  });
+
+  it('links to the full page only once there is a result', async () => {
+    const { mock } = env();
+    vi.spyOn(mock, 'whySlow').mockResolvedValue(diagnosis());
+    const f = TestBed.createComponent(DiagnosisCard);
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('a[href="/why-slow"]')).toBeNull();
+    byText(el, 'Check now').click();
+    await settle(f);
+    expect(el.querySelector('a[href="/why-slow"]')?.textContent).toContain('See the evidence');
   });
 
   it('routes the suggestions that open a screen and acts on a process suggestion', async () => {
@@ -143,7 +158,7 @@ describe('DiagnosisCard', () => {
 
   it('lists other possible causes behind a toggle (singular and plural)', async () => {
     const { mock } = env();
-    const other = { kind: 'memoryPressure', title: 'Low memory', explanation: '', confidence: 0.3, evidence: [], suggestions: [] } as Diagnosis['causes'][number];
+    const other = { kind: 'memoryPressure', title: 'Low memory', explanation: '', confidence: 0.3, evidence: [], suggestions: [], involved: [] } as Diagnosis['causes'][number];
     vi.spyOn(mock, 'whySlow').mockResolvedValue(diagnosis([other]));
     const f = TestBed.createComponent(DiagnosisCard);
     f.detectChanges();
