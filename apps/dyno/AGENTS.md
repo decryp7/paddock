@@ -132,9 +132,8 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
   files (`rustfmt --edition 2021 <files>`). Use a private `CARGO_TARGET_DIR`.
 - Commit only complete, owned work. Never commit a workspace `Cargo.toml` listing crates whose sources aren't
   committed.
-- Windows-only and macOS-only code must at least type-check on the other host:
-  `cargo clippy -p dyno-platform -p dyno-agent --all-targets --target x86_64-apple-darwin` and
-  `--target x86_64-pc-windows-msvc`.
+- Windows-only and macOS-only code is linted and tested on its own OS's CI runner (cross-checking from another host fails on
+  the bundled SQLite's C build, and on macOS needs the Windows SDK). Write it carefully and read the runner's log.
 
 ## Contracts
 

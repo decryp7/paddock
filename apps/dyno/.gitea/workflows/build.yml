@@ -70,13 +70,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # The OS adapters must at least type-check for the other hosts (AGENTS.md "Working in parallel").
-      - name: Clippy for the other platform adapters (Windows, macOS)
-        run: |
-          rustup target add x86_64-pc-windows-msvc x86_64-apple-darwin
-          cargo clippy -p dyno-core -p dyno-ipc -p dyno-platform -p dyno-agent --all-targets --target x86_64-pc-windows-msvc -- -D warnings
-          cargo clippy -p dyno-core -p dyno-ipc -p dyno-platform -p dyno-agent --all-targets --target x86_64-apple-darwin -- -D warnings
-
       - uses: actions/cache/save@v4
         if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
         with:
@@ -127,6 +120,12 @@ jobs:
             ~/.cargo/git
           key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: test-registry-${{ runner.os }}-
+
+      # The Windows adapters are linted where they run: cross-checking them from Linux needs a Windows C toolchain
+      # for the bundled SQLite, which the Linux container does not have.
+      - name: Clippy (Windows)
+        if: runner.os == 'Windows'
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests
         run: cargo test --workspace
