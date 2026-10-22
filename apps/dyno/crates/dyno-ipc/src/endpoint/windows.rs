@@ -1,4 +1,4 @@
-//! Windows: an owner-only, local-only, single-instance named pipe with overlapped I/O.
+//! Windows: an owner-only, local-only named pipe with overlapped I/O, one pipe instance per client.
 //!
 //! Every operation is started overlapped and waited for at once (`GetOverlappedResult(.., wait = TRUE)` on every
 //! path), so the `OVERLAPPED` and the buffer outlive the operation. Overlapped handles let one thread read while
@@ -24,7 +24,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, WaitNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
-    PIPE_TYPE_BYTE, PIPE_WAIT,
+    PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
 use windows_sys::Win32::System::Threading::{CreateEventW, SetEvent, WaitForMultipleObjects, INFINITE};
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
@@ -139,49 +139,53 @@ pub(super) struct Listener {
     name: String,
 }
 
+/// Creates one instance of the pipe `name`. The first instance is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so a
+/// squatter that created the name earlier makes it fail; later instances (one per accepted client) rely on the owner-only
+/// DACL: nobody else may add an instance to this pipe.
+fn create_instance(name: &str, first: bool) -> io::Result<OwnedHandle> {
+    let sddl = wide(OWNER_ONLY);
+    let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+    // SAFETY: `sddl` is NUL-terminated and outlives the call; the descriptor is freed below.
+    if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut descriptor, null_mut()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor,
+        bInheritHandle: 0,
+    };
+    let wname = wide(name);
+    let open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | if first { FILE_FLAG_FIRST_PIPE_INSTANCE } else { 0 };
+    // SAFETY: valid NUL-terminated name and attributes for the duration of the call.
+    let h = unsafe {
+        CreateNamedPipeW(
+            wname.as_ptr(),
+            open_mode,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            PIPE_UNLIMITED_INSTANCES,
+            BUFFER,
+            BUFFER,
+            0,
+            &attributes,
+        )
+    };
+    let created = io::Error::last_os_error();
+    // SAFETY: allocated by the conversion above; the pipe copied it.
+    unsafe {
+        LocalFree(descriptor);
+    }
+    if h == INVALID_HANDLE_VALUE {
+        return Err(created);
+    }
+    // SAFETY: a fresh, valid handle nobody else owns.
+    Ok(unsafe { OwnedHandle::from_raw_handle(h) })
+}
+
 impl Listener {
     pub(super) fn bind() -> io::Result<Listener> {
         let name = format!(r"\\.\pipe\dyno-{}", random_hex(12)?);
-        let sddl = wide(OWNER_ONLY);
-        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
-        // SAFETY: `sddl` is NUL-terminated and outlives the call; the descriptor is freed below.
-        if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut descriptor, null_mut()) } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: descriptor,
-            bInheritHandle: 0,
-        };
-        let wname = wide(&name);
-        // SAFETY: valid NUL-terminated name and attributes for the duration of the call. One instance, the first one:
-        // nobody can have created this random name before us, and nobody can add a second instance.
-        let h = unsafe {
-            CreateNamedPipeW(
-                wname.as_ptr(),
-                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                1,
-                BUFFER,
-                BUFFER,
-                0,
-                &attributes,
-            )
-        };
-        let created = io::Error::last_os_error();
-        // SAFETY: allocated by the conversion above; the pipe copied it.
-        unsafe {
-            LocalFree(descriptor);
-        }
-        if h == INVALID_HANDLE_VALUE {
-            return Err(created);
-        }
-        Ok(Listener {
-            // SAFETY: a fresh, valid handle nobody else owns.
-            pipe: Some(unsafe { OwnedHandle::from_raw_handle(h) }),
-            name,
-        })
+        let pipe = create_instance(&name, true)?;
+        Ok(Listener { pipe: Some(pipe), name })
     }
 
     pub(super) fn name(&self) -> &str {
@@ -206,11 +210,14 @@ impl Listener {
         let mut pid = 0u32;
         // SAFETY: a connected pipe server handle and a valid out pointer.
         let pid = (unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) } != 0).then_some(pid);
-        let pipe = self
+        let connected = self
             .pipe
             .take()
             .ok_or_else(|| io::Error::other("the endpoint already has its connection"))?;
-        Ok((Stream::new(pipe)?, pid))
+        // The next client needs a fresh instance of the same pipe; until it exists a connecting client sees "busy" and
+        // waits. If it cannot be made, later accepts report that, this connection still works.
+        self.pipe = create_instance(&self.name, false).ok();
+        Ok((Stream::new(connected)?, pid))
     }
 }
 
