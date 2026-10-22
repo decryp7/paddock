@@ -20,7 +20,7 @@ describe('editSettings', () => {
     const s = demoSettings();
     expect(editSettings(s, 'memory', { maxHotModels: 2 }).memory.preset).toBe('custom');
     expect(editSettings(s, 'memory', { preset: 'performance' }).memory.preset).toBe('performance');
-    expect(editSettings(s, 'general', { startAtLogin: false }).memory.preset).toBe('balanced');
+    expect(editSettings(s, 'general', { keepServingWhenClosed: false }).memory.preset).toBe('balanced');
   });
 });
 
@@ -37,7 +37,7 @@ describe('SettingsStore', () => {
     expect(store.dirty()).toBe(false);
   });
 
-  it('loads settings, a separate draft copy and the update status', async () => {
+  it('loads settings, a separate draft copy', async () => {
     const { store } = setup();
     const p = store.load();
     expect(store.loading()).toBe(true);
@@ -46,38 +46,28 @@ describe('SettingsStore', () => {
     expect(store.saved()?.server.port).toBe(11500);
     expect(store.draft()).toEqual(store.saved());
     expect(store.draft()).not.toBe(store.saved());
-    expect(store.update()?.available).toBe(false);
     expect(store.error()).toBeNull();
   });
 
-  it('reports a load error and keeps going without update status', async () => {
-    const { store } = setup(new MockBackend({ failing: ['settings', 'appUpdateStatus'] }));
+  it('reports a load error', async () => {
+    const { store } = setup(new MockBackend({ failing: ['settings'] }));
     await store.load();
     expect(store.error()?.code).toBe('serverUnavailable');
     expect(store.draft()).toBeNull();
-    expect(store.update()).toBeNull();
     expect(store.loading()).toBe(false);
-  });
-
-  it('keeps the settings when only the update check fails', async () => {
-    const { store } = setup(new MockBackend({ failing: ['appUpdateStatus'] }));
-    await store.load();
-    expect(store.error()).toBeNull();
-    expect(store.draft()).not.toBeNull();
-    expect(store.update()).toBeNull();
   });
 
   it('tracks dirty state across edits and discard', async () => {
     const { store } = setup();
     await store.load();
-    store.edit('general', { startAtLogin: false });
+    store.edit('general', { keepServingWhenClosed: false });
     expect(store.dirty()).toBe(true);
-    expect(store.saved()?.general.startAtLogin).toBe(true);
+    expect(store.saved()?.general.keepServingWhenClosed).toBe(true);
     store.discard();
     expect(store.dirty()).toBe(false);
-    expect(store.draft()?.general.startAtLogin).toBe(true);
-    store.edit('general', { startAtLogin: false });
-    store.edit('general', { startAtLogin: true });
+    expect(store.draft()?.general.keepServingWhenClosed).toBe(true);
+    store.edit('general', { keepServingWhenClosed: false });
+    store.edit('general', { keepServingWhenClosed: true });
     expect(store.dirty()).toBe(false);
   });
 
@@ -127,7 +117,7 @@ describe('SettingsStore', () => {
   it('reports a failing save call', async () => {
     const { store } = setup(new MockBackend({ failing: ['saveSettings'] }));
     await store.load();
-    store.edit('general', { startAtLogin: false });
+    store.edit('general', { keepServingWhenClosed: false });
     expect(await store.save()).toBe(false);
     expect(store.saveError()?.code).toBe('serverUnavailable');
     store.discard();
@@ -137,11 +127,11 @@ describe('SettingsStore', () => {
   it('applies a preset: server memory values are shown and other unsaved edits stay', async () => {
     const { store, toasts } = setup();
     await store.load();
-    store.edit('general', { startAtLogin: false });
+    store.edit('general', { keepServingWhenClosed: false });
     await store.applyPreset('lowMemory');
     expect(store.draft()?.memory.preset).toBe('lowMemory');
     expect(store.draft()?.memory.maxHotModels).toBe(1);
-    expect(store.draft()?.general.startAtLogin).toBe(false);
+    expect(store.draft()?.general.keepServingWhenClosed).toBe(false);
     expect(store.saved()?.memory.preset).toBe('lowMemory');
     expect(toasts.toasts().at(-1)?.message).toBe('Low memory preset applied.');
   });

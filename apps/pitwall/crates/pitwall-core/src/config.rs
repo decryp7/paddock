@@ -33,8 +33,6 @@ pub enum Theme {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GeneralSettings {
-    /// Start Pitwall when the user logs in.
-    pub start_at_login: bool,
     /// The UI theme.
     pub theme: Theme,
     /// Keep the server running when the window and tray app close.
@@ -44,7 +42,6 @@ pub struct GeneralSettings {
 impl Default for GeneralSettings {
     fn default() -> Self {
         GeneralSettings {
-            start_at_login: false,
             theme: Theme::System,
             keep_serving_when_closed: true,
         }

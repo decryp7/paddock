@@ -37,8 +37,12 @@
             </div>
           </div>
           <div class="row">
-            <div class="lbl"><span class="name" id="lbl-login">Start at login</span><p class="hint">Start Pitwall in the tray when you sign in.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-login" [checked]="s.general.startAtLogin" (change)="store.edit('general', { startAtLogin: $event.checked })" />
+            <div class="lbl"><span class="name" id="lbl-login">Start at login</span><p class="hint">Start Pitwall in the tray when you sign in. This is your computer's own login item, so it applies at once.</p></div>
+            @if (service.autostart() !== null) {
+              <mat-slide-toggle hideIcon aria-labelledby="lbl-login" [checked]="service.autostart() === true" [disabled]="service.isBusy()('autostart')" (change)="service.setAutostart($event.checked)" />
+            } @else {
+              <span class="faint">Unavailable</span>
+            }
           </div>
           <div class="row">
             <div class="lbl"><span class="name" id="lbl-keep">Keep serving when the window is closed</span><p class="hint">Apps keep working; Pitwall stays in the tray.</p></div>
@@ -190,16 +194,61 @@
           </div>
         </pw-panel>
 
+        <!-- Service -->
+        <pw-panel id="set-service" heading="Background service" icon="server" sub="So apps can use Pitwall without this window">
+          @if (service.service(); as sv) {
+            <div class="row">
+              <div class="lbl">
+                <span class="name">{{ platformLabel(sv.platform) }}</span>
+                <p class="hint">{{ sv.message ?? (sv.installed ? 'Pitwall\'s server starts by itself and keeps running when this window is closed.' : 'Pitwall\'s server only runs while this app is open.') }}</p>
+              </div>
+              <span class="pill dot" data-testid="service-pill" [attr.data-tone]="sv.installed ? (sv.running ? 'ok' : 'warn') : 'muted'">{{ sv.installed ? (sv.running ? 'Running' : 'Installed, not running') : 'Not installed' }}</span>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint">{{ serviceHint(sv.platform) }}</p></div>
+              @if (sv.installed) {
+                <button type="button" class="btn" [disabled]="service.isBusy()('uninstall')" (click)="service.uninstall()">{{ service.isBusy()('uninstall') ? 'Removing…' : 'Remove service' }}</button>
+              } @else {
+                <button type="button" class="btn primary" [disabled]="!sv.canInstall || service.isBusy()('install')" (click)="service.install()">{{ service.isBusy()('install') ? 'Installing…' : 'Install service' }}</button>
+              }
+            </div>
+          } @else {
+            <p class="faint pad">Could not ask the operating system about the service.</p>
+          }
+        </pw-panel>
+
         <!-- Updates -->
         <pw-panel id="set-updates" heading="Updates" icon="download">
-          @if (store.update(); as u) {
+          @if (service.updateStatus(); as u) {
             <div class="row">
               <div class="lbl">
                 <span class="name">Pitwall {{ u.currentVersion }}</span>
-                <p class="hint">{{ u.available ? 'A new version is ready to install.' : (u.reason ?? 'You have the latest version.') }}</p>
+                <p class="hint">
+                  @if (service.update(); as up) {
+                    Version {{ up.version }} is ready to install. {{ up.notes ?? '' }}
+                  } @else if (!u.available) {
+                    {{ u.reason ?? 'Updates are off in this build.' }}
+                  } @else if (service.upToDate()) {
+                    You have the latest version.
+                  } @else {
+                    Pitwall only looks for updates when you ask; nothing is sent until then.
+                  }
+                </p>
               </div>
-              <span class="pill dot" [attr.data-tone]="u.available ? 'info' : u.reason ? 'muted' : 'ok'">{{ u.available ? 'Update available' : u.reason ? 'Not configured' : 'Up to date' }}</span>
+              <span class="pill dot" [attr.data-tone]="service.update() ? 'info' : u.available ? (service.upToDate() ? 'ok' : 'muted') : 'muted'">{{
+                service.update() ? 'Update available' : u.available ? (service.upToDate() ? 'Up to date' : 'Not checked') : 'Not configured'
+              }}</span>
             </div>
+            @if (u.available) {
+              <div class="row">
+                <div class="lbl"><span class="name">{{ service.update() ? 'Install ' + service.update()!.version : 'Check for updates' }}</span><p class="hint">{{ service.update() ? 'Pitwall restarts. The server restarts itself when it is idle.' : 'Asks the release server whether a newer version exists.' }}</p></div>
+                @if (service.update()) {
+                  <button type="button" class="btn primary" [disabled]="service.isBusy()('apply')" (click)="service.applyUpdate()">{{ service.isBusy()('apply') ? 'Installing…' : 'Install and restart' }}</button>
+                } @else {
+                  <button type="button" class="btn" [disabled]="service.isBusy()('check')" (click)="service.checkUpdate()">{{ service.isBusy()('check') ? 'Checking…' : 'Check for updates' }}</button>
+                }
+              </div>
+            }
           } @else {
             <p class="faint pad">Could not ask for updates.</p>
           }

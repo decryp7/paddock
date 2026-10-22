@@ -1,8 +1,10 @@
-import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, effect, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { isTauri } from './core/backend';
+import { ServiceConsentPrompt } from './features/service/service-consent';
+import { ServiceStore } from './features/service/service.store';
 import { LiveStore } from './core/live.store';
 import { ThemeService, isMac } from './core/theme';
 import { WINDOW_CONTROL } from './core/window-control';
@@ -91,6 +93,15 @@ export class App {
     theme.applyPlatform({ mac: isMac(nav?.userAgent ?? ''), translucent: isTauri() || params.has('translucent') });
     void this.live.load();
     this.live.connect();
+    // The service question belongs to the main window only, and never delays the first paint: it starts in the background.
+    if (!this.doc.location?.hash.startsWith('#/tray')) {
+      const service = inject(ServiceStore);
+      const prompt = inject(ServiceConsentPrompt);
+      void service.refresh();
+      effect(() => {
+        if (service.askConsent()) void prompt.ask();
+      });
+    }
     // The tray popover's "Open Pitwall" can ask the main window for a screen.
     const stop = inject(WINDOW_CONTROL).onNavigate((route) => void this.router.navigateByUrl(route));
     inject(DestroyRef).onDestroy(stop);

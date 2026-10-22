@@ -27,6 +27,8 @@ import type {
   QueueSnapshot,
   RequestContent,
   RequestRecord,
+  ServiceInstall,
+  UpdateInfo,
   ServerInfo,
   Settings,
   Throughput,
@@ -69,6 +71,10 @@ export interface MockOptions {
   /** Start with no models, apps or history (empty-state tests). */
   empty?: boolean;
   seed?: number;
+  /** The server is not registered with the OS yet and the user has not been asked (first-run question). */
+  askConsent?: boolean;
+  /** A newer release is available and the build can update itself. */
+  updateAvailable?: boolean;
   /** Delay between streamed playground words (ms). */
   streamDelayMs?: number;
 }
@@ -106,6 +112,9 @@ export class MockBackend implements PitwallBackend {
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticks = 0;
   private nextId = 1;
+  private service: ServiceInstall;
+  private autostart_ = false;
+  private readonly updateAvailable: boolean;
 
   constructor(options: MockOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -114,6 +123,15 @@ export class MockBackend implements PitwallBackend {
     this.failing = new Set(options.failing ?? []);
     this.rnd = prng(options.seed ?? 42);
     this.streamDelay = options.streamDelayMs ?? 0;
+    this.updateAvailable = options.updateAvailable ?? false;
+    this.service = {
+      platform: 'macos',
+      installed: !options.askConsent,
+      running: true,
+      canInstall: true,
+      askConsent: options.askConsent ?? false,
+      message: null,
+    };
     const now = this.now();
     const empty = options.empty ?? false;
     this.settings_ = demoSettings();
@@ -733,6 +751,58 @@ export class MockBackend implements PitwallBackend {
   }
 
   appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.reply('appUpdateStatus', () => ({ available: false, reason: 'Updates are not configured for this build (no updater key).', currentVersion: this.server.version }));
+    return this.reply('appUpdateStatus', () =>
+      this.updateAvailable
+        ? { available: true, reason: null, currentVersion: this.server.version }
+        : { available: false, reason: 'Updates are not configured for this build (no updater key).', currentVersion: this.server.version },
+    );
+  }
+
+  checkAppUpdate(): Promise<UpdateInfo | null> {
+    return this.reply('checkAppUpdate', () => {
+      if (!this.updateAvailable) this.fail('notAvailable', 'Updates are not available in this build.');
+      return { version: '0.2.0', notes: 'Faster model loading and a new dashboard tile.' };
+    });
+  }
+
+  installAppUpdate(): Promise<void> {
+    return this.reply('installAppUpdate', () => {
+      if (!this.updateAvailable) this.fail('notAvailable', 'Updates are not available in this build.');
+    });
+  }
+
+  serviceState(): Promise<ServiceInstall> {
+    return this.reply('serviceState', () => this.service);
+  }
+
+  installService(): Promise<ServiceInstall> {
+    return this.reply('installService', () => {
+      this.service = { ...this.service, installed: true, running: true, askConsent: false, message: null };
+      return this.service;
+    });
+  }
+
+  uninstallService(): Promise<ServiceInstall> {
+    return this.reply('uninstallService', () => {
+      this.service = { ...this.service, installed: false, askConsent: false };
+      return this.service;
+    });
+  }
+
+  declineService(): Promise<void> {
+    return this.reply('declineService', () => {
+      this.service = { ...this.service, askConsent: false };
+    });
+  }
+
+  autostart(): Promise<boolean> {
+    return this.reply('autostart', () => this.autostart_);
+  }
+
+  setAutostart(enabled: boolean): Promise<boolean> {
+    return this.reply('setAutostart', () => {
+      this.autostart_ = enabled;
+      return enabled;
+    });
   }
 }

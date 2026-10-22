@@ -36,7 +36,7 @@ describe('SettingsPage', () => {
   it('renders every section from the loaded settings, with no save bar', async () => {
     const { el } = await setup();
     expect(el.querySelector('h1')?.textContent).toBe('Settings');
-    for (const id of ['general', 'server', 'memory', 'network', 'privacy', 'updates']) expect(el.querySelector('#set-' + id)).not.toBeNull();
+    for (const id of ['general', 'server', 'memory', 'network', 'privacy', 'service', 'updates']) expect(el.querySelector('#set-' + id)).not.toBeNull();
     expect(input(el, 'srv-port').value).toBe('11500');
     expect(input(el, 'srv-max').value).toBe('32');
     expect(input(el, 'mem-idle').value).toBe('10');
@@ -56,6 +56,38 @@ describe('SettingsPage', () => {
   it('says it could not ask for updates when that check fails', async () => {
     const { el } = await setup(new MockBackend({ failing: ['appUpdateStatus'] }));
     expect(el.textContent).toContain('Could not ask for updates.');
+  });
+
+  it('shows the service state and installs and removes it', async () => {
+    const { fixture, el, toasts } = await setup(new MockBackend({ askConsent: true }));
+    expect(el.querySelector('[data-testid="service-pill"]')?.textContent).toContain('Not installed');
+    await button(el, 'Install service').click();
+    await settle(fixture);
+    expect(el.querySelector('[data-testid="service-pill"]')?.textContent).toContain('Running');
+    expect(toasts.toasts().at(-1)?.message).toBe('Pitwall now runs as a service.');
+    await button(el, 'Remove service').click();
+    await settle(fixture);
+    expect(el.querySelector('[data-testid="service-pill"]')?.textContent).toContain('Not installed');
+  });
+
+  it('switches start at log-in', async () => {
+    const { fixture, el } = await setup();
+    const toggle = el.querySelector<HTMLButtonElement>('[aria-labelledby="lbl-login"] button, button[aria-labelledby="lbl-login"]')!;
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    toggle.click();
+    await settle(fixture);
+    expect(el.querySelector<HTMLButtonElement>('button[aria-labelledby="lbl-login"]')!.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('checks for an update only on request, then installs it', async () => {
+    const { fixture, el } = await setup(new MockBackend({ updateAvailable: true }));
+    expect(el.textContent).toContain('only looks for updates when you ask');
+    await button(el, 'Check for updates').click();
+    await settle(fixture);
+    expect(el.textContent).toContain('Version 0.2.0 is ready to install');
+    await button(el, 'Install and restart').click();
+    await settle(fixture);
+    expect(el.textContent).toContain('Update available');
   });
 
   it('edits a number, shows the save bar, and saves it', async () => {

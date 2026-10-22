@@ -24,7 +24,9 @@ import type {
   Preset,
   RequestContent,
   RequestRecord,
+  ServiceInstall,
   Settings,
+  UpdateInfo,
 } from './api.types';
 import type { PitwallBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -237,6 +239,32 @@ export class TauriBackend implements PitwallBackend {
   }
   appUpdateStatus(): Promise<AppUpdateStatus> {
     return this.run('app_update_status');
+  }
+  checkAppUpdate(): Promise<UpdateInfo | null> {
+    return this.run('check_app_update');
+  }
+  installAppUpdate(): Promise<void> {
+    return this.run('install_app_update');
+  }
+
+  // The server as an OS service, and start at log-in
+  serviceState(): Promise<ServiceInstall> {
+    return this.run('service_state');
+  }
+  installService(): Promise<ServiceInstall> {
+    return this.run('install_service');
+  }
+  uninstallService(): Promise<ServiceInstall> {
+    return this.run('uninstall_service');
+  }
+  declineService(): Promise<void> {
+    return this.run('decline_service');
+  }
+  autostart(): Promise<boolean> {
+    return this.run('get_autostart');
+  }
+  setAutostart(enabled: boolean): Promise<boolean> {
+    return this.run('set_autostart', { enabled });
   }
 
   private async run<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

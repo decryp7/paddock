@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { AppUpdateStatus, CommandError, Preset, Settings } from '../../core/api.types';
+import type { CommandError, Preset, Settings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
@@ -13,7 +13,6 @@ interface SettingsState {
   saved: Settings | null;
   /** The form: `saved` plus unsaved edits. */
   draft: Settings | null;
-  update: AppUpdateStatus | null;
   loading: boolean;
   saving: boolean;
   error: CommandError | null;
@@ -21,7 +20,7 @@ interface SettingsState {
   saveError: CommandError | null;
 }
 
-const initial: SettingsState = { saved: null, draft: null, update: null, loading: false, saving: false, error: null, saveError: null };
+const initial: SettingsState = { saved: null, draft: null, loading: false, saving: false, error: null, saveError: null };
 
 /** Applies an edit to one section; any memory edit other than the preset itself makes the preset `custom`. */
 export function editSettings<S extends Section>(s: Settings, section: S, values: Partial<Settings[S]>): Settings {
@@ -30,7 +29,7 @@ export function editSettings<S extends Section>(s: Settings, section: S, values:
   return next;
 }
 
-/** Settings: the saved values, a draft the form edits, Save / Discard, presets and the update status. */
+/** Settings: the saved values, a draft the form edits, Save / Discard, and presets. */
 export const SettingsStore = signalStore(
   withState(initial),
   withComputed(({ saved, draft }) => ({
@@ -48,12 +47,6 @@ export const SettingsStore = signalStore(
         patchState(store, { saved: settings, draft: structuredClone(settings), loading: false });
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
-      }
-      try {
-        patchState(store, { update: await backend.appUpdateStatus() });
-      } catch {
-        // The updates card says it could not ask; the rest of Settings works.
-        patchState(store, { update: null });
       }
     },
 

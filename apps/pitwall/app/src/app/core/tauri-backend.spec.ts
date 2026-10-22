@@ -87,6 +87,14 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['settings', (b) => b.settings(), 'settings', undefined],
   ['saveSettings', (b) => b.saveSettings(SETTINGS), 'save_settings', { settings: SETTINGS }],
   ['appUpdateStatus', (b) => b.appUpdateStatus(), 'app_update_status', undefined],
+  ['checkAppUpdate', (b) => b.checkAppUpdate(), 'check_app_update', undefined],
+  ['installAppUpdate', (b) => b.installAppUpdate(), 'install_app_update', undefined],
+  ['serviceState', (b) => b.serviceState(), 'service_state', undefined],
+  ['installService', (b) => b.installService(), 'install_service', undefined],
+  ['uninstallService', (b) => b.uninstallService(), 'uninstall_service', undefined],
+  ['declineService', (b) => b.declineService(), 'decline_service', undefined],
+  ['autostart', (b) => b.autostart(), 'get_autostart', undefined],
+  ['setAutostart', (b) => b.setAutostart(true), 'set_autostart', { enabled: true }],
 ];
 
 describe('TauriBackend', () => {

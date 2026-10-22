@@ -23,7 +23,9 @@ import type {
   Preset,
   RequestContent,
   RequestRecord,
+  ServiceInstall,
   Settings,
+  UpdateInfo,
 } from './api.types';
 
 /** Stops a subscription or a running stream. */
@@ -96,6 +98,19 @@ export interface PitwallBackend {
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
   appUpdateStatus(): Promise<AppUpdateStatus>;
+  /** Looks for a newer release; only when the user asks. Null: this is the latest. */
+  checkAppUpdate(): Promise<UpdateInfo | null>;
+  /** Installs the update the last check found; the app restarts. */
+  installAppUpdate(): Promise<void>;
+
+  // The server as an OS service, and start at log-in (app commands, not management calls)
+  serviceState(): Promise<ServiceInstall>;
+  installService(): Promise<ServiceInstall>;
+  uninstallService(): Promise<ServiceInstall>;
+  /** The user said no to the service; do not ask again. */
+  declineService(): Promise<void>;
+  autostart(): Promise<boolean>;
+  setAutostart(enabled: boolean): Promise<boolean>;
 }
 
 export const BACKEND = new InjectionToken<PitwallBackend>('PitwallBackend');

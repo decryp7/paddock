@@ -11,6 +11,11 @@ const SLOW: Partial<Record<keyof PitwallBackend, number>> = {
   searchModels: 30_000,
   repoFiles: 30_000,
   appUpdateStatus: 30_000,
+  checkAppUpdate: 30_000,
+  // The OS asks the user to approve (UAC, Login Items) and the server then starts.
+  installService: 150_000,
+  uninstallService: 150_000,
+  installAppUpdate: 600_000,
 };
 
 export function timeoutError(method: string, ms: number): CommandError {

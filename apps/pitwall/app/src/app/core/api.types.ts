@@ -573,7 +573,6 @@ export interface PrivacySettings {
 }
 
 export interface GeneralSettings {
-  startAtLogin: boolean;
   theme: ThemeChoice;
   keepServingWhenClosed: boolean;
 }
@@ -590,6 +589,28 @@ export interface AppUpdateStatus {
   available: boolean;
   reason: string | null;
   currentVersion: string;
+}
+
+/** An update found by a check (`UpdateInfo` in `app/src-tauri/src/updater.rs`). */
+export interface UpdateInfo {
+  version: string;
+  notes: string | null;
+}
+
+export type Platform = 'windows' | 'macos' | 'linux';
+
+/** The server's registration with the OS (`ServiceInstall` in `app/src-tauri/src/service_install.rs`). */
+export interface ServiceInstall {
+  platform: Platform;
+  /** Registered with the OS. */
+  installed: boolean;
+  /** The server answers. */
+  running: boolean;
+  canInstall: boolean;
+  /** The user has not been asked yet: show the "run Pitwall's service?" question. */
+  askConsent: boolean;
+  /** What to do next, when something is off. */
+  message: string | null;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

@@ -8,6 +8,8 @@ import { ThemeService } from '../../core/theme';
 import { Toasts } from '../../core/toasts';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { Panel } from '../../shared/ui/panel';
+import { consentDetail } from '../service/service-consent';
+import { ServiceStore } from '../service/service.store';
 import { SettingsStore } from './settings.store';
 
 const GB = 1024 ** 3;
@@ -20,6 +22,7 @@ const SECTIONS = [
   { id: 'memory', label: 'Memory', icon: 'memory' },
   { id: 'network', label: 'Network', icon: 'globe' },
   { id: 'privacy', label: 'Privacy', icon: 'lock' },
+  { id: 'service', label: 'Service', icon: 'server' },
   { id: 'updates', label: 'Updates', icon: 'download' },
 ] as const;
 
@@ -43,6 +46,7 @@ export function parseNumber(value: string, min = -Infinity, max = Infinity): num
 export class SettingsPage implements OnInit {
   protected readonly store = inject(SettingsStore);
   protected readonly live = inject(LiveStore);
+  protected readonly service = inject(ServiceStore);
   private readonly theme = inject(ThemeService);
   private readonly toasts = inject(Toasts);
   private readonly doc = inject(DOCUMENT);
@@ -81,6 +85,7 @@ export class SettingsPage implements OnInit {
   private observe: () => void = () => undefined;
 
   ngOnInit(): void {
+    void this.service.refresh();
     void this.store.load().then(() => setTimeout(() => this.observe()));
   }
 
@@ -98,6 +103,14 @@ export class SettingsPage implements OnInit {
     this.store.discard();
     const t = this.store.saved()?.general.theme;
     if (t) this.theme.set(t);
+  }
+
+  protected platformLabel(platform: string): string {
+    return platform === 'windows' ? 'Windows service' : platform === 'macos' ? 'Login item (launch agent)' : 'systemd user service';
+  }
+
+  protected serviceHint(platform: string): string {
+    return consentDetail(platform);
   }
 
   protected value(e: Event): string {
