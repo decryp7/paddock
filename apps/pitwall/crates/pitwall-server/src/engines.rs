@@ -42,8 +42,10 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A running engine process serving one model on a loopback port.
 pub struct Running {
-    /// The child; dropping it kills the process.
-    pub child: tokio::process::Child,
+    /// The child; dropping it kills the process (`None` for in-process test engines).
+    pub child: Option<tokio::process::Child>,
+    /// Anything else that must live as long as the engine (test doubles).
+    pub guard: Option<Box<dyn Send + Sync>>,
     /// The client to reach it.
     pub client: Client,
     /// The loopback port.
@@ -76,7 +78,9 @@ impl Engine for Planned {
         self.kind
     }
     fn availability(&self) -> Availability {
-        Availability::NotAvailable { reason: self.reason.clone() }
+        Availability::NotAvailable {
+            reason: self.reason.clone(),
+        }
     }
     fn start<'a>(&'a self, _: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move { Err(EngineError::NotAvailable(self.reason.clone())) })
@@ -121,7 +125,13 @@ pub struct LlamaCpp {
 impl LlamaCpp {
     /// The manager.
     pub fn new(dirs: Dirs, egress: Egress, hardware: Hardware, choice: BuildChoice) -> LlamaCpp {
-        LlamaCpp { dirs, egress, catalog: std::sync::Arc::new(RuntimeCatalog::embedded()), hardware, choice: std::sync::Arc::new(std::sync::RwLock::new(choice)) }
+        LlamaCpp {
+            dirs,
+            egress,
+            catalog: std::sync::Arc::new(RuntimeCatalog::embedded()),
+            hardware,
+            choice: std::sync::Arc::new(std::sync::RwLock::new(choice)),
+        }
     }
 
     /// The pinned catalog.
@@ -156,7 +166,9 @@ impl LlamaCpp {
 
     /// Installed builds that passed their self-test, with their info.
     pub fn installed(&self) -> Vec<BuildInfo> {
-        let Ok(rd) = std::fs::read_dir(self.dirs.engines()) else { return vec![] };
+        let Ok(rd) = std::fs::read_dir(self.dirs.engines()) else {
+            return vec![];
+        };
         let mut v: Vec<BuildInfo> = rd
             .filter_map(Result::ok)
             .filter_map(|e| std::fs::read_to_string(e.path().join("build.json")).ok())
@@ -171,7 +183,10 @@ impl LlamaCpp {
     pub fn active(&self) -> Option<BuildInfo> {
         let ok: Vec<BuildInfo> = self.installed().into_iter().filter(|b| b.self_test == "passed").collect();
         let ids: Vec<String> = ok.iter().map(|b| b.id.clone()).collect();
-        builds::try_order(&ids, &self.choice()).into_iter().next().and_then(|id| ok.into_iter().find(|b| b.id == id))
+        builds::try_order(&ids, &self.choice())
+            .into_iter()
+            .next()
+            .and_then(|id| ok.into_iter().find(|b| b.id == id))
     }
 
     /// Path of the active `llama-server`.
@@ -191,26 +206,42 @@ impl LlamaCpp {
 
     /// Download, verify, unpack, self-test and activate build `id`. The previous install of the same id stays
     /// untouched until the new one passes (roll back = keep it).
-    pub async fn install(&self, id: &str, cancel: &CancelFlag, mut progress: impl FnMut(u64, u64) + Send) -> Result<BuildInfo, EngineError> {
+    pub async fn install(
+        &self,
+        id: &str,
+        cancel: &CancelFlag,
+        mut progress: impl FnMut(u64, u64) + Send,
+    ) -> Result<BuildInfo, EngineError> {
         let platform = self.platform();
-        let build: RuntimeBuild = self.catalog.find(&platform, id).cloned().ok_or_else(|| EngineError::NotAvailable(format!("there is no build \"{id}\" for {platform}")))?;
+        let build: RuntimeBuild = self
+            .catalog
+            .find(&platform, id)
+            .cloned()
+            .ok_or_else(|| EngineError::NotAvailable(format!("there is no build \"{id}\" for {platform}")))?;
         let total = build.download_bytes();
         let stage = self.dirs.engines().join(format!("{id}.new"));
         let _ = tokio::fs::remove_dir_all(&stage).await;
-        tokio::fs::create_dir_all(&stage).await.map_err(|e| EngineError::Install(e.to_string()))?;
+        tokio::fs::create_dir_all(&stage)
+            .await
+            .map_err(|e| EngineError::Install(e.to_string()))?;
         let mut base = 0u64;
         for asset in &build.assets {
             let url = DownloadUrl::parse(&asset.url).map_err(|e| EngineError::Install(e.to_string()))?;
             let part = self.dirs.partial().join(&asset.name);
             let b = base;
-            let r = self.egress.download(&url, &part, Some(&asset.sha256), cancel, |d, _| progress(b + d, total)).await;
+            let r = self
+                .egress
+                .download(&url, &part, Some(&asset.sha256), cancel, |d, _| progress(b + d, total))
+                .await;
             if let Err(e) = r {
                 let _ = tokio::fs::remove_dir_all(&stage).await;
                 return Err(e.into());
             }
             base += asset.size;
             let (p2, s2, name) = (part.clone(), stage.clone(), asset.name.clone());
-            let res = tokio::task::spawn_blocking(move || unpack(&p2, &s2, &name)).await.map_err(|e| EngineError::Install(e.to_string()))?;
+            let res = tokio::task::spawn_blocking(move || unpack(&p2, &s2, &name))
+                .await
+                .map_err(|e| EngineError::Install(e.to_string()))?;
             let _ = tokio::fs::remove_file(&part).await;
             if let Err(e) = res {
                 let _ = tokio::fs::remove_dir_all(&stage).await;
@@ -229,17 +260,28 @@ impl LlamaCpp {
             Err(m) => ("failed", Some(m.clone()), vec![]),
         };
         let size = dir_size(&stage);
-        let info = BuildInfo { id: id.into(), tag: self.catalog.tag.clone(), self_test: self_test_s.into(), message, devices, size };
+        let info = BuildInfo {
+            id: id.into(),
+            tag: self.catalog.tag.clone(),
+            self_test: self_test_s.into(),
+            message,
+            devices,
+            size,
+        };
         let _ = std::fs::write(stage.join("build.json"), serde_json::to_vec_pretty(&info).unwrap_or_default());
         if let Err(m) = test {
             let _ = tokio::fs::remove_dir_all(&stage).await;
-            return Err(EngineError::Install(format!("the new engine failed its self-test and was discarded ({m}); the previous build stays active")));
+            return Err(EngineError::Install(format!(
+                "the new engine failed its self-test and was discarded ({m}); the previous build stays active"
+            )));
         }
         let live = self.build_dir(id);
         let old = self.dirs.engines().join(format!("{id}.old"));
         let _ = tokio::fs::remove_dir_all(&old).await;
         if live.exists() {
-            tokio::fs::rename(&live, &old).await.map_err(|e| EngineError::Install(e.to_string()))?;
+            tokio::fs::rename(&live, &old)
+                .await
+                .map_err(|e| EngineError::Install(e.to_string()))?;
         }
         if let Err(e) = tokio::fs::rename(&stage, &live).await {
             let _ = tokio::fs::rename(&old, &live).await;
@@ -251,7 +293,9 @@ impl LlamaCpp {
 }
 
 fn dir_size(p: &Path) -> u64 {
-    std::fs::read_dir(p).map(|rd| rd.filter_map(Result::ok).filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum()).unwrap_or(0)
+    std::fs::read_dir(p)
+        .map(|rd| rd.filter_map(Result::ok).filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum())
+        .unwrap_or(0)
 }
 
 fn make_executable(p: &Path) {
@@ -272,9 +316,19 @@ pub async fn self_test(bin: &Path) -> Result<Vec<String>, String> {
         c.arg(arg);
         async move { tokio::time::timeout(Duration::from_secs(30), c.output()).await }
     };
-    let v = run("--version").await.map_err(|_| "it did not answer within 30 seconds".to_string())?.map_err(|e| format!("it could not start: {e}"))?;
+    let v = run("--version")
+        .await
+        .map_err(|_| "it did not answer within 30 seconds".to_string())?
+        .map_err(|e| format!("it could not start: {e}"))?;
     if !v.status.success() {
-        let tail: String = String::from_utf8_lossy(&v.stderr).chars().rev().take(300).collect::<Vec<_>>().into_iter().rev().collect();
+        let tail: String = String::from_utf8_lossy(&v.stderr)
+            .chars()
+            .rev()
+            .take(300)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         return Err(format!("--version failed: {}", tail.trim()));
     }
     let devices = match run("--list-devices").await {
@@ -304,7 +358,12 @@ pub fn unpack(archive: &Path, dest: &Path, name: &str) -> Result<(), EngineError
             if e.is_dir() {
                 continue;
             }
-            let Some(flat) = runtimes::flat_name(e.name()).filter(|n| runtimes::is_expected(n)).map(str::to_string) else { continue };
+            let Some(flat) = runtimes::flat_name(e.name())
+                .filter(|n| runtimes::is_expected(n))
+                .map(str::to_string)
+            else {
+                continue;
+            };
             if e.size() > MAX_FILE {
                 return Err(bad(&"an entry is too large"));
             }
@@ -321,7 +380,9 @@ pub fn unpack(archive: &Path, dest: &Path, name: &str) -> Result<(), EngineError
             }
             let mut e = e.map_err(|e| bad(&e))?;
             let path = e.path().map_err(|e| bad(&e))?.to_string_lossy().into_owned();
-            let Some(flat) = runtimes::flat_name(&path).filter(|n| runtimes::is_expected(n)).map(str::to_string) else { continue };
+            let Some(flat) = runtimes::flat_name(&path).filter(|n| runtimes::is_expected(n)).map(str::to_string) else {
+                continue;
+            };
             let kind = e.header().entry_type();
             if kind.is_symlink() {
                 if let Some(target) = e.link_name().ok().flatten().map(|t| t.to_string_lossy().into_owned()) {
@@ -360,9 +421,13 @@ impl Engine for LlamaCpp {
         if self.binary().is_some() {
             Availability::Available
         } else if self.catalog.builds(&self.platform()).is_empty() {
-            Availability::NotAvailable { reason: format!("llama.cpp has no build for {}", self.platform()) }
+            Availability::NotAvailable {
+                reason: format!("llama.cpp has no build for {}", self.platform()),
+            }
         } else {
-            Availability::NotInstalled { reason: "Install a llama.cpp build in Engines".into() }
+            Availability::NotInstalled {
+                reason: "Install a llama.cpp build in Engines".into(),
+            }
         }
     }
 
@@ -372,7 +437,10 @@ impl Engine for LlamaCpp {
             let port = LoopbackPort::new(launch.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
             let key = hex(&crate::paths::random32()[..16]);
             let mut c = process::command(&bin, bin.parent());
-            c.args(llama::args(launch)).env(llama::API_KEY_ENV, &key).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
+            c.args(llama::args(launch))
+                .env(llama::API_KEY_ENV, &key)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped());
             let mut child = c.spawn().map_err(|e| EngineError::Start(e.to_string()))?;
             let stderr = child.stderr.take();
             let tail = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
@@ -402,7 +470,10 @@ impl Engine for LlamaCpp {
                 if let Ok(Some(status)) = child.try_wait() {
                     let t = tail.lock().map(|g| g.clone()).unwrap_or_default();
                     let last: Vec<&str> = t.lines().rev().take(4).collect();
-                    return Err(EngineError::Start(format!("the engine exited ({status}): {}", last.into_iter().rev().collect::<Vec<_>>().join(" | "))));
+                    return Err(EngineError::Start(format!(
+                        "the engine exited ({status}): {}",
+                        last.into_iter().rev().collect::<Vec<_>>().join(" | ")
+                    )));
                 }
                 if let Ok((200, _)) = client.json("GET", "/health", None, Duration::from_secs(2)).await {
                     break;
@@ -416,7 +487,13 @@ impl Engine for LlamaCpp {
                 Ok((200, v)) => llama::parse_props(&v),
                 _ => llama::Props::default(),
             };
-            Ok(Running { child, client, port: launch.port, props })
+            Ok(Running {
+                child: Some(child),
+                guard: None,
+                client,
+                port: launch.port,
+                props,
+            })
         })
     }
 }
@@ -451,7 +528,12 @@ mod tests {
     }
 
     fn mgr(dirs: &Dirs) -> LlamaCpp {
-        LlamaCpp::new(dirs.clone(), Egress::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))), Hardware::default(), BuildChoice::Auto)
+        LlamaCpp::new(
+            dirs.clone(),
+            Egress::new(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))),
+            Hardware::default(),
+            BuildChoice::Auto,
+        )
     }
 
     #[test]
@@ -460,7 +542,13 @@ mod tests {
         let zp = d.path().join("a.zip");
         let mut z = zip::ZipWriter::new(std::fs::File::create(&zp).unwrap());
         let o = zip::write::SimpleFileOptions::default();
-        for (n, c) in [("llama-server.exe", "x"), ("sub/ggml.dll", "y"), ("../evil.dll", "z"), ("llama-bench.exe", "b"), ("deep/a/b.dll", "q")] {
+        for (n, c) in [
+            ("llama-server.exe", "x"),
+            ("sub/ggml.dll", "y"),
+            ("../evil.dll", "z"),
+            ("llama-bench.exe", "b"),
+            ("deep/a/b.dll", "q"),
+        ] {
             z.start_file(n, o).unwrap();
             z.write_all(c.as_bytes()).unwrap();
         }
@@ -468,7 +556,10 @@ mod tests {
         let out = d.path().join("out");
         std::fs::create_dir(&out).unwrap();
         unpack(&zp, &out, "a.zip").unwrap();
-        let mut names: Vec<String> = std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut names: Vec<String> = std::fs::read_dir(&out)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
         names.sort();
         assert_eq!(names, ["ggml.dll", "llama-server.exe"]);
         assert!(!d.path().join("evil.dll").exists());
@@ -503,7 +594,10 @@ mod tests {
         std::fs::create_dir(&out).unwrap();
         unpack(&tp, &out, "a.tar.gz").unwrap();
         assert!(out.join("llama-server").is_file());
-        assert_eq!(std::fs::read_link(out.join("libllama.dylib")).unwrap().to_string_lossy(), "libllama.0.dylib");
+        assert_eq!(
+            std::fs::read_link(out.join("libllama.dylib")).unwrap().to_string_lossy(),
+            "libllama.0.dylib"
+        );
         assert!(!out.join("libevil.dylib").exists());
     }
 
@@ -521,21 +615,52 @@ mod tests {
         let (_d, dirs) = dirs();
         let m = mgr(&dirs);
         assert!(m.installed().is_empty() && m.binary().is_none());
-        assert!(matches!(m.availability(), Availability::NotInstalled { .. } | Availability::NotAvailable { .. }));
+        assert!(matches!(
+            m.availability(),
+            Availability::NotInstalled { .. } | Availability::NotAvailable { .. }
+        ));
         let id = m.suggested().unwrap_or_else(|| "cpu".into());
         let err = m.install(&id, &CancelFlag::default(), |_, _| {}).await;
         assert!(err.is_err());
-        assert!(!dirs.engines().join(format!("{id}.new")).exists(), "a failed install leaves nothing behind");
-        let launch = Launch { model: "m".into(), mmproj: None, alias: "m".into(), port: 4100, context: 1024, gpu_layers: None, threads: 0, parallel: 1, kind: llama::ServeKind::Chat, cache_ram_mib: 0 };
+        assert!(
+            !dirs.engines().join(format!("{id}.new")).exists(),
+            "a failed install leaves nothing behind"
+        );
+        let launch = Launch {
+            model: "m".into(),
+            mmproj: None,
+            alias: "m".into(),
+            port: 4100,
+            context: 1024,
+            gpu_layers: None,
+            threads: 0,
+            parallel: 1,
+            kind: llama::ServeKind::Chat,
+            cache_ram_mib: 0,
+        };
         assert!(matches!(m.start(&launch).await, Err(EngineError::NotInstalled)));
         assert!(m.remove("../x").is_err());
     }
 
     #[tokio::test]
     async fn planned_engines_say_why() {
-        let p = Planned { kind: EngineKind::Mlx, reason: "MLX is planned".into() };
+        let p = Planned {
+            kind: EngineKind::Mlx,
+            reason: "MLX is planned".into(),
+        };
         assert!(matches!(p.availability(), Availability::NotAvailable { .. }));
-        let launch = Launch { model: "m".into(), mmproj: None, alias: "m".into(), port: 4100, context: 1024, gpu_layers: None, threads: 0, parallel: 1, kind: llama::ServeKind::Chat, cache_ram_mib: 0 };
+        let launch = Launch {
+            model: "m".into(),
+            mmproj: None,
+            alias: "m".into(),
+            port: 4100,
+            context: 1024,
+            gpu_layers: None,
+            threads: 0,
+            parallel: 1,
+            kind: llama::ServeKind::Chat,
+            cache_ram_mib: 0,
+        };
         assert!(p.start(&launch).await.is_err());
         assert_eq!(p.kind(), EngineKind::Mlx);
     }
@@ -546,7 +671,19 @@ mod tests {
         let m = mgr(&dirs);
         let b = dirs.engines().join("cpu");
         std::fs::create_dir_all(&b).unwrap();
-        std::fs::write(b.join("build.json"), serde_json::to_vec(&BuildInfo { id: "cpu".into(), tag: "t".into(), self_test: "passed".into(), message: None, devices: vec![], size: 1 }).unwrap()).unwrap();
+        std::fs::write(
+            b.join("build.json"),
+            serde_json::to_vec(&BuildInfo {
+                id: "cpu".into(),
+                tag: "t".into(),
+                self_test: "passed".into(),
+                message: None,
+                devices: vec![],
+                size: 1,
+            })
+            .unwrap(),
+        )
+        .unwrap();
         std::fs::write(b.join(server_name()), b"").unwrap();
         assert_eq!(m.active().unwrap().id, "cpu");
         assert!(m.binary().is_some());

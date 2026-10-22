@@ -63,6 +63,8 @@ pub struct Response {
     pub status: u16,
     /// The `content-type`, if any.
     pub content_type: Option<String>,
+    /// All response headers (names lowercase, values as text).
+    pub headers: Vec<(String, String)>,
     body: Incoming,
 }
 
@@ -110,7 +112,11 @@ fn header_ok(v: &str) -> bool {
 impl Client {
     /// A client of `port`, sending `Authorization: Bearer <bearer>` when given.
     pub fn new(port: LoopbackPort, bearer: Option<String>) -> Client {
-        Client { port, bearer, connect_timeout: Duration::from_secs(3) }
+        Client {
+            port,
+            bearer,
+            connect_timeout: Duration::from_secs(3),
+        }
     }
 
     /// The port.
@@ -120,8 +126,29 @@ impl Client {
 
     /// Sends a request; the head must arrive within `timeout` (the body streams afterwards).
     pub async fn send(&self, method: &str, path: &str, body: Option<Vec<u8>>, timeout: Duration) -> Result<Response, LoopbackError> {
+        self.send_with(method, path, body, &[], timeout).await
+    }
+
+    /// Like [`Client::send`] with extra request headers (a `host` header replaces the default one). Header names and
+    /// values with line breaks are refused.
+    pub async fn send_with(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Vec<u8>>,
+        headers: &[(&str, &str)],
+        timeout: Duration,
+    ) -> Result<Response, LoopbackError> {
+        if headers
+            .iter()
+            .any(|(k, v)| !header_ok(k) || !header_ok(v) || k.contains(':') || k.contains(' '))
+        {
+            return Err(LoopbackError::Invalid("a header holds line breaks, spaces or colons"));
+        }
         if !path.starts_with('/') || !header_ok(path) || path.contains(' ') {
-            return Err(LoopbackError::Invalid("the path must start with / and hold no spaces or line breaks"));
+            return Err(LoopbackError::Invalid(
+                "the path must start with / and hold no spaces or line breaks",
+            ));
         }
         if self.bearer.as_deref().is_some_and(|b| !header_ok(b)) {
             return Err(LoopbackError::Invalid("the key holds line breaks"));
@@ -132,12 +159,20 @@ impl Client {
             .map_err(|_| LoopbackError::Timeout(self.connect_timeout))?
             .map_err(|e| LoopbackError::Connect(self.port.0, e.to_string()))?;
         let _ = stream.set_nodelay(true);
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream)).await.map_err(|e| LoopbackError::Http(e.to_string()))?;
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+            .await
+            .map_err(|e| LoopbackError::Http(e.to_string()))?;
         tokio::spawn(async move {
             // The connection ends with the exchange; its error (if any) surfaces through the response.
             let _ = conn.await;
         });
-        let mut req = Request::builder().method(method).uri(path).header("host", format!("127.0.0.1:{}", self.port.0));
+        let mut req = Request::builder().method(method).uri(path);
+        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
+            req = req.header("host", format!("127.0.0.1:{}", self.port.0));
+        }
+        for (k, v) in headers {
+            req = req.header(*k, *v);
+        }
         if let Some(b) = &self.bearer {
             req = req.header("authorization", format!("Bearer {b}"));
         }
@@ -145,14 +180,26 @@ impl Client {
         if has_body {
             req = req.header("content-type", "application/json");
         }
-        let req = req.body(Full::new(Bytes::from(body.unwrap_or_default()))).map_err(|e| LoopbackError::Http(e.to_string()))?;
+        let req = req
+            .body(Full::new(Bytes::from(body.unwrap_or_default())))
+            .map_err(|e| LoopbackError::Http(e.to_string()))?;
         let resp = tokio::time::timeout(timeout, sender.send_request(req))
             .await
             .map_err(|_| LoopbackError::Timeout(timeout))?
             .map_err(|e| LoopbackError::Http(e.to_string()))?;
         let status = resp.status().as_u16();
         let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(str::to_string);
-        Ok(Response { status, content_type, body: resp.into_body() })
+        let headers = resp
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
+            .collect();
+        Ok(Response {
+            status,
+            content_type,
+            headers,
+            body: resp.into_body(),
+        })
     }
 
     /// Sends JSON (or nothing) and reads a JSON answer (an empty body is `null`).
@@ -166,7 +213,11 @@ impl Client {
         })
         .await
         .map_err(|_| LoopbackError::Timeout(timeout))??;
-        let v = if resp.1.is_empty() { Value::Null } else { serde_json::from_slice(&resp.1).map_err(|e| LoopbackError::Body(e.to_string()))? };
+        let v = if resp.1.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&resp.1).map_err(|e| LoopbackError::Body(e.to_string()))?
+        };
         Ok((resp.0, v))
     }
 }
@@ -196,7 +247,10 @@ mod tests {
         let (port, h) = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 11\r\n\r\n{\"ok\":true}").await;
         let c = Client::new(port, Some("secret".into()));
         assert_eq!(c.port(), port);
-        let (status, v) = c.json("POST", "/v1/x", Some(&serde_json::json!({"a": 1})), Duration::from_secs(5)).await.unwrap();
+        let (status, v) = c
+            .json("POST", "/v1/x", Some(&serde_json::json!({"a": 1})), Duration::from_secs(5))
+            .await
+            .unwrap();
         assert_eq!((status, v["ok"].as_bool()), (200, Some(true)));
         let seen = h.await.unwrap();
         assert!(seen.starts_with("POST /v1/x HTTP/1.1"));
@@ -217,13 +271,22 @@ mod tests {
         }
         assert_eq!(all, b"hello world");
         let (port, _h) = serve("HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n0123456789").await;
-        let r = Client::new(port, None).send("GET", "/", None, Duration::from_secs(5)).await.unwrap();
+        let r = Client::new(port, None)
+            .send("GET", "/", None, Duration::from_secs(5))
+            .await
+            .unwrap();
         assert!(r.bytes(4).await.unwrap_err().to_string().contains("larger than 4"));
         let (port, _h) = serve("HTTP/1.1 204 No Content\r\n\r\n").await;
-        let (s, v) = Client::new(port, None).json("DELETE", "/", None, Duration::from_secs(5)).await.unwrap();
+        let (s, v) = Client::new(port, None)
+            .json("DELETE", "/", None, Duration::from_secs(5))
+            .await
+            .unwrap();
         assert_eq!((s, v), (204, Value::Null));
         let (port, _h) = serve("HTTP/1.1 200 OK\r\ncontent-length: 3\r\n\r\nnot").await;
-        assert!(matches!(Client::new(port, None).json("GET", "/", None, Duration::from_secs(5)).await, Err(LoopbackError::Body(_))));
+        assert!(matches!(
+            Client::new(port, None).json("GET", "/", None, Duration::from_secs(5)).await,
+            Err(LoopbackError::Body(_))
+        ));
     }
 
     #[tokio::test]
@@ -234,15 +297,28 @@ mod tests {
         assert_eq!(p.get(), 1);
         let c = Client::new(p, None);
         for bad in ["no-slash", "/a b", "/a\r\nx"] {
-            assert!(matches!(c.send("GET", bad, None, Duration::from_secs(1)).await, Err(LoopbackError::Invalid(_))), "{bad}");
+            assert!(
+                matches!(
+                    c.send("GET", bad, None, Duration::from_secs(1)).await,
+                    Err(LoopbackError::Invalid(_))
+                ),
+                "{bad}"
+            );
         }
         let evil = Client::new(p, Some("a\nb".into()));
-        assert!(matches!(evil.send("GET", "/", None, Duration::from_secs(1)).await, Err(LoopbackError::Invalid(_))));
+        assert!(matches!(
+            evil.send("GET", "/", None, Duration::from_secs(1)).await,
+            Err(LoopbackError::Invalid(_))
+        ));
         // A free port: nothing listens.
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let free = LoopbackPort::new(l.local_addr().unwrap().port()).unwrap();
         drop(l);
-        let e = Client::new(free, None).send("GET", "/", None, Duration::from_secs(1)).await.err().unwrap();
+        let e = Client::new(free, None)
+            .send("GET", "/", None, Duration::from_secs(1))
+            .await
+            .err()
+            .unwrap();
         assert!(matches!(e, LoopbackError::Connect(..)), "{e}");
         // A server that accepts but never answers: timeout.
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -251,7 +327,10 @@ mod tests {
             let (_s, _) = l.accept().await.unwrap();
             tokio::time::sleep(Duration::from_secs(30)).await;
         });
-        let e = Client::new(port, None).json("GET", "/", None, Duration::from_millis(200)).await.unwrap_err();
+        let e = Client::new(port, None)
+            .json("GET", "/", None, Duration::from_millis(200))
+            .await
+            .unwrap_err();
         assert!(matches!(e, LoopbackError::Timeout(_)), "{e}");
     }
 }

@@ -3,9 +3,17 @@
 //! sockets). Outbound traffic exists only in [`egress`] (ADR 0001).
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod app;
+pub mod auth;
 pub mod egress;
 pub mod engines;
+pub mod http;
+pub mod library;
+pub mod mgmt;
 pub mod paths;
 pub mod process;
-pub mod library;
+pub mod serving;
 pub mod system;
+
+/// Lock a mutex, recovering from poisoning.
+pub(crate) use app::lock as app_lock;

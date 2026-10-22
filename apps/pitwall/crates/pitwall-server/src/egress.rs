@@ -104,7 +104,13 @@ impl Egress {
     /// GET a small JSON document (Hugging Face API), at most `max` bytes.
     pub async fn get_json(&self, url: &DownloadUrl, max: usize) -> Result<serde_json::Value, DownloadError> {
         check_online(self.offline())?;
-        let r = self.client.get(url.as_str()).header("accept", "application/json").send().await.map_err(|e| DownloadError::Network(e.to_string()))?;
+        let r = self
+            .client
+            .get(url.as_str())
+            .header("accept", "application/json")
+            .send()
+            .await
+            .map_err(|e| DownloadError::Network(e.to_string()))?;
         if !r.status().is_success() {
             return Err(DownloadError::Status(r.status().as_u16(), hint(r.status().as_u16())));
         }
@@ -149,9 +155,17 @@ impl Egress {
             s => return Err(DownloadError::Status(s, hint(s))),
         };
         if status != 416 {
-            let mut f = tokio::fs::OpenOptions::new().create(true).write(true).truncate(!append).open(dest).await.map_err(|e| DownloadError::Io(e.to_string()))?;
+            let mut f = tokio::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(!append)
+                .open(dest)
+                .await
+                .map_err(|e| DownloadError::Io(e.to_string()))?;
             if append {
-                f.seek(std::io::SeekFrom::End(0)).await.map_err(|e| DownloadError::Io(e.to_string()))?;
+                f.seek(std::io::SeekFrom::End(0))
+                    .await
+                    .map_err(|e| DownloadError::Io(e.to_string()))?;
             }
             let mut s = r.bytes_stream();
             while let Some(c) = s.next().await {
@@ -167,13 +181,19 @@ impl Egress {
             f.flush().await.map_err(|e| DownloadError::Io(e.to_string()))?;
         }
         if total.is_some_and(|t| t != done) {
-            return Err(DownloadError::Network(format!("the connection closed after {done} of {} bytes", total.unwrap_or(0))));
+            return Err(DownloadError::Network(format!(
+                "the connection closed after {done} of {} bytes",
+                total.unwrap_or(0)
+            )));
         }
         let actual = sha256_file(dest).await.map_err(|e| DownloadError::Io(e.to_string()))?;
         if let Some(expected) = sha256 {
             if !expected.eq_ignore_ascii_case(&actual) {
                 let _ = tokio::fs::remove_file(dest).await;
-                return Err(DownloadError::Checksum { expected: expected.to_string(), actual });
+                return Err(DownloadError::Checksum {
+                    expected: expected.to_string(),
+                    actual,
+                });
             }
         }
         Ok(actual)
@@ -220,7 +240,10 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("f");
         std::fs::write(&p, b"abc").unwrap();
-        assert_eq!(sha256_file(&p).await.unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            sha256_file(&p).await.unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]

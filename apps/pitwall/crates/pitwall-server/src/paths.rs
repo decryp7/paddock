@@ -21,7 +21,11 @@ impl Dirs {
         } else if cfg!(target_os = "macos") {
             home.join("Library/Application Support/Pitwall")
         } else {
-            std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(".local/share")).join("pitwall")
+            std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .unwrap_or_else(|| home.join(".local/share"))
+                .join("pitwall")
         };
         Dirs { root }
     }
@@ -85,7 +89,12 @@ pub fn backup_of(path: &Path) -> PathBuf {
 
 /// Read the primary file and its backup, bounded to `max` bytes (a missing or oversized file reads as `None`).
 pub fn read_with_backup(path: &Path, max: usize) -> (Option<String>, Option<String>) {
-    let read = |p: &Path| std::fs::metadata(p).ok().filter(|m| m.len() as usize <= max).and_then(|_| std::fs::read_to_string(p).ok());
+    let read = |p: &Path| {
+        std::fs::metadata(p)
+            .ok()
+            .filter(|m| m.len() as usize <= max)
+            .and_then(|_| std::fs::read_to_string(p).ok())
+    };
     (read(path), read(&backup_of(path)))
 }
 
@@ -104,7 +113,9 @@ pub fn restrict(path: &Path) {
 pub fn random32() -> [u8; 32] {
     let mut b = [0u8; 32];
     if getrandom::fill(&mut b).is_err() {
-        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
         for (i, x) in b.iter_mut().enumerate() {
             *x = (n >> (i % 16)) as u8 ^ (i as u8).wrapping_mul(31);
         }
@@ -114,7 +125,9 @@ pub fn random32() -> [u8; 32] {
 
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 #[cfg(test)]

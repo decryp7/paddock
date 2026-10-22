@@ -6,7 +6,22 @@ use std::path::Path;
 use tokio::process::Command;
 
 /// Environment variables an engine inherits (nothing else: no tokens, proxies or user variables).
-pub const KEPT_ENV: &[&str] = &["PATH", "SystemRoot", "SYSTEMROOT", "windir", "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LANG", "LC_ALL", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "XDG_RUNTIME_DIR"];
+pub const KEPT_ENV: &[&str] = &[
+    "PATH",
+    "SystemRoot",
+    "SYSTEMROOT",
+    "windir",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "HOME",
+    "USERPROFILE",
+    "LANG",
+    "LC_ALL",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "XDG_RUNTIME_DIR",
+];
 
 /// A command for `program` with the sanitised environment.
 #[allow(clippy::disallowed_methods)] // the single allowed place
@@ -37,7 +52,12 @@ mod tests {
     #[tokio::test]
     async fn environment_is_scrubbed() {
         std::env::set_var("PITWALL_SECRET_TEST", "x");
-        let out = if cfg!(windows) { command("cmd", None).args(["/C", "set"]).output().await } else { command("/usr/bin/env", None).output().await }.unwrap();
+        let out = if cfg!(windows) {
+            command("cmd", None).args(["/C", "set"]).output().await
+        } else {
+            command("/usr/bin/env", None).output().await
+        }
+        .unwrap();
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(!text.contains("PITWALL_SECRET_TEST"));
     }

@@ -70,14 +70,32 @@ pub fn scan(dir: &Path) -> Vec<LocalFile> {
         let size = split_total(p, &files);
         let projector = p
             .parent()
-            .and_then(|d| files.iter().find(|f| f.parent() == Some(d) && f.file_name().is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().contains("mmproj"))))
+            .and_then(|d| {
+                files.iter().find(|f| {
+                    f.parent() == Some(d)
+                        && f.file_name()
+                            .is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().contains("mmproj"))
+                })
+            })
             .cloned();
-        let modified = std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
+        let modified = std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_millis() as u64);
         let repo = repo_of(dir, p);
         if out.iter().any(|o| o.id == id) {
             continue;
         }
-        out.push(LocalFile { id, path: p.clone(), size, info, projector, modified, repo });
+        out.push(LocalFile {
+            id,
+            path: p.clone(),
+            size,
+            info,
+            projector,
+            modified,
+            repo,
+        });
     }
     out
 }
@@ -89,7 +107,9 @@ fn split_total(first: &Path, all: &[PathBuf]) -> u64 {
         .filter(|f| f.parent() == first.parent())
         .filter(|f| {
             let n = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            n.trim_end_matches(".gguf") == name.trim_end_matches(".gguf") || (pitwall_core::ids::split_part(n.trim_end_matches(".gguf")).is_some() && pitwall_core::ids::strip_split_suffix(n.trim_end_matches(".gguf")) == base)
+            n.trim_end_matches(".gguf") == name.trim_end_matches(".gguf")
+                || (pitwall_core::ids::split_part(n.trim_end_matches(".gguf")).is_some()
+                    && pitwall_core::ids::strip_split_suffix(n.trim_end_matches(".gguf")) == base)
         })
         .filter_map(|f| std::fs::metadata(f).ok())
         .map(|m| m.len())
@@ -134,7 +154,11 @@ struct Downloads {
 impl Library {
     /// A library.
     pub fn new(dirs: Dirs, egress: Egress) -> Library {
-        Library { dirs, egress, downloads: Arc::new(Mutex::new(Downloads::default())) }
+        Library {
+            dirs,
+            egress,
+            downloads: Arc::new(Mutex::new(Downloads::default())),
+        }
     }
 
     /// Models on disk.
@@ -145,14 +169,20 @@ impl Library {
     /// Delete a model (all parts and its folder when empty).
     pub fn delete(&self, id: &ModelId) -> std::io::Result<()> {
         let all = self.local();
-        let f = all.iter().find(|f| &f.id == id).ok_or_else(|| std::io::Error::other("no such model"))?;
+        let f = all
+            .iter()
+            .find(|f| &f.id == id)
+            .ok_or_else(|| std::io::Error::other("no such model"))?;
         let dir = f.path.parent().map(Path::to_path_buf).unwrap_or_default();
         let name = f.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let base = pitwall_core::ids::strip_split_suffix(name.trim_end_matches(".gguf")).to_string();
         for e in std::fs::read_dir(&dir)?.filter_map(Result::ok) {
             let n = e.file_name().to_string_lossy().into_owned();
             let stem = n.trim_end_matches(".gguf");
-            if n.ends_with(".gguf") && (stem == name.trim_end_matches(".gguf") || (pitwall_core::ids::split_part(stem).is_some() && pitwall_core::ids::strip_split_suffix(stem) == base)) {
+            if n.ends_with(".gguf")
+                && (stem == name.trim_end_matches(".gguf")
+                    || (pitwall_core::ids::split_part(stem).is_some() && pitwall_core::ids::strip_split_suffix(stem) == base))
+            {
                 std::fs::remove_file(e.path())?;
             }
         }
@@ -186,7 +216,13 @@ impl Library {
             fit: fit::assess(Some(&ModelSize::from_file(v.size, v.quant.as_deref())), context, room),
             downloaded: have.iter().any(|h| h.repo == repo && h.path.ends_with(&v.file)),
         };
-        Ok(HfRepo { repo: repo.into(), variants: files.variants.iter().map(variant).collect(), projectors: files.projectors.iter().map(variant).collect(), license, gated })
+        Ok(HfRepo {
+            repo: repo.into(),
+            variants: files.variants.iter().map(variant).collect(),
+            projectors: files.projectors.iter().map(variant).collect(),
+            license,
+            gated,
+        })
     }
 
     /// The listing of downloads (newest first).
@@ -212,7 +248,12 @@ impl Library {
 
     /// Start downloading a model file (all parts of a split model) into the library. Returns the download id; the
     /// work runs in a background task and `on_change` is called with every state change.
-    pub fn download(&self, repo: &str, variant: &hf::Variant, on_change: impl Fn(Download) + Send + Sync + 'static) -> Result<String, DownloadError> {
+    pub fn download(
+        &self,
+        repo: &str,
+        variant: &hf::Variant,
+        on_change: impl Fn(Download) + Send + Sync + 'static,
+    ) -> Result<String, DownloadError> {
         let repo_id = RepoId::parse(repo).map_err(DownloadError::Network)?;
         let urls: Vec<(DownloadUrl, String)> = variant
             .parts
@@ -237,7 +278,13 @@ impl Library {
                 error: None,
                 started_at: now_ms(),
             };
-            g.items.insert(id.clone(), Slot { dl, cancel: cancel.clone() });
+            g.items.insert(
+                id.clone(),
+                Slot {
+                    dl,
+                    cancel: cancel.clone(),
+                },
+            );
             (id, cancel)
         };
         let this = self.clone();
@@ -245,7 +292,13 @@ impl Library {
         let (id2, repo, shas, total) = (id.clone(), repo.to_string(), variant.sha256.clone(), variant.size);
         tokio::spawn(async move {
             let notify = |lib: &Library| {
-                if let Some(s) = lib.downloads.lock().unwrap_or_else(std::sync::PoisonError::into_inner).items.get(&id2) {
+                if let Some(s) = lib
+                    .downloads
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .items
+                    .get(&id2)
+                {
                     on_change(s.dl.clone());
                 }
             };
@@ -274,7 +327,13 @@ impl Library {
                                 d.bytes_total = total.max(b + t.unwrap_or(0));
                                 d.speed_bps = ((b + done) as f64 / secs) as u64;
                             });
-                            if let Some(s) = lib.downloads.lock().unwrap_or_else(std::sync::PoisonError::into_inner).items.get(&id3) {
+                            if let Some(s) = lib
+                                .downloads
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .items
+                                .get(&id3)
+                            {
                                 on_change(s.dl.clone());
                             }
                         }
@@ -319,7 +378,9 @@ impl Library {
 
 /// A downloaded model must parse as GGUF before it enters the library.
 fn verify_gguf(p: &Path) -> Result<(), String> {
-    gguf::inspect(p).map(|_| ()).map_err(|e| format!("the file is not a usable GGUF model ({}); it was discarded", e.0))
+    gguf::inspect(p)
+        .map(|_| ())
+        .map_err(|e| format!("the file is not a usable GGUF model ({}); it was discarded", e.0))
 }
 
 /// The `LocalModel` DTO for the UI.
@@ -336,7 +397,11 @@ pub fn to_dto(f: &LocalFile, loaded: bool, prefs: &pitwall_core::config::ModelPr
         context_max: f.info.context_length,
         architecture: Some(f.info.architecture.clone()),
         capabilities: capabilities(f),
-        projector: f.projector.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()),
+        projector: f
+            .projector
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned()),
         added_at: f.modified,
         last_used_at: None,
         loaded,
@@ -348,18 +413,12 @@ pub fn to_dto(f: &LocalFile, loaded: bool, prefs: &pitwall_core::config::ModelPr
 
 /// What a model can do, from its header and projector.
 pub fn capabilities(f: &LocalFile) -> Vec<pitwall_core::select::Capability> {
-    use pitwall_core::select::Capability as C;
-    let mut v = vec![];
-    match f.info.kind {
-        gguf::ModelKind::Embedding => v.push(C::Embeddings),
-        _ => {
-            v.push(C::Chat);
-            if f.projector.is_some() {
-                v.push(C::Vision);
-            }
-        }
-    }
-    v
+    pitwall_core::select::capabilities_of(
+        f.info.kind,
+        f.projector.is_some(),
+        f.info.chat_template.as_deref(),
+        &f.id.to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -391,7 +450,13 @@ mod tests {
         let lib = Library::new(Dirs::at(d.path()), Egress::new(Arc::new(std::sync::atomic::AtomicBool::new(true))));
         assert!(lib.search("qwen").await.is_err());
         assert!(lib.repo("o/r", 4096, &Room::default()).await.is_err());
-        let v = hf::Variant { file: "m-Q4_K_M.gguf".into(), parts: vec!["m-Q4_K_M.gguf".into()], quant: Some("Q4_K_M".into()), size: 10, sha256: vec![] };
+        let v = hf::Variant {
+            file: "m-Q4_K_M.gguf".into(),
+            parts: vec!["m-Q4_K_M.gguf".into()],
+            quant: Some("Q4_K_M".into()),
+            size: 10,
+            sha256: vec![],
+        };
         let id = lib.download("o/r", &v, |_| {}).unwrap();
         for _ in 0..100 {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;

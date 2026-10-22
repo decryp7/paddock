@@ -15,7 +15,13 @@ pub async fn detect_hardware() -> Hardware {
     let (os, arch) = (std::env::consts::OS.to_string(), std::env::consts::ARCH.to_string());
     let mut gpus: Vec<Gpu> = hardware::apple_silicon_gpu(&os, &arch, total).into_iter().collect();
     gpus.extend(nvidia_gpus().await);
-    Hardware { os, arch, cpu_cores: sys.cpus().len().max(1), total_ram: total, gpus }
+    Hardware {
+        os,
+        arch,
+        cpu_cores: sys.cpus().len().max(1),
+        total_ram: total,
+        gpus,
+    }
 }
 
 async fn nvidia_gpus() -> Vec<Gpu> {
@@ -31,20 +37,38 @@ async fn nvidia_gpus() -> Vec<Gpu> {
 pub fn read_system(hw: &Hardware) -> System {
     let mut s = sysinfo::System::new();
     s.refresh_memory();
-    System { total: s.total_memory(), available: s.available_memory(), vram_free: hw.vram_free(), os_pressure: false, os_critical: false, foreground_busy: false }
+    System {
+        total: s.total_memory(),
+        available: s.available_memory(),
+        vram_free: hw.vram_free(),
+        os_pressure: false,
+        os_critical: false,
+        foreground_busy: false,
+    }
 }
 
 /// The room a fit check has right now.
 pub fn room(hw: &Hardware, releasable: u64) -> Room {
     let sys = read_system(hw);
-    Room { ram_total: sys.total, ram_available: sys.available, ram_releasable: releasable, vram_free: hw.vram_free(), unified: hw.unified() }
+    Room {
+        ram_total: sys.total,
+        ram_available: sys.available,
+        ram_releasable: releasable,
+        vram_free: hw.vram_free(),
+        unified: hw.unified(),
+    }
 }
 
 /// Free bytes on the volume holding `path` (0 when unknown).
 pub fn free_disk(path: &std::path::Path) -> u64 {
     let disks = sysinfo::Disks::new_with_refreshed_list();
     let p = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    disks.list().iter().filter(|d| p.starts_with(d.mount_point())).max_by_key(|d| d.mount_point().as_os_str().len()).map_or(0, sysinfo::Disk::available_space)
+    disks
+        .list()
+        .iter()
+        .filter(|d| p.starts_with(d.mount_point()))
+        .max_by_key(|d| d.mount_point().as_os_str().len())
+        .map_or(0, sysinfo::Disk::available_space)
 }
 
 /// Resident memory of a process in bytes (0 when unreadable).
