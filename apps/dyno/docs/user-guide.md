@@ -43,7 +43,12 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **Command palette.** Ctrl or Cmd + K jumps to a screen or action.
 - **Tray.** The icon shows the metric you chose; its dropdown is a compact dashboard. Closing the window keeps Dyno in the
   tray and the agent measuring; **Quit** closes the app (the agent keeps measuring until you stop it).
-- **CPU taming, Cleanup, Health and tuning, Reports, Why slow** are placeholders for now. Their engine parts exist (see
+- **Tuning.** Suggestions grouped by topic (power, sleep and hibernation, battery, developer folders, appearance). Nothing
+  changes when you open the page. **Review...** shows exactly what Dyno will change and exactly how it will undo it; only
+  **Apply** changes anything, and the change appears in **Activity** with **Undo**. If something else changed the setting
+  afterwards, **Revert** asks before overwriting it (**Revert anyway**). Changes that need administrator rights are shown
+  but cannot be applied yet.
+- **CPU taming, Cleanup, Reports, Why slow** are placeholders for now. Their engine parts exist (see
   features.md); rules ship disabled and cannot act until you enable them.
 
 ## Undo

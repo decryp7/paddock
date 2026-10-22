@@ -72,7 +72,20 @@ foreground app.
 **Engine only** (the dashboard shows the health score and fixes). `Health` returns a score and grade with reasons and fixes;
 each fix explains and previews itself before anything changes. `StartupEntries` lists what starts at login (Windows: not
 wired yet; macOS: launch agents and login items; Linux: autostart and user units); `SetStartupState` enables or disables an
-entry that needs no administrator rights, undoable. The Health & tuning screen is a placeholder.
+entry that needs no administrator rights, undoable. The Health screen shows the score, its reasons and the startup manager.
+
+## Tuning
+
+**Built** (engine and screen). A catalogue of reversible suggestions that change something only on a click: power plan or mode
+(Windows plan, Linux profile, macOS Low Power Mode), sleep timer on battery, hibernation, battery charge limit where Linux exposes
+it, search indexing exclusions for developer folders, Defender exclusions for build folders, visual effects and background apps.
+Each previews its exact change and its exact inverse; applying records an undoable activity entry and reads the setting back to
+confirm it took effect; before a revert the setting is read again and a change made outside Dyno since is detected (Revert
+anyway overwrites it on purpose). The changes are a closed set of typed actions behind a port with a fake for tests; nothing
+runs text as a command. Changes that need administrator rights (Defender, hibernation, charge limit, macOS sleep and Low Power
+Mode) are listed with the reason and are not applicable until the privileged helper exists ([WP-01](roadmap.md#wp-01-privileged-helper)).
+Really applicable now: Windows power plan, sleep timer, visual effects, background apps and indexing; Linux power profile;
+macOS indexing exclusions (Spotlight markers). Windows commands are unit-tested through a fake runner, not yet run on Windows.
 
 ## Cleanup
 
