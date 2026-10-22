@@ -23,7 +23,9 @@ impl SensorProbe for NoProbe {
 }
 
 /// Volumes are re-listed (new USB drives) every this many ticks; between, only their space and I/O are refreshed.
-const RELIST_DISKS_EVERY: u64 = 30;
+const RELIST_DISKS_EVERY: u64 = 5;
+/// Volume free space is refreshed at most this often.
+const STORAGE_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 /// Temperatures are read every this many ticks (on Windows each read is a WMI query).
 const TEMPERATURES_EVERY: u64 = 5;
 /// The battery is read every this many ticks.
@@ -41,6 +43,8 @@ pub struct SysinfoSensors {
     probe: Box<dyn SensorProbe>,
     last: Option<Instant>,
     ticks: u64,
+    last_storage: Option<Instant>,
+    storage_refreshes: u64,
     temperatures: Reading<Vec<Temperature>>,
 }
 
@@ -63,12 +67,15 @@ impl SysinfoSensors {
             probe,
             last: None,
             ticks: 0,
+            last_storage: None,
+            storage_refreshes: 0,
             temperatures: Reading::unavailable(NO_TEMPERATURES),
         }
     }
 
     fn cpu(&mut self) -> CpuSample {
-        self.sys.refresh_cpu_specifics(CpuRefreshKind::nothing().with_cpu_usage().with_frequency());
+        self.sys
+            .refresh_cpu_specifics(CpuRefreshKind::nothing().with_cpu_usage().with_frequency());
         let cpus = self.sys.cpus();
         let per_core: Vec<f32> = cpus.iter().map(|c| clamp_pct(c.cpu_usage())).collect();
         let freq = if cpus.is_empty() {
@@ -87,7 +94,8 @@ impl SysinfoSensors {
     }
 
     fn memory(&mut self) -> MemorySample {
-        self.sys.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram().with_swap());
+        self.sys
+            .refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram().with_swap());
         let total = self.sys.total_memory();
         let available = self.sys.available_memory().min(total);
         let mut m = MemorySample {
@@ -104,8 +112,20 @@ impl SysinfoSensors {
     }
 
     fn disks(&mut self, secs: f64) -> (Vec<DiskSample>, DiskIo) {
-        let kind = DiskRefreshKind::nothing().with_storage().with_io_usage();
-        self.disks.refresh_specifics(self.ticks.is_multiple_of(RELIST_DISKS_EVERY), kind);
+        // Free space is polled rarely: calling the OS' volume-space API often can stall Finder on macOS (an iStat Menus
+        // lesson). I/O counters are cheap and refresh every tick.
+        let storage_due = self.last_storage.is_none_or(|t| t.elapsed() >= STORAGE_EVERY);
+        let mut kind = DiskRefreshKind::nothing().with_io_usage();
+        if storage_due {
+            kind = kind.with_storage();
+            self.last_storage = Some(Instant::now());
+        }
+        // New volumes (a USB drive) are looked for on every fifth space refresh.
+        let relist = storage_due && self.storage_refreshes.is_multiple_of(RELIST_DISKS_EVERY);
+        if storage_due {
+            self.storage_refreshes += 1;
+        }
+        self.disks.refresh_specifics(relist, kind);
         let (mut read, mut written) = (0u64, 0u64);
         let mut seen = Vec::new();
         let mut out = Vec::new();
