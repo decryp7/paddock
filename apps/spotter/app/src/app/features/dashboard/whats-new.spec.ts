@@ -117,14 +117,14 @@ describe('WhatsNew', () => {
   it('offers Mark as seen, Copy link and Copy SHA-256 in the menu according to the release', async () => {
     const { f, backend } = await make([item({ unseen: true }, { location: 'https://x/y', sha256: 'abc123', version: '9.9.9' })]);
     const copy = vi.spyOn(TestBed.inject(Clipboard), 'copy').mockResolvedValue(true as never);
-    let entries = await openMenu(f);
+    const entries = await openMenu(f);
     expect(entries.map((e) => text(e))).toEqual(['Mark as seen', 'Copy link', 'Copy SHA-256']);
     byText(document.body, '[cdkMenuItem]', 'Copy link')!.click();
     expect(copy).toHaveBeenCalledWith('https://x/y', 'Link');
-    entries = await openMenu(f);
+    await openMenu(f);
     byText(document.body, '[cdkMenuItem]', 'Copy SHA-256')!.click();
     expect(copy).toHaveBeenCalledWith('abc123', 'Checksum');
-    entries = await openMenu(f);
+    await openMenu(f);
     byText(document.body, '[cdkMenuItem]', 'Mark as seen')!.click();
     await flush(5);
     expect(backend.calls).toContain('acknowledge');

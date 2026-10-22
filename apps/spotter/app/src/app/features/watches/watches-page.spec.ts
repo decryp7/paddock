@@ -126,7 +126,7 @@ describe('WatchesPage', () => {
     expect(items.map((i) => text(i))).toEqual(['Check all now', 'Mark all seen']);
     items[0]!.click();
     await settle(f);
-    items = await openMenu(f, 'Watches actions');
+    await openMenu(f, 'Watches actions');
     byText(document.body, '[cdkMenuItem]', 'Mark all seen')!.click();
     await settle(f);
     expect(backend.calls).toEqual(expect.arrayContaining(['checkNow', 'acknowledge']));
