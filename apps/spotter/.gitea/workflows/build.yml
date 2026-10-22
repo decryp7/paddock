@@ -1,0 +1,438 @@
+# Checks Spotter on every push and pull request. Installers are built only for v* tags (which also publish a Gitea
+# release with them attached), the nightly run and manual runs (see the bundle job).
+#
+# Runner labels: ubuntu-latest, windows-latest, macos-latest (a host runner on the owner's Apple Silicon Mac: one job at
+# a time, so macOS jobs stay lean; they install nothing system-wide and leave no processes or launch agents behind).
+# Linux jobs run in the catthehacker/ubuntu:act-latest container (Node for JavaScript actions, git, sudo-free root).
+# Releases need a repository secret RELEASE_TOKEN (a Gitea access token with write:repository scope); signed
+# updates need TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD and TAURI_UPDATER_PUBKEY
+# (docs/releasing.md).
+# The shared UI kit (@decryp7 scope) is installed from the Gitea npm registry configured in app/.npmrc. If that registry
+# requires authentication from CI, add an npm token as a repository secret and write it to the runner's npmrc before
+# `npm ci`; no such secret is assumed here.
+# Actions are referenced by tag; Renovate (renovate.json, helpers:pinGitHubActionDigests) pins them to digests.
+
+name: build
+
+on:
+  push:
+    branches: [main, 'wip/**']
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    - cron: "45 0 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+# A newer push to the same branch supersedes the run still going; tags have their own ref, so releases are never
+# cancelled by later pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  rust-lint:
+    name: rust format + clippy
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # Cheap and first: a formatting slip fails in seconds.
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Linux dependencies for Tauri
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+
+      - uses: actions/cache/restore@v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/debug/incremental
+          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: clippy-${{ runner.os }}-
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - uses: actions/cache/save@v4
+        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/debug/incremental
+          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+  rust-test:
+    name: rust tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'catthehacker/ubuntu:act-latest' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Host-mode Windows runners: Git's bash on PATH (actions and `shell: bash` need it) and a build folder that
+      # outlives the job, so the next run builds incrementally.
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.spotter-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux dependencies for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+
+      - uses: actions/cache/restore@v4
+        if: runner.os == 'Linux'
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: test-registry-${{ runner.os }}-
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - uses: actions/cache/save@v4
+        if: always() && runner.os == 'Linux' && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+  # The macOS code for real (the launch agent, Unix socket, SIGTERM stops, Keychain, SMAppService): clippy and the
+  # tests on the Mac host runner. Host toolchains are used as they are (Rust and Node are installed there).
+  macos:
+    name: macOS clippy + tests
+    runs-on: macos-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../.spotter-ci-target
+      CARGO_BUILD_JOBS: "4"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain present
+        run: |
+          rustc --version && cargo --version
+          cargo clippy --version || { echo "::error::clippy is missing on the Mac runner (rustup component add clippy)"; exit 1; }
+
+      - name: Clippy (macOS)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests (macOS)
+        run: cargo test --workspace
+
+      # Nothing may stay behind on the host: no fake runners, no test sockets.
+      - name: Clean up test processes
+        if: always()
+        run: |
+          pkill -f spotter-render || true
+          pkill -f 'spotter-chromium' || true
+          rm -rf "${TMPDIR:-/tmp}"/spotter-* || true
+
+  licences:
+    name: licences, scripts + commits
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so pull requests can check every commit message.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: licences-${{ runner.os }}-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Commit messages follow Conventional Commits
+        if: github.event_name == 'pull_request'
+        run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
+
+      - name: Script tests
+        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs
+
+      - name: Licences, advisories and sources
+        run: cargo deny --all-features --workspace check
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+
+  frontend:
+    name: frontend build, lint + unit tests
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Frontend build
+        run: npx ng build
+
+      - name: Frontend unit tests
+        run: npx ng test --watch=false --coverage
+
+  # Browser flows against `ng serve` with the mock backend. Port 4370 (Spotter's, not the default) and one worker.
+  e2e:
+    name: e2e (playwright, mock backend)
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    defaults:
+      run:
+        working-directory: app
+    env:
+      PW_PORT: "4370"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Playwright browsers (Chromium + WebKit)
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: End-to-end tests
+        run: npx playwright test --project=chromium --project=webkit --workers=1
+
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: playwright-results
+          path: app/.angular/playwright-results
+          if-no-files-found: ignore
+
+  bundle:
+    name: bundle (${{ matrix.os }})
+    needs: [rust-lint]
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: dmg
+          - os: ubuntu-latest
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'catthehacker/ubuntu:act-latest' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The WebKitGTK, GTK and appindicator packages the app links against, and what the AppImage bundler needs.
+      - name: Linux dependencies for Tauri and the bundles
+        if: runner.os == 'Linux'
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf file xdg-utils
+
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.spotter-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      # The Mac host runner keeps its own toolchain (nothing is installed there).
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os != 'macOS'
+
+      # Host runners keep their own Node; fail fast when it is missing or not the major version app/.nvmrc asks for.
+      - name: Host Node matches app/.nvmrc
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+          if ! command -v node >/dev/null; then
+            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/nodejs:$PATH"
+            else
+              echo "::error::Node.js is not installed on this runner: install Node $want (app/.nvmrc)."
+              exit 1
+            fi
+          fi
+          have=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$have" != "$want" ]; then
+            echo "::error::The runner has Node $(node --version) but app/.nvmrc asks for Node $want."
+            exit 1
+          fi
+
+      # Signed updater artifacts (docs/releasing.md): with the signing secrets set, Tauri writes a .sig next to every
+      # installer and the public key is built into the app. Without them (forks, pull requests) the app reports
+      # "Updates are not available in this build".
+      - name: Build installers
+        working-directory: app
+        shell: bash
+        env:
+          # Tauri's DMG step skips Finder window scripting on CI (no Automation permission prompt on the host).
+          CI: "true"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          BUNDLES: ${{ matrix.bundles }}
+        run: |
+          npm ci
+          bundles="$BUNDLES"
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+            if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
+            mkdir -p ../target
+            node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
+            npx tauri build --bundles "$bundles" --config ../target/updater.conf.json -- --profile dist
+          else
+            echo '::warning::No updater signing secrets: this build cannot update itself.'
+            unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+            npx tauri build --bundles "$bundles" -- --profile dist
+          fi
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          mkdir -p dist
+          dir="${CARGO_TARGET_DIR:-target}"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
+          find "$dir/dist/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;
+          ls -la dist
+
+      # Gitea Actions supports upload/download-artifact v3.
+      - uses: actions/upload-artifact@v3
+        with:
+          name: spotter-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [bundle, rust-lint, rust-test, macos, licences, frontend, e2e]
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Release notes (git-cliff)
+        run: |
+          cargo install git-cliff --locked
+          git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+
+      # latest.json for the updater: version, notes, pub_date and, per platform, the installer's URL, signature and
+      # size. Installed apps fetch releases/download/latest/latest.json (the latest non-pre-release release).
+      - name: Updater manifest (latest.json)
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          node --test scripts/release/latest-json.test.mjs
+          if ! find artifacts -name '*.sig' | grep -q .; then
+            echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
+            exit 0
+          fi
+          node scripts/release/latest-json.mjs --dir artifacts --version "$TAG" --notes artifacts/RELEASE_NOTES.md \
+            --base-url "$BASE_URL" --out artifacts/latest.json
+          find artifacts -name '*.sig' -delete
+          cat artifacts/latest.json
+
+      - uses: https://gitea.com/actions/release-action@main
+        with:
+          files: artifacts/**/*
+          api_key: ${{ secrets.RELEASE_TOKEN }}
