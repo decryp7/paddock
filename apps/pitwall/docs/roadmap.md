@@ -87,3 +87,19 @@ Debrief uses Pitwall when it is running and keeps its built-in AI as the default
 - Property tests ("never panics") and fuzz targets for every parser; mutation testing to measure test strength.
 - Below-normal process priority for engines is applied on Windows only; decide the macOS and Linux equivalent.
 - Pin updates for llama.cpp as reviewed changes that pass the end-to-end test.
+
+## Next (hand-off, 2026-10-22)
+
+1. **Linux CI** (`rust tests + core coverage (linux)`): the two end-to-end tests that start a real child process
+   (`an_engine_pack_serves_a_model_through_a_real_child_process` and `a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry`)
+   fail in the container with `Permission denied (os error 13)` when launching `target/debug/pitwall-server`; the first one
+   predates the crash-handling work. Probably the workspace/target mount is `noexec` or the binary is not executable for the
+   container user: run the tests with `CARGO_TARGET_DIR` on an executable path (or copy the binary to a temp dir inside the
+   test), then re-run the whole job. Everything after those tests (core coverage guard >= 99 % lines, which is 99.4 % locally)
+   has not been seen green on Linux yet. Windows, macOS, format and clippy, licences and privacy, frontend and Playwright, and
+   the three bundles were green on run 6056.
+2. **Design review P2/P3** from `design-review-pitwall.md` (sidebar header pill, quick-action row, history legend and event
+   lane, playground chips, disk bar labels, tray sizes, page subtitles) and fresh light and dark screenshots of every screen.
+3. Per-app usage over time and the app detail view; model update notices; model presets and aliases; parallel slots with their
+   memory cost; the `pitwall` CLI; engine pin and capability gating (see the table above).
+4. Verify on real Windows and Linux machines: the OS pressure readers, the service flows, single instance, the first-run question.
