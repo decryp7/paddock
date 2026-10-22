@@ -49,6 +49,12 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-28 | Flight recorder | in progress |
 | WP-29 | Diagnostics bundle | model in progress |
 | WP-30 | Suite tie-ins (Spotter, Debrief, Pitcrew, Pitwall) | planned |
+| WP-31 | Session recording to CSV/Parquet with a built-in viewer | planned |
+| WP-32 | Prometheus `/metrics` endpoint on the local API (loopback, authenticated like the app; ADR 0014) | planned |
+| WP-33 | Right-click "search this file's hash on VirusTotal" (opens the browser only; nothing is uploaded) | planned |
+| WP-34 | Startup manager filter: hide OS and signed entries | planned |
+| WP-35 | Network change events (Wi-Fi joins, VPN up/down, IP changes) on the timeline | planned |
+| WP-36 | Taming acceptance rules: temporary, foreground-aware, self-restoring, with measured proof | planned |
 
 Suggested order: foundation gaps; WP-01 to WP-05; WP-06 to WP-08 and WP-26; the in-progress items as their agents report;
 WP-09 to WP-17; WP-23 to WP-25, WP-27 to WP-30.
@@ -369,6 +375,26 @@ Each is small and independent; all are core logic plus an adapter plus a card or
   anywhere.
 - **Depends on.** WP-06, WP-26, WP-28, WP-13 (inventory). **Touches.** `dyno-core` redaction (shared with WP-09), agent export,
   UI dialog.
+
+## WP-31 to WP-36 (from competitive research)
+
+- **WP-31 Session recording.** Record chosen metrics to CSV or Parquet (start/stop, bounded size), with a built-in viewer
+  (chart + table, open an old file). Touches: agent recorder/export, UI viewer page. Acceptance: a 10-minute session round
+  trips and charts; file size is bounded; Parquet opens in Debrief.
+- **WP-32 Prometheus endpoint.** `/metrics` on the optional local API (WP-16): 127.0.0.1 by default, token-authenticated,
+  text exposition format, stable metric names. Acceptance: `promtool check metrics` passes; off by default.
+- **WP-33 VirusTotal hash search.** Context menu on a process or file: compute the SHA-256 locally (once, cached), open the
+  browser at the VirusTotal file page for that hash. Nothing is uploaded and the hash is shown before opening.
+- **WP-34 Startup filter.** Hide OS-owned and signed entries in the startup manager (a toggle, remembered), counts shown.
+- **WP-35 Network change events.** Wi-Fi joins/leaves, VPN up/down and IP changes recorded as timeline events (per-OS
+  adapters in dyno-platform; no polling of the whole network stack: use OS change notifications or a slow check).
+- **WP-36 Taming acceptance rules.** A rule can be temporary (expires), foreground-aware (never touches the app in front),
+  self-restoring (releases when the condition ends or Dyno exits) and proves its effect (CPU before/after measured and
+  shown in the activity entry). Builds on the rules engine (ADR 0004).
+
+**Sampling lesson (applied):** polling the macOS volume-space API often can stall Finder (an iStat Menus experience). The
+common sensors now refresh free space at most once a minute; any new feature that touches volume space, the network stack
+or other shared OS services must poll rarely or use change notifications.
 
 ## WP-30 Suite tie-ins
 
