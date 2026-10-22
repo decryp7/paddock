@@ -17,6 +17,7 @@ pub mod parse;
 pub mod process;
 pub mod processes;
 pub mod sensors;
+pub mod tuning;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_control;

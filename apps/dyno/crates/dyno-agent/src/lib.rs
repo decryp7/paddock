@@ -20,6 +20,7 @@ pub mod sampler;
 pub mod server;
 pub mod service;
 pub mod store;
+pub mod tuning;
 
 use agent::Shared;
 use std::sync::Arc;

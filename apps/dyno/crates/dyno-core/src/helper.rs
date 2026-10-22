@@ -18,6 +18,67 @@ pub enum MachineStartup {
     StartupFolder,
 }
 
+/// A Linux power profile (power-profiles-daemon).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PowerProfile {
+    /// Saves power.
+    PowerSaver,
+    /// The default.
+    Balanced,
+    /// Favours speed.
+    Performance,
+}
+
+impl PowerProfile {
+    /// The name `powerprofilesctl` uses.
+    pub fn tool_name(self) -> &'static str {
+        match self {
+            PowerProfile::PowerSaver => "power-saver",
+            PowerProfile::Balanced => "balanced",
+            PowerProfile::Performance => "performance",
+        }
+    }
+
+    /// The profile a `powerprofilesctl get` answer names.
+    pub fn from_tool_name(s: &str) -> Option<PowerProfile> {
+        [PowerProfile::PowerSaver, PowerProfile::Balanced, PowerProfile::Performance]
+            .into_iter()
+            .find(|p| p.tool_name() == s.trim())
+    }
+
+    /// The name shown to the user.
+    pub fn label(self) -> &'static str {
+        match self {
+            PowerProfile::PowerSaver => "Power saver",
+            PowerProfile::Balanced => "Balanced",
+            PowerProfile::Performance => "Performance",
+        }
+    }
+}
+
+/// Which power source a sleep timer applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SleepSource {
+    /// Plugged in.
+    Ac,
+    /// On battery.
+    Battery,
+}
+
+/// The operating systems tuning knows how to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TuningHost {
+    /// Windows.
+    Windows,
+    /// macOS.
+    Macos,
+    /// Linux.
+    Linux,
+}
+
 /// One system change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +106,19 @@ pub enum HelperAction {
     },
     /// Turns macOS Low Power Mode on or off (needs administrator rights).
     SetLowPowerMode(bool),
+    /// Sets the Linux power profile.
+    SetPowerProfile(PowerProfile),
+    /// Sets after how many minutes of idling the computer sleeps (0 = never) on one power source.
+    SetSleepMinutes {
+        /// Which power source.
+        source: SleepSource,
+        /// Minutes, 0 for never.
+        minutes: u32,
+    },
+    /// Turns hibernation (and its hibernation file) on or off (needs administrator rights).
+    SetHibernate(bool),
+    /// Stops charging the battery at this percentage (needs administrator rights).
+    SetChargeLimit(u8),
     /// Enables or disables an all-users startup entry by name (needs administrator rights).
     SetMachineStartupEnabled {
         /// Where.
@@ -55,6 +129,9 @@ pub enum HelperAction {
         enabled: bool,
     },
 }
+
+/// The longest sleep timer one action may set (a day).
+pub const MAX_SLEEP_MINUTES: u32 = 1440;
 
 /// The most folders one action may name.
 pub const MAX_PATHS: usize = 64;
@@ -91,6 +168,10 @@ impl HelperAction {
         match self {
             HelperAction::SetPowerScheme(g) if !is_guid(g) => Err(format!("{g} is not a power scheme id.")),
             HelperAction::SetVisualEffects(v) if *v > 3 => Err("Visual effects setting is 0–3.".into()),
+            HelperAction::SetSleepMinutes { minutes, .. } if *minutes > MAX_SLEEP_MINUTES => {
+                Err(format!("Sleep after at most {MAX_SLEEP_MINUTES} minutes (0 means never)."))
+            }
+            HelperAction::SetChargeLimit(p) if !(50..=100).contains(p) => Err("A charge limit is between 50 and 100 percent.".into()),
             HelperAction::SetIndexingExcluded { paths, .. } | HelperAction::SetDefenderExcluded { paths, .. } => check_paths(paths),
             HelperAction::SetMachineStartupEnabled { name, .. }
                 if name.trim().is_empty() || name.len() > 260 || name.contains(['\\', '/', '\0']) =>
@@ -105,8 +186,44 @@ impl HelperAction {
     pub fn needs_admin(&self) -> bool {
         matches!(
             self,
-            HelperAction::SetDefenderExcluded { .. } | HelperAction::SetLowPowerMode(_) | HelperAction::SetMachineStartupEnabled { .. }
+            HelperAction::SetDefenderExcluded { .. }
+                | HelperAction::SetLowPowerMode(_)
+                | HelperAction::SetHibernate(_)
+                | HelperAction::SetChargeLimit(_)
+                | HelperAction::SetMachineStartupEnabled { .. }
         )
+    }
+
+    /// Whether it needs administrator rights on `host`: [`Self::needs_admin`], plus what only some systems guard
+    /// (macOS `pmset` changes the machine-wide sleep timer; Windows `powercfg /change` edits the user's scheme).
+    pub fn needs_admin_on(&self, host: TuningHost) -> bool {
+        self.needs_admin() || (host == TuningHost::Macos && matches!(self, HelperAction::SetSleepMinutes { .. }))
+    }
+
+    /// The setting this action sets, as (name, value after applying). A read of the same setting after the action ran
+    /// gives the same pair; comparing a later read with it tells whether something else changed the setting since.
+    pub fn setting(&self) -> (String, String) {
+        let on = |b: &bool| if *b { "on" } else { "off" }.to_string();
+        let per_path = |paths: &[String], excluded: bool| vec![if excluded { "excluded" } else { "included" }; paths.len()].join(",");
+        match self {
+            HelperAction::SetPowerScheme(g) => ("powerScheme".into(), g.to_lowercase()),
+            HelperAction::SetVisualEffects(v) => ("visualEffects".into(), v.to_string()),
+            HelperAction::SetBackgroundAppsDisabled(b) => ("backgroundApps".into(), if *b { "1" } else { "0" }.into()),
+            HelperAction::SetIndexingExcluded { paths, excluded } => (format!("indexing:{}", paths.join("|")), per_path(paths, *excluded)),
+            HelperAction::SetDefenderExcluded { paths, excluded } => (format!("defender:{}", paths.join("|")), per_path(paths, *excluded)),
+            HelperAction::SetLowPowerMode(b) => ("lowPowerMode".into(), on(b)),
+            HelperAction::SetPowerProfile(p) => ("powerProfile".into(), p.tool_name().into()),
+            HelperAction::SetSleepMinutes { source, minutes } => (
+                match source {
+                    SleepSource::Ac => "sleep:ac".into(),
+                    SleepSource::Battery => "sleep:battery".into(),
+                },
+                minutes.to_string(),
+            ),
+            HelperAction::SetHibernate(b) => ("hibernate".into(), on(b)),
+            HelperAction::SetChargeLimit(p) => ("chargeLimit".into(), p.to_string()),
+            HelperAction::SetMachineStartupEnabled { name, enabled, .. } => (format!("startup:{name}"), on(enabled)),
+        }
     }
 
     /// What it changes, in words, one line per change.
@@ -138,6 +255,27 @@ impl HelperAction {
                 })
                 .collect(),
             HelperAction::SetLowPowerMode(on) => vec![format!("Turn Low Power Mode {}", if *on { "on" } else { "off" })],
+            HelperAction::SetPowerProfile(p) => vec![format!("Switch the power profile to {}", p.label())],
+            HelperAction::SetSleepMinutes { source, minutes } => {
+                let when = match source {
+                    SleepSource::Ac => "plugged in",
+                    SleepSource::Battery => "on battery",
+                };
+                vec![match minutes {
+                    0 => format!("Never sleep when {when}"),
+                    m => format!("Sleep after {m} minute{} of idling when {when}", if *m == 1 { "" } else { "s" }),
+                }]
+            }
+            HelperAction::SetHibernate(on) => vec![format!(
+                "Turn hibernation {} ({})",
+                if *on { "on" } else { "off" },
+                if *on {
+                    "reserves disk space for the hibernation file"
+                } else {
+                    "frees the hibernation file"
+                }
+            )],
+            HelperAction::SetChargeLimit(p) => vec![format!("Stop charging the battery at {p}%")],
             HelperAction::SetMachineStartupEnabled { name, enabled, .. } => {
                 vec![format!(
                     "{} {name} at login for every user",
@@ -221,6 +359,72 @@ mod tests {
     }
 
     #[test]
+    fn settings_name_what_an_action_leaves_behind() {
+        assert_eq!(
+            HelperAction::SetPowerScheme("ABC".into()).setting(),
+            ("powerScheme".into(), "abc".into())
+        );
+        let idx = HelperAction::SetIndexingExcluded {
+            paths: vec!["/a".into(), "/b".into()],
+            excluded: true,
+        };
+        assert_eq!(idx.setting(), ("indexing:/a|/b".into(), "excluded,excluded".into()));
+        assert_eq!(HelperAction::SetHibernate(true).setting().1, "on");
+        assert_eq!(HelperAction::SetBackgroundAppsDisabled(true).setting().1, "1");
+        assert_eq!(HelperAction::SetChargeLimit(80).setting(), ("chargeLimit".into(), "80".into()));
+        assert_eq!(HelperAction::SetPowerProfile(PowerProfile::Balanced).setting().1, "balanced");
+        assert_eq!(HelperAction::SetVisualEffects(2).setting().1, "2");
+        assert_eq!(HelperAction::SetLowPowerMode(false).setting().1, "off");
+        assert_eq!(
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Battery,
+                minutes: 9
+            }
+            .setting(),
+            ("sleep:battery".into(), "9".into())
+        );
+        let d = HelperAction::SetDefenderExcluded {
+            paths: vec!["/a".into()],
+            excluded: false,
+        };
+        assert_eq!(d.setting().1, "included");
+        let m = HelperAction::SetMachineStartupEnabled {
+            location: MachineStartup::RunKey,
+            name: "x".into(),
+            enabled: true,
+        };
+        assert_eq!(m.setting(), ("startup:x".into(), "on".into()));
+        assert_eq!(
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Ac,
+                minutes: 0
+            }
+            .setting()
+            .0,
+            "sleep:ac"
+        );
+    }
+
+    #[test]
+    fn new_actions_validate_and_know_their_rights() {
+        let sleep = |minutes| HelperAction::SetSleepMinutes {
+            source: SleepSource::Ac,
+            minutes,
+        };
+        assert!(sleep(0).validate().is_ok() && sleep(MAX_SLEEP_MINUTES).validate().is_ok());
+        assert!(sleep(MAX_SLEEP_MINUTES + 1).validate().is_err());
+        assert!(HelperAction::SetChargeLimit(49).validate().is_err());
+        assert!(HelperAction::SetChargeLimit(101).validate().is_err());
+        assert!(HelperAction::SetChargeLimit(80).validate().is_ok());
+        assert!(!sleep(5).needs_admin_on(TuningHost::Windows));
+        assert!(sleep(5).needs_admin_on(TuningHost::Macos));
+        assert!(HelperAction::SetHibernate(false).needs_admin_on(TuningHost::Linux));
+        assert_eq!(PowerProfile::from_tool_name("power-saver\n"), Some(PowerProfile::PowerSaver));
+        assert_eq!(PowerProfile::from_tool_name("turbo"), None);
+        assert_eq!(PowerProfile::Performance.label(), "Performance");
+    }
+
+    #[test]
     fn previews_and_rights() {
         let all = vec![
             HelperAction::SetPowerScheme(BALANCED_SCHEME.into()),
@@ -239,6 +443,22 @@ mod tests {
                 excluded: false,
             },
             HelperAction::SetLowPowerMode(false),
+            HelperAction::SetPowerProfile(PowerProfile::Balanced),
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Battery,
+                minutes: 0,
+            },
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Ac,
+                minutes: 1,
+            },
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Ac,
+                minutes: 15,
+            },
+            HelperAction::SetHibernate(true),
+            HelperAction::SetHibernate(false),
+            HelperAction::SetChargeLimit(80),
             HelperAction::SetMachineStartupEnabled {
                 location: MachineStartup::StartupFolder,
                 name: "x".into(),
@@ -248,7 +468,7 @@ mod tests {
         for a in &all {
             assert!(!a.preview().is_empty());
         }
-        assert_eq!(all.iter().filter(|a| a.needs_admin()).count(), 3);
+        assert_eq!(all.iter().filter(|a| a.needs_admin()).count(), 6);
         assert_eq!(all[0].preview()[0], "Activate the power plan Balanced");
         assert_eq!(scheme_name(POWER_SAVER_SCHEME), "Power saver");
         assert_eq!(scheme_name("8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"), "High performance");

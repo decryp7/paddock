@@ -177,6 +177,8 @@ pub struct Ports {
     pub activity: Mutex<Box<dyn UserActivity>>,
     /// Startup entries.
     pub startup: Mutex<Box<dyn StartupItems>>,
+    /// The few system settings tuning may change (observe-only until a click).
+    pub tuning: Mutex<Box<dyn dyno_core::ports::TuningSystem>>,
 }
 
 /// Shows a file in the file manager (injectable so tests do not open Finder).
@@ -305,6 +307,7 @@ impl Shared {
                 facts: Mutex::new(facts),
                 activity: Mutex::new(activity),
                 startup: Mutex::new(startup),
+                tuning: Mutex::new(Box::new(dyno_platform::tuning::os_tuner())),
             },
             subs: Mutex::new(Vec::new()),
             reveal,

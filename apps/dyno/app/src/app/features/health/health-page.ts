@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import type { ImpactRating, StartupEntry, StartupState } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatSeconds } from '../../shared/format';
@@ -18,46 +19,22 @@ export function startupChoice(s: StartupState): 'enabled' | 'delayed' | 'disable
   return typeof s === 'string' ? s : 'delayed';
 }
 
-/** Health and tuning: the score and its reasons, reversible tuning suggestions and the startup manager. Changes happen only on a click and are logged and undoable. */
+/** Health: the score and its reasons, and the startup manager. Changes happen only on a click and are logged and undoable. Tuning suggestions have their own page. */
 @Component({
   selector: 'dy-health-page',
-  imports: [AsyncState, HealthHero, Icon, Switch],
+  imports: [AsyncState, HealthHero, Icon, RouterLink, Switch],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
         <div class="titles">
-          <h1>Health &amp; tuning</h1>
-          <p>A score with reasons, suggestions you can undo, and what slows your sign-in. Dyno changes nothing until you click.</p>
+          <h1>Health</h1>
+          <p>A score with reasons, and what slows your sign-in. Dyno changes nothing until you click.</p>
         </div>
+        <a class="btn" routerLink="/tuning"><dy-icon name="sparkle" />Tuning suggestions</a>
       </header>
 
       <dy-health-hero />
-
-      <section class="card" aria-label="Tuning suggestions">
-        <div class="card-head">
-          <h2><dy-icon name="sparkle" /> Tuning suggestions</h2>
-          @if (safe().length > 0) {
-            <button type="button" class="btn primary sm" [disabled]="busyAny()" (click)="applyAllSafe()">Apply all safe ({{ safe().length }})</button>
-          }
-        </div>
-        <dy-async [loaded]="store.tuningLoaded()" [error]="store.tuningError()" [empty]="store.tuning().length === 0" emptyTitle="Nothing to tune" emptyText="Dyno has no suggestions for this PC right now." what="tuning suggestions" [rows]="3" (retry)="store.loadTuning()">
-          <ul class="tunes">
-            @for (t of store.tuning(); track t.id) {
-              <li>
-                <div class="txt">
-                  <strong>{{ t.title }}@if (t.needsAdmin) { <dy-icon class="shield" name="shield" label="Asks for administrator approval through the Dyno helper" /> }</strong>
-                  <p>{{ t.explanation }}</p>
-                </div>
-                <span class="chg" [title]="'Now ' + t.current + ', suggested ' + t.proposed"><span class="truncate">{{ t.current }}</span><dy-icon name="arrow-right" /><span class="truncate">{{ t.proposed }}</span></span>
-                <button type="button" class="btn" [disabled]="busy(t.id)" [attr.aria-label]="(t.applied ? 'Revert ' : 'Apply ') + t.title" (click)="store.setTuning(t.id, !t.applied)">
-                  {{ t.applied ? 'Revert' : 'Apply' }}
-                </button>
-              </li>
-            }
-          </ul>
-        </dy-async>
-      </section>
 
       <section class="card" aria-label="Startup manager">
         <div class="card-head"><h2><dy-icon name="power" /> Startup manager</h2></div>
@@ -94,15 +71,6 @@ export function startupChoice(s: StartupState): 'enabled' | 'delayed' | 'disable
   styles: `
     :host { display: block; }
     .page { display: grid; gap: var(--sp-4); align-content: start; }
-    .card-head .btn { margin-left: auto; }
-    .tunes { list-style: none; margin: 0; padding: 0 var(--sp-4) var(--sp-2); display: grid; }
-    .tunes li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px) auto; gap: var(--sp-4); align-items: center; padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
-    .tunes li:first-child { border-top: 0; }
-    .tunes p { margin: 2px 0 0; color: var(--text-2); font-size: var(--fs-sm); }
-    .chg { display: inline-flex; gap: var(--sp-2); align-items: center; min-width: 0; color: var(--text-2); font-size: var(--fs-sm); }
-    .chg dy-icon { --icon-size: 14px; color: var(--text-3); flex: none; }
-    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .shield { --icon-size: 13px; color: var(--text-3); margin-left: var(--sp-1); vertical-align: -2px; }
     .table { margin: 0 var(--sp-4) var(--sp-3); width: calc(100% - 2 * var(--sp-4)); }
     .nowrap { white-space: nowrap; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--sp-2); background: var(--border-strong); }
@@ -124,21 +92,11 @@ export class HealthPage implements OnInit {
 
   ngOnInit(): void {
     void this.store.loadReport();
-    void this.store.loadTuning();
     void this.store.loadStartup();
   }
 
-  /** Suggestions that can be applied in one go: not yet applied and not needing administrator approval. */
-  protected readonly safe = computed(() => this.store.tuning().filter((t) => !t.applied && !t.needsAdmin));
   /** Highest startup impact first, then by name, so what slows sign-in most is on top. */
   protected readonly sorted = computed(() => [...this.store.startup()].sort((a, b) => IMPACT_ORDER[b.impact.rating] - IMPACT_ORDER[a.impact.rating] || a.name.localeCompare(b.name)));
-  protected busyAny(): boolean {
-    return this.store.busy().length > 0;
-  }
-  protected async applyAllSafe(): Promise<void> {
-    for (const t of this.safe()) await this.store.setTuning(t.id, true);
-  }
-
   protected busy(id: string): boolean {
     return this.store.busy().includes(id);
   }

@@ -1,5 +1,6 @@
 //! The activity log: every action Dyno took (by a rule or a click), with what is needed to undo it.
 
+use crate::helper::HelperAction;
 use crate::process::{Priority, ProcessAction, ProcessRef};
 use crate::startup::StartupState;
 use crate::time::{Timestamp, DAY};
@@ -87,6 +88,12 @@ pub enum UndoRecord {
     Tuning {
         /// Suggestion id.
         id: String,
+        /// The change that was applied (its setting is read again before undoing).
+        apply: HelperAction,
+        /// The change that puts the previous setting back.
+        revert: HelperAction,
+        /// The setting as Dyno left it; a different value later means someone changed it since.
+        after: String,
     },
     /// Restore a quarantined cleanup.
     Quarantine {
@@ -215,7 +222,12 @@ mod tests {
         };
         assert_eq!(undo_state(&q, false, now, |_| true), UndoState::Available);
         assert_eq!(undo_state(&q, false, Timestamp(8 * DAY), |_| true), UndoState::Expired);
-        let t = UndoRecord::Tuning { id: "x".into() };
+        let t = UndoRecord::Tuning {
+            id: "x".into(),
+            apply: HelperAction::SetHibernate(false),
+            revert: HelperAction::SetHibernate(true),
+            after: "off".into(),
+        };
         assert_eq!(undo_state(&t, false, now, |_| false), UndoState::Available);
         let s = UndoRecord::Startup {
             entry_id: "e".into(),

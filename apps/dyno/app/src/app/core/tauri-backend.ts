@@ -304,8 +304,8 @@ export class TauriBackend implements DynoBackend {
     return this.request({ applyTuning: { id } });
   }
 
-  revertTuning(id: string): Promise<ActivityEntry> {
-    return this.request({ revertTuning: { id } });
+  revertTuning(id: string, force = false): Promise<ActivityEntry> {
+    return this.request({ revertTuning: { id, force } });
   }
 
   startupEntries(): Promise<StartupEntry[]> {

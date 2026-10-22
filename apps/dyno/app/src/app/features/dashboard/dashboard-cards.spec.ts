@@ -7,7 +7,7 @@ import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
 import { DiagnosisStore } from '../../state/diagnosis.store';
-import { HealthStore } from '../../state/health.store';
+import { TuningStore } from '../../state/tuning.store';
 import { LiveStore } from '../../state/live.store';
 import { AnomaliesCallout } from './anomalies-callout';
 import { DiagnosisCard } from './diagnosis-card';
@@ -226,7 +226,7 @@ describe('HealthHero', () => {
   it('opens the fix dialog and applies the tuning only after confirming', async () => {
     const { mock } = env();
     vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, { tuning: 'power-plan' })]));
-    const apply = vi.spyOn(TestBed.inject(HealthStore), 'setTuning').mockResolvedValue(true);
+    const apply = vi.spyOn(TestBed.inject(TuningStore), 'apply').mockResolvedValue(true);
     const f = TestBed.createComponent(HealthHero);
     await settle(f);
     byText(f.nativeElement, 'Fix a').click();
@@ -244,7 +244,7 @@ describe('HealthHero', () => {
     const dlg2 = document.querySelector('dy-fix-dialog') as HTMLElement;
     [...dlg2.querySelectorAll('button.primary')].find((b) => b.textContent?.includes('Fix a'))!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle(f);
-    expect(apply).toHaveBeenCalledWith('power-plan', true);
+    expect(apply).toHaveBeenCalledWith('power-plan');
   });
 
   it.each([
