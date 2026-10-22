@@ -48,6 +48,12 @@ import { confirmAction } from './ui/confirm-dialog';
             <mat-icon svgIcon="pc:pause-circle" aria-hidden="true" />Drain and pause
           </button>
         }
+        <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="openTab('processes')">
+          <mat-icon svgIcon="pc:cpu" aria-hidden="true" />Processes…
+        </button>
+        <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="openTab('config')">
+          <mat-icon svgIcon="pc:file-text" aria-hidden="true" />Configuration…
+        </button>
         <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="openLogs()">
           <mat-icon svgIcon="pc:logs" aria-hidden="true" />Open logs
         </button>
@@ -90,6 +96,10 @@ export class RunnerActions {
 
   protected act(command: RunnerCommand): void {
     void this.store.act(this.runner().name, command);
+  }
+
+  protected openTab(tab: 'processes' | 'config'): void {
+    void this.router.navigate(['/runners', this.runner().name], { queryParams: { tab } });
   }
 
   protected openLogs(): void {

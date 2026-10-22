@@ -43,6 +43,8 @@ export interface PitcrewBackend {
 
   /** Subscribes to requests from the shell to show a page (tray actions, `pitcrew://navigate`); returns the unsubscribe. */
   navigations(listener: (route: string) => void): () => void;
+  /** The page the shell asked for before this window listened, once (`null` when there is none). */
+  takePendingNavigation(): Promise<string | null>;
 
   // Runner actions (the service waits for the current job where needed).
   start(runner: string): Promise<void>;

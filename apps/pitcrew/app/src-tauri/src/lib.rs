@@ -29,11 +29,13 @@ pub fn run() {
         ))
         .plugin(updater::plugin())
         .manage(client.clone())
+        .manage(events::PendingNav::default())
         .manage(events::Latest::default())
         .manage(events::Actions::new(client))
         .manage(updater::Pending::default())
         .invoke_handler(tauri::generate_handler![
             commands::platform_name,
+            commands::take_pending_navigation,
             commands::runner_status,
             commands::connection_state,
             commands::runner_action,
@@ -73,6 +75,17 @@ pub fn run() {
             commands::reveal_logs,
         ])
         .setup(|app| {
+            // After an update launchd may refuse the registered service (a rebuilt app has a new code identity on
+            // macOS): register it again in the background, so the runners come back without the user's help.
+            #[cfg(target_os = "macos")]
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                match service_install::repair_registration() {
+                    Ok(true) => eprintln!("Pitcrew: registered the service again (launchd refused the old registration)"),
+                    Ok(false) => {}
+                    Err(e) => eprintln!("Pitcrew: the service could not be registered again: {}", e.message),
+                }
+            });
             if let Err(e) = tray::create(app.handle()) {
                 // Linux without a status-notifier host or libayatana-appindicator: the window is then the only way
                 // in, so closing it must exit (see `tray::keeps_running`).

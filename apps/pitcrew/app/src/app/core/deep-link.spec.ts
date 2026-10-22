@@ -11,6 +11,13 @@ describe('safeRoute', () => {
     }
   });
 
+  it('opens a section of a runner page', () => {
+    expect(safeRoute('/runners/build-win/processes')).toBe('/runners/build-win?tab=processes');
+    expect(safeRoute('/runners/mac/config')).toBe('/runners/mac?tab=config');
+    expect(safeRoute('/runners/mac/updates')).toBe('/runners/mac?tab=updates');
+    expect(safeRoute('/runners/mac/disk')).toBe('/runners/mac?tab=disk');
+  });
+
   it('refuses anything else', () => {
     for (const bad of [
       '',
@@ -20,6 +27,9 @@ describe('safeRoute', () => {
       '/unknown',
       '/settings/x',
       '/runners/a/b',
+      '/runners/a/processes/x',
+      '/logs/a/processes',
+      '/runners/a/overview?x=1',
       '/runners/../settings',
       '/logs/bad name',
       '/logs/-x',
@@ -48,6 +58,21 @@ describe('provideDeepLinks', () => {
     env.destroy();
     mock.requestNavigation('/settings');
     expect(go).toHaveBeenCalledTimes(1);
+    mock.dispose();
+  });
+
+  it('opens the page the tray asked for before the window listened', async () => {
+    const mock = makeMock();
+    mock.setPendingNavigation('/runners/build-win/processes');
+    TestBed.configureTestingModule({ providers: appProviders(mock) });
+    const router = TestBed.inject(Router);
+    const go = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+    const env = createEnvironmentInjector([provideDeepLinks()], TestBed.inject(EnvironmentInjector));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(go.mock.calls).toEqual([['/runners/build-win?tab=processes']]);
+    expect(await mock.takePendingNavigation()).toBeNull();
+    env.destroy();
     mock.dispose();
   });
 });

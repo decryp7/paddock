@@ -140,6 +140,12 @@
     <button type="button" class="btn sm" (click)="store.clean(r.name)" [disabled]="!!busy()">
       <mat-icon svgIcon="pc:broom" aria-hidden="true" [class.pulse]="busy() === 'clean'" />Clean now
     </button>
+    <a class="btn sm ghost" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'processes' }">
+      <mat-icon svgIcon="pc:cpu" aria-hidden="true" />Processes
+    </a>
+    <a class="btn sm ghost" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'config' }">
+      <mat-icon svgIcon="pc:file-text" aria-hidden="true" />Configure
+    </a>
     <a class="btn sm ghost logs" [routerLink]="['/logs']" [queryParams]="{ runner: r.name }">
       <mat-icon svgIcon="pc:logs" aria-hidden="true" />Logs
     </a>

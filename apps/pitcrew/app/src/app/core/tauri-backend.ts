@@ -121,6 +121,10 @@ export class TauriBackend implements PitcrewBackend {
     };
   }
 
+  takePendingNavigation(): Promise<string | null> {
+    return this.run('take_pending_navigation');
+  }
+
   navigations(listener: (route: string) => void): () => void {
     let unlisten: UnlistenFn | null = null;
     let closed = false;

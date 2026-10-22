@@ -177,6 +177,12 @@ pub async fn runner_status(client: State<'_, SharedClient>) -> Result<StatusRepl
     blocking(move || status(c.as_ref())).await
 }
 
+/// `take_pending_navigation`: the page the tray asked for before this window listened (once).
+#[tauri::command]
+pub fn take_pending_navigation(pending: State<'_, crate::events::PendingNav>) -> Option<String> {
+    pending.take()
+}
+
 /// `connection_state`.
 #[tauri::command]
 pub fn connection_state(latest: State<'_, Latest>) -> ConnectionState {

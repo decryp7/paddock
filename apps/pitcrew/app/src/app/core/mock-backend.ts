@@ -145,6 +145,18 @@ export class MockBackend implements PitcrewBackend {
   }
 
   private readonly navigationListeners = new Set<(route: string) => void>();
+  private pendingNavigation: string | null = null;
+
+  async takePendingNavigation(): Promise<string | null> {
+    const p = this.pendingNavigation;
+    this.pendingNavigation = null;
+    return p;
+  }
+
+  /** Simulates the tray opening the window for a page before it listens (tests). */
+  setPendingNavigation(route: string): void {
+    this.pendingNavigation = route;
+  }
 
   navigations(listener: (route: string) => void): () => void {
     this.navigationListeners.add(listener);

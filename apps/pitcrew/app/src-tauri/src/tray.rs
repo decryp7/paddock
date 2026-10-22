@@ -226,6 +226,8 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, runners: &[RunnerSnapshot], connec
             ("stop", "Stop after the current job", running),
             ("applyUpdate", "Update now", r.update_target.is_some()),
             ("clean", "Clean up now", true),
+            ("processes", "Processes…", true),
+            ("config", "Configuration…", true),
             ("logs", "Open logs", true),
         ];
         for (action, label, enabled) in items {
@@ -272,7 +274,7 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 QUIT => app.exit(0),
                 _ => {
                     if let Some((action, runner)) = parse_action_id(id) {
-                        if action == "logs" {
+                        if crate::events::page_route(action, runner).is_some() {
                             show_main(app);
                         }
                         app.state::<Actions>().run(app, action, runner);

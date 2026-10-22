@@ -211,6 +211,63 @@ mod imp {
         unsafe { service().unregisterAndReturnError() }
             .map_err(|e| CommandError::internal(format!("the launch agent could not be removed: {}", e.localizedDescription())))
     }
+
+    /// After the app was updated, launchd may refuse the registered service (see [`super::stale_registration`]).
+    /// When the service is registered but does not answer and launchd reports a stale registration, registers it
+    /// again. Returns whether it did. macOS may ask for approval again; [`state`] then says so.
+    pub fn repair_registration() -> Result<bool, CommandError> {
+        // SAFETY: a property read on a valid object.
+        let registered = unsafe { service().status() } == SMAppServiceStatus::Enabled;
+        if !registered
+            || crate::service_client::LocalServiceClient
+                .request(pitcrew_core::protocol::Request::Status)
+                .is_ok()
+        {
+            return Ok(false);
+        }
+        let Some(report) = launchctl_print() else { return Ok(false) };
+        if !super::stale_registration(&report) {
+            return Ok(false);
+        }
+        // Unregistering a stale job can fail when launchd already dropped it; registering again is what matters.
+        let _ = uninstall();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        install().map(|()| true)
+    }
+
+    /// `launchctl print gui/<uid>/<label>`, bounded to a few seconds; `None` when it cannot be read.
+    fn launchctl_print() -> Option<String> {
+        use std::os::unix::fs::MetadataExt;
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        let home = std::env::var_os("HOME")?;
+        let uid = std::fs::metadata(home).ok()?.uid();
+        let target = format!("gui/{uid}/{}", pitcrew_core::service_spec::LAUNCHD_LABEL);
+        // macOS only: no console window to hide, and the wait below is bounded.
+        #[allow(clippy::disallowed_methods)]
+        let mut child = Command::new("/bin/launchctl")
+            .args(["print", &target])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+        let mut out = String::new();
+        std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
+        Some(out)
+    }
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
@@ -311,3 +368,31 @@ mod imp {
 }
 
 pub use imp::{install, state, uninstall};
+
+#[cfg(target_os = "macos")]
+pub use imp::repair_registration;
+
+/// Whether `launchctl print` of the launch agent shows a registration launchd can no longer start. macOS keeps the
+/// code requirement of the binary that was approved; a rebuilt, ad-hoc signed app has another identity, so launchd
+/// refuses the new service ("needs LWCR update", spawn failed, exit 78 EX_CONFIG) until it is registered again.
+pub fn stale_registration(launchctl_print: &str) -> bool {
+    launchctl_print.contains("needs LWCR update")
+        || launchctl_print.contains("job state = spawn failed")
+        || launchctl_print.contains("last exit code = 78")
+}
+
+#[cfg(test)]
+mod stale_tests {
+    use super::stale_registration;
+
+    #[test]
+    fn a_registration_launchd_cannot_start_is_stale() {
+        let failed = "\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n\tjob state = spawn failed\n\tproperties = partial import | keepalive | needs LWCR update | has LWCR\n";
+        assert!(stale_registration(failed));
+        assert!(stale_registration("\tproperties = keepalive | needs LWCR update\n"));
+        let healthy =
+            "\tstate = running\n\tpid = 88412\n\tlast exit code = (never exited)\n\tproperties = keepalive | runatload | has LWCR\n";
+        assert!(!stale_registration(healthy));
+        assert!(!stale_registration(""));
+    }
+}

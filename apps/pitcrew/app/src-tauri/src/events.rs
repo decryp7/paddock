@@ -49,6 +49,33 @@ impl Latest {
     }
 }
 
+/// The page a tray action opens, if it opens one: the runner's logs, processes or configuration.
+pub fn page_route(action: &str, runner: &str) -> Option<String> {
+    match action {
+        "logs" => Some(format!("/logs/{runner}")),
+        "processes" => Some(format!("/runners/{runner}/processes")),
+        "config" => Some(format!("/runners/{runner}/config")),
+        _ => None,
+    }
+}
+
+/// The last page the shell asked the window to open, until a window takes it (one created by that same action only
+/// starts listening after it was asked).
+#[derive(Default)]
+pub struct PendingNav(Mutex<Option<String>>);
+
+impl PendingNav {
+    /// Remembers `route`.
+    pub fn set(&self, route: String) {
+        *self.0.lock().unwrap_or_else(|p| p.into_inner()) = Some(route);
+    }
+
+    /// The remembered route, once.
+    pub fn take(&self) -> Option<String> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).take()
+    }
+}
+
 /// The tray's quick actions.
 pub struct Actions {
     client: SharedClient,
@@ -63,8 +90,12 @@ impl Actions {
     /// Runs a tray action off the UI thread; failures become a notification.
     pub fn run<R: Runtime>(&self, app: &AppHandle<R>, action: &str, runner: &str) {
         let Ok(name) = RunnerName::parse(runner) else { return };
-        if action == "logs" {
-            let _ = app.emit(NAVIGATE, format!("/logs/{name}"));
+        if let Some(route) = page_route(action, name.as_str()) {
+            // Kept until the window asks: a window the tray just created may not listen yet.
+            if let Some(p) = app.try_state::<PendingNav>() {
+                p.set(route.clone());
+            }
+            let _ = app.emit(NAVIGATE, route);
             return;
         }
         let req = match action {
@@ -202,5 +233,22 @@ mod tests {
         l.set_connection(ConnectionState::Unavailable { message: "x".into() });
         assert!(matches!(l.connection(), ConnectionState::Unavailable { .. }));
         assert!(l.status().is_none());
+    }
+}
+
+#[cfg(test)]
+mod nav_tests {
+    use super::*;
+
+    #[test]
+    fn tray_pages_have_routes_and_a_pending_route_is_taken_once() {
+        assert_eq!(page_route("logs", "mac").as_deref(), Some("/logs/mac"));
+        assert_eq!(page_route("processes", "mac").as_deref(), Some("/runners/mac/processes"));
+        assert_eq!(page_route("config", "mac").as_deref(), Some("/runners/mac/config"));
+        assert_eq!(page_route("clean", "mac"), None);
+        let p = PendingNav::default();
+        p.set("/logs/mac".into());
+        assert_eq!(p.take().as_deref(), Some("/logs/mac"));
+        assert_eq!(p.take(), None);
     }
 }
