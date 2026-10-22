@@ -18,15 +18,13 @@ decision. There is no cut-down release; v1 ships when all of them are done. Othe
 Status words are honest: **built** (code and tests committed), **in progress** (another agent is working on it; not all of it
 is committed, re-check `git log`), **planned** (nothing in the code).
 
-| WP | Feature | Status (2026-10-22) |
+| WP | Feature | Status (2026-10-23) |
 | --- | --- | --- |
 | WP-01 | Privileged helper | planned (core types only) |
 | WP-02 | CPU taming screen and profiles | built: rules table, profiles, in-effect list with release, protected list, activity with undo |
-| WP-03 | Health score and startup manager screen | engine built, UI planned |
-| WP-04 | Cleanup with quarantine and undo | policy built, rest planned |
+| WP-03 | Health score and startup manager screen | built: Health page with reasons, fixes and startup manager (switch, delay, undo); machine-wide entries wait for WP-01 |
 | WP-05 | Tuning catalogue | built: catalogue, previews with inverse, undo with outside-change detection, Tuning page; administrator items wait for WP-01; startup trimming stays on the Health page |
 | WP-04 | Cleanup with quarantine and undo | built: scanner, re-checking deleter, quarantine with restore, Cleanup page, disk map engine, TOML packs, Linux; scheduled cleanups, Docker removal and a disk-map screen planned |
-| WP-05 | Tuning catalogue | planned |
 | WP-06 | Issues with statistics | planned |
 | WP-07 | New and unusual processes | planned |
 | WP-08 | Alerts and the weekly report | built: weekly report from stored data (health trend, apps, disk forecast, issues, changes), Reports page with week selector, Markdown/HTML export; Why slow page (G10). Planned: alert history on the page, weekly OS notification (superseded in part by WP-26) |
@@ -60,6 +58,23 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 
 Suggested order: foundation gaps; WP-01 to WP-05; WP-06 to WP-08 and WP-26; the in-progress items as their agents report;
 WP-09 to WP-17; WP-23 to WP-25, WP-27 to WP-30.
+
+## Still open in v1 (2026-10-23)
+
+Built this round: WP-02, WP-03, WP-04, WP-05, WP-08 (Why slow and Reports pages), WP-26, WP-28, WP-29, WP-37 (Linux traffic via
+`sock_diag`; Windows says it needs administrator rights). **Not built and still in v1**, so the release waits for them:
+
+- WP-01 privileged helper (every administrator item in Tuning, machine-wide startup entries, Windows per-program traffic, Defender exclusions).
+- WP-06 Issues, WP-07 unusual processes, WP-09 right-click search, WP-10 watched folders, WP-12 counters browser, WP-13 extras,
+  WP-14 backup checks, WP-15 pack data beyond the cleanup packs, WP-16 web API, WP-17 Explain via Pitwall, WP-23 to WP-25,
+  WP-27 CLI, WP-30 suite tie-ins, WP-31 session recording, WP-33 to WP-36.
+- Parts of built packages: scheduled cleanups, a disk-map screen, Docker image removal, the weekly OS notification (needs an
+  agent-to-shell push), score recording in the sampler (the trend only fills while the app asks for health), engine-stored
+  diagnosis history, TRIM and network tuning items, Windows IPv6 traffic.
+- Not verified on a real desktop: clicking the OS notification and the native save dialog from a debug run (needs a person or
+  computer-use session); the Windows and Linux adapters for tuning, cleanup and traffic run only in CI.
+
+Nothing here has been moved to Later; any item moved out of v1 is a user decision.
 
 ## Known gaps in the foundation
 
