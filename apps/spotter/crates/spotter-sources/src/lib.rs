@@ -54,9 +54,23 @@ pub mod checker {
         }
     }
 
+    /// Stands in for plans that need the page renderer, which only the engine has: it explains instead of guessing.
+    pub struct NeedsRenderer;
+
+    impl ReleaseSource for NeedsRenderer {
+        fn list(&self, _limit: usize) -> BoxFuture<'_, Result<Vec<Candidate>, SourceError>> {
+            Box::pin(async {
+                Err(SourceError::Failed(
+                    "This source shows its versions with JavaScript and needs a browser; the engine renders it.".into(),
+                ))
+            })
+        }
+    }
+
     /// The checker for a plan.
     pub fn for_plan(plan: Plan, http: &Http, credentials: Option<(String, String)>) -> Box<dyn ReleaseSource> {
         match plan {
+            Plan::Render { .. } => Box::new(NeedsRenderer),
             Plan::Folder(f) => Box::new(FolderChecker(f)),
             Plan::Http { request, parser } => Box::new(HttpChecker {
                 http: http.clone(),

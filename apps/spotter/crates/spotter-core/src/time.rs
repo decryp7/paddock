@@ -53,7 +53,7 @@ impl Timestamp {
 }
 
 /// A local time of day, in minutes after midnight (`0..1440`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ClockTime(u16);
 

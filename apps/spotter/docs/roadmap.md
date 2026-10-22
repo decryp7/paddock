@@ -31,3 +31,7 @@ Left:
   installed" on almost every watch).
 - Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command" needs an engine field.
 - Check scripts/check-index.mjs against dist/app/browser/index.html.
+
+## Engine
+- Done: SQLite state/history (migrations, corrupt-DB recovery), atomic config, polite fetcher (per-host gap, ETag/Last-Modified, body cap, manual redirects with loop detection, SSRF guard), pipeline, scheduler, Engine facade, webhook/ntfy delivery.
+- Open: more failure-path tests (oversize body, redirect loop, timeout, bad webhook, digest flush, soak through the engine, rendered pages with a fake PageRenderer, page change mode end-to-end); coverage run for spotter-engine; E-mail channel delivery (shell/SMTP); local UTC offset must be set by the shell via SystemClock::set_utc_offset_minutes; DNS-rebinding pinning for the SSRF guard; Engine::download is the shell's job (use spotter-sources::download, then Engine::record_download); a `Db::in_memory` failure calls process::exit (SQLite unusable) - consider returning an error; Cargo.lock holds shared changes, commit it with the integration.
