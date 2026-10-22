@@ -9,8 +9,11 @@ import type {
   DiskUsage,
   Download,
   Engine,
+  AppDetail,
   History,
   HistoryRange,
+  UsageRange,
+  UsageSeries,
   HfModel,
   HfRepo,
   LiveUpdate,
@@ -66,6 +69,9 @@ export class TauriBackend implements PitwallBackend {
   }
   history(range: HistoryRange): Promise<History> {
     return this.run('history', { range });
+  }
+  usageSeries(range: UsageRange, appId: string | null): Promise<UsageSeries> {
+    return this.run('usage_series', { range, appId });
   }
   events(limit: number): Promise<PitwallEvent[]> {
     return this.run('events', { limit });
@@ -166,6 +172,9 @@ export class TauriBackend implements PitwallBackend {
   // Apps and keys
   apps(): Promise<AppInfo[]> {
     return this.run('apps');
+  }
+  appDetail(appId: string): Promise<AppDetail> {
+    return this.run('app_detail', { appId });
   }
   createApp(name: string): Promise<AppInfo> {
     return this.run('create_app', { name });

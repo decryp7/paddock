@@ -35,7 +35,7 @@ const PERMS: AppPermissions = {
   maxPriority: 'interactive',
   tools: false,
   extendedApis: false,
-  limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null },
+  limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
 };
 const SETTINGS = { general: { theme: 'dark' } } as unknown as Settings;
 
@@ -46,6 +46,8 @@ const SETTINGS = { general: { theme: 'dark' } } as unknown as Settings;
 const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<string, unknown> | undefined][] = [
   ['overview', (b) => b.overview(), 'overview', undefined],
   ['history', (b) => b.history('24h'), 'history', { range: '24h' }],
+  ['usageSeries', (b) => b.usageSeries('7d', 'pitcrew'), 'usage_series', { range: '7d', appId: 'pitcrew' }],
+  ['usageSeries (all apps)', (b) => b.usageSeries('24h', null), 'usage_series', { range: '24h', appId: null }],
   ['events', (b) => b.events(50), 'events', { limit: 50 }],
   ['setServing', (b) => b.setServing(true), 'set_serving', { paused: true }],
   ['releaseMemory', (b) => b.releaseMemory(), 'release_memory', undefined],
@@ -72,6 +74,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['selectBuild', (b) => b.selectBuild('auto'), 'select_build', { choice: 'auto' }],
   ['rollbackBuild', (b) => b.rollbackBuild(), 'rollback_build', undefined],
   ['apps', (b) => b.apps(), 'apps', undefined],
+  ['appDetail', (b) => b.appDetail('pitcrew'), 'app_detail', { appId: 'pitcrew' }],
   ['createApp', (b) => b.createApp('Tool'), 'create_app', { name: 'Tool' }],
   ['deleteApp', (b) => b.deleteApp('a1'), 'delete_app', { id: 'a1' }],
   ['createKey', (b) => b.createKey('a1'), 'create_key', { appId: 'a1' }],

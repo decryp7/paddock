@@ -6,8 +6,11 @@
 import type {
   PacksInfo,
   Recommendation,
+  AppDetail,
   AppInfo,
+  AppLimits,
   AppPermissions,
+  AppUsageSeries,
   BenchmarkResult,
   Engine,
   EventKind,
@@ -19,6 +22,7 @@ import type {
   HistoryPoint,
   HistoryRange,
   KeyedSeries,
+  LimitStatus,
   LoadedModel,
   LocalModel,
   PairingRequest,
@@ -28,6 +32,9 @@ import type {
   RequestRecord,
   Settings,
   Severity,
+  UsageCounters,
+  UsageRange,
+  UsageSeries,
 } from './api.types';
 
 export const GiB = 1024 ** 3;
@@ -51,14 +58,14 @@ export function prng(seed: number): () => number {
   };
 }
 
-export const APP_IDS = ['imt', 'pitcrew', 'spotter', 'dyno', 'continue'] as const;
+export const APP_IDS = ['debrief', 'pitcrew', 'spotter', 'dyno', 'nightly-report'] as const;
 
 const ALL_PERMS: AppPermissions = {
   models: null,
   maxPriority: 'interactive',
   tools: true,
   extendedApis: true,
-  limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: 4 },
+  limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: 4, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
 };
 
 export function demoApps(now: number): AppInfo[] {
@@ -78,17 +85,17 @@ export function demoApps(now: number): AppInfo[] {
     today,
   });
   return [
-    app('imt', 'IMT', true, true, { requests: 1284, promptTokens: 1_942_310, completionTokens: 286_940, busyMs: 2_710_000, errors: 3 }),
-    app('pitcrew', 'Pitcrew', true, true, { requests: 212, promptTokens: 148_220, completionTokens: 31_400, busyMs: 402_000, errors: 0 }, { maxPriority: 'background', tools: false }),
-    app('spotter', 'Spotter', true, true, { requests: 3460, promptTokens: 905_000, completionTokens: 12_400, busyMs: 1_120_000, errors: 12 }, {
+    app('debrief', 'Debrief', true, true, { requests: 1284, promptTokens: 1_942_310, completionTokens: 286_940, busyMs: 2_710_000, errors: 3, peakMemoryBytes: 7.4 * GiB }),
+    app('pitcrew', 'Pitcrew', true, true, { requests: 212, promptTokens: 148_220, completionTokens: 31_400, busyMs: 402_000, errors: 0, peakMemoryBytes: 3.6 * GiB }, { maxPriority: 'background', tools: false }),
+    app('spotter', 'Spotter', true, true, { requests: 3460, promptTokens: 905_000, completionTokens: 12_400, busyMs: 1_120_000, errors: 12, peakMemoryBytes: 0.5 * GiB }, {
       maxPriority: 'batch',
       models: ['nomic-embed-text-v1.5-f16', 'bge-reranker-v2-m3-q8_0'],
-      limits: { requestsPerMin: 600, tokensPerDay: 5_000_000, maxConcurrent: 2 },
+      limits: { requestsPerMin: 600, tokensPerDay: 5_000_000, maxConcurrent: 2, requestsPerDay: 20_000, tokensPerMonth: 120_000_000, maxMemoryPercent: null },
     }),
-    app('dyno', 'Dyno', true, false, { requests: 48, promptTokens: 61_200, completionTokens: 18_900, busyMs: 96_000, errors: 1 }, { maxPriority: 'background' }),
-    app('continue', 'Continue (VS Code)', false, true, { requests: 391, promptTokens: 702_600, completionTokens: 98_120, busyMs: 840_000, errors: 0 }, {
+    app('dyno', 'Dyno', true, false, { requests: 48, promptTokens: 61_200, completionTokens: 18_900, busyMs: 96_000, errors: 1, peakMemoryBytes: 3.6 * GiB }, { maxPriority: 'background' }),
+    app('nightly-report', 'Nightly report script', false, true, { requests: 391, promptTokens: 702_600, completionTokens: 98_120, busyMs: 840_000, errors: 0, peakMemoryBytes: 3.6 * GiB }, {
       extendedApis: false,
-      limits: { requestsPerMin: 60, tokensPerDay: 2_000_000, maxConcurrent: 2 },
+      limits: { requestsPerMin: 60, tokensPerDay: 600_000, maxConcurrent: 2, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: 25 },
     }, 2),
   ];
 }
@@ -101,7 +108,7 @@ export function demoPairings(now: number): PairingRequest[] {
       appName: 'Obsidian Copilot',
       code: '482913',
       requestedAt: now - 40_000,
-      permissions: { models: null, maxPriority: 'interactive', tools: false, extendedApis: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1 } },
+      permissions: { models: null, maxPriority: 'interactive', tools: false, extendedApis: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } },
     },
   ];
 }
@@ -305,7 +312,7 @@ const RANGES: Record<HistoryRange, { span: number; points: number }> = {
 
 // Keyed series use ids (app ids, model ids); the UI shows names.
 const MODEL_KEYS = ['qwen3-8b-instruct-q4_k_m', 'llama-3.2-3b-instruct-q5_k_m', 'nomic-embed-text-v1.5-f16', 'gemma-3-12b-it-q4_k_m'];
-const APP_KEYS = ['imt', 'spotter', 'continue', 'pitcrew', 'dyno'];
+const APP_KEYS = ['debrief', 'spotter', 'nightly-report', 'pitcrew', 'dyno'];
 
 export function demoHistory(range: HistoryRange, now: number, seed = 7): History {
   const rnd = prng(seed + range.length * 31 + range.charCodeAt(0));
@@ -399,11 +406,11 @@ export function demoEvents(now: number): PitwallEvent[] {
   const list = [
     e(0.7, 'pairing', 'info', 'Obsidian Copilot asks to pair (code 482 913)', { appId: 'obsidian-copilot' }),
     e(3, 'contextReleased', 'info', 'Released the context of Qwen3 8B Instruct after 2 min idle (1.2 GB)', { modelId: 'qwen3-8b-instruct-q4_k_m', reason: 'idle' }),
-    e(14, 'modelLoaded', 'info', 'Loaded Llama 3.2 3B Instruct for Continue (1.6 s cold start)', { modelId: 'llama-3.2-3b-instruct-q5_k_m', appId: 'continue' }),
+    e(14, 'modelLoaded', 'info', 'Loaded Llama 3.2 3B Instruct for Nightly report script (1.6 s cold start)', { modelId: 'llama-3.2-3b-instruct-q5_k_m', appId: 'nightly-report' }),
     e(22, 'modelUnloaded', 'warn', 'Released Gemma 3 12B: available RAM fell below 15 %', { modelId: 'gemma-3-12b-it-q4_k_m', reason: 'pressure' }),
     e(31, 'requestFailed', 'error', 'Spotter: 429 rate limit (600 requests/min)', { appId: 'spotter' }),
     e(48, 'download', 'info', 'Downloaded bge-reranker-v2-m3 Q8_0 (606 MB, verified)'),
-    e(52, 'modelLoaded', 'info', 'Loaded Qwen3 8B Instruct for IMT (3.4 s cold start)', { modelId: 'qwen3-8b-instruct-q4_k_m', appId: 'imt' }),
+    e(52, 'modelLoaded', 'info', 'Loaded Qwen3 8B Instruct for Debrief (3.4 s cold start)', { modelId: 'qwen3-8b-instruct-q4_k_m', appId: 'debrief' }),
     e(67, 'engineRestarted', 'warn', 'llama.cpp (Llama 3.2 3B) stopped responding and was restarted', { modelId: 'llama-3.2-3b-instruct-q5_k_m' }),
     e(95, 'modelUnloaded', 'info', 'Released Qwen3 8B Instruct: idle for 10 min', { modelId: 'qwen3-8b-instruct-q4_k_m', reason: 'idle' }),
     e(130, 'presetChanged', 'info', 'Memory preset set to Balanced'),
@@ -436,7 +443,7 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
       [api, endpoint] = rnd() > 0.3 ? ENDPOINTS[1]! : ENDPOINTS[4]!;
       modelId = endpoint.includes('rerank') ? 'bge-reranker-v2-m3-q8_0' : 'nomic-embed-text-v1.5-f16';
     }
-    if (appId === 'continue') [api, endpoint] = rnd() > 0.5 ? ENDPOINTS[3]! : ENDPOINTS[5]!;
+    if (appId === 'nightly-report') [api, endpoint] = rnd() > 0.5 ? ENDPOINTS[3]! : ENDPOINTS[5]!;
     const embedding = endpoint.includes('embed') || endpoint.includes('rerank');
     const fail = rnd();
     const status = fail > 0.975 ? 429 : fail > 0.965 ? 500 : fail > 0.955 ? 400 : 200;
@@ -519,5 +526,98 @@ export function demoPacks(tag: string | null): PacksInfo {
     problems: [{ file: 'packs/old-vllm.toml', message: 'skipped: unknown key `launch.cmd`; engine packs need `[launch] args`.' }],
     warnings: [{ file: 'packs/ik-llama.toml', message: 'unknown key `notes` ignored.' }],
     recommendations,
+  };
+}
+
+// ---- Usage over time ---------------------------------------------------------------------------------------------
+
+const USAGE_STEP: Record<UsageRange, { step: number; buckets: number }> = {
+  '24h': { step: HOUR, buckets: 24 },
+  '7d': { step: HOUR, buckets: 168 },
+  '30d': { step: DAY, buckets: 30 },
+};
+
+/** Per app: relative request volume, prompt and completion tokens per request, error rate and the model footprint. */
+const USAGE_PROFILE: Record<string, { weight: number; prompt: number; completion: number; errors: number; memory: number }> = {
+  debrief: { weight: 1.0, prompt: 1500, completion: 220, errors: 0.003, memory: 7.4 * GiB },
+  pitcrew: { weight: 0.16, prompt: 700, completion: 150, errors: 0.01, memory: 3.6 * GiB },
+  spotter: { weight: 2.6, prompt: 260, completion: 4, errors: 0.004, memory: 0.5 * GiB },
+  dyno: { weight: 0.04, prompt: 1200, completion: 390, errors: 0.02, memory: 3.6 * GiB },
+  'nightly-report': { weight: 0.3, prompt: 1800, completion: 250, errors: 0, memory: 3.6 * GiB },
+};
+
+/** Usage over a range for the demo apps (mock only): daytime-heavy hours, quiet nights, complete buckets. */
+export function demoUsageSeries(range: UsageRange, now: number, appId: string | null, known: string[] = Object.keys(USAGE_PROFILE), seed = 11): UsageSeries {
+  const { step, buckets } = USAGE_STEP[range];
+  const current = now - (now % step);
+  const starts = Array.from({ length: buckets }, (_, i) => current - (buckets - 1 - i) * step);
+  const ids = appId ? [appId] : known;
+  const empty = (): UsageCounters => ({ requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0 });
+  const merge = (a: UsageCounters, b: UsageCounters) => {
+    a.requests += b.requests;
+    a.promptTokens += b.promptTokens;
+    a.completionTokens += b.completionTokens;
+    a.busyMs += b.busyMs;
+    a.errors += b.errors;
+    a.peakMemoryBytes = Math.max(a.peakMemoryBytes, b.peakMemoryBytes);
+  };
+  const apps: AppUsageSeries[] = ids.map((id, k) => {
+    const profile = USAGE_PROFILE[id] ?? { weight: 0, prompt: 0, completion: 0, errors: 0, memory: 0 };
+    const rnd = prng(seed + k * 97 + range.length);
+    const totals = empty();
+    const points = starts.map((at) => {
+      const h = new Date(at).getHours();
+      const day = step === DAY ? 1 : 0.15 + 0.85 * Math.max(0, Math.sin(((h - 7) / 14) * Math.PI));
+      const requests = Math.round(profile.weight * day * (step === DAY ? 900 : 60) * (0.6 + rnd() * 0.8));
+      const c: UsageCounters = {
+        requests,
+        promptTokens: Math.round(requests * profile.prompt * (0.8 + rnd() * 0.4)),
+        completionTokens: Math.round(requests * profile.completion * (0.8 + rnd() * 0.4)),
+        busyMs: Math.round(requests * (300 + profile.completion * 22)),
+        errors: Math.round(requests * profile.errors * (rnd() * 2)),
+        peakMemoryBytes: requests ? profile.memory : 0,
+      };
+      merge(totals, c);
+      return c;
+    });
+    return { appId: id, points, totals };
+  });
+  apps.sort((a, b) => b.totals.promptTokens + b.totals.completionTokens - (a.totals.promptTokens + a.totals.completionTokens));
+  const total = starts.map((_, i) => {
+    const c = empty();
+    for (const a of apps) merge(c, a.points[i]!);
+    return c;
+  });
+  const totals = empty();
+  for (const c of total) merge(totals, c);
+  return { range, stepMs: step, starts, total, totals, apps };
+}
+
+/** Where each configured limit stands (mock only: the real statuses come from the server). */
+export function demoLimitStatuses(limits: AppLimits, today: UsageCounters, month: UsageCounters, machineBytes: number): LimitStatus[] {
+  const status = (kind: LimitStatus['kind'], used: number, limit: number): LimitStatus => {
+    const percent = Math.min(999, Math.floor((used * 100) / limit));
+    const state = percent >= 100 ? 'exceeded' : percent >= 80 ? 'warning' : 'ok';
+    const message =
+      state === 'warning' ? `${percent}% of the limit (${limit}) is used; requests are refused at 100%.` : state === 'exceeded' ? `The limit (${limit}) is reached; requests are refused until it resets.` : null;
+    return { kind, used, limit, percent, state, message };
+  };
+  const out: LimitStatus[] = [];
+  if (limits.requestsPerMin !== null) out.push(status('requestsPerMin', Math.min(limits.requestsPerMin - 1, 12), limits.requestsPerMin));
+  if (limits.requestsPerDay !== null) out.push(status('requestsPerDay', today.requests, limits.requestsPerDay));
+  if (limits.tokensPerDay !== null) out.push(status('tokensPerDay', today.promptTokens + today.completionTokens, limits.tokensPerDay));
+  if (limits.tokensPerMonth !== null) out.push(status('tokensPerMonth', month.promptTokens + month.completionTokens, limits.tokensPerMonth));
+  if (limits.maxMemoryPercent !== null) out.push(status('memoryShare', today.peakMemoryBytes, Math.floor((machineBytes * limits.maxMemoryPercent) / 100)));
+  return out;
+}
+
+/** One app in detail for the mock: this month from the 30-day series, limits from today's counters. */
+export function demoAppDetail(app: AppInfo, requests: RequestRecord[], now: number): AppDetail {
+  const month = demoUsageSeries('30d', now, app.id).totals;
+  return {
+    app,
+    month,
+    limits: demoLimitStatuses(app.permissions.limits, app.today, month, RAM_TOTAL),
+    recent: requests.filter((r) => r.appId === app.id).slice(0, 20),
   };
 }

@@ -1,6 +1,6 @@
 import type { EChartsCoreOption } from 'echarts/core';
-import type { HistoryPoint, HistoryRange, KeyedSeries, PitwallEvent, ReleaseReason } from '../../core/api.types';
-import { clock, date, rate } from '../format';
+import type { HistoryPoint, HistoryRange, KeyedSeries, PitwallEvent, ReleaseReason, UsageSeries } from '../../core/api.types';
+import { bytes, clock, compact, date, rate } from '../format';
 import { REASON_LABEL } from '../labels';
 import { seriesColor, type ThemeTokens } from '../theme-tokens';
 
@@ -308,5 +308,71 @@ export function stackedRequestsChart(points: HistoryPoint[], series: KeyedSeries
       itemStyle: { color: seriesColor(t, i), borderColor: t.surface, borderWidth: 0.5, borderRadius: i === folded.length - 1 ? [2, 2, 0, 0] : 0 },
       emphasis: { focus: 'series' },
     })),
+  };
+}
+
+/** What a usage chart plots. */
+export type UsageMetric = 'tokens' | 'requests' | 'memory';
+
+/** How the stacks of a usage chart divide: by app (the dashboard) or by kind (one app: prompt/completion, ok/errors). */
+export type UsageSplit = 'app' | 'kind';
+
+/**
+ * Usage over time from the server's complete buckets. Tokens and requests are stacked bars (by app, or by kind for one
+ * app: prompt and completion tokens, successful and failed requests); peak memory is one line per app (the largest
+ * model footprint attributed in each bucket, so it is a level, never a sum). Failed requests use the status colour and
+ * are named "Errors" in the legend and tooltip, so colour is never the only cue.
+ */
+export function usageChart(series: UsageSeries, metric: UsageMetric, split: UsageSplit, t: ThemeTokens, nameOf: (appId: string) => string = (k) => k): EChartsCoreOption {
+  const at = series.starts;
+  const pts = (values: number[]) => values.map((v, i) => [at[i] ?? 0, v] as [number, number]);
+  const unit = metric === 'memory' ? (v: number) => bytes(v) : (v: number) => (metric === 'tokens' ? `${compact(v)} tokens` : `${Math.round(v)} requests`);
+  type Entry = { name: string; color: string; values: number[] };
+  let entries: Entry[];
+  if (split === 'kind') {
+    const tot = series.total;
+    entries =
+      metric === 'tokens'
+        ? [
+            { name: 'Prompt', color: seriesColor(t, 0), values: tot.map((c) => c.promptTokens) },
+            { name: 'Completion', color: seriesColor(t, 1), values: tot.map((c) => c.completionTokens) },
+          ]
+        : metric === 'requests'
+          ? [
+              { name: 'Successful', color: seriesColor(t, 0), values: tot.map((c) => c.requests - c.errors) },
+              { name: 'Errors', color: t.bad, values: tot.map((c) => c.errors) },
+            ]
+          : [{ name: 'Peak memory', color: seriesColor(t, 0), values: tot.map((c) => c.peakMemoryBytes) }];
+  } else {
+    const pick = (c: UsageSeries['total'][number]) => (metric === 'tokens' ? c.promptTokens + c.completionTokens : metric === 'requests' ? c.requests : c.peakMemoryBytes);
+    entries = series.apps.map((a, i) => ({ name: a.appId === 'other' ? 'Other' : nameOf(a.appId), color: seriesColor(t, i), values: a.points.map(pick) }));
+  }
+  const bars = metric !== 'memory';
+  const wide = Math.max(1, series.stepMs / 3_600_000);
+  return {
+    ...base(t),
+    tooltip: {
+      ...(base(t)['tooltip'] as object),
+      axisPointer: { type: bars ? 'shadow' : 'line', shadowStyle: { color: `${t.text3}14` }, lineStyle: { color: t.axis, width: 1 } },
+      formatter: (p: unknown) => tooltipRows(p, unit),
+    },
+    legend: { ...legend(t, entries.map((e) => e.name)), top: 'auto', bottom: 0, left: 0, right: 0 },
+    grid: { left: 8, right: 12, top: 10, bottom: entries.length > 3 ? 52 : 32 },
+    xAxis: { ...timeAxis(t, series.range), boundaryGap: false },
+    yAxis: valueAxis(t, 0, (v) => (metric === 'memory' ? bytes(v, 0) : compact(v)), { min: 0 }),
+    series: entries.map((e, i) =>
+      bars
+        ? {
+            name: e.name,
+            type: 'bar',
+            stack: metric,
+            barMaxWidth: wide > 1 ? 14 : 10,
+            barCategoryGap: '25%',
+            data: pts(e.values),
+            itemStyle: { color: e.color, borderColor: t.surface, borderWidth: 0.5, borderRadius: i === entries.length - 1 ? [2, 2, 0, 0] : 0 },
+            emphasis: { focus: 'series' },
+          }
+        : line(e.name, e.color, pts(e.values), { step: 'end', smooth: false, ...(entries.length === 1 ? area(e.color) : {}) }),
+    ),
   };
 }

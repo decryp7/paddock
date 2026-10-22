@@ -16,7 +16,7 @@ const perms = (over: Partial<AppPermissions> = {}): AppPermissions => ({
   maxPriority: 'interactive',
   tools: false,
   extendedApis: false,
-  limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null },
+  limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
   ...over,
 });
 
@@ -36,7 +36,7 @@ describe('permissionSummary', () => {
     expect(permissionSummary(perms({ models: [] }))[0]).toBe('0 models');
   });
   it('lists tools, extended APIs and the rate limit when granted', () => {
-    const s = permissionSummary(perms({ maxPriority: 'batch', tools: true, extendedApis: true, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: null } }));
+    const s = permissionSummary(perms({ maxPriority: 'batch', tools: true, extendedApis: true, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } }));
     expect(s).toEqual(['Every model', 'Up to batch priority', 'Tools', 'Extended APIs', '60 requests/min']);
   });
 });

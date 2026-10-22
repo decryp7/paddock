@@ -12,6 +12,7 @@ import { duration } from '../../shared/format';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
 import { Panel } from '../../shared/ui/panel';
+import { UsageCard } from '../usage/usage-card';
 import { AppsCard } from './apps-card';
 import { DashboardStore } from './dashboard.store';
 import { EngineIssues } from './engine-issues';
@@ -48,7 +49,7 @@ export class PerfMeter {
 /** Home: everything Pitwall is doing right now, how it got here, and the actions you need most. */
 @Component({
   selector: 'pw-dashboard',
-  imports: [MatIconModule, MatTooltipModule, RouterLink, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EnginesCard, EventsFeed, AppsCard, PairingCard],
+  imports: [MatIconModule, MatTooltipModule, RouterLink, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -169,6 +170,8 @@ export class PerfMeter {
         <pw-panel class="c4" heading="Requests by model" icon="models" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.history()" (retry)="store.select(store.range())">
           <pw-echart [option]="byModelOption()" [themeKey]="chartKey()" height="220px" label="Requests per interval by model" />
         </pw-panel>
+
+        <pw-usage-card class="c12" />
       </div>
 
       @if (showPerf) {
@@ -253,6 +256,9 @@ export class PerfMeter {
     .c3 {
       grid-column: span 3;
     }
+    .c12 {
+      grid-column: span 12;
+    }
     .c4 {
       grid-column: span 4;
     }
@@ -324,6 +330,9 @@ export class PerfMeter {
       .c7,
       .c8 {
         grid-column: span 6;
+      }
+      .c12 {
+        grid-column: span 12;
       }
       .events {
         grid-column: span 6;

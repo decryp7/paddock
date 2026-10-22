@@ -6,6 +6,8 @@ import type {
   FitVerdict,
   HotState,
   JobState,
+  LimitKind,
+  LimitState,
   MemoryPressure,
   Preset,
   Priority,
@@ -158,6 +160,25 @@ export function jobStateLook(s: JobState): Look {
   return map[s];
 }
 
+/** What each limit counts, and when it resets. */
+export const LIMIT_LABEL: Record<LimitKind, { label: string; resets: string }> = {
+  requestsPerMin: { label: 'Requests per minute', resets: 'counts the last minute' },
+  requestsPerDay: { label: 'Requests per day', resets: 'resets at midnight UTC' },
+  tokensPerDay: { label: 'Tokens per day', resets: 'resets at midnight UTC' },
+  tokensPerMonth: { label: 'Tokens per month', resets: 'resets on the 1st, midnight UTC' },
+  memoryShare: { label: 'Memory share', resets: 'checked against the model each request uses' },
+};
+
+/** The word and tone of a limit's state (the bar's colour is never the only cue). */
+export function limitStateLook(s: LimitState): Look {
+  const map: Record<LimitState, Look> = {
+    ok: { label: 'Within limit', tone: 'ok' },
+    warning: { label: 'Close to the limit', tone: 'warn' },
+    exceeded: { label: 'Limit reached', tone: 'bad' },
+  };
+  return map[s];
+}
+
 export function severityTone(s: Severity): Tone {
   return s === 'error' ? 'bad' : s === 'warn' ? 'warn' : 'info';
 }
@@ -176,6 +197,7 @@ export function eventIcon(kind: EventKind): string {
     servingChanged: 'pause',
     presetChanged: 'sliders',
     requestFailed: 'alert',
+    limitWarning: 'alert',
   };
   return map[kind];
 }

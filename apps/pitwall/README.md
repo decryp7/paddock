@@ -72,7 +72,7 @@ Every feature, with its status, is in [docs/features.md](docs/features.md).
   background before batch) with cancel, pairing, task endpoints, token helpers, provenance headers on every answer.
 - **Memory management.** Presets (Low memory, Balanced, Performance), idle and deep-idle release, pressure release,
   pinned models, a countdown on the dashboard.
-- **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits, an offline mode.
+- **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits (with usage over time per app), an offline mode.
 - **Packs.** Add engines and model lists with TOML files, no code ([user guide](docs/user-guide.md#packs-add-an-engine-or-a-model-list)).
 - **The app.** Dashboard, models, engines, apps, requests, playground, benchmarks, settings, tray.
 

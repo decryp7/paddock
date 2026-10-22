@@ -13,7 +13,10 @@ import { Sparkline } from '../../shared/ui/sparkline';
 export function limitsText(l: AppLimits): string {
   const parts: string[] = [];
   if (l.requestsPerMin !== null) parts.push(`${l.requestsPerMin}/min`);
+  if (l.requestsPerDay !== null) parts.push(`${compact(l.requestsPerDay)} req/day`);
   if (l.tokensPerDay !== null) parts.push(`${compact(l.tokensPerDay)}/day`);
+  if (l.tokensPerMonth !== null) parts.push(`${compact(l.tokensPerMonth)}/mo`);
+  if (l.maxMemoryPercent !== null) parts.push(`≤${l.maxMemoryPercent}% RAM`);
   if (l.maxConcurrent !== null) parts.push(`×${l.maxConcurrent}`);
   return parts.length ? parts.join(' · ') : 'None';
 }

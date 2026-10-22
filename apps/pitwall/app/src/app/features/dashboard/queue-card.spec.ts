@@ -15,7 +15,7 @@ import { QueueCard } from './queue-card';
 const NOW = 1_800_000_000_000;
 const job = (over: Partial<Job> = {}): Job => ({
   id: 'j1',
-  appId: 'imt',
+  appId: 'debrief',
   modelId: 'm',
   priority: 'interactive',
   kind: 'chat',
@@ -65,7 +65,7 @@ describe('QueueCard', () => {
     const rows = el.querySelectorAll('.jobs li');
     expect(rows.length).toBe(4);
     expect(rows[0]!.querySelector('.status')!.getAttribute('aria-label')).toBe('Running');
-    expect(rows[0]!.querySelector('.app')!.textContent).toBe('IMT');
+    expect(rows[0]!.querySelector('.app')!.textContent).toBe('Debrief');
     expect(rows[0]!.querySelector('.kind')!.textContent).toBe('chat');
     expect(el.querySelector('.more')!.textContent).toContain('and 1 more waiting');
   });
@@ -78,7 +78,7 @@ describe('QueueCard', () => {
     expect(line).toMatch(/182(\.4)?k tok/);
     const bar = el.querySelector('.prog')!;
     expect(bar.getAttribute('aria-valuenow')).toBe('42');
-    expect(bar.getAttribute('aria-label')).toBe('Progress of IMT chat');
+    expect(bar.getAttribute('aria-label')).toBe('Progress of Debrief chat');
     expect((bar.querySelector('span') as HTMLElement).style.width).toBe('42%');
   });
 
@@ -117,7 +117,7 @@ describe('QueueCard', () => {
   it('cancels a job through the live store and disables its button meanwhile', async () => {
     const { fixture, el, backend, live } = await mount();
     const spy = vi.spyOn(backend, 'cancelJob');
-    const btn = el.querySelector('button[aria-label="Cancel IMT chat"]') as HTMLButtonElement;
+    const btn = el.querySelector('button[aria-label="Cancel Debrief chat"]') as HTMLButtonElement;
     btn.click();
     fixture.detectChanges();
     expect(btn.disabled).toBe(true);

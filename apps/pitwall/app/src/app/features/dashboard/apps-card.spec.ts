@@ -12,12 +12,13 @@ import { settle } from '../../../testing/render';
 import { AppsCard, limitsText } from './apps-card';
 
 describe('limitsText', () => {
-  const none: AppLimits = { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null };
+  const none: AppLimits = { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null };
   it('says None without limits', () => expect(limitsText(none)).toBe('None'));
   it('lists the limits that are set', () => {
-    expect(limitsText({ requestsPerMin: 600, tokensPerDay: 5_000_000, maxConcurrent: 2 })).toBe('600/min · 5.0M/day · ×2');
-    expect(limitsText({ ...none, maxConcurrent: 1 })).toBe('×1');
+    expect(limitsText({ requestsPerMin: 600, tokensPerDay: 5_000_000, maxConcurrent: 2, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null })).toBe('600/min · 5.0M/day · ×2');
+    expect(limitsText({ ...none, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null })).toBe('×1');
     expect(limitsText({ ...none, requestsPerMin: 0 })).toBe('0/min');
+    expect(limitsText({ ...none, requestsPerDay: 5000, tokensPerMonth: 3_000_000, maxMemoryPercent: 40 })).toBe('5.0k req/day · 3.0M/mo · ≤40% RAM');
   });
 });
 
@@ -46,10 +47,10 @@ describe('AppsCard', () => {
     expect(rows.length).toBe(live.apps().length);
     const counts = rows.map((r) => Number(r.querySelector('td.right')!.textContent!.replace(/,/g, '')));
     expect(counts).toEqual([...counts].sort((a, b) => b - a));
-    expect(rows.map((r) => r.querySelector('.nm')!.textContent)).toEqual(['Spotter', 'IMT', 'Continue (VS Code)', 'Pitcrew', 'Dyno']);
-    expect(rows[1]!.querySelector('.avatar')!.textContent).toBe('I');
+    expect(rows.map((r) => r.querySelector('.nm')!.textContent)).toEqual(['Spotter', 'Debrief', 'Nightly report script', 'Pitcrew', 'Dyno']);
+    expect(rows[1]!.querySelector('.avatar')!.textContent).toBe('D');
     expect(rows[0]!.querySelector('td.right')!.textContent).toBe('3,460');
-    expect(rows[0]!.querySelector('.limits')!.textContent).toBe('600/min · 5.0M/day · ×2');
+    expect(rows[0]!.querySelector('.limits')!.textContent).toBe('600/min · 20k req/day · 5.0M/day · 120M/mo · ×2');
     expect(rows[3]!.querySelector('.limits')!.textContent).toBe('×4');
     expect(rows[1]!.querySelectorAll('td.right')[1]!.textContent).toBe('2.2M');
     const states = rows.map((r) => r.querySelector('.conn')!.getAttribute('aria-label'));
@@ -65,26 +66,26 @@ describe('AppsCard', () => {
   });
 
   it('draws a sparkline from the series of each app and an empty one without data', async () => {
-    const { el, live } = await mount([{ key: 'imt', values: [1, 4, 2] }]);
+    const { el, live } = await mount([{ key: 'debrief', values: [1, 4, 2] }]);
     const rows = Array.from(el.querySelectorAll('tbody tr'));
-    const imt = rows.find((r) => r.querySelector('.nm')!.textContent === 'IMT')!;
+    const imt = rows.find((r) => r.querySelector('.nm')!.textContent === 'Debrief')!;
     expect(imt.querySelectorAll('pw-sparkline path')[1]!.getAttribute('d')).toMatch(/^M0\.0,/);
-    const other = rows.find((r) => r.querySelector('.nm')!.textContent !== 'IMT')!;
+    const other = rows.find((r) => r.querySelector('.nm')!.textContent !== 'Debrief')!;
     expect(other.querySelectorAll('pw-sparkline path')[1]!.getAttribute('d')).toBe('');
     expect(live.apps().length).toBeGreaterThan(1);
   });
 
   it('colours an app by its slot in the series, and apps without a series after them', async () => {
     const { el } = await mount([
-      { key: 'continue', values: [1] },
-      { key: 'imt', values: [1] },
+      { key: 'nightly-report', values: [1] },
+      { key: 'debrief', values: [1] },
     ]);
     const stroke = (name: string) => {
       const row = Array.from(el.querySelectorAll('tbody tr')).find((r) => r.querySelector('.nm')!.textContent === name)!;
       return row.querySelectorAll('pw-sparkline path')[1]!.getAttribute('stroke');
     };
-    expect(stroke('Continue (VS Code)')).not.toBe(stroke('IMT'));
-    expect(stroke('Spotter')).not.toBe(stroke('IMT'));
-    expect(stroke('Spotter')).not.toBe(stroke('Continue (VS Code)'));
+    expect(stroke('Nightly report script')).not.toBe(stroke('Debrief'));
+    expect(stroke('Spotter')).not.toBe(stroke('Debrief'));
+    expect(stroke('Spotter')).not.toBe(stroke('Nightly report script'));
   });
 });

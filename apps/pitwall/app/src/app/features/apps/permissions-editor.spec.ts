@@ -7,7 +7,7 @@ const BASE: AppPermissions = {
   maxPriority: 'interactive',
   tools: true,
   extendedApis: false,
-  limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 2 },
+  limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 2, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
 };
 
 const MODELS = [
@@ -19,7 +19,7 @@ function render(p: AppPermissions = BASE) {
   const fixture = TestBed.createComponent(PermissionsEditor);
   fixture.componentRef.setInput('permissions', p);
   fixture.componentRef.setInput('models', MODELS);
-  fixture.componentRef.setInput('appName', 'IMT');
+  fixture.componentRef.setInput('appName', 'Debrief');
   fixture.detectChanges();
   const el = fixture.nativeElement as HTMLElement;
   const saved: AppPermissions[] = [];
@@ -45,6 +45,8 @@ describe('parseLimit', () => {
     expect(parseLimit('1.5')).toBe('invalid');
     expect(parseLimit('abc')).toBe('invalid');
     expect(parseLimit('99999999999999999999')).toBe('invalid');
+    expect(parseLimit('100', 100)).toBe(100);
+    expect(parseLimit('101', 100)).toBe('invalid');
   });
 });
 
@@ -53,7 +55,7 @@ describe('samePermissions', () => {
     expect(samePermissions({ ...BASE, models: ['a', 'b'] }, { ...BASE, models: ['b', 'a'] })).toBe(true);
     expect(samePermissions(BASE, { ...BASE, models: [] })).toBe(false);
     expect(samePermissions(BASE, { ...BASE, tools: false })).toBe(false);
-    expect(samePermissions(BASE, { ...BASE, limits: { ...BASE.limits, maxConcurrent: null } })).toBe(false);
+    expect(samePermissions(BASE, { ...BASE, limits: { ...BASE.limits, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } })).toBe(false);
   });
 });
 
@@ -87,7 +89,20 @@ describe('PermissionsEditor', () => {
     type(rpm, '');
     type(input('input[id$="-tokensPerDay"]'), '50000');
     btn('Save').click();
-    expect(saved).toEqual([{ ...BASE, models: ['m2'], limits: { requestsPerMin: null, tokensPerDay: 50000, maxConcurrent: 2 } }]);
+    expect(saved).toEqual([{ ...BASE, models: ['m2'], limits: { requestsPerMin: null, tokensPerDay: 50000, maxConcurrent: 2, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } }]);
+  });
+
+  it('edits the daily, monthly and memory-share limits and caps the share at 100 percent', () => {
+    const { fixture, el, saved, btn, input, type } = render();
+    type(input('input[id$="-maxMemoryPercent"]'), '101');
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('from 1 to 100');
+    expect(btn('Save').disabled).toBe(true);
+    type(input('input[id$="-maxMemoryPercent"]'), '40');
+    type(input('input[id$="-requestsPerDay"]'), '2000');
+    type(input('input[id$="-tokensPerMonth"]'), '9000000');
+    fixture.detectChanges();
+    btn('Save').click();
+    expect(saved[0]!.limits).toEqual({ requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 2, requestsPerDay: 2000, tokensPerMonth: 9_000_000, maxMemoryPercent: 40 });
   });
 
   it('resets local edits to the saved permissions', () => {

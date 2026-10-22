@@ -13,7 +13,7 @@ function setup(backend: PitwallBackend = new MockBackend()) {
 const rec = (p: Partial<RequestRecord>): RequestRecord => ({
   id: 'r',
   at: 0,
-  appId: 'imt',
+  appId: 'debrief',
   api: 'openai',
   endpoint: '/v1/chat/completions',
   modelId: 'qwen3-8b',

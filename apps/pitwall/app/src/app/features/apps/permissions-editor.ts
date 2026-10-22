@@ -12,12 +12,12 @@ const PRIORITY_HINT: Record<Priority, string> = {
 };
 
 /** A limit field's text as a value: empty is no limit, a positive whole number is the limit, anything else invalid. */
-export function parseLimit(text: string): number | null | 'invalid' {
+export function parseLimit(text: string, max = Number.MAX_SAFE_INTEGER): number | null | 'invalid' {
   const t = text.trim();
   if (t === '') return null;
   if (!/^\d+$/.test(t)) return 'invalid';
   const n = Number(t);
-  return n >= 1 && Number.isSafeInteger(n) ? n : 'invalid';
+  return n >= 1 && n <= max && Number.isSafeInteger(n) ? n : 'invalid';
 }
 
 /** Deep equality of two permission sets (model order ignored). */
@@ -28,19 +28,22 @@ export function samePermissions(a: AppPermissions, b: AppPermissions): boolean {
     a.maxPriority === b.maxPriority &&
     a.tools === b.tools &&
     a.extendedApis === b.extendedApis &&
-    a.limits.requestsPerMin === b.limits.requestsPerMin &&
-    a.limits.tokensPerDay === b.limits.tokensPerDay &&
-    a.limits.maxConcurrent === b.limits.maxConcurrent
+    LIMITS.every((l) => a.limits[l.key] === b.limits[l.key])
   );
 }
 
 type LimitKey = keyof AppLimits;
 
-const LIMITS: { key: LimitKey; label: string; unit: string }[] = [
+const LIMITS: { key: LimitKey; label: string; unit: string; max?: number }[] = [
   { key: 'requestsPerMin', label: 'Requests per minute', unit: '/min' },
+  { key: 'requestsPerDay', label: 'Requests per day', unit: '/day' },
   { key: 'tokensPerDay', label: 'Tokens per day', unit: 'tok' },
+  { key: 'tokensPerMonth', label: 'Tokens per month', unit: 'tok' },
   { key: 'maxConcurrent', label: 'Requests at once', unit: 'max' },
+  { key: 'maxMemoryPercent', label: 'Memory share of RAM', unit: '%', max: 100 },
 ];
+
+const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: '', tokensPerDay: '', tokensPerMonth: '', maxConcurrent: '', maxMemoryPercent: '' };
 
 /** Edits an app's permissions locally; Save emits the parsed permissions (the server validates again). */
 @Component({
@@ -115,7 +118,7 @@ const LIMITS: { key: LimitKey; label: string; unit: string }[] = [
                 <span class="unit">{{ l.unit }}</span>
               </div>
               @if (invalid().has(l.key)) {
-                <span class="err" role="alert">A whole number of 1 or more, or empty.</span>
+                <span class="err" role="alert">{{ l.max ? 'A whole number from 1 to ' + l.max + ', or empty.' : 'A whole number of 1 or more, or empty.' }}</span>
               }
             </div>
           }
@@ -291,11 +294,11 @@ export class PermissionsEditor {
   protected readonly priority = signal<Priority>('interactive');
   protected readonly tools = signal(false);
   protected readonly extended = signal(false);
-  protected readonly limitText = signal<Record<LimitKey, string>>({ requestsPerMin: '', tokensPerDay: '', maxConcurrent: '' });
+  protected readonly limitText = signal<Record<LimitKey, string>>({ ...NO_TEXT });
 
   protected readonly invalid = computed(() => {
     const t = this.limitText();
-    return new Set(LIMITS.map((l) => l.key).filter((k) => parseLimit(t[k]) === 'invalid'));
+    return new Set(LIMITS.filter((l) => parseLimit(t[l.key], l.max) === 'invalid').map((l) => l.key));
   });
 
   /** The edited permissions, or null while a field is invalid. */
@@ -307,11 +310,7 @@ export class PermissionsEditor {
       maxPriority: this.priority(),
       tools: this.tools(),
       extendedApis: this.extended(),
-      limits: {
-        requestsPerMin: parseLimit(t.requestsPerMin) as number | null,
-        tokensPerDay: parseLimit(t.tokensPerDay) as number | null,
-        maxConcurrent: parseLimit(t.maxConcurrent) as number | null,
-      },
+      limits: Object.fromEntries(LIMITS.map((l) => [l.key, parseLimit(t[l.key], l.max) as number | null])) as unknown as AppLimits,
     };
   });
 
@@ -335,7 +334,7 @@ export class PermissionsEditor {
     this.priority.set(p.maxPriority);
     this.tools.set(p.tools);
     this.extended.set(p.extendedApis);
-    this.limitText.set({ requestsPerMin: text(p.limits.requestsPerMin), tokensPerDay: text(p.limits.tokensPerDay), maxConcurrent: text(p.limits.maxConcurrent) });
+    this.limitText.set(Object.fromEntries(LIMITS.map((l) => [l.key, text(p.limits[l.key])])) as Record<LimitKey, string>);
   }
 
   protected toggleModel(id: string): void {

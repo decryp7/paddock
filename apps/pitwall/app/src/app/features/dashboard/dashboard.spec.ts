@@ -109,8 +109,8 @@ describe('Dashboard', () => {
 
   it('loads the 1 h history on init and draws the memory, throughput, latency and request charts', async () => {
     const { el, backend } = await mount();
-    expect(el.querySelectorAll('pw-echart').length).toBe(5);
-    expect(FakeChart.all.length).toBe(5);
+    expect(el.querySelectorAll('pw-echart').length).toBe(6);
+    expect(FakeChart.all.length).toBe(6);
     expect(FakeChart.all.every((c) => c.options.length >= 1)).toBe(true);
     expect(el.querySelector('pw-echart')!.getAttribute('aria-label')).toContain('RAM, VRAM and Pitwall memory');
     expect((await backend.history('1h')).range).toBe('1h');
@@ -235,13 +235,13 @@ describe('Dashboard', () => {
     const { fixture, el } = await mount({ backend });
     const alerts = el.querySelectorAll('pw-panel [role="alert"]');
     expect(alerts.length).toBe(5);
-    expect(el.querySelector('pw-echart')).toBeNull();
+    expect(Array.from(el.querySelectorAll('pw-echart')).filter((c) => !c.closest('pw-usage-card'))).toEqual([]);
     const spy = vi.spyOn(backend, 'history');
     (backend as unknown as { failing: Set<string> }).failing.delete('history');
     (alerts[0]!.querySelector('button') as HTMLButtonElement).click();
     await settle(fixture);
     expect(spy).toHaveBeenCalledWith('1h');
-    expect(el.querySelectorAll('pw-echart').length).toBe(5);
+    expect(el.querySelectorAll('pw-echart').length).toBe(6);
     expect(el.querySelectorAll('pw-panel [role="alert"]').length).toBe(0);
   });
 
@@ -251,7 +251,7 @@ describe('Dashboard', () => {
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     const legend = (i: number) => ((FakeChart.all[i]!.options.at(-1)!.option as { legend: { data: string[] } }).legend.data);
     // chart order: memory, requests by app, tokens per second, latency, requests by model
-    expect(legend(1)).toContain('IMT');
+    expect(legend(1)).toContain('Debrief');
     expect(legend(1)).toContain('Spotter');
     expect(legend(4)).toContain('Qwen3 8B Instruct');
     expect(legend(4)).toContain('gemma-3-12b-it');

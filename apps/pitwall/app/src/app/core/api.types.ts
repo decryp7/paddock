@@ -219,6 +219,8 @@ export interface UsageCounters {
   completionTokens: number;
   busyMs: number;
   errors: number;
+  /** The largest footprint of the model that served the app's requests (RAM plus video memory, bytes). */
+  peakMemoryBytes: number;
 }
 
 export interface AppLimits {
@@ -226,6 +228,48 @@ export interface AppLimits {
   requestsPerMin: number | null;
   tokensPerDay: number | null;
   maxConcurrent: number | null;
+  /** Requests per UTC day. */
+  requestsPerDay: number | null;
+  /** Tokens per UTC calendar month. */
+  tokensPerMonth: number | null;
+  /** The most of the machine's RAM (1 to 100 percent) the model serving one request may occupy. */
+  maxMemoryPercent: number | null;
+}
+
+export type UsageRange = '24h' | '7d' | '30d';
+
+export interface AppUsageSeries {
+  /** The app, or `other` for the apps beyond the busiest eight. */
+  appId: string;
+  /** One entry per bucket of the series. */
+  points: UsageCounters[];
+  totals: UsageCounters;
+}
+
+/** Usage over a range: hourly buckets for 24h and 7d, daily for 30d; every bucket is present (zero when idle). */
+export interface UsageSeries {
+  range: UsageRange;
+  stepMs: number;
+  /** The start of every bucket, oldest first. */
+  starts: number[];
+  total: UsageCounters[];
+  totals: UsageCounters;
+  /** Busiest first. */
+  apps: AppUsageSeries[];
+}
+
+export type LimitKind = 'requestsPerMin' | 'requestsPerDay' | 'tokensPerDay' | 'tokensPerMonth' | 'memoryShare';
+export type LimitState = 'ok' | 'warning' | 'exceeded';
+
+/** One configured limit and how much of it is used. `used` and `limit` are requests, tokens or bytes by kind. */
+export interface LimitStatus {
+  kind: LimitKind;
+  used: number;
+  limit: number;
+  percent: number;
+  state: LimitState;
+  /** An explanation for a warning or an exceeded limit. */
+  message: string | null;
 }
 
 export interface AppPermissions {
@@ -248,13 +292,22 @@ export interface ApiKeyInfo {
 export interface AppInfo {
   id: string;
   name: string;
-  /** IMT, Pitcrew, Spotter, Dyno are `suite: true`. */
+  /** Debrief, Pitcrew, Spotter, Dyno are `suite: true`. */
   suite: boolean;
   connected: boolean;
   lastSeenAt: number | null;
   keys: ApiKeyInfo[];
   permissions: AppPermissions;
   today: UsageCounters;
+}
+
+export interface AppDetail {
+  app: AppInfo;
+  /** This UTC month so far. */
+  month: UsageCounters;
+  limits: LimitStatus[];
+  /** Latest requests, newest first; metadata only. */
+  recent: RequestRecord[];
 }
 
 export interface CreatedKey {
@@ -343,7 +396,8 @@ export type EventKind =
   | 'pairing'
   | 'servingChanged'
   | 'presetChanged'
-  | 'requestFailed';
+  | 'requestFailed'
+  | 'limitWarning';
 
 export interface PitwallEvent {
   id: number;

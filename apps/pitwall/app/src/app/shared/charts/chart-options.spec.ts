@@ -1,7 +1,7 @@
 import type { HistoryPoint, PitwallEvent } from '../../core/api.types';
-import { demoHistory } from '../../core/mock-data';
+import { demoHistory, demoUsageSeries } from '../../core/mock-data';
 import { THEME_TOKENS } from '../theme-tokens';
-import { MAX_BARS, bucketKeyed, eventMark, foldKeyed, latencyChart, memoryChart, stackedRequestsChart, throughputChart, timeLabel } from './chart-options';
+import { MAX_BARS, bucketKeyed, eventMark, foldKeyed, latencyChart, memoryChart, stackedRequestsChart, throughputChart, timeLabel, usageChart } from './chart-options';
 
 const t = THEME_TOKENS.dark;
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
@@ -97,15 +97,75 @@ describe('chart options', () => {
 
   it('stacks requests per key with names and fixed colours', () => {
     const o = stackedRequestsChart(h.points, h.requestsByApp, '1h', t, (k) => k.toUpperCase()) as unknown as Opt;
-    expect(o.series.map((s) => s['name'])).toEqual(['IMT', 'SPOTTER', 'CONTINUE', 'PITCREW', 'DYNO']);
+    expect(o.series.map((s) => s['name'])).toEqual(['DEBRIEF', 'SPOTTER', 'NIGHTLY-REPORT', 'PITCREW', 'DYNO']);
     expect((o.series[0]!['itemStyle'] as { color: string }).color).toBe(t.series[0]);
     expect((o.series[0]!['data'] as unknown[]).length).toBeLessThanOrEqual(MAX_BARS);
-    const fmt = (o['tooltip'] as { formatter: (p: unknown) => string }).formatter([{ marker: '', seriesName: 'IMT', value: [1, 3.4] }]);
+    const fmt = (o['tooltip'] as { formatter: (p: unknown) => string }).formatter([{ marker: '', seriesName: 'Debrief', value: [1, 3.4] }]);
     expect(fmt).toContain('<b>3</b>');
     const y = (o['yAxis'] as { axisLabel: { formatter: (v: number) => string } }).axisLabel.formatter;
     expect(y(1500)).toBe('1.5k');
     expect(y(15)).toBe('15');
     const other = stackedRequestsChart([], Array.from({ length: 7 }, (_, i) => ({ key: `m${i}`, values: [i] })), '7d', t) as unknown as Opt;
     expect(other.series[4]!['name']).toBe('Other');
+  });
+
+  describe('usageChart', () => {
+    const NOW2 = new Date(2026, 9, 22, 14, 30).getTime();
+    const series = demoUsageSeries('24h', NOW2, null);
+    const one = demoUsageSeries('7d', NOW2, 'spotter');
+    const names = (o: Opt) => o.series.map((x) => x['name']);
+
+    it('stacks tokens per app, one fixed colour each, with a readable legend', () => {
+      const o = usageChart(series, 'tokens', 'app', t, (k) => k.toUpperCase()) as unknown as Opt;
+      expect(names(o)).toEqual(series.apps.map((a) => a.appId.toUpperCase()));
+      expect(o.series.every((x) => x['type'] === 'bar' && x['stack'] === 'tokens')).toBe(true);
+      expect(o.series.map((x) => (x['itemStyle'] as { color: string }).color)).toEqual(series.apps.map((_, i) => t.series[Math.min(i, t.series.length - 1)]));
+      expect((o.series[0]!['data'] as unknown[]).length).toBe(24);
+      const tip = (o['tooltip'] as { formatter: (p: unknown) => string }).formatter;
+      expect(tip([{ marker: '', seriesName: 'A', value: [0, 12_345] }])).toContain('12k tokens');
+    });
+
+    it('folds the apps beyond the busiest into Other', () => {
+      const withOther = { ...series, apps: [...series.apps, { ...series.apps[0]!, appId: 'other' }] };
+      expect(names(usageChart(withOther, 'requests', 'app', t) as unknown as Opt)).toContain('Other');
+    });
+
+    it('splits one app into prompt and completion tokens', () => {
+      const o = usageChart(one, 'tokens', 'kind', t) as unknown as Opt;
+      expect(names(o)).toEqual(['Prompt', 'Completion']);
+      expect((o.series[0]!['data'] as unknown[]).length).toBe(168);
+    });
+
+    it('splits requests into successful and failed ones, errors in the status colour and named in words', () => {
+      const o = usageChart(one, 'requests', 'kind', t) as unknown as Opt;
+      expect(names(o)).toEqual(['Successful', 'Errors']);
+      expect((o.series[1]!['itemStyle'] as { color: string }).color).toBe(t.bad);
+      const first = (o.series[0]!['data'] as [number, number][])[0]![1];
+      expect(first).toBe(one.total[0]!.requests - one.total[0]!.errors);
+      const tip = (o['tooltip'] as { formatter: (p: unknown) => string }).formatter;
+      expect(tip([{ marker: '', seriesName: 'Errors', value: [0, 3] }])).toContain('3 requests');
+    });
+
+    it('draws peak memory as a level, not a sum, in bytes', () => {
+      const o = usageChart(one, 'memory', 'kind', t) as unknown as Opt;
+      expect(names(o)).toEqual(['Peak memory']);
+      expect(o.series[0]!['type']).toBe('line');
+      expect(o.series[0]!['step']).toBe('end');
+      expect(o.series[0]).toHaveProperty('areaStyle');
+      const multi = usageChart(series, 'memory', 'app', t) as unknown as Opt;
+      expect(multi.series.every((x) => x['type'] === 'line' && !('areaStyle' in x))).toBe(true);
+      const tip = (multi['tooltip'] as { formatter: (p: unknown) => string }).formatter;
+      expect(tip([{ marker: '', seriesName: 'A', value: [0, 3 * 1024 ** 3] }])).toContain('3.0 GB');
+      const axis = o['yAxis'] as { axisLabel: { formatter: (v: number) => string } };
+      expect(axis.axisLabel.formatter(2 * 1024 ** 3)).toBe('2 GB');
+    });
+
+    it('labels daily buckets by date and gives a legend row of room for many apps', () => {
+      const month = demoUsageSeries('30d', NOW2, null);
+      const o = usageChart(month, 'tokens', 'app', t) as unknown as Opt;
+      expect((o['xAxis'] as { axisLabel: { formatter: (v: number) => string } }).axisLabel.formatter(NOW2)).toBe('22 Oct');
+      expect((o['grid'] as { bottom: number }).bottom).toBe(52);
+      expect((usageChart(one, 'tokens', 'kind', t) as unknown as { grid: { bottom: number } }).grid.bottom).toBe(32);
+    });
   });
 });

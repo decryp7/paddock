@@ -16,7 +16,7 @@ const PERMS: AppPermissions = {
   maxPriority: 'batch',
   tools: false,
   extendedApis: false,
-  limits: { requestsPerMin: 10, tokensPerDay: null, maxConcurrent: 1 },
+  limits: { requestsPerMin: 10, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
 };
 
 describe('AppsStore', () => {
@@ -26,7 +26,7 @@ describe('AppsStore', () => {
     expect(store.loading()).toBe(true);
     await done;
     expect(store.loaded()).toBe(true);
-    expect(store.apps().map((a) => a.id)).toContain('imt');
+    expect(store.apps().map((a) => a.id)).toContain('debrief');
     expect(store.models().length).toBeGreaterThan(0);
   });
 
@@ -61,14 +61,14 @@ describe('AppsStore', () => {
   it('saves permissions and replaces the app', async () => {
     const { store } = setup();
     await store.load();
-    expect(await store.setPermissions('imt', PERMS)).toBe(true);
-    expect(store.apps().find((a) => a.id === 'imt')!.permissions).toEqual(PERMS);
+    expect(await store.setPermissions('debrief', PERMS)).toBe(true);
+    expect(store.apps().find((a) => a.id === 'debrief')!.permissions).toEqual(PERMS);
   });
 
   it('shows action errors as toasts and changes nothing', async () => {
     const { store, toasts } = setup();
     await store.load();
-    expect(await store.createApp('IMT')).toBeUndefined();
+    expect(await store.createApp('Debrief')).toBeUndefined();
     expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'bad' });
     expect(await store.createKey('nope')).toBeUndefined();
     expect(await store.setPermissions('nope', PERMS)).toBe(false);
@@ -78,12 +78,12 @@ describe('AppsStore', () => {
     const backend = new MockBackend({ latencyMs: 5 });
     const { store } = setup(backend);
     await store.load();
-    const a = store.revokeKey('imt', 'imt-k1');
-    expect(store.isBusy('key:imt-k1')).toBe(true);
-    const b = store.revokeKey('imt', 'imt-k1');
+    const a = store.revokeKey('debrief', 'debrief-k1');
+    expect(store.isBusy('key:debrief-k1')).toBe(true);
+    const b = store.revokeKey('debrief', 'debrief-k1');
     expect(await b).toBe(false);
     expect(await a).toBe(true);
-    expect(store.isBusy('key:imt-k1')).toBe(false);
+    expect(store.isBusy('key:debrief-k1')).toBe(false);
   });
 
   it('upserts by id', () => {

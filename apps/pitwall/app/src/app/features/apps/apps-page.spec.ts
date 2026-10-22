@@ -6,6 +6,7 @@ import { BACKEND } from '../../core/backend';
 import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';
 import { registerIcons } from '../../shared/icons';
+import { fakeChartProvider } from '../../../testing/render';
 import { AppsPage } from './apps-page';
 
 async function settle(fixture: { detectChanges(): void; whenStable(): Promise<unknown> }) {
@@ -18,7 +19,7 @@ async function settle(fixture: { detectChanges(): void; whenStable(): Promise<un
 }
 
 async function render(backend: PitwallBackend = new MockBackend()) {
-  TestBed.configureTestingModule({ imports: [AppsPage], providers: [{ provide: BACKEND, useValue: backend }] });
+  TestBed.configureTestingModule({ imports: [AppsPage], providers: [{ provide: BACKEND, useValue: backend }, fakeChartProvider] });
   registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
   const live = TestBed.inject(LiveStore);
   await live.load();
@@ -39,7 +40,7 @@ describe('AppsPage', () => {
     const items = el.querySelectorAll('.apps .app');
     expect(items.length).toBe(5);
     expect(items[0]!.getAttribute('aria-current')).toBe('true');
-    expect(el.querySelector('.hero h2')?.textContent).toContain('IMT');
+    expect(el.querySelector('.hero h2')?.textContent).toContain('Debrief');
     expect(el.querySelector('.usage')?.textContent).toContain('1,284');
     expect(el.querySelector('table.keys')?.textContent).toContain('pw_');
     expect(el.querySelector('pw-permissions-editor')).not.toBeNull();
@@ -49,7 +50,7 @@ describe('AppsPage', () => {
     const { fixture, el } = await render();
     (el.querySelectorAll('.apps .app')[4] as HTMLButtonElement).click();
     await settle(fixture);
-    expect(el.querySelector('.hero h2')?.textContent).toContain('Continue');
+    expect(el.querySelector('.hero h2')?.textContent).toContain('Nightly report script');
     expect(el.querySelectorAll('table.keys tbody tr').length).toBe(2);
   });
 
@@ -121,7 +122,7 @@ describe('AppsPage', () => {
     button(overlay().querySelector('pw-confirm-dialog')!, 'Delete app')!.click();
     await settle(fixture);
     expect(el.querySelectorAll('.apps .app').length).toBe(4);
-    expect(el.querySelector('.hero h2')?.textContent).not.toContain('IMT');
+    expect(el.querySelector('.hero h2')?.textContent).not.toContain('Debrief');
   });
 
   it('approves a pairing request and lists the new app', async () => {

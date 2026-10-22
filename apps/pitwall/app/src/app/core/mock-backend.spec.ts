@@ -3,7 +3,7 @@ import type { LiveUpdate, PlaygroundEvent } from './api.types';
 import { isTauri } from './backend';
 import { toCommandError } from './command-error';
 import { MockBackend } from './mock-backend';
-import { demoFit, demoHistory, demoRepo, demoRequests, demoSearch, presetMemory, prng, GiB } from './mock-data';
+import { demoLimitStatuses, demoFit, demoHistory, demoRepo, demoRequests, demoSearch, presetMemory, prng, GiB } from './mock-data';
 
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
@@ -311,5 +311,51 @@ describe('mock data', () => {
     expect((await mock.localModels()).find((m) => m.id === 'qwen3-8b-instruct-q4_k_m')?.engine).toBe('ik-llama-cpu');
     await mock.setModelEngine('qwen3-8b-instruct-q4_k_m', 'llama.cpp');
     expect((await mock.localModels()).find((m) => m.id === 'qwen3-8b-instruct-q4_k_m')?.engine).toBeNull();
+  });
+});
+
+describe('MockBackend usage', () => {
+  const t = NOW;
+  const clock = () => t;
+
+  it('serves usage over time per app and overall, complete and consistent', async () => {
+    const mock = new MockBackend({ now: clock });
+    for (const [range, n] of [['24h', 24], ['7d', 168], ['30d', 30]] as const) {
+      const all = await mock.usageSeries(range, null);
+      expect(all.starts.length).toBe(n);
+      expect(all.apps.every((a) => a.points.length === n)).toBe(true);
+      expect(all.totals.requests).toBe(all.apps.reduce((s, a) => s + a.totals.requests, 0));
+      expect(all.starts.at(-1)).toBeLessThanOrEqual(NOW);
+    }
+    const one = await mock.usageSeries('7d', 'spotter');
+    expect(one.apps.map((a) => a.appId)).toEqual(['spotter']);
+    expect(one.totals.peakMemoryBytes).toBeGreaterThan(0);
+    const created = await mock.createApp('Brand new');
+    expect((await mock.usageSeries('24h', created.id)).totals.requests).toBe(0);
+    expect((await new MockBackend({ now: clock, empty: true }).usageSeries('24h', null)).apps).toEqual([]);
+  });
+
+  it('describes an app in detail with limit statuses and its latest requests', async () => {
+    const mock = new MockBackend({ now: clock });
+    const d = await mock.appDetail('spotter');
+    expect(d.app.id).toBe('spotter');
+    expect(d.limits.map((l) => l.kind)).toEqual(['requestsPerMin', 'requestsPerDay', 'tokensPerDay', 'tokensPerMonth']);
+    expect(d.limits.every((l) => l.percent === Math.floor((l.used * 100) / l.limit))).toBe(true);
+    expect(d.recent.every((r) => r.appId === 'spotter')).toBe(true);
+    expect(d.recent.length).toBeLessThanOrEqual(20);
+    const cont = await mock.appDetail('nightly-report');
+    expect(cont.limits.map((l) => l.kind)).toContain('memoryShare');
+    await expect(mock.appDetail('nobody')).rejects.toMatchObject({ code: 'notFound' });
+  });
+
+  it('marks limits close to or over their budget', () => {
+    const base = { requestsPerMin: null, tokensPerDay: 100, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null };
+    const used = (tokens: number) => ({ requests: 0, promptTokens: tokens, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0 });
+    const state = (n: number) => demoLimitStatuses(base, used(n), used(0), 1)[0]!;
+    expect(state(79).state).toBe('ok');
+    expect(state(79).message).toBeNull();
+    expect(state(80).state).toBe('warning');
+    expect(state(100).state).toBe('exceeded');
+    expect(state(100).message).toContain('refused');
   });
 });

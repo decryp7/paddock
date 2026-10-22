@@ -8,6 +8,8 @@ import {
   healthLook,
   hotStateLook,
   jobStateLook,
+  LIMIT_LABEL,
+  limitStateLook,
   pressureLook,
   selfTestLook,
   severityTone,
@@ -67,5 +69,20 @@ describe('labels', () => {
     expect(statusTone(200)).toBe('ok');
     expect(statusTone(429)).toBe('warn');
     expect(statusTone(503)).toBe('bad');
+  });
+});
+
+describe('limit labels', () => {
+  it('names every limit and says when it resets', () => {
+    expect(Object.keys(LIMIT_LABEL).sort()).toEqual(['memoryShare', 'requestsPerDay', 'requestsPerMin', 'tokensPerDay', 'tokensPerMonth']);
+    expect(LIMIT_LABEL.tokensPerMonth.resets).toContain('1st');
+    expect(LIMIT_LABEL.tokensPerDay.resets).toContain('midnight UTC');
+  });
+
+  it('describes a limit state in words and a tone', () => {
+    expect(limitStateLook('ok')).toEqual({ label: 'Within limit', tone: 'ok' });
+    expect(limitStateLook('warning')).toEqual({ label: 'Close to the limit', tone: 'warn' });
+    expect(limitStateLook('exceeded')).toEqual({ label: 'Limit reached', tone: 'bad' });
+    expect(eventIcon('limitWarning')).toBe('alert');
   });
 });

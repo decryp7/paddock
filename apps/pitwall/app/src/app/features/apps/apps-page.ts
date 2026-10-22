@@ -2,6 +2,7 @@ import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import type { AppInfo, AppPermissions } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
@@ -15,12 +16,13 @@ import { groupCode, permissionSummary } from '../dashboard/pairing-card';
 import { AppsStore } from './apps.store';
 import { CreateAppDialog } from './create-app-dialog';
 import { KeySecretDialog, type KeySecretData } from './key-secret-dialog';
+import { AppUsage } from '../usage/app-usage';
 import { PermissionsEditor } from './permissions-editor';
 
 /** Apps & keys: who may use Pitwall, with which models and how much, their keys and pending pairings. */
 @Component({
   selector: 'pw-apps-page',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, PermissionsEditor],
+  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, PermissionsEditor, AppUsage],
   providers: [AppsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -116,6 +118,8 @@ import { PermissionsEditor } from './permissions-editor';
                 </dl>
                 <p class="today faint">Today, since midnight</p>
               </section>
+
+              <pw-app-usage [appId]="a.id" [appName]="a.name" [permissions]="a.permissions" />
 
               <pw-panel heading="Keys" icon="key" [sub]="a.keys.length ? a.keys.length + ' active' : ''" [flush]="true">
                 <button panel-actions type="button" class="btn sm" [disabled]="store.isBusy('app:' + a.id)" (click)="createKey(a)"><mat-icon svgIcon="pw:plus" aria-hidden="true" />Create key</button>
@@ -396,7 +400,8 @@ export class AppsPage implements OnInit {
   protected readonly summary = permissionSummary;
   protected readonly limits = limitsText;
 
-  private readonly selectedId = signal<string | null>(null);
+  /** `/apps?app=<id>` (from the dashboard's usage legend) opens that app. */
+  private readonly selectedId = signal<string | null>(inject(ActivatedRoute, { optional: true })?.snapshot.queryParamMap.get('app') ?? null);
   protected readonly selected = computed<AppInfo | null>(() => {
     const apps = this.store.apps();
     const id = this.selectedId();

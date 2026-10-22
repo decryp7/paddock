@@ -1,4 +1,5 @@
 import type {
+  AppDetail,
   AppInfo,
   AppPermissions,
   AppUpdateStatus,
@@ -10,6 +11,8 @@ import type {
   Engine,
   EngineIssue,
   History,
+  UsageRange,
+  UsageSeries,
   HistoryRange,
   HfModel,
   HfRepo,
@@ -47,7 +50,9 @@ import {
   demoEngines,
   demoEvents,
   demoFit,
+  demoAppDetail,
   demoHistory,
+  demoUsageSeries,
   demoLoaded,
   demoLocalModels,
   demoPacks,
@@ -200,11 +205,11 @@ export class MockBackend implements PitwallBackend {
 
   private demoQueue(now: number): QueueSnapshot {
     const running: Job[] = [
-      { id: 'job-41', appId: 'imt', modelId: 'qwen3-8b-instruct-q4_k_m', priority: 'interactive', kind: 'chat', state: 'running', submittedAt: now - 3_400, startedAt: now - 3_100, progress: null, tokens: 212 },
+      { id: 'job-41', appId: 'debrief', modelId: 'qwen3-8b-instruct-q4_k_m', priority: 'interactive', kind: 'chat', state: 'running', submittedAt: now - 3_400, startedAt: now - 3_100, progress: null, tokens: 212 },
       { id: 'job-39', appId: 'spotter', modelId: 'nomic-embed-text-v1.5-f16', priority: 'batch', kind: 'batch', state: 'running', submittedAt: now - 84_000, startedAt: now - 80_000, progress: 0.42, tokens: 182_400 },
     ];
     const waiting: Job[] = [
-      { id: 'job-42', appId: 'continue', modelId: 'llama-3.2-3b-instruct-q5_k_m', priority: 'interactive', kind: 'completion', state: 'queued', submittedAt: now - 600, startedAt: null, progress: null, tokens: 0 },
+      { id: 'job-42', appId: 'nightly-report', modelId: 'llama-3.2-3b-instruct-q5_k_m', priority: 'interactive', kind: 'completion', state: 'queued', submittedAt: now - 600, startedAt: null, progress: null, tokens: 0 },
       { id: 'job-43', appId: 'pitcrew', modelId: 'qwen3-8b-instruct-q4_k_m', priority: 'background', kind: 'task', state: 'queued', submittedAt: now - 12_000, startedAt: null, progress: null, tokens: 0 },
       { id: 'job-44', appId: 'spotter', modelId: 'bge-reranker-v2-m3-q8_0', priority: 'batch', kind: 'batch', state: 'queued', submittedAt: now - 30_000, startedAt: null, progress: 0, tokens: 0 },
     ];
@@ -355,6 +360,10 @@ export class MockBackend implements PitwallBackend {
       }
       return h;
     });
+  }
+
+  usageSeries(range: UsageRange, appId: string | null): Promise<UsageSeries> {
+    return this.reply('usageSeries', () => demoUsageSeries(range, this.now(), appId, this.apps_.map((a) => a.id)));
   }
 
   events(limit: number): Promise<PitwallEvent[]> {
@@ -596,6 +605,13 @@ export class MockBackend implements PitwallBackend {
     return this.reply('apps', () => this.apps_);
   }
 
+  appDetail(appId: string): Promise<AppDetail> {
+    return this.reply('appDetail', () => {
+      const app = this.apps_.find((a) => a.id === appId) ?? this.fail('notFound', `No app ${appId}.`);
+      return demoAppDetail(app, this.requests_, this.now());
+    });
+  }
+
   createApp(name: string): Promise<AppInfo> {
     return this.reply('createApp', () => {
       const n = name.trim();
@@ -609,8 +625,8 @@ export class MockBackend implements PitwallBackend {
         connected: false,
         lastSeenAt: null,
         keys: [],
-        permissions: { models: null, maxPriority: 'background', tools: false, extendedApis: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1 } },
-        today: { requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0 },
+        permissions: { models: null, maxPriority: 'background', tools: false, extendedApis: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } },
+        today: { requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0 },
       };
       this.apps_.push(app);
       return app;
@@ -645,7 +661,7 @@ export class MockBackend implements PitwallBackend {
     return this.reply('setPermissions', () => {
       const app = this.apps_.find((a) => a.id === appId) ?? this.fail('notFound', `No app ${appId}.`);
       app.permissions = clone(permissions);
-      return app;
+      return clone(app);
     });
   }
 
@@ -654,7 +670,7 @@ export class MockBackend implements PitwallBackend {
       const p = this.pairings_.find((x) => x.id === id) ?? this.fail('notFound', 'That pairing request has expired.');
       this.pairings_ = this.pairings_.filter((x) => x !== p);
       if (!this.apps_.some((a) => a.id === p.appId)) {
-        this.apps_.push({ id: p.appId, name: p.appName, suite: false, connected: true, lastSeenAt: this.now(), keys: [{ id: `${p.appId}-k1`, prefix: 'pw_8c1e…', createdAt: this.now(), lastUsedAt: null }], permissions: clone(permissions), today: { requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0 } });
+        this.apps_.push({ id: p.appId, name: p.appName, suite: false, connected: true, lastSeenAt: this.now(), keys: [{ id: `${p.appId}-k1`, prefix: 'pw_8c1e…', createdAt: this.now(), lastUsedAt: null }], permissions: clone(permissions), today: { requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0 } });
       }
       this.pushEvent({ kind: 'pairing', severity: 'info', message: `Paired ${p.appName}`, modelId: null, appId: p.appId, reason: null });
       this.emit({ kind: 'pairing', pairings: clone(this.pairings_) });

@@ -8,8 +8,11 @@ import type {
   DiskUsage,
   Download,
   Engine,
+  AppDetail,
   History,
   HistoryRange,
+  UsageRange,
+  UsageSeries,
   HfModel,
   HfRepo,
   LiveUpdate,
@@ -40,6 +43,8 @@ export interface PitwallBackend {
   // Dashboard
   overview(): Promise<Overview>;
   history(range: HistoryRange): Promise<History>;
+  /** Requests, tokens, errors and peak memory per app over time; one app, or `null` for all. */
+  usageSeries(range: UsageRange, appId: string | null): Promise<UsageSeries>;
   events(limit: number): Promise<PitwallEvent[]>;
   /** Pushed updates (no polling). The listener gets every update until the returned function is called. */
   subscribe(listener: (update: LiveUpdate) => void): Unsubscribe;
@@ -75,6 +80,7 @@ export interface PitwallBackend {
 
   // Apps and keys
   apps(): Promise<AppInfo[]>;
+  appDetail(appId: string): Promise<AppDetail>;
   createApp(name: string): Promise<AppInfo>;
   deleteApp(id: string): Promise<void>;
   createKey(appId: string): Promise<CreatedKey>;
