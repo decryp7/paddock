@@ -93,7 +93,10 @@ mod tests {
 
     #[test]
     fn errors_show_their_message() {
-        assert_eq!(PlatformError::AccessDenied("needs the helper".into()).to_string(), "needs the helper");
+        assert_eq!(
+            PlatformError::AccessDenied("needs the helper".into()).to_string(),
+            "needs the helper"
+        );
         let j = serde_json::to_value(PlatformError::NotFound("gone".into())).unwrap();
         assert_eq!(j["notFound"], "gone");
     }

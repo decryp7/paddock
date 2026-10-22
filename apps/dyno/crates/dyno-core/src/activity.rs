@@ -160,19 +160,31 @@ mod tests {
         assert_eq!(inverse(&ProcessAction::Resume, prev), None);
         assert_eq!(inverse(&ProcessAction::SetCpuCap(None), prev), None);
         assert_eq!(inverse(&ProcessAction::Suspend, prev), Some(ProcessAction::Resume));
-        assert_eq!(inverse(&ProcessAction::SetPriority(Priority::Idle), prev), Some(ProcessAction::SetPriority(Priority::High)));
+        assert_eq!(
+            inverse(&ProcessAction::SetPriority(Priority::Idle), prev),
+            Some(ProcessAction::SetPriority(Priority::High))
+        );
         assert_eq!(
             inverse(&ProcessAction::SetPriority(Priority::Idle), Previous::default()),
             Some(ProcessAction::SetPriority(Priority::Normal))
         );
-        assert_eq!(inverse(&ProcessAction::SetAffinity(1), prev), Some(ProcessAction::SetAffinity(0b11)));
+        assert_eq!(
+            inverse(&ProcessAction::SetAffinity(1), prev),
+            Some(ProcessAction::SetAffinity(0b11))
+        );
         assert_eq!(inverse(&ProcessAction::SetAffinity(1), Previous::default()), None);
-        assert_eq!(inverse(&ProcessAction::SetEfficiencyMode(true), prev), Some(ProcessAction::SetEfficiencyMode(false)));
+        assert_eq!(
+            inverse(&ProcessAction::SetEfficiencyMode(true), prev),
+            Some(ProcessAction::SetEfficiencyMode(false))
+        );
         assert_eq!(
             inverse(&ProcessAction::SetEfficiencyMode(true), Previous::default()),
             Some(ProcessAction::SetEfficiencyMode(false))
         );
-        assert_eq!(inverse(&ProcessAction::SetCpuCap(Some(5)), prev), Some(ProcessAction::SetCpuCap(None)));
+        assert_eq!(
+            inverse(&ProcessAction::SetCpuCap(Some(5)), prev),
+            Some(ProcessAction::SetCpuCap(None))
+        );
     }
 
     #[test]

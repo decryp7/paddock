@@ -65,10 +65,7 @@ impl ControlState {
             .filter(|b| b.version == STATE_VERSION)
             .map(|b| b.applied)
             .unwrap_or_default();
-        ControlState {
-            path: Some(path),
-            entries,
-        }
+        ControlState { path: Some(path), entries }
     }
 
     /// Every entry.

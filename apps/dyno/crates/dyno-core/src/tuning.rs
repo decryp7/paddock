@@ -42,21 +42,22 @@ pub struct Plan {
 /// their trigger no longer holds, so the user can always undo).
 pub fn plans(facts: &SystemFacts, os: Os, power: Option<PowerSource>, applied: &[String]) -> Vec<Plan> {
     let mut out = Vec::new();
-    let mut push = |id: &str, title: &str, explanation: String, current: String, proposed: String, apply: HelperAction, revert: HelperAction| {
-        out.push(Plan {
-            suggestion: TuningSuggestion {
-                id: id.into(),
-                title: title.into(),
-                explanation,
-                current,
-                proposed,
-                needs_admin: apply.needs_admin(),
-                applied: applied.iter().any(|a| a == id),
-            },
-            apply,
-            revert,
-        });
-    };
+    let mut push =
+        |id: &str, title: &str, explanation: String, current: String, proposed: String, apply: HelperAction, revert: HelperAction| {
+            out.push(Plan {
+                suggestion: TuningSuggestion {
+                    id: id.into(),
+                    title: title.into(),
+                    explanation,
+                    current,
+                    proposed,
+                    needs_admin: apply.needs_admin(),
+                    applied: applied.iter().any(|a| a == id),
+                },
+                apply,
+                revert,
+            });
+        };
     let dev: Vec<String> = facts.dev_folders.iter().map(|d| d.path.clone()).collect();
 
     if os == Os::Windows {
@@ -105,7 +106,12 @@ pub fn plans(facts: &SystemFacts, os: Os, power: Option<PowerSource>, applied: &
             }
         }
     }
-    let indexed: Vec<String> = facts.dev_folders.iter().filter(|d| d.indexed == Some(true)).map(|d| d.path.clone()).collect();
+    let indexed: Vec<String> = facts
+        .dev_folders
+        .iter()
+        .filter(|d| d.indexed == Some(true))
+        .map(|d| d.path.clone())
+        .collect();
     if !indexed.is_empty() {
         push(
             "indexDevFolders",
@@ -227,7 +233,16 @@ mod tests {
     fn windows_suggestions() {
         let p = plans(&facts(), Os::Windows, Some(PowerSource::Ac), &["visualEffects".into()]);
         let ids: Vec<&str> = p.iter().map(|p| p.suggestion.id.as_str()).collect();
-        assert_eq!(ids, ["powerPlan", "visualEffects", "backgroundApps", "indexDevFolders", "defenderDevFolders"]);
+        assert_eq!(
+            ids,
+            [
+                "powerPlan",
+                "visualEffects",
+                "backgroundApps",
+                "indexDevFolders",
+                "defenderDevFolders"
+            ]
+        );
         assert!(p[1].suggestion.applied);
         assert!(!p[0].suggestion.applied);
         assert_eq!(p[0].revert, HelperAction::SetPowerScheme(POWER_SAVER_SCHEME.into()));
@@ -259,10 +274,21 @@ mod tests {
 
     #[test]
     fn applied_entries_can_be_reverted() {
-        for id in ["powerPlan", "visualEffects", "backgroundApps", "indexDevFolders", "defenderDevFolders", "lowPowerMode", "other"] {
+        for id in [
+            "powerPlan",
+            "visualEffects",
+            "backgroundApps",
+            "indexDevFolders",
+            "defenderDevFolders",
+            "lowPowerMode",
+            "other",
+        ] {
             let e = applied_entry(id, &HelperAction::SetVisualEffects(0));
             assert!(e.applied && e.title.contains("applied by Dyno"));
         }
-        assert_eq!(applied_entry("powerPlan", &HelperAction::SetPowerScheme(POWER_SAVER_SCHEME.into())).proposed, "Power saver");
+        assert_eq!(
+            applied_entry("powerPlan", &HelperAction::SetPowerScheme(POWER_SAVER_SCHEME.into())).proposed,
+            "Power saver"
+        );
     }
 }

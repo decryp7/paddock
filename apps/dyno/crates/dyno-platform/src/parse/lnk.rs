@@ -51,7 +51,13 @@ fn ansi_z(b: &[u8], at: usize) -> Option<String> {
 /// A NUL-terminated UTF-16LE string.
 fn utf16_z(b: &[u8], at: usize) -> Option<String> {
     let rest = b.get(at..)?;
-    let units: Vec<u16> = rest.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).take_while(|&u| u != 0).collect();
+    let units: Vec<u16> = rest
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
+        .take_while(|&u| u != 0)
+        .collect();
     if units.len() * 2 >= rest.len() {
         return None; // no terminator
     }

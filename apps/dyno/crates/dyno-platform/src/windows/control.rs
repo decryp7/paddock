@@ -18,17 +18,16 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, OpenJobObjectW, SetInformationJobObject,
-    JobObjectCpuRateControlInformation, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0,
-    JOB_OBJECT_CPU_RATE_CONTROL, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE, JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
+    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JobObjectCpuRateControlInformation, OpenJobObjectW,
+    SetInformationJobObject, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION, JOBOBJECT_CPU_RATE_CONTROL_INFORMATION_0, JOB_OBJECT_CPU_RATE_CONTROL,
+    JOB_OBJECT_CPU_RATE_CONTROL_ENABLE, JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
 };
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetPriorityClass, GetProcessInformation, OpenThread, PROCESS_DUP_HANDLE, ProcessPowerThrottling, ResumeThread, SetPriorityClass, SetProcessAffinityMask,
-    SetProcessInformation, SuspendThread, TerminateProcess, WaitForSingleObject, ABOVE_NORMAL_PRIORITY_CLASS,
+    GetCurrentProcess, GetPriorityClass, GetProcessInformation, OpenThread, ProcessPowerThrottling, ResumeThread, SetPriorityClass,
+    SetProcessAffinityMask, SetProcessInformation, SuspendThread, TerminateProcess, WaitForSingleObject, ABOVE_NORMAL_PRIORITY_CLASS,
     BELOW_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS, PROCESS_CREATION_FLAGS,
-    PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
-    PROCESS_SET_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
-    REALTIME_PRIORITY_CLASS, THREAD_SUSPEND_RESUME,
+    PROCESS_DUP_HANDLE, PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
+    PROCESS_SET_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, REALTIME_PRIORITY_CLASS, THREAD_SUSPEND_RESUME,
 };
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE};
 
@@ -235,7 +234,17 @@ fn keep_name_alive(target: ProcessRef, job: &Owned) {
     let mut theirs = HANDLE::default();
     // SAFETY: duplicating our live job handle into the target process with query-only access; the target owns the
     // new handle (it is closed when the process exits).
-    let _ = unsafe { DuplicateHandle(GetCurrentProcess(), job.raw(), t.raw(), &mut theirs, JOB_QUERY, false, DUPLICATE_HANDLE_OPTIONS(0)) };
+    let _ = unsafe {
+        DuplicateHandle(
+            GetCurrentProcess(),
+            job.raw(),
+            t.raw(),
+            &mut theirs,
+            JOB_QUERY,
+            false,
+            DUPLICATE_HANDLE_OPTIONS(0),
+        )
+    };
 }
 
 /// Turns off the cap of a named job left by any run, if the job still exists.
@@ -352,7 +361,11 @@ impl WinControl {
             }
         } else {
             set_power_throttling(&h, target.pid, false)?;
-            let restore = self.priority_before_eco.remove(&target).map(PROCESS_CREATION_FLAGS).unwrap_or(NORMAL_PRIORITY_CLASS);
+            let restore = self
+                .priority_before_eco
+                .remove(&target)
+                .map(PROCESS_CREATION_FLAGS)
+                .unwrap_or(NORMAL_PRIORITY_CLASS);
             // SAFETY: as above.
             unsafe { SetPriorityClass(h.raw(), restore) }.map_err(|e| failed(target.pid, "change the priority of", &e))?;
         }
@@ -386,8 +399,16 @@ impl WinControl {
             }
             slot.insert(job);
         }
-        let job = self.jobs.get(&target).ok_or_else(|| PlatformError::Failed("The CPU cap job is missing.".into()))?;
-        set_rate(job, target.pid, JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP, cpu_rate(pct))?;
+        let job = self
+            .jobs
+            .get(&target)
+            .ok_or_else(|| PlatformError::Failed("The CPU cap job is missing.".into()))?;
+        set_rate(
+            job,
+            target.pid,
+            JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
+            cpu_rate(pct),
+        )?;
         self.state.update(target, |a| a.capped = true);
         Ok(())
     }
@@ -436,7 +457,13 @@ mod tests {
 
     #[test]
     fn mappings() {
-        for p in [Priority::Idle, Priority::BelowNormal, Priority::Normal, Priority::AboveNormal, Priority::High] {
+        for p in [
+            Priority::Idle,
+            Priority::BelowNormal,
+            Priority::Normal,
+            Priority::AboveNormal,
+            Priority::High,
+        ] {
             assert_eq!(priority_of_class(priority_class(p).0), Some(p));
         }
         assert_eq!(priority_of_class(REALTIME_PRIORITY_CLASS.0), Some(Priority::High));

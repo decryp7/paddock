@@ -319,7 +319,13 @@ mod tests {
 
     #[test]
     fn priorities_map_to_nice_and_back() {
-        for p in [Priority::Idle, Priority::BelowNormal, Priority::Normal, Priority::AboveNormal, Priority::High] {
+        for p in [
+            Priority::Idle,
+            Priority::BelowNormal,
+            Priority::Normal,
+            Priority::AboveNormal,
+            Priority::High,
+        ] {
             assert_eq!(Priority::from_nice(p.nice()), p);
         }
         assert_eq!(Priority::from_nice(-20), Priority::High);

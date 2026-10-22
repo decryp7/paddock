@@ -192,7 +192,11 @@ impl Settings {
     pub fn normalised(mut self) -> Settings {
         self.version = SCHEMA_VERSION;
         self.sampling.interval_ms = self.sampling.interval_ms.clamp(500, 10_000);
-        self.sampling.process_interval_ms = self.sampling.process_interval_ms.clamp(1_000, 30_000).max(self.sampling.interval_ms);
+        self.sampling.process_interval_ms = self
+            .sampling
+            .process_interval_ms
+            .clamp(1_000, 30_000)
+            .max(self.sampling.interval_ms);
         self.retention = self.retention.clamped();
         self.tray.metrics.dedup();
         self.tray.metrics.truncate(3);
@@ -215,15 +219,24 @@ impl Settings {
 /// defaults with a warning (the agent keeps the damaged file aside).
 pub fn parse(text: &str) -> (Settings, Option<String>) {
     if text.len() > MAX_SETTINGS_BYTES {
-        return (Settings::default(), Some("The settings file is too large; using the defaults.".into()));
+        return (
+            Settings::default(),
+            Some("The settings file is too large; using the defaults.".into()),
+        );
     }
     match serde_json::from_str::<Settings>(text) {
         Ok(s) if s.version > SCHEMA_VERSION => (
             Settings::default(),
-            Some(format!("The settings were saved by a newer Dyno (version {}); using the defaults.", s.version)),
+            Some(format!(
+                "The settings were saved by a newer Dyno (version {}); using the defaults.",
+                s.version
+            )),
         ),
         Ok(s) => (s.normalised(), None),
-        Err(e) => (Settings::default(), Some(format!("The settings file is damaged ({e}); using the defaults."))),
+        Err(e) => (
+            Settings::default(),
+            Some(format!("The settings file is damaged ({e}); using the defaults.")),
+        ),
     }
 }
 
@@ -260,7 +273,13 @@ mod tests {
             interval_ms: 1,
             process_interval_ms: 999_999,
         };
-        s.tray.metrics = vec![TrayMetric::Cpu, TrayMetric::Cpu, TrayMetric::Disk, TrayMetric::Gpu, TrayMetric::Network];
+        s.tray.metrics = vec![
+            TrayMetric::Cpu,
+            TrayMetric::Cpu,
+            TrayMetric::Disk,
+            TrayMetric::Gpu,
+            TrayMetric::Network,
+        ];
         s.cleanup.dev_project_age_days = 1;
         s.cleanup.categories = vec![String::new(), "userTemp".into()];
         s.web_api.port = 80;

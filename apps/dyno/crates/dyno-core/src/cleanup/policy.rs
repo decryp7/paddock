@@ -180,7 +180,16 @@ pub fn is_inside(path: &str, root: &str) -> bool {
 
 /// Checks a candidate against the category's resolved roots and the safety rules, and turns it into a preview item.
 #[allow(clippy::too_many_arguments)]
-pub fn admit(id: String, c: Candidate, roots: &[String], home: &str, risk: CleanupRisk, min_age_days: u32, now: Timestamp, default_reason: &str) -> Result<CleanupItem, String> {
+pub fn admit(
+    id: String,
+    c: Candidate,
+    roots: &[String],
+    home: &str,
+    risk: CleanupRisk,
+    min_age_days: u32,
+    now: Timestamp,
+    default_reason: &str,
+) -> Result<CleanupItem, String> {
     if c.link {
         return Err(format!("{} is a link; Dyno never follows or deletes links.", c.path));
     }
@@ -237,7 +246,10 @@ pub fn chosen<'a>(scan: &'a CleanupScan, ids: &[String], now: Timestamp) -> Resu
     }
     let mut out = Vec::with_capacity(ids.len());
     for id in ids {
-        let hit = scan.results.iter().find_map(|r| r.items.iter().find(|i| &i.id == id).map(|i| (r.category.as_str(), i)));
+        let hit = scan
+            .results
+            .iter()
+            .find_map(|r| r.items.iter().find(|i| &i.id == id).map(|i| (r.category.as_str(), i)));
         match hit {
             Some(h) => out.push(h),
             None => return Err(format!("Item {id} is not part of this scan.")),
@@ -249,7 +261,9 @@ pub fn chosen<'a>(scan: &'a CleanupScan, ids: &[String], now: Timestamp) -> Resu
 /// Whether a file name is an installer.
 pub fn is_installer(name: &str) -> bool {
     let n = name.to_lowercase();
-    [".exe", ".msi", ".msix", ".msixbundle", ".appx", ".dmg", ".pkg"].iter().any(|e| n.ends_with(e))
+    [".exe", ".msi", ".msix", ".msixbundle", ".appx", ".dmg", ".pkg"]
+        .iter()
+        .any(|e| n.ends_with(e))
 }
 
 /// A project's build output folder, if it is old enough to offer. `markers` are the file names in the project
@@ -268,7 +282,8 @@ pub fn dev_artifact(artifact: &str, markers: &[String], newest_source: Timestamp
 /// Installed Rust toolchains that neither the default nor an override uses.
 pub fn stale_toolchains(installed: &[String], default: Option<&str>, overrides: &[String]) -> Vec<String> {
     let used = |t: &str| {
-        default.is_some_and(|d| t == d || t.starts_with(&format!("{d}-"))) || overrides.iter().any(|o| t == o || t.starts_with(&format!("{o}-")))
+        default.is_some_and(|d| t == d || t.starts_with(&format!("{d}-")))
+            || overrides.iter().any(|o| t == o || t.starts_with(&format!("{o}-")))
     };
     installed.iter().filter(|t| !used(t)).cloned().collect()
 }
@@ -315,7 +330,10 @@ mod tests {
 
     #[test]
     fn inside_means_strictly_inside() {
-        assert!(is_inside("C:\\Users\\me\\AppData\\Local\\Temp\\x.tmp", "c:/users/me/appdata/local/temp/"));
+        assert!(is_inside(
+            "C:\\Users\\me\\AppData\\Local\\Temp\\x.tmp",
+            "c:/users/me/appdata/local/temp/"
+        ));
         assert!(!is_inside("C:/Temp", "C:/Temp"));
         assert!(!is_inside("C:/Temp2/x", "C:/Temp"));
         assert!(!is_inside("C:/x", ""));
@@ -325,20 +343,85 @@ mod tests {
     fn admission_rules() {
         let roots = vec!["C:/Users/me/AppData/Local/Temp".to_string()];
         let home = "C:/Users/me";
-        let ok = admit("1".into(), cand("C:/Users/me/AppData/Local/Temp/a.tmp", 5), &roots, home, CleanupRisk::Safe, 2, NOW, "Temp").unwrap();
+        let ok = admit(
+            "1".into(),
+            cand("C:/Users/me/AppData/Local/Temp/a.tmp", 5),
+            &roots,
+            home,
+            CleanupRisk::Safe,
+            2,
+            NOW,
+            "Temp",
+        )
+        .unwrap();
         assert!(ok.selected);
         assert_eq!(ok.reason, "Temp");
-        let review = admit("2".into(), cand("C:/Users/me/AppData/Local/Temp/b", 5), &roots, home, CleanupRisk::Review, 0, NOW, "x").unwrap();
+        let review = admit(
+            "2".into(),
+            cand("C:/Users/me/AppData/Local/Temp/b", 5),
+            &roots,
+            home,
+            CleanupRisk::Review,
+            0,
+            NOW,
+            "x",
+        )
+        .unwrap();
         assert!(!review.selected);
         let mut link = cand("C:/Users/me/AppData/Local/Temp/l", 5);
         link.link = true;
-        assert!(admit("3".into(), link, &roots, home, CleanupRisk::Safe, 0, NOW, "").unwrap_err().contains("link"));
-        assert!(admit("4".into(), cand("C:/Users/me/AppData/Local/Temp/../../x", 5), &roots, home, CleanupRisk::Safe, 0, NOW, "").is_err());
-        assert!(admit("5".into(), cand("C:/Windows/System32/x", 5), &roots, home, CleanupRisk::Safe, 0, NOW, "").unwrap_err().contains("outside"));
-        assert!(admit("6".into(), cand("C:/Users/me/AppData/Local/Temp/new", 1), &roots, home, CleanupRisk::Safe, 2, NOW, "").unwrap_err().contains("changed"));
+        assert!(admit("3".into(), link, &roots, home, CleanupRisk::Safe, 0, NOW, "")
+            .unwrap_err()
+            .contains("link"));
+        assert!(admit(
+            "4".into(),
+            cand("C:/Users/me/AppData/Local/Temp/../../x", 5),
+            &roots,
+            home,
+            CleanupRisk::Safe,
+            0,
+            NOW,
+            ""
+        )
+        .is_err());
+        assert!(admit(
+            "5".into(),
+            cand("C:/Windows/System32/x", 5),
+            &roots,
+            home,
+            CleanupRisk::Safe,
+            0,
+            NOW,
+            ""
+        )
+        .unwrap_err()
+        .contains("outside"));
+        assert!(admit(
+            "6".into(),
+            cand("C:/Users/me/AppData/Local/Temp/new", 1),
+            &roots,
+            home,
+            CleanupRisk::Safe,
+            2,
+            NOW,
+            ""
+        )
+        .unwrap_err()
+        .contains("changed"));
         // A root that reaches into a personal folder can't offer what's in it…
         let wide = vec!["C:/Users/me".to_string()];
-        assert!(admit("7".into(), cand("C:/Users/me/Documents/cv.docx", 90), &wide, home, CleanupRisk::Safe, 0, NOW, "").unwrap_err().contains("personal"));
+        assert!(admit(
+            "7".into(),
+            cand("C:/Users/me/Documents/cv.docx", 90),
+            &wide,
+            home,
+            CleanupRisk::Safe,
+            0,
+            NOW,
+            ""
+        )
+        .unwrap_err()
+        .contains("personal"));
         // …but the Downloads category's root may be one.
         let dl = vec!["C:/Users/me/Downloads".to_string()];
         let mut c = cand("C:/Users/me/Downloads/setup.exe", 90);
@@ -347,7 +430,17 @@ mod tests {
         assert!(!item.selected, "personal items are never pre-selected");
         assert_eq!(item.reason, "Installer");
         let docs = vec!["C:/Users/me/Documents".to_string()];
-        assert!(admit("9".into(), cand("C:/Users/me/Documents/a", 90), &docs, home, CleanupRisk::Personal, 0, NOW, "").is_ok());
+        assert!(admit(
+            "9".into(),
+            cand("C:/Users/me/Documents/a", 90),
+            &docs,
+            home,
+            CleanupRisk::Personal,
+            0,
+            NOW,
+            ""
+        )
+        .is_ok());
     }
 
     fn item(id: &str, bytes: u64) -> CleanupItem {
@@ -401,12 +494,18 @@ mod tests {
         );
         assert!(dev_artifact("target", &markers, Timestamp(90 * DAY), NOW, 30).is_none());
         assert!(dev_artifact("node_modules", &markers, Timestamp(0), NOW, 30).is_none());
-        assert!(dev_artifact("node_modules", &["package.json".into()], Timestamp(0), NOW, 30).unwrap().starts_with("npm"));
+        assert!(dev_artifact("node_modules", &["package.json".into()], Timestamp(0), NOW, 30)
+            .unwrap()
+            .starts_with("npm"));
         assert!(dev_artifact("bin", &markers, Timestamp(0), NOW, 30).is_none());
-        let installed: Vec<String> =
-            ["stable-x86_64-pc-windows-msvc", "nightly-2025-01-01-x86_64-pc-windows-msvc", "1.80.0-x86_64-pc-windows-msvc", "1.85.0-x86_64-pc-windows-msvc"]
-                .map(String::from)
-                .to_vec();
+        let installed: Vec<String> = [
+            "stable-x86_64-pc-windows-msvc",
+            "nightly-2025-01-01-x86_64-pc-windows-msvc",
+            "1.80.0-x86_64-pc-windows-msvc",
+            "1.85.0-x86_64-pc-windows-msvc",
+        ]
+        .map(String::from)
+        .to_vec();
         let stale = stale_toolchains(&installed, Some("stable-x86_64-pc-windows-msvc"), &["1.85.0".into()]);
         assert_eq!(stale, vec![installed[1].clone(), installed[2].clone()]);
         assert_eq!(stale_toolchains(&installed, Some("stable"), &[]).len(), 3);

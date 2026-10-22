@@ -75,12 +75,17 @@ pub fn memory_growth(rows: &[AppMinute]) -> Vec<Anomaly> {
     let mut out = Vec::new();
     for (app, mut pts) in by_app {
         pts.sort_by_key(|r| r.at);
-        let (Some(first), Some(last)) = (pts.first(), pts.last()) else { continue };
+        let (Some(first), Some(last)) = (pts.first(), pts.last()) else {
+            continue;
+        };
         let hours = last.at.since(first.at) as f64 / HOUR as f64;
         if hours < MIN_GROWTH_HOURS || pts.len() < 30 {
             continue;
         }
-        let xy: Vec<(f64, f64)> = pts.iter().map(|r| (r.at.since(first.at) as f64 / HOUR as f64, r.memory as f64)).collect();
+        let xy: Vec<(f64, f64)> = pts
+            .iter()
+            .map(|r| (r.at.since(first.at) as f64 / HOUR as f64, r.memory as f64))
+            .collect();
         let Some(fit) = linear_fit(&xy) else { continue };
         let growth = fit.slope * hours;
         if fit.slope >= MIN_GROWTH_PER_HOUR && growth >= MIN_GROWTH_TOTAL && fit.r2 >= 0.8 {
@@ -89,7 +94,11 @@ pub fn memory_growth(rows: &[AppMinute]) -> Vec<Anomaly> {
                 kind: AnomalyKind::MemoryGrowth,
                 app: app.to_string(),
                 since: first.at,
-                title: format!("{app}'s memory grew {} in {}", bytes(growth as u64), duration((hours * 3600.0) as u64)),
+                title: format!(
+                    "{app}'s memory grew {} in {}",
+                    bytes(growth as u64),
+                    duration((hours * 3600.0) as u64)
+                ),
                 explanation: format!(
                     "{app} keeps using more memory at a steady rate, which usually means a leak. Restarting it gives the \
                      memory back; if it keeps happening, look for an update."
@@ -126,7 +135,10 @@ pub fn periodic_spikes(points: &[HistoryPoint], rows: &[AppMinute]) -> Option<An
         return None;
     }
     let mut culprits: BTreeMap<&str, f32> = BTreeMap::new();
-    for r in rows.iter().filter(|r| spikes.iter().any(|s| r.at.floor_to(MINUTE) == s.floor_to(MINUTE))) {
+    for r in rows
+        .iter()
+        .filter(|r| spikes.iter().any(|s| r.at.floor_to(MINUTE) == s.floor_to(MINUTE)))
+    {
         *culprits.entry(r.app.as_str()).or_default() += r.cpu;
     }
     let app = culprits.into_iter().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(a, _)| a.to_string());
@@ -137,7 +149,10 @@ pub fn periodic_spikes(points: &[HistoryPoint], rows: &[AppMinute]) -> Option<An
         kind: AnomalyKind::PeriodicSpike,
         app: who.clone(),
         since: spikes[0],
-        title: format!("CPU spikes every {every}{}", app.as_ref().map(|a| format!(", mostly {a}")).unwrap_or_default()),
+        title: format!(
+            "CPU spikes every {every}{}",
+            app.as_ref().map(|a| format!(", mostly {a}")).unwrap_or_default()
+        ),
         explanation: "A regular spike is usually a scheduled task, an updater or an app polling in a loop. If it disturbs you, \
                       a rule can lower its priority, or check the app's settings for a sync or update interval."
             .into(),
@@ -258,7 +273,10 @@ mod tests {
         let b = periodic_spikes(&spikes, &[]).unwrap();
         assert_eq!(b.app, "System");
         assert!(periodic_spikes(&day(None, false), &[]).is_none());
-        assert!(periodic_spikes(&day(Some(15), true), &[]).is_none(), "an irregular extra spike breaks the rhythm");
+        assert!(
+            periodic_spikes(&day(Some(15), true), &[]).is_none(),
+            "an irregular extra spike breaks the rhythm"
+        );
         assert!(periodic_spikes(&[], &[]).is_none());
     }
 

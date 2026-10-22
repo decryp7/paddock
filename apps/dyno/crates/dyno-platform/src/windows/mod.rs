@@ -46,7 +46,9 @@ pub fn reveal(path: &Path) -> Result<(), PlatformError> {
     if shown.contains('"') {
         return Err(PlatformError::Failed("The path contains a quote character.".into()));
     }
-    let windir = std::env::var_os("WINDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let windir = std::env::var_os("WINDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
     let mut cmd = crate::process::command(windir.join("explorer.exe"));
     // Explorer parses its own command line: `/select,"<path>"` must reach it verbatim.
     cmd.raw_arg(format!("/select,\"{shown}\""));

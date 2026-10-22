@@ -8,9 +8,8 @@ use dyno_core::metrics::{Commit, GpuSample, Reading, SystemSample};
 use windows::core::HSTRING;
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE};
 use windows::Win32::System::Performance::{
-    PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhGetFormattedCounterValue,
-    PDH_FMT, PDH_FMT_COUNTERVALUE, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY,
-    PDH_MORE_DATA,
+    PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhGetFormattedCounterValue, PDH_FMT,
+    PDH_FMT_COUNTERVALUE, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_FMT_LARGE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA,
 };
 use windows::Win32::System::ProcessStatus::{GetPerformanceInfo, PERFORMANCE_INFORMATION};
 
@@ -69,7 +68,9 @@ fn value(c: Option<PDH_HCOUNTER>, format: PDH_FMT) -> Option<PDH_FMT_COUNTERVALU
 
 fn double(c: Option<PDH_HCOUNTER>) -> Option<f64> {
     // SAFETY: PDH_FMT_DOUBLE was requested, so the union holds a double.
-    value(c, PDH_FMT_DOUBLE).map(|v| unsafe { v.Anonymous.doubleValue }).filter(|d| d.is_finite())
+    value(c, PDH_FMT_DOUBLE)
+        .map(|v| unsafe { v.Anonymous.doubleValue })
+        .filter(|d| d.is_finite())
 }
 
 /// Every instance of a wildcard counter as (name, value).
@@ -142,7 +143,9 @@ fn main_adapter() -> Option<(String, u64)> {
     let mut best: Option<(String, u64)> = None;
     for i in 0..16u32 {
         // SAFETY: enumerating adapters by index; an error ends the list.
-        let Ok(adapter) = (unsafe { factory.EnumAdapters1(i) }) else { break };
+        let Ok(adapter) = (unsafe { factory.EnumAdapters1(i) }) else {
+            break;
+        };
         // SAFETY: GetDesc1 fills a plain struct.
         let Ok(desc) = (unsafe { adapter.GetDesc1() }) else { continue };
         if desc.Flags & (DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0 {
@@ -237,7 +240,9 @@ impl SensorProbe for WinProbe {
         let memory = array(c.gpu_memory, PDH_FMT_LARGE);
         s.gpu = match (engines, &self.adapter) {
             (Some(e), adapter) => {
-                let util = busiest_engine(e.iter().map(|(n, v)| (n.as_str(), *v))).map(|(u, _)| u).unwrap_or(0.0);
+                let util = busiest_engine(e.iter().map(|(n, v)| (n.as_str(), *v)))
+                    .map(|(u, _)| u)
+                    .unwrap_or(0.0);
                 let used = memory.unwrap_or_default().iter().map(|(_, v)| v.max(0.0) as u64).max().unwrap_or(0);
                 Reading::Available(GpuSample {
                     name: adapter.as_ref().map(|a| a.0.clone()).unwrap_or_default(),
@@ -266,7 +271,11 @@ mod tests {
         let x = s.sample(Timestamp(1));
         let c = x.memory.commit.value().expect("commit");
         assert!(c.limit >= c.used && c.used > 0);
-        assert!(x.disk_io.busy.value().is_some_and(|b| (0.0..=100.0).contains(b)), "{:?}", x.disk_io.busy);
+        assert!(
+            x.disk_io.busy.value().is_some_and(|b| (0.0..=100.0).contains(b)),
+            "{:?}",
+            x.disk_io.busy
+        );
         assert!(x.disk_io.queue.value().is_some(), "{:?}", x.disk_io.queue);
         assert!(x.cpu.base_frequency_mhz > 0, "{:?}", x.cpu);
         assert_eq!(x.fans, Reading::unavailable(WINDOWS_NO_FANS));

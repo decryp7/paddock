@@ -15,9 +15,7 @@ use crate::Platform;
 use dyno_core::facts::SystemFacts;
 use dyno_core::metrics::{CpuSample, DiskIo, MemoryPressure, MemorySample, Reading, SystemSample};
 use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessControl, ProcessSource, StartupItems, SystemSensors, UserActivity};
-use dyno_core::process::{
-    ListOrReason, Locker, Pid, ProcessAction, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo,
-};
+use dyno_core::process::{ListOrReason, Locker, Pid, ProcessAction, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use dyno_core::startup::{StartupEntry, StartupState};
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, VecDeque};
@@ -233,7 +231,10 @@ impl StartupItems for Fake {
         let mut st = self.lock();
         st.failure(FakeOp::StartupSet)?;
         if entry.location.needs_admin() {
-            return Err(PlatformError::AccessDenied(format!("Changing {} needs the Dyno helper.", entry.name)));
+            return Err(PlatformError::AccessDenied(format!(
+                "Changing {} needs the Dyno helper.",
+                entry.name
+            )));
         }
         let e = st
             .startup
@@ -387,7 +388,10 @@ mod tests {
             pid: 1,
             started: Timestamp(99),
         };
-        assert!(matches!(p.control.apply(reused, &ProcessAction::End), Err(PlatformError::NotFound(_))));
+        assert!(matches!(
+            p.control.apply(reused, &ProcessAction::End),
+            Err(PlatformError::NotFound(_))
+        ));
         p.control.apply(a, &ProcessAction::End).unwrap();
         assert_eq!(p.processes.processes().len(), 1);
         assert!(matches!(p.processes.details(a), Err(PlatformError::NotFound(_))));
@@ -433,9 +437,15 @@ mod tests {
         let list = p.startup.list().unwrap();
         p.startup.set_state(&list[0], StartupState::Disabled).unwrap();
         assert_eq!(p.startup.list().unwrap()[0].state, StartupState::Disabled);
-        assert!(matches!(p.startup.set_state(&list[1], StartupState::Disabled), Err(PlatformError::AccessDenied(_))));
+        assert!(matches!(
+            p.startup.set_state(&list[1], StartupState::Disabled),
+            Err(PlatformError::AccessDenied(_))
+        ));
         let gone = entry("gone", StartupLocation::UserStartupFolder);
-        assert!(matches!(p.startup.set_state(&gone, StartupState::Disabled), Err(PlatformError::NotFound(_))));
+        assert!(matches!(
+            p.startup.set_state(&gone, StartupState::Disabled),
+            Err(PlatformError::NotFound(_))
+        ));
         fake.fail(FakeOp::StartupList, PlatformError::Failed("x".into()));
         fake.fail(FakeOp::StartupSet, PlatformError::Failed("x".into()));
         assert!(p.startup.list().is_err());

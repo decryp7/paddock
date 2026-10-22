@@ -25,7 +25,10 @@ pub fn background_app_count(global_disabled: Option<u32>, apps: &[BackgroundApp]
     if global_disabled == Some(1) {
         return 0;
     }
-    let allowed = apps.iter().filter(|a| a.disabled != Some(1) && a.disabled_by_user != Some(1)).count();
+    let allowed = apps
+        .iter()
+        .filter(|a| a.disabled != Some(1) && a.disabled_by_user != Some(1))
+        .count();
     u32::try_from(allowed).unwrap_or(u32::MAX)
 }
 
@@ -45,9 +48,18 @@ mod tests {
     fn background_apps() {
         let apps = [
             BackgroundApp::default(),
-            BackgroundApp { disabled: Some(1), ..Default::default() },
-            BackgroundApp { disabled_by_user: Some(1), ..Default::default() },
-            BackgroundApp { disabled: Some(0), disabled_by_user: Some(0) },
+            BackgroundApp {
+                disabled: Some(1),
+                ..Default::default()
+            },
+            BackgroundApp {
+                disabled_by_user: Some(1),
+                ..Default::default()
+            },
+            BackgroundApp {
+                disabled: Some(0),
+                disabled_by_user: Some(0),
+            },
         ];
         assert_eq!(background_app_count(None, &apps), 2);
         assert_eq!(background_app_count(Some(0), &apps), 2);

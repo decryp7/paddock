@@ -62,7 +62,10 @@ pub const MAX_PATHS: usize = 64;
 fn is_guid(s: &str) -> bool {
     let parts: Vec<&str> = s.split('-').collect();
     parts.len() == 5
-        && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
+        && parts
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 fn check_paths(paths: &[String]) -> Result<(), String> {
@@ -127,11 +130,19 @@ impl HelperAction {
                 .collect(),
             HelperAction::SetDefenderExcluded { paths, excluded } => paths
                 .iter()
-                .map(|p| format!("{} Microsoft Defender scanning: {p}", if *excluded { "Exclude from" } else { "Include in" }))
+                .map(|p| {
+                    format!(
+                        "{} Microsoft Defender scanning: {p}",
+                        if *excluded { "Exclude from" } else { "Include in" }
+                    )
+                })
                 .collect(),
             HelperAction::SetLowPowerMode(on) => vec![format!("Turn Low Power Mode {}", if *on { "on" } else { "off" })],
             HelperAction::SetMachineStartupEnabled { name, enabled, .. } => {
-                vec![format!("{} {name} at login for every user", if *enabled { "Start" } else { "Don't start" })]
+                vec![format!(
+                    "{} {name} at login for every user",
+                    if *enabled { "Start" } else { "Don't start" }
+                )]
             }
         }
     }
@@ -167,7 +178,9 @@ mod tests {
     fn validation() {
         assert!(HelperAction::SetPowerScheme(BALANCED_SCHEME.into()).validate().is_ok());
         assert!(HelperAction::SetPowerScheme("nope".into()).validate().is_err());
-        assert!(HelperAction::SetPowerScheme("381b4222-f694-41f0-9685-ff5bb260dfzz".into()).validate().is_err());
+        assert!(HelperAction::SetPowerScheme("381b4222-f694-41f0-9685-ff5bb260dfzz".into())
+            .validate()
+            .is_err());
         assert!(HelperAction::SetVisualEffects(2).validate().is_ok());
         assert!(HelperAction::SetVisualEffects(9).validate().is_err());
         let ok = HelperAction::SetIndexingExcluded {
@@ -175,7 +188,15 @@ mod tests {
             excluded: true,
         };
         assert!(ok.validate().is_ok());
-        for bad in ["relative\\path", "C:\\", "C:\\Windows\\System32", "C:\\Users", "/Users", "C:\\a\\..\\b", "/"] {
+        for bad in [
+            "relative\\path",
+            "C:\\",
+            "C:\\Windows\\System32",
+            "C:\\Users",
+            "/Users",
+            "C:\\a\\..\\b",
+            "/",
+        ] {
             let a = HelperAction::SetDefenderExcluded {
                 paths: vec![bad.into()],
                 excluded: true,

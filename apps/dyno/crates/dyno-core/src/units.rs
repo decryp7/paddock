@@ -41,7 +41,12 @@ mod tests {
         assert_eq!(bytes(1023), "1023 B");
         assert_eq!(bytes(1536), "1.5 KB");
         assert_eq!(bytes(3 << 30), "3.0 GB");
-        assert_eq!(bytes(u64::MAX), "16.0 EB".replace("EB", "PB").replace("16.0", &format!("{:.1}", u64::MAX as f64 / 1024f64.powi(5))));
+        assert_eq!(
+            bytes(u64::MAX),
+            "16.0 EB"
+                .replace("EB", "PB")
+                .replace("16.0", &format!("{:.1}", u64::MAX as f64 / 1024f64.powi(5)))
+        );
     }
 
     #[test]

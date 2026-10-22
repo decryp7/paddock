@@ -187,7 +187,11 @@ impl Engine {
                     app, root, step, since, ..
                 } => {
                     let rule = set.rules.iter().find(|r| &r.id == rule_id)?;
-                    let description = rule.ladder[..=*step].iter().map(|s| s.action.describe()).collect::<Vec<_>>().join(", ");
+                    let description = rule.ladder[..=*step]
+                        .iter()
+                        .map(|s| s.action.describe())
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     Some(ActiveAction {
                         target: *root,
                         app: app.clone(),
@@ -430,7 +434,10 @@ mod tests {
                 for_secs,
                 when: vec![],
             },
-            ladder: ladder.into_iter().map(|(action, after_secs)| RuleStep { action, after_secs }).collect(),
+            ladder: ladder
+                .into_iter()
+                .map(|(action, after_secs)| RuleStep { action, after_secs })
+                .collect(),
             release_after_secs: 10,
             profiles: vec![],
         }
@@ -508,16 +515,27 @@ mod tests {
         let mut w = World::new(vec![rule(
             50.0,
             60,
-            vec![(StepAction::LowerPriority, 0), (StepAction::EfficiencyMode, 30), (StepAction::CpuCap(20), 30), (StepAction::Notify, 0)],
+            vec![
+                (StepAction::LowerPriority, 0),
+                (StepAction::EfficiencyMode, 30),
+                (StepAction::CpuCap(20), 30),
+                (StepAction::Notify, 0),
+            ],
         )]);
         w.hog(80.0);
         assert!(w.at(0).is_empty());
         assert!(w.at(59).is_empty(), "not long enough yet");
         let c = w.at(60);
-        assert_eq!(applies(&c), vec![(100, StepAction::LowerPriority), (101, StepAction::LowerPriority)]);
+        assert_eq!(
+            applies(&c),
+            vec![(100, StepAction::LowerPriority), (101, StepAction::LowerPriority)]
+        );
         assert_eq!(w.engine.active(&w.set).len(), 1);
         assert!(w.at(70).is_empty());
-        assert_eq!(applies(&w.at(90)), vec![(100, StepAction::EfficiencyMode), (101, StepAction::EfficiencyMode)]);
+        assert_eq!(
+            applies(&w.at(90)),
+            vec![(100, StepAction::EfficiencyMode), (101, StepAction::EfficiencyMode)]
+        );
         assert_eq!(applies(&w.at(120)).len(), 2);
         let notify = w.at(121);
         assert!(matches!(&notify[0], Command::Notify { app, .. } if app == "Hog"));
@@ -693,7 +711,11 @@ mod tests {
 
     #[test]
     fn snooze_and_release_all() {
-        let mut w = World::new(vec![rule(50.0, 5, vec![(StepAction::LowerPriority, 0), (StepAction::EfficiencyMode, 5)])]);
+        let mut w = World::new(vec![rule(
+            50.0,
+            5,
+            vec![(StepAction::LowerPriority, 0), (StepAction::EfficiencyMode, 5)],
+        )]);
         w.hog(90.0);
         w.at(0);
         w.at(5);
@@ -738,7 +760,15 @@ mod tests {
         let prot = Protection::new(&user, &[]);
         let s = maybe_start(State::Snoozed, &w.set.rules[0], g, Timestamp(0), &by_pid, &prot, &mut out);
         assert!(matches!(s, State::Snoozed));
-        let s = maybe_start(State::Watching { since: Timestamp(0) }, &w.set.rules[0], g, Timestamp(99_000), &by_pid, &prot, &mut out);
+        let s = maybe_start(
+            State::Watching { since: Timestamp(0) },
+            &w.set.rules[0],
+            g,
+            Timestamp(99_000),
+            &by_pid,
+            &prot,
+            &mut out,
+        );
         assert!(matches!(s, State::Watching { .. }), "no live root process");
     }
 }

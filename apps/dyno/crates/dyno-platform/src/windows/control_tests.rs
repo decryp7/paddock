@@ -12,8 +12,8 @@ use windows::core::HSTRING;
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::JobObjects::OpenJobObjectW;
 use windows::Win32::System::Threading::{
-    GetPriorityClass, GetProcessAffinityMask, GetProcessTimes, OpenProcess,
-    IDLE_PRIORITY_CLASS, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, BELOW_NORMAL_PRIORITY_CLASS,
+    GetPriorityClass, GetProcessAffinityMask, GetProcessTimes, OpenProcess, BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS,
+    PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 /// A process the test spawned; killed and reaped on drop.
@@ -114,7 +114,10 @@ fn priority_affinity_and_efficiency_mode() {
     // SAFETY: test-only query of our own child.
     unsafe { GetProcessAffinityMask(h.raw(), &mut proc_mask, &mut sys_mask) }.unwrap();
     assert_eq!(proc_mask, 1);
-    assert!(matches!(c.apply(d.target, &ProcessAction::SetAffinity(0)), Err(PlatformError::Failed(_))));
+    assert!(matches!(
+        c.apply(d.target, &ProcessAction::SetAffinity(0)),
+        Err(PlatformError::Failed(_))
+    ));
 
     c.apply(d.target, &ProcessAction::SetEfficiencyMode(true)).unwrap();
     assert_eq!(priority_of(&d), IDLE_PRIORITY_CLASS.0);
@@ -186,7 +189,7 @@ fn a_named_job_survives_its_creator_handle_while_the_process_runs() {
     let mut c = control();
     c.apply(d.target, &ProcessAction::SetCpuCap(Some(50))).unwrap();
     drop(c); // closes Dyno's job handle without releasing
-    // SAFETY: test-only open of a named object.
+             // SAFETY: test-only open of a named object.
     let reopened = unsafe { OpenJobObjectW(0x2, false, &HSTRING::from(job_name(d.target))) };
     // The capped process holds a handle to its own job, so the name outlives Dyno's handle.
     drop(Owned(reopened.unwrap()));
@@ -200,7 +203,12 @@ fn end_terminates_and_reused_pids_are_refused() {
         pid: d.target.pid,
         started: d.target.started.minus(5_000),
     };
-    for action in [ProcessAction::End, ProcessAction::Suspend, ProcessAction::SetCpuCap(Some(10)), ProcessAction::SetPriority(Priority::Idle)] {
+    for action in [
+        ProcessAction::End,
+        ProcessAction::Suspend,
+        ProcessAction::SetCpuCap(Some(10)),
+        ProcessAction::SetPriority(Priority::Idle),
+    ] {
         assert!(matches!(c.apply(wrong, &action), Err(PlatformError::NotFound(_))), "{action:?}");
     }
     c.apply(d.target, &ProcessAction::End).unwrap();
@@ -223,5 +231,8 @@ fn system_processes_are_access_denied() {
         started: crate::parse::time::started_from_unix_secs(p.start_time()),
     };
     let r = open_process(target, windows::Win32::System::Threading::PROCESS_SET_INFORMATION);
-    assert!(matches!(r, Err(PlatformError::AccessDenied(_)) | Err(PlatformError::NotFound(_))), "{r:?}");
+    assert!(
+        matches!(r, Err(PlatformError::AccessDenied(_)) | Err(PlatformError::NotFound(_))),
+        "{r:?}"
+    );
 }

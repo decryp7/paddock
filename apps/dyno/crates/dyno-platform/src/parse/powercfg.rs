@@ -51,7 +51,9 @@ mod tests {
         assert_eq!(p.id, "381b4222-f694-41f0-9685-ff5bb260df2e");
         assert_eq!(p.name, "Balanced");
         assert!(!p.power_saver);
-        let p = parse_active_scheme("\nGUID du mode de gestion de l'alimentation : A1841308-3541-4FAB-BC81-F71556F20B4A  (Économie d'énergie)").unwrap();
+        let p =
+            parse_active_scheme("\nGUID du mode de gestion de l'alimentation : A1841308-3541-4FAB-BC81-F71556F20B4A  (Économie d'énergie)")
+                .unwrap();
         assert!(p.power_saver);
         assert_eq!(p.name, "Économie d'énergie");
     }

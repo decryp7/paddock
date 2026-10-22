@@ -99,7 +99,10 @@ pub fn friendly_name(exe_name: &str) -> String {
     if let Some((_, f)) = FRIENDLY.iter().find(|(k, _)| *k == lower) {
         return (*f).to_string();
     }
-    let stem = exe_name.strip_suffix(".exe").or_else(|| exe_name.strip_suffix(".EXE")).unwrap_or(exe_name);
+    let stem = exe_name
+        .strip_suffix(".exe")
+        .or_else(|| exe_name.strip_suffix(".EXE"))
+        .unwrap_or(exe_name);
     let mut chars = stem.chars();
     match chars.next() {
         Some(c) => c.to_uppercase().chain(chars).collect(),
@@ -231,7 +234,10 @@ mod tests {
 
     #[test]
     fn many_chromes_are_one_app() {
-        let mut ps = vec![with_exe(proc(10, Some(1), "chrome.exe", 5.0, 100), Some("C:\\Program Files\\Google\\Chrome\\chrome.exe"))];
+        let mut ps = vec![with_exe(
+            proc(10, Some(1), "chrome.exe", 5.0, 100),
+            Some("C:\\Program Files\\Google\\Chrome\\chrome.exe"),
+        )];
         for pid in 11..50 {
             ps.push(with_exe(
                 proc(pid, Some(10), "chrome.exe", 1.0, 50),
@@ -253,7 +259,10 @@ mod tests {
     fn children_in_the_install_folder_join_their_parent() {
         let code = with_exe(proc(10, Some(1), "Code.exe", 1.0, 100), Some("C:\\Apps\\VS Code\\Code.exe"));
         let rg = with_exe(proc(11, Some(10), "rg.exe", 3.0, 10), Some("C:\\Apps\\VS Code\\resources\\rg.exe"));
-        let grandchild = with_exe(proc(12, Some(11), "x.exe", 0.0, 1), Some("C:\\Apps\\VS Code\\resources\\bin\\x.exe"));
+        let grandchild = with_exe(
+            proc(12, Some(11), "x.exe", 0.0, 1),
+            Some("C:\\Apps\\VS Code\\resources\\bin\\x.exe"),
+        );
         let outside = with_exe(proc(13, Some(10), "git.exe", 2.0, 5), Some("C:\\Git\\git.exe"));
         let g = group(&[code, rg, grandchild, outside]);
         let vs = g.iter().find(|g| g.name == "Visual Studio Code").unwrap();

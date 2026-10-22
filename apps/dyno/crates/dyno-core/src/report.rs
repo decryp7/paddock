@@ -72,7 +72,9 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
     if i.points.is_empty() {
         highlights.push("Dyno has no history for this week yet.".to_string());
     } else {
-        highlights.push(format!("Your PC averaged {avg_cpu:.0}% CPU and {avg_memory:.0}% memory, peaking at {peak_cpu:.0}% CPU."));
+        highlights.push(format!(
+            "Your PC averaged {avg_cpu:.0}% CPU and {avg_memory:.0}% memory, peaking at {peak_cpu:.0}% CPU."
+        ));
     }
     if let Some(top) = i.top_apps.first() {
         highlights.push(format!("{} was the busiest app ({:.0}% CPU on average).", top.app, top.cpu_avg));
@@ -83,14 +85,23 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         _ => {}
     }
     if i.rule_actions > 0 {
-        highlights.push(format!("Rules stepped in {} time{}.", i.rule_actions, if i.rule_actions == 1 { "" } else { "s" }));
+        highlights.push(format!(
+            "Rules stepped in {} time{}.",
+            i.rule_actions,
+            if i.rule_actions == 1 { "" } else { "s" }
+        ));
     }
     if i.cleaned_bytes > 0 {
         highlights.push(format!("Cleanup freed {}.", bytes(i.cleaned_bytes)));
     }
     if i.crashes > 0 {
         let one = i.crashes == 1;
-        highlights.push(format!("{} app crash{} {} recorded.", i.crashes, if one { "" } else { "es" }, if one { "was" } else { "were" }));
+        highlights.push(format!(
+            "{} app crash{} {} recorded.",
+            i.crashes,
+            if one { "" } else { "es" },
+            if one { "was" } else { "were" }
+        ));
     }
     WeeklyReport {
         from: i.from,

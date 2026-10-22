@@ -4,8 +4,8 @@ use dyno_core::process::{Connection, Pid};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID, MIB_UDP6ROW_OWNER_PID,
-    MIB_UDPROW_OWNER_PID, TCP_TABLE_OWNER_PID_ALL, UDP_TABLE_OWNER_PID,
+    GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID, MIB_UDP6ROW_OWNER_PID, MIB_UDPROW_OWNER_PID,
+    TCP_TABLE_OWNER_PID_ALL, UDP_TABLE_OWNER_PID,
 };
 use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 
@@ -102,39 +102,67 @@ pub fn connections(pid: Pid) -> Option<Vec<Connection>> {
     let mut any = false;
     if let Some(b) = tcp(u32::from(AF_INET.0)) {
         any = true;
-        out.extend(rows::<MIB_TCPROW_OWNER_PID>(&b).into_iter().filter(|r| r.dwOwningPid == pid).map(|r| Connection {
-            protocol: "TCP".into(),
-            local: v4(r.dwLocalAddr, r.dwLocalPort),
-            remote: if r.dwState == 2 { String::new() } else { v4(r.dwRemoteAddr, r.dwRemotePort) },
-            state: tcp_state(r.dwState).into(),
-        }));
+        out.extend(
+            rows::<MIB_TCPROW_OWNER_PID>(&b)
+                .into_iter()
+                .filter(|r| r.dwOwningPid == pid)
+                .map(|r| Connection {
+                    protocol: "TCP".into(),
+                    local: v4(r.dwLocalAddr, r.dwLocalPort),
+                    remote: if r.dwState == 2 {
+                        String::new()
+                    } else {
+                        v4(r.dwRemoteAddr, r.dwRemotePort)
+                    },
+                    state: tcp_state(r.dwState).into(),
+                }),
+        );
     }
     if let Some(b) = tcp(u32::from(AF_INET6.0)) {
         any = true;
-        out.extend(rows::<MIB_TCP6ROW_OWNER_PID>(&b).into_iter().filter(|r| r.dwOwningPid == pid).map(|r| Connection {
-            protocol: "TCP6".into(),
-            local: v6(r.ucLocalAddr, r.dwLocalPort),
-            remote: if r.dwState == 2 { String::new() } else { v6(r.ucRemoteAddr, r.dwRemotePort) },
-            state: tcp_state(r.dwState).into(),
-        }));
+        out.extend(
+            rows::<MIB_TCP6ROW_OWNER_PID>(&b)
+                .into_iter()
+                .filter(|r| r.dwOwningPid == pid)
+                .map(|r| Connection {
+                    protocol: "TCP6".into(),
+                    local: v6(r.ucLocalAddr, r.dwLocalPort),
+                    remote: if r.dwState == 2 {
+                        String::new()
+                    } else {
+                        v6(r.ucRemoteAddr, r.dwRemotePort)
+                    },
+                    state: tcp_state(r.dwState).into(),
+                }),
+        );
     }
     if let Some(b) = udp(u32::from(AF_INET.0)) {
         any = true;
-        out.extend(rows::<MIB_UDPROW_OWNER_PID>(&b).into_iter().filter(|r| r.dwOwningPid == pid).map(|r| Connection {
-            protocol: "UDP".into(),
-            local: v4(r.dwLocalAddr, r.dwLocalPort),
-            remote: String::new(),
-            state: String::new(),
-        }));
+        out.extend(
+            rows::<MIB_UDPROW_OWNER_PID>(&b)
+                .into_iter()
+                .filter(|r| r.dwOwningPid == pid)
+                .map(|r| Connection {
+                    protocol: "UDP".into(),
+                    local: v4(r.dwLocalAddr, r.dwLocalPort),
+                    remote: String::new(),
+                    state: String::new(),
+                }),
+        );
     }
     if let Some(b) = udp(u32::from(AF_INET6.0)) {
         any = true;
-        out.extend(rows::<MIB_UDP6ROW_OWNER_PID>(&b).into_iter().filter(|r| r.dwOwningPid == pid).map(|r| Connection {
-            protocol: "UDP6".into(),
-            local: v6(r.ucLocalAddr, r.dwLocalPort),
-            remote: String::new(),
-            state: String::new(),
-        }));
+        out.extend(
+            rows::<MIB_UDP6ROW_OWNER_PID>(&b)
+                .into_iter()
+                .filter(|r| r.dwOwningPid == pid)
+                .map(|r| Connection {
+                    protocol: "UDP6".into(),
+                    local: v6(r.ucLocalAddr, r.dwLocalPort),
+                    remote: String::new(),
+                    state: String::new(),
+                }),
+        );
     }
     any.then_some(out)
 }
@@ -166,7 +194,15 @@ mod tests {
         let tport = tcp.local_addr().unwrap().port();
         let uport = udp.local_addr().unwrap().port();
         let conns = connections(std::process::id()).unwrap();
-        assert!(conns.iter().any(|c| c.protocol == "TCP" && c.local == format!("127.0.0.1:{tport}") && c.state == "LISTEN"), "{conns:?}");
-        assert!(conns.iter().any(|c| c.protocol == "UDP6" && c.local == format!("[::1]:{uport}")), "{conns:?}");
+        assert!(
+            conns
+                .iter()
+                .any(|c| c.protocol == "TCP" && c.local == format!("127.0.0.1:{tport}") && c.state == "LISTEN"),
+            "{conns:?}"
+        );
+        assert!(
+            conns.iter().any(|c| c.protocol == "UDP6" && c.local == format!("[::1]:{uport}")),
+            "{conns:?}"
+        );
     }
 }

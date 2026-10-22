@@ -635,14 +635,36 @@ mod tests {
             action: ProcessAction::SetPriority(Priority::Idle),
         })
         .unwrap();
-        assert_eq!(j, serde_json::json!({"act": {"target": {"pid": 4, "started": 9}, "action": {"setPriority": "idle"}}}));
+        assert_eq!(
+            j,
+            serde_json::json!({"act": {"target": {"pid": 4, "started": 9}, "action": {"setPriority": "idle"}}})
+        );
         assert_eq!(serde_json::to_value(Request::WhySlow).unwrap(), "whySlow");
-        let r: Request = serde_json::from_value(serde_json::json!({"runCleanup": {"scanId": "s", "itemIds": ["a"], "mode": "quarantine"}})).unwrap();
-        assert!(matches!(r, Request::RunCleanup { mode: DeleteMode::Quarantine, .. }));
+        let r: Request =
+            serde_json::from_value(serde_json::json!({"runCleanup": {"scanId": "s", "itemIds": ["a"], "mode": "quarantine"}})).unwrap();
+        assert!(matches!(
+            r,
+            Request::RunCleanup {
+                mode: DeleteMode::Quarantine,
+                ..
+            }
+        ));
         let r: Request = serde_json::from_value(serde_json::json!({"history": {"range": "week", "end": null}})).unwrap();
-        assert_eq!(r, Request::History { range: HistoryRange::Week, end: None });
+        assert_eq!(
+            r,
+            Request::History {
+                range: HistoryRange::Week,
+                end: None
+            }
+        );
         let r: Request = serde_json::from_value(serde_json::json!({"setStartupState": {"id": "x", "state": {"delayed": 30}}})).unwrap();
-        assert!(matches!(r, Request::SetStartupState { state: StartupState::Delayed(30), .. }));
+        assert!(matches!(
+            r,
+            Request::SetStartupState {
+                state: StartupState::Delayed(30),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -660,7 +682,9 @@ mod tests {
             groups: Some(vec![]),
         };
         for m in [
-            Message::Request(Box::new(Request::SaveSettings { settings: Settings::default() })),
+            Message::Request(Box::new(Request::SaveSettings {
+                settings: Settings::default(),
+            })),
             Message::Request(Box::new(Request::SaveRules { rules: RuleSet::default() })),
             Message::Live(Box::new(live)),
             Message::Reply(Box::new(Ok(Reply::Settings(Box::default())))),
@@ -686,14 +710,28 @@ mod tests {
             Reply::Startup(vec![]),
             Reply::Alerts(vec![]),
             Reply::Plugins(vec![]),
-            Reply::Inventory(Box::new(crate::inventory::SystemInventory::new(String::new(), None, Default::default(), crate::inventory::MemoryLayout::unified(1, Default::default(), None), vec![]))),
+            Reply::Inventory(Box::new(crate::inventory::SystemInventory::new(
+                String::new(),
+                None,
+                Default::default(),
+                crate::inventory::MemoryLayout::unified(1, Default::default(), None),
+                vec![],
+            ))),
             Reply::Rules(Box::default()),
             Reply::Alarms(vec![]),
             Reply::AlarmStats(Box::default()),
             Reply::AlarmChanges(vec![]),
             Reply::RecorderSnapshots(vec![]),
-            Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics { path: "/x.zip".into(), bytes: 1, files: 1 }),
-            Reply::RecorderSnapshot(Box::new(crate::recorder::RecorderSnapshot::new(Timestamp(0), crate::recorder::CaptureReason::Manual, vec![]))),
+            Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {
+                path: "/x.zip".into(),
+                bytes: 1,
+                files: 1,
+            }),
+            Reply::RecorderSnapshot(Box::new(crate::recorder::RecorderSnapshot::new(
+                Timestamp(0),
+                crate::recorder::CaptureReason::Manual,
+                vec![],
+            ))),
         ];
         for r in all {
             assert!(r.into_json().is_ok());
@@ -714,6 +752,9 @@ mod tests {
             assert_eq!(e.code, code);
             assert_eq!(e.to_string(), "a");
         }
-        assert_eq!(serde_json::to_value(AgentError::new(ErrorCode::BadRequest, "x")).unwrap(), serde_json::json!({"code": "badRequest", "message": "x"}));
+        assert_eq!(
+            serde_json::to_value(AgentError::new(ErrorCode::BadRequest, "x")).unwrap(),
+            serde_json::json!({"code": "badRequest", "message": "x"})
+        );
     }
 }

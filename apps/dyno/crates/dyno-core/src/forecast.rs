@@ -53,7 +53,10 @@ pub fn disk_full(points: &[DiskTrendPoint]) -> Forecast {
     if recent.len() < 6 || last.at.since(first) < 12 * HOUR {
         return Forecast::NotEnoughData;
     }
-    let xy: Vec<(f64, f64)> = recent.iter().map(|p| ((p.at.since(first) as f64) / DAY as f64, p.free as f64)).collect();
+    let xy: Vec<(f64, f64)> = recent
+        .iter()
+        .map(|p| ((p.at.since(first) as f64) / DAY as f64, p.free as f64))
+        .collect();
     match linear_fit(&xy) {
         Some(fit) if fit.slope < 0.0 => {
             let days = (last.free as f64 / -fit.slope) as f32;

@@ -281,7 +281,13 @@ fn full_disk_sample() -> dyno_core::metrics::SystemSample {
 
 fn wait_for_alarm(peer: &Peer<Message>) -> dyno_core::alarms::Alarm {
     for _ in 0..100 {
-        let Reply::Alarms(list) = ask(peer, Request::Alarms { filter: Default::default() }).unwrap() else {
+        let Reply::Alarms(list) = ask(
+            peer,
+            Request::Alarms {
+                filter: Default::default(),
+            },
+        )
+        .unwrap() else {
             panic!("alarms")
         };
         if let Some(a) = list.into_iter().next() {
@@ -298,7 +304,13 @@ fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_
     let h = Harness::start();
     h.fake.push_sample(full_disk_sample());
     let peer = h.client();
-    ask(&peer, Request::Subscribe { detail: LiveDetail::Summary }).unwrap();
+    ask(
+        &peer,
+        Request::Subscribe {
+            detail: LiveDetail::Summary,
+        },
+    )
+    .unwrap();
     let alarm = wait_for_alarm(&peer);
     assert_eq!(alarm.rule, "alert:lowDisk");
     assert_eq!(alarm.state, AlarmState::Active);
@@ -309,26 +321,66 @@ fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_
         panic!("alarms")
     };
     assert_eq!(changed[0].state, AlarmState::Acknowledged);
-    ask(&peer, Request::NoteAlarm { id: alarm.id, text: "freed space on Monday".into() }).unwrap();
-    let Reply::AlarmChanges(log) = ask(&peer, Request::AlarmHistory { alarm_id: Some(alarm.id), limit: 10 }).unwrap() else {
+    ask(
+        &peer,
+        Request::NoteAlarm {
+            id: alarm.id,
+            text: "freed space on Monday".into(),
+        },
+    )
+    .unwrap();
+    let Reply::AlarmChanges(log) = ask(
+        &peer,
+        Request::AlarmHistory {
+            alarm_id: Some(alarm.id),
+            limit: 10,
+        },
+    )
+    .unwrap() else {
         panic!("changes")
     };
     assert!(log.len() >= 3, "raised, acknowledged and noted are logged: {log:?}");
 
     // Shelve hides it from the default list; unshelve brings it back.
-    ask(&peer, Request::ShelveAlarm { id: alarm.id, until: ShelveFor::OneHour }).unwrap();
-    let Reply::Alarms(visible) = ask(&peer, Request::Alarms { filter: AlarmFilter::default() }).unwrap() else {
+    ask(
+        &peer,
+        Request::ShelveAlarm {
+            id: alarm.id,
+            until: ShelveFor::OneHour,
+        },
+    )
+    .unwrap();
+    let Reply::Alarms(visible) = ask(
+        &peer,
+        Request::Alarms {
+            filter: AlarmFilter::default(),
+        },
+    )
+    .unwrap() else {
         panic!("alarms")
     };
     assert!(visible.is_empty());
     ask(&peer, Request::UnshelveAlarm { id: alarm.id }).unwrap();
-    let Reply::Alarms(visible) = ask(&peer, Request::Alarms { filter: AlarmFilter::default() }).unwrap() else {
+    let Reply::Alarms(visible) = ask(
+        &peer,
+        Request::Alarms {
+            filter: AlarmFilter::default(),
+        },
+    )
+    .unwrap() else {
         panic!("alarms")
     };
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].notes[0].text, "freed space on Monday");
 
-    ask(&peer, Request::MuteRule { rule: "alert:lowDisk".into(), muted: true }).unwrap();
+    ask(
+        &peer,
+        Request::MuteRule {
+            rule: "alert:lowDisk".into(),
+            muted: true,
+        },
+    )
+    .unwrap();
     let Reply::AlarmStats(stats) = ask(&peer, Request::AlarmStats).unwrap() else {
         panic!("stats")
     };
@@ -337,13 +389,32 @@ fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_
     // Bad input is refused with a message.
     for bad in [
         Request::AcknowledgeAlarms { ids: vec![] },
-        Request::ShelveAlarm { id: alarm.id, until: ShelveFor::Custom(Timestamp(1)) },
-        Request::NoteAlarm { id: alarm.id, text: "  ".into() },
-        Request::MuteRule { rule: String::new(), muted: true },
+        Request::ShelveAlarm {
+            id: alarm.id,
+            until: ShelveFor::Custom(Timestamp(1)),
+        },
+        Request::NoteAlarm {
+            id: alarm.id,
+            text: "  ".into(),
+        },
+        Request::MuteRule {
+            rule: String::new(),
+            muted: true,
+        },
     ] {
         assert!(ask(&peer, bad).is_err());
     }
-    for missing in [Request::UnshelveAlarm { id: 9_999 }, Request::NoteAlarm { id: 9_999, text: "x".into() }, Request::ShelveAlarm { id: 9_999, until: ShelveFor::OneHour }] {
+    for missing in [
+        Request::UnshelveAlarm { id: 9_999 },
+        Request::NoteAlarm {
+            id: 9_999,
+            text: "x".into(),
+        },
+        Request::ShelveAlarm {
+            id: 9_999,
+            until: ShelveFor::OneHour,
+        },
+    ] {
         assert!(ask(&peer, missing).is_err());
     }
 }
@@ -353,9 +424,22 @@ fn alarms_survive_an_agent_restart() {
     let mut h = Harness::start();
     h.fake.push_sample(full_disk_sample());
     let peer = h.client();
-    ask(&peer, Request::Subscribe { detail: LiveDetail::Summary }).unwrap();
+    ask(
+        &peer,
+        Request::Subscribe {
+            detail: LiveDetail::Summary,
+        },
+    )
+    .unwrap();
     let before = wait_for_alarm(&peer);
-    ask(&peer, Request::MuteRule { rule: "alert:lowDisk".into(), muted: true }).unwrap();
+    ask(
+        &peer,
+        Request::MuteRule {
+            rule: "alert:lowDisk".into(),
+            muted: true,
+        },
+    )
+    .unwrap();
     drop(peer);
     h.running.take().unwrap().stop();
     let fake = Fake::new();
@@ -378,7 +462,13 @@ fn the_flight_recorder_captures_on_request_and_when_an_alarm_fires() {
     h.fake.push_sample(full_disk_sample());
     let peer = h.client();
     let alarm = {
-        ask(&peer, Request::Subscribe { detail: LiveDetail::Summary }).unwrap();
+        ask(
+            &peer,
+            Request::Subscribe {
+                detail: LiveDetail::Summary,
+            },
+        )
+        .unwrap();
         wait_for_alarm(&peer)
     };
     // The alarm captured the ring automatically.
@@ -419,13 +509,23 @@ fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
     assert!(names.contains(&"system/inventory.json") && names.contains(&"settings.json") && names.contains(&"manifest.json"));
     assert!(p.total_bytes > 0);
     let dest = h._tmp.path().join("diag.zip");
-    let Reply::DiagnosticsSaved(saved) = ask(&peer, Request::SaveDiagnostics { path: dest.to_string_lossy().into_owned() }).unwrap() else {
+    let Reply::DiagnosticsSaved(saved) = ask(
+        &peer,
+        Request::SaveDiagnostics {
+            path: dest.to_string_lossy().into_owned(),
+        },
+    )
+    .unwrap() else {
         panic!("saved")
     };
     assert_eq!(saved.files as usize, p.files.len());
     assert!(std::fs::metadata(&dest).unwrap().len() == saved.bytes);
     // Refused: relative path, wrong extension, missing folder.
-    for bad in ["diag.zip".to_string(), h._tmp.path().join("diag.txt").to_string_lossy().into_owned(), h._tmp.path().join("nope").join("d.zip").to_string_lossy().into_owned()] {
+    for bad in [
+        "diag.zip".to_string(),
+        h._tmp.path().join("diag.txt").to_string_lossy().into_owned(),
+        h._tmp.path().join("nope").join("d.zip").to_string_lossy().into_owned(),
+    ] {
         assert!(ask(&peer, Request::SaveDiagnostics { path: bad }).is_err());
     }
 }

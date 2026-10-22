@@ -36,7 +36,11 @@ fn model(text: &str) -> Option<String> {
 pub fn parse_gpu(text: &str) -> Option<GpuStats> {
     let mut best: Option<GpuStats> = None;
     // One block per accelerator, each starting at its `+-o Name <class …>` header.
-    let blocks: Vec<&str> = if text.contains("+-o ") { text.split("+-o ").skip(1).collect() } else { vec![text] };
+    let blocks: Vec<&str> = if text.contains("+-o ") {
+        text.split("+-o ").skip(1).collect()
+    } else {
+        vec![text]
+    };
     for block in blocks {
         let Some(stats_at) = block.find("\"PerformanceStatistics\"") else {
             continue;

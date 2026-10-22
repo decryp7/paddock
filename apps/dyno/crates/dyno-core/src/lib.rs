@@ -4,8 +4,8 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::field_reassign_with_default))]
 
 pub mod activity;
-pub mod alerts;
 pub mod alarms;
+pub mod alerts;
 pub mod anomaly;
 pub mod cleanup;
 pub mod diagnosis;

@@ -121,7 +121,14 @@ const UPDATE: &[&str] = &[
 /// Antivirus engines.
 const ANTIVIRUS: &[&str] = &["msmpeng.exe", "mpdefendercoreservice.exe", "xprotect", "xprotectremediator"];
 /// Search indexers.
-const INDEXERS: &[&str] = &["searchindexer.exe", "searchprotocolhost.exe", "searchfilterhost.exe", "mds_stores", "mdworker_shared", "mds"];
+const INDEXERS: &[&str] = &[
+    "searchindexer.exe",
+    "searchprotocolhost.exe",
+    "searchfilterhost.exe",
+    "mds_stores",
+    "mdworker_shared",
+    "mds",
+];
 
 /// What the diagnosis looks at.
 pub struct Input<'a> {
@@ -209,23 +216,41 @@ fn root_of<'a>(g: &AppGroup, by_pid: &HashMap<u32, &'a ProcessSample>) -> Option
 
 fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mut Vec<Cause>) {
     let total = avg(input.samples, |s| s.cpu.total);
-    let Some(top) = input.groups.iter().max_by(|a, b| a.cpu.total_cmp(&b.cpu)) else { return };
+    let Some(top) = input.groups.iter().max_by(|a, b| a.cpu.total_cmp(&b.cpu)) else {
+        return;
+    };
     if total < 50.0 || top.cpu < 20.0 {
         return;
     }
     let confidence = ((total - 40.0) / 50.0).clamp(0.0, 1.0) * (top.cpu / 50.0).clamp(0.2, 1.0);
     let mut evidence = vec![
         Evidence::new("CPU (last minute)", pct(total)),
-        Evidence::new(format!("{} ({} process{})", top.name, top.pids.len(), if top.pids.len() == 1 { "" } else { "es" }), pct(top.cpu)),
+        Evidence::new(
+            format!(
+                "{} ({} process{})",
+                top.name,
+                top.pids.len(),
+                if top.pids.len() == 1 { "" } else { "es" }
+            ),
+            pct(top.cpu),
+        ),
     ];
-    if let Some(second) = input.groups.iter().filter(|g| g.id != top.id).max_by(|a, b| a.cpu.total_cmp(&b.cpu)) {
+    if let Some(second) = input
+        .groups
+        .iter()
+        .filter(|g| g.id != top.id)
+        .max_by(|a, b| a.cpu.total_cmp(&b.cpu))
+    {
         evidence.push(Evidence::new(format!("Next: {}", second.name), pct(second.cpu)));
     }
     let (kind, title, explanation, mut suggestions) = match app_kind(top, by_pid) {
         Some(CauseKind::OsUpdate) => (
             CauseKind::OsUpdate,
             "Your system is installing updates".to_string(),
-            format!("{} is busy installing updates; this passes on its own. A restart may be needed afterwards.", top.name),
+            format!(
+                "{} is busy installing updates; this passes on its own. A restart may be needed afterwards.",
+                top.name
+            ),
             vec![Suggestion {
                 label: "Let it finish".into(),
                 action: SuggestedAction::Wait,
@@ -298,7 +323,12 @@ fn cpu_causes(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mu
 
 fn memory_cause(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &mut Vec<Cause>) {
     let Some(last) = input.samples.last() else { return };
-    let level = last.memory.pressure.value().copied().unwrap_or_else(|| derive_pressure(&last.memory));
+    let level = last
+        .memory
+        .pressure
+        .value()
+        .copied()
+        .unwrap_or_else(|| derive_pressure(&last.memory));
     let confidence = match level {
         MemoryPressure::Critical => 0.9,
         MemoryPressure::Elevated => 0.55,
@@ -362,8 +392,16 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
         Evidence::new("Disk busy", pct(busy)),
         Evidence::new("Reading / writing", format!("{}/s / {}/s", bytes(read as u64), bytes(write as u64))),
     ];
-    if let Some(top) = input.groups.iter().filter(|g| g.disk_bps > 0.0).max_by(|a, b| a.disk_bps.total_cmp(&b.disk_bps)) {
-        evidence.push(Evidence::new(format!("Busiest: {}", top.name), format!("{}/s", bytes(top.disk_bps as u64))));
+    if let Some(top) = input
+        .groups
+        .iter()
+        .filter(|g| g.disk_bps > 0.0)
+        .max_by(|a, b| a.disk_bps.total_cmp(&b.disk_bps))
+    {
+        evidence.push(Evidence::new(
+            format!("Busiest: {}", top.name),
+            format!("{}/s", bytes(top.disk_bps as u64)),
+        ));
     }
     out.push(Cause {
         kind: CauseKind::DiskQueue,
@@ -411,7 +449,9 @@ fn thermal_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
 
 fn space_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
     let Some(last) = input.samples.last() else { return };
-    let Some(d) = last.disks.iter().find(|d| d.id.eq_ignore_ascii_case(input.system_disk)) else { return };
+    let Some(d) = last.disks.iter().find(|d| d.id.eq_ignore_ascii_case(input.system_disk)) else {
+        return;
+    };
     let free_pct = crate::metrics::percent(d.free, d.total);
     if free_pct >= 5.0 && d.free >= 5 << 30 {
         return;
@@ -511,7 +551,9 @@ mod tests {
         assert_eq!(d.headline, "Rust compiler is using 63% of your CPU");
         assert!(top.evidence.iter().any(|e| e.label.starts_with("Next: Google Chrome")));
         assert!(top.evidence.iter().any(|e| e.label == "Rust compiler (1 process)"));
-        assert!(matches!(&top.suggestions[0].action, SuggestedAction::Process { target, action: ProcessAction::SetPriority(_), .. } if target.pid == 20));
+        assert!(
+            matches!(&top.suggestions[0].action, SuggestedAction::Process { target, action: ProcessAction::SetPriority(_), .. } if target.pid == 20)
+        );
         assert_eq!(top.suggestions.len(), 3);
         // Two processes: plural; a protected hog gets no process suggestions.
         c.procs.push(proc(21, Some(20), "rustc.exe", 1.0, 1));
@@ -557,7 +599,13 @@ mod tests {
         assert_eq!(d.causes[0].kind, CauseKind::MemoryPressure);
         assert_eq!(d.causes[0].title, "Your PC is out of memory");
         assert!(d.causes[0].evidence.iter().any(|e| e.label == "Swap / page file in use"));
-        assert!(matches!(&d.causes[0].suggestions[0].action, SuggestedAction::Process { action: ProcessAction::End, .. }));
+        assert!(matches!(
+            &d.causes[0].suggestions[0].action,
+            SuggestedAction::Process {
+                action: ProcessAction::End,
+                ..
+            }
+        ));
         let mut c = Case::new();
         c.each(|s| {
             s.memory.pressure = Reading::unavailable("n/a");

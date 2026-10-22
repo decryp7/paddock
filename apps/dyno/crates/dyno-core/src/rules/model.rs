@@ -42,11 +42,31 @@ pub fn profiles() -> Vec<Profile> {
         description: description.into(),
     };
     vec![
-        p(ProfileId::Normal, "Normal", "Everyday use: only the rules you enabled for every profile."),
-        p(ProfileId::Gaming, "Gaming", "Background apps get out of the way of the game in front."),
-        p(ProfileId::Meeting, "Meeting", "Keeps calls smooth: busy background apps are slowed down."),
-        p(ProfileId::OnBattery, "On battery", "Saves power: busy apps run in efficiency mode, hogs are capped."),
-        p(ProfileId::BuildingCode, "Building code", "Compilers get the CPU; indexers, sync and update clients wait."),
+        p(
+            ProfileId::Normal,
+            "Normal",
+            "Everyday use: only the rules you enabled for every profile.",
+        ),
+        p(
+            ProfileId::Gaming,
+            "Gaming",
+            "Background apps get out of the way of the game in front.",
+        ),
+        p(
+            ProfileId::Meeting,
+            "Meeting",
+            "Keeps calls smooth: busy background apps are slowed down.",
+        ),
+        p(
+            ProfileId::OnBattery,
+            "On battery",
+            "Saves power: busy apps run in efficiency mode, hogs are capped.",
+        ),
+        p(
+            ProfileId::BuildingCode,
+            "Building code",
+            "Compilers get the CPU; indexers, sync and update clients wait.",
+        ),
     ]
 }
 
@@ -299,7 +319,11 @@ pub fn default_rules() -> Vec<Rule> {
             40.0,
             120,
             vec![RuleContext::UserActive],
-            vec![step(StepAction::LowerPriority, 0), step(StepAction::EfficiencyMode, 60), step(StepAction::Notify, 0)],
+            vec![
+                step(StepAction::LowerPriority, 0),
+                step(StepAction::EfficiencyMode, 60),
+                step(StepAction::Notify, 0),
+            ],
             vec![],
         ),
         rule(
@@ -309,7 +333,11 @@ pub fn default_rules() -> Vec<Rule> {
             15.0,
             30,
             vec![],
-            vec![step(StepAction::LowerPriority, 0), step(StepAction::EfficiencyMode, 30), step(StepAction::CpuCap(20), 60)],
+            vec![
+                step(StepAction::LowerPriority, 0),
+                step(StepAction::EfficiencyMode, 30),
+                step(StepAction::CpuCap(20), 60),
+            ],
             vec![ProfileId::Gaming],
         ),
         rule(
@@ -396,16 +424,30 @@ mod tests {
 
     #[test]
     fn steps_map_to_actions_and_back() {
-        assert_eq!(StepAction::LowerPriority.apply(), Some(ProcessAction::SetPriority(Priority::BelowNormal)));
-        assert_eq!(StepAction::LowerPriority.undo(Some(Priority::High)), Some(ProcessAction::SetPriority(Priority::High)));
-        assert_eq!(StepAction::LowerPriority.undo(None), Some(ProcessAction::SetPriority(Priority::Normal)));
+        assert_eq!(
+            StepAction::LowerPriority.apply(),
+            Some(ProcessAction::SetPriority(Priority::BelowNormal))
+        );
+        assert_eq!(
+            StepAction::LowerPriority.undo(Some(Priority::High)),
+            Some(ProcessAction::SetPriority(Priority::High))
+        );
+        assert_eq!(
+            StepAction::LowerPriority.undo(None),
+            Some(ProcessAction::SetPriority(Priority::Normal))
+        );
         assert_eq!(StepAction::EfficiencyMode.apply(), Some(ProcessAction::SetEfficiencyMode(true)));
         assert_eq!(StepAction::EfficiencyMode.undo(None), Some(ProcessAction::SetEfficiencyMode(false)));
         assert_eq!(StepAction::CpuCap(20).apply(), Some(ProcessAction::SetCpuCap(Some(20))));
         assert_eq!(StepAction::CpuCap(20).undo(None), Some(ProcessAction::SetCpuCap(None)));
         assert_eq!(StepAction::Notify.apply(), None);
         assert_eq!(StepAction::Notify.undo(None), None);
-        for s in [StepAction::LowerPriority, StepAction::EfficiencyMode, StepAction::CpuCap(5), StepAction::Notify] {
+        for s in [
+            StepAction::LowerPriority,
+            StepAction::EfficiencyMode,
+            StepAction::CpuCap(5),
+            StepAction::Notify,
+        ] {
             assert!(!s.describe().is_empty());
         }
     }

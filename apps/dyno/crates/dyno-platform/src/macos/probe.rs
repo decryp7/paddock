@@ -85,7 +85,15 @@ pub fn sysctl_int(name: &str) -> Option<i32> {
     let mut v: libc::c_int = 0;
     let mut size = std::mem::size_of::<libc::c_int>();
     // SAFETY: `cname` is NUL-terminated; `v` and `size` are valid for writes of the sizes given; nothing is set.
-    let r = unsafe { libc::sysctlbyname(cname.as_ptr(), (&mut v as *mut libc::c_int).cast(), &mut size, std::ptr::null_mut(), 0) };
+    let r = unsafe {
+        libc::sysctlbyname(
+            cname.as_ptr(),
+            (&mut v as *mut libc::c_int).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
     (r == 0).then_some(v)
 }
 

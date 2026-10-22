@@ -142,7 +142,9 @@ pub fn exe_of_command(command: &str) -> Option<String> {
 pub fn source_of<'a>(exe: &str, entries: &'a [StartupEntry]) -> Option<&'a StartupEntry> {
     let norm = |s: &str| s.replace('\\', "/").to_lowercase();
     let target = norm(exe);
-    entries.iter().find(|e| e.exe.as_deref().map(norm).as_deref() == Some(target.as_str()))
+    entries
+        .iter()
+        .find(|e| e.exe.as_deref().map(norm).as_deref() == Some(target.as_str()))
 }
 
 /// The most seconds a delayed start may wait.
@@ -215,7 +217,10 @@ mod tests {
     #[test]
     fn sources_and_locations() {
         let es = vec![entry("Slack", "C:\\Users\\me\\Slack\\slack.exe", ImpactRating::High)];
-        assert_eq!(source_of("c:/users/me/slack/SLACK.exe", &es).map(|e| e.name.as_str()), Some("Slack"));
+        assert_eq!(
+            source_of("c:/users/me/slack/SLACK.exe", &es).map(|e| e.name.as_str()),
+            Some("Slack")
+        );
         assert!(source_of("c:/other.exe", &es).is_none());
         let all = [
             StartupLocation::UserRunKey,

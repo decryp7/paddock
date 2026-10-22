@@ -3,9 +3,8 @@
 //! not built yet answer `Unsupported` with a message saying so.
 
 use crate::agent::{lock, now, Shared, FACTS_TTL};
-use dyno_core::recorder::CaptureReason;
-use dyno_core::alarms::{Alarm, AlarmEvent, ShelveFor};
 use dyno_core::activity::{inverse, undo_state, ActivityEntry, ActivityKind, Previous, UndoRecord, UndoState};
+use dyno_core::alarms::{Alarm, AlarmEvent, ShelveFor};
 use dyno_core::anomaly;
 use dyno_core::diagnosis;
 use dyno_core::facts::SystemFacts;
@@ -17,6 +16,7 @@ use dyno_core::ports::PlatformError;
 use dyno_core::process::{Pid, ProcessAction, ProcessRef, ProcessSample};
 use dyno_core::protect::Protection;
 use dyno_core::protocol::{AgentError, ErrorCode, History, LiveDetail, Message, PluginInfo, PluginState, Reply, Request};
+use dyno_core::recorder::CaptureReason;
 use dyno_core::rules::{Command as RuleCommand, Situation};
 use dyno_core::snapshot;
 use dyno_core::startup::StartupState;
@@ -183,7 +183,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
                 .map(Reply::Captured)
                 .map_err(|m| AgentError::new(ErrorCode::NotFound, m))
         }
-        Request::RecorderSnapshots => Ok(Reply::RecorderSnapshots(lock(&shared.core).store.recorder_snapshots().map_err(internal)?)),
+        Request::RecorderSnapshots => Ok(Reply::RecorderSnapshots(
+            lock(&shared.core).store.recorder_snapshots().map_err(internal)?,
+        )),
         Request::RecorderSnapshot { id } => lock(&shared.core)
             .store
             .recorder_snapshot(id)

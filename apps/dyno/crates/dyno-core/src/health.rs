@@ -189,14 +189,22 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
     if let Some(d) = i.sample.disks.iter().find(|d| d.id.eq_ignore_ascii_case(i.system_disk)) {
         let free = percent(d.free, d.total);
         if free < 10.0 {
-            let (impact, severity) = if free < 5.0 { (25, Severity::Critical) } else { (15, Severity::Warning) };
+            let (impact, severity) = if free < 5.0 {
+                (25, Severity::Critical)
+            } else {
+                (15, Severity::Warning)
+            };
             add(
                 "lowDisk",
                 format!("{} has {} free ({free:.0}%)", d.name, bytes(d.free)),
                 "Windows and apps need free space for updates, the page file and temporary files.".into(),
                 impact,
                 severity,
-                simple_fix("Free up space", "Opens Cleanup with a preview of what can go.", FixKind::OpenCleanup),
+                simple_fix(
+                    "Free up space",
+                    "Opens Cleanup with a preview of what can go.",
+                    FixKind::OpenCleanup,
+                ),
             );
         }
         if let Some((_, Forecast::FullInDays(days))) = i.forecasts.iter().find(|(id, _)| id.eq_ignore_ascii_case(&d.id)) {
@@ -215,7 +223,11 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
 
     if let Some(b) = i.sample.battery.value() {
         if b.health < 80.0 {
-            let (impact, severity) = if b.health < 60.0 { (20, Severity::Warning) } else { (10, Severity::Info) };
+            let (impact, severity) = if b.health < 60.0 {
+                (20, Severity::Warning)
+            } else {
+                (10, Severity::Info)
+            };
             add(
                 "battery",
                 format!("The battery holds {:.0}% of its original charge", b.health),
@@ -230,15 +242,29 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
         }
     }
 
-    let pressure = i.sample.memory.pressure.value().copied().unwrap_or_else(|| derive_pressure(&i.sample.memory));
+    let pressure = i
+        .sample
+        .memory
+        .pressure
+        .value()
+        .copied()
+        .unwrap_or_else(|| derive_pressure(&i.sample.memory));
     if pressure != MemoryPressure::Normal {
         add(
             "memory",
             "Memory is under pressure".into(),
-            format!("{} of {} in use. Close apps you don't need, or add memory.", bytes(i.sample.memory.used), bytes(i.sample.memory.total)),
+            format!(
+                "{} of {} in use. Close apps you don't need, or add memory.",
+                bytes(i.sample.memory.used),
+                bytes(i.sample.memory.total)
+            ),
             if pressure == MemoryPressure::Critical { 15 } else { 8 },
             Severity::Warning,
-            simple_fix("See what uses memory", "Opens the task manager sorted by memory.", FixKind::OpenTaskManager),
+            simple_fix(
+                "See what uses memory",
+                "Opens the task manager sorted by memory.",
+                FixKind::OpenTaskManager,
+            ),
         );
     }
 
@@ -261,7 +287,11 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             "Updates are only half installed until you restart.".into(),
             8,
             Severity::Warning,
-            simple_fix("Restart now", "Restarts the computer after you confirm. Save your work first.", FixKind::Restart),
+            simple_fix(
+                "Restart now",
+                "Restarts the computer after you confirm. Save your work first.",
+                FixKind::Restart,
+            ),
         );
     }
     if let Some(n) = i.facts.pending_updates.value().filter(|n| **n > 0) {
@@ -282,7 +312,11 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             "A restart clears memory leaks and finishes pending maintenance.".into(),
             5,
             Severity::Info,
-            simple_fix("Restart now", "Restarts the computer after you confirm. Save your work first.", FixKind::Restart),
+            simple_fix(
+                "Restart now",
+                "Restarts the computer after you confirm. Save your work first.",
+                FixKind::Restart,
+            ),
         );
     }
 
@@ -301,7 +335,11 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             ),
             5,
             Severity::Info,
-            simple_fix("Review startup apps", "Opens the startup manager to disable or delay them.", FixKind::OpenStartup),
+            simple_fix(
+                "Review startup apps",
+                "Opens the startup manager to disable or delay them.",
+                FixKind::OpenStartup,
+            ),
         );
     }
 
@@ -316,7 +354,14 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
         );
     }
     for (n, a) in i.anomalies.iter().enumerate() {
-        add(&a.id, a.title.clone(), a.explanation.clone(), if n < 3 { 5 } else { 0 }, Severity::Info, None);
+        add(
+            &a.id,
+            a.title.clone(),
+            a.explanation.clone(),
+            if n < 3 { 5 } else { 0 },
+            Severity::Info,
+            None,
+        );
     }
 
     if let Some(fix) = tuning_fix(i.tuning, "powerPlan").or_else(|| tuning_fix(i.tuning, "lowPowerMode")) {
@@ -330,7 +375,14 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
         );
     }
     if let Some(fix) = tuning_fix(i.tuning, "indexDevFolders") {
-        add("indexing", "Search indexing slows your builds".into(), fix.explanation.clone(), 2, Severity::Info, Some(fix));
+        add(
+            "indexing",
+            "Search indexing slows your builds".into(),
+            fix.explanation.clone(),
+            2,
+            Severity::Info,
+            Some(fix),
+        );
     }
 
     r.sort_by(|a, b| b.impact.cmp(&a.impact).then(b.severity.cmp(&a.severity)));
@@ -356,7 +408,14 @@ mod tests {
     use crate::startup::fixtures::entry;
     use crate::tuning::plans;
 
-    fn run(sample: &SystemSample, facts: &SystemFacts, startup: &[StartupEntry], anomalies: &[Anomaly], crashes: u32, forecasts: &[(String, Forecast)]) -> HealthReport {
+    fn run(
+        sample: &SystemSample,
+        facts: &SystemFacts,
+        startup: &[StartupEntry],
+        anomalies: &[Anomaly],
+        crashes: u32,
+        forecasts: &[(String, Forecast)],
+    ) -> HealthReport {
         let tuning = plans(facts, Os::Windows, Some(PowerSource::Ac), &[]);
         assess(&HealthInput {
             now: Timestamp(1),
@@ -451,7 +510,19 @@ mod tests {
         assert_eq!(r.grade, Grade::Poor);
         assert_eq!(r.reasons[0].id, "disk:Old HDD");
         let ids: Vec<&str> = r.reasons.iter().map(|r| r.id.as_str()).collect();
-        for want in ["lowDisk", "diskFilling", "battery", "memory", "heat", "restartPending", "updates", "startup", "crashes", "powerSaver", "indexing"] {
+        for want in [
+            "lowDisk",
+            "diskFilling",
+            "battery",
+            "memory",
+            "heat",
+            "restartPending",
+            "updates",
+            "startup",
+            "crashes",
+            "powerSaver",
+            "indexing",
+        ] {
             assert!(ids.contains(&want), "{want} in {ids:?}");
         }
         assert!(!ids.contains(&"uptime"), "restart pending already says it");
@@ -488,8 +559,18 @@ mod tests {
         assert_eq!(r.grade, Grade::Poor);
         assert_eq!(grade(60), Grade::Fair);
         assert_eq!(grade(80), Grade::Good);
-        assert_eq!((grade(79), grade(59), grade(100), grade(0)), (Grade::Fair, Grade::Poor, Grade::Good, Grade::Poor));
-        let r = run(&sample(0), &SystemFacts::unknown("w"), &[], &[], 0, &[("C:".into(), Forecast::FullInDays(90.0))]);
+        assert_eq!(
+            (grade(79), grade(59), grade(100), grade(0)),
+            (Grade::Fair, Grade::Poor, Grade::Good, Grade::Poor)
+        );
+        let r = run(
+            &sample(0),
+            &SystemFacts::unknown("w"),
+            &[],
+            &[],
+            0,
+            &[("C:".into(), Forecast::FullInDays(90.0))],
+        );
         assert_eq!(r.score, 100);
     }
 }

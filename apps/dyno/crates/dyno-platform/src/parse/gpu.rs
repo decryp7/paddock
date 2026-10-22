@@ -42,7 +42,13 @@ mod tests {
             ("pid_4_luid_0x0_0xD1_phys_0_eng_5_engtype_Copy", -1.0),
         ];
         assert_eq!(busiest_engine(inst), Some((35.0, "3D".into())));
-        assert_eq!(busiest_engine([("pid_1_luid_a_phys_0_eng_0_engtype_3D", 70.0), ("pid_2_luid_a_phys_0_eng_0_engtype_3D", 60.0)]), Some((100.0, "3D".into())));
+        assert_eq!(
+            busiest_engine([
+                ("pid_1_luid_a_phys_0_eng_0_engtype_3D", 70.0),
+                ("pid_2_luid_a_phys_0_eng_0_engtype_3D", 60.0)
+            ]),
+            Some((100.0, "3D".into()))
+        );
         assert_eq!(busiest_engine([]), None);
     }
 }

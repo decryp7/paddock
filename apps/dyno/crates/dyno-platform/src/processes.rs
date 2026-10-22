@@ -119,7 +119,8 @@ impl ProcessSource for SysinfoProcesses {
         let now = Instant::now();
         let secs = self.last.map(|l| now.duration_since(l).as_secs_f64()).unwrap_or(0.0);
         self.last = Some(now);
-        self.sys.refresh_processes_specifics(ProcessesToUpdate::All, true, Self::tick_kind());
+        self.sys
+            .refresh_processes_specifics(ProcessesToUpdate::All, true, Self::tick_kind());
         let unknown_user = self
             .sys
             .processes()

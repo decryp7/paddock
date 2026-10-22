@@ -20,12 +20,12 @@ pub mod sensors;
 #[allow(unsafe_code)]
 pub mod unix_control;
 
-#[cfg(target_os = "macos")]
-#[allow(unsafe_code)]
-pub mod macos;
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
 pub mod linux;
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+pub mod macos;
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub mod other;
 #[cfg(windows)]
@@ -93,7 +93,8 @@ pub fn default_state_file() -> PathBuf {
             .map(|d| d.join("dyno"))
             .or_else(|| env("HOME").map(|h| h.join(".local").join("state").join("dyno")))
     };
-    dir.unwrap_or_else(|| std::env::temp_dir().join("Dyno")).join("process-control.json")
+    dir.unwrap_or_else(|| std::env::temp_dir().join("Dyno"))
+        .join("process-control.json")
 }
 
 /// Shows `path` selected in the file manager (Explorer on Windows, Finder on macOS).

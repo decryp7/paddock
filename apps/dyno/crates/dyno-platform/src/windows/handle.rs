@@ -5,9 +5,7 @@ use dyno_core::ports::PlatformError;
 use dyno_core::process::{Pid, ProcessRef};
 use dyno_core::time::Timestamp;
 use windows::core::{Error, HRESULT};
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, STILL_ACTIVE, WIN32_ERROR,
-};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, STILL_ACTIVE, WIN32_ERROR};
 use windows::Win32::System::Threading::{
     GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
 };
@@ -105,7 +103,13 @@ mod tests {
         assert!(matches!(failed(5, "open", &gone_err), PlatformError::NotFound(_)));
         let other = Error::from_hresult(HRESULT::from_win32(31));
         assert!(matches!(failed(5, "open", &other), PlatformError::Failed(m) if m.contains("process 5")));
-        assert_eq!(ft64(FILETIME { dwLowDateTime: 1, dwHighDateTime: 1 }), (1 << 32) + 1);
+        assert_eq!(
+            ft64(FILETIME {
+                dwLowDateTime: 1,
+                dwHighDateTime: 1
+            }),
+            (1 << 32) + 1
+        );
     }
 
     #[test]
@@ -119,12 +123,18 @@ mod tests {
             pid: me,
             started: started.minus(10_000),
         };
-        assert!(matches!(open_process(reused, PROCESS_QUERY_LIMITED_INFORMATION), Err(PlatformError::NotFound(_))));
-        assert!(matches!(open_process(ProcessRef { pid: 0, started }, PROCESS_QUERY_LIMITED_INFORMATION), Err(PlatformError::AccessDenied(_))));
-        let missing = ProcessRef {
-            pid: 0xFFFF_FFF0,
-            started,
-        };
-        assert!(matches!(open_process(missing, PROCESS_QUERY_LIMITED_INFORMATION), Err(PlatformError::NotFound(_))));
+        assert!(matches!(
+            open_process(reused, PROCESS_QUERY_LIMITED_INFORMATION),
+            Err(PlatformError::NotFound(_))
+        ));
+        assert!(matches!(
+            open_process(ProcessRef { pid: 0, started }, PROCESS_QUERY_LIMITED_INFORMATION),
+            Err(PlatformError::AccessDenied(_))
+        ));
+        let missing = ProcessRef { pid: 0xFFFF_FFF0, started };
+        assert!(matches!(
+            open_process(missing, PROCESS_QUERY_LIMITED_INFORMATION),
+            Err(PlatformError::NotFound(_))
+        ));
     }
 }

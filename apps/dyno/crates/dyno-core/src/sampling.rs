@@ -40,7 +40,11 @@ pub fn intervals(s: Sampling, load: Load) -> Intervals {
         // Nobody watching: history needs a point every 5 s, rules need per-app CPU every few seconds.
         None => {
             system = system.max(2_000);
-            process = if load.rules_active { process.max(3_000) } else { process.max(10_000) };
+            process = if load.rules_active {
+                process.max(3_000)
+            } else {
+                process.max(10_000)
+            };
         }
     }
     if load.on_battery {
@@ -65,34 +69,70 @@ mod tests {
 
     #[test]
     fn watching_uses_the_settings() {
-        let i = intervals(Sampling::default(), Load {
-            watching: Some(LiveDetail::Processes),
-            ..Default::default()
-        });
-        assert_eq!(i, Intervals { system_ms: 1_000, process_ms: 2_000 });
+        let i = intervals(
+            Sampling::default(),
+            Load {
+                watching: Some(LiveDetail::Processes),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            i,
+            Intervals {
+                system_ms: 1_000,
+                process_ms: 2_000
+            }
+        );
     }
 
     #[test]
     fn idle_battery_and_overshoot_slow_down() {
         let idle = intervals(Sampling::default(), Load::default());
-        assert_eq!(idle, Intervals { system_ms: 2_000, process_ms: 10_000 });
-        let rules = intervals(Sampling::default(), Load {
-            rules_active: true,
-            ..Default::default()
-        });
+        assert_eq!(
+            idle,
+            Intervals {
+                system_ms: 2_000,
+                process_ms: 10_000
+            }
+        );
+        let rules = intervals(
+            Sampling::default(),
+            Load {
+                rules_active: true,
+                ..Default::default()
+            },
+        );
         assert_eq!(rules.process_ms, 3_000);
-        let battery = intervals(Sampling::default(), Load {
-            watching: Some(LiveDetail::Summary),
-            on_battery: true,
-            ..Default::default()
-        });
-        assert_eq!(battery, Intervals { system_ms: 2_000, process_ms: 4_000 });
-        let hot = intervals(Sampling::default(), Load {
-            watching: Some(LiveDetail::Summary),
-            own_cpu: 4.0,
-            ..Default::default()
-        });
-        assert_eq!(hot, Intervals { system_ms: 2_000, process_ms: 8_000 });
+        let battery = intervals(
+            Sampling::default(),
+            Load {
+                watching: Some(LiveDetail::Summary),
+                on_battery: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            battery,
+            Intervals {
+                system_ms: 2_000,
+                process_ms: 4_000
+            }
+        );
+        let hot = intervals(
+            Sampling::default(),
+            Load {
+                watching: Some(LiveDetail::Summary),
+                own_cpu: 4.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            hot,
+            Intervals {
+                system_ms: 2_000,
+                process_ms: 8_000
+            }
+        );
         let cap = intervals(
             Sampling {
                 interval_ms: 10_000,
@@ -104,6 +144,12 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(cap, Intervals { system_ms: 10_000, process_ms: 30_000 });
+        assert_eq!(
+            cap,
+            Intervals {
+                system_ms: 10_000,
+                process_ms: 30_000
+            }
+        );
     }
 }

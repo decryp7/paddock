@@ -115,35 +115,103 @@ impl Alerts {
                 let key = format!("lowDisk:{}", d.id);
                 live.push(key.clone());
                 let sev = if free < 3.0 { Severity::Critical } else { Severity::Warning };
-                self.maybe(&mut out, key, now, 0, 6 * HOUR, AlertKind::LowDisk, sev, format!("{} is almost full", d.name), format!("{} free ({free:.0}%). Cleanup can free space safely.", bytes(d.free)));
+                self.maybe(
+                    &mut out,
+                    key,
+                    now,
+                    0,
+                    6 * HOUR,
+                    AlertKind::LowDisk,
+                    sev,
+                    format!("{} is almost full", d.name),
+                    format!("{} free ({free:.0}%). Cleanup can free space safely.", bytes(d.free)),
+                );
             }
         }
         if let Some(t) = s.hottest().filter(|t| t.celsius >= st.overheat_celsius) {
             live.push("heat".into());
-            self.maybe(&mut out, "heat".into(), now, MINUTE, 30 * MINUTE, AlertKind::Overheating, Severity::Warning, format!("{} is overheating", t.label), format!("{:.0} °C for over a minute. Check the vents and what is running.", t.celsius));
+            self.maybe(
+                &mut out,
+                "heat".into(),
+                now,
+                MINUTE,
+                30 * MINUTE,
+                AlertKind::Overheating,
+                Severity::Warning,
+                format!("{} is overheating", t.label),
+                format!("{:.0} °C for over a minute. Check the vents and what is running.", t.celsius),
+            );
         }
         let pressure = s.memory.pressure.value().copied().unwrap_or_else(|| derive_pressure(&s.memory));
         if pressure == MemoryPressure::Critical {
             live.push("memory".into());
-            self.maybe(&mut out, "memory".into(), now, MINUTE, 30 * MINUTE, AlertKind::MemoryPressure, Severity::Warning, "Your PC is out of memory".into(), format!("{} of {} in use. Close apps you don't need.", bytes(s.memory.used), bytes(s.memory.total)));
+            self.maybe(
+                &mut out,
+                "memory".into(),
+                now,
+                MINUTE,
+                30 * MINUTE,
+                AlertKind::MemoryPressure,
+                Severity::Warning,
+                "Your PC is out of memory".into(),
+                format!(
+                    "{} of {} in use. Close apps you don't need.",
+                    bytes(s.memory.used),
+                    bytes(s.memory.total)
+                ),
+            );
         }
         for a in anomalies.iter().filter(|a| a.kind == AnomalyKind::RestartLoop) {
             let key = format!("crash:{}", a.app);
             live.push(key.clone());
-            self.maybe(&mut out, key, now, 0, HOUR, AlertKind::CrashLoop, Severity::Warning, a.title.clone(), a.explanation.clone());
+            self.maybe(
+                &mut out,
+                key,
+                now,
+                0,
+                HOUR,
+                AlertKind::CrashLoop,
+                Severity::Warning,
+                a.title.clone(),
+                a.explanation.clone(),
+            );
         }
         let sustain = i64::from(st.long_high_cpu_minutes) * MINUTE;
         for g in groups.iter().filter(|g| g.cpu > HIGH_CPU) {
             let key = format!("cpu:{}", g.id);
             live.push(key.clone());
-            self.maybe(&mut out, key, now, sustain, HOUR, AlertKind::LongHighCpu, Severity::Info, format!("{} has used over {HIGH_CPU:.0}% CPU for {} minutes", g.name, st.long_high_cpu_minutes), "A rule can tame it automatically next time (CPU taming).".into());
+            self.maybe(
+                &mut out,
+                key,
+                now,
+                sustain,
+                HOUR,
+                AlertKind::LongHighCpu,
+                Severity::Info,
+                format!(
+                    "{} has used over {HIGH_CPU:.0}% CPU for {} minutes",
+                    g.name, st.long_high_cpu_minutes
+                ),
+                "A rule can tame it automatically next time (CPU taming).".into(),
+            );
         }
         self.since.retain(|k, _| live.contains(k));
         out
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn maybe(&mut self, out: &mut Vec<Alert>, key: String, now: Timestamp, sustain: i64, cooldown: i64, kind: AlertKind, severity: Severity, title: String, detail: String) {
+    fn maybe(
+        &mut self,
+        out: &mut Vec<Alert>,
+        key: String,
+        now: Timestamp,
+        sustain: i64,
+        cooldown: i64,
+        kind: AlertKind,
+        severity: Severity,
+        title: String,
+        detail: String,
+    ) {
         let since = *self.since.entry(key.clone()).or_insert(now);
         if now.since(since) < sustain.max(0) {
             return;

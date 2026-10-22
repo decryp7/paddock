@@ -11,7 +11,10 @@ pub fn parse_codesign(text: &str, success: bool) -> SignatureInfo {
         return SignatureInfo::Unsigned;
     }
     if !success {
-        let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("the signature does not verify");
+        let first = text
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("the signature does not verify");
         return SignatureInfo::Invalid(first.trim().to_string());
     }
     if let Some(a) = text.lines().find_map(|l| l.trim().strip_prefix("Authority=")) {
@@ -80,8 +83,13 @@ Authority=Developer ID Application: Slack Technologies, Inc. (BQR82RBBHL)\nAutho
             parse_codesign(signed, true),
             SignatureInfo::Signed("Developer ID Application: Slack Technologies, Inc. (BQR82RBBHL)".into())
         );
-        assert_eq!(parse_codesign("/tmp/a: code object is not signed at all\n", false), SignatureInfo::Unsigned);
-        assert!(matches!(parse_codesign("/tmp/a: invalid signature (code or signature have been modified)", false), SignatureInfo::Invalid(m) if m.contains("modified")));
+        assert_eq!(
+            parse_codesign("/tmp/a: code object is not signed at all\n", false),
+            SignatureInfo::Unsigned
+        );
+        assert!(
+            matches!(parse_codesign("/tmp/a: invalid signature (code or signature have been modified)", false), SignatureInfo::Invalid(m) if m.contains("modified"))
+        );
         assert!(matches!(parse_codesign("", false), SignatureInfo::Invalid(_)));
         assert!(matches!(parse_codesign("Signature=adhoc\n", true), SignatureInfo::Invalid(_)));
         assert!(matches!(parse_codesign("Identifier=x\n", true), SignatureInfo::Unknown(_)));
@@ -103,7 +111,10 @@ Authority=Developer ID Application: Slack Technologies, Inc. (BQR82RBBHL)\nAutho
         assert_eq!(parse_sw_vers(v).as_deref(), Some("macOS 15.1 (24B83)"));
         assert_eq!(parse_sw_vers("ProductVersion: 14.0").as_deref(), Some("macOS 14.0"));
         assert_eq!(parse_sw_vers("garbage"), None);
-        assert_eq!(parse_pmset_low_power("System-wide power settings:\n lowpowermode         1\n"), Some(true));
+        assert_eq!(
+            parse_pmset_low_power("System-wide power settings:\n lowpowermode         1\n"),
+            Some(true)
+        );
         assert_eq!(parse_pmset_low_power(" lowpowermode 0\n"), Some(false));
         assert_eq!(parse_pmset_low_power(" sleep 1\n"), None);
     }

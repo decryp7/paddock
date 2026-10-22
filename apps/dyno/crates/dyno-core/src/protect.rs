@@ -52,7 +52,16 @@ pub const MACOS_PROTECTED: &[&str] = &[
 ];
 
 /// Dyno's own executables (the app, its agent, the helper and plugins are protected too).
-pub const DYNO_PROTECTED: &[&str] = &["dyno.exe", "dyno", "dyno-app.exe", "dyno-app", "dyno-agent.exe", "dyno-agent", "dyno-helper.exe", "dyno-helper"];
+pub const DYNO_PROTECTED: &[&str] = &[
+    "dyno.exe",
+    "dyno",
+    "dyno-app.exe",
+    "dyno-app",
+    "dyno-agent.exe",
+    "dyno-agent",
+    "dyno-helper.exe",
+    "dyno-helper",
+];
 
 /// Every built-in protected name (both OSes; names don't collide).
 pub fn built_in() -> Vec<String> {
@@ -88,7 +97,10 @@ impl<'a> Protection<'a> {
         let exe_name = p.exe.as_deref().map(|e| file_name(e).to_lowercase());
         let is = |list: &[&str]| list.iter().any(|n| *n == name || exe_name.as_deref() == Some(*n));
         if is(WINDOWS_PROTECTED) || is(MACOS_PROTECTED) {
-            return Some(format!("{} is critical to the operating system or its security; Dyno never touches it.", p.name));
+            return Some(format!(
+                "{} is critical to the operating system or its security; Dyno never touches it.",
+                p.name
+            ));
         }
         if is(DYNO_PROTECTED) {
             return Some("This is part of Dyno.".into());
@@ -136,7 +148,10 @@ mod tests {
         assert!(p.reason(&proc(501, None, "MsMpEng.exe", 0.0, 1)).is_some());
         assert!(p.reason(&proc(502, None, "WindowServer", 0.0, 1)).is_some());
         assert_eq!(p.reason(&proc(999, None, "x", 0.0, 1)).unwrap(), "This is Dyno itself.");
-        assert_eq!(p.reason(&proc(503, None, "dyno-agent.exe", 0.0, 1)).unwrap(), "This is part of Dyno.");
+        assert_eq!(
+            p.reason(&proc(503, None, "dyno-agent.exe", 0.0, 1)).unwrap(),
+            "This is part of Dyno."
+        );
         assert!(p.allows(&proc(600, None, "chrome.exe", 0.0, 1)));
         assert!(built_in().contains(&"lsass.exe".to_string()));
     }
