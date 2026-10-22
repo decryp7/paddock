@@ -29,6 +29,17 @@ import { HotModels } from '../dashboard/hot-models';
         <button type="button" class="btn ghost icon sm" aria-label="Open Pitwall" (click)="open('/')"><mat-icon svgIcon="pw:open" aria-hidden="true" /></button>
       </header>
 
+      @if (live.pairings().length; as n) {
+        <button type="button" class="pairing" (click)="open('/')">
+          <mat-icon svgIcon="pw:apps" aria-hidden="true" />
+          <span>{{ n === 1 ? 'An app wants to pair' : n + ' apps want to pair' }}. <b>Review</b></span>
+        </button>
+      }
+
+      @if (live.error() && !live.overview()) {
+        <p class="down" role="alert">The Pitwall server is not responding. <button type="button" class="btn sm" (click)="live.load()">Retry</button></p>
+      }
+
       @if (live.memory(); as m) {
         <section class="mem" aria-label="Memory">
           <div class="row">
@@ -83,6 +94,32 @@ import { HotModels } from '../dashboard/hot-models';
       padding: var(--sp-3) var(--sp-4) var(--sp-4);
       background: var(--bg-content);
       overflow: hidden;
+    }
+    .pairing {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      padding: var(--sp-2) var(--sp-3);
+      font: inherit;
+      font-size: var(--fs-sm);
+      color: var(--text);
+      text-align: left;
+      background: var(--accent-soft);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+      border-radius: var(--r-md);
+      mat-icon {
+        color: var(--accent);
+      }
+    }
+    .down {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-2);
+      padding: var(--sp-2) var(--sp-3);
+      font-size: var(--fs-sm);
+      background: var(--bad-soft);
+      border-radius: var(--r-md);
     }
     header {
       display: flex;

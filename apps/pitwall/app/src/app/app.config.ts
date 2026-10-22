@@ -5,6 +5,7 @@ import type { PitwallBackend } from './core/backend';
 import { BACKEND, isTauri } from './core/backend';
 import { MockBackend, type MockOptions } from './core/mock-backend';
 import { TauriBackend } from './core/tauri-backend';
+import { withTimeout } from './core/timeout-backend';
 import { provideNativeFeel } from './core/native-feel';
 import { provideIcons } from './shared/icons';
 
@@ -31,6 +32,6 @@ export const appConfig: ApplicationConfig = {
     provideIcons(),
     provideNativeFeel(),
     // Inside the app the real Tauri backend; in the browser build (development, UI tests) the mock.
-    { provide: BACKEND, useFactory: () => (isTauri() ? new TauriBackend() : new MockBackend(mockOptionsFrom(location.search))) },
+    { provide: BACKEND, useFactory: () => withTimeout(isTauri() ? new TauriBackend() : new MockBackend(mockOptionsFrom(location.search))) },
   ],
 };
