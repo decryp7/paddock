@@ -1,15 +1,17 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { SuEmptyState, SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
+import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
 import { BACKEND } from '../../core/backend';
 import { platformFromUserAgent } from '../../core/tauri-backend';
-import { AgoPipe } from '../../shared/ui/ago.pipe';
+import { AgoShortPipe } from '../../shared/ui/ago.pipe';
+import { Avatar } from '../../shared/ui/avatar';
+import { Version } from '../../shared/ui/version';
 import { WatchesStore } from '../../state/watches.store';
 
 /** The tray popup: unseen releases at a glance. Frameless and transparent; the shell draws the OS material behind. */
 @Component({
   selector: 'sp-tray-page',
-  imports: [MatIcon, SuEmptyState, SuTrayPopover, AgoPipe],
+  imports: [MatIcon, SuTrayPopover, AgoShortPipe, Avatar, Version],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pd-tray-popover label="Spotter" [platform]="platform" (dismissed)="close()">
@@ -17,7 +19,7 @@ import { WatchesStore } from '../../state/watches.store';
         <img src="brand/spotter-small.svg" alt="" width="20" height="20" />
         <strong>Spotter</strong>
         @if (unseen().length) {
-          <span class="pill" role="status">{{ unseen().length }} unseen</span>
+          <span class="pill" role="status">{{ store.unseen().length }} new</span>
         }
       </div>
       @if (store.error(); as err) {
@@ -29,18 +31,29 @@ import { WatchesStore } from '../../state/watches.store';
           @for (w of unseen(); track w.id) {
             <li>
               <button type="button" class="item" (click)="open(w.id)" [attr.aria-label]="w.name + ' ' + w.latest?.version + ', open'">
+                <sp-avatar [name]="w.name" [size]="32" />
                 <span class="main">
                   <span class="name truncate">{{ w.name }}</span>
-                  <span class="meta truncate"><span class="ver">{{ w.latest?.version }}</span> · {{ w.latest?.firstSeenMs | ago }}</span>
+                  <span class="meta truncate">
+                    @if (w.newerThanInstalled && w.installed && w.latest) {
+                      <sp-ver [value]="w.installed" /> → <sp-ver [value]="w.latest.version" />
+                    } @else if (w.latest) {
+                      <sp-ver [value]="w.latest.version" />
+                    }
+                    · {{ w.latest?.firstSeenMs | agoShort }}
+                  </span>
                 </span>
-                <mat-icon svgIcon="sp:chevron-right" aria-hidden="true" />
               </button>
-              <button type="button" class="btn ghost icon sm" (click)="store.acknowledge(w.id, null)" [attr.aria-label]="'Mark ' + w.name + ' as seen'"><mat-icon svgIcon="sp:check" aria-hidden="true" /></button>
+              <button type="button" class="btn ghost icon sm check" (click)="store.acknowledge(w.id, null)" [attr.aria-label]="'Mark ' + w.name + ' as seen'" title="Mark as seen"><mat-icon svgIcon="sp:check" aria-hidden="true" /></button>
             </li>
           }
         </ul>
       } @else {
-        <pd-empty-state heading="Nothing new" description="You have seen every release." />
+        <div class="empty">
+          <mat-icon svgIcon="sp:check-all" aria-hidden="true" />
+          <strong>All caught up</strong>
+          <span class="muted">You have seen every release.</span>
+        </div>
       }
       <div slot="footer" class="foot">
         @if (unseen().length > 1) {
@@ -65,10 +78,25 @@ import { WatchesStore } from '../../state/watches.store';
       margin-left: auto;
       padding: 1px var(--pd-space-2);
       border-radius: var(--pd-radius-pill);
-      background: var(--pd-accent-tint);
-      color: var(--pd-accent);
+      background: var(--pd-surface-3);
+      color: var(--pd-text-muted);
       font-size: var(--pd-text-caption);
       font-weight: var(--pd-weight-semibold);
+    }
+    .empty {
+      display: grid;
+      justify-items: center;
+      gap: var(--pd-space-1);
+      padding: var(--pd-space-6) var(--pd-space-4);
+      text-align: center;
+    }
+    .empty mat-icon {
+      width: 32px;
+      height: 32px;
+      color: var(--pd-text-subtle);
+    }
+    li:not(:hover):not(:focus-within) .check {
+      opacity: 0;
     }
     .list {
       display: grid;
@@ -97,11 +125,6 @@ import { WatchesStore } from '../../state/watches.store';
     }
     .item:hover {
       background: var(--pd-hover);
-    }
-    .item mat-icon {
-      width: 14px;
-      height: 14px;
-      color: var(--pd-text-subtle);
     }
     .main {
       display: grid;

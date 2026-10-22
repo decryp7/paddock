@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
-import { SuEmptyState, SuStatusPill } from '@decryp7/paddock-ui';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { formatBytes } from '../../shared/format';
 import { eventView } from '../../shared/labels';
-import { AgoPipe } from '../../shared/ui/ago.pipe';
+import { AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { Panel } from '../../shared/ui/panel';
 import { DashboardStore } from '../../state/dashboard.store';
 import type { AppEvent } from '../../core/api.types';
@@ -11,7 +12,7 @@ import type { AppEvent } from '../../core/api.types';
 /** The activity feed: new releases, failed checks, recoveries, downloads. "Load more" pages back in time. */
 @Component({
   selector: 'sp-events-feed',
-  imports: [RouterLink, SuEmptyState, SuStatusPill, Panel, AgoPipe],
+  imports: [MatIcon, RouterLink, SuEmptyState, Panel, AgoShortPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <sp-panel [state]="store.events()" label="the activity feed" (retry)="store.loadEvents()">
@@ -21,19 +22,20 @@ import type { AppEvent } from '../../core/api.types';
           @for (e of events; track e.atMs + e.kind + (e.watchId ?? '') + (e.version ?? '')) {
             @let v = view(e);
             <li class="item">
-              <pd-status-pill [status]="v.tone" [label]="v.title" />
+              <mat-icon class="ico" [class]="v.tone" [svgIcon]="'sp:' + v.icon" aria-hidden="true" />
               <div class="main truncate">
+                <span class="what">{{ v.title }}</span>
                 @if (e.watchId) {
                   <a [routerLink]="['/watches', e.watchId]">{{ e.watchName }}</a>
                 }
                 <span class="detail">{{ detail(e) }}</span>
               </div>
-              <time class="when">{{ e.atMs | ago }}</time>
+              <time class="when">{{ e.atMs | agoShort }}</time>
             </li>
           }
         </ul>
         @if (store.moreEvents()) {
-          <button type="button" class="btn more" (click)="store.loadMoreEvents()">Load more</button>
+          <button type="button" class="btn ghost more" (click)="store.loadMoreEvents()">Load more</button>
         }
       } @else {
         <pd-empty-state heading="Nothing has happened yet" description="Releases, failed checks and downloads are listed here." />
@@ -45,20 +47,41 @@ import type { AppEvent } from '../../core/api.types';
       margin: 0 0 var(--pd-space-3);
       padding: 0;
       list-style: none;
-      border: 1px solid var(--pd-hairline);
-      border-radius: var(--pd-radius-card);
-      background: var(--pd-surface-1);
     }
     .item {
-      display: grid;
-      grid-template-columns: 150px 1fr auto;
+      display: flex;
       align-items: center;
       gap: var(--pd-space-3);
-      padding: var(--pd-space-2) var(--pd-space-4);
+      min-height: 36px;
+      padding: var(--pd-space-1) var(--pd-space-3);
       border-bottom: 1px solid var(--pd-hairline);
     }
     .item:last-child {
       border-bottom: 0;
+    }
+    .ico {
+      flex: none;
+      width: 16px;
+      height: 16px;
+      color: var(--pd-text-subtle);
+    }
+    .ico.danger { color: var(--pd-danger); }
+    .ico.warning { color: var(--pd-warning); }
+    .ico.success { color: var(--pd-success); }
+    .main {
+      flex: 1;
+      min-width: 0;
+    }
+    .what {
+      margin-right: var(--pd-space-2);
+      font-weight: var(--pd-weight-medium);
+    }
+    a {
+      color: var(--pd-text);
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
     }
     .detail {
       margin-left: var(--pd-space-2);
@@ -68,14 +91,6 @@ import type { AppEvent } from '../../core/api.types';
       color: var(--pd-text-subtle);
       font-size: var(--pd-text-caption);
       white-space: nowrap;
-    }
-    @media (max-width: 720px) {
-      .item {
-        grid-template-columns: 1fr auto;
-      }
-      pd-status-pill {
-        grid-column: 1 / -1;
-      }
     }
   `,
 })

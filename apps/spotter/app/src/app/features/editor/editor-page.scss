@@ -17,19 +17,31 @@
   margin: 0;
   padding: 0;
   list-style: none;
+  li {
+    display: flex;
+    align-items: center;
+    gap: var(--pd-space-2);
+  }
+  li:not(:last-child)::after {
+    content: '';
+    width: 20px;
+    height: 1px;
+    background: var(--pd-border-strong);
+  }
 }
 .step {
   display: inline-flex;
   align-items: center;
   gap: var(--pd-space-2);
   padding: var(--pd-space-1) var(--pd-space-3) var(--pd-space-1) var(--pd-space-1);
-  border: 1px solid var(--pd-hairline);
+  border: 1px solid transparent;
   border-radius: var(--pd-radius-pill);
   background: transparent;
   color: var(--pd-text-muted);
   font: inherit;
   &:disabled {
-    opacity: 0.55;
+    opacity: 0.7;
+    color: var(--pd-text-subtle);
   }
   &.on {
     border-color: var(--pd-accent);

@@ -33,19 +33,19 @@
               @if (pausedFor(); as left) { Paused for another {{ left }}. } @else { Notifications are on. }
             </div>
           </div>
-          <div class="inline">
-            <button type="button" class="btn sm" (click)="store.pauseNotifications(60)">1 hour</button>
-            <button type="button" class="btn sm" (click)="store.pauseNotifications(24 * 60)">1 day</button>
-            @if (pausedFor()) { <button type="button" class="btn sm primary" (click)="store.pauseNotifications(null)">Resume</button> }
+          <div class="seg-tabs" role="group" aria-label="Pause notifications">
+            <button type="button" [attr.aria-pressed]="!pausedFor()" (click)="store.pauseNotifications(null)">On</button>
+            <button type="button" [attr.aria-pressed]="!!pausedFor()" (click)="store.pauseNotifications(60)">Pause 1 hour</button>
+            <button type="button" aria-pressed="false" (click)="store.pauseNotifications(24 * 60)">Pause 1 day</button>
           </div>
         </div>
         <div class="row">
-          <div><label class="l" for="digest">Digest</label><div class="help">Collect releases into one notification instead of announcing each at once.</div></div>
-          <select id="digest" class="input fit" [value]="c.digest" (change)="set({ digest: $any(value($event)) })">
-            <option value="off">Announce at once</option>
-            <option value="daily">Daily digest</option>
-            <option value="weekly">Weekly digest</option>
-          </select>
+          <div><div class="l">Digest</div><div class="help">Collect releases into one notification instead of announcing each at once.</div></div>
+          <div class="seg-tabs" role="group" aria-label="Digest">
+            <button type="button" [attr.aria-pressed]="c.digest === 'off'" (click)="set({ digest: 'off' })">At once</button>
+            <button type="button" [attr.aria-pressed]="c.digest === 'daily'" (click)="set({ digest: 'daily' })">Daily</button>
+            <button type="button" [attr.aria-pressed]="c.digest === 'weekly'" (click)="set({ digest: 'weekly' })">Weekly</button>
+          </div>
         </div>
         <div class="row">
           <div><label class="l" for="quiet">Quiet hours</label><div class="help">No notifications in this window. Watches can add their own.</div></div>
@@ -65,10 +65,10 @@
       <section class="group surface" aria-labelledby="chk-h">
         <h2 id="chk-h">Checks and downloads</h2>
         <div class="row">
-          <div><label class="l" for="interval">Default check interval</label><div class="help">New watches start with this; each watch can change it.</div></div>
-          <select id="interval" class="input fit" [value]="c.defaultIntervalSecs" (change)="set({ defaultIntervalSecs: +value($event) })">
-            @for (i of intervals; track i.secs) { <option [value]="i.secs" [selected]="i.secs === c.defaultIntervalSecs">{{ i.label }}</option> }
-          </select>
+          <div><div class="l">Default check interval</div><div class="help">New watches start with this; each watch can change it.</div></div>
+          <div class="seg-tabs" role="group" aria-label="Default check interval">
+            @for (i of intervals; track i.secs) { <button type="button" [attr.aria-pressed]="i.secs === c.defaultIntervalSecs" (click)="set({ defaultIntervalSecs: i.secs })">{{ i.label }}</button> }
+          </div>
         </div>
         <div class="row">
           <div>
@@ -89,7 +89,7 @@
           @if (r) {
             <div class="row">
               <div>
-                <pd-status-pill [status]="rendererTone()" [label]="rendererWord()" />
+                <div class="l"><span class="dot" [class]="rendererTone()"></span>{{ rendererWord() }}</div>
                 <div class="help detail pd-selectable">{{ r.detail }}</div>
               </div>
               @if (r.canDownload) {

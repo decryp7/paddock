@@ -83,3 +83,26 @@ export function lastSegment(location: string): string {
   const parts = location.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? location;
 }
+
+/** A short, non-wrapping date: `Oct 22, 4:20 PM`; the year only when it is not the current one; `—` when unknown. */
+export function formatShortDateTime(ms: number | null | undefined, now: number): string {
+  if (ms === null || ms === undefined) return '—';
+  const d = new Date(ms);
+  const sameYear = d.getFullYear() === new Date(now).getFullYear();
+  return d.toLocaleString(undefined, sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/** Bytes as a number of MiB with the unit left to the column header: `25.5`; `—` when unknown. */
+export function mebibytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined) return '—';
+  const v = bytes / 1048576;
+  return v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+}
+
+/** A compact ago for a table cell: `20 min`, `3 h`, `2 days`; `—` when unknown. */
+export function agoShort(atMs: number | null | undefined, now: number): string {
+  if (atMs === null || atMs === undefined) return '—';
+  const diff = now - atMs;
+  if (Math.abs(diff) < 45 * SECOND) return 'now';
+  return spanText(diff);
+}

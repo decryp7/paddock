@@ -8,82 +8,89 @@
           @if (nextCheck(); as next) {
             · next check {{ next | ago }}
           }
+          @if (paused()) { · notifications paused }
         } @else {
           Spotter tells you the moment a new release appears.
         }
       </p>
     </div>
     <div class="actions">
-      <button type="button" class="btn" (click)="watches.checkNow(null)" [disabled]="watches.checking() || !watches.watches().length">
-        <mat-icon svgIcon="sp:refresh" aria-hidden="true" [class.spin]="watches.checking()" />
-        Check all now
-      </button>
-      <button type="button" class="btn" [cdkMenuTriggerFor]="pauseMenu" aria-label="Pause notifications">
-        <mat-icon [svgIcon]="paused() ? 'sp:bell-off' : 'sp:bell'" aria-hidden="true" />
-        {{ paused() ? 'Notifications paused' : 'Pause notifications' }}
-      </button>
-      <ng-template #pauseMenu>
-        <div class="menu" cdkMenu>
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="pause(60)">For 1 hour</button>
-          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="pauseUntilTomorrow()">Until tomorrow</button>
-          @if (paused()) {
-            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="pause(null)">Resume now</button>
-          }
-        </div>
-      </ng-template>
       <a class="btn primary" routerLink="/watches/new">
         <mat-icon svgIcon="sp:plus" aria-hidden="true" />
         Add watch
       </a>
+      <sp-menu-button label="Dashboard actions" [small]="false" [entries]="headEntries()" (picked)="onHead($event)" />
     </div>
   </header>
 
   @if (watches.loaded() && !watches.watches().length && !watches.error()) {
-    <pd-empty-state heading="Nothing to watch yet" description="Add a folder, a feed, a GitHub repository or a web page and Spotter will tell you the moment a new release appears.">
-      <a slot="action" class="btn primary" routerLink="/watches/new">Add your first watch</a>
-    </pd-empty-state>
+    <div class="empty">
+      <span class="tile-icon big" aria-hidden="true"><mat-icon svgIcon="sp:sparkle" /></span>
+      <h2>Nothing to watch yet</h2>
+      <p>Add a folder, a feed, a GitHub repository or a web page and Spotter will tell you the moment a new release appears.</p>
+      <a class="btn primary" routerLink="/watches/new">Add your first watch</a>
+    </div>
   } @else {
+    @if (watches.watches().length) {
+      <dl class="strip" aria-label="Summary">
+        <div><dd>{{ watches.watches().length }}</dd><dt>Watches</dt></div>
+        <div [class.hot]="watches.unseen().length"><dd>{{ watches.unseen().length }}</dd><dt>New releases</dt></div>
+        <div [class.warn]="watches.attention().length"><dd>{{ watches.attention().length }}</dd><dt>Need attention</dt></div>
+        <div><dd>{{ nextCheck() ? (nextCheck() | agoShort) : '—' }}</dd><dt>Until next check</dt></div>
+      </dl>
+    }
+
+    @if (watches.attention().length) {
+      <section class="section" aria-labelledby="att-h">
+        <div class="section-head"><h2 id="att-h">Needs attention</h2></div>
+        <ul class="attention">
+          @for (w of watches.attention(); track w.id) {
+            <li>
+              <a [routerLink]="['/watches', w.id]">
+                <sp-avatar [name]="w.name" [size]="24" />
+                <span class="name truncate">{{ w.name }}</span>
+                <sp-status-dot [watch]="w" />
+                <span class="why truncate">{{ w.status.message }}</span>
+              </a>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+
     <sp-panel [state]="store.dashboard()" label="the dashboard" (retry)="store.loadDashboard()">
       <section class="section" aria-labelledby="new-h">
-        <div class="section-head"><h2 id="new-h">What's new</h2></div>
+        <div class="section-head">
+          <h2 id="new-h">What's new</h2>
+          @if (watches.unseen().length) {
+            <button type="button" class="btn ghost sm" (click)="watches.acknowledgeAll()"><mat-icon svgIcon="sp:check-all" aria-hidden="true" />Mark all seen</button>
+          }
+        </div>
         <sp-whats-new [items]="dashboard()?.whatsNew ?? []" />
       </section>
 
-      <section class="section" aria-labelledby="watch-h">
-        <div class="section-head"><h2 id="watch-h">Your watches</h2><a routerLink="/watches">See all</a></div>
-        <div class="tiles">
-          @for (w of watches.watches(); track w.id) {
-            @let n = numbersOf(w.id);
-            <pd-card [heading]="w.name" [interactive]="true" (activated)="goto(w.id)">
-              <sp-kind-icon slot="icon" [kind]="w.sourceKind" />
-              <sp-watch-status slot="status" [watch]="w" />
-              <span class="ver tile-ver">{{ w.latest?.version ?? 'No release yet' }}</span>
-              @if (n) {
-                <pd-sparkline slot="sparkline" [values]="n.sparkline" [label]="'Releases per week for ' + w.name + ', last 12 weeks'" />
+      @if (hasCadence()) {
+        <section class="section" aria-labelledby="cad-h">
+          <div class="section-head">
+            <h2 id="cad-h">Release cadence</h2>
+            <div class="seg-tabs" role="group" aria-label="Time range">
+              @for (r of ranges; track r.value) {
+                <button type="button" [attr.aria-pressed]="store.range() === r.value" (click)="setRange(r.value)">{{ r.label }}</button>
               }
-              <span slot="caption">
-                @if (w.unseen) { <strong>New</strong> · }
-                checked {{ w.lastCheckMs | ago }}
-                @if (n) { · every {{ span(n.averageIntervalMs) }} on average }
-              </span>
-            </pd-card>
-          }
-        </div>
-      </section>
+            </div>
+          </div>
+          <sp-cadence-cards [watches]="watches.watches()" [numbers]="dashboard()?.watches ?? []" [rangeLabel]="rangeLabel()" />
+        </section>
+      }
 
-      <section class="section" aria-labelledby="chart-h">
-        <div class="section-head">
-          <h2 id="chart-h">Releases over time</h2>
-          <pd-segmented-control label="Time range" [options]="ranges" [value]="store.range()" (valueChange)="setRange($event)" />
-        </div>
-        <div class="surface chart">
-          @if (series().length) {
+      @if (series().length) {
+        <section class="section" aria-labelledby="chart-h">
+          <div class="section-head"><h2 id="chart-h">Releases per {{ store.range() === '1y' ? 'week' : 'day' }}</h2></div>
+          <div class="surface chart">
             <sp-chart [option]="chartOption()" [label]="chartLabel()" />
-          } @else {
-            <p class="muted">No releases in this range.</p>
-          }
-        </div>
-      </section>
+          </div>
+        </section>
+      }
     </sp-panel>
 
     <section class="section" aria-labelledby="events-h">

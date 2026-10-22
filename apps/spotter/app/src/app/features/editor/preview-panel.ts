@@ -1,22 +1,23 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { SuStatusPill } from '@decryp7/paddock-ui';
-import { formatBytes, formatDate, formatDuration } from '../../shared/format';
+import { formatBytes, formatDuration } from '../../shared/format';
 import { statusView } from '../../shared/labels';
 import type { SourcePreview } from '../../core/api.types';
 import type { Loadable } from '../../state/loadable';
+import { Version } from '../../shared/ui/version';
 import { Panel } from '../../shared/ui/panel';
 import { ExtractionPanel } from './extraction-panel';
 
 /** "Test this source": what the draft would find right now, with the reasons for everything it left out. */
 @Component({
   selector: 'sp-preview-panel',
-  imports: [SuStatusPill, Panel, ExtractionPanel],
+  imports: [SuStatusPill, Panel, ExtractionPanel, Version],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="surface" aria-labelledby="pv-h" aria-live="polite">
       <div class="head">
         <h2 id="pv-h">Test this source</h2>
-        <button type="button" class="btn sm" (click)="rerun.emit()" [disabled]="state().loading || !ready()">Test again</button>
+        <button type="button" class="btn ghost sm" (click)="rerun.emit()" [disabled]="state().loading || !ready()">Test again</button>
       </div>
       @if (!ready()) {
         <p class="help">Fill in the required fields and Spotter tests the source here.</p>
@@ -48,14 +49,14 @@ import { ExtractionPanel } from './extraction-panel';
                 <sp-extraction-panel [extraction]="x" />
               } @else if (p.releases.length) {
                 <table class="table" aria-label="Releases found">
-                  <thead><tr><th scope="col">Version</th><th scope="col">Name</th><th scope="col">Date</th><th scope="col">Size</th></tr></thead>
+                  <thead><tr><th scope="col">Version</th>@if (showName(p)) {<th scope="col">Name</th>}<th scope="col">Date</th><th scope="col" class="num">Size</th></tr></thead>
                   <tbody>
                     @for (r of p.releases; track r.version) {
                       <tr>
-                        <td><span class="ver">{{ r.version }}</span>@if (r.prerelease) { <span class="chip">Pre-release</span> }</td>
-                        <td class="truncate">{{ r.name }}</td>
-                        <td>{{ date(r.publishedAtMs ?? r.firstSeenMs) }}</td>
-                        <td>{{ bytes(r.size) }}</td>
+                        <td class="nowrap"><sp-ver [value]="r.version" />@if (r.prerelease) { <span class="pre">pre-release</span> }</td>
+                        @if (showName(p)) { <td class="truncate">{{ r.name }}</td> }
+                        <td class="nowrap">{{ date(r.publishedAtMs ?? r.firstSeenMs) }}</td>
+                        <td class="num">{{ bytes(r.size) }}</td>
                       </tr>
                     }
                   </tbody>
@@ -93,6 +94,10 @@ import { ExtractionPanel } from './extraction-panel';
       color: var(--pd-text-muted);
       font-size: var(--pd-text-caption);
     }
+    .pre {
+      color: var(--pd-text-muted);
+      font-size: var(--pd-text-caption);
+    }
     .summary {
       margin-bottom: var(--pd-space-3);
     }
@@ -123,7 +128,12 @@ export class PreviewPanel {
   readonly rerun = output<void>();
 
   protected readonly bytes = formatBytes;
-  protected readonly date = formatDate;
+  protected readonly date = (ms: number | null) => (ms === null ? '—' : new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+
+  /** The name column only earns its place when some name differs from the version. */
+  protected showName(p: SourcePreview): boolean {
+    return p.releases.some((r) => r.name !== r.version);
+  }
   protected readonly duration = formatDuration;
 
   protected tone(p: SourcePreview) {

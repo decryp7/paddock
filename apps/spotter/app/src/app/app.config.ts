@@ -8,7 +8,7 @@ import { TauriBackend, platformFromUserAgent } from './core/tauri-backend';
 import { applyWindowChrome } from './core/window-chrome';
 import { provideIcons } from './shared/icons';
 
-const SCENARIOS: MockScenario[] = ['demo', 'empty', 'broken'];
+const SCENARIOS: MockScenario[] = ['demo', 'empty', 'broken', 'products'];
 
 /** The browser build's mock; `?mock=<scenario>` picks what it shows (development, screenshots and e2e tests). */
 function browserBackend(): SpotterBackend {

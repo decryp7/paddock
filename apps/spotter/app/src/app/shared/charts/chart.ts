@@ -36,6 +36,7 @@ export const CHART_LOADER = new InjectionToken<ChartLoader>('CHART_LOADER', { pr
   styles: `
     :host {
       display: block;
+      height: 100%;
     }
     .host {
       width: 100%;

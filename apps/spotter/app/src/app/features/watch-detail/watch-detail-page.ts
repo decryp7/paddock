@@ -2,15 +2,19 @@ import { ChangeDetectionStrategy, Component, computed, effect, inject, input, si
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
 import { SuEmptyState } from '@decryp7/paddock-ui';
-import type { Release, WatchAction } from '../../core/api.types';
+import type { CheckRecord, Release, WatchAction } from '../../core/api.types';
+import { ClockService } from '../../core/clock.service';
 import { Clipboard } from '../../shared/clipboard';
-import { formatBytes, formatDateTime, formatDuration, formatInterval, shortHash } from '../../shared/format';
-import { SCHEME_OPTIONS } from '../../shared/labels';
-import { AgoPipe } from '../../shared/ui/ago.pipe';
+import { formatBytes, formatDateTime, formatDuration, formatInterval, formatShortDateTime, mebibytes } from '../../shared/format';
+import { kindIcon, SCHEME_OPTIONS } from '../../shared/labels';
+import { middleEllipsis } from '../../shared/identity';
+import { AgoPipe, AgoShortPipe } from '../../shared/ui/ago.pipe';
+import { Avatar } from '../../shared/ui/avatar';
 import { Confirm } from '../../shared/ui/confirm-dialog';
-import { KindIcon } from '../../shared/ui/kind-icon';
 import { Panel } from '../../shared/ui/panel';
-import { WatchStatus } from '../../shared/ui/watch-status';
+import { MenuButton, type MenuEntry } from '../../shared/ui/row-menu';
+import { StatusDot } from '../../shared/ui/status-dot';
+import { Version } from '../../shared/ui/version';
 import { WatchesStore } from '../../state/watches.store';
 import { WatchDetailStore } from './watch-detail.store';
 
@@ -22,7 +26,7 @@ function choice(a: { variant?: string; extension?: string }): string {
 /** One watch: its latest release, history, recent checks and settings, with every action on it. */
 @Component({
   selector: 'sp-watch-detail-page',
-  imports: [MatIcon, RouterLink, SuEmptyState, Panel, KindIcon, WatchStatus, AgoPipe],
+  imports: [MatIcon, RouterLink, SuEmptyState, Panel, Avatar, StatusDot, Version, MenuButton, AgoPipe, AgoShortPipe],
   providers: [WatchDetailStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './watch-detail-page.html',
@@ -45,8 +49,30 @@ export class WatchDetailPage {
   protected readonly dateTime = formatDateTime;
   protected readonly duration = formatDuration;
   protected readonly interval = formatInterval;
-  protected readonly hash = (h: string | null) => shortHash(h);
-  protected readonly checks = computed(() => [...(this.detail()?.checks ?? [])].reverse().slice(0, 12));
+  protected readonly mib = mebibytes;
+  protected readonly glyph = kindIcon;
+  protected readonly middle = (text: string) => middleEllipsis(text, 38);
+  private readonly clock = inject(ClockService);
+  protected readonly short = (ms: number | null | undefined) => formatShortDateTime(ms, this.clock.now());
+  /** The last 30 checks, oldest first, each marked when it found more than the check before. */
+  protected readonly checks = computed<(CheckRecord & { changed: boolean })[]>(() => {
+    const all = [...(this.detail()?.checks ?? [])].sort((a, b) => a.atMs - b.atMs);
+    return all.map((c, i) => ({ ...c, changed: !c.error && i > 0 && c.found > (all[i - 1]?.found ?? 0) })).slice(-30);
+  });
+  protected readonly lastFailure = computed(() => [...this.checks()].reverse().find((c) => c.error)?.error ?? null);
+  protected readonly pickable = computed(() => (this.detail()?.history ?? []).slice(0, 12));
+  private readonly selectedKey = signal<{ version: string; product: string | null } | null>(null);
+  protected readonly selected = computed(() => {
+    const k = this.selectedKey();
+    return k ? (this.detail()?.history.find((r) => r.version === k.version && r.product === k.product) ?? null) : null;
+  });
+  private opener: HTMLElement | null = null;
+  protected readonly menuEntries = computed<MenuEntry[]>(() => [
+    { id: 'edit', label: 'Edit', icon: 'edit' },
+    { id: 'installed', label: 'I have installed…', icon: 'package' },
+    { id: 'copy', label: 'Copy address', icon: 'copy' },
+    { id: 'delete', label: 'Delete watch', icon: 'trash', danger: true, separated: true },
+  ]);
   protected readonly scheme = computed(() => SCHEME_OPTIONS.find((s) => s.value === this.detail()?.spec.versions)?.label ?? this.detail()?.spec.versions ?? '');
 
   constructor() {
@@ -61,6 +87,48 @@ export class WatchDetailPage {
       if (first) first = false;
       else untracked(() => void this.store.reload());
     });
+  }
+
+  protected select(r: Release): void {
+    this.opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    this.selectedKey.set({ version: r.version, product: r.product });
+  }
+
+  protected isSelected(r: Release): boolean {
+    return this.selected() === r;
+  }
+
+  protected closePanel(): void {
+    this.selectedKey.set(null);
+    this.opener?.focus();
+  }
+
+  protected checkTitle(c: CheckRecord): string {
+    return `${formatDateTime(c.atMs)}: ${c.error ? 'failed, ' + c.error : 'found ' + c.found} (${formatDuration(c.tookMs)})`;
+  }
+
+  protected onMenu(id: string): void {
+    const s = this.summary();
+    if (id === 'edit') void this.router.navigate(['/watches', this.id(), 'edit']);
+    else if (id === 'installed') this.installedPicker.update((v) => !v);
+    else if (id === 'copy' && s) this.copy(s.sourceDescription, 'Address');
+    else if (id === 'delete') void this.remove();
+  }
+
+  protected releaseEntries(r: Release): MenuEntry[] {
+    return [
+      { id: 'link', label: 'Copy link', icon: 'link' },
+      ...(r.sha256 ? [{ id: 'sha', label: 'Copy SHA-256', icon: 'lock' }] : []),
+      { id: 'installed', label: 'Mark as installed', icon: 'package', separated: true },
+      { id: 'seen', label: 'Mark as seen', icon: 'check' },
+    ];
+  }
+
+  protected onRelease(id: string, r: Release): void {
+    if (id === 'link') this.copy(r.location, 'Link');
+    else if (id === 'sha' && r.sha256) this.copy(r.sha256, 'Checksum');
+    else if (id === 'installed') void this.setInstalled(r.version);
+    else if (id === 'seen') void this.watches.acknowledge(this.id(), r.version);
   }
 
   protected async remove(): Promise<void> {
@@ -78,11 +146,6 @@ export class WatchDetailPage {
   protected async setInstalled(version: string | null): Promise<void> {
     this.installedPicker.set(false);
     await this.watches.setInstalled(this.id(), version);
-  }
-
-  protected onInstalled(e: Event): void {
-    const v = (e.target as HTMLSelectElement).value;
-    void this.setInstalled(v === '' ? null : v);
   }
 
   protected copy(text: string, what: string): void {

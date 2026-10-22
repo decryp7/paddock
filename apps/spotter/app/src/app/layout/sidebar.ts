@@ -122,8 +122,8 @@ const NAV: NavItem[] = [
       min-width: 20px;
       padding: 0 6px;
       border-radius: var(--pd-radius-pill);
-      background: var(--pd-accent-fill);
-      color: var(--pd-on-accent);
+      background: var(--pd-surface-3);
+      color: var(--pd-text-muted);
       font-size: var(--pd-text-caption);
       font-weight: var(--pd-weight-semibold);
       text-align: center;

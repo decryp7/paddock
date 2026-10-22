@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { SuSegmentedControl, SuStatusPill, type SuSegment } from '@decryp7/paddock-ui';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import type { Settings, Theme } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { formatDateTime, spanText } from '../../shared/format';
@@ -16,7 +16,7 @@ const THEMES: SuSegment[] = [
 /** Settings: appearance, notifications, checks, downloads, the page renderer, updates and data. */
 @Component({
   selector: 'sp-settings-page',
-  imports: [MatIcon, SuSegmentedControl, SuStatusPill, Panel],
+  imports: [MatIcon, SuSegmentedControl, Panel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
   styleUrl: './settings-page.scss',

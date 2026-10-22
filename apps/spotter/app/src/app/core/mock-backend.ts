@@ -81,11 +81,11 @@ function demoWatches(now: number): MockWatch[] {
   ): MockWatch => {
     const releases = makeReleases(seed, scheme, count, now - (seed % 5) * 6 * HOUR - 40 * MINUTE, 330, prefix).reverse();
     const checkRand = rng(seed + 100);
-    const checks: CheckRecord[] = Array.from({ length: 12 }, (_, i) => ({
-      atMs: now - (12 - i) * 6 * HOUR,
+    const checks: CheckRecord[] = Array.from({ length: 30 }, (_, i) => ({
+      atMs: now - (30 - i) * 6 * HOUR,
       tookMs: Math.round(200 + checkRand() * 1400),
-      error: null,
-      found: count,
+      error: seed % 3 === 1 && (i === 9 || i === 21) ? 'The server did not answer within 20 seconds.' : null,
+      found: count - (i < 14 ? 2 : i < 25 ? 1 : 0),
     }));
     return {
       spec: blankDraft({ id: `w-${seed}`, name, source: { kind, values }, versions: scheme, ...spec }),

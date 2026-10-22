@@ -1,8 +1,8 @@
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--pd-space-3);
+  min-height: 44px;
 }
 .search {
   position: relative;
@@ -23,19 +23,58 @@
     padding-left: 36px;
   }
 }
-.sort {
-  display: flex;
-  align-items: center;
-  gap: var(--pd-space-2);
-  margin-left: auto;
-  color: var(--pd-text-muted);
-  .input {
-    width: auto;
-  }
-}
 .table-wrap {
   padding: 0;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: calc(100vh - 220px);
+}
+.fixed {
+  table-layout: fixed;
+  min-width: 860px;
+  .c-latest { width: 250px; }
+  .c-status { width: 150px; }
+  .c-time { width: 90px; }
+  .c-act { width: 112px; }
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 0 var(--pd-space-3);
+    height: 36px;
+    background: var(--pd-surface-1);
+    white-space: nowrap;
+  }
+  tbody td {
+    height: 56px;
+    padding: 0 var(--pd-space-3);
+    overflow: hidden;
+  }
+  tbody tr {
+    cursor: default;
+  }
+}
+.sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: var(--pd-weight-medium);
+  cursor: default;
+  &:hover {
+    color: var(--pd-text);
+  }
+}
+.arrow {
+  opacity: 0;
+  font-size: 11px;
+}
+.arrow.on,
+.sort:hover .arrow {
+  opacity: 1;
 }
 .who {
   display: flex;
@@ -43,9 +82,13 @@
   gap: var(--pd-space-3);
   min-width: 0;
 }
+.names {
+  min-width: 0;
+}
 .name {
+  display: block;
   color: var(--pd-text);
-  font-weight: var(--pd-weight-medium);
+  font-weight: var(--pd-weight-semibold);
   text-decoration: none;
   &:hover {
     text-decoration: underline;
@@ -54,13 +97,35 @@
 .src {
   color: var(--pd-text-muted);
   font-size: var(--pd-text-caption);
+  mat-icon {
+    width: 12px;
+    height: 12px;
+    margin-right: 4px;
+    vertical-align: -2px;
+  }
 }
-.msg {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.muted {
+  color: var(--pd-text-muted);
+}
+.status-cell {
   white-space: nowrap;
 }
-.chip {
-  margin-left: var(--pd-space-2);
+.hover-actions {
+  justify-content: flex-end;
+}
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--pd-space-3);
+  max-width: 440px;
+  margin: var(--pd-space-8) auto;
+  text-align: center;
+  h2 {
+    font-size: 15px;
+    font-weight: var(--pd-weight-semibold);
+  }
+  p {
+    margin: 0;
+    color: var(--pd-text-muted);
+  }
 }

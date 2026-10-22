@@ -5,101 +5,89 @@
       <p class="sub">{{ store.watches().length }} {{ store.watches().length === 1 ? 'watch' : 'watches' }}@if (store.unseen().length) { · {{ store.unseen().length }} with new releases }</p>
     </div>
     <div class="actions">
-      @if (store.unseen().length) {
-        <button type="button" class="btn" (click)="store.acknowledgeAll()"><mat-icon svgIcon="sp:check-all" aria-hidden="true" />Mark all seen</button>
-      }
-      <button type="button" class="btn" (click)="store.checkNow(null)" [disabled]="store.checking() || !store.watches().length">
-        <mat-icon svgIcon="sp:refresh" aria-hidden="true" [class.spin]="store.checking()" />Check all now
-      </button>
       <a class="btn primary" routerLink="/watches/new"><mat-icon svgIcon="sp:plus" aria-hidden="true" />Add watch</a>
+      <sp-menu-button label="Watches actions" [small]="false" [entries]="headEntries()" (picked)="onHead($event)" />
     </div>
   </header>
 
   <sp-panel [state]="listState()" label="the watch list" (retry)="store.load()">
     @if (!store.watches().length) {
-      <pd-empty-state heading="No watches yet" description="A watch looks at one place for new releases and tells you when something appears.">
-        <a slot="action" class="btn primary" routerLink="/watches/new">Add your first watch</a>
-      </pd-empty-state>
+      <div class="empty">
+        <span class="tile-icon big" aria-hidden="true"><mat-icon svgIcon="sp:watches" /></span>
+        <h2>No watches yet</h2>
+        <p>A watch looks at one place for new releases and tells you when something appears.</p>
+        <a class="btn primary" routerLink="/watches/new">Add your first watch</a>
+      </div>
     } @else {
       <div class="toolbar">
         <div class="search">
           <mat-icon svgIcon="sp:search" aria-hidden="true" />
           <input class="input" type="search" placeholder="Search watches" aria-label="Search watches" [value]="store.query()" (input)="onQuery($event)" />
         </div>
-        <pd-segmented-control label="Filter watches" [options]="filters" [value]="store.filter()" (valueChange)="setFilter($event)" />
-        <label class="sort">
-          <span>Sort by</span>
-          <select class="input" [value]="store.sort()" (change)="onSort($event)" aria-label="Sort watches">
-            <option value="name">Name</option>
-            <option value="latest">Newest release</option>
-            <option value="checked">Last checked</option>
-          </select>
-        </label>
+        <div class="seg-tabs" role="group" aria-label="Filter watches">
+          @for (f of filters; track f.value) {
+            <button type="button" [attr.aria-pressed]="store.filter() === f.value" (click)="setFilter(f.value)">{{ f.label }}</button>
+          }
+        </div>
       </div>
 
       @if (store.visible().length) {
         <div class="surface table-wrap">
-          <table class="table">
+          <table class="table fixed">
+            <colgroup><col /><col class="c-latest" /><col class="c-status" /><col class="c-time" /><col class="c-time" /><col class="c-act" /></colgroup>
             <thead>
               <tr>
-                <th scope="col">Watch</th>
-                <th scope="col">Latest</th>
+                <th scope="col" [attr.aria-sort]="ariaSort('name')"><button type="button" class="sort" (click)="store.setSort('name')">Watch<span class="arrow" [class.on]="store.sort() === 'name'">↓</span></button></th>
+                <th scope="col" [attr.aria-sort]="ariaSort('latest')"><button type="button" class="sort" (click)="store.setSort('latest')">Latest<span class="arrow" [class.on]="store.sort() === 'latest'">↓</span></button></th>
                 <th scope="col">Status</th>
-                <th scope="col">Last check</th>
-                <th scope="col">Next check</th>
+                <th scope="col" [attr.aria-sort]="ariaSort('checked')"><button type="button" class="sort" (click)="store.setSort('checked')">Checked<span class="arrow" [class.on]="store.sort() === 'checked'">↓</span></button></th>
+                <th scope="col">Next</th>
                 <th scope="col"><span class="pd-visually-hidden">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               @for (w of store.visible(); track w.id) {
-                <tr>
+                <tr (click)="open(w.id)">
                   <td>
                     <div class="who">
-                      <sp-kind-icon [kind]="w.sourceKind" />
-                      <div class="truncate">
-                        <a class="name" [routerLink]="['/watches', w.id]">{{ w.name }}</a>
-                        <div class="src truncate" [attr.title]="w.sourceDescription">{{ w.sourceLabel }} · {{ w.sourceDescription }}</div>
+                      <span class="unseen-dot" [class.off]="!w.unseen" [attr.title]="w.unseen ? 'New release' : null"></span>
+                      <sp-avatar [name]="w.name" />
+                      <div class="names">
+                        <a class="name truncate" [routerLink]="['/watches', w.id]" (click)="$event.stopPropagation()" [attr.title]="w.name">{{ w.name }}</a>
+                        <div class="src truncate" [attr.title]="w.sourceLabel + ' · ' + w.sourceDescription">
+                          <mat-icon [svgIcon]="'sp:' + glyph(w.sourceKind)" aria-hidden="true" />{{ w.sourceLabel }} · {{ w.sourceDescription }}
+                        </div>
                       </div>
                     </div>
                   </td>
-                  <td>
-                    <span class="ver">{{ w.latest?.version ?? '—' }}</span>
-                    @if (w.productCount) {
-                      <span class="chip" [title]="'The newest release of ' + w.latest?.product">{{ w.productCount }} products</span>
-                    }
-                    @if (w.unseen) {
-                      <span class="chip accent">New</span>
-                    }
-                    @if (w.newerThanInstalled) {
-                      <div class="src">Newer than installed {{ w.installed }}</div>
-                    }
-                  </td>
-                  <td>
-                    <sp-watch-status [watch]="w" />
-                    @if (w.status.message && !w.paused) {
-                      <div class="src msg" [attr.title]="w.status.message">{{ w.status.message }}</div>
+                  <td class="nowrap">
+                    @if (w.latest) {
+                      @if (w.newerThanInstalled && w.installed) {
+                        <span class="token"><sp-ver [value]="w.installed" /><mat-icon svgIcon="sp:arrow-right" aria-hidden="true" /><span class="to"><sp-ver [value]="w.latest.version" /></span></span>
+                      } @else {
+                        <sp-ver [value]="w.latest.version" />
+                      }
+                      @if (w.productCount) { <span class="muted"> +{{ w.productCount - 1 }}</span> }
+                    } @else {
+                      <span class="muted">—</span>
                     }
                   </td>
-                  <td>{{ w.lastCheckMs | ago }}</td>
-                  <td>{{ w.paused ? 'Paused' : (w.nextCheckMs | ago) }}</td>
+                  <td class="status-cell">
+                    <sp-status-dot [watch]="w" />
+                  </td>
+                  <td class="nowrap muted" [attr.title]="w.lastCheckMs ? (w.lastCheckMs | ago) : null">{{ w.lastCheckMs | agoShort }}</td>
+                  <td class="nowrap muted">{{ w.paused ? 'Paused' : (w.nextCheckMs ? (w.nextCheckMs | untilShort) : '—') }}</td>
                   <td>
-                    <div class="row-actions">
-                      <button type="button" class="btn ghost icon sm" (click)="store.checkNow(w.id)" [disabled]="w.checking" [attr.aria-label]="'Check ' + w.name + ' now'">
+                    <div class="hover-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+                      <button type="button" class="btn ghost icon sm reveal" (click)="store.checkNow(w.id)" [disabled]="w.checking" [attr.aria-label]="'Check ' + w.name + ' now'" title="Check now">
                         <mat-icon svgIcon="sp:refresh" aria-hidden="true" [class.spin]="w.checking" />
                       </button>
-                      @if (w.unseen) {
-                        <button type="button" class="btn ghost icon sm" (click)="store.acknowledge(w.id, null)" [attr.aria-label]="'Mark ' + w.name + ' as seen'">
-                          <mat-icon svgIcon="sp:check" aria-hidden="true" />
-                        </button>
-                      }
-                      <button type="button" class="btn ghost icon sm" (click)="store.setPaused(w.id, !w.paused)" [attr.aria-label]="(w.paused ? 'Resume ' : 'Pause ') + w.name">
-                        <mat-icon [svgIcon]="w.paused ? 'sp:play' : 'sp:pause'" aria-hidden="true" />
-                      </button>
                       @if (w.latest) {
-                        <button type="button" class="btn ghost icon sm" (click)="store.openRelease(w.id, w.latest.version, { product: w.latest.product })" [attr.aria-label]="'Open the latest release of ' + w.name">
+                        <button type="button" class="btn ghost icon sm reveal" (click)="store.openRelease(w.id, w.latest.version, { product: w.latest.product })" [attr.aria-label]="'Open the latest release of ' + w.name" title="Open latest">
                           <mat-icon svgIcon="sp:external" aria-hidden="true" />
                         </button>
                       }
+                      <sp-menu-button [label]="'More actions for ' + w.name" [entries]="rowEntries(w)" (picked)="onRow($event, w)" />
                     </div>
                   </td>
                 </tr>

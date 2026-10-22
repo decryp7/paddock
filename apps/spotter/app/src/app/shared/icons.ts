@@ -46,6 +46,7 @@ export const ICONS: Record<string, string> = {
   'chevron-left': outline(p('m14.5 6.5-5.5 5.5 5.5 5.5')),
   'chevron-down': outline(p('m6.5 9.5 5.5 5.5 5.5-5.5')),
   'arrow-left': outline(p('M19 12H5M11 6l-6 6 6 6')),
+  'arrow-right': outline(p('M5 12h14M13 6l6 6-6 6')),
   more: outline(dot(5.5, 12) + dot(12, 12) + dot(18.5, 12)),
   bell: outline(p('M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0')),
   'bell-off': outline(p('M6 16.5V11c0-1 .3-2 .8-2.8M9 5.5A6 6 0 0 1 18 11v5.5l1.5 2H8M10 20.5a2 2 0 0 0 4 0M4 4l16 16')),

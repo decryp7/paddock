@@ -3,6 +3,7 @@ import { Router } from '@angular/router';
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import type { DiscoveredFeed, ImportFormat, SourceKind } from '../../core/api.types';
 import { GROUP_LABEL, GROUP_ORDER } from '../../shared/labels';
+import { Avatar } from '../../shared/ui/avatar';
 import { KindIcon } from '../../shared/ui/kind-icon';
 import { Panel } from '../../shared/ui/panel';
 import { ToastStore } from '../../state/toast.store';
@@ -13,26 +14,36 @@ type Way = 'presets' | 'kinds' | 'feed' | 'import';
 /** Step 1: how to start: a ready-made preset, a kind of source, a page that advertises feeds, or a list to import. */
 @Component({
   selector: 'sp-source-step',
-  imports: [SuEmptyState, KindIcon, Panel],
+  imports: [SuEmptyState, KindIcon, Avatar, Panel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="tabs" role="tablist" aria-label="How to start">
+    <div class="seg-tabs ways" role="group" aria-label="How to start">
       @for (w of ways; track w.id) {
-        <button type="button" role="tab" class="tab" [class.on]="way() === w.id" [attr.aria-selected]="way() === w.id" (click)="way.set(w.id)">{{ w.label }}</button>
+        <button type="button" [attr.aria-pressed]="way() === w.id" (click)="way.set(w.id)">{{ w.label }}</button>
       }
     </div>
 
     @switch (way()) {
       @case ('presets') {
         <sp-panel [state]="store.presets()" label="the presets" (retry)="store.loadCatalog()">
+          <div class="filters">
+            <input class="input search" type="search" placeholder="Search popular software" aria-label="Search popular software" [value]="query()" (input)="query.set(val($event))" />
+            <div class="seg-tabs" role="group" aria-label="Category">
+              <button type="button" [attr.aria-pressed]="cat() === ''" (click)="cat.set('')">All</button>
+              @for (c of categories(); track c) {
+                <button type="button" [attr.aria-pressed]="cat() === c" (click)="cat.set(c)">{{ c }}</button>
+              }
+            </div>
+          </div>
           <div class="grid">
-            @for (p of store.presets().value ?? []; track p.id) {
+            @for (p of shown(); track p.id) {
               <button type="button" class="card" (click)="store.pickPreset(p)">
-                <sp-kind-icon [kind]="p.draft.source.kind" />
+                <sp-avatar [name]="p.name" [size]="36" />
                 <span class="t">{{ p.name }}</span>
                 <span class="d">{{ p.description }}</span>
-                <span class="chip">{{ p.category }}</span>
               </button>
+            } @empty {
+              <p class="help">Nothing matches "{{ query() }}". Try another word, or start from a source kind.</p>
             }
           </div>
         </sp-panel>
@@ -125,23 +136,18 @@ type Way = 'presets' | 'kinds' | 'feed' | 'import';
       display: grid;
       gap: var(--pd-space-4);
     }
-    .tabs {
+    .ways {
+      width: fit-content;
+    }
+    .filters {
       display: flex;
-      gap: var(--pd-space-1);
-      border-bottom: 1px solid var(--pd-hairline);
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--pd-space-3);
+      margin-bottom: var(--pd-space-4);
     }
-    .tab {
-      padding: var(--pd-space-2) var(--pd-space-4);
-      border: 0;
-      border-bottom: 2px solid transparent;
-      background: transparent;
-      color: var(--pd-text-muted);
-      font: inherit;
-      font-weight: var(--pd-weight-medium);
-    }
-    .tab.on {
-      border-color: var(--pd-accent);
-      color: var(--pd-text);
+    .search {
+      width: 280px;
     }
     .group {
       margin: var(--pd-space-4) 0 var(--pd-space-2);
@@ -231,12 +237,25 @@ export class SourceStep {
     { id: 'import', label: 'Import a list' },
   ];
   protected readonly way = signal<Way>('presets');
+  protected readonly query = signal('');
+  protected readonly cat = signal('');
+  protected readonly categories = computed(() => [...new Set((this.store.presets().value ?? []).map((p) => p.category))]);
+  protected readonly shown = computed(() => {
+    const q = this.query().trim().toLowerCase();
+    return (this.store.presets().value ?? []).filter(
+      (p) => (!this.cat() || p.category === this.cat()) && (!q || `${p.name} ${p.description} ${p.category}`.toLowerCase().includes(q)),
+    );
+  });
   protected readonly format = signal<ImportFormat>('winget');
   /** Whether the pasted list has any text (the template cannot read the textarea itself: the page is zoneless and OnPush). */
   protected readonly hasText = signal(false);
   protected readonly groups = computed(() =>
     GROUP_ORDER.map((id) => ({ id, label: GROUP_LABEL[id], kinds: (this.store.kinds().value ?? []).filter((k: SourceKind) => k.group === id) })).filter((g) => g.kinds.length),
   );
+
+  protected val(e: Event): string {
+    return (e.target as HTMLInputElement).value;
+  }
 
   protected find(e: Event, url: string): void {
     e.preventDefault();

@@ -1,24 +1,25 @@
-import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { Router, RouterLink } from '@angular/router';
-import { SuCard, SuEmptyState, SuSegmentedControl, SuSparkline, type SuSegment } from '@decryp7/paddock-ui';
-import type { DashboardRange, WatchNumbers } from '../../core/api.types';
+import { RouterLink } from '@angular/router';
+
+import type { DashboardRange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { Chart } from '../../shared/charts/chart';
 import { releaseChartSummary, releaseSeries, releasesOption } from '../../shared/charts/chart-options';
-import { formatDuration, spanText } from '../../shared/format';
-import { AgoPipe } from '../../shared/ui/ago.pipe';
-import { KindIcon } from '../../shared/ui/kind-icon';
+import { formatDuration } from '../../shared/format';
+import { AgoPipe, AgoShortPipe } from '../../shared/ui/ago.pipe';
+import { Avatar } from '../../shared/ui/avatar';
 import { Panel } from '../../shared/ui/panel';
-import { WatchStatus } from '../../shared/ui/watch-status';
+import { MenuButton, type MenuEntry } from '../../shared/ui/row-menu';
+import { StatusDot } from '../../shared/ui/status-dot';
 import { DashboardStore } from '../../state/dashboard.store';
 import { SettingsStore } from '../../state/settings.store';
 import { WatchesStore } from '../../state/watches.store';
+import { CadenceCards } from './cadence-cards';
 import { EventsFeed } from './events-feed';
 import { WhatsNew } from './whats-new';
 
-const RANGES: SuSegment[] = [
+const RANGES: { value: DashboardRange; label: string }[] = [
   { value: '30d', label: '30 days' },
   { value: '90d', label: '90 days' },
   { value: '1y', label: '1 year' },
@@ -27,10 +28,7 @@ const RANGES: SuSegment[] = [
 /** The home page: what is new, every watch at a glance, the releases chart and the events feed. */
 @Component({
   selector: 'sp-dashboard-page',
-  imports: [
-    RouterLink, MatIcon, CdkMenu, CdkMenuItem, CdkMenuTrigger, SuCard, SuEmptyState, SuSegmentedControl, SuSparkline,
-    Panel, Chart, KindIcon, WatchStatus, AgoPipe, WhatsNew, EventsFeed,
-  ],
+  imports: [RouterLink, MatIcon, Panel, Chart, Avatar, StatusDot, MenuButton, AgoPipe, AgoShortPipe, WhatsNew, EventsFeed, CadenceCards],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './dashboard-page.html',
   styleUrl: './dashboard-page.scss',
@@ -40,11 +38,20 @@ export class DashboardPage {
   protected readonly watches = inject(WatchesStore);
   protected readonly settings = inject(SettingsStore);
   private readonly backend = inject(BACKEND);
-  private readonly router = inject(Router);
   protected readonly ranges = RANGES;
 
   protected readonly dashboard = computed(() => this.store.dashboard().value);
-  protected readonly numbers = computed(() => new Map((this.dashboard()?.watches ?? []).map((n) => [n.watchId, n])));
+  protected readonly hasCadence = computed(() => (this.dashboard()?.watches ?? []).some((n) => n.releases.some((c) => c > 0)));
+  protected readonly rangeLabel = computed(() => RANGES.find((r) => r.value === this.store.range())?.label.toLowerCase() ?? '');
+  protected readonly headEntries = computed<MenuEntry[]>(() => [
+    { id: 'check', label: 'Check all now', icon: 'refresh', disabled: this.watches.checking() || !this.watches.watches().length },
+    ...(this.paused()
+      ? [{ id: 'resume', label: 'Resume notifications', icon: 'bell' }]
+      : [
+          { id: 'hour', label: 'Pause notifications for 1 hour', icon: 'bell-off', separated: true },
+          { id: 'tomorrow', label: 'Pause notifications until tomorrow', icon: 'bell-off' },
+        ]),
+  ]);
   protected readonly series = computed(() => {
     const d = this.dashboard();
     return d ? releaseSeries(d, this.watches.watches()) : [];
@@ -99,15 +106,10 @@ export class DashboardPage {
     void this.backend.open('downloads');
   }
 
-  protected goto(id: string): void {
-    void this.router.navigate(['/watches', id]);
-  }
-
-  protected span(ms: number | null): string {
-    return ms === null ? '—' : spanText(ms);
-  }
-
-  protected numbersOf(id: string): WatchNumbers | undefined {
-    return this.numbers().get(id);
+  protected onHead(id: string): void {
+    if (id === 'check') void this.watches.checkNow(null);
+    else if (id === 'hour') this.pause(60);
+    else if (id === 'tomorrow') this.pauseUntilTomorrow();
+    else if (id === 'resume') this.pause(null);
   }
 }

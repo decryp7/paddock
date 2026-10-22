@@ -1,83 +1,105 @@
-import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import type { WhatsNewItem } from '../../core/api.types';
+import { ClockService } from '../../core/clock.service';
+import { Clipboard } from '../../shared/clipboard';
+import { groupByDay } from '../../shared/day-groups';
 import { formatBytes } from '../../shared/format';
-import { AgoPipe } from '../../shared/ui/ago.pipe';
-import { KindIcon } from '../../shared/ui/kind-icon';
+import { Avatar } from '../../shared/ui/avatar';
+import { AgoShortPipe } from '../../shared/ui/ago.pipe';
+import { MenuButton, type MenuEntry } from '../../shared/ui/row-menu';
+import { Version } from '../../shared/ui/version';
 import { WatchesStore } from '../../state/watches.store';
 
-/** The newest releases across all watches, with the actions you want on them. */
+/**
+ * The release feed: newest first, grouped by day. A row shows who, what and when; its actions appear on hover and
+ * focus (Open, Download, and a menu); a click opens the watch. Unseen rows carry a dot, seen rows are quieter.
+ */
 @Component({
   selector: 'sp-whats-new',
-  imports: [MatIcon, RouterLink, SuEmptyState, KindIcon, AgoPipe],
+  imports: [MatIcon, SuEmptyState, Avatar, Version, AgoShortPipe, MenuButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (items().length) {
-      <ul class="list">
-        @for (item of items(); track item.watchId + item.release.version) {
-          <li class="item" [class.unseen]="item.unseen">
-            <sp-kind-icon [kind]="item.sourceKind" />
-            <div class="main">
-              <div class="title">
-                <span class="ver">{{ item.release.version }}</span>
-                @if (item.unseen) {
-                  <span class="chip accent">New</span>
-                }
-                @if (item.newerThanInstalled) {
-                  <span class="chip info">Newer than installed</span>
-                }
-                @if (item.release.prerelease) {
-                  <span class="chip">Pre-release</span>
-                }
-              </div>
-              <div class="meta truncate">
-                <a [routerLink]="['/watches', item.watchId]">{{ item.watchName }}</a>
-                · released {{ item.releasedAtMs | ago }}
-                @if (item.release.size !== null) {
-                  · {{ size(item.release.size) }}
-                }
-              </div>
-            </div>
-            <div class="row-actions">
-              <button type="button" class="btn sm" (click)="store.openRelease(item.watchId, item.release.version)" [attr.aria-label]="'Open ' + item.release.version + ' of ' + item.watchName">
-                <mat-icon svgIcon="sp:external" aria-hidden="true" />Open
-              </button>
-              <button type="button" class="btn sm" (click)="store.download(item.watchId, item.release.version)" [attr.aria-label]="'Download ' + item.release.version + ' of ' + item.watchName">
-                <mat-icon svgIcon="sp:download" aria-hidden="true" />Download
-              </button>
-              @if (item.unseen) {
-                <button type="button" class="btn sm primary" (click)="store.acknowledge(item.watchId, item.release.version)" [attr.aria-label]="'Mark ' + item.release.version + ' of ' + item.watchName + ' as seen'">
-                  <mat-icon svgIcon="sp:check" aria-hidden="true" />Mark seen
-                </button>
-              }
-            </div>
-          </li>
-        }
-      </ul>
+    @if (groups().length) {
+      @for (g of groups(); track g.label) {
+        <section class="day" [attr.aria-label]="g.label">
+          <h3>{{ g.label }}</h3>
+          <ul class="list">
+            @for (item of g.items; track item.watchId + item.release.version + (item.release.product ?? '')) {
+              <li class="item" [class.seen]="!item.unseen" tabindex="0" (click)="goto(item)" (keydown.enter)="goto(item)" (keydown.e)="seen(item)">
+                <span class="unseen-dot" [class.off]="!item.unseen" [attr.title]="item.unseen ? 'Not seen yet' : null"></span>
+                <sp-avatar [name]="item.watchName" />
+                <div class="main">
+                  <div class="title truncate">
+                    <span class="name">{{ item.watchName }}</span>
+                    @if (item.release.prerelease) { <span class="pre">pre-release</span> }
+                  </div>
+                  <div class="meta truncate">
+                    {{ item.release.product ?? item.release.name }}
+                    @if (item.release.size !== null) { · {{ size(item.release.size) }} }
+                    @if (item.release.artifacts.length > 1) { · {{ item.release.artifacts.length }} files }
+                  </div>
+                </div>
+                <span class="token" [attr.title]="installed(item) ? 'Installed ' + installed(item) + ', latest ' + item.release.version : null">
+                  @if (installed(item); as inst) {
+                    <sp-ver [value]="inst" /><mat-icon svgIcon="sp:arrow-right" aria-hidden="true" />
+                  }
+                  <span class="to"><sp-ver [value]="item.release.version" /></span>
+                </span>
+                <time class="when">{{ item.releasedAtMs | agoShort }}</time>
+                <div class="hover-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+                  <button type="button" class="btn ghost icon sm reveal" (click)="store.openRelease(item.watchId, item.release.version, { product: item.release.product })" [attr.aria-label]="'Open ' + item.release.version + ' of ' + item.watchName" title="Open">
+                    <mat-icon svgIcon="sp:external" aria-hidden="true" />
+                  </button>
+                  <button type="button" class="btn ghost icon sm reveal" (click)="store.download(item.watchId, item.release.version, { product: item.release.product })" [attr.aria-label]="'Download ' + item.release.version + ' of ' + item.watchName" title="Download">
+                    <mat-icon svgIcon="sp:download" aria-hidden="true" />
+                  </button>
+                  <sp-menu-button class="more-wrap" [label]="'More actions for ' + item.watchName + ' ' + item.release.version" [entries]="entries(item)" (picked)="run($event, item)" />
+                </div>
+              </li>
+            }
+          </ul>
+        </section>
+      }
     } @else {
       <pd-empty-state heading="No releases yet" description="New releases show up here as soon as a watch finds one." />
     }
   `,
   styles: `
+    :host {
+      display: grid;
+      gap: var(--pd-space-4);
+    }
+    .day {
+      display: grid;
+      gap: var(--pd-space-1);
+    }
+    h3 {
+      margin: 0;
+      padding: 0 var(--pd-space-3);
+      color: var(--pd-text-muted);
+      font-size: var(--pd-text-caption);
+      font-weight: var(--pd-weight-medium);
+    }
     .list {
       margin: 0;
       padding: 0;
       list-style: none;
-      border: 1px solid var(--pd-hairline);
-      border-radius: var(--pd-radius-card);
-      background: var(--pd-surface-1);
     }
     .item {
       display: flex;
       align-items: center;
       gap: var(--pd-space-3);
-      padding: var(--pd-space-3) var(--pd-space-4);
-      border-bottom: 1px solid var(--pd-hairline);
+      min-height: 56px;
+      padding: var(--pd-space-2) var(--pd-space-3);
+      border-radius: var(--pd-radius-card);
+      cursor: default;
     }
-    .item:last-child {
-      border-bottom: 0;
+    .item:hover,
+    .item:focus-visible {
+      background: var(--pd-hover);
     }
     .main {
       flex: 1;
@@ -85,26 +107,73 @@ import { WatchesStore } from '../../state/watches.store';
     }
     .title {
       display: flex;
-      align-items: center;
+      align-items: baseline;
       gap: var(--pd-space-2);
+      font-size: var(--pd-text-body);
     }
-    .ver {
-      font-size: var(--pd-text-subtitle);
+    .name {
+      font-weight: var(--pd-weight-semibold);
     }
-    .unseen .ver {
-      color: var(--pd-accent);
-    }
+    .pre,
     .meta {
       color: var(--pd-text-muted);
       font-size: var(--pd-text-caption);
+    }
+    .seen .name {
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-text-muted);
+    }
+    .when {
+      min-width: 52px;
+      color: var(--pd-text-subtle);
+      font-size: var(--pd-text-caption);
+      text-align: right;
+      white-space: nowrap;
+    }
+    .hover-actions {
+      width: 92px;
+      justify-content: flex-end;
     }
   `,
 })
 export class WhatsNew {
   readonly items = input.required<readonly WhatsNewItem[]>();
   protected readonly store = inject(WatchesStore);
+  private readonly router = inject(Router);
+  private readonly clipboard = inject(Clipboard);
+  private readonly clock = inject(ClockService);
+
+  protected readonly groups = computed(() => groupByDay(this.items(), (i) => i.releasedAtMs, this.clock.now()));
 
   protected size(bytes: number): string {
     return formatBytes(bytes);
+  }
+
+  /** The installed version, only when it differs from the release shown (the arrow token needs both). */
+  protected installed(item: WhatsNewItem): string | null {
+    const inst = this.store.byId(item.watchId)?.installed ?? null;
+    return inst && item.newerThanInstalled ? inst : null;
+  }
+
+  protected entries(item: WhatsNewItem): MenuEntry[] {
+    return [
+      ...(item.unseen ? [{ id: 'seen', label: 'Mark as seen', icon: 'check' }] : []),
+      { id: 'link', label: 'Copy link', icon: 'link' },
+      ...(item.release.sha256 ? [{ id: 'sha', label: 'Copy SHA-256', icon: 'lock' }] : []),
+    ];
+  }
+
+  protected run(id: string, item: WhatsNewItem): void {
+    if (id === 'seen') this.seen(item);
+    else if (id === 'link') void this.clipboard.copy(item.release.location, 'Link');
+    else if (id === 'sha' && item.release.sha256) void this.clipboard.copy(item.release.sha256, 'Checksum');
+  }
+
+  protected seen(item: WhatsNewItem): void {
+    if (item.unseen) void this.store.acknowledge(item.watchId, item.release.version);
+  }
+
+  protected goto(item: WhatsNewItem): void {
+    void this.router.navigate(['/watches', item.watchId]);
   }
 }

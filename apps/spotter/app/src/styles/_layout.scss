@@ -73,6 +73,16 @@
   }
 }
 
+.tile-icon.big {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  mat-icon {
+    width: 28px;
+    height: 28px;
+  }
+}
+
 .skip-link {
   position: fixed;
   top: var(--pd-space-2);
@@ -98,4 +108,10 @@
   .page {
     padding: var(--pd-space-4);
   }
+}
+
+/* Panels hold several blocks; they keep the page's rhythm between them. */
+.page sp-panel {
+  display: grid;
+  gap: var(--pd-space-6);
 }

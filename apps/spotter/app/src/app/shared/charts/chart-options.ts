@@ -26,14 +26,22 @@ export function releaseChartSummary(d: Dashboard, series: readonly ReleaseSeries
   return `Releases found per ${unit}: ${total} in total across ${series.length} watch${series.length === 1 ? '' : 'es'}.`;
 }
 
-/** The ECharts option for stacked bars of releases per bucket (colours and fonts come from the paddock theme). */
-export function releasesOption(d: Dashboard, series: readonly ReleaseSeries[]): Record<string, unknown> {
+/** Releases per bucket across every watch: the one number the chart shows. */
+export function releaseTotals(d: Dashboard): number[] {
+  return d.bucketsMs.map((_, i) => d.watches.reduce((sum, n) => sum + (n.releases[i] ?? 0), 0));
+}
+
+/**
+ * The ECharts option for the releases chart: one series of bars from zero in the accent colour, the unit on the axis
+ * and the day (or week) in the tooltip. Fonts and the axis colours come from the paddock theme.
+ */
+export function releasesOption(d: Dashboard, _series?: readonly ReleaseSeries[]): Record<string, unknown> {
+  const unit = d.range === '1y' ? 'week' : 'day';
   return {
-    grid: { left: 28, right: 8, top: 36, bottom: 24 },
-    legend: { type: 'scroll' },
+    grid: { left: 36, right: 8, top: 24, bottom: 24 },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     xAxis: { type: 'category', data: d.bucketsMs.map(bucketLabel), axisTick: { show: false } },
-    yAxis: { type: 'value', minInterval: 1 },
-    series: series.map((s) => ({ name: s.name, type: 'bar', stack: 'releases', data: s.data, emphasis: { focus: 'series' } })),
+    yAxis: { type: 'value', minInterval: 1, min: 0, name: `Releases per ${unit}`, nameTextStyle: { align: 'left' } },
+    series: [{ name: 'Releases', type: 'bar', data: releaseTotals(d), barMaxWidth: 18, emphasis: { focus: 'series' } }],
   };
 }

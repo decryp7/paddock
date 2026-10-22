@@ -212,3 +212,125 @@ textarea.input {
 a {
   color: var(--pd-accent);
 }
+
+/* Menus (CDK overlay content, so global) */
+.menu {
+  display: grid;
+  min-width: 200px;
+  padding: var(--pd-space-1);
+  border: 1px solid var(--pd-hairline);
+  border-radius: var(--pd-radius-popover);
+  background: var(--pd-surface-3);
+  box-shadow: var(--pd-shadow-3);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--pd-space-2);
+  padding: var(--pd-space-2) var(--pd-space-3);
+  border: 0;
+  border-radius: var(--pd-radius-control);
+  background: transparent;
+  color: var(--pd-text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  mat-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--pd-text-muted);
+  }
+  &:hover:not(:disabled),
+  &:focus-visible {
+    background: var(--pd-hover);
+    outline: none;
+  }
+  &.danger,
+  &.danger mat-icon {
+    color: var(--pd-danger);
+  }
+}
+.menu-sep {
+  height: 1px;
+  margin: var(--pd-space-1) 0;
+  background: var(--pd-hairline);
+}
+
+/* A feed or table row shows its actions on hover and focus; the "..." stays faintly visible for touch and keyboard. */
+.hover-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  .reveal {
+    opacity: 0;
+    transition: opacity var(--pd-duration-micro) var(--pd-ease-move);
+  }
+  .btn.more {
+    opacity: 0.4;
+  }
+}
+:hover > .hover-actions,
+:focus-within > .hover-actions,
+.hover-actions:focus-within {
+  .reveal,
+  .btn.more {
+    opacity: 1;
+  }
+}
+.unseen-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pd-accent);
+}
+.unseen-dot.off {
+  background: transparent;
+}
+.token {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pd-space-1);
+  color: var(--pd-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  mat-icon {
+    width: 12px;
+    height: 12px;
+  }
+  .to {
+    color: var(--pd-text);
+    font-weight: var(--pd-weight-semibold);
+  }
+}
+.nowrap {
+  white-space: nowrap;
+}
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.seg-tabs {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--pd-radius-control);
+  background: var(--pd-surface-3);
+  button {
+    min-height: 26px;
+    padding: 0 var(--pd-space-3);
+    border: 0;
+    border-radius: calc(var(--pd-radius-control) - 2px);
+    background: transparent;
+    color: var(--pd-text-muted);
+    font: inherit;
+    font-size: var(--pd-text-caption);
+    font-weight: var(--pd-weight-medium);
+    cursor: default;
+    &[aria-pressed='true'] {
+      background: var(--pd-surface-1);
+      color: var(--pd-text);
+      box-shadow: var(--pd-shadow-1, 0 1px 2px rgb(0 0 0 / 0.15));
+    }
+  }
+}
