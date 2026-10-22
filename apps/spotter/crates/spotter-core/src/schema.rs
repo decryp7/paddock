@@ -28,6 +28,9 @@ pub struct FieldSpec {
     pub default: String,
     /// An example shown in the empty input (may be empty).
     pub placeholder: String,
+    /// Shown under "More options" rather than in the main form.
+    #[serde(default)]
+    pub advanced: bool,
 }
 
 /// What kind of value a field takes. Secrets are never stored in the configuration: the app keeps them in the
@@ -85,7 +88,14 @@ impl FieldSpec {
             required: false,
             default: String::new(),
             placeholder: String::new(),
+            advanced: false,
         }
+    }
+
+    /// The same field, under "More options".
+    pub fn advanced(mut self) -> FieldSpec {
+        self.advanced = true;
+        self
     }
 
     /// The same field, required.

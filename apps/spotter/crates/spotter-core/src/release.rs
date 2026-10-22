@@ -216,6 +216,8 @@ impl Default for ReleaseFilter {
 pub enum Skip {
     /// Left out by the name filter.
     Name,
+    /// Not one of the chosen file extensions.
+    Extension,
     /// The scheme found nothing in the name.
     Unread(Ignored),
     /// A pre-release, and pre-releases are off.
@@ -235,6 +237,7 @@ impl Skip {
     pub fn reason(&self) -> String {
         match self {
             Skip::Name => "ignored: the name filter does not match".into(),
+            Skip::Extension => "ignored: not one of the chosen file types".into(),
             Skip::Unread(i) => format!("ignored: {}", i.reason()),
             Skip::Prerelease => "ignored: a pre-release (turn on pre-releases to include it)".into(),
             Skip::Product => "ignored: not one of the chosen products".into(),
@@ -395,7 +398,7 @@ pub fn select(candidates: Vec<Candidate>, scheme: &VersionScheme, filter: &Relea
                     out.without_version.push(name);
                 }
             }
-            Err(Skip::Product | Skip::Checksum) => {}
+            Err(Skip::Product | Skip::Checksum | Skip::Extension) => {}
         }
     }
     let mut releases: Vec<Release> = groups.into_values().map(|g| release_of(g, &checksums, filter.latest_by)).collect();
