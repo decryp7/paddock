@@ -157,6 +157,10 @@ pub struct Settings {
     pub cleanup: CleanupSettings,
     /// Local web API.
     pub web_api: WebApi,
+    /// The dashboard's widgets and presets.
+    pub dashboard: crate::widgets::DashboardLayout,
+    /// The tray / menu-bar items.
+    pub tray_items: crate::widgets::TrayItems,
 }
 
 impl Default for Settings {
@@ -171,6 +175,8 @@ impl Default for Settings {
             alerts: AlertSettings::default(),
             cleanup: CleanupSettings::default(),
             web_api: WebApi::default(),
+            dashboard: Default::default(),
+            tray_items: Default::default(),
         }
     }
 }
@@ -192,6 +198,8 @@ impl Settings {
         self.cleanup.categories.retain(|c| !c.is_empty() && c.len() <= 64);
         self.cleanup.categories.truncate(100);
         self.web_api.port = self.web_api.port.max(1024);
+        self.dashboard = self.dashboard.normalised();
+        self.tray_items = self.tray_items.normalised();
         self
     }
 }
@@ -261,5 +269,23 @@ mod tests {
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(j["webApi"]["port"], 47_800);
         assert_eq!(j["cleanup"]["mode"], "recycleBin");
+    }
+
+    #[test]
+    fn dashboard_and_tray_items_are_normalised_and_optional() {
+        // Old files without the new keys still load with the defaults.
+        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        assert!(w.is_none());
+        assert_eq!(s.dashboard, crate::widgets::DashboardLayout::default());
+        assert_eq!(s.tray_items, crate::widgets::TrayItems::default());
+        let mut s = Settings::default();
+        s.dashboard.widgets.clear();
+        s.tray_items.items.clear();
+        let n = s.normalised();
+        assert!(!n.dashboard.widgets.is_empty());
+        assert_eq!(n.tray_items.items.len(), 2);
+        let j = serde_json::to_value(Settings::default()).unwrap();
+        assert!(j["dashboard"]["presets"].is_array());
+        assert_eq!(j["trayItems"]["items"][0]["metric"], "cpuTotal");
     }
 }

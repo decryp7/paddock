@@ -31,3 +31,4 @@ pub mod time;
 pub mod tray;
 pub mod tuning;
 pub mod units;
+pub mod widgets;
