@@ -38,7 +38,11 @@ import type {
   RequestRecord,
   ServiceInstall,
   Settings,
+  UpdateCheckResult,
+  UpdateCheckStatus,
   UpdateInfo,
+  UpdateNotice,
+  UpdateSchedule,
 } from './api.types';
 import type { PitwallBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -211,6 +215,23 @@ export class TauriBackend implements PitwallBackend {
   }
   resolvePreset(preset: PresetDraft, editing: string | null): Promise<PresetPreview> {
     return this.run('resolve_preset', { preset, editing });
+  }
+
+  // Model update notices
+  updateCheckStatus(): Promise<UpdateCheckStatus> {
+    return this.run('update_check_status');
+  }
+  updateNotices(): Promise<UpdateNotice[]> {
+    return this.run('update_notices');
+  }
+  checkUpdatesNow(): Promise<UpdateCheckResult> {
+    return this.run('check_updates_now');
+  }
+  setUpdateCheck(enabled: boolean, schedule: UpdateSchedule): Promise<UpdateCheckStatus> {
+    return this.run('set_update_check', { enabled, schedule });
+  }
+  dismissUpdate(id: string, snoozeDays: number | null): Promise<UpdateNotice[]> {
+    return this.run('dismiss_update', { id, snoozeDays });
   }
 
   // Apps and keys

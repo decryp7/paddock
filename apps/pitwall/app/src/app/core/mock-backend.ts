@@ -44,7 +44,12 @@ import type {
   RequestContent,
   RequestRecord,
   ServiceInstall,
+  UpdateCheckResult,
+  UpdateCheckSettings,
+  UpdateCheckStatus,
   UpdateInfo,
+  UpdateNotice,
+  UpdateSchedule,
   ServerInfo,
   Settings,
   Throughput,
@@ -76,6 +81,7 @@ import {
   demoRequests,
   demoSearch,
   demoSettings,
+  demoUpdateNotices,
   presetMemory,
   prng,
 } from './mock-data';
@@ -102,6 +108,8 @@ export interface MockOptions {
   updateAvailable?: boolean;
   /** A model's engine crashed repeatedly and was given up on (dashboard issue with Retry). */
   crashed?: boolean;
+  /** Model update notices are already on offer (otherwise "Check now" finds them). */
+  modelUpdates?: boolean;
   /** Delay between streamed playground words (ms). */
   streamDelayMs?: number;
 }
@@ -148,6 +156,10 @@ export class MockBackend implements PitwallBackend {
   private autostart_ = false;
   private issues_: EngineIssue[] = [];
   private readonly updateAvailable: boolean;
+  private updateCheck_: UpdateCheckSettings = { enabled: false, schedule: 'weekly' };
+  private updateNotices_: UpdateNotice[] = [];
+  private updateHidden_ = new Set<string>();
+  private updateChecked_: { at: number; message: string } | null = null;
 
   constructor(options: MockOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -157,6 +169,7 @@ export class MockBackend implements PitwallBackend {
     this.rnd = prng(options.seed ?? 42);
     this.streamDelay = options.streamDelayMs ?? 0;
     this.updateAvailable = options.updateAvailable ?? false;
+    if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.crashed) {
       this.issues_ = [
         { modelId: 'gemma-3-12b-it-q4_k_m', state: 'failed', crashes: 6, restartAt: null, message: 'The engine for gemma-3-12b-it-q4_k_m crashed repeatedly and Pitwall stopped restarting it. Check that the model file is complete, then press Retry.' },
@@ -473,6 +486,8 @@ export class MockBackend implements PitwallBackend {
       const variant = demoRepo(repo, this.library).variants.find((v) => v.file === file);
       const d: Download = { id: `dl-${10 + this.nextId++}`, kind: 'model', name: file, host: 'huggingface.co', bytesDone: 0, bytesTotal: (variant?.sizeBytes ?? 2 * GiB) + (projector ? 854 * MiB : 0), speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
       this.downloads_.unshift(d);
+      // Like the engine: a notice that offered this file is done once its download starts being tracked.
+      this.updateNotices_ = this.updateNotices_.filter((n) => !(n.repo === repo && n.file === file));
       this.emit({ kind: 'download', download: clone(d) });
       return d;
     });
@@ -834,6 +849,70 @@ export class MockBackend implements PitwallBackend {
       // Like the engine: the target's status is shown whenever the target itself parses, even if the name is wrong.
       const targetParses = !problem?.includes('is not a capability');
       return { problem, status: targetParses ? this.presetStatus(this.presetFrom({ ...draft, alias: 'preview' })) : null };
+    });
+  }
+
+  // ---- Model update notices ------------------------------------------------------------------------------------
+
+  private updateStatus(): UpdateCheckStatus {
+    const week = this.updateCheck_.schedule === 'daily' ? 86_400_000 : 7 * 86_400_000;
+    return {
+      settings: { ...this.updateCheck_ },
+      lastCheckedAt: this.updateChecked_?.at ?? null,
+      lastAttemptAt: this.updateChecked_?.at ?? null,
+      lastMessage: this.updateChecked_?.message ?? null,
+      nextCheckAt: this.server.offline || !this.updateCheck_.enabled ? null : (this.updateChecked_?.at ?? this.now()) + week,
+      offline: this.server.offline,
+      running: false,
+      notices: this.visibleUpdates().length,
+      host: 'huggingface.co',
+      maxRepos: 40,
+    };
+  }
+
+  private visibleUpdates(): UpdateNotice[] {
+    return this.updateNotices_.filter((n) => !this.updateHidden_.has(n.id) && this.library.some((m) => m.id === n.modelId));
+  }
+
+  updateCheckStatus(): Promise<UpdateCheckStatus> {
+    return this.reply('updateCheckStatus', () => this.updateStatus());
+  }
+
+  updateNotices(): Promise<UpdateNotice[]> {
+    return this.reply('updateNotices', () => clone(this.visibleUpdates()));
+  }
+
+  checkUpdatesNow(): Promise<UpdateCheckResult> {
+    return this.reply('checkUpdatesNow', () => {
+      if (this.server.offline) {
+        return { outcome: 'offline', message: 'Offline mode is on, so Pitwall did not ask Hugging Face about your models. Turn offline mode off in Settings > Network to check.', reposChecked: 0, notices: 0, retryInSecs: null };
+      }
+      const now = this.now();
+      if (this.updateChecked_ && now - this.updateChecked_.at < 60_000) {
+        const wait = Math.ceil((60_000 - (now - this.updateChecked_.at)) / 1000);
+        return { outcome: 'rateLimited', message: `A check ran moments ago. Try again in ${wait} seconds.`, reposChecked: 0, notices: this.visibleUpdates().length, retryInSecs: wait };
+      }
+      if (this.updateNotices_.length === 0) this.updateNotices_ = demoUpdateNotices(now);
+      const repos = new Set(this.library.map((m) => m.repo)).size;
+      const message = `Asked Hugging Face about ${repos} repositories.`;
+      this.updateChecked_ = { at: now, message };
+      return { outcome: 'checked', message, reposChecked: repos, notices: this.visibleUpdates().length, retryInSecs: null };
+    });
+  }
+
+  setUpdateCheck(enabled: boolean, schedule: UpdateSchedule): Promise<UpdateCheckStatus> {
+    return this.reply('setUpdateCheck', () => {
+      this.updateCheck_ = { enabled, schedule };
+      return this.updateStatus();
+    });
+  }
+
+  dismissUpdate(id: string, snoozeDays: number | null): Promise<UpdateNotice[]> {
+    return this.reply('dismissUpdate', () => {
+      if (!this.updateNotices_.some((n) => n.id === id)) this.fail('notFound', `there is no update notice "${id}" (it may already have been dealt with)`);
+      if (snoozeDays !== null && (snoozeDays < 1 || snoozeDays > 90)) this.fail('badRequest', `a snooze lasts between 1 and 90 days (it was ${snoozeDays})`);
+      this.updateHidden_.add(id);
+      return clone(this.visibleUpdates());
     });
   }
 

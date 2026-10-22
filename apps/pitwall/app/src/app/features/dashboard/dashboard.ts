@@ -20,6 +20,7 @@ import { EnginesCard } from './engines-card';
 import { EventsFeed } from './events-feed';
 import { HotModels } from './hot-models';
 import { PairingCard } from './pairing-card';
+import { UpdateBanner } from '../updates/update-banner';
 import { QueueCard } from './queue-card';
 import { StatTiles } from './stat-tiles';
 
@@ -49,7 +50,7 @@ export class PerfMeter {
 /** Home: everything Pitwall is doing right now, how it got here, and the actions you need most. */
 @Component({
   selector: 'pw-dashboard',
-  imports: [MatIconModule, MatTooltipModule, RouterLink, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard],
+  imports: [MatIconModule, MatTooltipModule, RouterLink, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -103,6 +104,8 @@ export class PerfMeter {
       @for (p of live.pairings(); track p.id) {
         <pw-pairing-card [request]="p" [now]="now()" />
       }
+
+      <pw-update-banner mode="summary" />
 
       <nav class="quick" aria-label="Quick actions">
         <a class="btn" routerLink="/models"><mat-icon svgIcon="pw:models" aria-hidden="true" />Open Models</a>

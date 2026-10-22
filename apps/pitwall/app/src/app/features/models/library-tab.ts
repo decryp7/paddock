@@ -4,11 +4,12 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
 import { ago, bytes, seconds, slotsText } from '../../shared/format';
-import { CAPABILITY_LABEL, fitLook } from '../../shared/labels';
+import { CAPABILITY_LABEL, UPDATE_KIND_LABEL, fitLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
 import { ModelsStore } from './models.store';
+import { UpdatesStore } from '../updates/updates.store';
 import { SlotsPanel } from './slots-panel';
 
 /** Per-model idle choices (seconds); `null` follows Settings ▸ Memory. */
@@ -92,6 +93,12 @@ export function contextText(tokens: number | null): string {
                   <td class="model">
                     <span class="name">{{ m.name }}</span>
                     <span class="repo">{{ m.repo }} · used {{ when(m.lastUsedAt, now()) }}</span>
+                    @for (u of updates.noticesFor()(m.id); track u.id) {
+                      <span class="upd" [matTooltip]="u.summary">
+                        <mat-icon svgIcon="pw:download" aria-hidden="true" />Update available: {{ updateKind[u.kind] }}
+                        <button type="button" class="link" [disabled]="updates.isBusy()(u.id)" [attr.aria-label]="'Get ' + u.file + ' for ' + m.name" (click)="updates.get(u)">Get it</button>
+                      </span>
+                    }
                   </td>
                   <td><span class="tag mono">{{ m.quant ?? '—' }}</span></td>
                   <td class="right num">{{ params(m.paramsB) }}</td>
@@ -382,6 +389,28 @@ export function contextText(tokens: number | null): string {
         margin-right: var(--sp-1);
       }
     }
+    .upd {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 2px;
+      font-size: var(--fs-xs);
+      color: var(--accent);
+      mat-icon {
+        width: 12px;
+        height: 12px;
+      }
+      .link {
+        padding: 0;
+        font: inherit;
+        font-weight: var(--fw-medium);
+        color: var(--accent);
+        text-decoration: underline;
+        background: none;
+        border: none;
+        cursor: default;
+      }
+    }
     .del:hover:not(:disabled) {
       color: var(--bad);
     }
@@ -391,6 +420,8 @@ export class LibraryTab {
   readonly now = input.required<number>();
   readonly discover = output<void>();
   protected readonly store = inject(ModelsStore);
+  protected readonly updates = inject(UpdatesStore);
+  protected readonly updateKind = UPDATE_KIND_LABEL;
   private readonly confirm = inject(Confirm);
   protected readonly size = bytes;
   protected readonly when = ago;
@@ -400,6 +431,10 @@ export class LibraryTab {
   protected readonly idleOptions = idleOptions;
   protected readonly capability = CAPABILITY_LABEL;
   protected readonly fit = (m: LocalModel) => fitLook(m.fit.verdict);
+
+  constructor() {
+    void this.updates.ensureLoaded();
+  }
 
   protected readonly summary = computed(() => {
     const lib = this.store.library();

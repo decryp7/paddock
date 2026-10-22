@@ -458,7 +458,8 @@ export type EventKind =
   | 'servingChanged'
   | 'presetChanged'
   | 'requestFailed'
-  | 'limitWarning';
+  | 'limitWarning'
+  | 'modelUpdate';
 
 export interface PitwallEvent {
   id: number;
@@ -870,4 +871,62 @@ export interface PacksInfo {
   problems: PackNote[];
   warnings: PackNote[];
   recommendations: Recommendation[];
+}
+
+// Model update notices (ADR 0017): newer revisions and better quantisations of the models you downloaded.
+
+export type UpdateSchedule = 'weekly' | 'daily';
+
+export interface UpdateCheckSettings {
+  /** The scheduled check. Off until you turn it on. */
+  enabled: boolean;
+  schedule: UpdateSchedule;
+}
+
+export type UpdateKind = 'newerRevision' | 'betterQuant' | 'imatrix';
+
+/** One offered update. Pitwall only offers; downloading it is the user's decision. */
+export interface UpdateNotice {
+  /** `<model id>#<kind>`. */
+  id: string;
+  modelId: string;
+  repo: string;
+  kind: UpdateKind;
+  /** The file to download. */
+  file: string;
+  quant: string | null;
+  sizeBytes: number;
+  installedFile: string;
+  installedQuant: string | null;
+  /** One sentence for the user. */
+  summary: string;
+  foundAt: number;
+  targetSha256: string | null;
+}
+
+export type UpdateCheckOutcome = 'checked' | 'offline' | 'rateLimited' | 'busy' | 'nothingToCheck' | 'failed';
+
+export interface UpdateCheckResult {
+  outcome: UpdateCheckOutcome;
+  message: string;
+  reposChecked: number;
+  /** Notices shown now (not dismissed). */
+  notices: number;
+  /** Seconds until a new check is allowed. */
+  retryInSecs: number | null;
+}
+
+export interface UpdateCheckStatus {
+  settings: UpdateCheckSettings;
+  lastCheckedAt: number | null;
+  lastAttemptAt: number | null;
+  lastMessage: string | null;
+  /** Null when the schedule is off or offline mode is on. */
+  nextCheckAt: number | null;
+  offline: boolean;
+  running: boolean;
+  notices: number;
+  /** The only host a check talks to. */
+  host: string;
+  maxRepos: number;
 }

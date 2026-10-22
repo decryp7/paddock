@@ -4,6 +4,7 @@ import { LiveStore } from '../../core/live.store';
 import { downloadActive } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
 import { Panel } from '../../shared/ui/panel';
+import { UpdateBanner } from '../updates/update-banner';
 import { DiscoverTab } from './discover-tab';
 import { DownloadsList } from './downloads-list';
 import { LibraryTab } from './library-tab';
@@ -29,7 +30,7 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
 /** Models: the local library, Hugging Face discovery with fit verdicts, and downloads. */
 @Component({
   selector: 'pw-models-page',
-  imports: [MatIconModule, Panel, LibraryTab, DiscoverTab, PresetsTab, DownloadsList],
+  imports: [MatIconModule, Panel, LibraryTab, DiscoverTab, PresetsTab, DownloadsList, UpdateBanner],
   providers: [ModelsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -43,6 +44,8 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
           <button type="button" class="btn" (click)="store.load()" [disabled]="store.loading()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" />Refresh</button>
         </div>
       </header>
+
+      <pw-update-banner class="updates" />
 
       <div class="tabs" role="tablist" aria-label="Models">
         @for (t of tabs; track t.id) {

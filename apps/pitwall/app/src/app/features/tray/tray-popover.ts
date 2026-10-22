@@ -6,6 +6,7 @@ import { bytes, percent, rate } from '../../shared/format';
 import { loadTone, pressureLook } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
 import { HotModels } from '../dashboard/hot-models';
+import { UpdatesStore } from '../updates/updates.store';
 
 /** The tray / menu-bar popover (360×520, frameless): memory, hot models with countdowns, throughput and the key actions. */
 @Component({
@@ -33,6 +34,13 @@ import { HotModels } from '../dashboard/hot-models';
         <button type="button" class="pairing" (click)="open('/')">
           <mat-icon svgIcon="pw:apps" aria-hidden="true" />
           <span>{{ n === 1 ? 'An app wants to pair' : n + ' apps want to pair' }}. <b>Review</b></span>
+        </button>
+      }
+
+      @if (updates.count(); as u) {
+        <button type="button" class="pairing" (click)="open('/models')">
+          <mat-icon svgIcon="pw:download" aria-hidden="true" />
+          <span>{{ u === 1 ? 'A model update is available' : u + ' model updates are available' }}. <b>Review</b></span>
         </button>
       }
 
@@ -240,6 +248,7 @@ import { HotModels } from '../dashboard/hot-models';
 })
 export class TrayPopover {
   protected readonly live = inject(LiveStore);
+  protected readonly updates = inject(UpdatesStore);
   private readonly windows = inject(WINDOW_CONTROL);
   protected readonly now = injectNow();
   protected readonly size = bytes;
@@ -259,6 +268,10 @@ export class TrayPopover {
     return { used: g.vramUsed, total: g.vramTotal, pct: percent(g.vramUsed, g.vramTotal), util: g.utilisation };
   });
   protected readonly tps = computed(() => (this.live.paused() ? '0.0' : rate(this.live.throughput()?.genTps ?? 0)));
+
+  constructor() {
+    void this.updates.ensureLoaded();
+  }
 
   protected open(route: string): void {
     void this.windows.openMain(route);

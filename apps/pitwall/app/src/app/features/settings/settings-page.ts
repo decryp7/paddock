@@ -10,6 +10,9 @@ import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { Panel } from '../../shared/ui/panel';
 import { consentDetail } from '../service/service-consent';
 import { ServiceStore } from '../service/service.store';
+import { checkSummary } from '../updates/update-text';
+import { UpdatesStore } from '../updates/updates.store';
+import { injectNow } from '../../shared/now';
 import { SettingsStore } from './settings.store';
 
 const GB = 1024 ** 3;
@@ -21,6 +24,7 @@ const SECTIONS = [
   { id: 'server', label: 'Server', icon: 'server' },
   { id: 'memory', label: 'Memory', icon: 'memory' },
   { id: 'network', label: 'Network', icon: 'globe' },
+  { id: 'model-updates', label: 'Model updates', icon: 'download' },
   { id: 'privacy', label: 'Privacy', icon: 'lock' },
   { id: 'service', label: 'Service', icon: 'server' },
   { id: 'updates', label: 'Updates', icon: 'download' },
@@ -47,6 +51,12 @@ export class SettingsPage implements OnInit {
   protected readonly store = inject(SettingsStore);
   protected readonly live = inject(LiveStore);
   protected readonly service = inject(ServiceStore);
+  protected readonly updates = inject(UpdatesStore);
+  private readonly now = injectNow();
+  protected readonly updateSummary = computed(() => {
+    const s = this.updates.status();
+    return s ? checkSummary(s, this.now()) : '';
+  });
   private readonly theme = inject(ThemeService);
   private readonly toasts = inject(Toasts);
   private readonly doc = inject(DOCUMENT);
@@ -86,6 +96,7 @@ export class SettingsPage implements OnInit {
 
   ngOnInit(): void {
     void this.service.refresh();
+    void this.updates.load();
     void this.store.load().then(() => setTimeout(() => this.observe()));
   }
 

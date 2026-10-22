@@ -36,7 +36,7 @@ describe('SettingsPage', () => {
   it('renders every section from the loaded settings, with no save bar', async () => {
     const { el } = await setup();
     expect(el.querySelector('h1')?.textContent).toBe('Settings');
-    for (const id of ['general', 'server', 'memory', 'network', 'privacy', 'service', 'updates']) expect(el.querySelector('#set-' + id)).not.toBeNull();
+    for (const id of ['general', 'server', 'memory', 'network', 'model-updates', 'privacy', 'service', 'updates']) expect(el.querySelector('#set-' + id)).not.toBeNull();
     expect(input(el, 'srv-port').value).toBe('11500');
     expect(input(el, 'srv-max').value).toBe('32');
     expect(input(el, 'mem-idle').value).toBe('10');
@@ -255,5 +255,60 @@ describe('SettingsPage', () => {
     expect(scroll).toHaveBeenCalled();
     expect(button(el, 'Privacy').getAttribute('aria-current')).toBe('true');
     expect(button(el, 'General').getAttribute('aria-current')).toBeNull();
+  });
+
+  describe('model updates', () => {
+    const panel = (el: HTMLElement) => el.querySelector('#set-model-updates')!;
+
+    it('is off by default and says plainly what is sent to Hugging Face', async () => {
+      const { el } = await setup();
+      const p = panel(el);
+      expect(switchOf(el, 'lbl-model-updates').getAttribute('aria-checked')).toBe('false');
+      expect(p.querySelector<HTMLSelectElement>('#model-updates-schedule')!.disabled).toBe(true);
+      expect(p.textContent).toContain('Off until you turn it on');
+      expect(p.textContent).toContain('never downloads anything by itself');
+      expect(p.textContent).toContain('only the repository ids');
+      expect(p.textContent).toContain('Never checked.');
+      expect(p.textContent).toContain('Scheduled checks are off; Check now still works.');
+    });
+
+    it('turns the schedule on, lets you pick daily, and shows the next check', async () => {
+      const { el, fixture, backend } = await setup();
+      const spy = vi.spyOn(backend, 'setUpdateCheck');
+      switchOf(el, 'lbl-model-updates').click();
+      await settle(fixture);
+      expect(spy).toHaveBeenLastCalledWith(true, 'weekly');
+      const select = panel(el).querySelector<HTMLSelectElement>('#model-updates-schedule')!;
+      expect(select.disabled).toBe(false);
+      select.value = 'daily';
+      select.dispatchEvent(new Event('change'));
+      await settle(fixture);
+      expect(spy).toHaveBeenLastCalledWith(true, 'daily');
+      expect(panel(el).textContent).toContain('The next check runs');
+    });
+
+    it('checks now and shows what it found', async () => {
+      const { el, fixture } = await setup();
+      button(panel(el) as HTMLElement, 'Check now').click();
+      await settle(fixture);
+      expect(panel(el).textContent).toContain('Asked Hugging Face about');
+      expect(panel(el).textContent).toContain('Last checked');
+      expect(TestBed.inject(Toasts).toasts().at(-1)?.message).toBe('Checked: 2 updates available.');
+    });
+
+    it('cannot check while offline mode is on, and says so', async () => {
+      const mock = new MockBackend();
+      const s = await mock.settings();
+      await mock.saveSettings({ ...s, network: { ...s.network, offline: true } });
+      const { el } = await setup(mock);
+      expect(button(panel(el) as HTMLElement, 'Check now').disabled).toBe(true);
+      expect(panel(el).textContent).toContain('Offline mode is on, so no check can run.');
+    });
+
+    it('shows an error with Retry when the state cannot be read', async () => {
+      const { el } = await setup(new MockBackend({ failing: ['updateCheckStatus'] }));
+      expect(panel(el).querySelector('#model-updates-schedule')).toBeNull();
+      expect(panel(el).textContent).toContain('Retry');
+    });
   });
 });

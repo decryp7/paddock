@@ -256,4 +256,25 @@ describe('ModelsPage', () => {
     await settle();
     expect(document.body.textContent).toContain('Loaded with 2 slots; 8 slots apply the next time it loads');
   });
+
+  it('shows a banner and a note on the row of each model with an update on offer, and Get it asks first', async () => {
+    const backend = new MockBackend({ modelUpdates: true });
+    const spy = vi.spyOn(backend, 'downloadModel');
+    const { el, settle } = await render(backend, false);
+    expect(el.querySelector('pw-update-banner .banner')!.textContent).toContain('2 updates available');
+    const notes = Array.from(el.querySelectorAll('.upd')).map((n) => n.textContent!.replace(/\s+/g, ' ').trim());
+    expect(notes).toEqual(['Update available: newer revision Get it', 'Update available: better quantisation Get it']);
+    const row = (name: string) => Array.from(el.querySelectorAll('tbody tr')).find((r) => r.textContent!.includes(name))!;
+    expect(row('Qwen3 8B Instruct').querySelector('.upd')).not.toBeNull();
+    expect(row('Gemma 3 12B').querySelector('.upd')).toBeNull();
+    (row('Qwen3 8B Instruct').querySelector('.upd button') as HTMLButtonElement).click();
+    await settle();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('shows no update notes when nothing is on offer', async () => {
+    const { el } = await render();
+    expect(el.querySelector('.upd')).toBeNull();
+    expect(el.querySelector('pw-update-banner .banner')).toBeNull();
+  });
 });

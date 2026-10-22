@@ -202,6 +202,16 @@ describe('Dashboard', () => {
     expect(cards[0]!.textContent).toContain('Obsidian Copilot');
   });
 
+  it('points at model updates in the attention area, only when there are some', async () => {
+    const none = await mount();
+    expect(none.el.querySelector('pw-update-banner .banner')).toBeNull();
+    TestBed.resetTestingModule();
+    const { el } = await mount({ backend: new MockBackend({ modelUpdates: true }) });
+    const line = el.querySelector('pw-update-banner .summary')!;
+    expect(line.textContent).toContain('2 model updates are available');
+    expect(line.querySelector('a')!.getAttribute('href')).toBe('/models');
+  });
+
   it('switches the history range and refetches', async () => {
     const { fixture, el, backend, btn } = await mount();
     const spy = vi.spyOn(backend, 'history');

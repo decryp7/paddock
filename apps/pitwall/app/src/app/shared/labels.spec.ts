@@ -17,6 +17,7 @@ import {
   severityTone,
   statusTone,
   loadTone,
+  UPDATE_KIND_LABEL,
 } from './labels';
 import { ICONS } from './icons';
 
@@ -86,6 +87,7 @@ describe('limit labels', () => {
     expect(limitStateLook('warning')).toEqual({ label: 'Close to the limit', tone: 'warn' });
     expect(limitStateLook('exceeded')).toEqual({ label: 'Limit reached', tone: 'bad' });
     expect(eventIcon('limitWarning')).toBe('alert');
+    expect(eventIcon('modelUpdate')).toBe('download');
   });
 });
 
@@ -104,5 +106,11 @@ describe('presetStatusLook', () => {
     expect(capabilityLook({ ...base, status: 'needsBuild', minBuild: 5600 })).toEqual({ label: 'Needs b5600', tone: 'warn' });
     expect(capabilityLook({ ...base, status: 'needsBuild', minBuild: null }).label).toBe('Needs a newer build');
     expect(capabilityLook({ ...base, status: 'notSupported', minBuild: null })).toEqual({ label: 'Not supported', tone: 'bad' });
+  });
+});
+
+describe('UPDATE_KIND_LABEL', () => {
+  it('words every kind of update', () => {
+    expect(UPDATE_KIND_LABEL).toEqual({ newerRevision: 'newer revision', betterQuant: 'better quantisation', imatrix: 'imatrix build' });
   });
 });

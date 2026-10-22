@@ -520,3 +520,50 @@ describe('MockBackend usage', () => {
     });
   });
 });
+
+describe('MockBackend model updates', () => {
+  it('starts with the schedule off and nothing on offer; Check now finds notices and then rate limits', async () => {
+    const mock = new MockBackend();
+    expect((await mock.updateCheckStatus()).settings).toEqual({ enabled: false, schedule: 'weekly' });
+    expect(await mock.updateNotices()).toEqual([]);
+    const first = await mock.checkUpdatesNow();
+    expect(first).toMatchObject({ outcome: 'checked', notices: 2, retryInSecs: null });
+    expect((await mock.updateNotices()).map((n) => n.kind)).toEqual(['newerRevision', 'betterQuant']);
+    const again = await mock.checkUpdatesNow();
+    expect(again).toMatchObject({ outcome: 'rateLimited', retryInSecs: 60 });
+    expect((await mock.updateCheckStatus()).lastCheckedAt).not.toBeNull();
+  });
+
+  it('turns the schedule on, reports the next check, and does nothing offline', async () => {
+    const mock = new MockBackend();
+    const on = await mock.setUpdateCheck(true, 'daily');
+    expect(on.settings).toEqual({ enabled: true, schedule: 'daily' });
+    expect(on.nextCheckAt).not.toBeNull();
+    const s = await mock.settings();
+    await mock.saveSettings({ ...s, network: { ...s.network, offline: true } });
+    const off = await mock.updateCheckStatus();
+    expect(off).toMatchObject({ offline: true, nextCheckAt: null });
+    expect(await mock.checkUpdatesNow()).toMatchObject({ outcome: 'offline', notices: 0 });
+    expect(await mock.updateNotices()).toEqual([]);
+  });
+
+  it('dismisses notices, refusing an unknown one or a bad snooze, and forgets one once its file is downloaded', async () => {
+    const mock = new MockBackend({ modelUpdates: true });
+    await expect(mock.dismissUpdate('nope#betterQuant', null)).rejects.toMatchObject({ code: 'notFound' });
+    await expect(mock.dismissUpdate('qwen3-8b-instruct-q4_k_m#newerRevision', 0)).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(mock.dismissUpdate('qwen3-8b-instruct-q4_k_m#newerRevision', 91)).rejects.toMatchObject({ code: 'badRequest' });
+    expect((await mock.dismissUpdate('qwen3-8b-instruct-q4_k_m#newerRevision', 7)).map((n) => n.id)).toEqual(['llama-3.2-3b-instruct-q5_k_m#betterQuant']);
+    await mock.downloadModel('bartowski/Llama-3.2-3B-Instruct-GGUF', 'Llama-3.2-3B-Instruct-Q6_K.gguf', null);
+    expect(await mock.updateNotices()).toEqual([]);
+    expect((await mock.updateCheckStatus()).notices).toBe(0);
+  });
+
+  it('hides a notice whose model was deleted', async () => {
+    const mock = new MockBackend({ modelUpdates: true });
+    await mock.deleteModel('qwen2.5-coder-1.5b-q8_0');
+    expect(await mock.updateNotices()).toHaveLength(2);
+    await mock.unloadModel('llama-3.2-3b-instruct-q5_k_m');
+    await mock.deleteModel('llama-3.2-3b-instruct-q5_k_m');
+    expect((await mock.updateNotices()).map((n) => n.modelId)).toEqual(['qwen3-8b-instruct-q4_k_m']);
+  });
+});

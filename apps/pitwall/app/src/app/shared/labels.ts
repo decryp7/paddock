@@ -17,6 +17,7 @@ import type {
   SelfTest,
   BuildCapability,
   Severity,
+  UpdateKind,
 } from '../core/api.types';
 
 /** The visual tone of a status pill (always shown with its text, never colour alone). */
@@ -212,6 +213,7 @@ export function eventIcon(kind: EventKind): string {
     presetChanged: 'sliders',
     requestFailed: 'alert',
     limitWarning: 'alert',
+    modelUpdate: 'download',
   };
   return map[kind];
 }
@@ -236,3 +238,10 @@ export function statusTone(status: number): Tone {
   if (status >= 400) return 'warn';
   return 'ok';
 }
+
+/** What an update notice offers, in words (shown after "Update available:"). */
+export const UPDATE_KIND_LABEL: Record<UpdateKind, string> = {
+  newerRevision: 'newer revision',
+  betterQuant: 'better quantisation',
+  imatrix: 'imatrix build',
+};

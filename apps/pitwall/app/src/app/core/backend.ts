@@ -37,7 +37,11 @@ import type {
   RequestRecord,
   ServiceInstall,
   Settings,
+  UpdateCheckResult,
+  UpdateCheckStatus,
   UpdateInfo,
+  UpdateNotice,
+  UpdateSchedule,
 } from './api.types';
 
 /** Stops a subscription or a running stream. */
@@ -120,6 +124,16 @@ export interface PitwallBackend {
   deletePreset(alias: string): Promise<void>;
   /** The engine's live check of a draft; `editing` is the alias being edited (not a duplicate of itself). */
   resolvePreset(preset: PresetDraft, editing: string | null): Promise<PresetPreview>;
+
+  // Model update notices (check only; downloading is the user's decision)
+  updateCheckStatus(): Promise<UpdateCheckStatus>;
+  updateNotices(): Promise<UpdateNotice[]>;
+  /** Asks Hugging Face now about the repositories you downloaded from; refused in offline mode. */
+  checkUpdatesNow(): Promise<UpdateCheckResult>;
+  /** Turns the scheduled check on or off (off until you turn it on) and sets how often it runs. */
+  setUpdateCheck(enabled: boolean, schedule: UpdateSchedule): Promise<UpdateCheckStatus>;
+  /** Hides a notice until the offer changes, or for `snoozeDays` days. Returns the notices still shown. */
+  dismissUpdate(id: string, snoozeDays: number | null): Promise<UpdateNotice[]>;
 
   // Request inspector
   requests(limit: number): Promise<RequestRecord[]>;

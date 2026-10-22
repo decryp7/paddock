@@ -39,6 +39,7 @@ import type {
   UsageRange,
   UsageSeries,
   SlotFit,
+  UpdateNotice,
 } from './api.types';
 
 export const GiB = 1024 ** 3;
@@ -210,6 +211,40 @@ export function demoLocalModels(now: number): LocalModel[] {
     m({ id: 'gemma-3-12b-it-q4_k_m', repo: 'unsloth/gemma-3-12b-it-GGUF', file: 'gemma-3-12b-it-Q4_K_M.gguf', name: 'Gemma 3 12B', quant: 'Q4_K_M', sizeBytes: 6.79 * GiB, paramsB: 12.2, contextMax: 131072, architecture: 'gemma3', capabilities: ['chat', 'vision', 'json'], projector: 'mmproj-F16.gguf', lastUsedAt: now - 2 * DAY, idleSecs: 120 }),
     m({ id: 'bge-reranker-v2-m3-q8_0', repo: 'gpustack/bge-reranker-v2-m3-GGUF', file: 'bge-reranker-v2-m3-Q8_0.gguf', name: 'BGE reranker v2 m3', quant: 'Q8_0', sizeBytes: 606 * MiB, paramsB: 0.57, contextMax: 8192, architecture: 'xlm-roberta', capabilities: ['rerank'], lastUsedAt: now - 5 * HOUR }),
     m({ id: 'qwen2.5-coder-1.5b-q8_0', repo: 'Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF', file: 'qwen2.5-coder-1.5b-instruct-q8_0.gguf', name: 'Qwen2.5 Coder 1.5B', quant: 'Q8_0', sizeBytes: 1.76 * GiB, paramsB: 1.5, contextMax: 32768, architecture: 'qwen2', capabilities: ['chat'], lastUsedAt: now - 41 * DAY, addedAt: now - 80 * DAY }),
+  ];
+}
+
+/** Update notices the mock "finds" (invented): a changed file and a better quantisation that fits. */
+export function demoUpdateNotices(now: number): UpdateNotice[] {
+  return [
+    {
+      id: 'qwen3-8b-instruct-q4_k_m#newerRevision',
+      modelId: 'qwen3-8b-instruct-q4_k_m',
+      repo: 'Qwen/Qwen3-8B-Instruct-GGUF',
+      kind: 'newerRevision',
+      file: 'Qwen3-8B-Instruct-Q4_K_M.gguf',
+      quant: 'Q4_K_M',
+      sizeBytes: 5.03 * GiB,
+      installedFile: 'Qwen3-8B-Instruct-Q4_K_M.gguf',
+      installedQuant: 'Q4_K_M',
+      summary: 'Qwen3-8B-Instruct-Q4_K_M.gguf changed on Hugging Face since you downloaded it (repository revision 3f9a1c2, now b72e04d).',
+      foundAt: now,
+      targetSha256: 'b'.repeat(64),
+    },
+    {
+      id: 'llama-3.2-3b-instruct-q5_k_m#betterQuant',
+      modelId: 'llama-3.2-3b-instruct-q5_k_m',
+      repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF',
+      kind: 'betterQuant',
+      file: 'Llama-3.2-3B-Instruct-Q6_K.gguf',
+      quant: 'Q6_K',
+      sizeBytes: 2.64 * GiB,
+      installedFile: 'Llama-3.2-3B-Instruct-Q5_K_M.gguf',
+      installedQuant: 'Q5_K_M',
+      summary: 'Q6_K (2.6 GB) is available and fits this machine; you have Q5_K_M.',
+      foundAt: now,
+      targetSha256: null,
+    },
   ];
 }
 

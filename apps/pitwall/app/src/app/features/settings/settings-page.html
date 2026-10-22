@@ -179,6 +179,37 @@
           }
         </pw-panel>
 
+        <!-- Model updates -->
+        <pw-panel id="set-model-updates" heading="Model updates" icon="download" sub="Newer revisions and better quantisations of the models you downloaded" [loading]="updates.loading()" [error]="updates.status() ? null : updates.error()" [ready]="!!updates.status()" [skeletonLines]="3" (retry)="updates.load()">
+          @if (updates.status(); as u) {
+            <div class="row">
+              <div class="lbl"><span class="name" id="lbl-model-updates">Check for model updates</span><p class="hint">Off until you turn it on. Pitwall asks {{ u.host }} on a schedule and tells you what it finds. It never downloads anything by itself.</p></div>
+              <mat-slide-toggle hideIcon aria-labelledby="lbl-model-updates" [checked]="u.settings.enabled" [disabled]="updates.saving()" (change)="updates.setCheck($event.checked, u.settings.schedule)" />
+            </div>
+            <div class="row">
+              <div class="lbl"><label class="name" for="model-updates-schedule">How often</label><p class="hint">Once a day or once a week. The first check runs as soon as you turn it on.</p></div>
+              <select id="model-updates-schedule" class="select" [disabled]="!u.settings.enabled || updates.saving()" (change)="updates.setCheck(true, $any($event.target).value)">
+                <option value="weekly" [selected]="u.settings.schedule === 'weekly'">Every week</option>
+                <option value="daily" [selected]="u.settings.schedule === 'daily'">Every day</option>
+              </select>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="name">Status</span><p class="hint" aria-live="polite">{{ updateSummary() }}</p></div>
+              <button type="button" class="btn" [disabled]="updates.checking() || u.offline" (click)="updates.checkNow()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" />{{ updates.checking() ? 'Checking…' : 'Check now' }}</button>
+            </div>
+            @if (updates.lastResult(); as r) {
+              <p class="hint pad" role="status">{{ r.message }}</p>
+            }
+            <div class="note info" role="note">
+              <mat-icon svgIcon="pw:shield" aria-hidden="true" />
+              <span>
+                A check sends {{ u.host }} only the repository ids (like <code>owner/name</code>) of models you already downloaded, in the address of an ordinary file-list request:
+                no prompts, file contents, usage or identifiers, and at most {{ u.maxRepos }} repositories per check. Offline mode stops it completely.
+              </span>
+            </div>
+          }
+        </pw-panel>
+
         <!-- Privacy -->
         <pw-panel id="set-privacy" heading="Privacy" icon="lock" sub="Nothing leaves this computer">
           <div class="row">

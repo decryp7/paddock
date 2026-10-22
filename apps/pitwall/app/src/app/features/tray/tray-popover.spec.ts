@@ -125,4 +125,14 @@ describe('TrayPopover', () => {
     expect(openMain).toHaveBeenNthCalledWith(1, '/');
     expect(openMain).toHaveBeenNthCalledWith(2, '/');
   });
+
+  it('offers a way to review model updates, only when there are some', async () => {
+    const none = await mount();
+    expect(none.el.textContent).not.toContain('model update');
+    TestBed.resetTestingModule();
+    const { el, openMain, btn } = await mount({ backend: new MockBackend({ modelUpdates: true }) });
+    expect(Array.from(el.querySelectorAll('.pairing')).map(text)).toContain('2modelupdatesareavailable.Review');
+    btn('model updates are available').click();
+    expect(openMain).toHaveBeenCalledWith('/models');
+  });
 });
