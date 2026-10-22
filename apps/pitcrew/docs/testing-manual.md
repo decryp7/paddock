@@ -101,3 +101,20 @@ and `scripts/linux-verify.sh` cover the read-only checks of an installed Pitcrew
 | 51 | Start a new job before a leftover is due. | Nothing is stopped while the job runs. |
 | 52 | Add a rule `sleep` = never; repeat 49. | The process is never stopped automatically (the countdown says so). |
 
+## Holds, deadlines, insights, storage, channels, Debrief
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 53 | Set the disk guard's drain threshold above the disk's free space (Settings ▸ Defaults). | Within a minute each runner shows "Paused by Pitcrew: the disk is nearly full" (after its job); Activity has a *Held* entry. |
+| 54 | Lower the threshold below the free space. | Within a minute the runners resume; *Released* in Activity; a pause you made earlier is untouched. |
+| 55 | Resume a held runner by hand. | It runs and is not paused again until the reason has gone and returned. |
+| 56 | Pause windows: add a window around now. | Runners drain; the card says how long is left; outside the window they resume. |
+| 57 | Pause windows ▸ only when idle: start a heavy local program. | After the busy period the runners drain; a few quiet minutes after it ends they resume. |
+| 58 | Update policy: set the reminder to 1 day while a newer release exists. | "Update due ..." on the card; a notification at *soon* and *overdue*. |
+| 59 | Make updates fail three times (no disk, blocked host). | Loop warning with the cause; automatic updates to that version stop; *Update now* still works. |
+| 60 | Insights with a read token. | Slowest, flaky, queue time, success per repository, advice; refreshing looks up more outcomes. |
+| 61 | Storage ▸ Container engine: select images and Preview, change the selection. | Preview lists items; changing the selection disables Prune until the next preview. |
+| 62 | Prune during a job. | Refused with "a job is running"; nothing removed. |
+| 63 | Storage ▸ Actions cache: trim to a small size with a preview. | The oldest entries are listed, then deleted on confirm; the report shrinks. |
+| 64 | Notification channels: add a webhook, Send test message, then trigger a notification. | The test arrives; the channel receives only the events chosen; the secret is not shown again. |
+| 65 | Activity ▸ Debrief on a job; repeat with Debrief not installed. | Debrief opens the extract; without it a message names the saved file. |

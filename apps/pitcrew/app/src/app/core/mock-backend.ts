@@ -570,7 +570,7 @@ export class MockBackend implements PitcrewBackend {
   async cacheReport(runner: string): Promise<CacheInfo> {
     await this.delay();
     const r = this.find(runner);
-    const info = demoCache(this.now(), `${r.dir}\cache`);
+    const info = demoCache(this.now(), `${r.dir}${r.dir.includes('\\') ? '\\' : '/'}cache`);
     const trimmed = this.cacheTrimmedBytes.get(runner) ?? 0;
     return { ...info, bytes: Math.max(0, info.bytes - trimmed), overLimit: info.bytes - trimmed > (info.sizeLimitMb ?? Infinity) * 1024 * 1024 };
   }

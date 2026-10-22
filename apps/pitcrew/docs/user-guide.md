@@ -85,6 +85,17 @@ it. The card shows **Idle** once the server accepts it.
 - **Quitting the app** never stops the runners. To stop supervising, stop the runners or remove the service
   (Settings ▸ Service ▸ Uninstall); the runner folders stay.
 
+## Keeping disks safe, and quiet hours
+
+- **Settings ▸ Defaults ▸ Disk guard:** below the drain threshold Pitcrew pauses runners after their current job and
+  resumes them by itself when space is back. Resume a runner yourself to override it until the disk has recovered.
+- **Settings ▸ Defaults ▸ Pause windows:** no jobs during a schedule, or only while the machine is otherwise idle.
+- **Storage** (sidebar): the container engine's use, a preview-then-confirm prune, and each runner's Actions cache.
+- **Insights** (sidebar): slow and flaky jobs, queue time and success rates per repository, with advice. Needs a Gitea read
+  token for outcomes and waits.
+- **Notification channels:** Settings ▸ Notification channels (webhook, ntfy, email).
+- **Open in Debrief:** the Debrief button next to a job in Activity or on the Logs page.
+
 ## Changing a runner's configuration
 
 Runner page ▸ **Configuration**. Change a setting in the form (or switch to **Advanced** to edit the YAML), then **Review

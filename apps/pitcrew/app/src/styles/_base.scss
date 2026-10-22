@@ -21,6 +21,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* Numbers line up everywhere; monospace is only for paths, hashes and small aligned columns. */
+  font-variant-numeric: tabular-nums;
 }
 
 h1,

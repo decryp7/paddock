@@ -40,7 +40,7 @@ const VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
             <dt>Target</dt>
             <dd class="num">
               @if (r.updateTarget) {
-                <span class="badge accent">{{ r.updateTarget }}</span>
+                <span class="badge update">{{ r.updateTarget }}</span>
               } @else {
                 <span class="faint">up to date</span>
               }

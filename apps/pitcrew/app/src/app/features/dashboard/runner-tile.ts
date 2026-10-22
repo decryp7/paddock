@@ -1,11 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { MatTooltip } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import type { FinishedJob, RunDetails, RunnerSnapshot } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
-import { formatBytes, formatDuration, formatElapsed, formatPermille, formatRelative, share } from '../../shared/format';
-import { pendingLabel, phaseLabel, sessionLabel } from '../../shared/labels';
+import { formatBytes, formatDuration, formatElapsed, formatPermille, formatRelative, plural, share } from '../../shared/format';
+import { holdWords, pendingLabel, phaseLabel, sessionLabel } from '../../shared/labels';
 import { RunnerActions } from '../../shared/runner-actions';
 import { StatusBadge } from '../../shared/ui/status-badge';
 import { StatusStore } from '../../state/status.store';
@@ -13,7 +12,7 @@ import { StatusStore } from '../../state/status.store';
 /** One runner on the dashboard: status, current job, version, uptime, disk, and quick actions. */
 @Component({
   selector: 'pc-runner-tile',
-  imports: [MatIcon, MatTooltip, RouterLink, StatusBadge, RunnerActions],
+  imports: [MatIcon, RouterLink, StatusBadge, RunnerActions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './runner-tile.html',
   styleUrl: './runner-tile.scss',
@@ -66,6 +65,24 @@ export class RunnerTile {
   protected readonly pending = computed(() => {
     const p = this.runner().pending;
     return p ? pendingLabel(p) : null;
+  });
+  /** Why Pitcrew itself holds the runner (low disk, a pause window, a busy machine). */
+  protected readonly hold = computed(() => {
+    const h = this.runner().hold;
+    const first = h?.reasons[0];
+    if (!h || !first) return null;
+    const why = holdWords(first);
+    const left = h.minutesLeft !== null && first === 'schedule' ? ` · ${formatDuration(h.minutesLeft * 60_000)} left` : '';
+    const text = h.paused ? `Paused by Pitcrew: ${why}${left}` : `Pausing after this job: ${why}${left}`;
+    return { text, detail: 'Pitcrew resumes the runner by itself when the reason is gone. Resume it yourself to override.' };
+  });
+  /** The countdown to the owner's update deadline (ADR 0014). */
+  protected readonly deadline = computed(() => {
+    const d = this.runner().deadline;
+    if (!d || !this.runner().updateTarget) return null;
+    const days = Math.abs(d.daysLeft);
+    const text = d.state === 'overdue' ? `Update overdue by ${plural(days, 'day')}` : d.daysLeft === 0 ? 'Update due today' : `Update due in ${plural(days, 'day')}`;
+    return { text, warn: d.state !== 'ok' };
   });
   protected readonly paused = computed(() => this.runner().status === 'paused' || this.runner().status === 'draining');
 

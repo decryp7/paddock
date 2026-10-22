@@ -39,7 +39,7 @@ describe('RunnerActions', () => {
 
   it('greys out what does not apply to a running runner', async () => {
     const m = await open('ui-tests');
-    expect(m.items().map((b) => text(b))).toEqual(['Start', 'Stop', 'Restart', 'Drain and pause', 'Processes…', 'Configuration…', 'Open logs']);
+    expect(m.items().map((b) => text(b))).toEqual(['Start', 'Stop', 'Restart', 'Drain and pause', 'Processes…', 'Configuration…', 'Clean now', 'Open logs']);
     expect(m.item('Start')!.getAttribute('aria-disabled')).toBe('true');
     expect(m.item('Stop')!.getAttribute('aria-disabled')).not.toBe('true');
   });

@@ -315,6 +315,12 @@ export function notificationIcon(k: NotificationKind): string {
       return 'cloud-off';
     case 'notRegistered':
       return 'link-off';
+    case 'held':
+      return 'pause-circle';
+    case 'released':
+      return 'play-circle';
+    case 'updateDeadline':
+      return 'calendar';
     default:
       return 'alert';
   }

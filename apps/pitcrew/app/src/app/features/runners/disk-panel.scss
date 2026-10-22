@@ -58,6 +58,7 @@ pc-load-state {
   font-family: var(--font-display);
   font-size: var(--text-3xl);
   font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
   line-height: 1.1;
 }

@@ -617,3 +617,80 @@ describe('MockBackend processes', () => {
     expect((await mock.runnerProcesses('build-win')).cleanup).toBe(false);
   });
 });
+
+describe('MockBackend insights, storage, Debrief and channels', () => {
+  let mock: MockBackend;
+  beforeEach(() => {
+    mock = make();
+  });
+  afterEach(() => mock.dispose());
+
+  it('answers insights for a range, clamped to 1-90 days', async () => {
+    const r = await mock.insights(30);
+    expect(r.insights.rangeDays).toBe(30);
+    expect(r.insights.repos[0]!.days).toHaveLength(30);
+    expect((await mock.insights(500)).insights.rangeDays).toBe(90);
+    expect((await mock.insights(0)).insights.rangeDays).toBe(1);
+  });
+
+  it('previews and prunes the container engine, and refuses an empty choice or a running job', async () => {
+    expect((await mock.engineReport()).engine).toBe('docker');
+    const p = await mock.previewEnginePrune({ kinds: ['danglingImages', 'buildCache'], olderThanDays: 0 });
+    expect(p.items).toHaveLength(2);
+    expect(p.totalBytes).toBeGreaterThan(0);
+    expect((await rejection(mock.previewEnginePrune({ kinds: [], olderThanDays: 0 }))).code).toBe('badRequest');
+    expect((await rejection(mock.pruneEngine({ kinds: ['volumes'], olderThanDays: 0 }))).code).toBe('busy');
+    const quiet = make({ scenario: 'demo' });
+    (quiet as unknown as { runners: { currentJob: unknown }[] }).runners.forEach((r) => (r.currentJob = null));
+    const res = await quiet.pruneEngine({ kinds: ['danglingImages'], olderThanDays: 0 });
+    expect(res.freed[0]![0]).toBe('danglingImages');
+    quiet.dispose();
+  });
+
+  it('reports, previews and trims the cache', async () => {
+    const info = await mock.cacheReport('ui-tests');
+    expect(info.entries).toBeGreaterThan(0);
+    const plan = await mock.previewCacheClean('ui-tests', { maxMb: 0, maxAgeDays: 20 });
+    expect(plan.entries.every(([, why]) => why === 'old')).toBe(true);
+    expect((await rejection(mock.previewCacheClean('ui-tests', { maxMb: 0, maxAgeDays: 0 }))).code).toBe('badRequest');
+    const done = await mock.cleanCache('ui-tests', { maxMb: 0, maxAgeDays: 20 });
+    expect(done.failures).toEqual([]);
+    expect((await mock.cacheReport('ui-tests')).bytes).toBeLessThan(info.bytes);
+    expect((await rejection(mock.cleanCache('build-win', { maxMb: 1, maxAgeDays: 0 }))).code).toBe('busy');
+  });
+
+  it('hands a job to Debrief and says so when it is not installed', async () => {
+    expect((await mock.debriefStatus()).cliName).toBe('imt');
+    expect(await mock.openInDebrief('build-win', 'run 7', 1, 2)).toMatchObject({ result: 'opened' });
+    expect((await rejection(mock.openInDebrief('build-win', 'x', 1, null))).code).toBe('badRequest');
+    (mock as unknown as { debrief: boolean }).debrief = false;
+    expect(await mock.openInDebrief('build-win', 'x', null, null)).toMatchObject({ result: 'notInstalled' });
+    expect((await mock.debriefStatus()).installed).toBe(false);
+  });
+
+  it('keeps channels and their secrets apart and validates them', async () => {
+    expect((await mock.channels()).channels).toEqual([]);
+    const hook = {
+      id: 'ch-1',
+      name: 'Hook',
+      enabled: false,
+      events: ['diskLow'],
+      minSeverity: 'info' as const,
+      transport: { type: 'webhook' as const, url: 'https://example.org/h', secretKey: 'channel-ch-1' },
+    };
+    await mock.saveChannels({ channels: [hook] });
+    expect((await mock.channels()).channels).toHaveLength(1);
+    expect(await mock.hasChannelSecret('channel-ch-1')).toBe(false);
+    await mock.setChannelSecret('channel-ch-1', 'tok');
+    expect(await mock.hasChannelSecret('channel-ch-1')).toBe(true);
+    await mock.clearChannelSecret('channel-ch-1');
+    expect(await mock.hasChannelSecret('channel-ch-1')).toBe(false);
+    expect((await rejection(mock.setChannelSecret('k', ''))).code).toBe('badRequest');
+    expect(await mock.testChannel('ch-1')).toContain('Sent');
+    expect((await rejection(mock.testChannel('nope'))).code).toBe('badRequest');
+    expect((await rejection(mock.saveChannels({ channels: [hook, hook] }))).message).toContain('unique');
+    expect((await rejection(mock.saveChannels({ channels: [{ ...hook, transport: { type: 'webhook', url: 'ftp://x', secretKey: null } }] }))).message).toContain('http');
+    const many = Array.from({ length: 9 }, (_, i) => ({ ...hook, id: `ch-${i}` }));
+    expect((await rejection(mock.saveChannels({ channels: many }))).message).toContain('at most 8');
+  });
+});

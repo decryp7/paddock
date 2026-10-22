@@ -191,11 +191,12 @@ describe('labels', () => {
     expect(severityTone('error')).toBe('danger');
     expect(severityTone('warning')).toBe('warning');
     expect(severityTone('info')).toBe('info');
-    expect(NOTIFICATION_KINDS).toHaveLength(12);
+    expect(NOTIFICATION_KINDS).toHaveLength(16);
     const icons: Record<NotificationKind, string> = {
       updated: 'download', updateAvailable: 'download', updateFailed: 'download', rolledBack: 'undo', diskLow: 'disk',
       cleanedUp: 'broom', cleanupProblems: 'broom', serverUnreachable: 'cloud-off', notRegistered: 'link-off',
-      stalled: 'alert', crashLoop: 'alert', labelMismatch: 'alert',
+      stalled: 'alert', crashLoop: 'alert', labelMismatch: 'alert', updateLoop: 'alert',
+      held: 'pause-circle', released: 'play-circle', updateDeadline: 'calendar',
     };
     for (const k of NOTIFICATION_KINDS) {
       expect(notificationKindLabel(k)).not.toBe('');

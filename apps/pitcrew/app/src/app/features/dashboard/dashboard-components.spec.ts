@@ -98,24 +98,51 @@ describe('RunnerTile', () => {
     expect(byText(el, 'button', 'Update now')).toBeNull();
   });
 
-  it('shows a stopped runner and disables Drain', async () => {
+  it('shows a stopped runner', async () => {
     runners = runners.map((r) => (r.name === 'ui-tests' ? { ...r, status: 'stopped' as const, disk: null, runningSince: null } : r));
     const { el } = await mount('ui-tests');
     expect(text(el.querySelector('.quiet'))).toBe('Not running.');
-    expect(byText<HTMLButtonElement>(el, 'button', 'Drain')!.disabled).toBe(true);
     expect(text(el.querySelector('dl'))).toContain('—');
   });
 
-  it('runs Restart and Clean now through the store', async () => {
-    const { el } = await mount('ui-tests');
+  it('offers one contextual action: Update now, else Restart, else Resume', async () => {
     const store = TestBed.inject(StatusStore);
     const act = vi.spyOn(store, 'act');
-    const clean = vi.spyOn(store, 'clean');
-    byText<HTMLButtonElement>(el, 'button', 'Restart')!.click();
-    byText<HTMLButtonElement>(el, 'button', 'Clean now')!.click();
+    const { el } = await mount('ui-tests');
+    byText<HTMLButtonElement>(el, 'button', 'Update now')!.click();
+    expect(act).toHaveBeenCalledWith('ui-tests', 'applyUpdate');
+    expect(byText(el, 'button', 'Restart')).toBeNull();
+    runners = runners.map((r) => (r.name === 'ui-tests' ? { ...r, updateTarget: null } : r));
+    byText<HTMLButtonElement>((await mount('ui-tests')).el, 'button', 'Restart')!.click();
     expect(act).toHaveBeenCalledWith('ui-tests', 'restart');
-    expect(clean).toHaveBeenCalledWith('ui-tests');
+    runners = runners.map((r) => (r.name === 'ui-tests' ? { ...r, status: 'paused' as const } : r));
+    byText<HTMLButtonElement>((await mount('ui-tests')).el, 'button', 'Resume')!.click();
+    expect(act).toHaveBeenCalledWith('ui-tests', 'resume');
     await flush();
+  });
+
+  it('says why Pitcrew holds a runner, how late an update is and when updates loop', async () => {
+    runners = runners.map((r) =>
+      r.name === 'ui-tests'
+        ? {
+            ...r,
+            hold: { reasons: ['schedule' as const], paused: true, minutesLeft: 90 },
+            deadline: { behindSince: NOW - 40 * 86_400_000, dueAt: NOW - 10 * 86_400_000, daysLeft: -10, state: 'overdue' as const },
+            updateLoop: { target: '5.3.0', kind: 'failing' as const, attempts: 3, cause: 'The update failed 3 times in 7 days.' },
+          }
+        : r,
+    );
+    const { el } = await mount('ui-tests');
+    expect(text(el.querySelector('.hold'))).toBe('Paused by Pitcrew: a pause window is open · 1h 30m left');
+    expect(text(el.querySelector('.upd')?.parentElement)).toContain('Update overdue by 10 days');
+    expect(text(el.querySelector('.loop'))).toContain('Updating to 5.3.0 keeps failing');
+    runners = runners.map((r) =>
+      r.name === 'ui-tests' ? { ...r, hold: { reasons: ['lowDisk' as const], paused: false, minutesLeft: null }, updateLoop: null, deadline: { behindSince: NOW, dueAt: NOW, daysLeft: 4, state: 'soon' as const } } : r,
+    );
+    const again = (await mount('ui-tests')).el;
+    expect(text(again.querySelector('.hold'))).toBe('Pausing after this job: the disk is nearly full');
+    expect(text(again)).toContain('Update due in 4 days');
+    expect(again.querySelector('.loop')).toBeNull();
   });
 
   it('links to the runner and its logs', async () => {

@@ -31,6 +31,14 @@ nothing planned is in the code yet. The remaining engineering follow-ups are at 
   and a Processes tab with automatic cleanup of leftovers. *(Done; [ADR 0011](adr/0011-runner-config-editing.md),
   [0012](adr/0012-process-tracking-and-leftover-cleanup.md); Windows paths are verified on CI only.)*
 
+- Disk safety and quiet hours: the low-disk guard and pause windows, container engine and Actions cache hygiene, update
+  deadline and loop detection. *(Done; [ADR 0013](adr/0013-holds-low-disk-guard-and-pause-windows.md),
+  [0014](adr/0014-update-deadline-and-update-loops.md), [0016](adr/0016-container-engine-hygiene-and-actions-cache.md).)*
+- Workflow insights with capacity advice, notification channels (webhook, ntfy, email), and opening a job's log in Debrief.
+  *(Done; [ADR 0015](adr/0015-workflow-insights-and-capacity-advice.md), [0017](adr/0017-notification-channels.md),
+  [0018](adr/0018-open-in-debrief.md).)*
+- A Prometheus/OpenMetrics endpoint was considered and left for later (the owner's decision: not in v1).
+
 ## Phase 3: more runners and platforms *(planned)*
 
 - **Forgejo's runner:** on Windows and macOS a user-provided binary (upstream publishes none); OpenPGP-verified updates on

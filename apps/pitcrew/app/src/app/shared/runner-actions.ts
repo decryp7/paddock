@@ -54,6 +54,9 @@ import { confirmAction } from './ui/confirm-dialog';
         <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="openTab('config')">
           <mat-icon svgIcon="pc:file-text" aria-hidden="true" />Configuration…
         </button>
+        <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="clean()">
+          <mat-icon svgIcon="pc:broom" aria-hidden="true" />Clean now
+        </button>
         <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="openLogs()">
           <mat-icon svgIcon="pc:logs" aria-hidden="true" />Open logs
         </button>
@@ -78,6 +81,10 @@ export class RunnerActions {
   readonly allowRemove = input(false);
 
   private readonly store = inject(StatusStore);
+
+  protected clean(): void {
+    this.store.clean(this.runner().name);
+  }
   private readonly router = inject(Router);
   private readonly dialog = inject(Dialog);
 

@@ -152,8 +152,8 @@ const NAV: NavItem[] = [
       color: var(--danger);
     }
     .count.accent {
-      background: var(--accent-soft);
-      color: var(--accent);
+      background: var(--surface-3);
+      color: var(--text-2);
     }
     .spacer {
       flex: 1;

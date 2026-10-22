@@ -50,8 +50,8 @@ describe('Sidebar', () => {
     await settle(f);
     const el = f.nativeElement as HTMLElement;
     const links = Array.from(el.querySelectorAll('nav a'));
-    expect(links.map((a) => text(a).replace(/\d+/g, '').trim())).toEqual(['Dashboard', 'Runners', 'Activity', 'Logs', 'Updates', 'Settings']);
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/', '/runners', '/activity', '/logs', '/updates', '/settings']);
+    expect(links.map((a) => text(a).replace(/\d+/g, '').trim())).toEqual(['Dashboard', 'Runners', 'Activity', 'Insights', 'Storage', 'Logs', 'Updates', 'Settings']);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/', '/runners', '/activity', '/insights', '/storage', '/logs', '/updates', '/settings']);
     expect(el.querySelector('.count.danger')?.getAttribute('aria-label')).toBe('1 need attention');
     expect(el.querySelector('.count.accent')?.getAttribute('aria-label')).toBe('2 updates available');
     expect(text(el.querySelector('.service'))).toBe('Service 0.1.0 · connected');
@@ -106,11 +106,11 @@ describe('Sidebar', () => {
     expect(document.activeElement).toBe(links[1]);
     press('ArrowUp');
     press('ArrowUp');
-    expect(document.activeElement).toBe(links[5]);
+    expect(document.activeElement).toBe(links[7]);
     press('Home');
     expect(document.activeElement).toBe(links[0]);
     press('End');
-    expect(document.activeElement).toBe(links[5]);
+    expect(document.activeElement).toBe(links[7]);
     expect(press('a').defaultPrevented).toBe(false);
     f.nativeElement.remove();
   });

@@ -74,6 +74,7 @@ interface Tile {
       font-family: var(--font-display);
       font-size: var(--text-2xl);
       font-weight: var(--weight-semibold);
+      font-variant-numeric: tabular-nums;
       letter-spacing: -0.01em;
       margin-top: var(--space-1);
     }

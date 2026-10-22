@@ -70,16 +70,16 @@
 
 @mixin light {
   color-scheme: light;
-  --canvas: #f2f2f5;
-  --sidebar-bg: #ececf0;
-  --pane: #fbfbfc;
+  --canvas: #f4f5f7;
+  --sidebar-bg: #e8eaee;
+  --pane: #f9fafb;
   --surface: #ffffff;
   --surface-2: #f6f6f8;
   --surface-3: #ececf0;
   --hover: rgb(23 24 28 / 0.045);
   --active: rgb(23 24 28 / 0.08);
-  --border: #e5e5ea;
-  --border-strong: #d2d3da;
+  --border: #dfe1e6;
+  --border-strong: #c9ccd4;
   --text: #17181c;
   --text-2: #555a65;
   --text-3: #6b707c;

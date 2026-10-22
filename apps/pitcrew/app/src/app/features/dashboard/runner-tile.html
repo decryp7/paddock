@@ -73,6 +73,15 @@
         <span class="num">{{ l.cpu }}</span> CPU · <span class="num">{{ l.mem }}</span> · {{ l.processes }}
       </div>
     }
+    @if (hold(); as h) {
+      <div class="hold badge outline" [attr.title]="h.detail"><mat-icon svgIcon="pc:pause-circle" aria-hidden="true" />{{ h.text }}</div>
+    }
+    @if (r.updateLoop; as l) {
+      <div class="loop callout warning" role="status">
+        <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+        <div class="callout-body"><strong>Updating to {{ l.target }} keeps failing</strong><span class="small">{{ l.cause }}</span></div>
+      </div>
+    }
     @if (r.leftovers > 0) {
       <a class="badge warning leftover-chip" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'processes' }"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />{{ r.leftovers }} leftover {{ r.leftovers === 1 ? 'process' : 'processes' }}</a>
     }
@@ -90,7 +99,10 @@
       <dd>
         <span class="num">{{ r.currentVersion ?? '—' }}</span>
         @if (r.updateTarget && r.updatePhase.phase === 'idle') {
-          <span class="badge accent upd">{{ r.updateTarget }} available</span>
+          <span class="badge update upd">{{ r.updateTarget }} available</span>
+        }
+        @if (deadline(); as d) {
+          <span class="badge small" [class.warning]="d.warn" [class.outline]="!d.warn">{{ d.text }}</span>
         }
       </dd>
     </div>
@@ -124,28 +136,15 @@
       <button type="button" class="btn sm" (click)="store.act(r.name, 'resume')" [disabled]="!!busy()">
         <mat-icon svgIcon="pc:play" aria-hidden="true" />Resume
       </button>
+    } @else if (r.updateTarget && r.updatePhase.phase === 'idle' && r.managedBinary) {
+      <button type="button" class="btn sm" (click)="store.act(r.name, 'applyUpdate')" [disabled]="!!busy()">
+        <mat-icon svgIcon="pc:download" aria-hidden="true" />Update now
+      </button>
     } @else {
       <button type="button" class="btn sm" (click)="store.act(r.name, 'restart')" [disabled]="!!busy() || r.status === 'notRegistered'">
         <mat-icon svgIcon="pc:refresh" aria-hidden="true" [class.spin]="busy() === 'restart'" />Restart
       </button>
-      <button type="button" class="btn sm" (click)="store.act(r.name, 'drain')" [disabled]="!!busy() || r.status === 'stopped'" matTooltip="Finish the current job, then take no new ones">
-        <mat-icon svgIcon="pc:pause-circle" aria-hidden="true" />Drain
-      </button>
     }
-    @if (r.updateTarget && r.updatePhase.phase === 'idle' && r.managedBinary) {
-      <button type="button" class="btn sm" (click)="store.act(r.name, 'applyUpdate')" [disabled]="!!busy()">
-        <mat-icon svgIcon="pc:download" aria-hidden="true" />Update now
-      </button>
-    }
-    <button type="button" class="btn sm" (click)="store.clean(r.name)" [disabled]="!!busy()">
-      <mat-icon svgIcon="pc:broom" aria-hidden="true" [class.pulse]="busy() === 'clean'" />Clean now
-    </button>
-    <a class="btn sm ghost" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'processes' }">
-      <mat-icon svgIcon="pc:cpu" aria-hidden="true" />Processes
-    </a>
-    <a class="btn sm ghost" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'config' }">
-      <mat-icon svgIcon="pc:file-text" aria-hidden="true" />Configure
-    </a>
     <a class="btn sm ghost logs" [routerLink]="['/logs']" [queryParams]="{ runner: r.name }">
       <mat-icon svgIcon="pc:logs" aria-hidden="true" />Logs
     </a>

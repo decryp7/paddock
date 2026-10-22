@@ -70,7 +70,7 @@ import { StatusStore } from '../../state/status.store';
                     <td>
                       <span class="num">{{ r.currentVersion ?? '—' }}</span>
                       @if (r.updateTarget) {
-                        <span class="badge accent small">{{ r.updateTarget }} available</span>
+                        <span class="badge update small">{{ r.updateTarget }} available</span>
                       }
                     </td>
                     <td class="num">{{ r.runningSince ? uptime(r.runningSince) : '—' }}</td>

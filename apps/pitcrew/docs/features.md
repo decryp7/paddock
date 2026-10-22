@@ -13,7 +13,12 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 - [Supervision and the watchdog](#supervision-and-the-watchdog)
 - [Safe updates with roll-back](#safe-updates-with-roll-back)
 - [Housekeeping](#housekeeping)
+- [Holds: low-disk guard and pause windows](#holds-low-disk-guard-and-pause-windows)
+- [Update deadline and update loops](#update-deadline-and-update-loops)
 - [Dashboard](#dashboard)
+- [Workflow insights](#workflow-insights)
+- [Storage: container engine and the Actions cache](#storage-container-engine-and-the-actions-cache)
+- [Open a job's log in Debrief](#open-a-jobs-log-in-debrief)
 - [Runners and a runner's page](#runners-and-a-runners-page)
 - [Editing a runner's configuration](#editing-a-runners-configuration)
 - [Processes and leftovers](#processes-and-leftovers)
@@ -109,6 +114,30 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
   with a reason and tried again next time, never an error for the whole cleanup.
 - **Warns when the disk is low** (tile, tray, notification). Every cleanup is a history entry.
 
+## Holds: low-disk guard and pause windows
+
+![Disk guard and pause windows](screenshots/dark/settings-disk-guard.png)
+
+- **Low-disk guard** ([ADR 0013](adr/0013-holds-low-disk-guard-and-pause-windows.md)). Below a free-space threshold
+  (default 4 GB) Pitcrew drains the runners (the job in progress finishes, no new ones start) and resumes them by itself
+  when space is back above a higher threshold (default 6 GB), so a disk hovering at one limit does not flap. A *reserve*
+  (default 1 GB) is space Pitcrew keeps for itself: below it a cleanup runs at once. The disk is read at most once a
+  minute.
+- **Pause windows.** Runners take no jobs during a schedule (days and times, a window may span midnight), or take jobs
+  only while the machine is otherwise quiet (the load outside the runners stays below a threshold for a few minutes).
+- **The user always wins.** Pausing or resuming by hand takes the runner out of Pitcrew's hands until the reason is gone;
+  a pause you made is never lifted. Every hold and release is in Activity, the log and a notification, and the card
+  says why: "Paused by Pitcrew: the disk is nearly full".
+
+## Update deadline and update loops
+
+- **Countdown.** Gitea and Forgejo enforce no deadline for runner versions ([ADR 0014](adr/0014-update-deadline-and-update-loops.md)),
+  so the deadline is yours: *remind me when a newer release has been available for N days* (default 30, 0 = off). The
+  card shows "Update due in 4 days", warning as it nears and when overdue, and a notification is sent once for each.
+- **Loop detection.** An update that fails or rolls back three times in a week, installs three times without sticking, or
+  is postponed five times is a loop. Automatic updates to that version stop, the card and the Updates page say what went
+  wrong and what to do, and you can still install it by hand or skip it.
+
 ## Dashboard
 
 ![The dashboard](screenshots/dashboard-dark.png)
@@ -172,6 +201,35 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
 - **Every stop is recorded** in the runner's log and in Activity with the name, pid, age and the rule used; Activity also
   shows each job's peak CPU and memory and how many processes it left behind.
 
+## Workflow insights
+
+![Insights](screenshots/dark/insights.png)
+
+- Which jobs are **slowest** (average, 95th percentile, longest), which are **flaky** (they pass and fail without a
+  change), how long jobs **wait for a runner**, and each repository's **success rate over time**, from the jobs Pitcrew
+  saw and what the Gitea API says about them (read-only token from the credential store, cached, at most 25 lookups per
+  refresh) ([ADR 0015](adr/0015-workflow-insights-and-capacity-advice.md)).
+- **Advice** in words when the numbers justify it: add a runner or raise capacity (jobs wait and the busiest runner is
+  almost always busy), look at labels (jobs wait although runners are free), capacity to spare, a repository whose
+  success rate dropped.
+
+## Storage: container engine and the Actions cache
+
+![Storage](screenshots/dark/storage.png)
+
+- **Container engine report** (Docker or Podman): images, containers, volumes and build cache with what a prune could
+  give back, plus the size of `~/.cache/act` and the runner cache folder.
+- **Prune only on click**: choose the kinds and an age, **Preview** (a dry run), confirm, prune. Nothing is removed while
+  a job runs ([ADR 0016](adr/0016-container-engine-hygiene-and-actions-cache.md)).
+- **Actions cache** of each runner: folder, size, biggest entries, the runner's own size limit; turn the built-in cache
+  server on or off in the runner's Configuration; trim it to a size and/or an age with a preview first.
+
+## Open a job's log in Debrief
+
+- **Debrief** button on every job in Activity and on the Logs page: Pitcrew cuts the job's lines out of the runner log
+  and starts Debrief with the file ([ADR 0018](adr/0018-open-in-debrief.md)). Without Debrief the file is still written
+  and the message says where it is and how to get Debrief.
+
 ## Activity and history
 
 ![Activity](screenshots/activity-light.png)
@@ -212,6 +270,8 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
 - **Notifications** for stalls, crash loops, an unreachable server, a runner the server forgot, updates installed,
   rolled back or failed, a new version (notify-only policy), low disk and cleanups. Only transitions are announced: a
   runner that stays stalled is announced once. They can be switched off in Settings.
+- **Channels** ([ADR 0017](adr/0017-notification-channels.md)): webhook, ntfy and email, off by default, each with its own
+  list of events and minimum severity, secrets in the OS credential store, a test button. Sent by the app while it runs.
 - **Open at log-in** is a toggle.
 - **Window lifecycle.** Closing the window destroys it and frees the webview; the tray's Open item (and the macOS Dock icon) recreate it. Where there is no tray (Linux without a status-notifier host) closing the window quits the app. Tray actions and notifications can deep-link into the app (`pitcrew://navigate`, for example a runner's logs).
 
