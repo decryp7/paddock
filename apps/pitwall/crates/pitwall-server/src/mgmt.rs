@@ -183,11 +183,13 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "delete_model" => {
             let id = model(a, "id")?;
             st.serving.unload(&id, pitwall_core::memory::ReleaseReason::Manual);
+            st.serving.retry(&id);
             st.library.delete(&id).map_err(|e| err(mgmt::ErrorCode::NotFound, e.to_string()))?;
             ok(())
         }
         "load_model" => {
             let id = model(a, "id")?;
+            st.serving.retry(&id);
             st.serving.ensure(&id).await.map_err(|e| {
                 err(
                     if e.kind == ErrorKind::InsufficientMemory {
@@ -825,6 +827,7 @@ fn overview(st: &Arc<AppState>) -> mgmt::Overview {
         apps: apps(st),
         preset: cfg.memory.preset,
         pairings: st.auth.pairings(now_ms()),
+        issues: st.serving.issues(),
     }
 }
 

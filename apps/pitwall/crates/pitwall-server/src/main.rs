@@ -12,13 +12,14 @@ async fn main() {
         std::process::exit(code);
     }
     let mut args = std::env::args().skip(1);
-    let (mut port, mut dir, mut fake) = (None::<u16>, None::<String>, false);
+    let (mut port, mut dir, mut fake, mut die_after) = (None::<u16>, None::<String>, false, None::<u64>);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--port" => port = args.next().and_then(|p| p.parse().ok()),
             "--data-dir" => dir = args.next(),
             // Test fixture: act as an OpenAI-compatible engine with canned answers (used by engine pack tests).
             "--fake-engine" => fake = true,
+            "--die-after-ms" => die_after = args.next().and_then(|p| p.parse().ok()),
             "--host" | "--model" => {
                 args.next();
             }
@@ -37,7 +38,7 @@ async fn main() {
         }
     }
     if fake {
-        if let Err(e) = pitwall_server::fake_engine::serve(port.unwrap_or(0)).await {
+        if let Err(e) = pitwall_server::fake_engine::serve(port.unwrap_or(0), die_after).await {
             eprintln!("fake engine: {e}");
             std::process::exit(1);
         }

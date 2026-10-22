@@ -547,6 +547,32 @@ pub struct EngineStatusTile {
     pub unhealthy: u32,
 }
 
+/// Whether a model's engine is being restarted or has been given up on (`IssueState`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum IssueState {
+    /// The engine died and Pitwall restarts it.
+    Restarting,
+    /// It kept crashing: no more automatic restarts until the user retries.
+    Failed,
+}
+
+/// A model whose engine crashed (`EngineIssue`), shown on the dashboard.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineIssue {
+    /// The model.
+    pub model_id: String,
+    /// Restarting or failed.
+    pub state: IssueState,
+    /// Crashes seen since the last retry.
+    pub crashes: u32,
+    /// When the next restart happens (Unix ms), while one is planned.
+    pub restart_at: Option<u64>,
+    /// What happened and what to do.
+    pub message: String,
+}
+
 /// The dashboard (`Overview`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -569,6 +595,8 @@ pub struct Overview {
     pub preset: Preset,
     /// Pending pairings.
     pub pairings: Vec<PairingRequest>,
+    /// Models whose engine crashed and is being restarted or was given up on.
+    pub issues: Vec<EngineIssue>,
 }
 
 /// History (`History`).
@@ -907,6 +935,11 @@ pub enum LiveUpdate {
     Queue {
         /// The queue.
         queue: QueueSnapshot,
+    },
+    /// Engine crashes being handled.
+    Issues {
+        /// The current issues.
+        issues: Vec<EngineIssue>,
     },
     /// Throughput.
     Throughput {

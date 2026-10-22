@@ -20,6 +20,7 @@ use pitwall_core::mgmt::{ChosenBy, HotState, LoadedModel};
 use pitwall_core::scheduler::{Cancelled, Caps, JobId, JobKind, JobSpec, Priority, QueueError, Scheduler};
 use pitwall_core::select::{self, Candidate, Requirements};
 use pitwall_core::sse;
+use pitwall_core::supervise::{Outcome, Supervisor};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -139,6 +140,7 @@ struct Inner {
     last_activity: AtomicU64,
     next_port: AtomicU64,
     cancelled: Mutex<Vec<JobId>>,
+    supervisor: Mutex<Supervisor>,
 }
 
 /// The serving core.
@@ -185,6 +187,7 @@ impl Serving {
                 last_activity: AtomicU64::new(now_ms()),
                 next_port: AtomicU64::new(0),
                 cancelled: Mutex::new(vec![]),
+                supervisor: Mutex::new(Supervisor::default()),
             }),
         }
     }
@@ -431,11 +434,19 @@ impl Serving {
     /// Make sure `id` is loaded (loading it first if needed) and mark it busy. Returns the cold-start time in ms
     /// when the model had to be loaded.
     pub async fn ensure(&self, id: &ModelId) -> Result<(Busy, Option<u64>), ApiError> {
+        self.ensure_as(id, false).await
+    }
+
+    /// [`Serving::ensure`]; `auto_restart` marks a background restart, whose failed start plans the next attempt.
+    async fn ensure_as(&self, id: &ModelId, auto_restart: bool) -> Result<(Busy, Option<u64>), ApiError> {
         let gate = lock(&self.inner.loading).entry(id.clone()).or_default().clone();
         let _g = gate.lock().await;
         self.inner.last_activity.store(now_ms(), Ordering::SeqCst);
         if let Some(h) = lock(&self.inner.hot).get(id).cloned() {
             return Ok((Busy::new(h), None));
+        }
+        if let Some(why) = lock(&self.inner.supervisor).failure(id) {
+            return Err(api(ErrorKind::Engine, why));
         }
         let started = std::time::Instant::now();
         let f = self
@@ -495,6 +506,13 @@ impl Serving {
         let engine = self.engine_for(prefs.engine.as_deref())?;
         let running = engine.start(&launch).await.map_err(|e| {
             self.event(EventKind::EngineFailed, Severity::Error, format!("{id}: {e}"));
+            if lock(&self.inner.supervisor).crashed(id, now_ms(), auto_restart) == Outcome::GaveUp {
+                self.event(
+                    EventKind::EngineFailed,
+                    Severity::Error,
+                    format!("{id} failed to start repeatedly; Pitwall stopped trying. Press Retry on the Dashboard once it is fixed."),
+                );
+            }
             match e {
                 EngineError::NotInstalled | EngineError::NotAvailable(_) => api(ErrorKind::Engine, e.to_string()),
                 _ => api(ErrorKind::Engine, format!("could not load {id}: {e}")),
@@ -518,6 +536,7 @@ impl Serving {
             capabilities: library::capabilities(&f),
         });
         lock(&self.inner.hot).insert(id.clone(), h.clone());
+        lock(&self.inner.supervisor).started(id);
         let ms = started.elapsed().as_millis() as u64;
         self.event(
             EventKind::ModelLoaded,
@@ -525,6 +544,21 @@ impl Serving {
             format!("Loaded {id} in {:.1} s", ms as f64 / 1000.0),
         );
         Ok((Busy::new(h), Some(ms)))
+    }
+
+    /// Replaces the restart limits (tests use short delays).
+    pub fn set_restart_limits(&self, limits: pitwall_core::backoff::Limits) {
+        *lock(&self.inner.supervisor) = Supervisor::new(limits);
+    }
+
+    /// The user pressed Retry (or loads the model by hand): forget the crash history so the next load is tried.
+    pub fn retry(&self, id: &ModelId) {
+        lock(&self.inner.supervisor).clear(id);
+    }
+
+    /// Crashed engines being restarted or given up on, for the dashboard.
+    pub fn issues(&self) -> Vec<pitwall_core::mgmt::EngineIssue> {
+        lock(&self.inner.supervisor).issues()
     }
 
     /// Unload a model now (a busy model is refused).
@@ -552,11 +586,23 @@ impl Serving {
             .collect();
         for d in dead {
             lock(&self.inner.hot).remove(&d);
-            self.event(
-                EventKind::EngineFailed,
-                Severity::Error,
-                format!("The engine for {d} exited; it reloads on the next request."),
-            );
+            let outcome = lock(&self.inner.supervisor).crashed(&d, now, true);
+            let msg = match outcome {
+                Outcome::RestartIn(ms) => format!("The engine for {d} exited unexpectedly; restarting in {} s.", ms.div_ceil(1000)),
+                _ => format!("The engine for {d} exited unexpectedly and keeps crashing; Pitwall stopped restarting it."),
+            };
+            self.event(EventKind::EngineFailed, Severity::Error, msg);
+        }
+        {
+            let alive: Vec<ModelId> = lock(&self.inner.hot).keys().cloned().collect();
+            let mut sup = lock(&self.inner.supervisor);
+            for id in &alive {
+                sup.healthy(id, now);
+            }
+        }
+        let due = lock(&self.inner.supervisor).due(now);
+        for id in due {
+            self.restart(id);
         }
         let hots: Vec<Hot> = lock(&self.inner.hot)
             .values()
@@ -576,6 +622,27 @@ impl Serving {
             }
         }
         actions
+    }
+
+    /// Restarts a crashed model in the background; a failed attempt is another crash (backoff, then the loop guard).
+    fn restart(&self, id: ModelId) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            match me.ensure_as(&id, true).await {
+                Ok((busy, _)) => {
+                    drop(busy);
+                    me.event(EventKind::ModelLoaded, Severity::Info, format!("Restarted the engine for {id}."));
+                }
+                Err(e) => {
+                    // A failed start already counted toward the loop guard and planned the next attempt (or gave up).
+                    me.event(
+                        EventKind::EngineFailed,
+                        Severity::Error,
+                        format!("Restarting {id} failed: {}", e.message),
+                    );
+                }
+            }
+        });
     }
 
     /// Run the periodic release loop until the process ends.

@@ -84,7 +84,8 @@ pub fn pid_alive(pid: u32) -> bool {
     let mut s = sysinfo::System::new();
     let p = sysinfo::Pid::from_u32(pid);
     s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), false);
-    s.process(p).is_some()
+    // A child that exited but was not reaped yet (a zombie on Linux) is gone for our purposes.
+    s.process(p).is_some_and(|proc| proc.status() != sysinfo::ProcessStatus::Zombie)
 }
 
 #[cfg(test)]

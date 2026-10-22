@@ -30,6 +30,7 @@ export const LiveStore = signalStore(
     queue: computed(() => overview()?.queue ?? null),
     throughput: computed(() => overview()?.throughput ?? null),
     pairings: computed(() => overview()?.pairings ?? []),
+    issues: computed(() => overview()?.issues ?? []),
     server: computed(() => overview()?.server ?? null),
     apps: computed(() => overview()?.apps ?? []),
     paused: computed(() => overview()?.server.serving === 'paused'),

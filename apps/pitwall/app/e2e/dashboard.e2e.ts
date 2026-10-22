@@ -51,3 +51,19 @@ test.describe('dashboard', () => {
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible({ timeout: 2000 });
   });
 });
+
+test.describe('crashed engines', () => {
+  test('a model given up on after a crash loop is shown with Retry, which clears it', async ({ page }) => {
+    await openApp(page, '/', 'mock-fast&mock-static&mock-crash');
+    const issue = page.getByRole('alert', { name: /Engine problem: gemma-3-12b-it-q4_k_m/ });
+    await expect(issue).toBeVisible();
+    await expect(issue).toContainText('keeps crashing');
+    await issue.getByRole('button', { name: 'Retry' }).click();
+    await expect(issue).toHaveCount(0);
+  });
+
+  test('shows no engine problem when all is well', async ({ page }) => {
+    await openApp(page);
+    await expect(page.getByRole('alert', { name: /Engine problem/ })).toHaveCount(0);
+  });
+});

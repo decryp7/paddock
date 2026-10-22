@@ -30,8 +30,15 @@ pub fn router() -> Router {
         )
 }
 
-/// Serve on 127.0.0.1:`port` until the process ends.
-pub async fn serve(port: u16) -> std::io::Result<()> {
+/// Serve on 127.0.0.1:`port` until the process ends; with `die_after_ms` the process exits that long after it started
+/// listening (a crashing engine, for the restart and crash-loop tests).
+pub async fn serve(port: u16, die_after_ms: Option<u64>) -> std::io::Result<()> {
     let l = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    if let Some(ms) = die_after_ms {
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            std::process::exit(3);
+        });
+    }
     axum::serve(l, router()).await
 }

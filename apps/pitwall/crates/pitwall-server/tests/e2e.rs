@@ -554,3 +554,94 @@ async fn benchmarks_are_kept_and_models_report_their_engine() {
     let m = h.rpc("local_models", json!({})).await.json();
     assert!(m[0]["engine"].is_null());
 }
+
+/// A pack whose engine process exits shortly after it starts serving: a crashing engine, as a real child process.
+fn crashy_pack(dir: &std::path::Path, die_after_ms: u64) {
+    let exe = env!("CARGO_BIN_EXE_pitwall-server");
+    let packs = dir.join("packs");
+    std::fs::create_dir_all(&packs).unwrap();
+    std::fs::write(
+        packs.join("crashy.engine.toml"),
+        format!(
+            "format = 1\nid = \"crashy\"\nname = \"Crashing engine\"\nversion = \"1\"\n[capabilities]\nchat = true\n[launch]\ncommand = {exe:?}\nargs = [\"--fake-engine\", \"--die-after-ms\", \"{die_after_ms}\", \"--host\", \"{{host}}\", \"--port\", \"{{port}}\", \"--model\", \"{{model}}\"]\n[health]\npath = \"/health\"\n"
+        ),
+    )
+    .unwrap();
+    let m = dir.join("models/o/r");
+    std::fs::create_dir_all(&m).unwrap();
+    std::fs::write(m.join("tiny-Q4_K_M.gguf"), common::gguf("llama")).unwrap();
+}
+
+async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&common::Harness) -> bool) {
+    for _ in 0..200 {
+        h.st.serving.tick();
+        if done(h) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("timed out waiting for: {what}");
+}
+
+#[tokio::test]
+async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    crashy_pack(dir.path(), 900);
+    let h = common::harness_in(dir, false).await;
+    h.st.serving.set_restart_limits(pitwall_core::backoff::Limits {
+        initial: 50,
+        max: 100,
+        reset_after: 60_000,
+        max_crashes: 2,
+        window: 600_000,
+    });
+    let key = h.make_key("Crash Test").await;
+    assert_eq!(
+        h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "crashy"}))
+            .await
+            .status,
+        200
+    );
+    let r = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(h.st.serving.issues().is_empty());
+
+    // The process exits: the next tick notices, plans a restart and the model comes back by itself.
+    tick_until(&h, "a restart to be planned", |h| !h.st.serving.issues().is_empty()).await;
+    let ov = h.rpc("overview", json!({})).await.json();
+    assert_eq!(ov["issues"][0]["state"], "restarting");
+    assert_eq!(ov["issues"][0]["modelId"], "tiny-q4_k_m");
+    tick_until(&h, "the model to be restarted", |h| {
+        h.st.serving.issues().is_empty() && h.st.serving.is_loaded(&pitwall_core::ids::ModelId::parse("tiny-q4_k_m").unwrap())
+    })
+    .await;
+
+    // It keeps dying: after the limit the loop guard stops the restarts and says why.
+    tick_until(&h, "the crash loop to be detected", |h| {
+        h.st.serving
+            .issues()
+            .iter()
+            .any(|i| i.state == pitwall_core::mgmt::IssueState::Failed)
+    })
+    .await;
+    let ov = h.rpc("overview", json!({})).await.json();
+    assert_eq!(ov["issues"][0]["state"], "failed");
+    assert!(ov["issues"][0]["message"].as_str().unwrap().contains("Retry"));
+    let r = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    assert_eq!(r.status, 500, "{}", r.body);
+    assert!(r.json()["error"]["message"].as_str().unwrap().contains("stopped restarting"));
+    h.st.serving.tick();
+    assert!(
+        !h.st.serving.is_loaded(&pitwall_core::ids::ModelId::parse("tiny-q4_k_m").unwrap()),
+        "no more restarts"
+    );
+
+    // Retry (loading by hand) clears the guard and tries again.
+    assert_eq!(h.rpc("load_model", json!({"id": "tiny-q4_k_m"})).await.status, 200);
+    assert!(h.st.serving.issues().is_empty());
+    h.st.serving.release_all();
+}

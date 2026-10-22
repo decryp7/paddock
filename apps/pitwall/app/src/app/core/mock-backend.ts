@@ -8,6 +8,7 @@ import type {
   DiskUsage,
   Download,
   Engine,
+  EngineIssue,
   History,
   HistoryRange,
   HfModel,
@@ -75,6 +76,8 @@ export interface MockOptions {
   askConsent?: boolean;
   /** A newer release is available and the build can update itself. */
   updateAvailable?: boolean;
+  /** A model's engine crashed repeatedly and was given up on (dashboard issue with Retry). */
+  crashed?: boolean;
   /** Delay between streamed playground words (ms). */
   streamDelayMs?: number;
 }
@@ -114,6 +117,7 @@ export class MockBackend implements PitwallBackend {
   private nextId = 1;
   private service: ServiceInstall;
   private autostart_ = false;
+  private issues_: EngineIssue[] = [];
   private readonly updateAvailable: boolean;
 
   constructor(options: MockOptions = {}) {
@@ -124,6 +128,11 @@ export class MockBackend implements PitwallBackend {
     this.rnd = prng(options.seed ?? 42);
     this.streamDelay = options.streamDelayMs ?? 0;
     this.updateAvailable = options.updateAvailable ?? false;
+    if (options.crashed) {
+      this.issues_ = [
+        { modelId: 'gemma-3-12b-it-q4_k_m', state: 'failed', crashes: 6, restartAt: null, message: 'The engine for gemma-3-12b-it-q4_k_m crashed repeatedly and Pitwall stopped restarting it. Check that the model file is complete, then press Retry.' },
+      ];
+    }
     this.service = {
       platform: 'macos',
       installed: !options.askConsent,
@@ -333,6 +342,7 @@ export class MockBackend implements PitwallBackend {
       apps: this.apps_,
       preset: this.settings_.memory.preset,
       pairings: this.pairings_,
+      issues: this.issues_,
     }));
   }
 
@@ -455,6 +465,10 @@ export class MockBackend implements PitwallBackend {
     return this.reply('loadModel', () => {
       const m = this.library.find((x) => x.id === id) ?? this.fail('notFound', `No model ${id}.`);
       if (m.fit.verdict === 'wontFit') this.fail('insufficientMemory', `${m.name} needs more memory than this machine has free.`);
+      if (this.issues_.some((i) => i.modelId === id)) {
+        this.issues_ = this.issues_.filter((i) => i.modelId !== id);
+        this.emit({ kind: 'issues', issues: clone(this.issues_) });
+      }
       if (!this.loaded.some((x) => x.modelId === id)) {
         const now = this.now();
         const vram = Math.min(m.sizeBytes * 0.9, 3.5 * GiB);

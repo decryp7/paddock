@@ -287,6 +287,20 @@ export interface Overview {
   apps: AppInfo[];
   preset: Preset;
   pairings: PairingRequest[];
+  /** Models whose engine crashed and is being restarted or was given up on. */
+  issues: EngineIssue[];
+}
+
+export type IssueState = 'restarting' | 'failed';
+
+/** `EngineIssue` in `pitwall_core::mgmt`. */
+export interface EngineIssue {
+  modelId: string;
+  state: IssueState;
+  crashes: number;
+  /** Unix ms of the next restart while one is planned. */
+  restartAt: number | null;
+  message: string;
 }
 
 export interface EngineStatusTile {
@@ -358,6 +372,7 @@ export type LiveUpdate =
   | { kind: 'memory'; sample: MemorySample }
   | { kind: 'models'; models: LoadedModel[] }
   | { kind: 'queue'; queue: QueueSnapshot }
+  | { kind: 'issues'; issues: EngineIssue[] }
   | { kind: 'throughput'; throughput: Throughput }
   | { kind: 'event'; event: PitwallEvent }
   | { kind: 'download'; download: Download }

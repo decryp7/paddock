@@ -24,6 +24,7 @@ export function mockOptionsFrom(search: string): MockOptions {
     empty: q.has('mock-empty'),
     askConsent: q.has('mock-consent'),
     updateAvailable: q.has('mock-update'),
+    crashed: q.has('mock-crash'),
     failing: fail ? (fail.split(',') as (keyof PitwallBackend)[]) : [],
   };
 }

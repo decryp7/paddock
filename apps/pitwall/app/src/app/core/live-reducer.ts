@@ -28,6 +28,8 @@ export function applyUpdate(state: LiveState, u: LiveUpdate): LiveState {
       return { ...next, overview: o && { ...o, models: u.models } };
     case 'queue':
       return { ...next, overview: o && { ...o, queue: u.queue } };
+    case 'issues':
+      return { ...next, overview: o && { ...o, issues: u.issues } };
     case 'throughput':
       return { ...next, overview: o && { ...o, throughput: u.throughput } };
     case 'pairing':

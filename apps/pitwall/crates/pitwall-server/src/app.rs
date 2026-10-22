@@ -244,6 +244,9 @@ impl AppState {
                 me.push(&LiveUpdate::Models {
                     models: me.serving.loaded(),
                 });
+                me.push(&LiveUpdate::Issues {
+                    issues: me.serving.issues(),
+                });
                 me.push(&LiveUpdate::Queue {
                     queue: me.queue_snapshot(),
                 });

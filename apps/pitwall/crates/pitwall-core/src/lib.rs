@@ -4,7 +4,7 @@
 //! - Wire formats: [`api`] (OpenAI, Anthropic and Ollama compatible requests and responses, ADR 0003), [`llama`]
 //!   (llama-server's protocol), [`sse`] (event streams), [`chat`] (the neutral request every API maps to).
 //! - Serving: [`scheduler`] (priority queue and concurrency caps, ADR 0005), [`memory`] (when to release models,
-//!   whether a load fits, ADR 0006), [`select`] (capability-based model choice), [`backoff`] (engine restarts).
+//!   whether a load fits, ADR 0006), [`select`] (capability-based model choice), [`backoff`] and [`supervise`] (engine restarts and the crash-loop guard).
 //! - Models and engines: [`gguf`], [`quant`], [`fit`], [`hf`] (Hugging Face API answers), [`runtimes`] (the pinned
 //!   llama.cpp builds), [`hardware`].
 //! - Security and privacy: [`privacy`] (the download allow-list, ADR 0001), [`keys`] and [`limits`] (ADR 0007).
@@ -37,6 +37,7 @@ pub mod runtimes;
 pub mod scheduler;
 pub mod select;
 pub mod sse;
+pub mod supervise;
 pub mod tasks;
 pub mod time;
 pub mod tokens;

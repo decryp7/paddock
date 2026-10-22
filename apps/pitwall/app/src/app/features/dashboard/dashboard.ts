@@ -14,6 +14,7 @@ import { injectNow } from '../../shared/now';
 import { Panel } from '../../shared/ui/panel';
 import { AppsCard } from './apps-card';
 import { DashboardStore } from './dashboard.store';
+import { EngineIssues } from './engine-issues';
 import { EnginesCard } from './engines-card';
 import { EventsFeed } from './events-feed';
 import { HotModels } from './hot-models';
@@ -47,7 +48,7 @@ export class PerfMeter {
 /** Home: everything Pitwall is doing right now, how it got here, and the actions you need most. */
 @Component({
   selector: 'pw-dashboard',
-  imports: [MatIconModule, MatTooltipModule, RouterLink, Panel, EChart, StatTiles, HotModels, QueueCard, EnginesCard, EventsFeed, AppsCard, PairingCard],
+  imports: [MatIconModule, MatTooltipModule, RouterLink, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EnginesCard, EventsFeed, AppsCard, PairingCard],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -95,6 +96,8 @@ export class PerfMeter {
           <span><b>Serving is paused.</b> Apps can still connect; new requests wait in the queue until you resume.</span>
         </div>
       }
+
+      <pw-engine-issues [now]="now()" />
 
       @for (p of live.pairings(); track p.id) {
         <pw-pairing-card [request]="p" [now]="now()" />

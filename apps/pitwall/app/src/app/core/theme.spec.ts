@@ -12,6 +12,8 @@ function mockMedia(matches: boolean) {
 }
 
 describe('ThemeService', () => {
+  beforeEach(() => localStorage.clear());
+
   afterEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();
