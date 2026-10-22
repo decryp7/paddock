@@ -162,7 +162,7 @@ mod tests {
         let c = shell_candidates(Some("/usr/bin/fish"), all);
         assert_eq!(c[0], PathBuf::from("/usr/bin/fish"));
         assert!(c.len() >= 2);
-        assert_eq!(shell_candidates(Some("zsh"), all)[0].as_os_str() == "zsh", false);
+        assert!(shell_candidates(Some("zsh"), all).iter().all(|p| p.is_absolute()));
         assert!(shell_candidates(Some("/nope"), |p| p != Path::new("/nope"))
             .iter()
             .all(|p| p != Path::new("/nope")));
