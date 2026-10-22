@@ -14,6 +14,11 @@ import { WatchStatus } from '../../shared/ui/watch-status';
 import { WatchesStore } from '../../state/watches.store';
 import { WatchDetailStore } from './watch-detail.store';
 
+function choice(a: { variant?: string; extension?: string }): string {
+  const parts = [a.variant, a.extension ? '.' + a.extension : ''].filter(Boolean);
+  return parts.length ? ` (${parts.join(' ')})` : '';
+}
+
 /** One watch: its latest release, history, recent checks and settings, with every action on it. */
 @Component({
   selector: 'sp-watch-detail-page',
@@ -87,12 +92,16 @@ export class WatchDetailPage {
   protected actionText(a: WatchAction): string {
     switch (a.kind) {
       case 'open-location':
-        return 'Open the release location';
+        return `Open the release location${choice(a)}`;
       case 'download':
-        return `Download to ${a.folder || 'the downloads folder'}${a.verify ? ' and verify the checksum' : ''}`;
+        return `Download${choice(a)} to ${a.folder || 'the downloads folder'}${a.verify ? ' and verify the checksum' : ''}`;
       case 'run-command':
         return `Run ${a.program}${a.args.length ? ' ' + a.args.join(' ') : ''}`;
     }
+  }
+
+  protected latestByText(by: string): string {
+    return by === 'modified' ? 'Newest modified time' : by === 'created' ? 'Newest created time' : by === 'name' ? 'Last name in natural order' : 'Newest version';
   }
 
   protected notifyText(mode: string): string {

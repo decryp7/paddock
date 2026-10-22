@@ -1,7 +1,7 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, WatchSummary } from '../core/api.types';
-import { BACKEND } from '../core/backend';
+import { BACKEND, type ReleaseTarget } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { needsAttention } from '../shared/labels';
 import { ToastStore } from './toast.store';
@@ -94,10 +94,11 @@ export const WatchesStore = signalStore(
       },
       setInstalled: (id: string, version: string | null) => act(() => backend.setInstalled(id, version), version ? `Recorded ${version} as installed` : 'Installed version cleared'),
       remove: (id: string) => act(() => backend.deleteWatch(id), 'Watch deleted'),
-      openRelease: (id: string, version: string) => act(() => backend.openRelease(id, version), null),
-      async download(id: string, version: string): Promise<void> {
+      acknowledgeProduct: (id: string, product: string) => act(() => backend.acknowledgeProduct(id, product), 'Marked as seen'),
+      openRelease: (id: string, version: string, target?: ReleaseTarget) => act(() => backend.openRelease(id, version, target), null),
+      async download(id: string, version: string, target?: ReleaseTarget): Promise<void> {
         try {
-          const path = await backend.downloadRelease(id, version);
+          const path = await backend.downloadRelease(id, version, target);
           toast.success('Download finished', path);
         } catch (e) {
           toast.error('Download failed', toCommandError(e).message);

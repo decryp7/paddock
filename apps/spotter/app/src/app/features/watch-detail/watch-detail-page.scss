@@ -99,3 +99,36 @@
     overflow-wrap: anywhere;
   }
 }
+
+.products {
+  display: grid;
+  gap: var(--pd-space-3);
+}
+.product {
+  display: grid;
+  gap: var(--pd-space-2);
+  padding: var(--pd-space-4);
+  header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--pd-space-2);
+    h3 {
+      font-size: var(--pd-text-body);
+      font-weight: var(--pd-weight-semibold);
+    }
+  }
+}
+.files {
+  display: grid;
+  gap: var(--pd-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  li {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--pd-space-2);
+  }
+}

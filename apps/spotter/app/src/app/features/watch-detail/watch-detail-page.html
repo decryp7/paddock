@@ -68,6 +68,46 @@
         }
       </section>
 
+      @if (d.products.length) {
+        <section class="section" aria-labelledby="prod-h">
+          <div class="section-head"><h2 id="prod-h">Products</h2><span class="help">{{ d.products.length }} followed separately</span></div>
+          <div class="products">
+            @for (p of d.products; track p.id) {
+              <article class="surface product" [attr.aria-label]="p.name">
+                <header>
+                  <h3>{{ p.name }}</h3>
+                  @if (p.name !== p.id) { <span class="help mono">{{ p.id }}</span> }
+                  @if (p.unseen) { <span class="chip accent">New</span> }
+                  @if (p.muted) { <span class="chip">Muted</span> }
+                  @if (p.unseen) {
+                    <button type="button" class="btn sm" (click)="watches.acknowledgeProduct(s.id, p.id)" [attr.aria-label]="'Mark ' + p.name + ' as seen'"><mat-icon svgIcon="sp:check" aria-hidden="true" />Mark as seen</button>
+                  }
+                </header>
+                @if (p.latest; as r) {
+                  <p class="meta"><span class="ver">{{ r.version }}</span>@if (r.channel) { <span class="chip">{{ r.channel }}</span> }@if (r.updatedInPlace) { <span class="chip info" title="The same file name came back with new contents">Updated in place</span> } · found {{ r.firstSeenMs | ago }}</p>
+                  <ul class="files" [attr.aria-label]="'Files of ' + p.name + ' ' + r.version">
+                    @for (a of r.artifacts; track a.name) {
+                      <li>
+                        <span class="mono truncate">{{ a.name }}</span>
+                        @if (a.variant) { <span class="chip">{{ a.variant }}</span> }
+                        <span class="help">{{ bytes(a.size) }} · {{ dateTime(a.modifiedMs) }}</span>
+                        @if (a.checksumFile) { <span class="chip success" [title]="a.checksumFile">checksum {{ a.checksumFile }}</span> }
+                        <span class="row-actions">
+                          <button type="button" class="btn ghost icon sm" (click)="watches.openRelease(s.id, r.version, { product: p.id, artifact: a.name })" [attr.aria-label]="'Open ' + a.name"><mat-icon svgIcon="sp:external" aria-hidden="true" /></button>
+                          <button type="button" class="btn ghost icon sm" (click)="watches.download(s.id, r.version, { product: p.id, artifact: a.name })" [attr.aria-label]="'Download ' + a.name"><mat-icon svgIcon="sp:download" aria-hidden="true" /></button>
+                        </span>
+                      </li>
+                    }
+                  </ul>
+                } @else {
+                  <p class="help">No release yet.</p>
+                }
+              </article>
+            }
+          </div>
+        </section>
+      }
+
       <section class="section" aria-labelledby="hist-h">
         <div class="section-head"><h2 id="hist-h">Releases</h2><span class="help">{{ d.history.length }} found</span></div>
         @if (d.history.length) {
@@ -89,7 +129,9 @@
                   <tr>
                     <td>
                       <span class="ver">{{ r.version }}</span>
+                      @if (r.product) { <span class="chip">{{ r.product }}</span> }
                       @if (r.prerelease) { <span class="chip">Pre-release</span> }
+                      @if (r.artifacts.length > 1) { <span class="chip" [title]="r.artifacts.length + ' files'">{{ r.artifacts.length }} files</span> }
                       @if (isInstalled(r)) { <span class="chip success">Installed</span> }
                     </td>
                     <td class="truncate name">{{ r.name }}</td>
@@ -99,8 +141,8 @@
                     <td class="mono">{{ hash(r.sha256) }}</td>
                     <td>
                       <div class="row-actions">
-                        <button type="button" class="btn ghost icon sm" (click)="watches.openRelease(s.id, r.version)" [attr.aria-label]="'Open ' + r.version"><mat-icon svgIcon="sp:external" aria-hidden="true" /></button>
-                        <button type="button" class="btn ghost icon sm" (click)="watches.download(s.id, r.version)" [attr.aria-label]="'Download ' + r.version"><mat-icon svgIcon="sp:download" aria-hidden="true" /></button>
+                        <button type="button" class="btn ghost icon sm" (click)="watches.openRelease(s.id, r.version, { product: r.product })" [attr.aria-label]="'Open ' + r.version"><mat-icon svgIcon="sp:external" aria-hidden="true" /></button>
+                        <button type="button" class="btn ghost icon sm" (click)="watches.download(s.id, r.version, { product: r.product })" [attr.aria-label]="'Download ' + r.version"><mat-icon svgIcon="sp:download" aria-hidden="true" /></button>
                         <button type="button" class="btn ghost icon sm" (click)="copy(r.location, 'Location')" [attr.aria-label]="'Copy the location of ' + r.version"><mat-icon svgIcon="sp:copy" aria-hidden="true" /></button>
                         @if (r.sha256) {
                           <button type="button" class="btn ghost icon sm" (click)="copy(r.sha256, 'Checksum')" [attr.aria-label]="'Copy the checksum of ' + r.version"><mat-icon svgIcon="sp:lock" aria-hidden="true" /></button>
@@ -145,6 +187,9 @@
           <dl class="surface kv">
             <dt>Checks</dt><dd>{{ interval(d.spec.intervalSecs) }}</dd>
             <dt>Versions</dt><dd>{{ scheme() }}{{ d.spec.includePrereleases ? ', including pre-releases' : '' }}</dd>
+            @if (d.spec.tracking.latestBy !== 'version') {
+              <dt>Latest by</dt><dd>{{ latestByText(d.spec.tracking.latestBy) }}</dd>
+            }
             @if (d.spec.filter.prefix || d.spec.nameFilter || d.spec.filter.soakHours) {
               <dt>Filters</dt>
               <dd>

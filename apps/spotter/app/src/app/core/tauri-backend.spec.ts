@@ -51,13 +51,25 @@ describe('TauriBackend', () => {
     await backend.installAppUpdate();
     await backend.showMainWindow('/watches');
     await backend.hideTray();
+    await backend.acknowledgeProduct('w1', 'PRO');
+    await backend.openRelease('w1', '1.0', { product: 'PRO', artifact: 'a.iso' });
+    await backend.downloadRelease('w1', '1.0', { artifact: 'a.iso' });
+    await backend.suggestPattern('app-1.2', [{ role: 'major', start: 4, end: 5 }]);
+    await backend.testPattern('custom', '(?<major>\\d+)', true, 'v1');
+    await backend.versionSchemes();
     expect(calls.map((c) => c[0])).toEqual([
       'app_info', 'list_watches', 'get_watch', 'source_kinds', 'test_source', 'save_watch', 'delete_watch', 'set_paused', 'check_now',
       'acknowledge', 'reset_acknowledgement', 'set_installed', 'open_release', 'download_release', 'dashboard', 'events', 'get_settings',
       'save_settings', 'pause_notifications', 'get_autostart', 'set_autostart', 'open', 'choose_folder', 'choose_program', 'presets',
       'discover_feeds', 'renderer_status', 'install_renderer', 'import_list', 'app_update_status', 'check_app_update',
-      'install_app_update', 'show_main_window', 'hide_tray',
+      'install_app_update', 'show_main_window', 'hide_tray', 'acknowledge_product', 'open_release', 'download_release', 'suggest_pattern',
+      'test_pattern', 'version_schemes',
     ]);
+    expect(calls[34]?.[1]).toEqual({ id: 'w1', product: 'PRO' });
+    expect(calls[35]?.[1]).toEqual({ id: 'w1', version: '1.0', product: 'PRO', artifact: 'a.iso' });
+    expect(calls[36]?.[1]).toEqual({ id: 'w1', version: '1.0', product: null, artifact: 'a.iso' });
+    expect(calls[38]?.[1]).toEqual({ versions: 'custom', versionPattern: '(?<major>\\d+)', missingOlder: true, text: 'v1' });
+    expect(calls[12]?.[1]).toEqual({ id: 'w1', version: '1.0', product: null, artifact: null });
     expect(calls[2]?.[1]).toEqual({ id: 'w1' });
     expect(calls[4]?.[1]).toEqual({ draft, secrets: { token: 'x' } });
     expect(calls[15]?.[1]).toEqual({ limit: 20, beforeMs: null });
