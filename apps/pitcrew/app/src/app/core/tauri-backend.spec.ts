@@ -1,5 +1,5 @@
 import type { BackendEvent, Config, RegisterRequest, RunnerConfig } from './api.types';
-import { EVENT_NAME, TauriBackend, type CommandCall, type EventListen } from './tauri-backend';
+import { EVENT_NAME, platformFromUserAgent, TauriBackend, type CommandCall, type EventListen } from './tauri-backend';
 
 function setup(result: unknown = undefined) {
   const call = vi.fn(async () => result);
@@ -83,20 +83,39 @@ describe('TauriBackend commands', () => {
 });
 
 describe('TauriBackend platform', () => {
-  it('is the browser until init asks the shell', async () => {
+  it('takes the platform the shell names', async () => {
     const { backend } = setup('macos');
     expect(backend.platform()).toBe('browser');
     await backend.init();
     expect(backend.platform()).toBe('macos');
   });
 
-  it('keeps the browser platform when the shell cannot answer', async () => {
+  it('falls back to the user agent when the shell cannot answer', async () => {
     const call = vi.fn(async () => {
       throw new Error('no');
     });
     const backend = new TauriBackend(call as unknown as CommandCall, vi.fn() as unknown as EventListen);
     await backend.init();
-    expect(backend.platform()).toBe('browser');
+    expect(backend.platform()).toBe(platformFromUserAgent(navigator.userAgent));
+  });
+
+  it('never blocks start-up when the shell does not answer at all (a blank window otherwise)', async () => {
+    let answer: (p: string) => void = () => undefined;
+    const call = vi.fn(() => new Promise((resolve) => (answer = resolve)));
+    const backend = new TauriBackend(call as unknown as CommandCall, vi.fn() as unknown as EventListen);
+    await backend.init(20);
+    expect(backend.platform()).toBe(platformFromUserAgent(navigator.userAgent));
+    answer('linux');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(backend.platform()).toBe('linux');
+  });
+
+  it('reads the platform from user agents', () => {
+    expect(platformFromUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15')).toBe('macos');
+    expect(platformFromUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/130.0')).toBe('windows');
+    expect(platformFromUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15')).toBe('linux');
+    expect(platformFromUserAgent('')).toBe('browser');
   });
 });
 

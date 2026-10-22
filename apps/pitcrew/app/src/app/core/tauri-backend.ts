@@ -46,6 +46,17 @@ export const NAVIGATE_EVENT = 'pitcrew://navigate';
  * The real backend: the Tauri commands of `app/src-tauri/src/commands.rs`. Argument keys are camelCase; Tauri maps
  * them to the commands' snake_case parameters. Every rejection becomes a typed `CommandError`.
  */
+/** How long start-up waits for the shell to name the platform. */
+export const PLATFORM_WAIT_MS = 1000;
+
+/** The platform the webview's user agent names (only for the window chrome until the shell answers). */
+export function platformFromUserAgent(ua: string): Platform {
+  if (/Windows/i.test(ua)) return 'windows';
+  if (/Mac OS X|Macintosh/i.test(ua)) return 'macos';
+  if (/Linux|X11/i.test(ua)) return 'linux';
+  return 'browser';
+}
+
 export class TauriBackend implements PitcrewBackend {
   private platformName: Platform = 'browser';
 
@@ -54,13 +65,21 @@ export class TauriBackend implements PitcrewBackend {
     private readonly listenTo: EventListen = listen,
   ) {}
 
-  /** Asks the shell for the platform once at start-up (the interface's `platform()` is synchronous). */
-  async init(): Promise<void> {
-    try {
-      this.platformName = await this.call<Platform>('platform_name');
-    } catch {
-      // Window chrome falls back to the plain look; nothing else depends on it.
-    }
+  /**
+   * Asks the shell for the platform at start-up (the interface's `platform()` is synchronous). Start-up waits for it
+   * at most {@link PLATFORM_WAIT_MS}: in a window that was just created the first IPC call can stay unanswered, and
+   * an app initializer that never resolves leaves the window blank for good. Until the shell answers, the platform
+   * comes from the user agent (it only picks the window chrome); a late answer still replaces it.
+   */
+  async init(waitMs = PLATFORM_WAIT_MS): Promise<void> {
+    this.platformName = platformFromUserAgent(globalThis.navigator?.userAgent ?? '');
+    const asked = this.call<Platform>('platform_name').then(
+      (p) => {
+        this.platformName = p;
+      },
+      () => undefined, // Window chrome falls back to the user agent's guess; nothing else depends on it.
+    );
+    await Promise.race([asked, new Promise<void>((resolve) => setTimeout(resolve, waitMs))]);
   }
 
   platform(): Platform {
