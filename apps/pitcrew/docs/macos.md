@@ -16,7 +16,16 @@ bash scripts/macos-bootstrap.sh
 It checks macOS 13+, the Xcode command line tools, Rust and Node 24, runs `npm ci` and `npx tauri build --bundles
 app,dmg`, and prints where `Pitcrew.app` and the `.dmg` are (`target/dist/bundle/`). It installs nothing.
 
-Apple Silicon builds an arm64 app; on an Intel Mac it is x86_64. The runner Pitcrew installs matches the Mac
+Apple Silicon builds an arm64 app; on an Intel Mac it is x86_64. Two things in the build matter on macOS:
+
+- **The bundle is sealed with an ad-hoc signature** (`"signingIdentity": "-"` in `app/src-tauri/tauri.macos.conf.json`).
+  This is required: with no identity the bundle is only linker-signed (no sealed resources) and `SMAppService`
+  refuses the launch agent plist with codesigning error -67056. A release build overrides it with a Developer ID.
+- **`index.html` must not contain inline `<style>` or `<script>`.** Tauri adds a nonce or hash for each to the CSP, and
+  a `style-src` with a nonce makes the webview ignore `'unsafe-inline'`, which blocks the `<style>` elements Angular
+  adds at run time: the app then renders without its component styles. `inlineCritical` is therefore `false` in
+  `angular.json`, and `scripts/check-index.mjs` (run by `beforeBuildCommand` after `ng build`) fails the bundle if
+  the built `index.html` has inline elements. The runner Pitcrew installs matches the Mac
 (`gitea-runner-<v>-darwin-arm64` or `-darwin-amd64`).
 
 ## 2. Install
@@ -35,8 +44,14 @@ Pitcrew; grant it to the runner only if your jobs read protected folders (Deskto
 
 ## 3. Register the runner
 
-Before Pitcrew takes over, stop any other supervisor of the same runner folder (e.g. a hand-made launchd job:
-`launchctl bootout gui/$(id -u)/<its label>`), or Pitcrew refuses to start a second copy and tells you so.
+Before Pitcrew takes over, stop whatever supervised the runner folder until now, or two supervisors fight over one
+runner. Pitcrew does not do this for you:
+
+```sh
+launchctl bootout gui/$(id -u)/<label of the old launchd job>
+pgrep -fl supervisor          # a supervisor script that is still running (its loop restarts the runner)
+kill <its pid>                # kill the script first, then stop the runner it started if it still runs
+```
 
 In Pitcrew: **Runners ▸ Add runner**.
 
@@ -48,6 +63,11 @@ In Pitcrew: **Runners ▸ Add runner**.
 - **Labels**: `macos-latest,macos-arm64` (add `:host` forms such as `macos-latest:host` if your server expects them).
 - **Folder**: the default (`~/Library/Application Support/Pitcrew/runners/<name>`) or an existing registered runner
   folder to adopt.
+
+**Adopting an existing folder** (verified on a real Mac with a `~/gitea-runner` folder): choose "An existing runner
+folder". A folder that is registered already (it has a `.runner` file, which Pitcrew never reads) is used as it is:
+no registration happens and the token is not sent; the runner log says so. Both layouts work: Pitcrew's own
+(`<folder>/bin/gitea-runner`) and the legacy one with the binary next to `config.yaml` in the folder itself.
 
 Pitcrew downloads the latest Gitea runner for the Mac, verifies its SHA-256 against both `dl.gitea.com` and the
 gitea.com release, writes its configuration (jobs and cache inside the runner folder, so housekeeping finds them),
@@ -101,6 +121,10 @@ Settings ▸ Service ▸ **Turn off** (unregisters the agent; runners stop after
 Applications. The runner folders stay; remove the runners on the server if you no longer need them.
 
 ## What was verified where
+
+On a real Mac (Apple Silicon) on 2026-10-22: the sealed bundle, `SMAppService` registration of the launch agent
+(after the ad-hoc signature fix), the styled window under the CSP (after the `inlineCritical` fix) and adopting a
+registered `~/gitea-runner` folder.
 
 The macOS code paths (launch agent, Unix socket with mode 0600, SIGTERM stops, Keychain, SMAppService) are built and
 tested by the `macos` CI job on a `macos-latest` runner; the `.dmg` is built by the `bundle` job on tags, nightly and

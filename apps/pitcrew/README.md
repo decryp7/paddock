@@ -7,8 +7,11 @@ self-hosted runner — on **Windows and macOS** (Linux later).
 A pit crew keeps the car going without stopping the race: Pitcrew restarts a runner that crashed or stalled, and
 updates it between jobs, so the builds keep running.
 
-> **Status: early skeleton (v0.1.0, unreleased).** The design is written down and the pure core is built and tested;
-> the service and the app are scaffolds that build and answer "not implemented yet". See [What works](#what-works).
+> **Status: v0.1.0, unreleased.** The supervisor, watchdog, updates with roll-back, housekeeping, dashboard and tray
+> are built and tested; the macOS path was verified on a real Mac on 2026-10-22. No release is published yet. See
+> [Status](#status).
+
+![The dashboard](docs/screenshots/dashboard-dark.png)
 
 ## Why
 
@@ -19,56 +22,102 @@ and nobody can see what it is doing. Pitcrew does the same work as a proper serv
 that show what is going on, and adds what the scripts lack: roll-back of bad updates, crash-loop protection, several
 runners per machine and macOS support.
 
-## What it does (design)
+## What it does
 
 1. **Runs the runner as a service.** A small Rust service: a Windows service under the Service Control Manager, or a
-   per-user launch agent on macOS ([ADR 0003](docs/adr/0003-service-model.md)). On Windows each runner runs either
-   in the logged-on user's desktop session (default; jobs that need a desktop, such as WebView2 tests, work) or in the
-   service session. Registering and removing the service is done from the app; elevation prompts are the OS's own,
-   and Pitcrew never handles passwords.
-2. **Health and watchdog.** Per runner: process alive, registered with the server, polling OK, job running. A
-   runner whose polls keep timing out while no job runs is **stalled** (default: 6 timed-out polls in 15 minutes)
-   and is restarted. Restarts back off (10 s doubling to 5 min, reset after 10 min of running); 5 exits in 10
-   minutes is a **crash loop**: restarts pause for 30 minutes and you are notified. A running job is never killed.
-3. **Runner auto-update** ([ADR 0002](docs/adr/0002-runner-auto-update.md)). Checks the official releases
-   (`dl.gitea.com/gitea-runner`, cross-checked with the gitea.com release) on a schedule, downloads the binary for the
-   platform, verifies its SHA-256 from two hosts (signatures where a project publishes them), waits until the runner
-   is idle, swaps the binary, restarts it and waits for the server to accept it — and **rolls back** to the previous
-   binary automatically if it doesn't within a few minutes. Policy per runner: automatic / notify only / manual, an
-   optional pinned version, and an update window. The window shows current and latest version and the last update's
-   result.
-4. **Pitcrew updates itself** with the Tauri updater: minisign-signed releases, opt-in ([docs/releasing.md](docs/releasing.md)).
-5. **Tray app and window.** Status per runner, logs (bounded, searchable), start / stop / restart, settings, and
-   notifications for failures and updates. Closing the window keeps Pitcrew in the tray; quitting the app never stops
-   the runners.
-6. **Several runners per machine**, each with its own folder, labels and work directories, configured in a versioned
-   `pitcrew.toml` that tolerates damage (falls back to the last good copy, skips one bad entry).
+   per-user launch agent on macOS registered with `SMAppService` ([ADR 0003](docs/adr/0003-service-model.md)). On
+   Windows each runner runs either in the logged-on user's desktop session (default; jobs that need a desktop, such as
+   WebView2 tests, work) or in the service session. Installing the service is done from the app; elevation prompts
+   are the OS's own, and Pitcrew never handles passwords.
+2. **Supervisor and watchdog** ([ADR 0006](docs/adr/0006-supervision-and-housekeeping.md)). Per runner: process
+   alive, registered, polling OK, job running (with repository, job, run link and elapsed time). A runner whose
+   polls keep timing out while no job runs is **stalled** and restarted. Restarts back off; repeated exits are a
+   **crash loop**: restarts pause and you are notified. A running job is never killed. Pause, resume and drain
+   (finish the current job, then stop) are one click.
+3. **Safe updates with roll-back** ([ADR 0002](docs/adr/0002-runner-auto-update.md)). Checks the official runner
+   releases on a schedule, downloads the binary for the platform, verifies its SHA-256 from two hosts, waits until the
+   runner is idle, swaps the binary, restarts it and waits for the server to accept it, and **rolls back**
+   automatically if it does not. Per runner: automatic, ask first or manual; pin or skip a version; an update window.
+4. **Housekeeping.** Cleans each runner's work and cache folders on a schedule or on demand, warns when the disk is
+   low, and records what it freed.
+5. **Dashboard.** Live runner cards, machine tiles (CPU, memory, free disk, Pitcrew itself), jobs per day, an uptime
+   timeline with restarts, stalls and updates marked, an events feed and quick actions. With a read-only Gitea token
+   (kept in the OS credential store) it also shows job outcomes. History is local and bounded.
+6. **Tray and notifications.** The tray icon (Windows notification area, macOS menu bar) shows the worst state of all
+   runners. Closing the window keeps Pitcrew running; quitting the app never stops the runners. Notifications for
+   stalls, crash loops, updates, roll-backs and low disk are configurable.
+7. **Several runners per machine**, each with its own folder, labels and session, in a versioned `pitcrew.toml` that
+   tolerates damage (falls back to the last good copy, skips one bad entry). An existing registered runner folder is
+   adopted as it is: no registration happens.
+8. **Pitcrew updates itself** with the Tauri updater: minisign-signed releases, opt-in
+   ([docs/releasing.md](docs/releasing.md)).
 
-The architecture (a pure core, a privileged service, an unprivileged app, and the local IPC between them) is in
-[ADR 0001](docs/adr/0001-architecture.md).
+## Screenshots
 
-## What works
+Taken against the mock backend (`docs/screenshots`, dark and light for every screen).
+
+| | |
+| --- | --- |
+| ![Runners](docs/screenshots/runners-dark.png) | ![Runner detail](docs/screenshots/runner-detail-dark.png) |
+| ![Activity](docs/screenshots/activity-light.png) | ![Runner updates](docs/screenshots/runner-updates-light.png) |
+| ![Logs](docs/screenshots/logs-dark.png) | ![Register a runner](docs/screenshots/register-wizard-dark.png) |
+| ![Settings](docs/screenshots/settings-light.png) | ![Disk and cleanup](docs/screenshots/runner-disk-light.png) |
+
+## Install
+
+No release is published yet; build the installer yourself ([Building](#building)) or take the CI artifacts of a `v*`
+tag or the nightly run.
+
+### Windows
+
+Run the NSIS installer (`Pitcrew_<version>_x64-setup.exe`). Then **Settings > Service > Install service**: Windows
+asks for administrator permission (UAC) once to register the "Pitcrew" service (automatic, delayed start, recovery
+actions). Add a runner with **Register runner**, or adopt an existing runner folder.
+
+### macOS (13 or newer)
+
+The build is **not notarised**; it is signed ad hoc (see [docs/macos.md](docs/macos.md)). Open the `.dmg`, drag Pitcrew
+to Applications, and open it the first time with right-click > Open (or System Settings > Privacy & Security > Open
+Anyway). Then **Settings > Service > Turn on**: Pitcrew registers its launch agent with `SMAppService`, and macOS asks you
+to allow it under **System Settings > General > Login Items & Extensions**. No administrator rights are needed.
+
+To adopt an existing registered runner folder (for example `~/gitea-runner`, with the binary next to `config.yaml`),
+choose "An existing runner folder" in the Register wizard: the folder is used as it is and the token is not sent.
+Stop whatever supervised that folder before (a launchd job: `launchctl bootout gui/$(id -u)/<label>`; a leftover
+supervisor script: kill it). The full walk-through, permissions and a verification script are in
+[docs/macos.md](docs/macos.md).
+
+## Architecture
+
+A pure core, a privileged service and an unprivileged app that talk over one local IPC.
+
+| Part | Where | Role |
+| --- | --- | --- |
+| Core | `crates/pitcrew-core` | Pure rules, no I/O, time passed in: controller (start, stop, backoff, stalls, drain), jobs, update policy and state machine, housekeeping, history, metrics, notifications, config, protocol. |
+| Service | `crates/pitcrew-service` | One supervisor thread, workers for slow work, launch adapters, the IPC server (named pipe with ACL / 0600 Unix socket), the SCM and launchd integration. |
+| App | `app/src-tauri`, `app/src` | Tauri 2 shell (tray, window, commands, credentials, updater) and the Angular UI over a `BACKEND` token (Tauri or mock). |
+
+Decisions: [0001 architecture](docs/adr/0001-architecture.md), [0002 runner auto-update](docs/adr/0002-runner-auto-update.md),
+[0003 service model](docs/adr/0003-service-model.md), [0004 IPC protocol and ACL](docs/adr/0004-ipc-protocol-and-acl.md),
+[0005 credential storage](docs/adr/0005-credential-storage.md), [0006 supervision and housekeeping](docs/adr/0006-supervision-and-housekeeping.md).
+
+## Status
 
 | Area | State |
 | --- | --- |
-| Core rules (`crates/pitcrew-core`) | **Built and unit-tested:** log-line classification, stall rule, restart backoff and crash-loop protection, health status, update policy (modes, pin, window across midnight), update state machine with drain/postpone/roll-back, versions, release locations for Gitea's and Forgejo's runner, checksum files and verification, configuration with migration and damage tolerance, app ↔ service protocol and framing, launch agent plist. |
-| Service (`crates/pitcrew-service`) | Command line, configuration loading, child processes with timeouts. On Windows: runs under the SCM (start/stop) and `install`/`uninstall` register it with automatic delayed start and recovery actions — **compiled, not yet tried on a real machine**. Supervising runners, the IPC server, downloads and updates: *not implemented yet*. macOS launch agent registration: *not implemented yet* (the plist is rendered). |
-| App (`app/src-tauri`, `app/src`) | Tray icon (Open / Quit), window that hides to the tray, the status view (against the mock in the browser build), "updates not available in this build" without an update key. The service client: *not implemented yet*, so the real app shows "Connecting to the Pitcrew service is not implemented yet" with Retry. |
-| Installers | CI builds a Windows NSIS installer on tags and nightly; it does not contain the service yet. |
+| Core | Built and unit-tested (rules, update state machine with roll-back, config migration, protocol). |
+| Service | Supervisor, IPC, session launch, updates and cleanup built; end-to-end tests drive the real supervisor with a fake runner. Windows service and macOS launch agent have their own CI jobs. |
+| App | Dashboard, runners, activity, logs, updates, settings and the register wizard against the real service. The Pitcrew self-update UI (check, download, restart) is not built yet: the updater plugin is wired and About reports whether the build can update. |
+| macOS | Verified on a real Mac on 2026-10-22 (bundle, `SMAppService`, adopting a runner folder). |
+| Windows | Built and tested on the Windows CI runner; not yet verified end to end on a dedicated build machine. |
+| Installers | CI builds a Windows NSIS installer and a macOS `.dmg` on tags, nightly and manual runs. Not yet published. |
 
 ## Roadmap
 
-1. Service: the supervisor loop for one runner on Windows (start with redirected logs, classify lines, stall rule,
-   backoff, graceful stop), the named-pipe server and the app's client; status in the window and tray.
-2. Interactive-session launch on Windows (ADR 0003), session-change handling; service mode.
-3. Runner auto-update end to end (download, two-host checksum, drain, swap, confirm, roll-back) with a fake runner
-   binary in integration tests.
-4. Bundle the service with the app; install/uninstall from the app with UAC; the macOS launch agent via
-   `SMAppService`.
-5. Logs view (paged, searchable), settings, notifications; register a runner from the app.
-6. Pitcrew self-update UI (check, download, restart) on top of the wired updater plugin.
-7. Forgejo's runner (user-provided binary on Windows/macOS, OpenPGP-verified updates on Linux); Linux (systemd).
-8. Later: GitHub's self-hosted runner, LaunchDaemon mode for headless Macs.
+1. Pitcrew self-update UI (check, download, restart) on top of the wired updater plugin.
+2. Forgejo's runner (user-provided binary on Windows/macOS, OpenPGP-verified updates on Linux); Linux (systemd).
+3. Developer ID signing and notarisation for the macOS build.
+4. Later: GitHub's self-hosted runner, LaunchDaemon mode for headless Macs.
 
 Dedicated build Macs: since the macOS service is a launch agent, enable automatic log-in for the CI user so the
 runners start after a reboot.
@@ -86,6 +135,9 @@ cargo test --workspace                 # core, service and app tests
 (cd app && npx tauri dev)              # the desktop app
 cargo run -p pitcrew-service -- check-config
 ```
+
+On a Mac, `bash scripts/macos-bootstrap.sh` checks the prerequisites and builds the `.app` and `.dmg`
+([docs/macos.md](docs/macos.md)).
 
 More in [docs/development.md](docs/development.md); releasing and the update signing key in
 [docs/releasing.md](docs/releasing.md); engineering rules in [AGENTS.md](AGENTS.md).

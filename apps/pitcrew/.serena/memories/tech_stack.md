@@ -1,6 +1,6 @@
 # Tech stack
 
-- Rust stable (1.99 here), workspace: pitcrew-core, pitcrew-service, app/src-tauri (Tauri 2.12).
+- Rust stable (1.88+), workspace: pitcrew-core, pitcrew-service, app/src-tauri (Tauri 2.12).
 - Service: tokio (IPC only), sysinfo (processes, metrics, disks), ureq 3 + rustls with the platform verifier,
   windows-service + windows 0.62 (Windows), nix (Unix signals), chrono (local time).
 - App: tauri plugins notification, opener, autostart, updater (minisign); keyring 4 (Credential Manager / Keychain);
@@ -9,3 +9,5 @@
   Vitest (`ng test`), Playwright (e2e and screenshots against the mock backend).
 - CI: Gitea Actions `.gitea/workflows/build.yml` (Linux container jobs, the Windows host runner, the macOS host
   runner `macos-latest`).
+- macOS bundle: ad-hoc signed (`signingIdentity "-"`, required by SMAppService); `scripts/check-index.mjs` rejects inline
+  `<style>`/`<script>` in index.html (Tauri CSP nonce); `scripts/sidecar.mjs` builds the service for `externalBin`.

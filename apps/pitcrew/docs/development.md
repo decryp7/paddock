@@ -7,7 +7,7 @@ crates/pitcrew-core      pure logic: rules, state machines, config, protocol (no
 crates/pitcrew-service   the background service: supervision, OS service integration, IPC server
 app/src-tauri            the Tauri 2 shell: tray, window, commands, updater
 app/src                  the Angular UI (standalone components, signals, SignalStores)
-scripts/                 commit-lint, release manifest (latest.json)
+scripts/                 commit-lint, release manifest (latest.json), sidecar.mjs, check-index.mjs, macos-bootstrap.sh, macos-verify.sh
 docs/adr/                architecture decisions
 .gitea/workflows/        CI
 ```
@@ -34,6 +34,27 @@ cargo run -p pitcrew-service -- --help
 cargo run -p pitcrew-service -- check-config     # reads pitcrew.toml from the data folder
 ```
 
+`npx tauri dev` and `tauri build` run `scripts/sidecar.mjs` first (`beforeDevCommand` / `beforeBuildCommand`): it builds
+`pitcrew-service` (debug with `--dev`, the `dist` profile otherwise; honours `CARGO_TARGET_DIR`) and copies it to
+`app/src-tauri/binaries/pitcrew-service-<target triple>` where Tauri's `externalBin` expects it. `tauri build` then
+runs `scripts/check-index.mjs`, which fails when the built `index.html` has inline `<style>`/`<script>` (they break
+component styles under Tauri's CSP; `inlineCritical` stays `false`, see [macos.md](macos.md)).
+
+### Screenshots and browser tests
+
+```sh
+cd app
+npx playwright test                                   # flows against `ng serve` with the mock backend (port 4310; PW_PORT overrides)
+SCREENSHOTS=1 npx playwright test --project=screenshots   # rewrites ../docs/screenshots (every screen, dark and light)
+```
+
+Review the images before committing them.
+
+### On a Mac
+
+`bash scripts/macos-bootstrap.sh [--check]` checks the prerequisites and builds the `.app` and `.dmg` (nothing is
+installed system-wide); `bash scripts/macos-verify.sh` checks an installed Pitcrew (read-only). See [macos.md](macos.md).
+
 The data folder is `%ProgramData%\Pitcrew` on Windows and `~/Library/Application Support/Pitcrew` on macOS.
 
 ### The Windows service
@@ -48,8 +69,8 @@ sc.exe query Pitcrew
 target\debug\pitcrew-service.exe uninstall
 ```
 
-Register the binary from a stable location: the SCM keeps the path. The service currently only answers the SCM
-(start/stop); supervision is not built yet.
+Register the binary from a stable location: the SCM keeps the path. `pitcrew-service run` supervises in the
+foreground (for development); `status` asks a running service for its state.
 
 ## Quality gates
 
@@ -60,7 +81,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny --workspace check
-node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs
+node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs
 (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
 ```
 
@@ -83,7 +104,8 @@ and `Square*`/`StoreLogo` files (Pitcrew ships no mobile or Store packages).
 
 ## CI/CD
 
-`.gitea/workflows/build.yml`: format + clippy (Linux, plus a macOS type-check), tests (Linux and the Windows host
-runner), licences/advisories/commit messages/script tests, frontend lint/build/tests; installers on `v*` tags, the
-nightly run and manual runs; the release job publishes the installers, release notes (git-cliff) and `latest.json`.
+`.gitea/workflows/build.yml`: jobs `rust-lint` (format + clippy, Linux), `rust-test` (Linux and the Windows host runner),
+`macos` (clippy + tests on the Mac host runner, kept lean), `licences` (cargo-deny, commit messages, the three script
+tests), `frontend` (lint, build, unit tests with coverage); `bundle` (Windows NSIS and macOS `.dmg`) on `v*` tags, the
+nightly run and manual runs; the `release` job publishes the installers, release notes (git-cliff) and `latest.json`.
 See [releasing.md](releasing.md).

@@ -131,7 +131,7 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
   cargo deny --workspace check
-  node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs
+  node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
   ```
 

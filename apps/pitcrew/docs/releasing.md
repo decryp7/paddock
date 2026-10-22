@@ -1,7 +1,6 @@
 # Releasing Pitcrew (and signed updates)
 
-A `v*` tag on `main` runs `.gitea/workflows/build.yml`: the `bundle` jobs build the installers (Windows NSIS today;
-macOS once a `macos-latest` runner is registered), and the `release` job publishes a Gitea release with the
+A `v*` tag on `main` runs `.gitea/workflows/build.yml`: the `bundle` jobs build the installers (Windows NSIS and the macOS `.dmg` on the `macos-latest` host runner), and the `release` job publishes a Gitea release with the
 installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Pitcrew's
 updater reads. Installers are also built for the nightly run of `main` and manual runs (`workflow_dispatch`).
 
