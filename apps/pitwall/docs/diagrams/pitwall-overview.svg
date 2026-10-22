@@ -33,9 +33,9 @@
 <rect x="496" y="352" width="368" height="104" rx="6" class="n acc"/>
 <text x="512" y="380" class="h">Queue and serving</text>
 <text x="512" y="402" class="t">Aliases and presets pick the model; priorities and</text>
-<text x="512" y="418" class="t">caps queue it; it loads on first use with its parallel</text>
-<text x="512" y="434" class="t">slots (context per slot) and is released when idle or</text>
-<text x="512" y="450" class="t">under pressure.</text>
+<text x="512" y="418" class="t">caps queue it; caches answer repeats; it loads on</text>
+<text x="512" y="434" class="t">first use with its parallel slots and is released when</text>
+<text x="512" y="450" class="t">idle.</text>
 <rect x="496" y="472" width="368" height="96" rx="6" class="n acc"/>
 <text x="512" y="500" class="h">Model library</text>
 <text x="512" y="522" class="t">Search, fit check, resumable verified downloads with</text>
@@ -105,7 +105,7 @@
 <text x="932" y="430" class="m">asks</text>
 <rect x="48" y="904" width="1232" height="88" rx="6" class="n core"/>
 <text x="64" y="932" class="h">pitwall-core: pure Rust, no I/O, no clock</text>
-<text x="64" y="956" class="t">API translation, scheduler, memory policy, fit check, model choice, presets, slots, keys, limits, usage, update rules, engine pins, privacy allow-list, settings.</text>
+<text x="64" y="956" class="t">API translation, scheduler, memory policy, fit check, model choice, presets, slots, cache rules, keys, limits, usage, update rules, engine pins, privacy allow-list, settings.</text>
 <text x="64" y="976" class="t">Time and readings come in as values. The server and the app both use it.</text>
 <rect x="48" y="1028" width="1000" height="40" rx="14" class="g"/>
 <rect x="68" y="1040" width="28" height="16" rx="4" class="n ext"/>

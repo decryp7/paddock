@@ -52,7 +52,7 @@ group(AX, top, AW, ph, 'Pitwall app and CLI: see and control');
 
 // service
 box(SX + 24, 208, SW - 48, 128, 'accent', 'One gate', 'OpenAI, Anthropic and Ollama APIs plus /x/v1 on 127.0.0.1:11435. Every call passes Host, Origin and key checks; the window uses the admin key.');
-box(SX + 24, 352, SW - 48, 104, 'accent', 'Queue and serving', 'Aliases and presets pick the model; priorities and caps queue it; it loads on first use with its parallel slots (context per slot) and is released when idle or under pressure.');
+box(SX + 24, 352, SW - 48, 104, 'accent', 'Queue and serving', 'Aliases and presets pick the model; priorities and caps queue it; caches answer repeats; it loads on first use with its parallel slots and is released when idle.');
 box(SX + 24, 472, SW - 48, 96, 'accent', 'Model library', 'Search, fit check, resumable verified downloads with their origin, and opt-in update notices that only ever check.');
 box(SX + 24, 584, SW - 48, 80, 'accent', 'Engines', 'llama.cpp builds: self-test, pin, roll back; missing features are refused with a reason.');
 box(SX + 24, 680, SW - 48, 80, 'accent', 'Keys, limits and usage', 'Per-app keys and limits; tokens, requests and attributed memory over time.');
@@ -80,7 +80,7 @@ arrow(AX + 24, 440, SX + SW - 24, 440, 'asks');
 // core bar
 out.push(`<rect x="48" y="904" width="1232" height="88" rx="6" class="n core"/>`);
 text(64, 932, 'pitwall-core: pure Rust, no I/O, no clock', 'h');
-text(64, 956, 'API translation, scheduler, memory policy, fit check, model choice, presets, slots, keys, limits, usage, update rules, engine pins, privacy allow-list, settings.', 't');
+text(64, 956, 'API translation, scheduler, memory policy, fit check, model choice, presets, slots, cache rules, keys, limits, usage, update rules, engine pins, privacy allow-list, settings.', 't');
 text(64, 976, 'Time and readings come in as values. The server and the app both use it.', 't');
 // legend
 let lx = 64; const ly = 1048;

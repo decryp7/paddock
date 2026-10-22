@@ -31,7 +31,7 @@ deployment('uml-deployment-windows', { name: 'Windows', ver: 'Windows 10 / 11, x
   cred: { name: 'Credential Manager', tech: 'OS', desc: 'The app’s copy of the admin key.' },
   svc: { name: 'pitwall-server.exe', tech: 'runs as the logged-on user · 127.0.0.1:11435', desc: 'Started by the Windows service “Pitwall” (pitwall-server --service) in the active session and again when it exits. Engines, GPU access and data belong to the user, not to the service.' },
   sm: { name: 'Service Control Manager', tech: 'OS · LocalSystem supervisor', desc: 'Registered by the NSIS installer; unsigned until signing secrets exist.' },
-  data: { name: '%APPDATA%\\Pitwall', tech: 'data folder', desc: 'settings.toml, apps.json, usage.json, presets.json, engine-pins.json, model-updates.json, admin.key, models, engines.' },
+  data: { name: '%APPDATA%\\Pitwall', tech: 'data folder', desc: 'settings.toml, apps.json, usage.json, presets.json, engine-pins.json, model-updates.json, cache.sqlite, slots/, admin.key, models, engines.' },
   run: { name: 'llama-server.exe children', tech: 'Vulkan, CUDA or CPU build', desc: 'One per loaded model; no console window, below-normal priority, scrubbed environment.' },
 });
 deployment('uml-deployment-macos', { name: 'macOS', ver: 'Apple Silicon and Intel' }, {
@@ -40,7 +40,7 @@ deployment('uml-deployment-macos', { name: 'macOS', ver: 'Apple Silicon and Inte
   cred: { name: 'Keychain', tech: 'OS', desc: 'The app’s copy of the admin key.' },
   svc: { name: 'pitwall-server', tech: 'runs as the logged-on user · 127.0.0.1:11435', desc: 'Inside the app bundle; gets the login shell’s PATH for external engines. KeepAlive restarts it after a crash or an app update.' },
   sm: { name: 'launchd', tech: 'launch agent via SMAppService', desc: 'Plist net.decryptology.pitwall.service ships in the bundle; the user approves it under Login Items.' },
-  data: { name: '~/Library/Application Support/Pitwall', tech: 'data folder', desc: 'settings.toml, apps.json, usage.json, presets.json, engine-pins.json, model-updates.json, admin.key, models, engines.' },
+  data: { name: '~/Library/Application Support/Pitwall', tech: 'data folder', desc: 'settings.toml, apps.json, usage.json, presets.json, engine-pins.json, model-updates.json, cache.sqlite, slots/, admin.key, models, engines.' },
   run: { name: 'llama-server children', tech: 'Metal or CPU build', desc: 'One per loaded model; scrubbed environment, killed with the server.' },
 });
 deployment('uml-deployment-linux', { name: 'Linux', ver: 'x64 and arm64' }, {
@@ -49,6 +49,6 @@ deployment('uml-deployment-linux', { name: 'Linux', ver: 'x64 and arm64' }, {
   cred: { name: 'Secret Service', tech: 'OS', desc: 'The app’s copy of the admin key, or admin.key when the store is unavailable.' },
   svc: { name: 'pitwall-server', tech: 'runs as the user · 127.0.0.1:11435', desc: 'Gets the login shell’s PATH; restarts itself when its binary changed and it is idle. Packaged as .deb and AppImage; not run on a real desktop yet.' },
   sm: { name: 'systemd (user)', tech: '~/.config/systemd/user/pitwall.service', desc: 'Written by pitwall-server install, Restart=always. Running without a login needs loginctl enable-linger.' },
-  data: { name: '~/.local/share/pitwall', tech: 'data folder · XDG_DATA_HOME', desc: 'settings.toml, apps.json, usage.json, presets.json, engine-pins.json, model-updates.json, admin.key, models, engines.' },
+  data: { name: '~/.local/share/pitwall', tech: 'data folder · XDG_DATA_HOME', desc: 'settings.toml, apps.json, usage.json, presets.json, engine-pins.json, model-updates.json, cache.sqlite, slots/, admin.key, models, engines.' },
   run: { name: 'llama-server children', tech: 'CPU, Vulkan or CUDA build', desc: 'One per loaded model; scrubbed environment, killed with the server.' },
 });

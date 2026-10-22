@@ -89,3 +89,30 @@ const states = (d, list) => list.forEach(([id, c, r, name, desc, h = H, w = W, r
   d.legend([{ kind: 'accent', label: 'State' }, { kind: 'line', label: 'Event' }]);
   save('uml-state-pairing', d, Math.max(d.rect.n[1] + d.rect.n[3], d.rect.ex[1] + d.rect.ex[3]));
 }
+
+// ---------- cache entry ----------
+{
+  Y = 248;
+  const d = frame('States of a cache entry', 'An answer or an embedding is stored, may be used, and ends expired and swept, evicted over the size cap, or dropped when its model, engine or preset changes. An expired entry is never served, even before the sweep (ADR 0019).', 1376);
+  states(d, [
+    ['st', 0, 0, 'Stored', 'Written by the writer thread after a completed answer or a computed vector; expiry clock starts.'],
+    ['us', 1, 0, 'Used', 'A hit: last-used time and hit count are updated; embeddings renew their expiry.'],
+    ['ex', 2, 0, 'Expired', 'Past its expiry (answers: since stored; embeddings: since last use). Never served.'],
+    ['sw', 3, 0, 'Swept', 'Removed by the background sweep: at startup, hourly and when idle, at most 5,000 entries a pass.'],
+    ['ev', 1, 1, 'Evicted', 'Over the size cap: least recently used first.'],
+    ['dr', 0, 1, 'Dropped', 'Its model was removed, the engine build or pin changed, or the preset changed.'],
+  ]);
+  const top = Y;
+  dot(d, 'ini', cx(0) - 40, top - 56, 'start');
+  E(d, 'ini', 'B', 0.5, 'st', 'T', 0.1, [[cx(0) - 32, top - 24], [Math.round(cx(0) + W * 0.1), top - 24]]);
+  link(d, 'st', 'R', 'us', 'L', { label: 'Hit' });
+  link(d, 'us', 'R', 'ex', 'L', { label: 'Time passes' });
+  link(d, 'ex', 'R', 'sw', 'L', { label: 'Sweep' });
+  E(d, 'st', 'T', 0.7, 'ex', 'T', 0.3, [[Math.round(cx(0) + W * 0.7), top - 28], [Math.round(cx(2) + W * 0.3), top - 28]]);
+  d.lbl('Never used, time passes', (cx(0) + W * 0.7 + cx(2) + W * 0.3) / 2, top - 28, 'a', { maxw: 200 });
+  link(d, 'us', 'B', 'ev', 'T', { label: 'Cap exceeded' });
+  link(d, 'st', 'B', 'dr', 'T', { label: 'Invalidated' });
+  d.note('n', cx(2), Y + (H + 96), W * 2 + G, 'Clear now, or clear per app, per model or all, removes entries in any state. A request with Cache-Control: no-cache neither reads nor writes. Expiry options: 1 h, 1 day, 7 days, 30 days, 90 days, never.', 104);
+  d.legend([{ kind: 'accent', label: 'State' }, { kind: 'line', label: 'Event' }]);
+  save('uml-state-cache-entry', d, d.rect.n[1] + d.rect.n[3]);
+}

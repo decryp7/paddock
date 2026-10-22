@@ -32,8 +32,10 @@ classes('uml-class-serving', {
     ['po', 2, 1, { name: 'Policy', attrs: ['idle_unload, deep_idle: Millis', 'release_context_first: bool', 'pressure_available_percent: u8', 'min_free, max_hot, hot_cap', 'yield_to_foreground: bool'], ops: ['preset(Preset) → Policy', '  // memory::plan_release, plan_load'], role: 'core' }],
     ['pr', 3, 1, { name: 'Priority', stereotype: 'enum', attrs: ['Interactive', 'Background', 'Batch'], role: 'core' }],
     ['ps', 2, 2, { name: 'memory::Preset', stereotype: 'enum', attrs: ['LowMemory', 'Balanced', 'Performance', 'Custom'], role: 'core' }],
+    ['cp', 0, 2, { name: 'cache (policy)', attrs: ['key: SHA-256 of fingerprint + request', 'ttl: 1 h … 90 d | never', 'max_bytes: 256 MiB | 512 MiB', 'affinity: conversation key → slot'], ops: ['eligible(req, app, preset) → bool', 'expired(entry, now) → bool', 'victims(entries, cap) → Vec<Key>'], role: 'core' }],
+    ['cs', 1, 2, { name: 'CacheStore', attrs: ['memory: LRU map', 'disk: cache.sqlite (WAL)', 'writer: thread'], ops: ['get(key, now) → Option<Value>', 'put(key, value, meta)', 'sweep(now, 5000)', 'clear(scope), info()'] }],
   ],
-  links: [['al', 'R', 'sv', 'L', 'resolves', imp], ['sv', 'R', 'sc', 'L', '1', comp], ['sc', 'R', 'jb', 'L', '0..*', comp], ['jb', 'B', 'pr', 'T', 'priority', { arrow: 'open' }], ['sv', 'B', 'hm', 'T', '0..*', comp], ['hm', 'L', 'sl', 'R', 'slots', { arrow: 'open' }], ['hm', 'R', 'po', 'L', 'judged by', imp], ['po', 'B', 'ps', 'T', 'from', { arrow: 'open' }]],
+  links: [['al', 'R', 'sv', 'L', 'resolves', imp], ['sv', 'R', 'sc', 'L', '1', comp], ['sc', 'R', 'jb', 'L', '0..*', comp], ['jb', 'B', 'pr', 'T', 'priority', { arrow: 'open' }], ['sv', 'B', 'hm', 'T', '0..*', comp], ['hm', 'L', 'sl', 'R', 'slots', { arrow: 'open' }], ['hm', 'R', 'po', 'L', 'judged by', imp], ['po', 'B', 'ps', 'T', 'from', { arrow: 'open' }], ['cs', 'L', 'cp', 'R', 'decided by', imp]],
 });
 
 classes('uml-class-library', {

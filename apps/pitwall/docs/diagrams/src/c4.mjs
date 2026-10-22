@@ -58,10 +58,10 @@ import { P, save, link, hub, hubAt } from './common.mjs';
   d.group('g3', c3, y0, g3w, 40 + (bottom - y0) + 32 + 112 + 24 - 40 + 0, 'Server process [pitwall-server · windowless · 127.0.0.1 only]', { os: true });
   const hubH = bottom - y0 - 40 + 0;
   d.node('srv', c3 + 24, y0 + 40, g3w - 48, bottom - y0 - 40, 'accent', { name: 'pitwall-server', tech: 'Rust: axum, tokio; the only HTTP client is egress.rs',
-    desc: 'Standard APIs (OpenAI, Anthropic, Ollama) and /x/v1 behind one gate: Host, Origin, key. Management API and live feed for the window. Serving: aliases, queue, load with parallel slots, idle release. Model library with update notices (opt-in, check only), engines with pins, rollback and capability gating, apps, keys and usage history, OS service integration. It reaches engines through pitwall-loopback and takes every decision from pitwall-core.' });
+    desc: 'Standard APIs (OpenAI, Anthropic, Ollama) and /x/v1 behind one gate: Host, Origin, key. Management API and live feed for the window. Serving: aliases, queue, load with parallel slots and slot affinity, idle release, caches for repeated prompts, answers and embeddings. Model library with update notices (opt-in, check only), engines with pins, rollback and capability gating, apps, keys and usage history, OS service integration. It reaches engines through pitwall-loopback and takes every decision from pitwall-core.' });
   const ry = y0 + 40 + (bottom - y0 - 40) + 32;
-  d.node('core', c3 + 24, ry, w3n, 112, 'core', { name: 'pitwall-core', tech: 'Rust library, no I/O', desc: 'Decisions: formats, scheduler, memory, fit, slots, presets, limits, update rules, pins.' });
-  d.node('data', c3 + 24 + w3n + 32, ry, w3n, 112, 'process', { name: 'Data folder', tech: 'TOML, JSON, GGUF', desc: 'settings, apps, usage, presets, engine pins, update notices, models, engines.' });
+  d.node('core', c3 + 24, ry, w3n, 112, 'core', { name: 'pitwall-core', tech: 'Rust library, no I/O', desc: 'Decisions: formats, scheduler, memory, fit, slots, presets, limits, cache keys, update rules, pins.' });
+  d.node('data', c3 + 24 + w3n + 32, ry, w3n, 112, 'process', { name: 'Data folder', tech: 'TOML, JSON, GGUF', desc: 'settings, apps, usage, presets, pins, notices, cache.sqlite, slots, models, engines.' });
   d.rect.g3[3] = ry + 112 + 24 - y0;
   // group 2: app process and the CLI
   const g2h = 40 + 96 + G + 176 + 24;

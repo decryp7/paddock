@@ -24,17 +24,17 @@ const LEGP = [{ kind: 'core', label: 'Component (pure Rust)' }, { kind: 'tag', l
 const SUB = 'C4 · Level 3 — Components of pitwall-core';
 
 panel('c4-3-core-wire', {
-  title: 'pitwall-core — wire formats', kind: SUB, group: 'Wire formats and requests [pure, no I/O]', cols: 3, rows: 2, legend: LEGP,
-  desc: 'Each API is parsed once into one neutral request and answered in its own family’s shape. Time and bytes come in as values (ADR 0002, 0003).',
+  title: 'pitwall-core — wire formats', kind: SUB, group: 'Wire formats and requests [pure, no I/O]', cols: 3, rows: 2,
+  desc: 'Each API is parsed once into one neutral request and answered in its own family’s shape. Time and bytes come in as values (ADR 0002, 0003, 0019).',
   nodes: [
     ['api', 0, 0, 'api', 'openai · anthropic · ollama', 'Parse each API’s request once; write answers, stream chunks and errors in that family’s shape.'],
     ['chat', 1, 0, 'chat', 'neutral request', 'ChatRequest, ModelRef, ChatEvent, Usage: what every API maps to.'],
     ['llama', 2, 0, 'llama', 'llama-server protocol', 'Launch arguments, parallel slots, the /v1/chat/completions body and /props parsing.'],
     ['tasks', 1, 1, 'tasks · tokens', '/x/v1 helpers', 'Versioned task prompts (summarise, classify, extract, translate); token estimates and truncation.'],
     ['sse', 2, 1, 'sse', 'event streams', 'SSE and NDJSON framing for streamed answers.'],
-    ['cache', 0, 1, 'cache', 'response cache', 'Cache keys and a bounded store; no handler uses it yet.', { planned: true }],
+    ['cache', 0, 1, 'cache', 'keys · expiry · eviction', 'ADR 0019: response and embeddings cache keys, expiry options, LRU eviction and sweep decisions; the store is in the server.'],
   ],
-  links: [['api', 'R', 'chat', 'L', 'Parse into'], ['chat', 'R', 'llama', 'L', 'Maps to'], ['llama', 'B', 'sse', 'T', 'Events'], ['tasks', 'T', 'chat', 'B', 'Builds', { rev: true }]],
+  links: [['api', 'R', 'chat', 'L', 'Parse into'], ['chat', 'R', 'llama', 'L', 'Maps to'], ['llama', 'B', 'sse', 'T', 'Events'], ['tasks', 'T', 'chat', 'B', 'Builds', { rev: true }], ['cache', 'T', 'api', 'B', 'Keyed by', { rev: true }]],
 });
 
 panel('c4-3-core-serving', {
@@ -44,7 +44,7 @@ panel('c4-3-core-serving', {
     ['presets', 0, 0, 'presets', 'ModelPreset · AliasName', 'An alias maps to a model or an auto: selection plus context, sampling defaults, system prompt and engine. resolve and apply; presets.json.'],
     ['select', 1, 0, 'select', 'capability choice', 'Requirements::parse_auto and choose, with fit verdicts and measured speed; says how it chose.'],
     ['fit', 2, 0, 'fit', 'will it fit?', 'ModelSize, Room, Verdict (Fits, Tight, WontFit, Unknown); need_tokens and assess for a total number of KV positions.'],
-    ['slots', 3, 0, 'slots', 'Slots 1 to 16', 'Context is per slot; launch_context = context x slots. solve, max_context and max_slots build the fit table.'],
+    ['slots', 3, 0, 'slots', 'Slots 1 to 16', 'Context is per slot; launch_context = context x slots. solve builds the fit table; affinity picks the slot (id_slot) for a conversation.'],
     ['sched', 0, 1, 'scheduler', 'priority queue', 'Priorities, global, per-model (slots) and per-app caps, aging, cancel, pause, progress.'],
     ['mem', 1, 1, 'memory', 'plan_load · plan_release', 'Memory presets, idle and deep-idle, pressure, yield; never unloads a busy model.'],
     ['pres', 2, 1, 'pressure · supervise', 'OS signals · restarts', 'Turns raw OS signals into levels; restart delays and the crash-loop guard for engines (backoff).'],
@@ -88,17 +88,19 @@ panel('c4-3-core-state', {
 
 const SUBS = 'C4 · Level 3 — Components of pitwall-server';
 panel('c4-3-server-requests', {
-  title: 'pitwall-server — request path', kind: SUBS, group: 'Request path [ADR 0003, 0007, 0018]', cols: 3, rows: 2,
+  title: 'pitwall-server — request path', kind: SUBS, group: 'Request path [ADR 0003, 0007, 0018, 0019]', cols: 3, rows: 3,
   desc: 'Every request passes the gate, then one pipeline. Decisions come from pitwall-core; this crate sockets, files and processes.',
   nodes: [
     ['http', 0, 0, 'http', 'axum router', 'The three standard APIs and /x/v1; the gate checks Host, Origin and key; provenance headers incl. X-Pitwall-Alias; SSE and NDJSON out.', { role: 'accent' }],
     ['mgmt', 0, 1, 'mgmt', '/mgmt/v1', 'One JSON call per UI method (rpc/{method}), the live feed and the playground stream; admin key only.', { role: 'accent' }],
     ['app', 1, 0, 'app', 'AppState', 'start_chat: resolve alias, apply preset, authorize, limits, capability gate, queue, load, generate; the Recorder; usage.json, presets.json and engine-pins.json saves.', { role: 'accent', span: 2 }],
     ['auth', 2, 0, 'auth', 'apps.json', 'Apps, hashed keys, pairing, admin key file, per-app rate window.', { role: 'accent' }],
-    ['serving', 2, 1, 'serving', 'resolve, queue, load, release', 'Resolve names, acquire a turn, ensure_for a hot model with its slots, idle release every 5 s, chat and embed on the engine.', { role: 'accent' }],
+    ['serving', 2, 1, 'serving', 'resolve, queue, load, release', 'Resolve names, acquire a turn, ensure_for a hot model with its slots and slot affinity, idle release every 5 s, chat and embed on the engine.', { role: 'accent' }],
+    ['cache', 1, 2, 'cache', 'responses · embeddings', 'Lookup before the queue (a hit needs no model), store after a completed answer; sweep at start, hourly and when idle; X-Pitwall-Cache.', { role: 'accent' }],
+    ['cdb', 2, 2, 'cache.sqlite', 'memory or one SQLite file', 'WAL, versioned schema, owner-only; written by a writer thread off the request path; LRU over the size cap.', { role: 'process' }],
   ],
-  links: [['http', 'R', 'app', 'L', 'Requests', { t: [0.5, 0.2143] }], ['mgmt', 'R', 'app', 'L', 'Rpc calls', { t: [0.5, 0.7857] }], ['app', 'R', 'auth', 'L', 'Keys', { t: [0.2143, 0.5] }], ['app', 'R', 'serving', 'L', 'Starts', { t: [0.7857, 0.5] }]],
-  legend: [{ kind: 'accent', label: 'Server module' }, { kind: 'line', label: 'Calls' }],
+  links: [['http', 'R', 'app', 'L', 'Requests', { t: [0.5, 0.2143] }], ['mgmt', 'R', 'app', 'L', 'Rpc calls', { t: [0.5, 0.7857] }], ['app', 'R', 'auth', 'L', 'Keys', { t: [0.2143, 0.5] }], ['app', 'R', 'serving', 'L', 'Starts', { t: [0.7857, 0.5] }], ['app', 'B', 'cache', 'T', 'Lookup, store'], ['cache', 'R', 'cdb', 'L', 'Writes']],
+  legend: [{ kind: 'accent', label: 'Server module' }, { kind: 'process', label: 'Data' }, { kind: 'line', label: 'Calls' }],
 });
 
 panel('c4-3-server-edges', {

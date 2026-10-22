@@ -74,7 +74,7 @@ seq('uml-seq-chat-admit', {
 });
 
 seq('uml-seq-chat-serve', {
-  title: 'Chat request — load and answer', desc: 'Part 2 of 2. If the model is not in memory it is loaded first, with its slots; the answer streams back in the client’s own format and the usage is recorded (ADR 0003, 0006, 0013, 0016).',
+  title: 'Chat request — load and answer', desc: 'Part 2 of 2. If the model is not in memory it is loaded first, with its slots; the answer streams back in the client’s own format and the usage is recorded (ADR 0003, 0006, 0013, 0016, 0019).',
   parts: [['cl', 'Client app', 'external', 'external'], ['ap', 'AppState', 'start_chat', 'accent'], ['sv', 'Serving', 'hot models', 'process'], ['co', 'pitwall-core', 'fit, memory', 'core'], ['lc', 'LlamaCpp', 'Engine adapter', 'process'], ['ls', 'llama-server', 'child process', 'process'], ['us', 'Usage', 'usage.json', 'core']],
   script: [
     ['m', 'ap', 'sv', '`ensure_for(resolved)`'],
@@ -93,13 +93,41 @@ seq('uml-seq-chat-serve', {
     ['m', 'sv', 'ap', '`(Busy, cold_start_ms)`', 1],
     ['m', 'ap', 'co', '`check_memory(footprint, total, share)`'],
     ['m', 'ap', 'sv', '`chat(busy, permit, …)`'],
-    ['m', 'sv', 'ls', '`POST /v1/chat/completions` (stream)'],
-    ['m', 'ls', 'sv', 'Events, token by token', 1],
+    ['s', 'sv', 'Slot affinity: the conversation’s slot if free, else idle longest, else none'],
+    ['m', 'sv', 'ls', '`POST /v1/chat/completions` (stream, `id_slot`)'],
+    ['m', 'ls', 'sv', 'Events, token by token (`cache_n`)', 1],
     ['m', 'sv', 'ap', 'Events', 1],
     ['m', 'ap', 'cl', 'Tokens in the client’s format', 1],
     ['m', 'ap', 'us', '`record(UsageEvent)`'],
     ['s', 'us', 'Hourly and daily buckets per app; saved every 30 s'],
     ['n', 'ap', 'The reply carries X-Pitwall-Model, -Alias (when a preset was asked for), -Engine, -Chosen-By and -Cold-Start-Ms; the permit is released and last_used is set.', 400],
+  ],
+});
+
+seq('uml-seq-chat-cache', {
+  title: 'Chat request — response cache and slot affinity', desc: 'After the gate, a deterministic request from an opted-in app or preset is looked up before it is queued: a hit needs no model and no queue. A miss runs on the slot that served the conversation before and the completed answer is stored off the request path (ADR 0019).',
+  parts: [['cl', 'Client app', 'external', 'external'], ['ap', 'AppState', 'start_chat', 'accent'], ['co', 'pitwall-core', 'cache keys', 'core'], ['ca', 'Cache store', 'memory, cache.sqlite', 'process'], ['sv', 'Serving', 'queue, slots', 'process'], ['ls', 'llama-server', 'child process', 'process']],
+  script: [
+    ['m', 'cl', 'ap', '`POST /v1/chat/completions`'],
+    ['s', 'ap', 'Gate, alias, limits and capability check as in “admit and queue”'],
+    ['m', 'ap', 'co', '`cache::key(model, request)`'],
+    ['s', 'co', 'Eligible: temperature 0 or a seed, no tools, app or preset opted in, no Cache-Control: no-cache'],
+    ['m', 'co', 'ap', '`Key`, or bypass', 1],
+    ['o', 'alt', '[hit: stored and not expired]'],
+    ['m', 'ap', 'ca', '`get(key, now)`'],
+    ['m', 'ca', 'ap', 'Answer, hit count + 1', 1],
+    ['m', 'ap', 'cl', 'Answer, `X-Pitwall-Cache: hit`', 1],
+    ['e', '[miss]'],
+    ['m', 'ap', 'sv', '`acquire`, `ensure_for` (queue, load)'],
+    ['s', 'sv', 'Slot affinity: the conversation’s slot if free, else idle longest, else none'],
+    ['m', 'sv', 'ls', '`/v1/chat/completions` (`id_slot`)'],
+    ['m', 'ls', 'sv', 'Events and `timings.cache_n`', 1],
+    ['m', 'sv', 'ap', 'Events', 1],
+    ['m', 'ap', 'cl', 'Answer, `X-Pitwall-Cache: miss`', 1],
+    ['m', 'ap', 'ca', '`put(key, answer)` (only a completed answer)'],
+    ['s', 'ca', 'Writer thread saves it; least-recently-used entries go over the size cap'],
+    ['c'],
+    ['n', 'ap', 'Usage records cacheHits, cacheMisses, prefixTokens (cache_n) and savedTokens. A hit is not queued, loads no model and is recorded as a request.', 400],
   ],
 });
 
