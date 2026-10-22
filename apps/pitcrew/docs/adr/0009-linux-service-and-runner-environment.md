@@ -23,7 +23,7 @@ wait; the service program bounds each `systemctl` call (30 s). Errors say what t
 is not reachable over ssh without a session).
 
 The unit (`service_spec::systemd_unit`, pure, `ExecStart` words quoted so `%`, `$` and spaces cannot be expanded):
-`Restart=on-failure`, `RestartSec=10`, `KillMode=mixed` (SIGTERM goes to the service only, which stops its runners
+`Restart=always` (a clean exit after the service's binary changed restarts it too; `systemctl stop` still stops it), `RestartSec=10`, `KillMode=mixed` (SIGTERM goes to the service only, which stops its runners
 gracefully and waits for a running job; leftovers are killed after `TimeoutStopSec=300`), `WantedBy=default.target`.
 
 **Lingering** (running with nobody logged in) is a system setting. Pitcrew documents `loginctl enable-linger $USER`
