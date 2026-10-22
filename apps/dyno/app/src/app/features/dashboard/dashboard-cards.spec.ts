@@ -132,9 +132,8 @@ describe('DiagnosisCard', () => {
     byText(el, 'Open tasks').click();
     byText(el, 'Open cleanup').click();
     byText(el, 'Open startup').click();
-    expect(nav.mock.calls.map((c) => c[0])).toEqual(['/processes', '/health']);
+    expect(nav.mock.calls.map((c) => c[0])).toEqual(['/processes', '/cleanup', '/health']);
     await settle(f);
-    expect(document.body.textContent).toContain('Not built yet');
     byText(el, 'Lower').click();
     await settle(f);
     expect(act).toHaveBeenCalledWith({ pid: 7, started: 1 }, { setPriority: 'belowNormal' });
@@ -265,7 +264,7 @@ describe('HealthHero', () => {
     expect(nav).toHaveBeenCalledWith(url);
   });
 
-  it('a confirmed openCleanup fix lists what is coming instead of a route that does not exist', async () => {
+  it('a confirmed openCleanup fix opens the Cleanup page (it only scans there; nothing is deleted)', async () => {
     const { mock, nav } = env();
     vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, 'openCleanup', { needsAdmin: false, undoable: false, preview: [] })]));
     const f = TestBed.createComponent(HealthHero);
@@ -274,8 +273,7 @@ describe('HealthHero', () => {
     await settle(f);
     [...(document.querySelector('dy-fix-dialog') as HTMLElement).querySelectorAll('button.primary')][0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle(f);
-    expect(nav).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('Not built yet');
+    expect(nav).toHaveBeenCalledWith('/cleanup');
   });
 
   it('a confirmed restart fix only advises, it never restarts anything', async () => {

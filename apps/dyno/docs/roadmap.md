@@ -23,7 +23,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-01 | Privileged helper | planned (core types only) |
 | WP-02 | CPU taming screen and profiles | built: rules table, profiles, in-effect list with release, protected list, activity with undo |
 | WP-03 | Health score and startup manager screen | engine built, UI planned |
-| WP-04 | Cleanup with quarantine and undo | policy built, rest planned |
+| WP-04 | Cleanup with quarantine and undo | built: scanner, re-checking deleter, quarantine with restore, Cleanup page, disk map engine, TOML packs, Linux; scheduled cleanups, Docker removal and a disk-map screen planned |
 | WP-05 | Tuning catalogue | planned |
 | WP-06 | Issues with statistics | planned |
 | WP-07 | New and unusual processes | planned |
@@ -65,13 +65,13 @@ What the code does today, read from the code on 2026-10-22. Each is a small task
 
 | # | Gap | Where | Fix |
 | --- | --- | --- | --- |
-| G1 | The cleanup category `Os` enum has `Windows`, `Macos`, `Any` but no `Linux`, so Linux has no categories or roots | `crates/dyno-core/src/cleanup/catalog.rs`, `crates/dyno-agent/src/cleanup/roots.rs` | Add `Os::Linux`, XDG roots (`~/.cache`, `~/.local/share/Trash`, `~/.cargo`, …), catalogue entries and tests |
+| G1 | Done in WP-04 (`Os::Linux`, XDG roots, Linux categories). Was: the cleanup category `Os` enum has `Windows`, `Macos`, `Any` but no `Linux`, so Linux has no categories or roots | `crates/dyno-core/src/cleanup/catalog.rs`, `crates/dyno-agent/src/cleanup/roots.rs` | Add `Os::Linux`, XDG roots (`~/.cache`, `~/.local/share/Trash`, `~/.cargo`, …), catalogue entries and tests |
 | G2 | `StartupLocation` has Windows and macOS variants only; the Linux startup adapter (XDG autostart, systemd user units) has nowhere to put its entries | `crates/dyno-core/src/startup.rs`, `crates/dyno-platform/src/linux/startup.rs` | Add `XdgAutostart`, `SystemdUserUnit` (and `needs_admin` for system units), map them, keep the wire contract in step |
 | G3 | On Linux the shared Unix `SetPriority` calls `setpriority` on the main thread only (Linux priorities are per thread); efficiency mode and affinity already walk the threads | `crates/dyno-platform/src/unix_control.rs`, `linux/os_control.rs` | Walk the process's threads for `SetPriority` on Linux (best effort for threads that exit); test with a multi-thread dummy |
 | G4 | The history `crashes` list is always empty and the health report gets `crashes_7d: 0`, so the crashes chart and the "crashing apps" health reason have no data | `crates/dyno-agent/src/handlers.rs` (`history`, `health`) | Filled by WP-06 (Issues) |
 | G5 | Plugins are wired minimally: the agent starts the host on first `Request::Plugins` and lists plugins; sensor, cleanup-proposal and rule-action contributions are not connected to the sampler, the scanner or the engine | `crates/dyno-agent/src/handlers.rs`, `sampler.rs`, `crates/dyno-plugin-host` | Connect contributions through guarded adapters (ADR 0007), trim the host to sensors, cleanup proposals and rule actions |
 | G6 | The helper is not built: `crates/dyno-helper/src/main.rs` is `fn main() {}`; only `HelperAction` and its validation exist | `crates/dyno-helper` | WP-01 |
-| G7 | Cleanup (`CleanupCategories`, `ScanCleanup`, `RunCleanup`, `Quarantine`, `RestoreQuarantine`), `DiskUsage`, tuning (`Tuning`, `ApplyTuning`, `RevertTuning`) and `WeeklyReport` answer `Unsupported: "<x> is not built yet."` | `crates/dyno-agent/src/handlers.rs` | WP-04, WP-05, WP-08 |
+| G7 | Cleanup and `DiskUsage` are built (WP-04); tuning (`Tuning`, `ApplyTuning`, `RevertTuning`) and `WeeklyReport` answer `Unsupported: "<x> is not built yet."` | `crates/dyno-agent/src/handlers.rs` | WP-04, WP-05, WP-08 |
 | G8 | Windows wires sensors (PDH), process control and user activity only. Process details use `NoDetails`; file locks (Restart Manager), startup entries and facts are the in-memory fakes | `crates/dyno-platform/src/windows/mod.rs` | Windows details probe (command line, modules, connections, signature), Restart Manager locks, registry / Startup folder / scheduled-task startup, facts (disk health, updates, power plan); verify on the Windows CI runner |
 | G9 | The doc comments on `Overhead::agent_cpu` and `Load::own_cpu` say "percent of the machine", but the sampler multiplies by the core count: the value is a share of one core (ADR 0002 section 4) | `crates/dyno-core/src/protocol.rs`, `sampling.rs` | Fix the comments (and the UI label) or change the unit; keep the budget comparison consistent |
 | G10 | The Why slow, CPU taming, Cleanup, Health and Reports screens are placeholders in the UI (marked "Soon" in the sidebar) although the engine answers `WhySlow`, `Rules`, `SaveRules`, `SetProfile`, `PauseRules`, `Health`, `StartupEntries`, `SetStartupState`, `Alerts`, `Anomalies` | `app/src/app/features/*`, `app/src/app/core/api.types.ts`, the mock | WP-02, WP-03, WP-08 |
@@ -440,7 +440,7 @@ feature needs its images; a row is done when both exist and show the built scree
 | Tray dropdown | `tray-*.png` | built |
 | Why slow | `why-slow-*.png` | placeholder; real screen with WP-02/WP-06 |
 | CPU taming | `rules-*.png` | placeholder; real screen with WP-02 |
-| Cleanup | `cleanup-*.png` | placeholder; real screen with WP-04 |
+| Cleanup | `cleanup-*.png` | page built; recapture the screenshots |
 | Health and tuning | `health-*.png` | placeholder; real screen with WP-03 and WP-05 |
 | Reports and alerts | `reports-*.png` | placeholder; real screen with WP-08 |
 | Issues with statistics | `issues-*.png` | not started (WP-06) |

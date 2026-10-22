@@ -43,11 +43,16 @@ delete.
 
 ## Consequences
 
-- Built today: the policy, the catalogue and root resolution (`dyno_agent::cleanup::roots`). Not built: scanning,
-  deleting, the quarantine store and expiry, file-lock reporting; the agent answers cleanup requests with "not built
-  yet". Items 4 to 6 are the contract those parts must meet.
-- The core owns the rules and is exhaustively unit-tested; the agent's scanners are thin and tested against temp
-  folders they create.
-- Known gap: the category catalogue's `Os` enum has `Windows`, `Macos` and `Any` but no `Linux`, so Linux has no
-  categories until it gains a variant and roots (docs/roadmap.md). Cleanup requests currently answer "not built yet".
+- Built (WP-04): the policy, the catalogue (now the embedded TOML pack `builtin.toml`, ADR 0007), root resolution for Windows,
+  macOS and Linux, the scanner, the re-check before each delete (`dyno_agent::cleanup::guard`), the deleter, the quarantine
+  store with restore and expiry, file-lock reporting, the bounded disk-space map and the Cleanup page. Items 4 to 6 are
+  enforced and each refusal (link, `..`, outside the root, personal folder, stale scan, changed item, locked file) has a test.
+- `freed_bytes` is the size of what left the scanned folders; the space is released when the quarantine expires or the
+  Recycle Bin is emptied, and the page says so.
+- Dyno never empties the user's Trash/Recycle Bin (that would be a permanent delete outside the quarantine), so the Linux
+  category list has no Trash entry. Docker images are not removed yet (they are not files; see the roadmap).
+- Not built: scheduled cleanups (the setting exists; nothing runs on a schedule), the privileged helper for system folders
+  (items the user cannot delete are reported as failed with the OS's reason).
+- The core owns the rules and is exhaustively unit-tested; the agent's scanners are thin and tested against temp folders
+  they create.
 - The scan-age and re-check rules mean a long-open preview must be refreshed before cleaning; the UI says so.

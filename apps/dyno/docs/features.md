@@ -76,10 +76,17 @@ entry that needs no administrator rights, undoable. The Health & tuning screen i
 
 ## Cleanup
 
-**Policy built, scanner and deleter planned.** The catalogue, the admission policy (never links, never personal folders, never
-outside the category's roots, age filters, preview before delete, scan validity of one hour) and per-OS root resolution exist and
-are tested ([ADR 0005](adr/0005-cleanup-safety.md)). The agent answers cleanup requests with "not built yet"; the disk-space map
-too. Linux has no categories yet. Work package: [WP-04](roadmap.md#wp-04-cleanup-with-quarantine-and-undo).
+**Built, observe-only.** The Cleanup screen scans the categories you tick (scanning deletes nothing), lists every item with its path,
+size and reason, and cleans only what you selected after you confirm in a dialog. A run accepts only a scan younger than an hour,
+re-checks each item right before it moves (still there, not a link, no `..`, still inside its category's folders after resolving
+the real path, not in a personal folder, unchanged since the scan), skips files in use and names the program holding them, and
+moves items to a 7-day **quarantine** (restorable from the page or the activity log, then deleted for good by the agent) or to the
+Recycle Bin / Trash. Categories come from TOML packs: the built-in pack is embedded; you may add packs to the data folder's
+`packs/` folder (paths by template, `children` and `installers` selectors only; a bad pack is reported in the activity log and
+ignored). Windows, macOS and Linux (XDG folders) have categories. The disk-space map (`DiskUsage`) is bounded in depth, entries and
+time. Policy: [ADR 0005](adr/0005-cleanup-safety.md). Not built yet: scheduled cleanups, Docker image removal (the category says
+to run `docker image prune`), a disk-map screen, Linux Trash is never emptied by Dyno. Work package:
+[WP-04](roadmap.md#wp-04-cleanup-with-quarantine-and-undo).
 
 ## Tuning
 

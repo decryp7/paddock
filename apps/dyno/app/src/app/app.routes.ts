@@ -28,6 +28,7 @@ export const routes: Routes = [
       { path: 'alarms', title: 'Alarms · Dyno', loadComponent: () => import('./features/alarms/alarms-page').then((m) => m.AlarmsPage) },
       { path: 'recorder', title: 'Flight recorder · Dyno', loadComponent: () => import('./features/recorder/recorder-page').then((m) => m.RecorderPage) },
       { path: 'diagnostics', title: 'Diagnostics · Dyno', loadComponent: () => import('./features/diagnostics/diagnostics-page').then((m) => m.DiagnosticsPage) },
+      { path: 'cleanup', title: 'Cleanup · Dyno', loadComponent: () => import('./features/cleanup/cleanup-page').then((m) => m.CleanupPage) },
       { path: 'health', title: 'Health & tuning · Dyno', loadComponent: () => import('./features/health/health-page').then((m) => m.HealthPage) },
       { path: 'settings', title: 'Settings · Dyno', loadComponent: () => import('./features/settings/settings-page').then((m) => m.SettingsPage) },
       { path: '**', redirectTo: '' },

@@ -1,7 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { ComingDialog } from '../../shell/coming-dialog';
-import { Dialogs } from '../../shared/dialog';
 import type { Suggestion } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { formatCount, formatFraction, formatPercent, formatRate } from '../../shared/format';
@@ -110,7 +108,6 @@ import { LiveStore } from '../../state/live.store';
 export class DiagnosisCard {
   protected readonly store = inject(DiagnosisStore);
   protected readonly router = inject(Router);
-  private readonly dialogs = inject(Dialogs);
   private readonly live = inject(LiveStore);
   /** The numbers the diagnosis weighs, as they are right now (formatting only; the engine does the reasoning). */
   protected readonly stats = computed(() => {
@@ -140,7 +137,7 @@ export class DiagnosisCard {
   protected take(s: Suggestion): void {
     const a = s.action;
     if (typeof a === 'object') void this.store.act(a.process.target, a.process.action);
-    else if (a === 'openCleanup') this.dialogs.open(ComingDialog);
+    else if (a === 'openCleanup') void this.router.navigateByUrl('/cleanup');
     else if (a === 'openTaskManager') void this.router.navigateByUrl('/processes');
     else if (a === 'openStartup') void this.router.navigateByUrl('/health');
   }
