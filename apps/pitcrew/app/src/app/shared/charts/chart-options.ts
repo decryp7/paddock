@@ -289,3 +289,51 @@ export function diskOption(series: TimeSeries[], cleanups: number[], t: ChartTok
     })),
   };
 }
+
+/** A moment of the machine's load split into the runners' share and the machine's total. */
+export interface LoadPoint {
+  at: number;
+  runners: number;
+  machine: number;
+}
+
+/**
+ * Runners against the rest of the machine as two stacked areas (the top edge is the machine's total). `max` fixes the
+ * axis (1000 per mille, installed memory); the runners' share is clamped to the total so the stack never exceeds it.
+ */
+export function loadOption(points: LoadPoint[], format: (v: number) => string, max: number | undefined, t: ChartTokens, hours: number): EChartsCoreOption {
+  const o = base(t);
+  const runners = points.map((p): [number, number] => [p.at, Math.min(p.runners, p.machine)]);
+  const rest = points.map((p): [number, number] => [p.at, Math.max(0, p.machine - p.runners)]);
+  const area = (name: string, color: string, data: [number, number][]) => ({
+    name,
+    type: 'line',
+    stack: 'load',
+    showSymbol: false,
+    lineStyle: { width: 1.5, color },
+    itemStyle: { color },
+    areaStyle: { color, opacity: 0.35 },
+    data,
+  });
+  return {
+    ...o,
+    legend: { ...(o['legend'] as object), show: true },
+    tooltip: {
+      ...(o['tooltip'] as object),
+      formatter: (params: { seriesName: string; value: [number, number]; color: string }[]) => {
+        const at = params[0]?.value[0] ?? 0;
+        const run = params.find((p) => p.seriesName === 'Runners')?.value[1] ?? 0;
+        const other = params.find((p) => p.seriesName === 'Rest of machine')?.value[1] ?? 0;
+        return tooltipHtml(hours <= 24 ? formatTime(at) : `${formatShortDate(at)} ${formatTime(at)}`, [
+          { color: t.series[0], label: 'Runners', value: format(run) },
+          { color: t.muted, label: 'Rest of machine', value: format(other) },
+          { color: t.text3, label: 'Machine', value: format(run + other) },
+        ]);
+      },
+    },
+    xAxis: timeAxis(t, hours),
+    yAxis: { ...valueAxis(t, format), min: 0, ...(max === undefined ? {} : { max }) },
+    dataZoom: [{ type: 'inside', throttle: 50 }],
+    series: [area('Runners', t.series[0], runners), area('Rest of machine', t.muted, rest)],
+  };
+}

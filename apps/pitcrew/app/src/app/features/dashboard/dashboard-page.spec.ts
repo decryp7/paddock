@@ -29,10 +29,10 @@ describe('DashboardPage', () => {
     const { el } = await mount();
     expect(text(el.querySelector('.subtitle'))).toBe('4 runners · 1 running a job · 1 needs attention');
     expect(el.querySelectorAll('pc-runner-tile')).toHaveLength(4);
-    for (const title of ['This machine', 'History', 'Jobs per day', 'Events', 'Uptime', 'Average job duration', 'Queue wait', 'Updates', 'Runner folders']) {
+    for (const title of ['Runner load', 'History', 'CPU', 'Memory', 'Jobs per day', 'Events', 'Uptime', 'Average job duration', 'Queue wait', 'Updates', 'Runner folders']) {
       expect(text(el)).toContain(title);
     }
-    expect(el.querySelectorAll('pc-chart').length).toBeGreaterThanOrEqual(3);
+    expect(el.querySelectorAll('pc-chart').length).toBeGreaterThanOrEqual(5);
     expect(el.querySelector('pc-timeline')).not.toBeNull();
     expect(el.querySelector('pc-machine-tiles')).not.toBeNull();
     expect(text(el.querySelector('.updates'))).toContain('Updated');

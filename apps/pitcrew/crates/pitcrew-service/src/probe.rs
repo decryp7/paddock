@@ -6,6 +6,7 @@
 use pitcrew_core::jobs::is_job_process;
 use pitcrew_core::metrics::{permille, MachineSample};
 use pitcrew_core::time::Timestamp;
+use pitcrew_core::usage::{ProcessInfo, Usage};
 use std::path::Path;
 use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 
@@ -13,6 +14,7 @@ use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, Sy
 pub struct Probe {
     sys: System,
     disks: Disks,
+    cpus: usize,
 }
 
 impl Default for Probe {
@@ -28,6 +30,7 @@ impl Probe {
         let mut p = Probe {
             sys,
             disks: Disks::new_with_refreshed_list(),
+            cpus: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
         };
         p.refresh_processes();
         p
@@ -43,6 +46,26 @@ impl Probe {
                 .with_cpu()
                 .with_memory(),
         );
+    }
+
+    /// Logical cores of the machine (the denominator of every CPU share).
+    pub fn cpus(&self) -> usize {
+        self.cpus
+    }
+
+    /// The process table as of the last refresh: ids, parents, process groups, CPU time and resident memory.
+    pub fn process_table(&self) -> Vec<ProcessInfo> {
+        self.sys
+            .processes()
+            .iter()
+            .map(|(pid, p)| ProcessInfo {
+                pid: pid.as_u32(),
+                ppid: p.parent().map(Pid::as_u32),
+                pgid: process_group(pid.as_u32()),
+                cpu_time_ms: p.accumulated_cpu_time(),
+                rss_bytes: p.memory(),
+            })
+            .collect()
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).
@@ -65,7 +88,7 @@ impl Probe {
             .map(|(pid, _)| pid.as_u32())
     }
 
-    /// A machine sample; `disk_of` names a folder on the disk to report.
+    /// A machine sample (without the runners' share, which the supervisor adds); `disk_of` names a folder on the disk to report.
     pub fn machine(&mut self, now: Timestamp, disk_of: &Path) -> MachineSample {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
@@ -79,6 +102,7 @@ impl Probe {
             mem_total_bytes: self.sys.total_memory(),
             disk_free_bytes: free,
             disk_total_bytes: total,
+            runners: Usage::default(),
         }
     }
 
@@ -104,6 +128,21 @@ impl Probe {
             .map(|p| (permille(p.cpu_usage() / 100.0 / cpus), p.memory()))
             .unwrap_or((0, 0))
     }
+}
+
+/// The process group of `pid` (Unix); `None` when it is gone or the platform has no groups.
+#[cfg(unix)]
+fn process_group(pid: u32) -> Option<u32> {
+    let pid = i32::try_from(pid).ok()?;
+    nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pid)))
+        .ok()
+        .and_then(|g| u32::try_from(g.as_raw()).ok())
+}
+
+/// Windows has no process groups; the tree is the parent-pid tree there.
+#[cfg(not(unix))]
+fn process_group(_pid: u32) -> Option<u32> {
+    None
 }
 
 /// A path for comparison: `\\?\` dropped, separators unified, case-insensitive on Windows.
@@ -133,6 +172,17 @@ mod tests {
         assert!(m.disk_total_bytes > 0, "{m:?}");
         let (_, mem) = p.own_usage();
         assert!(mem > 0);
+        assert!(p.cpus() >= 1);
+        let me = std::process::id();
+        let mine = p
+            .process_table()
+            .into_iter()
+            .find(|r| r.pid == me)
+            .expect("this process is in the table");
+        assert!(mine.rss_bytes > 0 && mine.ppid.is_some());
+        if cfg!(unix) {
+            assert!(mine.pgid.is_some());
+        }
     }
 
     #[test]

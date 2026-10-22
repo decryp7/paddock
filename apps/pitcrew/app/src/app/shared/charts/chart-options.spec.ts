@@ -1,6 +1,6 @@
 import type { JobDay } from '../../core/api.types';
 import type { ChartTokens } from '../../core/theme.service';
-import { diskOption, durationOption, escapeHtml, jobsPerDayOption, queueOption, sumJobDays, tooltipHtml } from './chart-options';
+import { diskOption, durationOption, escapeHtml, jobsPerDayOption, loadOption, queueOption, sumJobDays, tooltipHtml } from './chart-options';
 
 const t: ChartTokens = {
   theme: 'light',
@@ -165,5 +165,36 @@ describe('diskOption', () => {
     const long = diskOption(series, [], t, 24 * 7) as Opt;
     expect(long['tooltip'].formatter([{ seriesName: 'a', value: [0, 1], color: 'red' }])).toContain('1 B');
     expect(o['yAxis'].axisLabel.formatter(2048)).toBe('2 KB');
+  });
+});
+
+describe('loadOption', () => {
+  const pts = [
+    { at: 0, runners: 300, machine: 800 },
+    { at: 1000, runners: 900, machine: 500 }, // runners above the machine total (sampling skew)
+  ];
+  it('stacks the runners over the rest of the machine and never exceeds the total', () => {
+    const o = loadOption(pts, (v) => `${v / 10}%`, 1000, t, 24) as Opt;
+    expect(o['series'].map((x: Opt) => x.name)).toEqual(['Runners', 'Rest of machine']);
+    expect(o['series'][0].data).toEqual([[0, 300], [1000, 500]]);
+    expect(o['series'][1].data).toEqual([[0, 500], [1000, 0]]);
+    expect(o['series'][0].stack).toBe(o['series'][1].stack);
+    expect(o['series'][0].lineStyle.color).toBe(t.series[0]);
+    expect(o['series'][1].lineStyle.color).toBe(t.muted);
+    expect(o['yAxis'].max).toBe(1000);
+    expect(o['legend'].show).toBe(true);
+  });
+  it('has a free axis without a maximum and a tooltip with all three numbers', () => {
+    const o = loadOption(pts, (v) => `${v}u`, undefined, t, 24 * 7) as Opt;
+    expect('max' in o['yAxis']).toBe(false);
+    const html = o['tooltip'].formatter([
+      { seriesName: 'Runners', value: [0, 300], color: 'x' },
+      { seriesName: 'Rest of machine', value: [0, 500], color: 'y' },
+    ]);
+    expect(html).toContain('300u');
+    expect(html).toContain('500u');
+    expect(html).toContain('800u');
+    expect(o['tooltip'].formatter([])).toContain('Machine');
+    expect(o['yAxis'].axisLabel.formatter(5)).toBe('5u');
   });
 });

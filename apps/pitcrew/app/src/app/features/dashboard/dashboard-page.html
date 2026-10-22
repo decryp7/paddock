@@ -41,7 +41,7 @@
 
     <section aria-labelledby="machine-title" class="block">
       <div class="block-head">
-        <h2 id="machine-title" class="section-label">This machine</h2>
+        <h2 id="machine-title" class="section-label">Runner load</h2>
         <span class="faint small">last {{ rangeLabel() }}</span>
       </div>
       <pc-load-state what="Machine metrics" [hasValue]="!!store.machine().value" [error]="store.machine().error" [skeleton]="[96]" (retry)="store.retry()">
@@ -148,6 +148,30 @@
                   }
                 </ul>
               }
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card span-2">
+          <header class="card-header">
+            <h3>CPU</h3>
+            <span class="meta">runners and the rest of the machine</span>
+          </header>
+          <div class="card-body">
+            <pc-load-state what="CPU history" [hasValue]="!!store.machine().value" [error]="store.machine().error" [skeleton]="[168]" (retry)="store.retry()">
+              <pc-chart [option]="cpuOpt()" [height]="176" label="CPU use of the runners and of the rest of the machine over time" />
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card">
+          <header class="card-header">
+            <h3>Memory</h3>
+            <span class="meta">runners and the rest</span>
+          </header>
+          <div class="card-body">
+            <pc-load-state what="Memory history" [hasValue]="!!store.machine().value" [error]="store.machine().error" [skeleton]="[168]" (retry)="store.retry()">
+              <pc-chart [option]="memOpt()" [height]="176" label="Memory use of the runners and of the rest of the machine over time" />
             </pc-load-state>
           </div>
         </article>

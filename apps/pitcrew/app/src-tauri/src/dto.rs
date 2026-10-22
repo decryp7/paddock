@@ -6,7 +6,7 @@ use pitcrew_core::config::{Config, SessionMode};
 use pitcrew_core::gitea_api::JobDay;
 use pitcrew_core::history::{HistoryEvent, HistorySummary};
 use pitcrew_core::housekeeping::{CleanupPlan, CleanupPolicy, CleanupReport, DiskScan};
-use pitcrew_core::metrics::MachineSample;
+use pitcrew_core::metrics::{MachineSample, UsagePoint};
 use pitcrew_core::notify::Notification;
 use pitcrew_core::protocol::{ErrorCode, RunnerSnapshot, ServiceError, ServiceInfo};
 use pitcrew_core::session::LoggedOffMode;
@@ -45,6 +45,8 @@ pub struct MetricsReply {
     pub machine: Vec<MachineSample>,
     /// The folder size.
     pub folder: Vec<(Timestamp, u64)>,
+    /// The runner's own CPU and memory, with its processes.
+    pub usage: Vec<UsagePoint>,
 }
 
 /// `DiskReply`.

@@ -43,6 +43,15 @@ describe('RunnerTile', () => {
     expect(open).toHaveBeenCalledWith(details!.url);
   });
 
+  it('shows what the runner and its processes use, and nothing while it is not running', async () => {
+    const { el } = await mount('build-win');
+    expect(text(el.querySelector('.load'))).toBe('31% CPU · 4.2 GB · 23 processes');
+    const { el: stopped } = await mount('docker-lab');
+    expect(stopped.querySelector('.load')).toBeNull();
+    runners = runners.map((r) => (r.name === 'ui-tests' && r.usage ? { ...r, usage: { ...r.usage, processes: 1 } } : r));
+    expect(text((await mount('ui-tests')).el.querySelector('.load'))).toContain('1 process');
+  });
+
   it('shows a pending action of a busy runner', async () => {
     runners = runners.map((r) => (r.name === 'build-win' ? { ...r, pending: 'restart' as const } : r));
     const { el } = await mount('build-win');
@@ -125,6 +134,7 @@ describe('MachineTiles', () => {
     memTotalBytes: 16 * 1024 ** 3,
     diskFreeBytes: 50 * 1024 ** 3,
     diskTotalBytes: 500 * 1024 ** 3,
+    runners: { cpuPermille: 50 * i, cpuPeakPermille: 80 * i, memBytes: 2 * 1024 ** 3, memPeakBytes: 3 * 1024 ** 3, processes: 4 },
   });
   const service = (machine: MachineSample | null): ServiceInfo => ({
     version: '0.1.0',
@@ -148,22 +158,28 @@ describe('MachineTiles', () => {
     return f.nativeElement as HTMLElement;
   }
 
-  it('shows CPU, memory and free disk with trends, and the service cost', () => {
+  it('shows the runners CPU and memory, the machine free disk, and the service cost', () => {
     const el = mount([sample(1), sample(2), sample(3)], service(null));
     const tiles = Array.from(el.querySelectorAll('section')).map((s) => s.getAttribute('aria-label'));
-    expect(tiles[0]).toBe('CPU: 30%, avg 20% · peak 45%');
-    expect(tiles[1]).toBe('Memory: 8.0 GB, of 16 GB · 50%');
+    expect(tiles[0]).toBe('Runners CPU: 15%, avg 10% · peak 24%');
+    expect(tiles[1]).toBe('Runners memory: 2.0 GB, 13% of 16 GB · peak 3.0 GB');
     expect(tiles[2]).toBe('Free disk: 50.0 GB, of 500 GB · 10% free');
     expect(text(el.querySelector('.own'))).toContain('2.5% CPU');
     expect(text(el.querySelector('.own'))).toContain('24.0 MB memory · up 1h 00m');
     expect(el.querySelectorAll('pc-sparkline')).toHaveLength(3);
   });
 
+  it('adds the whole machine as a muted context line, runners included', () => {
+    const el = mount([sample(1), sample(2), sample(3)], service(null));
+    expect(text(el.querySelector('[data-testid="machine-context"]'))).toBe('This machine: 30% CPU · 8.0 GB of 16 GB memory in use, runners included');
+    expect(text(mount([], null).querySelector('[data-testid="machine-context"]'))).toContain('appear once samples arrive');
+  });
+
   it('falls back to the service sample, and to dashes without data', () => {
     const el = mount([], service(sample(5)));
-    expect(el.querySelector('section')?.getAttribute('aria-label')).toBe('CPU: 50%, No samples yet');
+    expect(el.querySelector('section')?.getAttribute('aria-label')).toBe('Runners CPU: 25%, No samples yet');
     const empty = mount([], null);
-    expect(empty.querySelector('section')?.getAttribute('aria-label')).toBe('CPU: —, No samples yet');
+    expect(empty.querySelector('section')?.getAttribute('aria-label')).toBe('Runners CPU: —, No samples yet');
     expect(text(empty.querySelector('.own'))).toContain('— CPU');
   });
 

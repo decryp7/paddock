@@ -279,8 +279,14 @@ describe('MockBackend data', () => {
     const all = await mock.metrics(null, 24);
     expect(all.machine.length).toBeGreaterThan(0);
     expect(all.folder).toEqual([]);
+    expect(all.usage).toEqual([]);
+    expect(all.machine.at(-1)?.runners.memBytes).toBeGreaterThan(0);
+    expect(all.machine.every((m) => m.runners.cpuPermille <= m.cpuPermille)).toBe(true);
     const one = await mock.metrics('docker-lab', 100_000);
     expect(one.folder.length).toBeGreaterThan(0);
+    expect(one.usage.length).toBeGreaterThan(0);
+    expect((await mock.status()).runners.find((r) => r.name === 'docker-lab')?.usage).toBeNull();
+    expect((await mock.status()).runners.find((r) => r.name === 'build-win')?.usage?.processes).toBe(23);
     await mock.metrics('docker-lab', 0);
     expect((await rejection(mock.metrics('nope', 1))).code).toBe('unknownRunner');
   });

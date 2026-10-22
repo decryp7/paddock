@@ -126,6 +126,33 @@
               </div>
             </section>
 
+            <section class="card span-3" aria-labelledby="use-title">
+              <header class="card-header">
+                <h3 id="use-title">CPU and memory</h3>
+                <span class="meta">this runner and every process it started · last 24 h</span>
+              </header>
+              <div class="card-body use">
+                @if (usageNow(); as u) {
+                  <dl class="kv">
+                    <dt>CPU now</dt>
+                    <dd class="num">{{ u.cpu }} <span class="faint">of the machine, peak {{ u.peakCpu }}</span></dd>
+                    <dt>Memory now</dt>
+                    <dd class="num">{{ u.mem }}</dd>
+                    <dt>Processes</dt>
+                    <dd class="num">{{ u.processes }}</dd>
+                  </dl>
+                } @else {
+                  <p class="muted">Not running, so nothing is used.</p>
+                }
+                @if (usagePeak(); as p) {
+                  <div class="trends">
+                    <div><span class="faint small">CPU, peak {{ p.cpu }}</span><pc-sparkline [values]="usageCpu()" [max]="1000" [width]="320" [height]="40" /></div>
+                    <div><span class="faint small">Memory, peak {{ p.mem }}</span><pc-sparkline style="color: var(--chart-3)" [values]="usageMem()" [width]="320" [height]="40" /></div>
+                  </div>
+                }
+              </div>
+            </section>
+
             <section class="card span-3" aria-labelledby="config-title">
               <header class="card-header">
                 <h3 id="config-title">Configuration</h3>

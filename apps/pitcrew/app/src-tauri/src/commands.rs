@@ -311,7 +311,7 @@ pub async fn machine_metrics(
     };
     let c = client.inner().clone();
     blocking(move || match ask(c.as_ref(), req)? {
-        Response::Metrics { machine, folder } => Ok(MetricsReply { machine, folder }),
+        Response::Metrics { machine, folder, usage } => Ok(MetricsReply { machine, folder, usage }),
         other => Err(unexpected(other)),
     })
     .await

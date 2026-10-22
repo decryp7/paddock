@@ -4,6 +4,16 @@ import { expect, test } from '@playwright/test';
 const APP = '/?simulate=0#';
 
 test.describe('Pitcrew in the browser (mock backend)', () => {
+  test('the dashboard is about the runners, with the machine as context', async ({ page }) => {
+    await page.goto(`${APP}/`);
+    await expect(page.getByRole('region', { name: /^Runners CPU:/ })).toBeVisible();
+    await expect(page.getByRole('region', { name: /^Runners memory:/ })).toBeVisible();
+    await expect(page.getByTestId('machine-context')).toContainText('This machine:');
+    await expect(page.getByRole('heading', { name: 'CPU', exact: true })).toBeVisible();
+    await page.goto(`${APP}/runners/build-win`);
+    await expect(page.getByRole('heading', { name: 'CPU and memory' })).toBeVisible();
+  });
+
   test('navigates between the screens with the sidebar', async ({ page }) => {
     await page.goto(`${APP}/`);
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();

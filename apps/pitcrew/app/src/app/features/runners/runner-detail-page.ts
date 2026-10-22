@@ -1,13 +1,14 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
-import type { RunDetails } from '../../core/api.types';
+import type { RunDetails, UsagePoint } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { ClockService } from '../../core/clock.service';
-import { formatDateTime, formatDuration, formatElapsed, formatRelative } from '../../shared/format';
+import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatPermille, formatRelative } from '../../shared/format';
 import { loggedOffLabel, pendingLabel, sessionLabel } from '../../shared/labels';
 import { RunnerActions } from '../../shared/runner-actions';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { Sparkline } from '../../shared/ui/sparkline';
 import { StatusBadge } from '../../shared/ui/status-badge';
 import { SettingsStore } from '../../state/settings.store';
 import { StatusStore } from '../../state/status.store';
@@ -25,7 +26,7 @@ const TABS: { key: DetailTab; label: string; icon: string }[] = [
 /** One runner: overview, updates and disk, with its actions. */
 @Component({
   selector: 'pc-runner-detail-page',
-  imports: [MatIcon, RouterLink, StatusBadge, RunnerActions, EmptyState, DiskPanel, RunnerUpdatePanel],
+  imports: [MatIcon, RouterLink, StatusBadge, RunnerActions, EmptyState, DiskPanel, RunnerUpdatePanel, Sparkline],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './runner-detail-page.html',
   styleUrl: './runner-detail-page.scss',
@@ -47,6 +48,18 @@ export class RunnerDetailPage {
   protected readonly runner = computed(() => this.status.runners().find((r) => r.name === this.name()) ?? null);
   protected readonly config = computed(() => this.settings.runnerConfig(this.name()));
   protected readonly details = signal<RunDetails | null>(null);
+  /** The runner's CPU and memory over the last 24 hours (with its processes). */
+  protected readonly usage = signal<UsagePoint[]>([]);
+  protected readonly usageNow = computed(() => {
+    const u = this.runner()?.usage;
+    return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes), processes: u.processes, peakCpu: formatPermille(u.cpuPeakPermille) } : null;
+  });
+  protected readonly usageCpu = computed(() => this.usage().map((p) => p.cpuPermille));
+  protected readonly usageMem = computed(() => this.usage().map((p) => p.memBytes));
+  protected readonly usagePeak = computed(() => {
+    const u = this.usage();
+    return u.length ? { cpu: formatPermille(Math.max(...u.map((p) => p.cpuPeakPermille))), mem: formatBytes(Math.max(...u.map((p) => p.memPeakBytes))) } : null;
+  });
 
   protected readonly session = computed(() => {
     const r = this.runner();
@@ -77,6 +90,10 @@ export class RunnerDetailPage {
         if (key && r) this.backend.runDetails(r.name).then((d) => this.details.set(d), () => this.details.set(null));
         else this.details.set(null);
       });
+    });
+    effect(() => {
+      const name = this.name();
+      untracked(() => this.backend.metrics(name, 24).then((m) => this.usage.set(m.usage), () => this.usage.set([])));
     });
     effect(() => {
       if (!this.settings.settings().value && !this.settings.settings().loading) untracked(() => void this.settings.load());

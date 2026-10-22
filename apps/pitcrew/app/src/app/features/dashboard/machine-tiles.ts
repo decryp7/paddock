@@ -15,7 +15,10 @@ interface Tile {
   tone: 'chart-1' | 'chart-3' | 'chart-4' | 'warning';
 }
 
-/** The host's CPU, memory and free disk (with trends), and what Pitcrew itself costs. */
+/**
+ * What the runners use: CPU and memory of the runner processes and everything they started (ADR 0007), with trends;
+ * the machine's free disk; what Pitcrew itself costs. A muted line gives the machine's totals for context.
+ */
 @Component({
   selector: 'pc-machine-tiles',
   imports: [MatIcon, Sparkline],
@@ -39,6 +42,7 @@ interface Tile {
       <div class="sub faint">{{ own().mem }} memory · up {{ own().up }}</div>
       <div class="note faint">The service and this window together.</div>
     </section>
+    <p class="context faint" data-testid="machine-context">{{ context() }}</p>
   `,
   styles: `
     :host {
@@ -86,6 +90,11 @@ interface Tile {
       margin-top: var(--space-2);
       align-self: end;
     }
+    .context {
+      grid-column: 1 / -1;
+      margin: calc(var(--space-1) * -1) 0 0;
+      font-size: var(--text-sm);
+    }
     .note {
       align-self: end;
       font-size: var(--text-xs);
@@ -101,28 +110,30 @@ export class MachineTiles {
   protected readonly tiles = computed<Tile[]>(() => {
     const s = this.samples();
     const last = s.at(-1) ?? this.service()?.machine ?? null;
-    const peak = s.reduce((a, x) => Math.max(a, x.cpuPeakPermille), 0);
-    const avg = s.length ? s.reduce((a, x) => a + x.cpuPermille, 0) / s.length : 0;
-    const memShare = last ? Math.round((last.memUsedBytes / Math.max(1, last.memTotalBytes)) * 1000) : null;
+    const run = s.map((x) => x.runners);
+    const peak = run.reduce((a, x) => Math.max(a, x.cpuPeakPermille), 0);
+    const avg = run.length ? run.reduce((a, x) => a + x.cpuPermille, 0) / run.length : 0;
+    const memPeak = run.reduce((a, x) => Math.max(a, x.memPeakBytes), 0);
+    const memShare = last ? Math.round((last.runners.memBytes / Math.max(1, last.memTotalBytes)) * 1000) : null;
     const freeShare = last ? Math.round((last.diskFreeBytes / Math.max(1, last.diskTotalBytes)) * 1000) : null;
     return [
       {
         key: 'cpu',
         icon: 'cpu',
-        label: 'CPU',
-        value: last ? formatPermille(last.cpuPermille) : '—',
+        label: 'Runners CPU',
+        value: last ? formatPermille(last.runners.cpuPermille) : '—',
         sub: s.length ? `avg ${formatPermille(avg)} · peak ${formatPermille(peak)}` : 'No samples yet',
-        values: s.map((x) => x.cpuPermille),
+        values: run.map((x) => x.cpuPermille),
         max: 1000,
         tone: 'chart-1',
       },
       {
         key: 'mem',
         icon: 'memory',
-        label: 'Memory',
-        value: last ? formatBytes(last.memUsedBytes) : '—',
-        sub: last ? `of ${formatBytes(last.memTotalBytes, 0)} · ${formatPermille(memShare)}` : 'No samples yet',
-        values: s.map((x) => x.memUsedBytes),
+        label: 'Runners memory',
+        value: last ? formatBytes(last.runners.memBytes) : '—',
+        sub: last ? `${formatPermille(memShare)} of ${formatBytes(last.memTotalBytes, 0)} · peak ${formatBytes(memPeak)}` : 'No samples yet',
+        values: run.map((x) => x.memBytes),
         max: last?.memTotalBytes,
         tone: 'chart-3',
       },
@@ -137,6 +148,13 @@ export class MachineTiles {
         tone: freeShare !== null && freeShare < 100 ? 'warning' : 'chart-4',
       },
     ];
+  });
+
+  /** The whole machine, for context: the runners are a part of it. */
+  protected readonly context = computed(() => {
+    const last = this.samples().at(-1) ?? this.service()?.machine ?? null;
+    if (!last) return 'The machine’s own totals appear once samples arrive.';
+    return `This machine: ${formatPermille(last.cpuPermille)} CPU · ${formatBytes(last.memUsedBytes)} of ${formatBytes(last.memTotalBytes, 0)} memory in use, runners included`;
   });
 
   protected readonly own = computed(() => {

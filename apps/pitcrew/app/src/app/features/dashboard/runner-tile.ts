@@ -4,7 +4,7 @@ import { MatTooltip } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import type { FinishedJob, RunDetails, RunnerSnapshot } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
-import { formatBytes, formatDuration, formatElapsed, formatRelative, share } from '../../shared/format';
+import { formatBytes, formatDuration, formatElapsed, formatPermille, formatRelative, share } from '../../shared/format';
 import { pendingLabel, phaseLabel, sessionLabel } from '../../shared/labels';
 import { RunnerActions } from '../../shared/runner-actions';
 import { StatusBadge } from '../../shared/ui/status-badge';
@@ -46,6 +46,11 @@ export class RunnerTile {
       share: total === null ? 0 : share(d.folderBytes, total),
       low: d.low,
     };
+  });
+  /** What the runner and its processes use now (ADR 0007). */
+  protected readonly load = computed(() => {
+    const u = this.runner().usage;
+    return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes), processes: `${u.processes} ${u.processes === 1 ? 'process' : 'processes'}` } : null;
   });
   protected readonly nextCleanup = computed(() => formatRelative(this.runner().nextCleanupAt, this.now()));
   protected readonly nextStart = computed(() => formatRelative(this.runner().nextStartAt, this.now()));

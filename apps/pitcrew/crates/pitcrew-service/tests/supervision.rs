@@ -166,6 +166,14 @@ impl Harness {
         std::fs::read_to_string(self.runner_dir.join("logs").join("runner.log")).unwrap_or_default()
     }
 
+    fn finish_stopped_usage(mut self) {
+        let _ = self.ask(Request::Stop { runner: self.name.clone() });
+        self.until("stopped", Duration::from_secs(6), |h| h.status().running_since.is_none());
+        self.pump(Duration::from_secs(6));
+        assert!(self.status().usage.is_none(), "a stopped runner uses nothing");
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+
     fn finish(mut self) {
         let _ = self.ask(Request::Stop { runner: self.name.clone() });
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -253,6 +261,46 @@ fn stop_waits_for_the_running_job() {
     assert_eq!(count(&hist, |k| matches!(k, HistoryKind::JobFinished { .. })), 1);
     assert_eq!(count(&hist, |k| matches!(k, HistoryKind::Exited { expected: true, .. })), 1);
     let _ = std::fs::remove_dir_all(&h.root);
+}
+
+#[test]
+fn usage_follows_the_runner_and_the_processes_it_started() {
+    let mut h = Harness::new("meter", "mode=job\njob_secs=6\n", true);
+    // The job's child (the stand-in for a compiler) is counted with the runner.
+    h.until("the job's process is counted", Duration::from_secs(6), |h| {
+        h.status().usage.is_some_and(|u| u.processes >= 2)
+    });
+    let during = h.status().usage.unwrap();
+    assert!(during.mem_bytes > 0, "{during:?}");
+    assert!(during.cpu_permille <= 1000);
+    // It exits, and drops out of the count while the runner stays.
+    h.until("the exited child is no longer counted", Duration::from_secs(6), |h| {
+        h.status().usage.is_some_and(|u| u.processes == 1)
+    });
+    // The history has the runner's series and the machine series carries the runners' share.
+    let name = h.name.clone();
+    h.until("a usage sample is stored", Duration::from_secs(31), |h| {
+        match h.ask(Request::Metrics {
+            runner: Some(name.clone()),
+            range_hours: 1,
+        }) {
+            Response::Metrics { usage, .. } => !usage.is_empty(),
+            other => panic!("{other:?}"),
+        }
+    });
+    let Response::Metrics { machine, usage, .. } = h.ask(Request::Metrics {
+        runner: Some(name),
+        range_hours: 1,
+    }) else {
+        panic!("metrics")
+    };
+    assert!(usage.iter().all(|p| p.usage.mem_bytes > 0));
+    assert!(
+        machine.last().unwrap().runners.mem_bytes > 0,
+        "the machine point holds the runners' share"
+    );
+    // Stopped: no usage is reported for it.
+    h.finish_stopped_usage();
 }
 
 #[test]
