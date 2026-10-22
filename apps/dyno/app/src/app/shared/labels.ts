@@ -135,8 +135,8 @@ export const GROUP_ORDER: CleanupGroup[] = ['system', 'browser', 'developer', 'd
 export const RISK_LABEL: Record<CleanupRisk, string> = { safe: 'Safe', review: 'Review', personal: 'Personal files' };
 export const RISK_TONE: Record<CleanupRisk, Tone> = { safe: 'ok', review: 'warn', personal: 'bad' };
 
-export const GRADE_LABEL: Record<Grade, string> = { excellent: 'Excellent', good: 'Good', fair: 'Fair', poor: 'Poor' };
-export const GRADE_TONE: Record<Grade, 'ok' | 'warn' | 'bad' | 'accent'> = { excellent: 'ok', good: 'ok', fair: 'warn', poor: 'bad' };
+export const GRADE_LABEL: Record<Grade, string> = { good: 'Good', fair: 'Fair', poor: 'Poor' };
+export const GRADE_TONE: Record<Grade, 'ok' | 'warn' | 'bad' | 'accent'> = { good: 'ok', fair: 'warn', poor: 'bad' };
 
 export const SEVERITY_LABEL: Record<Severity, string> = { info: 'Info', warning: 'Warning', critical: 'Critical' };
 export const SEVERITY_TONE: Record<Severity, Tone> = { info: 'info', warning: 'warn', critical: 'bad' };

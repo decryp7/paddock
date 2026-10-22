@@ -40,22 +40,22 @@ import { SettingsStore } from '../../state/settings.store';
           <div class="cell">
             <span class="k"><dy-icon name="cpu" /> CPU</span>
             <span class="v num">{{ pct(cpu()) }}</span>
-            <dy-sparkline [values]="live.series().cpu" [max]="100" label="CPU" style="--spark-h: 28px" />
+            <dy-sparkline [values]="live.series().cpu" [max]="100" color="var(--accent)" label="CPU" style="--spark-h: 28px" />
           </div>
           <div class="cell">
             <span class="k"><dy-icon name="memory" /> Memory</span>
             <span class="v num">{{ pct(mem()) }}</span>
-            <dy-sparkline [values]="live.series().memory" [max]="100" color="var(--chart-2)" label="Memory" style="--spark-h: 28px" />
+            <dy-sparkline [values]="live.series().memory" [max]="100" label="Memory" style="--spark-h: 28px" />
           </div>
           <div class="cell">
             <span class="k"><dy-icon name="disk" /> Disk</span>
             <span class="v num">{{ rate(disk()) }}</span>
-            <dy-sparkline [values]="live.series().diskRead" [values2]="live.series().diskWrite" color="var(--chart-1)" color2="var(--chart-2)" label="Disk" style="--spark-h: 28px" />
+            <dy-sparkline [values]="live.series().diskRead" [values2]="live.series().diskWrite" color2="var(--text-3)" label="Disk" style="--spark-h: 28px" />
           </div>
           <div class="cell">
             <span class="k"><dy-icon name="network" /> Network</span>
             <span class="v num">{{ rate(net()) }}</span>
-            <dy-sparkline [values]="live.series().netRx" [values2]="live.series().netTx" color="var(--chart-1)" color2="var(--chart-2)" label="Network" style="--spark-h: 28px" />
+            <dy-sparkline [values]="live.series().netRx" [values2]="live.series().netTx" color2="var(--text-3)" label="Network" style="--spark-h: 28px" />
           </div>
         </section>
 
@@ -99,7 +99,7 @@ import { SettingsStore } from '../../state/settings.store';
     .cell dy-sparkline { grid-column: 1 / -1; }
     .k { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); font-size: var(--fs-xs); }
     .k dy-icon { --icon-size: 13px; }
-    .v { font-weight: var(--fw-semibold); font-size: var(--fs-md); text-align: right; white-space: nowrap; }
+    .v { font: var(--fw-semibold) 20px / 1.1 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
     .top { display: grid; gap: 2px; }
     .top .eyebrow { padding: 0 var(--sp-1); margin-bottom: 2px; }
     ol { list-style: none; margin: 0; padding: 0; display: grid; }

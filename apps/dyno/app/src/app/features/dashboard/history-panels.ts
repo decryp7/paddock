@@ -38,7 +38,10 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
       </div>
       <dy-async [loaded]="!!store.history()" [error]="store.error()" [empty]="empty()" emptyTitle="No history yet" emptyText="Dyno keeps what it measures; the chart fills in as time passes." what="history" [rows]="0" (retry)="store.load()">
         <div skeleton class="skeleton chart-skeleton"></div>
-        <dy-chart [options]="option()" [label]="chartLabel()" style="--chart-h: 440px" />
+        @if (zoomed()) {
+          <button type="button" class="chip-toggle reset" (click)="resetZoom()"><dy-icon name="undo" /> Reset zoom</button>
+        }
+        <dy-chart [options]="option()" [label]="chartLabel()" (zoomed)="zoomed.set(true)" style="--chart-h: 360px" />
         <div class="legend" role="group" aria-label="Events on the timeline">
           @for (e of events(); track e.kind) {
             <button type="button" class="chip-toggle" [attr.aria-pressed]="!hidden().has(e.kind)" (click)="toggle(e.kind)" [title]="'Show or hide: ' + label(e.kind)">
@@ -57,7 +60,8 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
     .card { height: 100%; padding-bottom: var(--sp-3); }
     .card-head { padding-bottom: var(--sp-1); }
     dy-async { padding: 0 var(--sp-4); }
-    .chart-skeleton { height: 440px; margin-top: var(--sp-2); }
+    .chart-skeleton { height: 360px; margin-top: var(--sp-2); }
+    .reset { justify-self: start; margin-bottom: var(--sp-1); }
     .legend { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding-top: var(--sp-1); }
     .chip-toggle { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--surface-inset); color: var(--text-2); font: var(--fs-xs) var(--font-sans); cursor: default; }
     .chip-toggle[aria-pressed='false'] { opacity: 0.5; text-decoration: line-through; }
@@ -74,7 +78,10 @@ export class HistoryPanel implements OnInit {
   protected readonly hidden = signal<ReadonlySet<TimelineEventKind>>(new Set());
   protected readonly empty = computed(() => (this.store.history()?.points.length ?? 0) === 0);
   protected readonly events = computed(() => eventCounts(this.store.history()?.events ?? []));
+  protected readonly zoomed = signal(false);
+  private readonly resetKey = signal(0);
   protected readonly option = computed(() => {
+    this.resetKey();
     const h = this.store.history();
     return h && h.points.length ? historyOption(h, this.theme.tokens(), this.hidden()) : null;
   });
@@ -85,6 +92,12 @@ export class HistoryPanel implements OnInit {
 
   ngOnInit(): void {
     void this.store.ensure();
+  }
+
+  /** A fresh option object redraws the chart at full range. */
+  protected resetZoom(): void {
+    this.zoomed.set(false);
+    this.resetKey.update((k) => k + 1);
   }
 
   protected toggle(kind: TimelineEventKind): void {

@@ -528,7 +528,7 @@ describe('health, tuning, startup', () => {
   it('health grades the score', async () => {
     const h = await make().health();
     expect(h.score).toBe(100 - h.reasons.reduce((a, r) => a + r.impact, 0));
-    const grade = h.score >= 90 ? 'excellent' : h.score >= 70 ? 'good' : h.score >= 50 ? 'fair' : 'poor';
+    const grade = h.score >= 80 ? 'good' : h.score >= 60 ? 'fair' : 'poor';
     expect(h.grade).toBe(grade);
   });
   it('applying a tuning suggestion changes the list, the score and the log; applying twice fails', async () => {

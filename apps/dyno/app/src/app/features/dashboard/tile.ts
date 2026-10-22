@@ -35,7 +35,7 @@ import type { IconName } from '../../shared/icons';
     }
   `,
   styles: `
-    :host { display: flex; flex-direction: column; min-width: 0; padding: var(--sp-4); gap: var(--sp-3); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
+    :host { display: flex; flex-direction: column; min-width: 0; min-height: 168px; padding: var(--sp-4); gap: var(--sp-3); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
     header { display: flex; align-items: center; gap: var(--sp-2); min-height: 22px; color: var(--text-2); }
     header dy-icon { --icon-size: 16px; color: var(--text-3); }
     h2 { font-size: var(--fs-sm); font-weight: var(--fw-semibold); letter-spacing: 0.02em; color: var(--text-2); }

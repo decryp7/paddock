@@ -558,7 +558,7 @@ export interface SizeNode {
 
 // ------------------------------------------------------------------------------------------- health and tuning
 
-export type Grade = 'excellent' | 'good' | 'fair' | 'poor';
+export type Grade = 'good' | 'fair' | 'poor';
 export type Severity = 'info' | 'warning' | 'critical';
 
 export type FixKind = { tuning: string } | 'openCleanup' | 'openStartup' | 'restart' | 'openTaskManager';

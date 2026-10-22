@@ -31,6 +31,8 @@ export class Chart {
   readonly options = input.required<EChartsCoreOption | null>();
   readonly label = input('');
   /** A click on a data item (`params` as ECharts gives them). */
+  /** The user zoomed or panned the chart (wheel or drag). */
+  readonly zoomed = output<void>();
   readonly itemClick = output<{ name?: string; data?: unknown; seriesName?: string }>();
 
   private readonly host = viewChild.required<ElementRef<HTMLDivElement>>('host');
@@ -53,6 +55,7 @@ export class Chart {
         .then(({ init }) => {
           if (disposed) return;
           this.chart = init(this.host().nativeElement, null, { renderer: 'canvas' });
+          this.chart.on('datazoom', () => this.zoomed.emit());
           this.chart.on('click', (p) => this.itemClick.emit(p as { name?: string; data?: unknown; seriesName?: string }));
           if (typeof ResizeObserver !== 'undefined') {
             observer = new ResizeObserver(() => this.chart?.resize());

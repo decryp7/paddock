@@ -779,7 +779,7 @@ export class MockBackend implements DynoBackend {
       const applied = new Set(this.tuningList.filter((t) => t.applied).map((t) => t.id));
       const reasons = healthReasons().filter((r) => !(r.fix && typeof r.fix.kind === 'object' && applied.has(r.fix.kind.tuning)));
       const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
-      return { at: this.now(), score, grade: score >= 90 ? 'excellent' : score >= 70 ? 'good' : score >= 50 ? 'fair' : 'poor', reasons };
+      return { at: this.now(), score, grade: score >= 80 ? 'good' : score >= 60 ? 'fair' : 'poor', reasons };
     });
   }
 

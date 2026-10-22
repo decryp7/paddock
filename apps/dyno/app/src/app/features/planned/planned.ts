@@ -46,11 +46,11 @@ export type PlannedKey = keyof typeof PLANNED;
         <div class="txt">
           <div class="row">
             <h1>{{ meta().title }}</h1>
-            <span class="badge" data-tone="accent">Planned</span>
+            <span class="badge">Planned</span>
           </div>
           <p>{{ meta().text }}</p>
           <p class="note">This screen is not built yet. Dyno only measures until it is: nothing on your PC changes unless you enable a rule or click an action.</p>
-          <a class="btn" routerLink="/"><dy-icon name="dashboard" /> Back to the dashboard</a>
+          <a class="btn ghost" routerLink="/"><dy-icon name="arrow-right" /> Back to the dashboard</a>
         </div>
       </div>
     </div>
@@ -58,7 +58,7 @@ export type PlannedKey = keyof typeof PLANNED;
   styles: `
     :host { display: block; }
     .panel { display: flex; gap: var(--sp-5); align-items: flex-start; max-width: 680px; margin: var(--sp-10) auto 0; padding: var(--sp-8); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-xl); box-shadow: var(--shadow-1); }
-    .ic { display: grid; place-items: center; width: 56px; height: 56px; flex: none; border-radius: var(--r-lg); background: var(--accent-soft); color: var(--accent-text); --icon-size: 28px; }
+    .ic { display: grid; place-items: center; width: 48px; height: 48px; flex: none; border-radius: var(--r-lg); background: var(--surface-active); color: var(--text-2); --icon-size: 24px; }
     .txt { display: grid; gap: var(--sp-3); justify-items: start; min-width: 0; }
     .row { display: flex; align-items: center; gap: var(--sp-3); }
     p { color: var(--text-2); font-size: var(--fs-md); line-height: 1.5; }

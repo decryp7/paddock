@@ -46,7 +46,7 @@ function readCollapsed(): boolean {
       </div>
       <nav>
         <ul>
-          @for (item of nav; track item.path) {
+          @for (item of live_; track item.path) {
             <li>
               <a
                 [routerLink]="item.path"
@@ -59,13 +59,25 @@ function readCollapsed(): boolean {
               >
                 <dy-icon [name]="item.icon" />
                 <span class="label">{{ item.label }}</span>
-                @if (item.planned) {
-                  <span class="soon label">Soon</span>
-                }
               </a>
             </li>
           }
         </ul>
+        <button type="button" class="more label" [attr.aria-expanded]="showPlanned()" aria-controls="planned-nav" (click)="showPlanned.set(!showPlanned())">
+          <dy-icon [name]="showPlanned() ? 'chevron-down' : 'chevron-right'" /> Coming ({{ planned_.length }})
+        </button>
+        @if (showPlanned()) {
+          <ul id="planned-nav" class="planned">
+            @for (item of planned_; track item.path) {
+              <li>
+                <a [routerLink]="item.path" routerLinkActive="active" ariaCurrentWhenActive="page" [matTooltip]="collapsed() ? item.label : ''" matTooltipPosition="right" [attr.aria-label]="collapsed() ? item.label : null">
+                  <dy-icon [name]="item.icon" />
+                  <span class="label">{{ item.label }}</span>
+                </a>
+              </li>
+            }
+          </ul>
+        }
       </nav>
       <div class="side-foot">
         <button type="button" class="btn ghost collapse" (click)="toggle()" [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [attr.aria-expanded]="!collapsed()">
@@ -119,9 +131,13 @@ function readCollapsed(): boolean {
     .side-foot { margin-top: auto; display: grid; gap: var(--sp-1); }
     .overhead { display: flex; align-items: center; gap: 6px; height: var(--control-h-sm); padding: 0 var(--sp-2); border-radius: var(--r-pill); background: var(--surface-inset); border: 1px solid var(--border); color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
     .overhead dy-icon { --icon-size: 13px; color: var(--text-3); }
+    .more { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: 26px; margin-top: var(--sp-3); padding: 0 10px; border: 0; background: none; color: var(--text-3); font: var(--fw-medium) var(--fs-xs) var(--font-sans); letter-spacing: 0.03em; cursor: default; }
+    .more:hover { color: var(--text-1); }
+    .more dy-icon { --icon-size: 13px; }
+    nav ul.planned a { color: var(--text-3); }
     .soon { margin-left: auto; font-size: var(--fs-2xs); font-weight: var(--fw-medium); color: var(--text-3); letter-spacing: 0.02em; }
     .collapse { justify-content: flex-start; gap: var(--sp-3); padding: 0 10px; color: var(--text-3); }
-    :host(.collapsed) .label, :host(.collapsed) .word { display: none; }
+    :host(.collapsed) .label, :host(.collapsed) .word, :host(.collapsed) .more { display: none; }
     :host(.collapsed) .brand { justify-content: center; padding: 0; }
     :host(.collapsed) nav a, :host(.collapsed) .collapse { justify-content: center; padding: 0; }
 
@@ -149,7 +165,10 @@ export class Shell implements OnInit {
   private readonly dialogs = inject(Dialogs);
   private readonly notifier = inject(Notifier);
   private readonly backend = inject(BACKEND);
-  protected readonly nav = NAV;
+  protected readonly live_ = NAV.filter((n) => !n.planned);
+  protected readonly planned_ = NAV.filter((n) => n.planned);
+  /** The unbuilt screens stay out of the way until asked for (or while one of them is open). */
+  protected readonly showPlanned = signal(this.planned_.some((n) => location.hash.startsWith(`#${n.path}`)));
   protected readonly collapsed = signal(readCollapsed());
   private paletteOpen = false;
 

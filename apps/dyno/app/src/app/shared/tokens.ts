@@ -57,7 +57,7 @@ export const LIGHT: ThemeTokens = {
   borderStrong: '#cdced5',
   chartGrid: '#ececf0',
   focus: '#be3584',
-  chart: ['#0b6fb0', '#c25700', '#00845f', '#6b7785', '#2b2d42', '#7a5cc4'],
+  chart: ['#0072b2', '#c77f00', '#007a5e', '#a8588c', '#c24e00', '#4c5bd4', '#8a7a00', '#6b7280'],
 };
 
 export const DARK: ThemeTokens = {
@@ -86,5 +86,5 @@ export const DARK: ThemeTokens = {
   borderStrong: '#35363d',
   chartGrid: '#222327',
   focus: '#ef86be',
-  chart: ['#56b4e9', '#e69f00', '#5cc97a', '#9eabbc', '#e3d24c', '#a993f0'],
+  chart: ['#56b4e9', '#f0a030', '#5ad07f', '#d98bc0', '#f07d3a', '#8fa3ff', '#e8dc5a', '#a0a7b2'],
 };

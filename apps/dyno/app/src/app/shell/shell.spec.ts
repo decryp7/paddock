@@ -37,16 +37,18 @@ describe('Shell', () => {
     }
   });
 
-  it('lists every NAV item, with "Soon" only on the planned ones', async () => {
-    const { el } = await make();
-    const links = [...el.querySelectorAll<HTMLAnchorElement>('nav a')];
-    expect(links.map((a) => a.querySelector('.label')?.textContent?.trim())).toEqual(NAV.map((n) => n.label));
-    NAV.forEach((item, i) => {
-      const soon = links[i]!.querySelector('.soon');
-      if (item.planned) expect(soon?.textContent?.trim()).toBe('Soon');
-      else expect(soon).toBeNull();
-    });
-    expect(el.querySelectorAll('.soon').length).toBe(NAV.filter((n) => n.planned).length);
+  it('lists the built screens, and keeps the planned ones behind a "Coming" disclosure', async () => {
+    const { f, el } = await make();
+    const label = (a: Element) => a.querySelector('.label')?.textContent?.trim();
+    const built = NAV.filter((n) => !n.planned).map((n) => n.label);
+    expect([...el.querySelectorAll('nav ul:not(.planned) a')].map(label)).toEqual(built);
+    expect(el.querySelector('ul.planned')).toBeNull();
+    const toggle = el.querySelector<HTMLButtonElement>('button.more')!;
+    expect(toggle.textContent).toContain(`Coming (${NAV.filter((n) => n.planned).length})`);
+    toggle.click();
+    f.detectChanges();
+    expect([...el.querySelectorAll('ul.planned a')].map(label)).toEqual(NAV.filter((n) => n.planned).map((n) => n.label));
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
   });
   it('has a skip link, a main landmark and a search button', async () => {
     const { el } = await make();

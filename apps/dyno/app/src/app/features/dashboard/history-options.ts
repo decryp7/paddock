@@ -56,23 +56,19 @@ export function historyOption(history: History, t: ThemeTokens, hidden: Readonly
   const events = history.events.filter((e) => !hidden.has(e.kind));
   const cpuColor = t.chart[0]!;
   const memColor = t.chart[1]!;
-  const markPoint = events.map((e) => {
+  // Events sit on their own 14 px lane under the plot (one marker per event, shape-coded), not on the lines.
+  const lane = events.map((e) => {
     const style = EVENT_STYLE[e.kind];
-    return {
-      name: e.label,
-      coord: [e.at, nearestValue(history.points, e.at, (p) => p.cpu)],
-      symbol: style.symbol,
-      symbolSize: style.symbol === 'pin' ? 22 : 14,
-      itemStyle: { color: style.color(t), borderColor: t.surface2, borderWidth: 1.5 },
-      value: e.kind,
-    };
+    return { name: e.label, value: [e.at, 0.5, e.kind], symbol: style.symbol, symbolSize: 11, itemStyle: { color: style.color(t) } };
   });
-  const markLine = events.map((e) => ({ xAxis: e.at, lineStyle: { color: EVENT_STYLE[e.kind].color(t), opacity: 0.35, width: 1, type: 'dashed' as const } }));
   return {
     animationDuration: 250,
     textStyle: { fontFamily: FONT },
-    grid: { left: 40, right: 16, top: 34, bottom: 62 },
-    legend: { top: 0, left: 0, itemWidth: 14, itemHeight: 3, itemGap: 18, textStyle: { color: t.text2, fontFamily: FONT, fontSize: 12 }, icon: 'roundRect', selectedMode: true },
+    grid: [
+      { left: 40, right: 16, top: 34, bottom: 66 },
+      { left: 40, right: 16, height: 14, bottom: 40 },
+    ],
+    legend: { top: 0, left: 0, itemWidth: 14, itemHeight: 3, itemGap: 18, textStyle: { color: t.text2, fontFamily: FONT, fontSize: 12 }, icon: 'roundRect', selectedMode: true, data: ['CPU', 'Memory'] },
     tooltip: {
       trigger: 'axis',
       confine: true,
@@ -81,72 +77,74 @@ export function historyOption(history: History, t: ThemeTokens, hidden: Readonly
       textStyle: { color: t.text1, fontFamily: FONT, fontSize: 12 },
       axisPointer: { type: 'line', lineStyle: { color: t.borderStrong } },
       formatter: (raw: unknown) => {
-        const list = raw as { axisValue: number; marker: string; seriesName: string; value: [number, number] }[];
+        const list = (raw as { axisValue: number; marker: string; seriesName: string; seriesType: string; value: [number, number] }[]).filter((p) => p.seriesType === 'line');
         if (!list.length) return '';
         const rows = list.map((p) => `${p.marker} ${p.seriesName}&nbsp;<b>${formatPercent(p.value[1])}</b>`);
         return `${tooltipTime(list[0]!.axisValue, history.range)}<br/>${rows.join('<br/>')}`;
       },
     },
-    xAxis: {
-      type: 'time',
-      min: history.from,
-      max: history.to,
-      axisLine: { lineStyle: { color: t.border } },
-      axisTick: { show: false },
-      axisLabel: { ...axisText(t), hideOverlap: true, formatter: axisTime(history) },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: 'value',
-      min: 0,
-      max: 100,
-      interval: 25,
-      axisLabel: { ...axisText(t), formatter: '{value}%' },
-      splitLine: { lineStyle: { color: t.chartGrid } },
-    },
-    dataZoom: [
-      { type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+    xAxis: [
       {
-        type: 'slider',
-        xAxisIndex: 0,
-        height: 18,
-        bottom: 10,
-        filterMode: 'none',
-        borderColor: t.border,
-        backgroundColor: 'transparent',
-        fillerColor: t.accentSoft,
-        handleStyle: { color: t.accent, borderColor: t.accent },
-        moveHandleStyle: { color: t.borderStrong },
-        dataBackground: { lineStyle: { color: t.borderStrong }, areaStyle: { color: t.chartGrid } },
-        selectedDataBackground: { lineStyle: { color: t.accent }, areaStyle: { color: t.accentSoft } },
-        textStyle: { color: t.text3, fontFamily: FONT, fontSize: 10 },
+        type: 'time',
+        gridIndex: 0,
+        min: history.from,
+        max: history.to,
+        axisLine: { lineStyle: { color: t.border } },
+        axisTick: { show: false },
+        axisLabel: { ...axisText(t), hideOverlap: true, formatter: axisTime(history) },
+        splitLine: { show: false },
       },
+      { type: 'time', gridIndex: 1, min: history.from, max: history.to, show: false },
     ],
+    yAxis: [
+      {
+        type: 'value',
+        gridIndex: 0,
+        min: 0,
+        max: 100,
+        interval: 50,
+        axisLabel: { ...axisText(t), formatter: '{value}%' },
+        splitLine: { lineStyle: { color: t.chartGrid, type: 'dashed' } },
+      },
+      { type: 'value', gridIndex: 1, min: 0, max: 1, show: false },
+    ],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], filterMode: 'none' }],
     series: [
       {
         name: 'CPU',
         type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
         showSymbol: false,
         smooth: 0.2,
         sampling: 'lttb',
         data: history.points.map((p) => [p.at, p.cpu]),
-        lineStyle: { width: 1.75, color: cpuColor },
+        lineStyle: { width: 1.5, color: cpuColor },
         itemStyle: { color: cpuColor },
-        areaStyle: { color: cpuColor, opacity: 0.1 },
-        markPoint: { data: markPoint, animation: false, label: { show: false }, tooltip: { formatter: (p: { name: string }) => p.name } },
-        markLine: { data: markLine, symbol: 'none', silent: true, animation: false, label: { show: false } },
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: `${cpuColor}47` }, { offset: 1, color: `${cpuColor}00` }] } },
         z: 3,
       },
       {
         name: 'Memory',
         type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
         showSymbol: false,
         smooth: 0.2,
         sampling: 'lttb',
         data: history.points.map((p) => [p.at, p.memory]),
-        lineStyle: { width: 1.75, color: memColor },
+        lineStyle: { width: 1.5, color: memColor },
         itemStyle: { color: memColor },
         z: 2,
+      },
+      {
+        name: 'Events',
+        type: 'scatter',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: lane,
+        tooltip: { trigger: 'item', confine: true, backgroundColor: t.overlay, borderColor: t.border, textStyle: { color: t.text1, fontFamily: FONT, fontSize: 12 }, formatter: (p: { name: string; value: [number] }) => `${formatClock(p.value[0])} · ${p.name}` },
+        z: 4,
       },
     ],
   };

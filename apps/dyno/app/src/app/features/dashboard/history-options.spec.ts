@@ -39,48 +39,50 @@ describe('eventCounts', () => {
 });
 
 describe('historyOption', () => {
-  it('has CPU and Memory series over the points', () => {
+  it('has CPU and Memory lines over the points and an events lane', () => {
     const s = series(historyOption(history(), LIGHT));
-    expect(s.map((x) => x.name)).toEqual(['CPU', 'Memory']);
+    expect(s.map((x) => x.name)).toEqual(['CPU', 'Memory', 'Events']);
     expect(s[0]!.data).toEqual([[100, 10], [200, 40], [300, 20]]);
     expect(s[1]!.data).toEqual([[100, 50], [200, 50], [300, 50]]);
   });
-  it('marks every event on the CPU line, snapped to the nearest point', () => {
-    const cpu = series(historyOption(history(), LIGHT))[0]!;
-    expect(cpu.markPoint!.data).toHaveLength(3);
-    expect(cpu.markLine!.data).toHaveLength(3);
-    expect(cpu.markPoint!.data[0]).toMatchObject({ coord: [190, 40], symbol: EVENT_STYLE.throttle.symbol, value: 'throttle' });
-    expect(cpu.markPoint!.data[1]).toMatchObject({ coord: [290, 20], symbol: 'pin', symbolSize: 22 });
+  it('puts every event on the lane with a shape, not on the lines', () => {
+    const [cpu, , lane] = series(historyOption(history(), LIGHT)) as [Series, Series, Series];
+    expect(cpu.markPoint).toBeUndefined();
+    expect(lane.data).toHaveLength(3);
+    expect(lane.data[0]).toMatchObject({ symbol: EVENT_STYLE.throttle.symbol, value: [190, 0.5, 'throttle'] });
+    expect(lane.data[1]).toMatchObject({ symbol: 'pin' });
   });
   it('honours hidden kinds', () => {
-    const cpu = series(historyOption(history(), LIGHT, new Set(['throttle'])))[0]!;
-    expect(cpu.markPoint!.data).toHaveLength(1);
-    expect(cpu.markLine!.data).toHaveLength(1);
-    const none = series(historyOption(history(), LIGHT, new Set(['throttle', 'alert'])))[0]!;
-    expect(none.markPoint!.data).toEqual([]);
+    const lane = series(historyOption(history(), LIGHT, new Set(['throttle'])))[2]!;
+    expect(lane.data).toHaveLength(1);
+    expect(series(historyOption(history(), LIGHT, new Set(['throttle', 'alert'])))[2]!.data).toEqual([]);
+  });
+  it('fixes the y axis to 0-100% with three gridlines', () => {
+    const o = historyOption(history(), LIGHT) as { yAxis: { min?: number; max?: number; interval?: number }[] };
+    expect(o.yAxis[0]).toMatchObject({ min: 0, max: 100, interval: 50 });
   });
   it('spans the history on a time axis with the right label format per range', () => {
-    const o = historyOption(history({ from: 5, to: 99 }), DARK) as { xAxis: { min: number; max: number; axisLabel: { formatter: string } } };
-    expect([o.xAxis.min, o.xAxis.max]).toEqual([5, 99]);
-    expect(o.xAxis.axisLabel.formatter).toBe('{HH}:{mm}');
-    expect((historyOption(history({ range: 'hour' }), DARK) as typeof o).xAxis.axisLabel.formatter).toBe('{HH}:{mm}');
-    expect((historyOption(history({ range: 'week' }), DARK) as typeof o).xAxis.axisLabel.formatter).toBe('{d} {MMM}');
+    const o = historyOption(history({ from: 5, to: 99 }), DARK) as unknown as { xAxis: { min: number; max: number; axisLabel: { formatter: string } }[] };
+    expect([o.xAxis[0]!.min, o.xAxis[0]!.max]).toEqual([5, 99]);
+    expect(o.xAxis[0]!.axisLabel.formatter).toBe('{HH}:{mm}');
+    expect((historyOption(history({ range: 'hour' }), DARK) as unknown as typeof o).xAxis[0]!.axisLabel.formatter).toBe('{HH}:{mm}');
+    expect((historyOption(history({ range: 'week' }), DARK) as unknown as typeof o).xAxis[0]!.axisLabel.formatter).toBe('{d} {MMM}');
   });
   it('the tooltip formatter prints the time and each series percentage', () => {
     const at = new Date(2024, 0, 15, 9, 30).getTime();
     const o = historyOption(history(), LIGHT) as { tooltip: { formatter: (raw: unknown) => string } };
     expect(o.tooltip.formatter([])).toBe('');
-    const html = o.tooltip.formatter([{ axisValue: at, marker: '*', seriesName: 'CPU', value: [at, 42] }]);
+    const html = o.tooltip.formatter([{ axisValue: at, marker: '*', seriesName: 'CPU', seriesType: 'line', value: [at, 42] }]);
     expect(html).toMatch(/09\D30/);
     expect(html).toContain('CPU');
     expect(html).toContain('<b>42%</b>');
     const week = historyOption(history({ range: 'week' }), LIGHT) as typeof o;
-    expect(week.tooltip.formatter([{ axisValue: at, marker: '', seriesName: 'CPU', value: [at, 1] }])).toMatch(/Jan/);
+    expect(week.tooltip.formatter([{ axisValue: at, marker: '', seriesName: 'CPU', seriesType: 'line', value: [at, 1] }])).toMatch(/Jan/);
   });
   it('handles an empty history', () => {
     const cpu = series(historyOption(history({ points: [], events: [] }), LIGHT))[0]!;
     expect(cpu.data).toEqual([]);
-    expect(cpu.markPoint!.data).toEqual([]);
+    expect(series(historyOption(history({ points: [], events: [] }), LIGHT))[2]!.data).toEqual([]);
   });
 });
 

@@ -162,3 +162,9 @@ export function formatAffinity(mask: number | null | undefined, cores: number): 
   }
   return runs.join(', ');
 }
+
+/** Splits a formatted value into its number and unit (`23.9 GB` → `['23.9', 'GB']`, `75%` → `['75', '%']`) so the unit can be set smaller. */
+export function splitValue(text: string): [string, string] {
+  const m = /^([−+-]?[\d.,]+)\s*(.*)$/.exec(text);
+  return m ? [m[1]!, m[2] ?? ''] : [text, ''];
+}

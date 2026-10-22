@@ -105,12 +105,15 @@
   --skeleton-shine: #f6f6f8;
 
   /* Charts: Okabe–Ito based, adjusted per theme for ≥ 3:1 against the card (see shared/palette.ts). */
-  --chart-1: #0b6fb0;
-  --chart-2: #c25700;
-  --chart-3: #00845f;
-  --chart-4: #6b7785;
-  --chart-5: #2b2d42;
-  --chart-6: #7a5cc4;
+  --chart-1: #0072b2;
+  --chart-2: #c77f00;
+  --chart-3: #007a5e;
+  --chart-4: #a8588c;
+  --chart-5: #c24e00;
+  --chart-6: #4c5bd4;
+  --chart-7: #8a7a00;
+  --chart-8: #6b7280;
+  --bar-fill: #6b7380;
   --chart-grid: #ececf0;
   --chart-axis: #686b73;
 }
@@ -154,11 +157,14 @@
   --skeleton: #1d1e22;
   --skeleton-shine: #25262b;
   --chart-1: #56b4e9;
-  --chart-2: #e69f00;
-  --chart-3: #5cc97a;
-  --chart-4: #9eabbc;
-  --chart-5: #e3d24c;
-  --chart-6: #a993f0;
+  --chart-2: #f0a030;
+  --chart-3: #5ad07f;
+  --chart-4: #d98bc0;
+  --chart-5: #f07d3a;
+  --chart-6: #8fa3ff;
+  --chart-7: #e8dc5a;
+  --chart-8: #a0a7b2;
+  --bar-fill: #8a92a0;
   --chart-grid: #222327;
   --chart-axis: #8c8f98;
 }
@@ -345,7 +351,7 @@ h3 {
 }
 
 a {
-  color: var(--accent-text);
+  color: var(--text-1);
   text-decoration: none;
 }
 
@@ -573,10 +579,11 @@ code,
     border: 0;
     background: none;
     box-shadow: none;
-    color: var(--accent-text);
+    color: var(--text-2);
 
     &:hover:not(:disabled) {
       background: none;
+      color: var(--text-1);
       text-decoration: underline;
     }
   }
@@ -923,6 +930,50 @@ kbd,
   }
 }
 
+/* ------------------------------------------------------------------------------------------- tile anatomy */
+
+/* One hero per tile: 28/600 tabular with its unit as a smaller sibling; then one sparkline; then caption rows. */
+.hero {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font: var(--fw-semibold) 28px / 1 var(--font-display);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+
+  small {
+    font: var(--fw-regular) var(--fs-base) / 1 var(--font-sans);
+    letter-spacing: 0;
+    color: var(--text-3);
+  }
+}
+
+.caps {
+  margin: 0;
+  display: grid;
+  gap: 3px;
+  font-size: var(--fs-sm);
+
+  > div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    min-width: 0;
+  }
+
+  dt {
+    color: var(--text-3);
+  }
+
+  dd {
+    margin: 0;
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    min-width: 0;
+  }
+}
+
 /* ------------------------------------------------------------------------------------------- states and misc */
 
 .skeleton {
@@ -987,7 +1038,7 @@ kbd,
     display: block;
     height: 100%;
     border-radius: inherit;
-    background: var(--accent);
+    background: var(--bar-fill);
     transition: width var(--dur-slow) var(--ease-out);
   }
 

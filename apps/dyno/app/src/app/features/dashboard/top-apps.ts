@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
-import { formatBytes, formatPercent } from '../../shared/format';
+import { formatBytes, formatCount, formatPercent } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { LiveStore } from '../../state/live.store';
 import type { AppGroup } from '../../core/api.types';
@@ -30,7 +30,7 @@ import type { AppGroup } from '../../core/api.types';
               <button type="button" (click)="open(g)" [attr.aria-label]="'Show ' + g.name + ' in Processes'">
                 <span class="name truncate">{{ g.name }}</span>
                 @if (g.pids.length > 1) {
-                  <span class="badge">{{ g.pids.length }}</span>
+                  <span class="mult num" [title]="count(g.pids.length) + ' processes'">×{{ count(g.pids.length) }}</span>
                 }
                 <span class="val num">{{ value(g) }}</span>
                 <span class="bar-track" aria-hidden="true"><span [style.width.%]="share(g)"></span></span>
@@ -53,12 +53,14 @@ import type { AppGroup } from '../../core/api.types';
     .bar-track { grid-column: 1 / -1; height: 4px; }
     .val { font-weight: var(--fw-medium); min-width: 56px; text-align: right; }
     .name { font-weight: var(--fw-medium); }
+    .mult { color: var(--text-3); font-size: var(--fs-xs); }
   `,
 })
 export class TopApps {
   protected readonly live = inject(LiveStore);
   private readonly router = inject(Router);
   readonly metric = input<'cpu' | 'memory'>('cpu');
+  protected readonly count = formatCount;
   protected readonly placeholders = [1, 2, 3, 4, 5];
 
   protected readonly rows = computed<AppGroup[]>(() => {

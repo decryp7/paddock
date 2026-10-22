@@ -1,47 +1,69 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { formatCount } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ANOMALY_ICON, ANOMALY_LABEL } from '../../shared/labels';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 
-/** A banner when the engine found something odd in the history (memory growth, periodic spikes, restart loops). Nothing when there is none. */
+/**
+ * Unusual patterns the engine found in the history (memory growth, periodic spikes, restart loops): a quiet card with a
+ * warning bar and a one-line summary (about 48 px), expandable into the list. Nothing when there is none.
+ */
 @Component({
   selector: 'dy-anomalies-callout',
   imports: [Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (store.anomalies().length; as n) {
-      <section class="callout" role="status" aria-label="Anomalies">
-        <span class="ic"><dy-icon name="trend" /></span>
-        <div class="txt">
-          <strong>{{ n === 1 ? 'Dyno noticed something unusual' : 'Dyno noticed ' + count(n) + ' unusual patterns' }}</strong>
+      <section class="card" role="status" aria-label="Anomalies">
+        <div class="bar"></div>
+        <div class="head">
+          <dy-icon name="trend" />
+          <strong>{{ n === 1 ? 'Dyno noticed 1 unusual pattern' : 'Dyno noticed ' + count(n) + ' unusual patterns' }}</strong>
+          <span class="chips">
+            @for (a of store.anomalies(); track a.id) {
+              <span class="chip"><dy-icon [name]="icon(a.kind)" />{{ label(a.kind) }}</span>
+            }
+          </span>
+          <span class="spacer"></span>
+          <button type="button" class="btn sm ghost" [attr.aria-expanded]="open()" (click)="open.set(!open())">
+            {{ open() ? 'Hide' : 'Show' }} <dy-icon [name]="open() ? 'chevron-down' : 'chevron-right'" />
+          </button>
+        </div>
+        @if (open()) {
           <ul>
-            @for (a of store.anomalies().slice(0, 3); track a.id) {
-              <li [title]="a.explanation">
-                <dy-icon [name]="icon(a.kind)" /><span><b>{{ label(a.kind) }}:</b> {{ a.title }}</span>
+            @for (a of store.anomalies(); track a.id) {
+              <li>
+                <dy-icon [name]="icon(a.kind)" />
+                <div><strong>{{ a.title }}</strong><span>{{ a.explanation }}</span></div>
               </li>
             }
           </ul>
-        </div>
+        }
       </section>
     }
   `,
   styles: `
     :host { display: block; }
-    .callout { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); border-radius: var(--r-lg); background: var(--warn-soft); }
-    .ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--r-md); background: var(--surface-2); color: var(--warn); flex: none; }
-    .txt { flex: 1; min-width: 0; display: grid; gap: 2px; }
-    ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; font-size: var(--fs-sm); color: var(--text-2); }
-    li dy-icon { --icon-size: 13px; vertical-align: -2px; }
-    li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 6px; }
-    .why { color: var(--text-3); }
-    b { font-weight: var(--fw-medium); color: var(--text-1); }
+    .card { position: relative; overflow: hidden; padding: 0 var(--sp-4) 0 calc(var(--sp-4) + 3px); }
+    .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--warn); }
+    .head { display: flex; align-items: center; gap: var(--sp-3); min-height: 48px; }
+    .head > dy-icon { color: var(--warn); }
+    .chips { display: inline-flex; gap: var(--sp-1); flex-wrap: wrap; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 var(--sp-2); border-radius: var(--r-pill); background: var(--surface-inset); color: var(--text-2); font-size: var(--fs-xs); }
+    .chip dy-icon { --icon-size: 12px; }
+    .spacer { flex: 1; }
+    ul { list-style: none; margin: 0; padding: 0 0 var(--sp-3); display: grid; gap: var(--sp-2); border-top: 1px solid var(--border-subtle); padding-top: var(--sp-3); }
+    li { display: flex; gap: var(--sp-3); font-size: var(--fs-sm); }
+    li > dy-icon { color: var(--text-3); margin-top: 2px; }
+    li div { display: grid; }
+    li span { color: var(--text-3); }
   `,
 })
 export class AnomaliesCallout implements OnInit {
   protected readonly store = inject(DiagnosisStore);
-  protected readonly icon = (k: keyof typeof ANOMALY_ICON) => ANOMALY_ICON[k];
+  protected readonly open = signal(false);
   protected readonly count = formatCount;
+  protected readonly icon = (k: keyof typeof ANOMALY_ICON) => ANOMALY_ICON[k];
   protected readonly label = (k: keyof typeof ANOMALY_LABEL) => ANOMALY_LABEL[k];
 
   ngOnInit(): void {

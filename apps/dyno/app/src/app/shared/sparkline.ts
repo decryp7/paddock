@@ -48,7 +48,7 @@ export function sparkMax(series: readonly (readonly number[])[], max: number | n
     svg { width: 100%; height: 100%; display: block; overflow: visible; }
     .line { fill: none; stroke-width: 1.5px; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
     .second { stroke-dasharray: 3 2; }
-    .area { opacity: 0.14; stroke: none; }
+    .area { opacity: 0.16; stroke: none; }
   `,
 })
 export class Sparkline {
@@ -56,7 +56,7 @@ export class Sparkline {
   readonly values2 = input<readonly number[] | null>(null);
   /** A fixed scale (e.g. 100 for percentages); `null` scales to the data. */
   readonly max = input<number | null>(null);
-  readonly color = input('var(--accent)');
+  readonly color = input('var(--text-3)');
   readonly color2 = input('var(--chart-2)');
   readonly fill = input(true);
   readonly label = input('');
