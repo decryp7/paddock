@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { ModelPreset, PresetEntry, PresetStatus } from '../../core/api.types';
 import { presetStatusLook } from '../../shared/labels';
@@ -9,6 +10,7 @@ import { RowMenu } from '../../shared/ui/row-menu';
 import { isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
+import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { defaultsSummary, EMPTY_FORM, formOf, parseForm, type PresetField, type PresetForm } from './preset-form';
 import { PresetsStore } from './presets.store';
 import { ModelsStore } from './models.store';
@@ -28,7 +30,7 @@ export function statusDetail(s: PresetStatus): string {
 /** Model presets and aliases (ADR 0014): apps send the alias as `model`; here the user decides what serves it. */
 @Component({
   selector: 'pw-presets-tab',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, RowMenu],
+  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, RowMenu, MatSlideToggleModule, PwSelect],
   providers: [PresetsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -55,7 +57,7 @@ export function statusDetail(s: PresetStatus): string {
             <tbody>
               @for (e of store.entries(); track e.preset.alias) {
                 <tr tabindex="0" [class.editing]="store.editor()?.editing === e.preset.alias" (click)="onRowClick(e.preset, $event)" (keydown)="onRowKey(e.preset, $event)" (contextmenu)="onRowMenu(e.preset, $event)">
-                  <td class="alias"><span class="mono pitwall-selectable">{{ e.preset.alias }}</span></td>
+                  <td class="alias"><span class="mono pitwall-selectable">{{ e.preset.alias }}</span>@if (e.preset.cacheResponses) {<span class="badge" matTooltip="Answers to repeated deterministic requests are cached">cache</span>}@if (e.preset.keepWarm) {<span class="badge" matTooltip="The system prompt is kept warm across unloads">warm</span>}</td>
                   <td><span class="mono target pitwall-selectable" [matTooltip]="e.preset.target" matTooltipShowDelay="600">{{ e.preset.target }}</span></td>
                   <td class="serves">
                     <span class="status" [attr.data-tone]="look(e).tone" [matTooltip]="detail(e)">{{ look(e).label }}</span>
@@ -130,14 +132,24 @@ export function statusDetail(s: PresetStatus): string {
 
           <div class="field engine">
             <label for="pw-preset-engine">Engine</label>
-            <select class="select" id="pw-preset-engine" (change)="set('engine', $any($event.target).value)">
-              <option value="" [selected]="form().engine === ''">llama.cpp</option>
-              @for (e of models.engineChoices(); track e.id) {
-                <option [value]="e.id" [selected]="form().engine === e.id">{{ e.name }}</option>
-              }
-            </select>
+            <pw-select inputId="pw-preset-engine" [options]="engineOptions()" [value]="form().engine" label="Engine" (changed)="set('engine', $event)" />
           </div>
           <p class="hint faint">Context and engine apply when the model is loaded for a request. A model that is already loaded keeps what it was loaded with until it is released. Values a request carries win over the defaults here.</p>
+
+          <div class="toggle-row">
+            <div>
+              <span class="t" id="pw-preset-cache-l">Cache answers</span>
+              <span class="faint d">Repeat a deterministic request (temperature 0 or a fixed seed, no tools) and get the saved answer. Apps that have not opted in under Apps & keys are never cached.</span>
+            </div>
+            <mat-slide-toggle hideIcon aria-labelledby="pw-preset-cache-l" [checked]="form().cacheResponses" (change)="setFlag('cacheResponses', $event.checked)" />
+          </div>
+          <div class="toggle-row">
+            <div>
+              <span class="t" id="pw-preset-warm-l">Keep prompt warm</span>
+              <span class="faint d">Saves the system prompt's processed prefix when the model unloads and restores it on load, so the first request is fast. Bounded in size; cleared when the model, engine or preset changes.</span>
+            </div>
+            <mat-slide-toggle hideIcon aria-labelledby="pw-preset-warm-l" [checked]="form().keepWarm" (change)="setFlag('keepWarm', $event.checked)" />
+          </div>
 
           <div class="preview" role="status" aria-live="polite" aria-label="What this preset resolves to">
             @if (store.preview(); as p) {
@@ -255,6 +267,35 @@ export function statusDetail(s: PresetStatus): string {
         max-width: 280px;
       }
     }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-6);
+      > div {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .t {
+        font-weight: var(--fw-medium);
+      }
+      .d {
+        font-size: var(--fs-sm);
+      }
+    }
+    .badge {
+      display: inline-block;
+      margin-left: var(--sp-2);
+      padding: 0 6px;
+      font-size: var(--fs-xs);
+      font-weight: var(--fw-medium);
+      line-height: 18px;
+      color: var(--text-2);
+      background: var(--bg-active);
+      border-radius: var(--r-full);
+    }
     .hint {
       margin: 0;
       font-size: var(--fs-xs);
@@ -347,6 +388,14 @@ export class PresetsTab {
 
   protected bad(field: PresetField): boolean {
     return this.parsed().invalid.has(field);
+  }
+
+  protected engineOptions(): SelectOption[] {
+    return [{ value: '', label: 'llama.cpp' }, ...this.models.engineChoices().map((e) => ({ value: e.id, label: e.name }))];
+  }
+
+  protected setFlag(field: 'cacheResponses' | 'keepWarm', on: boolean): void {
+    this.form.update((f) => ({ ...f, [field]: on }));
   }
 
   protected set(field: PresetField, value: string): void {

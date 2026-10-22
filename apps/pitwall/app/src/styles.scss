@@ -919,6 +919,46 @@ textarea.input {
   }
 }
 
+/* The themed select's popup (pw-select): a CDK listbox in an overlay. */
+.pw-select-list {
+  min-width: 180px;
+  max-height: 320px;
+  margin: 0;
+  padding: var(--sp-1);
+  overflow-y: auto;
+  list-style: none;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  outline: none;
+  animation: pw-pop var(--dur-fast) var(--ease);
+  .opt {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    height: 30px;
+    padding: 0 var(--sp-3) 0 var(--sp-2);
+    color: var(--text);
+    white-space: nowrap;
+    border-radius: var(--r-sm);
+    cursor: default;
+    .tick {
+      width: 14px;
+      height: 14px;
+      color: var(--accent);
+      visibility: hidden;
+    }
+    &:hover,
+    &.cdk-option-active {
+      background: var(--bg-hover);
+    }
+    &[aria-selected='true'] .tick {
+      visibility: visible;
+    }
+  }
+}
+
 mat-icon.mat-icon {
   width: 16px;
   height: 16px;

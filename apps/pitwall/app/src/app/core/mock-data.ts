@@ -70,6 +70,7 @@ const ALL_PERMS: AppPermissions = {
   maxPriority: 'interactive',
   tools: true,
   extendedApis: true,
+  cacheResponses: false,
   limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: 4, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
 };
 
@@ -90,15 +91,15 @@ export function demoApps(now: number): AppInfo[] {
     today,
   });
   return [
-    app('debrief', 'Debrief', true, true, { requests: 1284, promptTokens: 1_942_310, completionTokens: 286_940, busyMs: 2_710_000, errors: 3, peakMemoryBytes: 7.4 * GiB }),
-    app('pitcrew', 'Pitcrew', true, true, { requests: 212, promptTokens: 148_220, completionTokens: 31_400, busyMs: 402_000, errors: 0, peakMemoryBytes: 3.6 * GiB }, { maxPriority: 'background', tools: false }),
-    app('spotter', 'Spotter', true, true, { requests: 3460, promptTokens: 905_000, completionTokens: 12_400, busyMs: 1_120_000, errors: 12, peakMemoryBytes: 0.5 * GiB }, {
+    app('debrief', 'Debrief', true, true, { requests: 1284, promptTokens: 1_942_310, completionTokens: 286_940, busyMs: 2_710_000, errors: 3, peakMemoryBytes: 7.4 * GiB, cacheHits: 212, cacheMisses: 388, prefixTokens: 1_180_000, savedTokens: 96_400 }, { cacheResponses: true }),
+    app('pitcrew', 'Pitcrew', true, true, { requests: 212, promptTokens: 148_220, completionTokens: 31_400, busyMs: 402_000, errors: 0, peakMemoryBytes: 3.6 * GiB, cacheHits: 0, cacheMisses: 0, prefixTokens: 61_000, savedTokens: 0 }, { maxPriority: 'background', tools: false }),
+    app('spotter', 'Spotter', true, true, { requests: 3460, promptTokens: 905_000, completionTokens: 12_400, busyMs: 1_120_000, errors: 12, peakMemoryBytes: 0.5 * GiB, cacheHits: 2_310, cacheMisses: 1_150, prefixTokens: 0, savedTokens: 601_000 }, {
       maxPriority: 'batch',
       models: ['nomic-embed-text-v1.5-f16', 'bge-reranker-v2-m3-q8_0'],
       limits: { requestsPerMin: 600, tokensPerDay: 5_000_000, maxConcurrent: 2, requestsPerDay: 20_000, tokensPerMonth: 120_000_000, maxMemoryPercent: null },
     }),
-    app('dyno', 'Dyno', true, false, { requests: 48, promptTokens: 61_200, completionTokens: 18_900, busyMs: 96_000, errors: 1, peakMemoryBytes: 3.6 * GiB }, { maxPriority: 'background' }),
-    app('nightly-report', 'Nightly report script', false, true, { requests: 391, promptTokens: 702_600, completionTokens: 98_120, busyMs: 840_000, errors: 0, peakMemoryBytes: 3.6 * GiB }, {
+    app('dyno', 'Dyno', true, false, { requests: 48, promptTokens: 61_200, completionTokens: 18_900, busyMs: 96_000, errors: 1, peakMemoryBytes: 3.6 * GiB, cacheHits: 0, cacheMisses: 0, prefixTokens: 18_400, savedTokens: 0 }, { maxPriority: 'background' }),
+    app('nightly-report', 'Nightly report script', false, true, { requests: 391, promptTokens: 702_600, completionTokens: 98_120, busyMs: 840_000, errors: 0, peakMemoryBytes: 3.6 * GiB, cacheHits: 0, cacheMisses: 0, prefixTokens: 240_000, savedTokens: 0 }, {
       extendedApis: false,
       limits: { requestsPerMin: 60, tokensPerDay: 600_000, maxConcurrent: 2, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: 25 },
     }, 2),
@@ -113,7 +114,7 @@ export function demoPairings(now: number): PairingRequest[] {
       appName: 'Obsidian Copilot',
       code: '482913',
       requestedAt: now - 40_000,
-      permissions: { models: null, maxPriority: 'interactive', tools: false, extendedApis: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } },
+      permissions: { models: null, maxPriority: 'interactive', tools: false, extendedApis: false, cacheResponses: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } },
     },
   ];
 }
@@ -339,6 +340,18 @@ export function demoSettings(): Settings {
     },
     network: { offline: false, lanEnabled: false, lanPort: 11501 },
     privacy: { keepRequestContent: false, metricsRetentionDays: 30 },
+    cache: {
+      prefixAffinity: true,
+      promptCacheMib: null,
+      embeddings: true,
+      embeddingsStorage: 'disk',
+      embeddingsMaxMib: 512,
+      embeddingsTtlSecs: 90 * 86_400,
+      responsesStorage: 'disk',
+      responsesMaxMib: 256,
+      responsesTtlSecs: 7 * 86_400,
+      keepWarmDays: 30,
+    },
   };
 }
 
@@ -587,11 +600,29 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
       coldStartMs: cold,
       promptTokens: Math.round(embedding ? 64 + rnd() * 400 : 200 + rnd() * 3800),
       completionTokens: completion,
+      cache: null,
+      cachedTokens: 0,
       error: status === 429 ? 'Rate limit: 600 requests/min' : status === 500 ? 'Engine stopped responding' : status === 400 ? 'Unknown model "gpt-4o"' : null,
       hasContent: i % 3 !== 2,
     });
     at -= Math.round(2_000 + rnd() * 25_000);
   }
+  // Cache outcomes: Spotter's embeddings and Debrief's opted-in answers are cache-eligible; chat prompts reuse prefixes.
+  out.forEach((r, i) => {
+    if (r.status !== 200) return;
+    if (r.appId === 'spotter' && r.endpoint.includes('embed')) {
+      r.cache = i % 3 === 0 ? 'miss' : 'hit';
+      if (r.cache === 'hit') r.totalMs = Math.min(r.totalMs, 6 + (i % 9));
+    } else if (r.appId === 'debrief' && !r.endpoint.includes('embed')) {
+      r.cache = i % 5 === 0 ? 'hit' : i % 5 === 1 ? 'miss' : i % 7 === 0 ? 'bypass' : null;
+      if (r.cache === 'hit') {
+        r.totalMs = Math.min(r.totalMs, 12 + (i % 11));
+        r.ttftMs = 4;
+        r.completionTokens = Math.max(r.completionTokens, 40);
+      }
+    }
+    if (r.promptTokens > 1000 && r.cache !== 'hit' && !r.endpoint.includes('embed') && i % 2 === 0) r.cachedTokens = Math.round(r.promptTokens * 0.8);
+  });
   // Some apps ask for a preset by name; `modelId` is what it resolved to.
   out.forEach((r, i) => {
     if (r.status === 400 || r.endpoint.includes('embed') || r.endpoint.includes('rerank')) return;
@@ -603,10 +634,10 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
 
 /** Presets an engineer might have set up. `legacy-explain` points at a model that was removed. */
 export function demoPresets(): ModelPreset[] {
-  const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null };
+  const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null, cacheResponses: false, keepWarm: false };
   return [
-    { ...base, alias: 'debrief-explain', target: 'qwen3-8b-instruct-q4_k_m', temperature: 0.3, maxTokens: 800, systemPrompt: 'Explain the log excerpt to an engineer in plain language. Be concise and name the likely cause first.' },
-    { ...base, alias: 'pitcrew-triage', target: 'auto:chat,tools,fast', context: 16384, temperature: 0.1 },
+    { ...base, alias: 'debrief-explain', target: 'qwen3-8b-instruct-q4_k_m', temperature: 0.3, maxTokens: 800, cacheResponses: true, keepWarm: true, systemPrompt: 'Explain the log excerpt to an engineer in plain language. Be concise and name the likely cause first.' },
+    { ...base, alias: 'pitcrew-triage', target: 'auto:chat,tools,fast', context: 16384, temperature: 0.1, keepWarm: true },
     { ...base, alias: 'spotter-summarise', target: 'llama-3.2-3b-instruct-q5_k_m', temperature: 0.2, topP: 0.9, maxTokens: 300, systemPrompt: 'Summarise the text in three short bullet points.' },
     { ...base, alias: 'legacy-explain', target: 'mistral-7b-instruct-v0.3-q4_k_m' },
   ];
@@ -627,6 +658,20 @@ export function demoBenchmarks(now: number): BenchmarkResult[] {
 export const DEMO_REPLY =
   'Pitwall keeps models hot only while they are useful. When a model has been idle for the configured time it first releases the context (the KV cache), and later the weights, so your games and IDE get the memory back. Under memory pressure it releases the least recently used model at once, and pinned models stay loaded until you unpin them.';
 
+/** The demo reply as streamed words: the small model says less, always in whole sentences. */
+export function demoReplyWords(modelId: string): string[] {
+  const sentences = DEMO_REPLY.match(/[^.]+\.\s*/g) ?? [DEMO_REPLY];
+  const text = modelId.includes('llama') ? sentences.slice(0, 2).join('') : DEMO_REPLY;
+  return text.trim().split(/(?<= )/);
+}
+
+/** How many of `words` fit in `maxTokens`: the longest run of whole sentences, or the plain cut when not even one sentence fits. */
+export function wordsThatFit(words: string[], maxTokens: number): number {
+  const limit = Math.max(1, Math.min(words.length, Math.floor(maxTokens / 1.3)));
+  if (limit >= words.length) return words.length;
+  for (let n = limit; n > 0; n--) if (/[.!?]\s*$/.test(words[n - 1]!)) return n;
+  return limit;
+}
 
 // ---- Packs -------------------------------------------------------------------------------------------------------
 
@@ -676,12 +721,12 @@ const USAGE_STEP: Record<UsageRange, { step: number; buckets: number }> = {
 };
 
 /** Per app: relative request volume, prompt and completion tokens per request, error rate and the model footprint. */
-const USAGE_PROFILE: Record<string, { weight: number; prompt: number; completion: number; errors: number; memory: number }> = {
-  debrief: { weight: 1.0, prompt: 1500, completion: 220, errors: 0.003, memory: 7.4 * GiB },
-  pitcrew: { weight: 0.16, prompt: 700, completion: 150, errors: 0.01, memory: 3.6 * GiB },
-  spotter: { weight: 2.6, prompt: 260, completion: 4, errors: 0.004, memory: 0.5 * GiB },
-  dyno: { weight: 0.04, prompt: 1200, completion: 390, errors: 0.02, memory: 3.6 * GiB },
-  'nightly-report': { weight: 0.3, prompt: 1800, completion: 250, errors: 0, memory: 3.6 * GiB },
+const USAGE_PROFILE: Record<string, { weight: number; prompt: number; completion: number; errors: number; memory: number; cacheShare: number; hitRate: number; prefix: number }> = {
+  debrief: { weight: 1.0, prompt: 1500, completion: 220, errors: 0.003, memory: 7.4 * GiB, cacheShare: 0.4, hitRate: 0.35, prefix: 700 },
+  pitcrew: { weight: 0.16, prompt: 700, completion: 150, errors: 0.01, memory: 3.6 * GiB, cacheShare: 0, hitRate: 0, prefix: 300 },
+  spotter: { weight: 2.6, prompt: 260, completion: 4, errors: 0.004, memory: 0.5 * GiB, cacheShare: 1, hitRate: 0.64, prefix: 0 },
+  dyno: { weight: 0.04, prompt: 1200, completion: 390, errors: 0.02, memory: 3.6 * GiB, cacheShare: 0, hitRate: 0, prefix: 400 },
+  'nightly-report': { weight: 0.3, prompt: 1800, completion: 250, errors: 0, memory: 3.6 * GiB, cacheShare: 0, hitRate: 0, prefix: 500 },
 };
 
 /** Usage over a range for the demo apps (mock only): daytime-heavy hours, quiet nights, complete buckets. */
@@ -690,23 +735,31 @@ export function demoUsageSeries(range: UsageRange, now: number, appId: string | 
   const current = now - (now % step);
   const starts = Array.from({ length: buckets }, (_, i) => current - (buckets - 1 - i) * step);
   const ids = appId ? [appId] : known;
-  const empty = (): UsageCounters => ({ requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0 });
+  const empty = (): UsageCounters => ({ requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0, cacheHits: 0, cacheMisses: 0, prefixTokens: 0, savedTokens: 0 });
   const merge = (a: UsageCounters, b: UsageCounters) => {
     a.requests += b.requests;
     a.promptTokens += b.promptTokens;
     a.completionTokens += b.completionTokens;
     a.busyMs += b.busyMs;
     a.errors += b.errors;
+    a.cacheHits += b.cacheHits;
+    a.cacheMisses += b.cacheMisses;
+    a.prefixTokens += b.prefixTokens;
+    a.savedTokens += b.savedTokens;
     a.peakMemoryBytes = Math.max(a.peakMemoryBytes, b.peakMemoryBytes);
   };
   const apps: AppUsageSeries[] = ids.map((id, k) => {
-    const profile = USAGE_PROFILE[id] ?? { weight: 0, prompt: 0, completion: 0, errors: 0, memory: 0 };
+    const profile = USAGE_PROFILE[id] ?? { weight: 0, prompt: 0, completion: 0, errors: 0, memory: 0, cacheShare: 0, hitRate: 0, prefix: 0 };
     const rnd = prng(seed + k * 97 + range.length);
     const totals = empty();
     const points = starts.map((at) => {
       const h = new Date(at).getHours();
       const day = step === DAY ? 1 : 0.15 + 0.85 * Math.max(0, Math.sin(((h - 7) / 14) * Math.PI));
       const requests = Math.round(profile.weight * day * (step === DAY ? 900 : 60) * (0.6 + rnd() * 0.8));
+      const eligible = Math.round(requests * profile.cacheShare * (0.8 + rnd() * 0.4));
+      const hits = Math.round(eligible * profile.hitRate * (0.8 + rnd() * 0.4));
+      const prefixTokens = Math.round(requests * profile.prefix * (0.8 + rnd() * 0.4));
+      const cache = { cacheHits: hits, cacheMisses: eligible - hits, prefixTokens, savedTokens: Math.round(hits * profile.prompt * 0.9) };
       const c: UsageCounters = {
         requests,
         promptTokens: Math.round(requests * profile.prompt * (0.8 + rnd() * 0.4)),
@@ -714,6 +767,7 @@ export function demoUsageSeries(range: UsageRange, now: number, appId: string | 
         busyMs: Math.round(requests * (300 + profile.completion * 22)),
         errors: Math.round(requests * profile.errors * (rnd() * 2)),
         peakMemoryBytes: requests ? profile.memory : 0,
+        ...cache,
       };
       merge(totals, c);
       return c;

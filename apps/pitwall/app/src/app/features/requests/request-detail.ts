@@ -5,7 +5,7 @@ import { date, duration, int } from '../../shared/format';
 import { PRIORITY_LABEL } from '../../shared/labels';
 import { DetailPanel } from '../../shared/ui/detail-panel';
 import { Fact } from '../../shared/ui/fact';
-import { API_LABEL, CHOSEN_LABEL, statusText } from './request-labels';
+import { API_LABEL, CACHE_LABEL, CHOSEN_LABEL, statusText } from './request-labels';
 import { RequestsStore } from './requests.store';
 
 /** The details of one request, in the panel beside the log. Prompt and response stay hidden until the user asks for them. */
@@ -25,6 +25,12 @@ import { RequestsStore } from './requests.store';
           <span class="faint">Streamed</span>
         }
       </div>
+      @if (r().cache; as c) {
+        <p class="cache">
+          <span class="status" [attr.data-tone]="cacheLabel[c].tone">{{ cacheLabel[c].label }}</span>
+          <span class="faint">{{ cacheLabel[c].text }} The <span class="mono">X-Pitwall-Cache</span> response header says <span class="mono">{{ c }}</span>.</span>
+        </p>
+      }
       @if (r().error) {
         <p class="err" role="note"><mat-icon svgIcon="pw:alert" aria-hidden="true" />{{ r().error }}</p>
       }
@@ -59,6 +65,9 @@ import { RequestsStore } from './requests.store';
         <pw-fact label="Priority" [value]="priority[r().priority]" />
         <pw-fact label="Prompt tokens" [value]="count(r().promptTokens)" [num]="true" />
         <pw-fact label="Completion tokens" [value]="count(r().completionTokens)" [num]="true" />
+        @if (r().cachedTokens > 0) {
+          <pw-fact label="Prompt tokens reused" [value]="count(r().cachedTokens)" [num]="true" />
+        }
         <pw-fact label="Request id" [value]="r().id" [copy]="true" [mono]="true" />
       </section>
 
@@ -102,6 +111,14 @@ import { RequestsStore } from './requests.store';
       display: flex;
       align-items: center;
       gap: var(--sp-3);
+      font-size: var(--fs-sm);
+    }
+    .cache {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: var(--sp-1);
+      margin: var(--sp-3) 0 0;
       font-size: var(--fs-sm);
     }
     .err {
@@ -221,6 +238,7 @@ export class RequestDetail {
   protected readonly count = int;
   protected readonly statusLabel = statusText;
   protected readonly api = API_LABEL;
+  protected readonly cacheLabel = CACHE_LABEL;
   protected readonly chosen = CHOSEN_LABEL;
   protected readonly priority = PRIORITY_LABEL;
 

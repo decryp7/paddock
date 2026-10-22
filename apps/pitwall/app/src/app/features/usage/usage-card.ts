@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import type { EChartsCoreOption } from 'echarts/core';
+import type { UsageCounters } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
 import { usageChart, type UsageMetric } from '../../shared/charts/chart-options';
@@ -9,13 +10,14 @@ import { bytes, compact, int } from '../../shared/format';
 import { seriesColor } from '../../shared/theme-tokens';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
-import { tokensOf, USAGE_RANGES, USAGE_RANGE_TEXT } from './usage-format';
+import { CacheTiles } from './cache-tiles';
+import { cacheHitRate, cacheHitRateText, tokensOf, USAGE_RANGES, USAGE_RANGE_TEXT } from './usage-format';
 import { UsageStore } from './usage.store';
 
 /** The dashboard's compact usage chart: tokens or requests per app over 24 h, 7 d or 30 d, with a legend of totals. */
 @Component({
   selector: 'pw-usage-card',
-  imports: [Panel, EChart, EmptyState, RouterLink],
+  imports: [Panel, EChart, EmptyState, RouterLink, CacheTiles],
   providers: [UsageStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -38,6 +40,7 @@ import { UsageStore } from './usage.store';
           </pw-empty-state>
         } @else {
           <pw-echart [option]="option()" [themeKey]="chartKey()" height="170px" [label]="chartLabel()" />
+          <pw-cache-tiles class="cache" [totals]="s.totals" />
           <ul class="totals" aria-label="Usage per app">
             @for (a of s.apps; track a.appId; let i = $index) {
               <li>
@@ -46,6 +49,7 @@ import { UsageStore } from './usage.store';
                 <span class="num">{{ count(tokens(a.totals)) }} tokens</span>
                 <span class="num faint">{{ intText(a.totals.requests) }} requests</span>
                 <span class="num faint">{{ a.totals.peakMemoryBytes ? size(a.totals.peakMemoryBytes) + ' peak' : '' }}</span>
+                <span class="num faint" [title]="'Cache hits: ' + intText(a.totals.cacheHits)">{{ hasRate(a.totals) ? rateText(a.totals) + ' cached' : '' }}</span>
               </li>
             }
           </ul>
@@ -89,16 +93,19 @@ import { UsageStore } from './usage.store';
         }
       }
     }
+    .cache {
+      margin-top: var(--sp-3);
+    }
     .totals {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
       gap: var(--sp-1) var(--sp-4);
       margin: var(--sp-2) 0 0;
       padding: 0;
       list-style: none;
       li {
         display: grid;
-        grid-template-columns: 10px minmax(0, 1fr) auto auto auto;
+        grid-template-columns: 10px minmax(0, 1fr) auto auto auto auto;
         align-items: center;
         gap: var(--sp-2);
         font-size: var(--fs-sm);
@@ -133,6 +140,10 @@ export class UsageCard implements OnInit {
   protected readonly intText = int;
   protected readonly size = bytes;
   protected readonly tokens = tokensOf;
+  protected readonly rateText = cacheHitRateText;
+  protected hasRate(c: UsageCounters): boolean {
+    return cacheHitRate(c) !== null;
+  }
   protected readonly rangeText = computed(() => USAGE_RANGE_TEXT[this.store.range()]);
   private readonly names = computed(() => new Map(this.live.apps().map((a) => [a.id, a.name])));
   protected readonly chartKey = computed(() => `${this.theme.resolved()}:${this.store.range()}:${this.metric()}`);

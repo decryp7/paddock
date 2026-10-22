@@ -7,6 +7,7 @@ import { firstValueFrom } from 'rxjs';
 import type { AppInfo, AppPermissions } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ago, compact, date, duration, int } from '../../shared/format';
+import { cacheHitRateText } from '../usage/usage-format';
 import { injectNow } from '../../shared/now';
 import { Confirm } from '../../shared/ui/confirm';
 import { EmptyState } from '../../shared/ui/empty-state';
@@ -113,6 +114,20 @@ import { PermissionsEditor } from './permissions-editor';
                 </dl>
                 <p class="today faint">Today, since midnight</p>
               </section>
+
+              <pw-panel heading="Cached answers" icon="bolt" [sub]="a.permissions.cacheResponses ? 'on for this app' : 'off for this app'">
+                <button panel-actions type="button" class="btn sm" [disabled]="store.isBusy('cache:' + a.id)" (click)="clearAnswers(a)">Clear this app's cached answers</button>
+                <dl class="cache-stats" aria-label="Cache use today">
+                  <div><dt>Cache hits</dt><dd class="num">{{ intText(a.today.cacheHits) }}</dd></div>
+                  <div><dt>Misses</dt><dd class="num">{{ intText(a.today.cacheMisses) }}</dd></div>
+                  <div><dt>Hit rate</dt><dd class="num">{{ rateText(a.today) }}</dd></div>
+                  <div><dt>Prompt tokens reused</dt><dd class="num">{{ count(a.today.prefixTokens) }}</dd></div>
+                </dl>
+                <p class="faint cache-note">
+                  {{ a.permissions.cacheResponses ? 'Repeated deterministic requests (temperature 0 or a fixed seed, no tools) are answered from the cache.' : 'Turn on Cache answers under Permissions to let repeated deterministic requests reuse a saved answer.' }}
+                  Figures are for today.
+                </p>
+              </pw-panel>
 
               <pw-app-usage [appId]="a.id" [appName]="a.name" [permissions]="a.permissions" />
 
@@ -327,6 +342,25 @@ import { PermissionsEditor } from './permissions-editor';
       margin-top: var(--sp-2);
       font-size: var(--fs-sm);
     }
+    .cache-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--sp-4);
+      margin: 0;
+      dt {
+        font-size: var(--fs-sm);
+        color: var(--text-2);
+      }
+      dd {
+        margin: 2px 0 0;
+        font-size: var(--fs-xl);
+        font-weight: var(--fw-semibold);
+      }
+    }
+    .cache-note {
+      margin: var(--sp-3) 0 0;
+      font-size: var(--fs-sm);
+    }
     .keys {
       margin-top: var(--sp-2);
       th:first-child,
@@ -359,6 +393,7 @@ export class AppsPage implements OnInit {
   protected readonly code = groupCode;
   protected readonly summary = permissionSummary;
   protected readonly limits = limitsText;
+  protected readonly rateText = cacheHitRateText;
 
   /** `/apps?app=<id>` (from the dashboard's usage legend) opens that app. */
   private readonly selectedId = signal<string | null>(inject(ActivatedRoute, { optional: true })?.snapshot.queryParamMap.get('app') ?? null);
@@ -442,6 +477,16 @@ export class AppsPage implements OnInit {
       danger: true,
     });
     if (ok && (await this.store.deleteApp(app.id))) this.selectedId.set(null);
+  }
+
+  protected async clearAnswers(app: AppInfo): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: `Clear ${app.name}'s cached answers?`,
+      message: 'Repeated requests are answered by the model again until new answers are cached. Nothing else changes.',
+      confirm: 'Clear cached answers',
+      danger: true,
+    });
+    if (ok) await this.store.clearCachedAnswers(app.id);
   }
 
   protected savePermissions(appId: string, p: AppPermissions): void {

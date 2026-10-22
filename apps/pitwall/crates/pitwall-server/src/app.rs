@@ -2,6 +2,7 @@
 //! (authorise, rate-limit, resolve the model, queue, load, run, record) all API families go through.
 
 use crate::auth::{Auth, Principal};
+use crate::caches::Caches;
 use crate::egress::Egress;
 use crate::engines::{Engine, LlamaCpp, Planned};
 use crate::library::Library;
@@ -96,6 +97,10 @@ pub struct AppState {
     pub updates: crate::updates::Updates,
     /// Where the checker asks (Hugging Face; tests swap it).
     pub update_source: RwLock<Arc<dyn crate::updates::RepoSource>>,
+    /// The response and embeddings caches (ADR 0019).
+    pub caches: Caches,
+    /// When the last request finished (the clean-up pass runs when the server has been idle).
+    pub last_request_at: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {
@@ -172,6 +177,8 @@ impl AppState {
         let update_source: RwLock<Arc<dyn crate::updates::RepoSource>> =
             RwLock::new(Arc::new(crate::updates::HfSource::new(egress.clone())));
         let (live, _) = broadcast::channel(256);
+        let caches = Caches::open(&dirs.cache_db(), &settings.read().map(|s| s.cache.clone()).unwrap_or_default(), now_ms());
+        serving.set_slots_dir(dirs.slots());
         let st = Arc::new(AppState {
             dirs,
             settings,
@@ -203,6 +210,8 @@ impl AppState {
             port: std::sync::atomic::AtomicU16::new(0),
             updates,
             update_source,
+            caches,
+            last_request_at: std::sync::atomic::AtomicU64::new(0),
         });
         st.serving.set_speeds(pitwall_core::benchmarks::speeds(&lock(&st.benchmarks)));
         if stored_presets.damaged || stored_presets.skipped > 0 {
@@ -289,6 +298,7 @@ impl AppState {
             *g = s.clone();
         }
         self.serving.settings_changed();
+        self.caches.apply(&s.cache);
         Ok(s)
     }
 
@@ -552,6 +562,53 @@ impl AppState {
             needed.push(Capability::Json);
         }
         self.serving.check_capabilities(&resolved, &needed)?;
+        let name = resolved.id.to_string();
+        req.model = ModelRef::Named(name.clone());
+        let chosen_by = resolved.chosen_by;
+        let alias = resolved.preset.as_ref().map(|p| p.alias.to_string());
+        let stream = req.stream;
+        let request_text = if cfg.privacy.keep_request_content {
+            Some(request_text(&req))
+        } else {
+            None
+        };
+        // The response cache (ADR 0019): only for deterministic requests, only for apps and presets that opted in.
+        let opted_in = perms.as_ref().is_some_and(|p| p.cache_responses) || resolved.preset.as_ref().is_some_and(|p| p.cache_responses);
+        let mut outcome = None;
+        let mut cache_store = None;
+        let cache_meta = pitwall_core::cache::Meta {
+            model: name.clone(),
+            app: app.to_string(),
+            preset: alias.clone().unwrap_or_default(),
+        };
+        if opted_in && pitwall_core::cache::cacheable(&req) {
+            if meta.no_cache {
+                outcome = Some(pitwall_core::cache::Outcome::Bypass);
+            } else {
+                let key = pitwall_core::cache::key(&self.serving.fingerprint(&resolved), &req);
+                match self.caches.response(&key, now) {
+                    Some(out) => {
+                        return Ok(self.cached_run(CachedAnswer {
+                            out,
+                            resolved,
+                            meta,
+                            app: app.to_string(),
+                            priority,
+                            limits: perms.map(|p| p.limits),
+                            stream,
+                            request_text,
+                            alias,
+                        }));
+                    }
+                    None => outcome = Some(pitwall_core::cache::Outcome::Miss),
+                }
+                cache_store = Some(CacheStore {
+                    key,
+                    meta: cache_meta,
+                    acc: pitwall_core::chat::ChatOutput::default(),
+                });
+            }
+        }
         let queued = Instant::now();
         let permit = self
             .serving
@@ -573,26 +630,21 @@ impl AppState {
             self.warn_limits(app.as_str(), &p.limits, now);
         }
         let queued_ms = queued.elapsed().as_millis() as u64;
-        let name = resolved.id.to_string();
         let timeout = Duration::from_secs(cfg.server.request_timeout_secs);
-        req.model = ModelRef::Named(name.clone());
         let job = permit.id();
-        let chosen_by = resolved.chosen_by;
-        let alias = resolved.preset.as_ref().map(|p| p.alias.to_string());
-        let stream = req.stream;
-        let request_text = if cfg.privacy.keep_request_content {
-            Some(request_text(&req))
-        } else {
-            None
-        };
         let engine = busy.model().engine.0.clone();
-        let rx = self.serving.chat(busy, permit, req, timeout);
+        let hint = crate::serving::ChatHint {
+            app: Some(app.to_string()),
+            warm_file: self.serving.warm_file_for(&resolved),
+        };
+        let rx = self.serving.chat(busy, permit, req, timeout, &hint);
         Ok(Run {
             rx,
             resolved,
             cold_start_ms: cold,
             engine,
             job,
+            cache: outcome,
             rec: Recorder {
                 st: self.clone(),
                 app: app.to_string(),
@@ -611,11 +663,78 @@ impl AppState {
                 model: name,
                 chosen_by,
                 alias,
+                cache: outcome,
+                cache_hit: false,
+                cache_store,
                 done: false,
             },
         })
     }
+
+    /// A [`Run`] that replays a stored answer: no queue, no model load, no engine.
+    fn cached_run(self: &Arc<Self>, a: CachedAnswer) -> Run {
+        let events = pitwall_core::cache::replay(&a.out);
+        let (tx, rx) = mpsc::channel(events.len() + 1);
+        for e in events {
+            let _ = tx.try_send(Ok(e));
+        }
+        let name = a.resolved.id.to_string();
+        Run {
+            rx,
+            cold_start_ms: None,
+            engine: "cache".into(),
+            job: 0,
+            cache: Some(pitwall_core::cache::Outcome::Hit),
+            rec: Recorder {
+                st: self.clone(),
+                app: a.app,
+                family: a.meta.family,
+                endpoint: a.meta.endpoint,
+                priority: a.priority,
+                started: Instant::now(),
+                memory_bytes: 0,
+                limits: a.limits,
+                queued_ms: 0,
+                ttft: None,
+                stream: a.stream,
+                cold_start_ms: None,
+                text: String::new(),
+                request_text: a.request_text,
+                model: name,
+                chosen_by: a.resolved.chosen_by,
+                alias: a.alias,
+                cache: Some(pitwall_core::cache::Outcome::Hit),
+                cache_hit: true,
+                cache_store: None,
+                done: false,
+            },
+            resolved: a.resolved,
+        }
+    }
 }
+
+/// What a cache hit needs to become a [`Run`].
+struct CachedAnswer {
+    out: pitwall_core::chat::ChatOutput,
+    resolved: Resolved,
+    meta: Meta,
+    app: String,
+    priority: Priority,
+    limits: Option<limits::AppLimits>,
+    stream: bool,
+    request_text: Option<String>,
+    alias: Option<String>,
+}
+
+/// The answer of a cache-eligible request, collected as it streams, to be stored when it completes.
+struct CacheStore {
+    key: pitwall_core::cache::Key,
+    meta: pitwall_core::cache::Meta,
+    acc: pitwall_core::chat::ChatOutput,
+}
+
+/// The largest answer the response cache collects (bytes of text).
+const MAX_CACHED_ANSWER: usize = 1024 * 1024;
 
 fn denied(d: limits::Denied) -> ApiError {
     ApiError::new(
@@ -637,6 +756,8 @@ pub struct Meta {
     pub extended: bool,
     /// What kind of job.
     pub kind: JobKind,
+    /// The caller asked not to use the response cache (`Cache-Control: no-cache`).
+    pub no_cache: bool,
 }
 
 /// A started request.
@@ -649,8 +770,10 @@ pub struct Run {
     pub cold_start_ms: Option<u64>,
     /// The engine that serves it (`llama.cpp`, or the id of the engine pack).
     pub engine: String,
-    /// The queue job id.
+    /// The queue job id (0 for an answer from the cache).
     pub job: u64,
+    /// What the response cache did, when the request was eligible for it.
+    pub cache: Option<pitwall_core::cache::Outcome>,
     /// Records the outcome when finished.
     pub rec: Recorder,
 }
@@ -678,6 +801,12 @@ pub struct Recorder {
     chosen_by: ChosenBy,
     /// The preset the request named, if any.
     alias: Option<String>,
+    /// What the response cache did.
+    cache: Option<pitwall_core::cache::Outcome>,
+    /// The answer came from the cache.
+    cache_hit: bool,
+    /// Collects the answer for the cache; dropped when the answer turns out too large or the request fails.
+    cache_store: Option<CacheStore>,
     done: bool,
 }
 
@@ -691,6 +820,12 @@ impl Recorder {
     pub fn event(&mut self, e: &ChatEvent) {
         if self.ttft.is_none() && matches!(e, ChatEvent::Delta(_) | ChatEvent::Reasoning(_) | ChatEvent::ToolCall { .. }) {
             self.ttft = Some(self.started.elapsed().as_millis() as u64);
+        }
+        if let Some(c) = &mut self.cache_store {
+            c.acc.push(e);
+            if c.acc.text.len() + c.acc.reasoning.len() > MAX_CACHED_ANSWER {
+                self.cache_store = None;
+            }
         }
         if let ChatEvent::Delta(t) = e {
             if self.st.cfg().privacy.keep_request_content && self.text.len() < 64 * 1024 {
@@ -708,15 +843,26 @@ impl Recorder {
         let now = now_ms();
         let total_ms = self.started.elapsed().as_millis() as u64;
         let failed = error.is_some();
+        let reused = timings.map_or(0, |t| t.cached_tokens);
+        let hit = self.cache_hit && !failed;
         lock(&self.st.usage).record(&UsageEvent {
             at: now,
             app: &self.app,
-            prompt_tokens: u64::from(usage.prompt_tokens),
-            completion_tokens: u64::from(usage.completion_tokens),
+            // A hit cost the model nothing: its tokens are "saved", not used.
+            prompt_tokens: if hit { 0 } else { u64::from(usage.prompt_tokens) },
+            completion_tokens: if hit { 0 } else { u64::from(usage.completion_tokens) },
             busy_ms: total_ms,
             failed,
             memory_bytes: self.memory_bytes,
+            cache_hit: hit,
+            cache_miss: self.cache == Some(pitwall_core::cache::Outcome::Miss),
+            prefix_tokens: u64::from(reused),
+            saved_tokens: if hit { u64::from(usage.prompt_tokens) + u64::from(usage.completion_tokens) } else { 0 },
         });
+        if let Some(c) = self.cache_store.take().filter(|_| !failed) {
+            self.st.caches.store_response(c.key, &c.acc, c.meta, now);
+        }
+        self.st.last_request_at.store(now, std::sync::atomic::Ordering::SeqCst);
         if let Some(l) = &self.limits {
             self.st.warn_limits(&self.app, l, now);
         }
@@ -776,6 +922,8 @@ impl Recorder {
             completion_tokens: usage.completion_tokens,
             error,
             has_content,
+            cache: self.cache,
+            cached_tokens: reused,
         };
         let mut q = lock(&self.st.requests);
         q.push_front(rec);

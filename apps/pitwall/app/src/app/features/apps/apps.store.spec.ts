@@ -16,6 +16,7 @@ const PERMS: AppPermissions = {
   maxPriority: 'batch',
   tools: false,
   extendedApis: false,
+  cacheResponses: false,
   limits: { requestsPerMin: 10, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
 };
 

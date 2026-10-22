@@ -1,4 +1,4 @@
-import type { ApiFamily, ChosenBy } from '../../core/api.types';
+import type { ApiFamily, CacheOutcome, ChosenBy } from '../../core/api.types';
 import { compact } from '../../shared/format';
 
 export const API_LABEL: Record<ApiFamily, string> = {
@@ -46,3 +46,10 @@ export function secondsCell(ms: number | null): string {
 export function tokensCell(promptTokens: number, completionTokens: number): string {
   return `${compact(promptTokens)} / ${compact(completionTokens)}`;
 }
+
+/** What a cache outcome means, for the chip and its explanation (the `X-Pitwall-Cache` response header carries the same word). */
+export const CACHE_LABEL: Record<CacheOutcome, { label: string; tone: 'ok' | 'info' | 'muted'; text: string }> = {
+  hit: { label: 'Cache hit', tone: 'ok', text: 'The answer came from the cache; the model did not run.' },
+  miss: { label: 'Cache miss', tone: 'info', text: 'The request could be cached but no saved answer matched, so the model ran and the answer was saved.' },
+  bypass: { label: 'Cache bypassed', tone: 'muted', text: 'This request cannot be cached (it is not deterministic, uses tools, or the app or preset has not opted in).' },
+};

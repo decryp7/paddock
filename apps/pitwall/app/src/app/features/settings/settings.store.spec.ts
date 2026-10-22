@@ -159,3 +159,51 @@ describe('SettingsStore', () => {
     expect(store.saved()?.memory.preset).toBe('performance');
   });
 });
+
+describe('SettingsStore caching', () => {
+  function setup(backend: PitwallBackend = new MockBackend()) {
+    TestBed.configureTestingModule({ providers: [SettingsStore, { provide: BACKEND, useValue: backend }] });
+    return { store: TestBed.inject(SettingsStore), toasts: TestBed.inject(Toasts), backend };
+  }
+
+  it('loads the cache figures and keeps the last good ones when a refresh fails', async () => {
+    const backend = new MockBackend();
+    const { store } = setup(backend);
+    await store.loadCacheInfo();
+    expect(store.cacheInfo()!.responses.entries).toBeGreaterThan(0);
+    vi.spyOn(backend, 'cacheInfo').mockRejectedValueOnce({ code: 'serverUnavailable', message: 'down' });
+    await store.loadCacheInfo();
+    expect(store.cacheError()?.message).toBe('down');
+    expect(store.cacheInfo()).not.toBeNull();
+    await store.loadCacheInfo();
+    expect(store.cacheError()).toBeNull();
+  });
+
+  it('clears a cache, says how many entries went and refreshes the figures', async () => {
+    const { store, toasts } = setup();
+    await store.loadCacheInfo();
+    const n = store.cacheInfo()!.embeddings.entries;
+    expect(await store.clearCache({ kind: 'embeddings' })).toBe(n);
+    expect(toasts.toasts().at(-1)?.message).toBe(`Removed ${n} cached entries.`);
+    expect(store.cacheInfo()!.embeddings.entries).toBe(0);
+    expect(store.clearing()).toBe(false);
+    expect(await store.clearCache({ kind: 'embeddings' })).toBe(0);
+    expect(toasts.toasts().at(-1)?.message).toContain('already empty');
+  });
+
+  it('reports a failed clear as an error toast and stays usable', async () => {
+    const { store, toasts } = setup(new MockBackend({ failing: ['clearCache'] }));
+    expect(await store.clearCache({ kind: 'all' })).toBeUndefined();
+    expect(toasts.toasts().at(-1)?.tone).toBe('bad');
+    expect(store.clearing()).toBe(false);
+  });
+
+  it('edits the cache section like any other and marks the form dirty', async () => {
+    const { store } = setup();
+    await store.load();
+    store.edit('cache', { responsesTtlSecs: 3600 });
+    expect(store.draft()!.cache.responsesTtlSecs).toBe(3600);
+    expect(store.draft()!.memory.preset).toBe('balanced');
+    expect(store.dirty()).toBe(true);
+  });
+});

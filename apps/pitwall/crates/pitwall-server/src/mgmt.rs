@@ -1007,6 +1007,7 @@ async fn run_benchmark(st: &Arc<AppState>, id: ModelId) -> R<Value> {
         priority: Some(pitwall_core::scheduler::Priority::Background),
         extended: true,
         kind: JobKind::Benchmark,
+        no_cache: true,
     };
     let mut run = st
         .start_chat(&Principal::Admin, meta, req)
@@ -1104,6 +1105,7 @@ async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         priority: Some(pitwall_core::scheduler::Priority::Interactive),
         extended: true,
         kind: JobKind::Chat,
+        no_cache: true,
     };
     let ev = |e: &PlaygroundEvent| pitwall_core::sse::data(&serde_json::to_string(e).unwrap_or_default());
     let run = st.start_chat(&Principal::Admin, meta, chat).await;

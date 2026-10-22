@@ -6,6 +6,7 @@ use crate::engines::{Engine, EngineError, Running};
 use crate::library::{self, Library, LocalFile};
 use crate::paths::now_ms;
 use crate::system;
+use pitwall_core::affinity::{self, SlotTable};
 use pitwall_core::api::ApiError;
 use pitwall_core::api::ErrorKind;
 use pitwall_core::chat::{ChatEvent, ChatRequest, EmbedOutput, EmbedRequest, ModelRef};
@@ -87,6 +88,31 @@ pub struct HotModel {
     pub engine: (String, pitwall_core::mgmt::EngineKind),
     /// What it can do.
     pub capabilities: Vec<pitwall_core::select::Capability>,
+    /// Which slot holds which conversation's prompt prefix (ADR 0019).
+    slot_table: Mutex<SlotTable>,
+    /// Slots whose prefix belongs to a keep-warm preset: the file to save it to when the model unloads.
+    warm: Mutex<HashMap<u32, String>>,
+}
+
+/// What a chat request tells Serving about itself beyond the request.
+#[derive(Debug, Clone, Default)]
+pub struct ChatHint {
+    /// The calling app, for slot affinity (`None`: no affinity).
+    pub app: Option<String>,
+    /// The keep-warm file of the preset the request named, if the preset asks for keep warm.
+    pub warm_file: Option<String>,
+}
+
+/// Frees a claimed slot when the request ends.
+struct SlotGuard {
+    model: Arc<HotModel>,
+    slot: u32,
+}
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        lock(&self.model.slot_table).release(self.slot);
+    }
 }
 
 impl HotModel {
@@ -176,6 +202,8 @@ struct Inner {
     presets: RwLock<Presets>,
     /// Gates requests by what the llama.cpp build in use supports (ADR 0018); set once by `AppState`.
     gate: RwLock<Option<Arc<dyn CapabilityGate>>>,
+    /// Where saved prompt prefixes live (`--slot-save-path`); set by `AppState`.
+    slots_dir: RwLock<Option<std::path::PathBuf>>,
 }
 
 /// The serving core.
@@ -248,6 +276,7 @@ impl Serving {
                 speeds: RwLock::new(HashMap::new()),
                 presets: RwLock::new(Presets::default()),
                 gate: RwLock::new(None),
+                slots_dir: RwLock::new(None),
             }),
         }
     }
@@ -590,7 +619,8 @@ impl Serving {
             } else {
                 ServeKind::Chat
             },
-            cache_ram_mib: if hw.total_ram >= 16 << 30 { 1024 } else { 256 },
+            cache_ram_mib: affinity::prompt_cache_mib(hw.total_ram, self.settings().cache.prompt_cache_mib),
+            slot_save_path: self.slots_dir().map(|p| p.to_string_lossy().into_owned()),
         }
     }
 
@@ -619,7 +649,106 @@ impl Serving {
             context: r.preset.as_ref().and_then(|p| p.context),
             engine: r.preset.as_ref().and_then(|p| p.engine.clone()),
         };
-        self.ensure_as(&r.id, false, &o).await
+        let (busy, cold) = self.ensure_as(&r.id, false, &o).await?;
+        if cold.is_some() {
+            if let Some(file) = self.warm_file_for(r) {
+                self.restore_warm(&busy, &file).await;
+            }
+        }
+        Ok((busy, cold))
+    }
+
+    /// Where saved prompt prefixes live.
+    pub fn slots_dir(&self) -> Option<std::path::PathBuf> {
+        self.inner.slots_dir.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Sets where saved prompt prefixes live (and creates the folder, owner-only on Unix).
+    pub fn set_slots_dir(&self, dir: std::path::PathBuf) {
+        let _ = std::fs::create_dir_all(&dir);
+        crate::paths::restrict_dir(&dir);
+        if let Ok(mut g) = self.inner.slots_dir.write() {
+            *g = Some(dir);
+        }
+    }
+
+    /// What identifies the thing that computes an answer for `r`: the model file, the engine and its build. Cache keys
+    /// and keep-warm files change with it, so nothing stale is ever served.
+    pub fn fingerprint(&self, r: &Resolved) -> String {
+        let version = self
+            .inner
+            .library
+            .local()
+            .into_iter()
+            .find(|f| f.id == r.id)
+            .map_or_else(String::new, |f| format!("{}-{}", f.size, f.modified));
+        let wanted = r.preset.as_ref().and_then(|p| p.engine.clone()).or_else(|| self.settings().prefs(&r.id).engine);
+        let (engine, build) = self
+            .engine_for(wanted.as_deref())
+            .map_or_else(|_| (String::new(), String::new()), |e| (e.id(), e.build_tag(r.id.as_str())));
+        pitwall_core::cache::fingerprint(r.id.as_str(), &version, &engine, &build)
+    }
+
+    /// The keep-warm file of the preset a request named, when the preset asks for keep warm.
+    pub fn warm_file_for(&self, r: &Resolved) -> Option<String> {
+        let p = r.preset.as_ref().filter(|p| p.keep_warm)?;
+        self.slots_dir()?;
+        Some(crate::warm::file_name(
+            r.id.as_str(),
+            p.alias.as_str(),
+            &self.fingerprint(r),
+            p.system_prompt.as_deref().unwrap_or(""),
+        ))
+    }
+
+    /// Restores a saved prompt prefix into slot 0 of a just-loaded model. A file the engine refuses is removed.
+    async fn restore_warm(&self, busy: &Busy, file: &str) {
+        let Some(dir) = self.slots_dir() else { return };
+        let path = dir.join(file);
+        if !path.is_file() {
+            return;
+        }
+        let body = serde_json::to_vec(&serde_json::json!({ "filename": file })).unwrap_or_default();
+        let ok = matches!(
+            busy.client().send("POST", "/slots/0?action=restore", Some(body), Duration::from_secs(30)).await,
+            Ok(r) if r.status == 200
+        );
+        if ok {
+            crate::warm::touch(&path);
+            lock(&busy.model().warm).insert(0, file.to_string());
+            self.event(EventKind::ContextReleased, Severity::Info, format!("Restored the saved prompt prefix for {}.", busy.model().id));
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    /// Saves the prefixes of keep-warm slots of a model that is being unloaded; the model stays alive until they are
+    /// written (or 20 s pass), then it is dropped.
+    fn save_warm(&self, h: Arc<HotModel>) {
+        let Some(dir) = self.slots_dir() else { return };
+        let jobs: Vec<(u32, String)> = if h.context_released.load(Ordering::SeqCst) {
+            vec![]
+        } else {
+            lock(&h.warm).iter().map(|(s, f)| (*s, f.clone())).collect()
+        };
+        if jobs.is_empty() || !dir.is_dir() {
+            return;
+        }
+        let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+        let me = self.clone();
+        rt.spawn(async move {
+            for (slot, file) in jobs {
+                let body = serde_json::to_vec(&serde_json::json!({ "filename": file })).unwrap_or_default();
+                let path = format!("/slots/{slot}?action=save");
+                match h.running.client.send("POST", &path, Some(body), Duration::from_secs(20)).await {
+                    Ok(r) if r.status == 200 => {}
+                    _ => {
+                        let _ = std::fs::remove_file(dir.join(&file));
+                    }
+                }
+            }
+            me.event(EventKind::ContextReleased, Severity::Info, format!("Saved the prompt prefixes of {}.", h.id));
+        });
     }
 
     /// [`Serving::ensure`]; `auto_restart` marks a background restart, whose failed start plans the next attempt.
@@ -734,6 +863,8 @@ impl Serving {
             engine: (engine.id(), engine.kind()),
             cold_start_ms: started.elapsed().as_millis() as u64,
             capabilities: library::capabilities(&f),
+            slot_table: Mutex::new(SlotTable::new(slots.count())),
+            warm: Mutex::new(HashMap::new()),
         });
         lock(&self.inner.hot).insert(id.clone(), h.clone());
         lock(&self.inner.sched).set_model_slots(id, slots.count());
@@ -775,8 +906,11 @@ impl Serving {
         let mut hot = lock(&self.inner.hot);
         match hot.get(id) {
             Some(h) if h.active.load(Ordering::SeqCst) == 0 => {
-                hot.remove(id);
+                let gone = hot.remove(id);
                 drop(hot);
+                if let Some(h) = gone {
+                    self.save_warm(h);
+                }
                 self.event(EventKind::ModelUnloaded, Severity::Info, format!("Released {id} ({why:?})"));
                 true
             }
@@ -860,6 +994,8 @@ impl Serving {
                     return;
                 }
             }
+            lock(&h.slot_table).forget();
+            lock(&h.warm).clear();
             me.event(
                 EventKind::ContextReleased,
                 Severity::Info,
@@ -967,13 +1103,38 @@ impl Serving {
     }
 
     /// Run a chat request on a loaded model, streaming events. The permit and busy marks live as long as the stream.
-    pub fn chat(&self, busy: Busy, permit: Permit, req: ChatRequest, timeout: Duration) -> mpsc::Receiver<Result<ChatEvent, EngineFail>> {
+    pub fn chat(
+        &self,
+        busy: Busy,
+        permit: Permit,
+        req: ChatRequest,
+        timeout: Duration,
+        hint: &ChatHint,
+    ) -> mpsc::Receiver<Result<ChatEvent, EngineFail>> {
         let (tx, rx) = mpsc::channel(64);
-        let body = llama::chat_body(&req, busy.model().id.as_str());
+        // Slot affinity (ADR 0019): the conversation's requests go to the slot that holds its prompt prefix. Only
+        // llama.cpp understands `id_slot`; when every slot is busy the engine chooses.
+        let claim = hint
+            .app
+            .as_deref()
+            .filter(|_| busy.model().engine.1 == pitwall_core::mgmt::EngineKind::LlamaCpp && self.settings().cache.prefix_affinity)
+            .and_then(|app| lock(&busy.model().slot_table).claim(affinity::prefix_key(app, &req)));
+        let slot_guard = claim.map(|c| SlotGuard {
+            model: busy.0.clone(),
+            slot: c.slot,
+        });
+        if let Some(c) = claim {
+            let mut w = lock(&busy.model().warm);
+            match &hint.warm_file {
+                Some(f) => w.insert(c.slot, f.clone()),
+                None => w.remove(&c.slot),
+            };
+        }
+        let body = llama::chat_body(&req, busy.model().id.as_str(), claim.map(|c| c.slot));
         let bytes = serde_json::to_vec(&body).unwrap_or_default();
         let me = self.clone();
         tokio::spawn(async move {
-            let _keep = (&permit, &busy);
+            let _keep = (&permit, &busy, &slot_guard);
             let mut resp = match busy.client().send("POST", "/v1/chat/completions", Some(bytes), timeout).await {
                 Ok(r) => r,
                 Err(e) => {

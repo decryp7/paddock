@@ -40,6 +40,8 @@ pub struct Launch {
     pub kind: ServeKind,
     /// Host-memory prompt cache in MiB (`--cache-ram`; 0 disables it).
     pub cache_ram_mib: u32,
+    /// Where `POST /slots/{id}?action=save|restore` keep files (`--slot-save-path`); `None` leaves saving off.
+    pub slot_save_path: Option<String>,
 }
 
 /// The environment variable llama-server reads its API key from (never put on the command line).
@@ -77,6 +79,9 @@ pub fn args(l: &Launch) -> Vec<String> {
             a.extend(["--jinja".into(), "--cache-reuse".into(), "256".into()]);
             if let Some(p) = &l.mmproj {
                 a.extend(["--mmproj".into(), p.clone()]);
+            }
+            if let Some(p) = &l.slot_save_path {
+                a.extend(["--slot-save-path".into(), p.clone()]);
             }
         }
         ServeKind::Embedding => a.push("--embeddings".into()),
@@ -375,6 +380,7 @@ mod tests {
             parallel: 0,
             kind,
             cache_ram_mib: 0,
+            slot_save_path: None,
         }
     }
 

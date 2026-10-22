@@ -21,3 +21,20 @@ export const USAGE_RANGE_TEXT: Record<UsageRange, string> = { '24h': 'the last 2
 export function tokensOf(c: UsageCounters): number {
   return c.promptTokens + c.completionTokens;
 }
+
+/** Share of cache-eligible requests answered from a cache (0..1); `null` before any request was eligible. */
+export function cacheHitRate(c: Pick<UsageCounters, 'cacheHits' | 'cacheMisses'>): number | null {
+  const total = c.cacheHits + c.cacheMisses;
+  return total > 0 ? c.cacheHits / total : null;
+}
+
+/** The hit rate as `42 %`, or an em dash before any eligible request. */
+export function cacheHitRateText(c: Pick<UsageCounters, 'cacheHits' | 'cacheMisses'>): string {
+  const r = cacheHitRate(c);
+  return r === null ? '—' : `${Math.round(r * 100)} %`;
+}
+
+/** Tokens the caches saved: prompt tokens reused from the prompt cache plus tokens cache hits skipped. */
+export function tokensSaved(c: Pick<UsageCounters, 'prefixTokens' | 'savedTokens'>): number {
+  return c.prefixTokens + c.savedTokens;
+}

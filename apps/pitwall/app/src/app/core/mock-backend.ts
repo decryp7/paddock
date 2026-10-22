@@ -6,6 +6,8 @@ import type {
   PresetPreview,
   PresetStatus,
   AppInfo,
+  CacheClearScope,
+  CacheInfo,
   AppPermissions,
   AppUpdateStatus,
   BenchmarkResult,
@@ -56,7 +58,8 @@ import type {
 } from './api.types';
 import type { PitwallBackend, Unsubscribe } from './backend';
 import {
-  DEMO_REPLY,
+  demoReplyWords,
+  wordsThatFit,
   GPU_NAME,
   GiB,
   MiB,
@@ -159,6 +162,7 @@ export class MockBackend implements PitwallBackend {
   private updateCheck_: UpdateCheckSettings = { enabled: false, schedule: 'weekly' };
   private updateNotices_: UpdateNotice[] = [];
   private updateHidden_ = new Set<string>();
+  private cache_: { responses: number; embeddings: number } = { responses: 184, embeddings: 3412 };
   private updateChecked_: { at: number; message: string } | null = null;
 
   constructor(options: MockOptions = {}) {
@@ -442,6 +446,51 @@ export class MockBackend implements PitwallBackend {
       }
       this.emit({ kind: 'models', models: clone(this.loaded) });
       return freed;
+    });
+  }
+
+  cacheInfo(): Promise<CacheInfo> {
+    return this.reply('cacheInfo', () => {
+      const now = this.now();
+      const c = this.settings_.cache;
+      const kind = (storage: CacheInfo['responses']['storage'], entries: number, bytesPerEntry: number, maxMib: number, ttl: number, sliding: boolean, hits: number, ageDays: number) => ({
+        storage,
+        entries,
+        bytes: entries * bytesPerEntry,
+        maxBytes: maxMib * 1024 * 1024,
+        hits: entries ? hits : 0,
+        oldestAt: entries ? now - ageDays * 86_400_000 : null,
+        expiresAfterSecs: ttl === 0 ? null : ttl,
+        sliding,
+        diskError: null,
+      });
+      return {
+        responses: kind(c.responsesStorage, this.cache_.responses, 2_900, c.responsesMaxMib, c.responsesTtlSecs, false, 212, 5.2),
+        embeddings: kind(c.embeddingsStorage, this.cache_.embeddings, 3_300, c.embeddingsMaxMib, c.embeddingsTtlSecs, true, 2_310, 41),
+        keepWarmFiles: 2,
+        keepWarmBytes: 18 * 1024 * 1024,
+        nextSweepAt: now + 3 * 3_600_000,
+      };
+    });
+  }
+
+  clearCache(scope: CacheClearScope): Promise<number> {
+    return this.reply('clearCache', () => {
+      const take = (key: 'responses' | 'embeddings', n: number) => {
+        const removed = Math.min(this.cache_[key], n);
+        this.cache_[key] -= removed;
+        return removed;
+      };
+      switch (scope.kind) {
+        case 'all':
+          return take('responses', Infinity) + take('embeddings', Infinity);
+        case 'responses':
+          return take('responses', Infinity);
+        case 'embeddings':
+          return take('embeddings', Infinity);
+        default:
+          return take('responses', 40);
+      }
     });
   }
 
@@ -942,8 +991,8 @@ export class MockBackend implements PitwallBackend {
         connected: false,
         lastSeenAt: null,
         keys: [],
-        permissions: { models: null, maxPriority: 'background', tools: false, extendedApis: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } },
-        today: { requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0 },
+        permissions: { models: null, maxPriority: 'background', tools: false, extendedApis: false, cacheResponses: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } },
+        today: { requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0, cacheHits: 0, cacheMisses: 0, prefixTokens: 0, savedTokens: 0 },
       };
       this.apps_.push(app);
       return app;
@@ -987,7 +1036,7 @@ export class MockBackend implements PitwallBackend {
       const p = this.pairings_.find((x) => x.id === id) ?? this.fail('notFound', 'That pairing request has expired.');
       this.pairings_ = this.pairings_.filter((x) => x !== p);
       if (!this.apps_.some((a) => a.id === p.appId)) {
-        this.apps_.push({ id: p.appId, name: p.appName, suite: false, connected: true, lastSeenAt: this.now(), keys: [{ id: `${p.appId}-k1`, prefix: 'pw_8c1e…', createdAt: this.now(), lastUsedAt: null }], permissions: clone(permissions), today: { requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0 } });
+        this.apps_.push({ id: p.appId, name: p.appName, suite: false, connected: true, lastSeenAt: this.now(), keys: [{ id: `${p.appId}-k1`, prefix: 'pw_8c1e…', createdAt: this.now(), lastUsedAt: null }], permissions: clone(permissions), today: { requests: 0, promptTokens: 0, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0, cacheHits: 0, cacheMisses: 0, prefixTokens: 0, savedTokens: 0 } });
       }
       this.pushEvent({ kind: 'pairing', severity: 'info', message: `Paired ${p.appName}`, modelId: null, appId: p.appId, reason: null });
       this.emit({ kind: 'pairing', pairings: clone(this.pairings_) });
@@ -1032,8 +1081,8 @@ export class MockBackend implements PitwallBackend {
   chat(request: PlaygroundRequest, onEvent: (event: PlaygroundEvent) => void): Unsubscribe {
     let stopped = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
-    const words = (request.modelId.includes('llama') ? DEMO_REPLY.split(' ').slice(0, 38).join(' ') + '.' : DEMO_REPLY).split(/(?<= )/);
-    const limit = Math.max(1, Math.min(words.length, Math.ceil(request.maxTokens / 1.3)));
+    const words = demoReplyWords(request.modelId);
+    const limit = wordsThatFit(words, request.maxTokens);
     const run = () => {
       if (this.failing.has('chat')) {
         onEvent({ kind: 'error', error: { code: 'serverUnavailable', message: 'The Pitwall server is not responding.' } });

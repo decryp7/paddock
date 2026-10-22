@@ -95,6 +95,14 @@ export const AppsStore = signalStore(
         return !!done;
       },
 
+      /** Removes the answers cached for one app; resolves to how many were removed. */
+      async clearCachedAnswers(appId: string): Promise<number | undefined> {
+        return act(`cache:${appId}`, () => backend.clearCache({ kind: 'app', appId }), undefined).then((n) => {
+          if (n !== undefined) toasts.ok(n > 0 ? `Removed ${n} cached ${n === 1 ? 'answer' : 'answers'}.` : 'No cached answers to remove.');
+          return n;
+        });
+      },
+
       async setPermissions(appId: string, permissions: AppPermissions): Promise<boolean> {
         const app = await act(`app:${appId}`, () => backend.setPermissions(appId, permissions), 'Permissions saved.');
         if (app) patchState(store, { apps: upsertApp(store.apps(), app) });

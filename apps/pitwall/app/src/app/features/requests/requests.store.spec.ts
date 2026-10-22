@@ -29,6 +29,8 @@ const rec = (p: Partial<RequestRecord>): RequestRecord => ({
   promptTokens: 10,
   completionTokens: 5,
   error: null,
+  cache: null,
+  cachedTokens: 0,
   hasContent: true,
   ...p,
 });

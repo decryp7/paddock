@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { CommandError, Preset, Settings } from '../../core/api.types';
+import type { CacheClearScope, CacheInfo, CommandError, Preset, Settings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
@@ -18,9 +18,14 @@ interface SettingsState {
   error: CommandError | null;
   /** The last save's error, shown next to the Save bar. */
   saveError: CommandError | null;
+  /** The caches' sizes and hit counts (ADR 0019); null until loaded. */
+  cacheInfo: CacheInfo | null;
+  cacheError: CommandError | null;
+  /** A cache clear is running. */
+  clearing: boolean;
 }
 
-const initial: SettingsState = { saved: null, draft: null, loading: false, saving: false, error: null, saveError: null };
+const initial: SettingsState = { saved: null, draft: null, loading: false, saving: false, error: null, saveError: null, cacheInfo: null, cacheError: null, clearing: false };
 
 /** Applies an edit to one section; any memory edit other than the preset itself makes the preset `custom`. */
 export function editSettings<S extends Section>(s: Settings, section: S, values: Partial<Settings[S]>): Settings {
@@ -47,6 +52,32 @@ export const SettingsStore = signalStore(
         patchState(store, { saved: settings, draft: structuredClone(settings), loading: false });
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
+      }
+    },
+
+    /** Reads the caches' sizes and hit counts; a failure shows inline and keeps the last good numbers. */
+    async loadCacheInfo(): Promise<void> {
+      try {
+        patchState(store, { cacheInfo: await backend.cacheInfo(), cacheError: null });
+      } catch (e) {
+        patchState(store, { cacheError: toCommandError(e) });
+      }
+    },
+
+    /** Empties caches (a command, applied at once and not part of the draft) and refreshes the numbers. */
+    async clearCache(scope: CacheClearScope): Promise<number | undefined> {
+      if (store.clearing()) return undefined;
+      patchState(store, { clearing: true });
+      try {
+        const removed = await backend.clearCache(scope);
+        toasts.ok(removed > 0 ? `Removed ${removed} cached ${removed === 1 ? 'entry' : 'entries'}.` : 'Nothing to remove: the cache was already empty.');
+        patchState(store, { clearing: false });
+        patchState(store, { cacheInfo: await backend.cacheInfo(), cacheError: null });
+        return removed;
+      } catch (e) {
+        patchState(store, { clearing: false });
+        toasts.error(toCommandError(e));
+        return undefined;
       }
     },
 

@@ -439,7 +439,7 @@ describe('MockBackend usage', () => {
 
   it('marks limits close to or over their budget', () => {
     const base = { requestsPerMin: null, tokensPerDay: 100, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null };
-    const used = (tokens: number) => ({ requests: 0, promptTokens: tokens, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0 });
+    const used = (tokens: number) => ({ requests: 0, promptTokens: tokens, completionTokens: 0, busyMs: 0, errors: 0, peakMemoryBytes: 0, cacheHits: 0, cacheMisses: 0, prefixTokens: 0, savedTokens: 0 });
     const state = (n: number) => demoLimitStatuses(base, used(n), used(0), 1)[0]!;
     expect(state(79).state).toBe('ok');
     expect(state(79).message).toBeNull();
@@ -449,7 +449,7 @@ describe('MockBackend usage', () => {
   });
 
   describe('presets', () => {
-    const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null };
+    const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null, cacheResponses: false, keepWarm: false };
     const draft = (alias: string, target = 'qwen3-8b-instruct-q4_k_m') => ({ ...base, alias, target });
     const message = async (p: Promise<unknown>) => ((await p.catch((e) => e)) as { message: string }).message;
 

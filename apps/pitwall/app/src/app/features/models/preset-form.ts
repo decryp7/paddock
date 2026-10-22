@@ -10,11 +10,14 @@ export interface PresetForm {
   maxTokens: string;
   systemPrompt: string;
   engine: string;
+  cacheResponses: boolean;
+  keepWarm: boolean;
 }
 
-export type PresetField = keyof PresetForm;
+/** The text fields; the two flags are set directly. */
+export type PresetField = Exclude<keyof PresetForm, 'cacheResponses' | 'keepWarm'>;
 
-export const EMPTY_FORM: PresetForm = { alias: '', target: '', context: '', temperature: '', topP: '', maxTokens: '', systemPrompt: '', engine: '' };
+export const EMPTY_FORM: PresetForm = { alias: '', target: '', context: '', temperature: '', topP: '', maxTokens: '', systemPrompt: '', engine: '', cacheResponses: false, keepWarm: false };
 
 /** A preset as form text. */
 export function formOf(p: ModelPreset): PresetForm {
@@ -28,6 +31,8 @@ export function formOf(p: ModelPreset): PresetForm {
     maxTokens: text(p.maxTokens),
     systemPrompt: p.systemPrompt ?? '',
     engine: p.engine ?? '',
+    cacheResponses: p.cacheResponses,
+    keepWarm: p.keepWarm,
   };
 }
 
@@ -66,6 +71,8 @@ export function parseForm(f: PresetForm): ParsedForm {
     maxTokens: num('maxTokens', true),
     systemPrompt: f.systemPrompt.trim() === '' ? null : f.systemPrompt,
     engine: f.engine === '' ? null : f.engine,
+    cacheResponses: f.cacheResponses,
+    keepWarm: f.keepWarm,
   };
   return { draft, invalid };
 }

@@ -35,11 +35,12 @@ const PERMS: AppPermissions = {
   maxPriority: 'interactive',
   tools: false,
   extendedApis: false,
+  cacheResponses: false,
   limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
 };
 const SETTINGS = { general: { theme: 'dark' } } as unknown as Settings;
 
-const DRAFT: PresetDraft = { alias: 'debrief-explain', target: 'auto:chat', context: null, temperature: 0.3, topP: null, maxTokens: null, systemPrompt: null, engine: null };
+const DRAFT: PresetDraft = { alias: 'debrief-explain', target: 'auto:chat', context: null, temperature: 0.3, topP: null, maxTokens: null, systemPrompt: null, engine: null, cacheResponses: false, keepWarm: false };
 
 /**
  * The command table the Rust side implements (`app/src-tauri/src/commands.rs`). Each row: the call, the command
@@ -53,6 +54,8 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['events', (b) => b.events(50), 'events', { limit: 50 }],
   ['setServing', (b) => b.setServing(true), 'set_serving', { paused: true }],
   ['releaseMemory', (b) => b.releaseMemory(), 'release_memory', undefined],
+  ['cacheInfo', (b) => b.cacheInfo(), 'cache_info', undefined],
+  ['clearCache', (b) => b.clearCache({ kind: 'app', appId: 'debrief' }), 'clear_cache', { scope: { kind: 'app', appId: 'debrief' } }],
   ['applyPreset', (b) => b.applyPreset('lowMemory'), 'apply_preset', { preset: 'lowMemory' }],
   ['cancelJob', (b) => b.cancelJob('j1'), 'cancel_job', { id: 'j1' }],
   ['localModels', (b) => b.localModels(), 'local_models', undefined],

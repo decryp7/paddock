@@ -12,6 +12,7 @@ import { EmptyState } from '../../shared/ui/empty-state';
 import { Fact } from '../../shared/ui/fact';
 import { Panel } from '../../shared/ui/panel';
 import { RowMenu } from '../../shared/ui/row-menu';
+import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { fromControl, isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
 import { ModelsStore } from './models.store';
 import { UpdatesStore } from '../updates/updates.store';
@@ -42,7 +43,7 @@ export function contextText(tokens: number | null): string {
 /** The local library: disk usage with clean-up, and every model with load, pin, idle override and delete. */
 @Component({
   selector: 'pw-library-tab',
-  imports: [MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, EmptyState, SlotsPanel, DetailPanel, Fact, RowMenu],
+  imports: [MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, EmptyState, SlotsPanel, DetailPanel, Fact, RowMenu, PwSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Disk" icon="disk" [loading]="store.loading()" [error]="store.disk() ? null : store.error()" [ready]="!!store.disk()" [skeletonLines]="2" (retry)="store.load()">
@@ -186,12 +187,7 @@ export function contextText(tokens: number | null): string {
           <section aria-label="Settings" class="settings">
             <div class="field">
               <span>Release when idle</span>
-              <select class="select" [id]="'idle-' + m.id" [disabled]="m.pinned || store.isBusy()('model:' + m.id)" [attr.aria-label]="'Release ' + m.name + ' when idle'" (change)="setIdle(m, $any($event.target).value)">
-                <option value="" [selected]="m.idleSecs === null">Global setting</option>
-                @for (s of idleOptions(m.idleSecs); track s) {
-                  <option [value]="'' + s" [selected]="m.idleSecs === s">After {{ secs(s) }}</option>
-                }
-              </select>
+<pw-select [inputId]="'idle-' + m.id" [options]="idleChoices(m)" [value]="m.idleSecs === null ? '' : '' + m.idleSecs" [disabled]="m.pinned || store.isBusy()('model:' + m.id)" [label]="'Release ' + m.name + ' when idle'" (changed)="setIdle(m, $event)" />
               @if (m.pinned) {
                 <span class="hint">Pinned models are never released automatically.</span>
               }
@@ -200,12 +196,7 @@ export function contextText(tokens: number | null): string {
             <div class="field">
               <span>Engine</span>
               @if (store.engineChoices().length) {
-                <select class="select" [id]="'engine-' + m.id" [disabled]="m.loaded || store.isBusy()('model:' + m.id)" [matTooltip]="m.loaded ? 'Unload the model to change its engine' : ''" [attr.aria-label]="'Engine for ' + m.name" (change)="setEngine(m, $any($event.target).value)">
-                  <option value="" [selected]="!m.engine">llama.cpp</option>
-                  @for (e of store.engineChoices(); track e.id) {
-                    <option [value]="e.id" [selected]="m.engine === e.id">{{ e.name }}</option>
-                  }
-                </select>
+                <pw-select [inputId]="'engine-' + m.id" [options]="engineChoicesFor()" [value]="m.engine ?? ''" [disabled]="m.loaded || store.isBusy()('model:' + m.id)" [matTooltip]="m.loaded ? 'Unload the model to change its engine' : ''" [label]="'Engine for ' + m.name" (changed)="setEngine(m, $event)" />
               } @else {
                 <span class="plain">llama.cpp</span>
               }
@@ -214,12 +205,7 @@ export function contextText(tokens: number | null): string {
             @if (!m.engine && store.enginePins() && store.pinnableBuilds().length) {
               <div class="field">
                 <span>Engine build</span>
-                <select class="select" [id]="'pin-' + m.id" [disabled]="store.isBusy()('pin:' + m.id)" [attr.aria-label]="'Engine build for ' + m.name" (change)="setPin(m, $any($event.target).value)">
-                  <option value="" [selected]="!store.pinOf()(m.id)">Follows global choice</option>
-                  @for (b of store.pinnableBuilds(); track b.id) {
-                    <option [value]="b.id" [selected]="store.pinOf()(m.id)?.buildId === b.id">Pin to {{ b.label }} {{ b.tag }}</option>
-                  }
-                </select>
+                <pw-select [inputId]="'pin-' + m.id" [options]="pinChoices()" [value]="store.pinOf()(m.id)?.buildId ?? ''" [disabled]="store.isBusy()('pin:' + m.id)" [label]="'Engine build for ' + m.name" (changed)="setPin(m, $event)" />
                 @if (store.pinOf()(m.id); as pin) {
                   <span class="hint pinned-build" [matTooltip]="m.loaded ? 'Loaded models keep their engine until they are loaded again' : 'Used from the next load'">Pinned to {{ pin.buildId }}{{ pin.tag ? ' ' + pin.tag : '' }}</span>
                 }
@@ -468,6 +454,9 @@ export function contextText(tokens: number | null): string {
       font-size: var(--fs-base);
       color: var(--text);
     }
+    pw-select {
+      display: block;
+    }
     .slots-btn {
       gap: 2px;
       font-variant-numeric: tabular-nums;
@@ -494,6 +483,15 @@ export class LibraryTab {
   protected readonly idleOptions = idleOptions;
   protected readonly capability = CAPABILITY_LABEL;
   protected readonly glyph = CAPABILITY_ICON;
+  protected idleChoices(m: LocalModel): SelectOption[] {
+    return [{ value: '', label: 'Global setting' }, ...idleOptions(m.idleSecs).map((s) => ({ value: '' + s, label: `After ${seconds(s)}` }))];
+  }
+  protected engineChoicesFor(): SelectOption[] {
+    return [{ value: '', label: 'llama.cpp' }, ...this.store.engineChoices().map((e) => ({ value: e.id, label: e.name }))];
+  }
+  protected pinChoices(): SelectOption[] {
+    return [{ value: '', label: 'Follows global choice' }, ...this.store.pinnableBuilds().map((b) => ({ value: b.id, label: `Pin to ${b.label} ${b.tag}` }))];
+  }
   protected readonly fit = (m: LocalModel) => fitLook(m.fit.verdict);
 
   constructor() {

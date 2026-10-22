@@ -7,6 +7,7 @@ const BASE: AppPermissions = {
   maxPriority: 'interactive',
   tools: true,
   extendedApis: false,
+  cacheResponses: false,
   limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 2, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
 };
 

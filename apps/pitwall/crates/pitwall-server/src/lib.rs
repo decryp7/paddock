@@ -5,6 +5,8 @@
 
 pub mod app;
 pub mod auth;
+pub mod cache_db;
+pub mod caches;
 pub mod egress;
 pub mod engine_pins;
 pub mod engines;
@@ -20,6 +22,7 @@ pub mod service;
 pub mod serving;
 pub mod system;
 pub mod updates;
+pub mod warm;
 
 /// Lock a mutex, recovering from poisoning.
 pub(crate) use app::lock as app_lock;

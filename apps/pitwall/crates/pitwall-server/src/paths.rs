@@ -82,6 +82,16 @@ impl Dirs {
     pub fn model_updates(&self) -> PathBuf {
         self.root.join("model-updates.json")
     }
+    /// The cache database (ADR 0019).
+    pub fn cache_db(&self) -> PathBuf {
+        self.root.join("cache.sqlite")
+    }
+
+    /// Saved prompt prefixes (llama-server's `--slot-save-path`).
+    pub fn slots(&self) -> PathBuf {
+        self.root.join("slots")
+    }
+
     /// Metrics history.
     pub fn metrics(&self) -> PathBuf {
         self.root.join("metrics.json")
@@ -125,6 +135,17 @@ pub fn restrict(path: &Path) {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// [`restrict`] for a folder: owner-only access on Unix.
+pub fn restrict_dir(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
     }
     #[cfg(not(unix))]
     let _ = path;

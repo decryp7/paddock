@@ -140,6 +140,107 @@
           </div>
         </pw-panel>
 
+        <!-- Caching -->
+        <pw-panel id="set-cache" heading="Caching" icon="bolt" sub="Three layers, all on this computer">
+          <div class="note info" role="note">
+            <mat-icon svgIcon="pw:shield" aria-hidden="true" />
+            <span>
+              <b>Prompt reuse</b> is automatic: the engine keeps the start of a conversation so the next message does not reprocess it.
+              <b>Saved answers</b> are opt-in for each app and each preset, and only for deterministic requests (temperature 0 or a fixed seed, no tools).
+              <b>Embeddings</b> are cached by default because the same text always gives the same vector.
+            </span>
+          </div>
+
+          <h3 class="group">Prompt reuse</h3>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-affinity">Keep a conversation on one slot</span><p class="hint">Sends a conversation's requests to the same engine slot so its saved prompt is found.</p></div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-affinity" [checked]="s.cache.prefixAffinity" (change)="store.edit('cache', { prefixAffinity: $event.checked })" />
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-prompt-cache">Prompt cache size</span><p class="hint">Host memory each model may use to keep prompts. Automatic sizes it from this computer's memory.</p></div>
+            <div class="cap">
+              <div class="seg" role="radiogroup" aria-labelledby="lbl-prompt-cache">
+                <button type="button" role="radio" [attr.aria-checked]="s.cache.promptCacheMib === null" (click)="setPromptCacheAuto(true)">Automatic</button>
+                <button type="button" role="radio" [attr.aria-checked]="s.cache.promptCacheMib !== null" (click)="setPromptCacheAuto(false)">Set size</button>
+              </div>
+              @if (s.cache.promptCacheMib !== null) {
+                <div class="unit-input"><input class="input num w-sm" type="number" min="0" aria-label="Prompt cache size in MiB" [value]="s.cache.promptCacheMib" (change)="setPromptCacheMib(value($event))" /><span>MiB</span></div>
+              }
+            </div>
+          </div>
+
+          @for (k of cacheKinds; track k.id) {
+            <h3 class="group">{{ k.title }}</h3>
+            <p class="hint pad-h">{{ k.about }}</p>
+            @if (k.id === 'embeddings') {
+              <div class="row">
+                <div class="lbl"><span class="name" id="lbl-emb-on">Cache embeddings</span><p class="hint">Off means every embedding request runs the model.</p></div>
+                <mat-slide-toggle hideIcon aria-labelledby="lbl-emb-on" [checked]="s.cache.embeddings" (change)="store.edit('cache', { embeddings: $event.checked })" />
+              </div>
+            }
+            <div class="row">
+              <div class="lbl"><span class="name" [id]="'lbl-' + k.id + '-storage'">Storage</span><p class="hint">On disk keeps it across restarts. Memory only forgets it when Pitwall stops.</p></div>
+              <div class="seg" role="radiogroup" [attr.aria-labelledby]="'lbl-' + k.id + '-storage'">
+                <button type="button" role="radio" [attr.aria-checked]="storage(k.id) === 'memory'" (click)="setStorage(k.id, 'memory')">Memory only</button>
+                <button type="button" role="radio" [attr.aria-checked]="storage(k.id) === 'disk'" (click)="setStorage(k.id, 'disk')">On disk</button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="lbl"><label class="name" [for]="'cache-' + k.id + '-max'">Largest size</label><p class="hint">The oldest entries go first when it is full.</p></div>
+              <div class="unit-input"><input [id]="'cache-' + k.id + '-max'" class="input num w-sm" type="number" min="1" [value]="maxMib(k.id)" (change)="setMaxMib(k.id, value($event))" /><span>MiB</span></div>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="name" [id]="'lbl-' + k.id + '-ttl'">Expires after</span><p class="hint">{{ k.ttlHint }}</p></div>
+              <pw-select [options]="ttlChoices(k.id)" [value]="'' + ttl(k.id)" [label]="k.title + ' expiry'" (changed)="setTtl(k.id, $event)" />
+            </div>
+            @if (store.cacheInfo(); as ci) {
+              @let info = ci[k.id];
+              @if (info.diskError) {
+                <p class="note warn" role="alert"><mat-icon svgIcon="pw:alert" aria-hidden="true" /><span>The disk cache is not in use, so this cache is memory only for now: {{ info.diskError }}</span></p>
+              }
+              <dl class="cache-stats" [attr.aria-label]="k.title + ' statistics'">
+                <div><dt>Entries</dt><dd class="num">{{ intText(info.entries) }}</dd></div>
+                <div><dt>Size</dt><dd class="num">{{ cacheSize(info) }}</dd></div>
+                <div><dt>Hits</dt><dd class="num">{{ intText(info.hits) }}</dd></div>
+                <div><dt>Oldest entry</dt><dd class="num">{{ oldest(info) }}</dd></div>
+                <div><dt>Expires after</dt><dd>{{ expiry(info) }}</dd></div>
+              </dl>
+            }
+            <div class="row actions">
+              <div class="lbl"><span class="hint">Removes every {{ k.noun }} now.</span></div>
+              <button type="button" class="btn" [disabled]="store.clearing()" (click)="clear({ kind: k.id }, k.title)">Clear now</button>
+            </div>
+          }
+
+          <h3 class="group">Kept-warm prompts</h3>
+          <div class="row">
+            <div class="lbl"><label class="name" for="cache-keep-warm">Keep unused files for</label><p class="hint">A preset's system prompt can be saved when its model unloads and restored on load. Files unused for this long are deleted.</p></div>
+            <div class="unit-input"><input id="cache-keep-warm" class="input num w-sm" type="number" min="1" max="3650" [value]="s.cache.keepWarmDays" (change)="setKeepWarmDays(value($event))" /><span>days</span></div>
+          </div>
+
+          @if (store.cacheError(); as e) {
+            <p class="note warn" role="alert"><mat-icon svgIcon="pw:alert" aria-hidden="true" /><span>Could not read the cache figures: {{ e.message }} <button type="button" class="btn sm" (click)="store.loadCacheInfo()">Retry</button></span></p>
+          }
+          @if (store.cacheInfo(); as ci) {
+            <div class="row">
+              <div class="lbl"><span class="name">Next clean-up</span><p class="hint">Expired entries are removed on this schedule. Kept-warm prompts: {{ ci.keepWarmFiles }} {{ ci.keepWarmFiles === 1 ? 'file' : 'files' }}, {{ sizeOf(ci.keepWarmBytes) }}.</p></div>
+              <span class="num" data-testid="next-sweep">{{ nextSweep(ci.nextSweepAt) }}</span>
+            </div>
+          }
+          <div class="row actions">
+            <div class="lbl"><span class="name">Clear all caches</span><p class="hint">Saved answers, embeddings and kept-warm prompts. Apps work as before, just slower at first.</p></div>
+            <button type="button" class="btn" [disabled]="store.clearing()" (click)="clear({ kind: 'all' }, 'all caches')">Clear all caches</button>
+          </div>
+
+          <div class="note info" role="note">
+            <mat-icon svgIcon="pw:lock" aria-hidden="true" />
+            <span>
+              Cached answers and embeddings are stored on this computer, in Pitwall's data folder (<code>cache.sqlite</code>), readable only by your account. They are never sent anywhere.
+              Answers are cached only for apps and presets you opt in. Choose Memory only to keep them off the disk.
+            </span>
+          </div>
+        </pw-panel>
+
         <!-- Network -->
         <pw-panel id="set-network" heading="Network" icon="globe">
           <div class="row">

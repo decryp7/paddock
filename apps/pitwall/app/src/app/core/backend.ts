@@ -1,6 +1,8 @@
 import { InjectionToken } from '@angular/core';
 import type {
   AppInfo,
+  CacheClearScope,
+  CacheInfo,
   AppPermissions,
   AppUpdateStatus,
   BenchmarkResult,
@@ -63,6 +65,10 @@ export interface PitwallBackend {
   subscribe(listener: (update: LiveUpdate) => void): Unsubscribe;
   setServing(paused: boolean): Promise<void>;
   releaseMemory(): Promise<number>;
+  /** Entries, size, hits and clean-up time of the response and embeddings caches (ADR 0019). */
+  cacheInfo(): Promise<CacheInfo>;
+  /** Empties caches; resolves to the number of entries removed. */
+  clearCache(scope: CacheClearScope): Promise<number>;
   applyPreset(preset: Preset): Promise<Settings>;
   cancelJob(id: string): Promise<void>;
 

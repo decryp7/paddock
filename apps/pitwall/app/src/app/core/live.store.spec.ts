@@ -111,7 +111,7 @@ describe('LiveStore', () => {
   it('denies a pairing and survives actions before the overview loaded', async () => {
     const { store } = setup(new MockBackend());
     await store.applyPreset('balanced');
-    await store.approvePairing('pair-1', { models: null, maxPriority: 'batch', tools: false, extendedApis: false, limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } });
+    await store.approvePairing('pair-1', { models: null, maxPriority: 'batch', tools: false, extendedApis: false, cacheResponses: false, limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } });
     await store.load();
     expect(store.pairings()).toEqual([]);
     await flush();

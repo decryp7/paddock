@@ -28,6 +28,7 @@ export function samePermissions(a: AppPermissions, b: AppPermissions): boolean {
     a.maxPriority === b.maxPriority &&
     a.tools === b.tools &&
     a.extendedApis === b.extendedApis &&
+    a.cacheResponses === b.cacheResponses &&
     LIMITS.every((l) => a.limits[l.key] === b.limits[l.key])
   );
 }
@@ -104,6 +105,13 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
             <span class="faint d">Pitwall's /x/v1 endpoints: rerank, tasks, batch</span>
           </div>
           <mat-slide-toggle [checked]="extended()" (change)="extended.set($event.checked)" aria-label="Extended APIs" />
+        </div>
+        <div class="toggle-row">
+          <div>
+            <span class="t">Cache answers</span>
+            <span class="faint d">Repeat a deterministic request (temperature 0 or a fixed seed, no tools) and get the saved answer. Off by default.</span>
+          </div>
+          <mat-slide-toggle [checked]="cacheResponses()" (change)="cacheResponses.set($event.checked)" aria-label="Cache answers" />
         </div>
       </fieldset>
 
@@ -294,6 +302,7 @@ export class PermissionsEditor {
   protected readonly priority = signal<Priority>('interactive');
   protected readonly tools = signal(false);
   protected readonly extended = signal(false);
+  protected readonly cacheResponses = signal(false);
   protected readonly limitText = signal<Record<LimitKey, string>>({ ...NO_TEXT });
 
   protected readonly invalid = computed(() => {
@@ -310,6 +319,7 @@ export class PermissionsEditor {
       maxPriority: this.priority(),
       tools: this.tools(),
       extendedApis: this.extended(),
+      cacheResponses: this.cacheResponses(),
       limits: Object.fromEntries(LIMITS.map((l) => [l.key, parseLimit(t[l.key], l.max) as number | null])) as unknown as AppLimits,
     };
   });
@@ -334,6 +344,7 @@ export class PermissionsEditor {
     this.priority.set(p.maxPriority);
     this.tools.set(p.tools);
     this.extended.set(p.extendedApis);
+    this.cacheResponses.set(p.cacheResponses);
     this.limitText.set(Object.fromEntries(LIMITS.map((l) => [l.key, text(p.limits[l.key])])) as Record<LimitKey, string>);
   }
 

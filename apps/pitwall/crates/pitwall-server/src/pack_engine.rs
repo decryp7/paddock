@@ -265,6 +265,7 @@ mod tests {
             parallel: 1,
             kind: ServeKind::Chat,
             cache_ram_mib: 0,
+            slot_save_path: None,
         }
     }
 

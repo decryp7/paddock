@@ -172,6 +172,8 @@ pub struct Meta {
     pub model: String,
     /// The app that created the entry (its id, never its key).
     pub app: String,
+    /// The preset (alias) the request named, empty for none.
+    pub preset: String,
 }
 
 /// What to clear.
@@ -185,6 +187,8 @@ pub enum Scope {
     App(String),
     /// Entries of one model.
     Model(String),
+    /// Entries of requests that named one preset.
+    Preset(String),
 }
 
 impl Scope {
@@ -195,6 +199,7 @@ impl Scope {
             Scope::Kind(k) => *k == kind,
             Scope::App(a) => &meta.app == a,
             Scope::Model(m) => &meta.model == m,
+            Scope::Preset(p) => &meta.preset == p,
         }
     }
 }
@@ -701,6 +706,7 @@ mod tests {
                 Meta {
                     model: model.into(),
                     app: app.into(),
+                    preset: format!("p-{app}"),
                 },
                 0,
             );
@@ -709,10 +715,13 @@ mod tests {
         put_as(2, Kind::Response, "pitcrew", "m1");
         put_as(3, Kind::Embedding, "debrief", "m2");
         put_as(4, Kind::Embedding, "pitcrew", "m2");
+        assert_eq!(s.clear(&Scope::Preset("p-pitcrew".into())), 2);
         assert_eq!(s.clear(&Scope::App("debrief".into())), 2);
+        assert_eq!(s.clear(&Scope::Model("m2".into())), 0);
+        put_as(3, Kind::Embedding, "debrief", "m2");
         assert_eq!(s.clear(&Scope::Model("m2".into())), 1);
         assert_eq!(s.clear(&Scope::Kind(Kind::Embedding)), 0);
-        assert_eq!(s.clear(&Scope::All), 1);
+        assert_eq!(s.clear(&Scope::All), 0);
         put_as(5, Kind::Response, "x", "m");
         put_as(6, Kind::Response, "x", "m");
         s.configure(Kind::Response, lim(10, 5));

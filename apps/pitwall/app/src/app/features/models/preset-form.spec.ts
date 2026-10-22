@@ -1,7 +1,7 @@
 import type { ModelPreset } from '../../core/api.types';
 import { defaultsSummary, EMPTY_FORM, formOf, parseForm, parseNumber } from './preset-form';
 
-const PRESET: ModelPreset = { alias: 'debrief-explain', target: 'auto:chat,fast', context: 8192, temperature: 0.3, topP: 0.9, maxTokens: 800, systemPrompt: 'Be brief.', engine: 'llama.cpp' };
+const PRESET: ModelPreset = { alias: 'debrief-explain', target: 'auto:chat,fast', context: 8192, temperature: 0.3, topP: 0.9, maxTokens: 800, systemPrompt: 'Be brief.', engine: 'llama.cpp', cacheResponses: false, keepWarm: false };
 
 describe('parseNumber', () => {
   it('reads plain numbers, empty as none, and rejects the rest', () => {

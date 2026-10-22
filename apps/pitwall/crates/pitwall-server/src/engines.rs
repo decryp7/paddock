@@ -71,6 +71,10 @@ pub trait Engine: Send + Sync {
     fn id(&self) -> String {
         "llama.cpp".into()
     }
+    /// Names the build that would serve `model` (part of cache keys, ADR 0019); empty when there is no such notion.
+    fn build_tag(&self, _model: &str) -> String {
+        String::new()
+    }
     /// Whether it can run here, and why not.
     fn availability(&self) -> Availability;
     /// Start serving `launch` (its port is chosen by the caller).
@@ -509,6 +513,10 @@ impl Engine for LlamaCpp {
         EngineKind::LlamaCpp
     }
 
+    fn build_tag(&self, model: &str) -> String {
+        self.select_for(Some(model)).map(|s| s.build.as_str().to_string()).unwrap_or_default()
+    }
+
     fn availability(&self) -> Availability {
         if self.binary().is_some() {
             Availability::Available
@@ -781,6 +789,7 @@ mod tests {
             parallel: 1,
             kind: llama::ServeKind::Chat,
             cache_ram_mib: 0,
+            slot_save_path: None,
         };
         assert!(matches!(m.start(&launch).await, Err(EngineError::NotInstalled)));
         assert!(m.remove("../x").is_err());
@@ -804,6 +813,7 @@ mod tests {
             parallel: 1,
             kind: llama::ServeKind::Chat,
             cache_ram_mib: 0,
+            slot_save_path: None,
         };
         assert!(p.start(&launch).await.is_err());
         assert_eq!(p.kind(), EngineKind::Mlx);

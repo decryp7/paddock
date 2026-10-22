@@ -15,6 +15,6 @@ describe('usage format', () => {
   });
 
   it('adds prompt and completion tokens', () => {
-    expect(tokensOf({ requests: 1, promptTokens: 7, completionTokens: 5, busyMs: 0, errors: 0, peakMemoryBytes: 0 })).toBe(12);
+    expect(tokensOf({ requests: 1, promptTokens: 7, completionTokens: 5, busyMs: 0, errors: 0, peakMemoryBytes: 0, cacheHits: 0, cacheMisses: 0, prefixTokens: 0, savedTokens: 0 })).toBe(12);
   });
 });

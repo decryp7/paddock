@@ -2,12 +2,16 @@ import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, OnInit, after
 import { MatIconModule } from '@angular/material/icon';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import type { Preset, ThemeChoice } from '../../core/api.types';
+import type { CacheClearScope, CacheInfo, CacheKindInfo, CacheStorage, Preset, ThemeChoice } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
 import { Toasts } from '../../core/toasts';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
+import { Confirm } from '../../shared/ui/confirm';
 import { Panel } from '../../shared/ui/panel';
+import { PwSelect } from '../../shared/ui/select';
+import { bytes, date, int } from '../../shared/format';
+import { expiryText, oldestText, sizeText, ttlOptions } from './cache-text';
 import { consentDetail } from '../service/service-consent';
 import { ServiceStore } from '../service/service.store';
 import { checkSummary } from '../updates/update-text';
@@ -23,6 +27,7 @@ const SECTIONS = [
   { id: 'general', label: 'General', icon: 'sliders' },
   { id: 'server', label: 'Server', icon: 'server' },
   { id: 'memory', label: 'Memory', icon: 'memory' },
+  { id: 'cache', label: 'Caching', icon: 'bolt' },
   { id: 'network', label: 'Network', icon: 'globe' },
   { id: 'model-updates', label: 'Model updates', icon: 'download' },
   { id: 'privacy', label: 'Privacy', icon: 'lock' },
@@ -41,7 +46,7 @@ export function parseNumber(value: string, min = -Infinity, max = Infinity): num
 /** Everything Pitwall can be told: general, server, memory, network, privacy and updates. */
 @Component({
   selector: 'pw-settings-page',
-  imports: [MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel],
+  imports: [MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PwSelect],
   providers: [SettingsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
@@ -60,7 +65,14 @@ export class SettingsPage implements OnInit {
   private readonly theme = inject(ThemeService);
   private readonly toasts = inject(Toasts);
   private readonly doc = inject(DOCUMENT);
+  private readonly confirm = inject(Confirm);
   protected readonly sections = SECTIONS;
+  protected readonly intText = int;
+  protected readonly sizeOf = bytes;
+  protected readonly cacheKinds: { id: 'embeddings' | 'responses'; title: string; noun: string; about: string; ttlHint: string }[] = [
+    { id: 'embeddings', title: 'Embeddings', noun: 'cached embedding', about: 'Vectors for text your apps embed. The same text and model always give the same vector.', ttlHint: 'Counted since the entry was last used, so what you keep using stays.' },
+    { id: 'responses', title: 'Saved answers', noun: 'saved answer', about: 'Answers to deterministic requests from apps and presets that opted in (Apps & keys, Models ▸ Presets).', ttlHint: 'Counted from when the answer was stored, so old answers do not outlive a model update for long.' },
+  ];
   protected readonly presets = PRESETS;
   protected readonly presetLabel = PRESET_LABEL;
   protected readonly presetHint = PRESET_HINT;
@@ -97,6 +109,7 @@ export class SettingsPage implements OnInit {
   ngOnInit(): void {
     void this.service.refresh();
     void this.updates.load();
+    void this.store.loadCacheInfo();
     void this.store.load().then(() => setTimeout(() => this.observe()));
   }
 
@@ -188,6 +201,67 @@ export class SettingsPage implements OnInit {
   protected setRetention(v: string): void {
     const n = parseNumber(v, 1, 365);
     if (n !== null) this.store.edit('privacy', { metricsRetentionDays: Math.round(n) });
+  }
+
+  protected storage(k: 'embeddings' | 'responses'): CacheStorage {
+    const c = this.store.draft()?.cache;
+    return c ? (k === 'embeddings' ? c.embeddingsStorage : c.responsesStorage) : 'disk';
+  }
+  protected maxMib(k: 'embeddings' | 'responses'): number {
+    const c = this.store.draft()?.cache;
+    return c ? (k === 'embeddings' ? c.embeddingsMaxMib : c.responsesMaxMib) : 0;
+  }
+  protected ttl(k: 'embeddings' | 'responses'): number {
+    const c = this.store.draft()?.cache;
+    return c ? (k === 'embeddings' ? c.embeddingsTtlSecs : c.responsesTtlSecs) : 0;
+  }
+  protected ttlChoices(k: 'embeddings' | 'responses') {
+    return ttlOptions(this.ttl(k), k === 'embeddings');
+  }
+  protected setStorage(k: 'embeddings' | 'responses', v: CacheStorage): void {
+    this.store.edit('cache', k === 'embeddings' ? { embeddingsStorage: v } : { responsesStorage: v });
+  }
+  protected setMaxMib(k: 'embeddings' | 'responses', v: string): void {
+    const n = parseNumber(v, 1, 1_048_576);
+    if (n !== null) this.store.edit('cache', k === 'embeddings' ? { embeddingsMaxMib: Math.round(n) } : { responsesMaxMib: Math.round(n) });
+  }
+  protected setTtl(k: 'embeddings' | 'responses', v: string): void {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0) this.store.edit('cache', k === 'embeddings' ? { embeddingsTtlSecs: n } : { responsesTtlSecs: n });
+  }
+  protected setPromptCacheAuto(auto: boolean): void {
+    this.store.edit('cache', { promptCacheMib: auto ? null : 1024 });
+  }
+  protected setPromptCacheMib(v: string): void {
+    const n = parseNumber(v, 0, 1_048_576);
+    if (n !== null) this.store.edit('cache', { promptCacheMib: Math.round(n) });
+  }
+  protected setKeepWarmDays(v: string): void {
+    const n = parseNumber(v, 1, 3650);
+    if (n !== null) this.store.edit('cache', { keepWarmDays: Math.round(n) });
+  }
+  protected cacheSize(k: CacheKindInfo): string {
+    return sizeText(k);
+  }
+  protected oldest(k: CacheKindInfo): string {
+    return oldestText(k, this.now());
+  }
+  protected expiry(k: CacheKindInfo): string {
+    return expiryText(k);
+  }
+  protected nextSweep(at: CacheInfo['nextSweepAt']): string {
+    return date(at, true);
+  }
+
+  /** Clearing is destructive but cheap to undo (the caches refill), so it asks once, naming what goes. */
+  protected async clear(scope: CacheClearScope, what: string): Promise<void> {
+    const ok = await this.confirm.ask({
+      title: `Clear ${what}?`,
+      message: 'The entries are deleted now. Apps keep working; requests are answered by the model again until the cache refills.',
+      confirm: 'Clear now',
+      danger: true,
+    });
+    if (ok) await this.store.clearCache(scope);
   }
 
   protected async copy(text: string): Promise<void> {

@@ -197,6 +197,8 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
                           <span role="cell" class="c-status">
                             @if (r.status >= 400) {
                               <span class="status" [attr.data-tone]="r.status >= 500 ? 'bad' : 'warn'" [matTooltip]="r.error ?? ''">{{ statusLabel(r.status) }}</span>
+                            } @else if (r.cache === 'hit') {
+                              <span class="cached" matTooltip="Answered from the cache" matTooltipShowDelay="400"><mat-icon svgIcon="pw:bolt" aria-hidden="true" />cached</span>
                             }
                           </span>
                         }
@@ -436,6 +438,17 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
     .r {
       text-align: right;
     }
+    .cached {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: var(--fs-sm);
+      color: var(--text-3);
+      mat-icon {
+        width: 12px;
+        height: 12px;
+      }
+    }
     .c-status {
       padding-left: var(--sp-3);
     }
@@ -530,7 +543,7 @@ export class RequestsPage implements OnInit {
   }
 
   protected label(r: RequestRecord): string {
-    return `${clock(r.at, true)}, ${this.appName(r.appId)}, ${r.endpoint}, status ${r.status}`;
+    return `${clock(r.at, true)}, ${this.appName(r.appId)}, ${r.endpoint}, status ${r.status}${r.cache === 'hit' ? ', answered from the cache' : ''}`;
   }
 
   /** One list for the row's "..." button, its right-click menu and Shift+F10. */

@@ -2,6 +2,8 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
   AppInfo,
+  CacheClearScope,
+  CacheInfo,
   AppPermissions,
   AppUpdateStatus,
   BenchmarkResult,
@@ -113,6 +115,12 @@ export class TauriBackend implements PitwallBackend {
   }
   releaseMemory(): Promise<number> {
     return this.run('release_memory');
+  }
+  cacheInfo(): Promise<CacheInfo> {
+    return this.run('cache_info');
+  }
+  clearCache(scope: CacheClearScope): Promise<number> {
+    return this.run('clear_cache', { scope });
   }
   applyPreset(preset: Preset): Promise<Settings> {
     return this.run('apply_preset', { preset });

@@ -48,6 +48,7 @@ fn engines_get_a_scrubbed_environment_and_offline_flag() {
         parallel: 1,
         kind: pitwall_core::llama::ServeKind::Chat,
         cache_ram_mib: 0,
+        slot_save_path: None,
     });
     assert!(args.contains(&"--offline".to_string()));
     let host = args.iter().position(|a| a == "--host").unwrap();

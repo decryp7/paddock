@@ -16,6 +16,7 @@ const perms = (over: Partial<AppPermissions> = {}): AppPermissions => ({
   maxPriority: 'interactive',
   tools: false,
   extendedApis: false,
+  cacheResponses: false,
   limits: { requestsPerMin: null, tokensPerDay: null, maxConcurrent: null, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null },
   ...over,
 });

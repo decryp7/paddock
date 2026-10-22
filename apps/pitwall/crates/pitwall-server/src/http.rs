@@ -118,6 +118,14 @@ fn json_body(b: &Bytes) -> Result<Value, ApiError> {
     serde_json::from_slice(b).map_err(|e| ApiError::invalid(format!("the request body is not valid JSON: {e}")))
 }
 
+/// `X-Pitwall-Cache`: what the response cache did for the request (absent when it was not eligible).
+fn cache_header(r: &mut Response, outcome: Option<pitwall_core::cache::Outcome>) {
+    if let Some(o) = outcome {
+        r.headers_mut()
+            .insert(HeaderName::from_static("x-pitwall-cache"), HeaderValue::from_static(o.header()));
+    }
+}
+
 fn provenance(
     r: &mut Response,
     run_model: &str,
@@ -201,6 +209,7 @@ fn meta(family: ApiFamily, endpoint: &str, h: &HeaderMap, kind: JobKind) -> Resu
         priority: priority(h)?,
         extended: family == ApiFamily::Extended,
         kind,
+        no_cache: pitwall_core::cache::bypass(header_str(h, "cache-control")),
     })
 }
 
@@ -217,6 +226,7 @@ fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'st
         run.engine.clone(),
     );
     let alias = run.resolved.preset.as_ref().map(|p| p.alias.to_string());
+    let cache = run.cache;
     struct St {
         run: Run,
         pending: VecDeque<String>,
@@ -264,6 +274,7 @@ fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'st
         .body(Body::from_stream(stream))
         .unwrap_or_default();
     provenance(&mut r, &model, &engine, by, (cold, alias.as_deref()));
+    cache_header(&mut r, cache);
     r
 }
 
@@ -309,6 +320,7 @@ fn json_response(v: Value, run: &Run) -> Response {
         run.resolved.chosen_by,
         (run.cold_start_ms, run.resolved.preset.as_ref().map(|p| p.alias.as_str())),
     );
+    cache_header(&mut r, run.cache);
     r
 }
 
@@ -402,7 +414,7 @@ async fn embed(
     family: ApiFamily,
     endpoint: &str,
     req: pitwall_core::chat::EmbedRequest,
-) -> Result<(pitwall_core::chat::EmbedOutput, String, u64), ApiError> {
+) -> Result<(pitwall_core::chat::EmbedOutput, String, u64, Option<pitwall_core::cache::Outcome>), ApiError> {
     let model = match &req.model {
         ModelRef::Default => ModelRef::Named("auto:embeddings".into()),
         m => m.clone(),
@@ -436,37 +448,100 @@ async fn embed(
         })?;
     }
     let started = std::time::Instant::now();
-    let permit = st
-        .serving
-        .acquire(app.clone(), resolved.id.clone(), pr, JobKind::Embedding, None)
-        .await?;
-    let (busy, _cold) = st.serving.ensure_for(&resolved).await?;
-    let out = st
-        .serving
-        .embed(&busy, &req, Duration::from_secs(st.cfg().server.request_timeout_secs))
-        .await;
-    drop(permit);
+    // The embeddings cache (ADR 0019): one vector per input text; only the missing inputs reach the model.
+    let (fp, now) = (st.serving.fingerprint(&resolved), now_ms());
+    let on = st.caches.embeddings_on();
+    let bypass = pitwall_core::cache::bypass(header_str(h, "cache-control"));
+    let keys: Vec<pitwall_core::cache::Key> = req.input.iter().map(|t| pitwall_core::cache::embed_key(&fp, t)).collect();
+    let mut vectors: Vec<Option<Vec<f32>>> = if on && !bypass {
+        keys.iter().map(|k| st.caches.vector(k, now)).collect()
+    } else {
+        vec![None; keys.len()]
+    };
+    let missing: Vec<usize> = (0..vectors.len()).filter(|i| vectors[*i].is_none()).collect();
+    let outcome = on.then(|| {
+        if bypass {
+            pitwall_core::cache::Outcome::Bypass
+        } else if missing.is_empty() {
+            pitwall_core::cache::Outcome::Hit
+        } else {
+            pitwall_core::cache::Outcome::Miss
+        }
+    });
+    let saved: u64 = vectors
+        .iter()
+        .zip(&req.input)
+        .filter(|(v, _)| v.is_some())
+        .map(|(_, t)| u64::from(pitwall_core::tokens::estimate(t)))
+        .sum();
+    let mut prompt_tokens = 0;
+    let mut memory = 0;
+    if !missing.is_empty() {
+        let permit = st
+            .serving
+            .acquire(app.clone(), resolved.id.clone(), pr, JobKind::Embedding, None)
+            .await?;
+        let (busy, _cold) = st.serving.ensure_for(&resolved).await?;
+        let todo = pitwall_core::chat::EmbedRequest {
+            model: req.model.clone(),
+            input: missing.iter().map(|i| req.input[*i].clone()).collect(),
+        };
+        let out = st
+            .serving
+            .embed(&busy, &todo, Duration::from_secs(st.cfg().server.request_timeout_secs))
+            .await;
+        drop(permit);
+        let out = out.map_err(|e| ApiError::new(ErrorKind::Engine, format!("the embedding model failed: {}", e.0)))?;
+        prompt_tokens = out.prompt_tokens;
+        memory = st.serving.footprint(&resolved.id);
+        let meta = pitwall_core::cache::Meta {
+            model: resolved.id.to_string(),
+            app: app.to_string(),
+            preset: resolved.preset.as_ref().map(|p| p.alias.to_string()).unwrap_or_default(),
+        };
+        for (i, v) in missing.iter().zip(out.vectors) {
+            if on {
+                st.caches.store_vector(keys[*i], &v, meta.clone(), now);
+            }
+            vectors[*i] = Some(v);
+        }
+    }
     let ms = started.elapsed().as_millis() as u64;
-    let out = out.map_err(|e| ApiError::new(ErrorKind::Engine, format!("the embedding model failed: {}", e.0)))?;
+    let vectors: Vec<Vec<f32>> = vectors.into_iter().map(Option::unwrap_or_default).collect();
     crate::app_lock(&st.usage).record(&pitwall_core::usage::UsageEvent {
         at: now_ms(),
         app: app.as_str(),
-        prompt_tokens: u64::from(out.prompt_tokens),
+        prompt_tokens: u64::from(prompt_tokens),
         completion_tokens: 0,
         busy_ms: ms,
         failed: false,
-        memory_bytes: st.serving.footprint(&resolved.id),
+        memory_bytes: memory,
+        cache_hit: outcome == Some(pitwall_core::cache::Outcome::Hit),
+        cache_miss: outcome == Some(pitwall_core::cache::Outcome::Miss),
+        prefix_tokens: 0,
+        saved_tokens: saved,
     });
     let _ = endpoint;
-    Ok((out, resolved.id.to_string(), ms))
+    st.last_request_at.store(now_ms(), std::sync::atomic::Ordering::SeqCst);
+    Ok((
+        pitwall_core::chat::EmbedOutput {
+            vectors,
+            prompt_tokens: prompt_tokens + u32::try_from(saved).unwrap_or(u32::MAX),
+        },
+        resolved.id.to_string(),
+        ms,
+        outcome,
+    ))
 }
 
 async fn openai_embeddings(State(st): S, h: HeaderMap, body: Bytes) -> Response {
     let who = gate!(st, h, ApiFamily::OpenAi);
     let go = async {
         let req = openai::parse_embeddings(&json_body(&body)?)?;
-        let (out, model, _) = embed(&st, &who, &h, ApiFamily::OpenAi, "/v1/embeddings", req).await?;
-        Ok(axum::Json(openai::embeddings_response(&out, &model)).into_response())
+        let (out, model, _, cache) = embed(&st, &who, &h, ApiFamily::OpenAi, "/v1/embeddings", req).await?;
+        let mut r = axum::Json(openai::embeddings_response(&out, &model)).into_response();
+        cache_header(&mut r, cache);
+        Ok(r)
     };
     go.await.unwrap_or_else(|e: ApiError| fail(&e, ApiFamily::OpenAi))
 }
@@ -659,8 +734,8 @@ async fn ollama_embed(State(st): S, h: HeaderMap, body: Bytes) -> Response {
     let who = gate!(st, h, ApiFamily::Ollama);
     let go = async {
         let (req, legacy) = ollama::parse_embed(&json_body(&body)?)?;
-        let (out, model, ms) = embed(&st, &who, &h, ApiFamily::Ollama, "/api/embed", req).await?;
-        Ok(axum::Json(ollama::embed_response(
+        let (out, model, ms, cache) = embed(&st, &who, &h, ApiFamily::Ollama, "/api/embed", req).await?;
+        let mut r = axum::Json(ollama::embed_response(
             &out,
             &model,
             legacy,
@@ -669,7 +744,9 @@ async fn ollama_embed(State(st): S, h: HeaderMap, body: Bytes) -> Response {
                 ..Default::default()
             },
         ))
-        .into_response())
+        .into_response();
+        cache_header(&mut r, cache);
+        Ok(r)
     };
     go.await.unwrap_or_else(|e: ApiError| fail(&e, ApiFamily::Ollama))
 }

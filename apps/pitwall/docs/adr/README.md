@@ -22,3 +22,4 @@ Numbered, with status, context, decision and consequences. ADRs are not renumber
 | [0016](0016-parallel-slots.md) | Parallel slots per model and what they cost | accepted (number provisional) |
 | [0017](0017-model-update-notices.md) | Model update notices: ask, never fetch | accepted (number provisional) |
 | [0018](0018-engine-pins-and-capability-gating.md) | Engine version pins, rollback and capability gating | accepted (number provisional) |
+| [0019](0019-caching.md) | Caching: prompt-prefix reuse, a response cache and an embeddings cache | accepted (number provisional); not built yet |

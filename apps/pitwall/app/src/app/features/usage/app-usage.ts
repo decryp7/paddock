@@ -8,6 +8,7 @@ import { bytes, clock, compact, duration, int } from '../../shared/format';
 import { LIMIT_LABEL, limitStateLook, statusTone } from '../../shared/labels';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
+import { CacheTiles } from './cache-tiles';
 import { barWidth, limitValue, tokensOf, USAGE_RANGES, USAGE_RANGE_TEXT } from './usage-format';
 import { UsageStore } from './usage.store';
 
@@ -20,7 +21,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
 /** One app's usage over time, where each of its limits stands, and its latest requests (metadata only). */
 @Component({
   selector: 'pw-app-usage',
-  imports: [Panel, EChart, EmptyState],
+  imports: [Panel, EChart, EmptyState, CacheTiles],
   providers: [UsageStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -45,6 +46,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
           <div><dt>Errors</dt><dd class="num" [class.bad]="s.totals.errors > 0">{{ intText(s.totals.errors) }}</dd></div>
           <div><dt>Peak memory</dt><dd class="num">{{ s.totals.peakMemoryBytes ? size(s.totals.peakMemoryBytes) : '—' }}</dd></div>
         </dl>
+        <pw-cache-tiles class="cache" [totals]="s.totals" />
         <pw-echart [option]="option()" [themeKey]="chartKey()" height="240px" [label]="chartLabel()" />
         <p class="note faint">Peak memory is the footprint of the largest model that served this app in each period. The server keeps hourly figures for 7 days and daily figures for 90 days, on this machine only.</p>
       }
@@ -124,6 +126,9 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       display: flex;
       flex-direction: column;
       gap: var(--sp-3);
+    }
+    .cache {
+      margin-bottom: var(--sp-3);
     }
     .controls {
       display: flex;
