@@ -21,6 +21,7 @@ use pitwall_core::ids::ModelId;
 use pitwall_core::mgmt::{
     self, CommandError, DiskUsage, Download, DownloadKind, DownloadState, EngineKind, LiveUpdate, PlaygroundEvent, PlaygroundRequest,
 };
+use pitwall_core::presets::{Known, PresetError, Presets};
 use pitwall_core::runtimes::builds;
 use pitwall_core::scheduler::JobKind;
 use serde::de::DeserializeOwned;
@@ -407,6 +408,25 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "run_benchmark" => {
             let id = model(a, "modelId")?;
             run_benchmark(st, id).await
+        }
+        "presets" => ok(preset_entries(st)),
+        "create_preset" => {
+            let draft: mgmt::PresetDraft = arg(a, "preset")?;
+            edit_presets(st, |ps, known| ps.create(draft.parse()?, known))
+        }
+        "update_preset" => {
+            let alias: String = arg(a, "alias")?;
+            let draft: mgmt::PresetDraft = arg(a, "preset")?;
+            edit_presets(st, |ps, known| ps.update(&alias, draft.parse()?, known))
+        }
+        "delete_preset" => {
+            let alias: String = arg(a, "alias")?;
+            edit_presets(st, |ps, _| ps.delete(&alias))
+        }
+        "resolve_preset" => {
+            let draft: mgmt::PresetDraft = arg(a, "preset")?;
+            let editing: Option<String> = arg(a, "editing")?;
+            ok(preview_preset(st, draft, editing.as_deref()))
         }
         "settings" => ok(st.cfg().ui()),
         "save_settings" => {
@@ -1043,4 +1063,93 @@ async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         .header(header::CACHE_CONTROL, "no-cache")
         .body(Body::from_stream(stream))
         .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Presets (ADR 0014)
+
+fn preset_error(e: PresetError) -> CommandError {
+    let code = match e {
+        PresetError::NotFound(_) => mgmt::ErrorCode::NotFound,
+        PresetError::Duplicate(_) | PresetError::NameClash { .. } | PresetError::TooMany => mgmt::ErrorCode::Conflict,
+        _ => mgmt::ErrorCode::BadRequest,
+    };
+    err(code, e.to_string())
+}
+
+fn preset_entries(st: &AppState) -> Vec<mgmt::PresetEntry> {
+    st.serving
+        .presets()
+        .list()
+        .iter()
+        .map(|p| mgmt::PresetEntry {
+            status: st.serving.preset_status(p),
+            preset: p.clone(),
+        })
+        .collect()
+}
+
+/// Validates against the library, changes the presets, saves them (the change is kept only when the save worked) and
+/// hands the new list to serving. Returns the saved preset (or the removed one) as JSON.
+fn edit_presets(st: &AppState, change: impl FnOnce(&mut Presets, &Known) -> Result<mgmt::ModelPreset, PresetError>) -> R<Value> {
+    let _gate = lock(&st.presets_gate);
+    let models: Vec<ModelId> = st.library.local().iter().map(|f| f.id.clone()).collect();
+    let engines = st.preset_engines();
+    let mut next = st.serving.presets();
+    let saved = change(
+        &mut next,
+        &Known {
+            models: &models,
+            engines: &engines,
+        },
+    )
+    .map_err(preset_error)?;
+    st.save_presets(&next).map_err(|e| {
+        err(
+            mgmt::ErrorCode::Internal,
+            format!("the presets could not be saved ({e}); check the disk and try again"),
+        )
+    })?;
+    st.serving.set_presets(next);
+    ok(saved)
+}
+
+/// The editor's live check: what is wrong with the draft, and what its target resolves to now.
+fn preview_preset(st: &AppState, draft: mgmt::PresetDraft, editing: Option<&str>) -> mgmt::PresetPreview {
+    let mut problem = None;
+    // Parse the target alone first so a bad alias doesn't hide what the target resolves to.
+    let target_only = mgmt::PresetDraft {
+        alias: "preview".into(),
+        ..draft.clone()
+    };
+    let status = match target_only.parse() {
+        Ok(p) => Some(st.serving.preset_status(&p)),
+        Err(e) => {
+            problem = Some(e.to_string());
+            None
+        }
+    };
+    if problem.is_none() {
+        let models: Vec<ModelId> = st.library.local().iter().map(|f| f.id.clone()).collect();
+        let engines = st.preset_engines();
+        let mut scratch = st.serving.presets();
+        // The preset being edited is replaced by the draft, so it is not a duplicate of itself.
+        if let Some(e) = editing {
+            let _ = scratch.delete(e);
+        }
+        problem = draft
+            .parse()
+            .and_then(|p| {
+                scratch.create(
+                    p,
+                    &Known {
+                        models: &models,
+                        engines: &engines,
+                    },
+                )
+            })
+            .err()
+            .map(|e| e.to_string());
+    }
+    mgmt::PresetPreview { problem, status }
 }

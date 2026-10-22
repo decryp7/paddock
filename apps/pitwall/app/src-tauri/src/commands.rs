@@ -9,7 +9,7 @@ use crate::server_client::ServerClient;
 use pitwall_core::config::UiSettings;
 use pitwall_core::limits::AppPermissions;
 use pitwall_core::memory::Preset;
-use pitwall_core::mgmt::{CommandError, ErrorCode, HistoryRange, PlaygroundRequest, UsageRange};
+use pitwall_core::mgmt::{CommandError, ErrorCode, HistoryRange, PlaygroundRequest, PresetDraft, UsageRange};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -89,6 +89,23 @@ impl Validate for AppPermissions {
     }
 }
 
+impl Validate for PresetDraft {
+    fn validate(&self, field: &str) -> Result<(), CommandError> {
+        self.alias.validate(field)?;
+        self.target.validate(field)?;
+        self.engine.validate(field)?;
+        // The server re-validates (and refuses over its own limit); this only stops absurd sizes being relayed.
+        if self
+            .system_prompt
+            .as_ref()
+            .is_some_and(|p| p.len() > 4 * pitwall_core::presets::MAX_SYSTEM_PROMPT_BYTES)
+        {
+            return Err(bad(field, "the system prompt is too long"));
+        }
+        Ok(())
+    }
+}
+
 impl Validate for PlaygroundRequest {
     fn validate(&self, field: &str) -> Result<(), CommandError> {
         if self.model_id.len() > MAX_TEXT {
@@ -143,6 +160,21 @@ rpc!(
 rpc!(
     /// One app in detail: usage, limits and its latest requests.
     app_detail => "app_detail", app_id: String = "appId");
+rpc!(
+    /// Model presets and aliases with where each stands now.
+    presets => "presets");
+rpc!(
+    /// Creates a preset.
+    create_preset => "create_preset", preset: PresetDraft = "preset");
+rpc!(
+    /// Replaces (or renames) a preset.
+    update_preset => "update_preset", alias: String = "alias", preset: PresetDraft = "preset");
+rpc!(
+    /// Deletes a preset.
+    delete_preset => "delete_preset", alias: String = "alias");
+rpc!(
+    /// The editor's live check of a draft: problems and what its target resolves to now.
+    resolve_preset => "resolve_preset", preset: PresetDraft = "preset", editing: Option<String> = "editing");
 rpc!(
     /// Recent events.
     events => "events", limit: u32 = "limit");
@@ -402,6 +434,21 @@ mod tests {
         r.model_id = "m".repeat(MAX_TEXT + 1);
         assert!(r.validate("r").is_err());
         assert!(AppPermissions::default().validate("p").is_ok());
+        let draft = |alias: &str| PresetDraft {
+            alias: alias.into(),
+            target: "m".into(),
+            context: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system_prompt: None,
+            engine: None,
+        };
+        assert!(draft("debrief-explain").validate("preset").is_ok());
+        assert!(draft(&"a".repeat(MAX_TEXT + 1)).validate("preset").is_err());
+        let mut d = draft("ok");
+        d.system_prompt = Some("x".repeat(4 * pitwall_core::presets::MAX_SYSTEM_PROMPT_BYTES + 1));
+        assert!(d.validate("preset").is_err());
         assert!(UsageRange::Week.validate("range").is_ok());
     }
 

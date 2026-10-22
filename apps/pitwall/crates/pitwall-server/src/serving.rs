@@ -16,7 +16,8 @@ use pitwall_core::hardware::Hardware;
 use pitwall_core::ids::{AppId, ModelId};
 use pitwall_core::llama::{self, Launch, ServeKind};
 use pitwall_core::memory::{self, Action, Hot, LoadPlan, ReleaseReason};
-use pitwall_core::mgmt::{ChosenBy, HotState, LoadedModel};
+use pitwall_core::mgmt::{ChosenBy, HotState, LoadedModel, PresetStatus};
+use pitwall_core::presets::{self, ModelPreset, PresetError, Presets};
 use pitwall_core::scheduler::{Cancelled, Caps, JobId, JobKind, JobSpec, Priority, QueueError, Scheduler};
 use pitwall_core::select::{self, Candidate, Requirements};
 use pitwall_core::sse;
@@ -146,6 +147,8 @@ struct Inner {
     supervisor: Mutex<Supervisor>,
     /// Measured generation speed by model id (from stored benchmarks), for "fast" selection.
     speeds: RwLock<HashMap<String, f64>>,
+    /// Model presets and aliases (ADR 0014); `AppState` loads, saves and replaces them.
+    presets: RwLock<Presets>,
 }
 
 /// The serving core.
@@ -161,6 +164,28 @@ pub struct Resolved {
     pub id: ModelId,
     /// How it was chosen.
     pub chosen_by: ChosenBy,
+    /// The preset the request named, when it asked for an alias (ADR 0014).
+    pub preset: Option<ModelPreset>,
+}
+
+/// What a preset changes about loading a model (the context and the engine).
+#[derive(Debug, Clone, Default)]
+struct LoadOverrides {
+    context: Option<u32>,
+    engine: Option<String>,
+}
+
+/// The installed model a request's `model` text names (id, repository or `repository:quant`).
+fn find_model(local: &[LocalFile], name: &str) -> Option<ModelId> {
+    let n = name.trim().trim_end_matches(".gguf").to_ascii_lowercase();
+    local
+        .iter()
+        .find(|f| {
+            f.id.as_str() == n
+                || f.repo.to_ascii_lowercase() == n
+                || format!("{}:{}", f.repo, f.info.quant.clone().unwrap_or_default()).to_ascii_lowercase() == n
+        })
+        .map(|f| f.id.clone())
 }
 
 fn api(kind: ErrorKind, m: impl Into<String>) -> ApiError {
@@ -194,6 +219,7 @@ impl Serving {
                 cancelled: Mutex::new(vec![]),
                 supervisor: Mutex::new(Supervisor::default()),
                 speeds: RwLock::new(HashMap::new()),
+                presets: RwLock::new(Presets::default()),
             }),
         }
     }
@@ -273,66 +299,132 @@ impl Serving {
         lock(&self.inner.cancelled).contains(&id)
     }
 
-    /// Resolve the request's model: a named file, `auto:<capabilities>` or the default.
+    /// The presets (a copy).
+    pub fn presets(&self) -> Presets {
+        self.inner.presets.read().map(|p| p.clone()).unwrap_or_default()
+    }
+
+    /// Replaces the presets (after they were validated and saved).
+    pub fn set_presets(&self, presets: Presets) {
+        if let Ok(mut g) = self.inner.presets.write() {
+            *g = presets;
+        }
+    }
+
+    /// Picks a model for capability requirements among the installed ones (shared by `auto:` names and presets).
+    fn choose_auto(
+        &self,
+        mut req: Requirements,
+        (needs_vision, needs_tools): (bool, bool),
+        local: &[LocalFile],
+        hot: &HashMap<ModelId, Arc<HotModel>>,
+        s: &Settings,
+    ) -> Result<select::Choice, String> {
+        if needs_vision && !req.capabilities.contains(&select::Capability::Vision) {
+            req.capabilities.push(select::Capability::Vision);
+        }
+        if needs_tools && !req.capabilities.contains(&select::Capability::Tools) {
+            req.capabilities.push(select::Capability::Tools);
+        }
+        let room = system::room(&self.hw(), hot.values().map(|h| h.ram).sum());
+        let speeds = self.inner.speeds.read().map(|g| g.clone()).unwrap_or_default();
+        let cands: Vec<Candidate> = local
+            .iter()
+            .map(|f| Candidate {
+                id: f.id.clone(),
+                capabilities: library::capabilities(f),
+                context_max: f.info.context_length.map(|c| c.min(u64::from(u32::MAX)) as u32),
+                size: f.size,
+                loaded: hot.contains_key(&f.id),
+                gen_tps: speeds.get(f.id.as_str()).copied(),
+                fit: fit::assess(Some(&library::size_of(f)), s.models.default_context, &room).verdict,
+            })
+            .collect();
+        select::choose(&req, &cands)
+    }
+
+    /// What a preset resolves to now.
+    fn resolve_preset(
+        &self,
+        p: &ModelPreset,
+        needs: (bool, bool),
+        local: &[LocalFile],
+        hot: &HashMap<ModelId, Arc<HotModel>>,
+        s: &Settings,
+    ) -> Result<presets::Resolution, PresetError> {
+        let installed: Vec<ModelId> = local.iter().map(|f| f.id.clone()).collect();
+        presets::resolve(p, &installed, |req| self.choose_auto(req.clone(), needs, local, hot, s))
+    }
+
+    /// Where a preset (possibly a draft) stands now: resolved, stale, matching nothing, or shadowed by a model.
+    pub fn preset_status(&self, p: &ModelPreset) -> PresetStatus {
+        let local = self.inner.library.local();
+        if find_model(&local, p.alias.as_str()).is_some() {
+            return PresetStatus::Shadowed {
+                message: format!(
+                    "a model named \"{}\" is installed, so requests for that name go to the model, not to this preset; rename the preset",
+                    p.alias
+                ),
+            };
+        }
+        let s = self.settings();
+        let hot = lock(&self.inner.hot);
+        let outcome = self.resolve_preset(p, (false, false), &local, &hot, &s);
+        PresetStatus::of(outcome, |id| hot.keys().any(|k| k.as_str() == id))
+    }
+
+    /// Resolve the request's model: a named file, a preset (alias), `auto:<capabilities>` or the default. A real
+    /// model's name wins over a preset of the same name.
     pub fn resolve(&self, model: &ModelRef, needs_vision: bool, needs_tools: bool) -> Result<Resolved, ApiError> {
         let local = self.inner.library.local();
         let s = self.settings();
-        let find = |name: &str| -> Option<ModelId> {
-            let n = name.trim().trim_end_matches(".gguf").to_ascii_lowercase();
-            local
-                .iter()
-                .find(|f| {
-                    f.id.as_str() == n
-                        || f.repo.to_ascii_lowercase() == n
-                        || format!("{}:{}", f.repo, f.info.quant.clone().unwrap_or_default()).to_ascii_lowercase() == n
-                })
-                .map(|f| f.id.clone())
-        };
         let hot = lock(&self.inner.hot);
+        let is_auto = |n: &str| n.starts_with("auto:") || n == "auto";
+        if let ModelRef::Named(n) = model {
+            let alias = if is_auto(n) || find_model(&local, n).is_some() {
+                None
+            } else {
+                self.inner.presets.read().ok().and_then(|g| g.get(n).cloned())
+            };
+            if let Some(p) = alias {
+                let r = self
+                    .resolve_preset(&p, (needs_vision, needs_tools), &local, &hot, &s)
+                    .map_err(ApiError::from)?;
+                return Ok(Resolved {
+                    id: r.model,
+                    chosen_by: r.chosen_by,
+                    preset: Some(p),
+                });
+            }
+        }
         let chat_models: Vec<&LocalFile> = local
             .iter()
             .filter(|f| library::capabilities(f).contains(&select::Capability::Chat))
             .collect();
-        if chat_models.is_empty() && !matches!(model, ModelRef::Named(n) if find(n).is_some()) {
+        if chat_models.is_empty() && !matches!(model, ModelRef::Named(n) if find_model(&local, n).is_some()) {
             return Err(api(
                 ErrorKind::NotFound,
                 "no models are installed. Open Models in Pitwall, search Hugging Face and download one.",
             ));
         }
         match model {
-            ModelRef::Named(n) if n.starts_with("auto:") || n == "auto" => {
+            ModelRef::Named(n) if is_auto(n) => {
                 let spec = n.strip_prefix("auto:").unwrap_or("");
-                let mut req = Requirements::parse_auto(spec).map_err(|e| api(ErrorKind::InvalidRequest, e))?;
-                if needs_vision && !req.capabilities.contains(&select::Capability::Vision) {
-                    req.capabilities.push(select::Capability::Vision);
-                }
-                if needs_tools && !req.capabilities.contains(&select::Capability::Tools) {
-                    req.capabilities.push(select::Capability::Tools);
-                }
-                let room = system::room(&self.hw(), hot.values().map(|h| h.ram).sum());
-                let speeds = self.inner.speeds.read().map(|g| g.clone()).unwrap_or_default();
-                let cands: Vec<Candidate> = local
-                    .iter()
-                    .map(|f| Candidate {
-                        id: f.id.clone(),
-                        capabilities: library::capabilities(f),
-                        context_max: f.info.context_length.map(|c| c.min(u64::from(u32::MAX)) as u32),
-                        size: f.size,
-                        loaded: hot.contains_key(&f.id),
-                        gen_tps: speeds.get(f.id.as_str()).copied(),
-                        fit: fit::assess(Some(&library::size_of(f)), s.models.default_context, &room).verdict,
-                    })
-                    .collect();
-                let c = select::choose(&req, &cands).map_err(|e| api(ErrorKind::NotFound, e))?;
+                let req = Requirements::parse_auto(spec).map_err(|e| api(ErrorKind::InvalidRequest, e))?;
+                let c = self
+                    .choose_auto(req, (needs_vision, needs_tools), &local, &hot, &s)
+                    .map_err(|e| api(ErrorKind::NotFound, e))?;
                 Ok(Resolved {
                     id: c.id,
                     chosen_by: ChosenBy::Capabilities,
+                    preset: None,
                 })
             }
-            ModelRef::Named(n) => match find(n) {
+            ModelRef::Named(n) => match find_model(&local, n) {
                 Some(id) => Ok(Resolved {
                     id,
                     chosen_by: ChosenBy::Explicit,
+                    preset: None,
                 }),
                 None => Err(api(
                     ErrorKind::NotFound,
@@ -353,6 +445,7 @@ impl Serving {
                 pick.map(|id| Resolved {
                     id,
                     chosen_by: ChosenBy::Default,
+                    preset: None,
                 })
                 .ok_or_else(|| api(ErrorKind::NotFound, "no chat model is installed"))
             }
@@ -441,11 +534,21 @@ impl Serving {
     /// Make sure `id` is loaded (loading it first if needed) and mark it busy. Returns the cold-start time in ms
     /// when the model had to be loaded.
     pub async fn ensure(&self, id: &ModelId) -> Result<(Busy, Option<u64>), ApiError> {
-        self.ensure_as(id, false).await
+        self.ensure_as(id, false, &LoadOverrides::default()).await
+    }
+
+    /// [`Serving::ensure`] for a resolved request: when it came through a preset, the preset's context and engine
+    /// apply if the model has to be loaded (a model that is already loaded keeps what it was loaded with).
+    pub async fn ensure_for(&self, r: &Resolved) -> Result<(Busy, Option<u64>), ApiError> {
+        let o = LoadOverrides {
+            context: r.preset.as_ref().and_then(|p| p.context),
+            engine: r.preset.as_ref().and_then(|p| p.engine.clone()),
+        };
+        self.ensure_as(&r.id, false, &o).await
     }
 
     /// [`Serving::ensure`]; `auto_restart` marks a background restart, whose failed start plans the next attempt.
-    async fn ensure_as(&self, id: &ModelId, auto_restart: bool) -> Result<(Busy, Option<u64>), ApiError> {
+    async fn ensure_as(&self, id: &ModelId, auto_restart: bool, o: &LoadOverrides) -> Result<(Busy, Option<u64>), ApiError> {
         let gate = lock(&self.inner.loading).entry(id.clone()).or_default().clone();
         let _g = gate.lock().await;
         self.inner.last_activity.store(now_ms(), Ordering::SeqCst);
@@ -465,8 +568,9 @@ impl Serving {
             .ok_or_else(|| api(ErrorKind::NotFound, format!("the model {id} is no longer installed")))?;
         let s = self.settings();
         let prefs = s.prefs(id);
-        let context = prefs
+        let context = o
             .context
+            .or(prefs.context)
             .unwrap_or(s.models.default_context)
             .min(f.info.context_length.unwrap_or(u64::MAX).min(u64::from(u32::MAX)) as u32)
             .max(512);
@@ -510,7 +614,7 @@ impl Serving {
         let port = self.free_port().await;
         let launch = self.launch_for(&f, context, port);
         self.event(EventKind::EngineStarted, Severity::Info, format!("Loading {id}"));
-        let engine = self.engine_for(prefs.engine.as_deref())?;
+        let engine = self.engine_for(o.engine.as_deref().or(prefs.engine.as_deref()))?;
         let running = engine.start(&launch).await.map_err(|e| {
             self.event(EventKind::EngineFailed, Severity::Error, format!("{id}: {e}"));
             if lock(&self.inner.supervisor).crashed(id, now_ms(), auto_restart) == Outcome::GaveUp {
@@ -678,7 +782,7 @@ impl Serving {
     fn restart(&self, id: ModelId) {
         let me = self.clone();
         tokio::spawn(async move {
-            match me.ensure_as(&id, true).await {
+            match me.ensure_as(&id, true, &LoadOverrides::default()).await {
                 Ok((busy, _)) => {
                     drop(busy);
                     me.event(EventKind::ModelLoaded, Severity::Info, format!("Restarted the engine for {id}."));

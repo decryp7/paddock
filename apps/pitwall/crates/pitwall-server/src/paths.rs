@@ -69,6 +69,10 @@ impl Dirs {
     pub fn usage(&self) -> PathBuf {
         self.root.join("usage.json")
     }
+    /// Model presets and aliases (ADR 0014).
+    pub fn presets(&self) -> PathBuf {
+        self.root.join("presets.json")
+    }
     /// Metrics history.
     pub fn metrics(&self) -> PathBuf {
         self.root.join("metrics.json")

@@ -30,6 +30,10 @@ pub struct FakeEngine {
     /// `POST /slots/{n}?action=erase` calls received (the context release).
     pub erases: Arc<AtomicUsize>,
     pub fail: bool,
+    /// The bodies of the chat requests the engine received (what the model was actually sent).
+    pub bodies: Arc<std::sync::Mutex<Vec<Value>>>,
+    /// The context each start asked for.
+    pub contexts: Arc<std::sync::Mutex<Vec<u32>>>,
 }
 
 const SSE: &str = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2},\"timings\":{\"prompt_per_second\":100.0,\"predicted_per_second\":50.0}}\n\ndata: [DONE]\n\n";
@@ -44,6 +48,8 @@ impl Engine for FakeEngine {
     fn start<'a>(&'a self, l: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move {
             self.starts.fetch_add(1, Ordering::SeqCst);
+            self.contexts.lock().unwrap().push(l.context);
+            let bodies = self.bodies.clone();
             if self.fail {
                 return Err(EngineError::Start("the fake engine refuses to start".into()));
             }
@@ -70,7 +76,15 @@ impl Engine for FakeEngine {
                 )
                 .route(
                     "/v1/chat/completions",
-                    post(|| async { ([("content-type", "text/event-stream")], SSE).into_response() }),
+                    post(move |body: axum::body::Bytes| {
+                        let bodies = bodies.clone();
+                        async move {
+                            if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+                                bodies.lock().unwrap().push(v);
+                            }
+                            ([("content-type", "text/event-stream")], SSE).into_response()
+                        }
+                    }),
                 )
                 .route(
                     "/v1/embeddings",
@@ -103,6 +117,8 @@ pub struct Harness {
     pub admin: String,
     pub starts: Arc<AtomicUsize>,
     pub erases: Arc<AtomicUsize>,
+    pub bodies: Arc<std::sync::Mutex<Vec<Value>>>,
+    pub contexts: Arc<std::sync::Mutex<Vec<u32>>>,
     pub dir: tempfile::TempDir,
 }
 
@@ -133,10 +149,14 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
     }
     let starts = Arc::new(AtomicUsize::new(0));
     let erases = Arc::new(AtomicUsize::new(0));
+    let bodies = Arc::new(std::sync::Mutex::new(vec![]));
+    let contexts = Arc::new(std::sync::Mutex::new(vec![]));
     let engine: Arc<dyn Engine> = Arc::new(FakeEngine {
         starts: starts.clone(),
         erases: erases.clone(),
         fail,
+        bodies: bodies.clone(),
+        contexts: contexts.clone(),
     });
     let st = AppState::open(dirs.clone(), Some(engine)).await;
     let _ = Hardware::default();
@@ -153,6 +173,8 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
         admin,
         starts,
         erases,
+        bodies,
+        contexts,
         dir,
     }
 }
@@ -232,6 +254,8 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
         admin,
         starts: Arc::new(AtomicUsize::new(0)),
         erases: Arc::new(AtomicUsize::new(0)),
+        bodies: Arc::new(std::sync::Mutex::new(vec![])),
+        contexts: Arc::new(std::sync::Mutex::new(vec![])),
         dir,
     }
 }

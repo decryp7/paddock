@@ -16,6 +16,7 @@ use pitwall_core::api::{anthropic, ollama, openai, ApiError, ApiFamily, ErrorKin
 use pitwall_core::chat::{ChatEvent, ChatOutput, ModelRef};
 use pitwall_core::events::{EventKind, Severity};
 use pitwall_core::ids::AppId;
+use pitwall_core::mgmt::PresetStatus;
 use pitwall_core::privacy;
 use pitwall_core::scheduler::{JobKind, Priority};
 use serde_json::{json, Value};
@@ -117,7 +118,13 @@ fn json_body(b: &Bytes) -> Result<Value, ApiError> {
     serde_json::from_slice(b).map_err(|e| ApiError::invalid(format!("the request body is not valid JSON: {e}")))
 }
 
-fn provenance(r: &mut Response, run_model: &str, engine: &str, by: pitwall_core::mgmt::ChosenBy, cold: Option<u64>) {
+fn provenance(
+    r: &mut Response,
+    run_model: &str,
+    engine: &str,
+    by: pitwall_core::mgmt::ChosenBy,
+    (cold, alias): (Option<u64>, Option<&str>),
+) {
     let h = r.headers_mut();
     let mut put = |k: &'static str, v: String| {
         if let Ok(v) = HeaderValue::from_str(&v) {
@@ -135,6 +142,9 @@ fn provenance(r: &mut Response, run_model: &str, engine: &str, by: pitwall_core:
     );
     if let Some(c) = cold {
         put("x-pitwall-cold-start-ms", c.to_string());
+    }
+    if let Some(a) = alias {
+        put("x-pitwall-alias", a.to_string());
     }
 }
 
@@ -158,6 +168,21 @@ fn entries(st: &AppState) -> Vec<ModelEntry> {
             }),
         })
         .collect()
+}
+
+/// The models plus the presets that resolve now, as the listing endpoints show them (`/v1/models`, `/api/tags`): an
+/// alias is listed with its model's details so clients can offer it, and one that cannot be served is left out.
+fn listed(st: &AppState) -> Vec<ModelEntry> {
+    let mut all = entries(st);
+    for p in st.serving.presets().list() {
+        let (Some(id), PresetStatus::Ready { model_id, .. }) = (p.alias.as_model_id(), st.serving.preset_status(p)) else {
+            continue;
+        };
+        if let Some(base) = all.iter().find(|e| e.id.as_str() == model_id).cloned() {
+            all.push(ModelEntry { id, ..base });
+        }
+    }
+    all
 }
 
 macro_rules! gate {
@@ -191,6 +216,7 @@ fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'st
         run.cold_start_ms,
         run.engine.clone(),
     );
+    let alias = run.resolved.preset.as_ref().map(|p| p.alias.to_string());
     struct St {
         run: Run,
         pending: VecDeque<String>,
@@ -237,7 +263,7 @@ fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'st
         .header("x-accel-buffering", "no")
         .body(Body::from_stream(stream))
         .unwrap_or_default();
-    provenance(&mut r, &model, &engine, by, cold);
+    provenance(&mut r, &model, &engine, by, (cold, alias.as_deref()));
     r
 }
 
@@ -281,7 +307,7 @@ fn json_response(v: Value, run: &Run) -> Response {
         run.resolved.id.as_str(),
         &run.engine,
         run.resolved.chosen_by,
-        run.cold_start_ms,
+        (run.cold_start_ms, run.resolved.preset.as_ref().map(|p| p.alias.as_str())),
     );
     r
 }
@@ -300,12 +326,12 @@ fn rand_suffix() -> u32 {
 
 async fn openai_models(State(st): S, h: HeaderMap) -> Response {
     gate!(st, h, ApiFamily::OpenAi);
-    axum::Json(openai::models(&entries(&st))).into_response()
+    axum::Json(openai::models(&listed(&st))).into_response()
 }
 
 async fn openai_model(State(st): S, h: HeaderMap, Path(name): Path<String>) -> Response {
     gate!(st, h, ApiFamily::OpenAi);
-    match entries(&st).iter().find(|e| e.id.as_str() == name) {
+    match listed(&st).iter().find(|e| e.id.as_str() == name) {
         Some(m) => axum::Json(openai::model(m)).into_response(),
         None => fail(
             &ApiError::new(ErrorKind::NotFound, format!("the model \"{name}\" does not exist")),
@@ -412,7 +438,7 @@ async fn embed(
         .serving
         .acquire(app.clone(), resolved.id.clone(), pr, JobKind::Embedding, None)
         .await?;
-    let (busy, _cold) = st.serving.ensure(&resolved.id).await?;
+    let (busy, _cold) = st.serving.ensure_for(&resolved).await?;
     let out = st
         .serving
         .embed(&busy, &req, Duration::from_secs(st.cfg().server.request_timeout_secs))
@@ -513,7 +539,7 @@ async fn ollama_run(st: Arc<AppState>, h: HeaderMap, body: Bytes, generate: bool
             if unload {
                 st.serving.unload(&resolved.id, pitwall_core::memory::ReleaseReason::Manual);
             } else {
-                st.serving.ensure(&resolved.id).await?;
+                st.serving.ensure_for(&resolved).await?;
             }
             return Ok(axum::Json(ollama::load_response(&name, generate, now_ms(), unload)).into_response());
         }
@@ -576,7 +602,7 @@ async fn ollama_generate(State(st): S, h: HeaderMap, body: Bytes) -> Response {
 
 async fn ollama_tags(State(st): S, h: HeaderMap) -> Response {
     gate!(st, h, ApiFamily::Ollama);
-    axum::Json(ollama::tags(&entries(&st))).into_response()
+    axum::Json(ollama::tags(&listed(&st))).into_response()
 }
 
 async fn ollama_ps(State(st): S, h: HeaderMap) -> Response {
@@ -596,6 +622,14 @@ async fn ollama_show(State(st): S, h: HeaderMap, body: Bytes) -> Response {
             .trim_end_matches(":latest")
             .to_string();
         let local = st.library.local();
+        // An alias shows the model behind it.
+        let name = if local.iter().any(|f| f.id.as_str() == name) {
+            name
+        } else {
+            st.serving
+                .resolve(&ModelRef::Named(name.clone()), false, false)
+                .map_or(name, |r| r.id.to_string())
+        };
         let f = local
             .iter()
             .find(|f| f.id.as_str() == name)

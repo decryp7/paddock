@@ -10,6 +10,7 @@ pub use crate::limits::{AppLimits, AppPermissions};
 pub use crate::limits::{LimitKind, LimitState, LimitStatus};
 pub use crate::memory::{Preset, ReleaseReason};
 pub use crate::metrics::{HistoryPoint, KeyedSeries, Range as HistoryRange};
+pub use crate::presets::ModelPreset;
 pub use crate::scheduler::{Depth, JobKind, Priority};
 pub use crate::select::Capability;
 pub use crate::usage::{AppUsageSeries, Counters as UsageCounters, UsageRange, UsageSeries};
@@ -823,6 +824,8 @@ pub struct RequestRecord {
     pub model_id: Option<String>,
     /// How chosen.
     pub chosen_by: ChosenBy,
+    /// The preset (alias) the app asked for, when the `model` field named one; `model_id` is what it resolved to.
+    pub alias: Option<String>,
     /// Priority.
     pub priority: Priority,
     /// HTTP status.
@@ -931,6 +934,122 @@ pub struct BenchmarkResult {
     pub ttft_ms: u64,
     /// Context.
     pub context_tokens: u32,
+}
+
+/// A preset as the UI edits it (`PresetDraft`): plain text that the engine parses and validates once.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetDraft {
+    /// The name apps send as `model`.
+    pub alias: String,
+    /// A model id, or `auto:<capabilities>`.
+    pub target: String,
+    /// Context the model loads with.
+    #[serde(default)]
+    pub context: Option<u32>,
+    /// Default temperature.
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    /// Default top-p.
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    /// Default most tokens.
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    /// System prompt used when the request has none.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// Engine override.
+    #[serde(default)]
+    pub engine: Option<String>,
+}
+
+impl PresetDraft {
+    /// Parses and range-checks the draft; the first problem is reported in words.
+    pub fn parse(self) -> Result<ModelPreset, crate::presets::PresetError> {
+        use crate::presets::{AliasName, Target};
+        ModelPreset {
+            alias: AliasName::parse(&self.alias)?,
+            target: Target::parse(&self.target)?,
+            context: self.context,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            max_tokens: self.max_tokens,
+            system_prompt: self.system_prompt,
+            engine: self.engine,
+        }
+        .checked()
+    }
+}
+
+/// Where a preset stands now (`PresetStatus`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum PresetStatus {
+    /// It resolves to a model.
+    #[serde(rename_all = "camelCase")]
+    Ready {
+        /// The model that would serve it now.
+        model_id: String,
+        /// Fixed by the preset, or chosen by capabilities.
+        chosen_by: ChosenBy,
+        /// One sentence for the inspector.
+        reason: String,
+        /// Whether that model is loaded now.
+        loaded: bool,
+    },
+    /// Its model was removed.
+    Stale {
+        /// What to do.
+        message: String,
+    },
+    /// Its capability selection matches no installed model.
+    NoMatch {
+        /// What to do.
+        message: String,
+    },
+    /// A model with the same name is installed, and requests for that name go to the model.
+    Shadowed {
+        /// What to do.
+        message: String,
+    },
+}
+
+impl PresetStatus {
+    /// The status for the outcome of resolving a preset.
+    pub fn of(outcome: Result<crate::presets::Resolution, crate::presets::PresetError>, loaded: impl FnOnce(&str) -> bool) -> PresetStatus {
+        use crate::presets::PresetError;
+        match outcome {
+            Ok(r) => PresetStatus::Ready {
+                loaded: loaded(r.model.as_str()),
+                model_id: r.model.to_string(),
+                chosen_by: r.chosen_by,
+                reason: r.reason,
+            },
+            Err(e @ PresetError::StaleTarget { .. }) => PresetStatus::Stale { message: e.to_string() },
+            Err(e) => PresetStatus::NoMatch { message: e.to_string() },
+        }
+    }
+}
+
+/// One preset in the listing (`PresetEntry`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetEntry {
+    /// The preset.
+    pub preset: ModelPreset,
+    /// Where it stands now.
+    pub status: PresetStatus,
+}
+
+/// The live check of a draft in the editor (`PresetPreview`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetPreview {
+    /// What is wrong with the draft, in words (`None`: it can be saved).
+    pub problem: Option<String>,
+    /// What the target resolves to now, when the target itself is valid.
+    pub status: Option<PresetStatus>,
 }
 
 /// A pushed update (`LiveUpdate`).
@@ -1071,5 +1190,69 @@ mod tests {
             assert_eq!(c.status(), s);
         }
         assert_eq!(CommandError::new(ErrorCode::Busy, "b").to_string(), "b");
+    }
+
+    #[test]
+    fn preset_drafts_parse_and_statuses_serialize() {
+        use crate::presets::{PresetError, Resolution};
+        let d: PresetDraft =
+            serde_json::from_value(json!({"alias": " Debrief-Explain ", "target": "auto:chat,fast", "temperature": 0.3})).unwrap();
+        let p = d.parse().unwrap();
+        assert_eq!(
+            (p.alias.as_str(), p.target.to_text().as_str(), p.temperature),
+            ("debrief-explain", "auto:chat,fast", Some(0.3))
+        );
+        let v = serde_json::to_value(&p).unwrap();
+        assert_eq!(
+            (v["alias"].as_str(), v["target"].as_str(), v["maxTokens"].is_null()),
+            (Some("debrief-explain"), Some("auto:chat,fast"), true)
+        );
+        for bad in [
+            json!({"alias": "bad name", "target": "m"}),
+            json!({"alias": "ok", "target": "auto:nope"}),
+            json!({"alias": "ok", "target": "m", "temperature": 3.0}),
+        ] {
+            assert!(serde_json::from_value::<PresetDraft>(bad).unwrap().parse().is_err());
+        }
+        let ready = PresetStatus::of(
+            Ok(Resolution {
+                model: crate::ids::ModelId::parse("tiny").unwrap(),
+                chosen_by: ChosenBy::Explicit,
+                reason: "r".into(),
+            }),
+            |id| id == "tiny",
+        );
+        let v = serde_json::to_value(&ready).unwrap();
+        assert_eq!(
+            (
+                v["state"].as_str(),
+                v["modelId"].as_str(),
+                v["chosenBy"].as_str(),
+                v["loaded"].as_bool()
+            ),
+            (Some("ready"), Some("tiny"), Some("explicit"), Some(true))
+        );
+        let stale = PresetStatus::of(
+            Err(PresetError::StaleTarget {
+                alias: "a".into(),
+                model: "m".into(),
+            }),
+            |_| false,
+        );
+        assert!(matches!(&stale, PresetStatus::Stale { message } if message.contains("no longer installed")));
+        let none = PresetStatus::of(
+            Err(PresetError::NoMatch {
+                alias: "a".into(),
+                reason: "r".into(),
+            }),
+            |_| false,
+        );
+        assert_eq!(serde_json::to_value(&none).unwrap()["state"], "noMatch");
+        let other = PresetStatus::of(Err(PresetError::TooMany), |_| false);
+        assert!(matches!(other, PresetStatus::NoMatch { .. }));
+        assert_eq!(
+            serde_json::to_value(PresetStatus::Shadowed { message: "m".into() }).unwrap()["state"],
+            "shadowed"
+        );
     }
 }

@@ -64,6 +64,8 @@ pub struct AppState {
     pub usage: Mutex<Usage>,
     /// Limit warnings already raised (app, limit, start of its period), so each is raised once per period.
     pub limit_warned: Mutex<HashSet<(String, limits::LimitKind, u64)>>,
+    /// Serialises read-modify-write of the presets (the list itself lives in [`Serving`]).
+    pub presets_gate: Mutex<()>,
     /// Detected hardware.
     pub hardware: Hardware,
     /// When the server started.
@@ -155,6 +157,10 @@ impl AppState {
             .flatten()
             .find_map(|t| Usage::restore(&t, now_ms()))
             .unwrap_or_default();
+        let stored_presets = {
+            let (p, b) = paths::read_with_backup(&dirs.presets(), pitwall_core::presets::MAX_BYTES);
+            pitwall_core::presets::load(p.as_deref(), b.as_deref())
+        };
         let (live, _) = broadcast::channel(256);
         let st = Arc::new(AppState {
             dirs,
@@ -172,6 +178,7 @@ impl AppState {
             metrics: Mutex::new(metrics),
             usage: Mutex::new(usage),
             limit_warned: Mutex::new(HashSet::new()),
+            presets_gate: Mutex::new(()),
             hardware,
             started_at: now_ms(),
             live,
@@ -185,6 +192,17 @@ impl AppState {
             port: std::sync::atomic::AtomicU16::new(0),
         });
         st.serving.set_speeds(pitwall_core::benchmarks::speeds(&lock(&st.benchmarks)));
+        if stored_presets.damaged || stored_presets.skipped > 0 {
+            st.event(
+                EventKind::RequestFailed,
+                Severity::Warn,
+                format!(
+                    "The presets file was damaged: {} preset(s) were left out. Check Models > Presets.",
+                    stored_presets.skipped
+                ),
+            );
+        }
+        st.serving.set_presets(stored_presets.presets);
         st.event(EventKind::EngineStarted, Severity::Info, "Pitwall started".into());
         for p in st.packs.problems.iter() {
             st.event(
@@ -294,6 +312,18 @@ impl AppState {
                 }
             }
         });
+    }
+
+    /// Writes the presets (atomic, with a backup).
+    pub fn save_presets(&self, presets: &pitwall_core::presets::Presets) -> std::io::Result<()> {
+        paths::write_atomic(&self.dirs.presets(), presets.to_json().as_bytes())
+    }
+
+    /// The engine ids a preset may name: llama.cpp and the loaded engine packs.
+    pub fn preset_engines(&self) -> Vec<String> {
+        std::iter::once("llama.cpp".to_string())
+            .chain(self.pack_engines.iter().map(|p| p.id()))
+            .collect()
     }
 
     /// Writes the per-app usage (atomic, with a backup). Failures are ignored: usage is rebuilt as requests arrive.
@@ -446,6 +476,9 @@ impl AppState {
             Principal::Keyless => (AppId::parse("local").map_err(|e| ApiError::invalid(e.to_string()))?, None),
         };
         let resolved = self.serving.resolve(&req.model, req.has_images(), !req.tools.is_empty())?;
+        if let Some(p) = &resolved.preset {
+            pitwall_core::presets::apply(p, &mut req);
+        }
         let wanted = meta.priority.or(req.priority).unwrap_or(Priority::Interactive);
         let mut app_cap = None;
         let priority = match &perms {
@@ -469,7 +502,7 @@ impl AppState {
             .serving
             .acquire(app.clone(), resolved.id.clone(), priority, meta.kind, app_cap)
             .await?;
-        let (busy, cold) = self.serving.ensure(&resolved.id).await?;
+        let (busy, cold) = self.serving.ensure_for(&resolved).await?;
         if req.has_images() && !busy.model().vision {
             return Err(ApiError::new(
                 ErrorKind::InvalidRequest,
@@ -490,6 +523,7 @@ impl AppState {
         req.model = ModelRef::Named(name.clone());
         let job = permit.id();
         let chosen_by = resolved.chosen_by;
+        let alias = resolved.preset.as_ref().map(|p| p.alias.to_string());
         let stream = req.stream;
         let request_text = if cfg.privacy.keep_request_content {
             Some(request_text(&req))
@@ -521,6 +555,7 @@ impl AppState {
                 request_text,
                 model: name,
                 chosen_by,
+                alias,
                 done: false,
             },
         })
@@ -586,6 +621,8 @@ pub struct Recorder {
     request_text: Option<String>,
     model: String,
     chosen_by: ChosenBy,
+    /// The preset the request named, if any.
+    alias: Option<String>,
     done: bool,
 }
 
@@ -672,6 +709,7 @@ impl Recorder {
             endpoint: self.endpoint.clone(),
             model_id: Some(self.model.clone()),
             chosen_by: self.chosen_by,
+            alias: self.alias.clone(),
             priority: self.priority,
             status: if failed { 502 } else { 200 },
             stream: self.stream,

@@ -50,6 +50,8 @@ pub enum ErrorKind {
     NotAvailable,
     /// The request took too long (504).
     Timeout,
+    /// A preset's target model is gone or matches nothing (404, typed; ADR 0014).
+    PresetTarget,
     /// The engine failed (500).
     Engine,
 }
@@ -84,7 +86,7 @@ impl ApiError {
             ErrorKind::InvalidRequest => 400,
             ErrorKind::Authentication => 401,
             ErrorKind::Permission => 403,
-            ErrorKind::NotFound => 404,
+            ErrorKind::NotFound | ErrorKind::PresetTarget => 404,
             ErrorKind::TooLarge => 413,
             ErrorKind::RateLimit => 429,
             ErrorKind::Overloaded | ErrorKind::InsufficientMemory => 503,
@@ -107,6 +109,7 @@ impl ApiError {
             ErrorKind::InsufficientMemory => "insufficient_memory",
             ErrorKind::NotAvailable => "not_available",
             ErrorKind::Timeout => "timeout",
+            ErrorKind::PresetTarget => "preset_target_unavailable",
             ErrorKind::Engine => "engine_error",
         }
     }
@@ -116,7 +119,9 @@ impl ApiError {
         match family {
             ApiFamily::OpenAi => {
                 let t = match self.kind {
-                    ErrorKind::InvalidRequest | ErrorKind::TooLarge | ErrorKind::NotFound => "invalid_request_error",
+                    ErrorKind::InvalidRequest | ErrorKind::TooLarge | ErrorKind::NotFound | ErrorKind::PresetTarget => {
+                        "invalid_request_error"
+                    }
                     ErrorKind::Authentication => "authentication_error",
                     ErrorKind::Permission => "permission_error",
                     ErrorKind::RateLimit => "rate_limit_error",
@@ -129,7 +134,7 @@ impl ApiError {
                     ErrorKind::InvalidRequest => "invalid_request_error",
                     ErrorKind::Authentication => "authentication_error",
                     ErrorKind::Permission => "permission_error",
-                    ErrorKind::NotFound => "not_found_error",
+                    ErrorKind::NotFound | ErrorKind::PresetTarget => "not_found_error",
                     ErrorKind::TooLarge => "request_too_large",
                     ErrorKind::RateLimit => "rate_limit_error",
                     ErrorKind::Overloaded | ErrorKind::InsufficientMemory => "overloaded_error",
@@ -261,10 +266,11 @@ mod tests {
             ErrorKind::InsufficientMemory,
             ErrorKind::NotAvailable,
             ErrorKind::Timeout,
+            ErrorKind::PresetTarget,
             ErrorKind::Engine,
         ];
         let statuses: Vec<u16> = all.iter().map(|k| ApiError::new(*k, "m").status()).collect();
-        assert_eq!(statuses, vec![400, 401, 403, 404, 413, 429, 503, 503, 501, 504, 500]);
+        assert_eq!(statuses, vec![400, 401, 403, 404, 413, 429, 503, 503, 501, 504, 404, 500]);
         for k in all {
             let e = ApiError::new(k, "msg");
             assert_eq!(e.body(ApiFamily::OpenAi)["error"]["message"], "msg");
