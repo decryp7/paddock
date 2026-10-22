@@ -37,3 +37,13 @@ same thing.
 
 - A new screen needs no new colour or spacing literal; if it does, the token is added first.
 - The sibling apps copy `styles/` and `shared/ui` as their starting point.
+
+## Amendment 2026-10-23: the shared package (`@decryp7/paddock-ui`) is not adopted for v1
+
+Looked at `@decryp7/paddock-ui` 0.1.0 (tokens, base styles, `Su*` components, an ECharts theme). The overlap with
+Pitcrew's own code is a status pill, metric, sparkline, card, empty/error state and segmented control, each already
+present here with Pitcrew's own markup, specs and e2e tests, and the package's tokens differ from the ones the design
+review fixed for Pitcrew (accent never for status, neutral badges, the validated status and chart palettes). Swapping
+them would be churn with visual change and a registry dependency in CI (`.npmrc`) for no feature gain. Not forced:
+Pitcrew keeps its local components; the package stays an option for the next design round, starting with its chart theme
+and the tray popover (which Pitcrew does not have).
