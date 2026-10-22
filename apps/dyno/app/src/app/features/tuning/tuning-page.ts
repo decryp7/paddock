@@ -24,6 +24,7 @@ import { actionFor, groupTuning, summary } from './tuning-model';
       </header>
 
       <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.items().length === 0" emptyTitle="Nothing to tune" emptyText="Dyno has no suggestions for this computer right now. It checks again whenever you open this page." what="tuning suggestions" [rows]="4" (retry)="store.load()">
+        <div class="stack">
         @for (g of groups(); track g.id) {
           <section class="card" [attr.aria-label]="g.title">
             <div class="card-head">
@@ -76,12 +77,14 @@ import { actionFor, groupTuning, summary } from './tuning-model';
             </ul>
           </section>
         }
+        </div>
       </dy-async>
     </div>
   `,
   styles: `
     :host { display: block; }
     .page { display: grid; gap: var(--sp-4); align-content: start; }
+    .stack { display: grid; gap: var(--sp-4); min-width: 0; align-content: start; }
     .page-head { margin-bottom: 0; }
     .card-head { flex-wrap: wrap; row-gap: 0; }
     .sub { color: var(--text-3); font-size: var(--fs-sm); }

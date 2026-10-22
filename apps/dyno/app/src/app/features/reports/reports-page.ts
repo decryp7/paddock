@@ -53,6 +53,7 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
       }
 
       <dy-async [loaded]="!!store.report()" [error]="store.error()" [empty]="!!store.report()?.nothingToReport" emptyTitle="Nothing to report" emptyText="Dyno recorded no history, issues or changes for this week." emptyIcon="reports" what="the report" [rows]="5" (retry)="store.load()">
+        <div class="stack">
         @if (store.report(); as r) {
           <p class="range num">{{ range(r) }}</p>
 
@@ -140,12 +141,14 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
             }
           </section>
         }
+        </div>
       </dy-async>
     </div>
   `,
   styles: `
     :host { display: block; }
     .page { display: grid; gap: var(--sp-4); align-content: start; }
+    .stack { display: grid; gap: var(--sp-4); min-width: 0; align-content: start; }
     .page-head { margin-bottom: 0; align-items: center; }
     .week .select { min-width: 190px; }
     .note { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); border: 1px solid var(--border); background: var(--surface-2); font-size: var(--fs-sm); min-width: 0; }

@@ -1226,7 +1226,7 @@ export class MockBackend implements DynoBackend {
         .replace(/SearchIndexer/g, this.profile.names.indexer)
         .replace(/Recycle Bin/g, this.profile.os === 'macos' ? 'Trash' : 'Trash')
         .replace(/Microsoft Defender|Defender/g, this.profile.os === 'macos' ? 'XProtect' : 'The antivirus')
-        .replace(/\bWindows\b/g, os);
+        .replace(/(?<!\\)\bWindows\b/g, os);
     const walk = (v: unknown): unknown => {
       if (typeof v === 'string') return fix(v);
       if (Array.isArray(v)) return v.map(walk);

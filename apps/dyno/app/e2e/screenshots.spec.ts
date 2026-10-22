@@ -194,6 +194,22 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
   },
   { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },
   { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Save bundle/ })).toBeVisible()) },
+  { name: 'tuning', path: '/#/tuning', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Tuning', exact: true })).toBeVisible()) },
+  { name: 'cleanup', path: '/#/cleanup', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Cleanup', exact: true })).toBeVisible()) },
+  {
+    name: 'cleanup-scanned',
+    path: '/#/cleanup',
+    size: { width: 1440, height: 1100 },
+    ready: async (page) => {
+      await page.getByRole('button', { name: /^Scan / }).click();
+      await page.clock.runFor(3_000);
+      await expect(page.getByText(/Scanning…/)).toHaveCount(0);
+      await page.getByRole('region', { name: 'Preview' }).scrollIntoViewIfNeeded();
+      await page.clock.runFor(500);
+    },
+  },
+  { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my PC slow?' })).toBeVisible()) },
+  { name: 'reports', path: '/#/reports', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible()) },
   {
     name: 'coming',
     path: '/#/',
