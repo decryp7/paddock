@@ -1,4 +1,4 @@
-import type { BootRecord, DayCount, DiskTrend, History, HistoryPoint, HistoryRange, TimelineEvent } from '../api.types';
+import type { BootRecord, CoreBucket, DayCount, DiskTrend, History, HistoryPoint, HistoryRange, TimelineEvent } from '../api.types';
 import { clamp, hash01, smoothNoise, wobble } from './noise';
 import { round } from './processes';
 
@@ -147,7 +147,20 @@ function crashes(now: number): DayCount[] {
 }
 
 /** The mock history for `range` ending at `end` (or now). */
-export function mockHistory(range: HistoryRange, end: number | null, now: number): History {
+/** Per-core load around each point's CPU load: performance cores work harder than efficiency cores (mock only). */
+function corePoints(points: readonly HistoryPoint[], cores: number, kinds: readonly string[]): CoreBucket[] {
+  return points.map((p) => ({
+    at: p.at,
+    cores: Array.from({ length: cores }, (_, i) => {
+      const w = kinds[i] === 'efficiency' ? 0.55 : kinds[i] === 'performance' ? 1.2 : 1;
+      const avg = clamp(p.cpu * w * (0.65 + 0.7 * hash01(Math.floor(p.at / 60000) + i * 977, 21)), 0, 100);
+      return { min: round(clamp(avg - 4 - 6 * hash01(i, p.at % 997), 0, avg), 1), avg: round(avg, 1), max: round(clamp(avg + 6 + 24 * hash01(i + 3, Math.floor(p.at / 1000) % 991), avg, 100), 1) };
+    }),
+  }));
+}
+
+/** The mock history for `range` ending at `end` (or now). */
+export function mockHistory(range: HistoryRange, end: number | null, now: number, cores = 0, kinds: readonly string[] = []): History {
   const { span, step } = RANGES[range];
   const to = Math.floor((end ?? now) / step) * step;
   const from = to - span;
@@ -173,5 +186,6 @@ export function mockHistory(range: HistoryRange, end: number | null, now: number
     diskTrends: diskTrends(now),
     boots: boots(now),
     crashes: crashes(now),
+    corePoints: cores > 0 ? corePoints(points, cores, kinds) : [],
   };
 }

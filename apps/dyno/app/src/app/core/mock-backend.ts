@@ -55,7 +55,7 @@ import {
   healthReasons,
 } from './mock/data';
 import { mockHistory } from './mock/history';
-import { type MockOs, type OsProfile, osProfile } from './mock/os';
+import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
 
@@ -73,6 +73,8 @@ export interface MockOptions {
   machine?: MockMachine;
   /** The operating system the mock pretends to run on (default macOS). */
   os?: MockOs;
+  /** The CPU layout: `hybrid` (performance + efficiency cores; the default on macOS) or `uniform`. */
+  cpu?: 'hybrid' | 'uniform';
   /** Simulated round-trip per request (skeletons show in the browser; 0 in unit tests). */
   latencyMs?: number;
   /** The clock (Playwright freezes it for stable screenshots). */
@@ -91,9 +93,11 @@ export function mockOptionsFromUrl(search: string): MockOptions {
   const latency = q.get('latency');
   const tokens = (q.get('mock') ?? '').split(',').map((t) => t.trim().toLowerCase());
   const os = (['windows', 'macos', 'linux'] as const).find((o) => tokens.includes(o));
+  const cpu = tokens.includes('hybrid') ? 'hybrid' : tokens.includes('uniform') ? 'uniform' : undefined;
   return {
     machine: tokens.includes('desktop') ? 'desktop' : 'laptop',
     os: os ?? 'macos',
+    ...(cpu ? { cpu } : {}),
     latencyMs: latency !== null && Number.isFinite(Number(latency)) ? Number(latency) : 150,
     fail: new Set(fail ? fail.split(',') : []),
   };
@@ -119,6 +123,7 @@ export class MockBackend implements DynoBackend {
   private readonly fail: ReadonlySet<string>;
   private readonly start: number;
   private readonly profile: OsProfile;
+  private readonly kinds: ('performance' | 'efficiency')[];
 
   private processes: MockProcess[];
   private readonly priorities = new Map<number, Priority>();
@@ -147,7 +152,10 @@ export class MockBackend implements DynoBackend {
 
   constructor(options: MockOptions = {}) {
     this.machine = options.machine ?? 'laptop';
-    this.profile = osProfile(options.os ?? 'macos');
+    const base = osProfile(options.os ?? 'macos');
+    this.profile =
+      options.cpu === 'uniform' ? { ...base, hybrid: null } : options.cpu === 'hybrid' && !base.hybrid ? { ...base, hybrid: { efficiency: 8, performance: 8, efficiencyFirst: false } } : base;
+    this.kinds = coreKindsOf(this.profile.hybrid);
     this.latencyMs = options.latencyMs ?? 0;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
@@ -267,7 +275,16 @@ export class MockBackend implements DynoBackend {
   private system(t: number, samples: ProcessSample[]): SystemSample {
     const processCpu = samples.reduce((a, s) => a + s.cpu, 0);
     const total = clamp(processCpu + 1.4 + 0.6 * wobble(t, 500, 3), 0, 100);
-    const perCore = Array.from({ length: this.profile.cores }, (_, i) => round(clamp(total * (1 + 0.45 * wobble(t, 600 + i, 3)) + (i === 0 ? 6 : 0), 0, 100), 1));
+    const perCore = Array.from({ length: this.profile.cores }, (_, i) => {
+      const weight = this.kinds[i] === 'efficiency' ? 0.5 : this.kinds[i] === 'performance' ? 1.2 : 1;
+      return round(clamp(total * weight * (1 + 0.4 * wobble(t, 600 + i, 3)) + (i === 0 ? 4 : 0), 0, 100), 1);
+    });
+    const coreFrequencyMhz = perCore.map((load, i) => {
+      const e = this.kinds[i] === 'efficiency';
+      const lo = e ? 1000 : this.profile.cpuBaseMhz + 400;
+      const hi = e ? 2600 : this.profile.cpuMaxMhz;
+      return Math.round(lo + ((hi - lo) * load) / 100);
+    });
     const memTotal = this.profile.memoryTotal;
     const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + s.memory, 0) + 2.9 * GB);
     const diskRead = samples.reduce((a, s) => a + s.diskReadBps, 0);
@@ -276,7 +293,7 @@ export class MockBackend implements DynoBackend {
     const laptop = this.machine === 'laptop';
     return {
       at: t * 1000,
-      cpu: { total: round(total, 1), perCore, frequencyMhz: Math.round(this.profile.cpuMaxMhz - 260 + 260 * wobble(t, 700, 4)), baseFrequencyMhz: this.profile.cpuBaseMhz },
+      cpu: { total: round(total, 1), perCore, coreKinds: [...this.kinds], coreFrequencyMhz, frequencyMhz: Math.round(this.profile.cpuMaxMhz - 260 + 260 * wobble(t, 700, 4)), baseFrequencyMhz: this.profile.cpuBaseMhz },
       memory: {
         total: memTotal,
         used: Math.round(memUsed),
@@ -611,7 +628,7 @@ export class MockBackend implements DynoBackend {
 
   history(range: HistoryRange, end: Timestamp | null): Promise<History> {
     return this.reply('history', () => {
-      const h = mockHistory(range, end, this.now());
+      const h = mockHistory(range, end, this.now(), this.profile.cores, this.kinds);
       if (this.profile.os !== 'windows') {
         const disks = this.profile.disks(0);
         h.diskTrends.forEach((t, i) => (t.disk = disks[i]?.mount ?? t.disk));

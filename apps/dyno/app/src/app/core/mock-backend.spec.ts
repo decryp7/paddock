@@ -106,7 +106,10 @@ describe('live data', () => {
   it('reports a plausible system sample', () => {
     const { system, pressure, activeActions, profile, rulesPaused } = make().liveUpdate('summary');
     expect(system.cpu.total).toBeGreaterThan(0);
-    expect(system.cpu.perCore).toHaveLength(12);
+    expect(system.cpu.perCore).toHaveLength(14);
+    expect(system.cpu.coreKinds.filter((k) => k === 'efficiency')).toHaveLength(4);
+    expect(system.cpu.coreKinds.slice(0, 4)).toEqual(['efficiency', 'efficiency', 'efficiency', 'efficiency']);
+    expect(system.cpu.coreFrequencyMhz).toHaveLength(14);
     expect(system.memory.used).toBeLessThan(system.memory.total);
     expect(['normal', 'elevated', 'critical']).toContain(pressure);
     expect(activeActions).toHaveLength(1);
@@ -580,5 +583,28 @@ describe('reports, settings, plugins, tray', () => {
     expect((await b.plugins()).length).toBeGreaterThan(0);
     await expect(b.trayOpenMain()).resolves.toBeUndefined();
     await expect(b.trayQuit()).resolves.toBeUndefined();
+  });
+});
+
+describe('mock CPU layout', () => {
+  it('is uniform with ?mock=uniform and hybrid with ?mock=hybrid on other systems', async () => {
+    const uniform = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000, cpu: 'uniform' });
+    expect(uniform.liveUpdate('summary').system.cpu.coreKinds).toEqual([]);
+    const win = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000, os: 'windows', cpu: 'hybrid' });
+    const cpu = win.liveUpdate('summary').system.cpu;
+    expect(cpu.coreKinds).toHaveLength(16);
+    expect(cpu.coreKinds[0]).toBe('performance');
+    expect(mockOptionsFromUrl('?mock=linux,hybrid').cpu).toBe('hybrid');
+    expect(mockOptionsFromUrl('?mock=uniform').cpu).toBe('uniform');
+  });
+
+  it('history carries per-core buckets in the CPU order', async () => {
+    const b = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
+    const h = await b.history('day', null);
+    expect(h.corePoints).toHaveLength(h.points.length);
+    expect(h.corePoints[0]!.cores).toHaveLength(14);
+    const c = h.corePoints[5]!.cores[0]!;
+    expect(c.min).toBeLessThanOrEqual(c.avg);
+    expect(c.avg).toBeLessThanOrEqual(c.max);
   });
 });

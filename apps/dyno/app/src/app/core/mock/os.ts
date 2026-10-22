@@ -93,6 +93,8 @@ export interface OsProfile {
   names: RoleNames;
   user: string;
   cores: number;
+  /** Hybrid layout: efficiency and performance core counts and whether the E cores are numbered first (Apple silicon). */
+  hybrid: { efficiency: number; performance: number; efficiencyFirst: boolean } | null;
   memoryTotal: number;
   cpuBaseMhz: number;
   cpuMaxMhz: number;
@@ -125,11 +127,12 @@ export function osProfile(os: MockOs): OsProfile {
       rootPid: 1,
       names: { rustc: 'rustc', cargo: 'cargo', chrome: 'Google Chrome', code: 'Code Helper', node: 'node', indexer: 'mds_stores', agent: 'dyno-agent' },
       user: 'alex',
-      cores: 12,
-      memoryTotal: 36 * GB,
-      cpuBaseMhz: 2750,
-      cpuMaxMhz: 4050,
-      gpuName: 'Apple M3 Pro GPU (18 cores)',
+      cores: 14,
+      hybrid: { efficiency: 4, performance: 10, efficiencyFirst: true },
+      memoryTotal: 48 * GB,
+      cpuBaseMhz: 1000,
+      cpuMaxMhz: 4500,
+      gpuName: 'Apple M4 Pro GPU (20 cores)',
       disks: (days) => [
         { id: 'macintosh-hd', name: 'Macintosh HD (APFS)', mount: '/', total: Math.round(994.7 * GB), free: Math.round((231 - days * 5.1) * GB), removable: false },
         { id: 't7', name: 'Samsung T7', mount: '/Volumes/T7', total: Math.round(931.5 * GB), free: Math.round(604 * GB), removable: true },
@@ -161,6 +164,7 @@ export function osProfile(os: MockOs): OsProfile {
       names: { rustc: 'rustc', cargo: 'cargo', chrome: 'chrome', code: 'code', node: 'node', indexer: 'tracker-miner-fs-3', agent: 'dyno-agent' },
       user: 'alex',
       cores: 16,
+      hybrid: null,
       memoryTotal: 32 * GB,
       cpuBaseMhz: 3800,
       cpuMaxMhz: 4650,
@@ -195,6 +199,7 @@ export function osProfile(os: MockOs): OsProfile {
     names: { rustc: 'rustc.exe', cargo: 'cargo.exe', chrome: 'chrome.exe', code: 'Code.exe', node: 'node.exe', indexer: 'SearchIndexer.exe', agent: 'dyno-agent.exe' },
     user: WIN_USER,
     cores: 16,
+    hybrid: null,
     memoryTotal: Math.round(31.7 * GB),
     cpuBaseMhz: 3800,
     cpuMaxMhz: 4640,
@@ -221,4 +226,12 @@ export function osProfile(os: MockOs): OsProfile {
     signer: 'Microsoft Windows',
     kernelNote: 'it is part of the Windows kernel',
   };
+}
+
+/** The kind of each logical core for a hybrid layout (empty for a uniform CPU). */
+export function coreKindsOf(hybrid: OsProfile['hybrid']): ('performance' | 'efficiency')[] {
+  if (!hybrid) return [];
+  const e = Array<'efficiency'>(hybrid.efficiency).fill('efficiency');
+  const p = Array<'performance'>(hybrid.performance).fill('performance');
+  return hybrid.efficiencyFirst ? [...e, ...p] : [...p, ...e];
 }

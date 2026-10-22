@@ -8,7 +8,7 @@ const pt = (at: number, cpu: number, memory = 50): HistoryPoint => ({
 const ev = (at: number, kind: TimelineEvent['kind']): TimelineEvent => ({ at, kind, label: `${kind}@${at}` });
 const history = (over: Partial<History> = {}): History => ({
   range: 'day', from: 0, to: 300, resolutionMs: 100, points: [pt(100, 10), pt(200, 40), pt(300, 20)],
-  events: [ev(190, 'throttle'), ev(290, 'alert'), ev(100, 'throttle')], topConsumers: [], diskTrends: [], boots: [], crashes: [], ...over,
+  events: [ev(190, 'throttle'), ev(290, 'alert'), ev(100, 'throttle')], topConsumers: [], diskTrends: [], boots: [], crashes: [], corePoints: [], ...over,
 });
 type Series = { name: string; data: unknown[]; markPoint?: { data: unknown[] }; markLine?: { data: unknown[] }; lineStyle?: { type?: string } };
 const series = (o: unknown) => (o as { series: Series[] }).series;

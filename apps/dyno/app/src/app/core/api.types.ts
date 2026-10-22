@@ -11,9 +11,16 @@ export type Reading<T> = { available: T } | { unavailable: string };
 
 // ---------------------------------------------------------------------------------------------------------- metrics
 
+/** What kind of core a logical core is on a hybrid CPU. */
+export type CoreKind = 'performance' | 'efficiency' | 'unknown';
+
 export interface CpuSample {
   total: number;
   perCore: number[];
+  /** Kind of each logical core (same length as `perCore`), or empty when the OS exposes no topology / the CPU is uniform. */
+  coreKinds: CoreKind[];
+  /** Current frequency of each logical core in MHz (same length as `perCore`), or empty when unknown. */
+  coreFrequencyMhz: number[];
   frequencyMhz: number;
   baseFrequencyMhz: number;
 }
@@ -373,6 +380,19 @@ export interface DayCount {
   restarts: number;
 }
 
+/** Minimum, average and maximum load of one logical core over a bucket, percent. */
+export interface CoreStat {
+  min: number;
+  avg: number;
+  max: number;
+}
+
+/** Per-core load for one bucket (every logical core, in the order of `CpuSample.perCore`). */
+export interface CoreBucket {
+  at: Timestamp;
+  cores: CoreStat[];
+}
+
 export interface History {
   range: HistoryRange;
   from: Timestamp;
@@ -384,6 +404,8 @@ export interface History {
   diskTrends: DiskTrend[];
   boots: BootRecord[];
   crashes: DayCount[];
+  /** Per-core load per bucket (same tier and resolution as `points`); empty when the range has none. */
+  corePoints: CoreBucket[];
 }
 
 // --------------------------------------------------------------------------------------------------------- rules
