@@ -94,10 +94,10 @@ type Way = 'presets' | 'kinds' | 'feed' | 'import';
           </div>
           <div class="field">
             <label for="import-text">Paste the list</label>
-            <textarea #text id="import-text" class="input" rows="8" spellcheck="false"></textarea>
+            <textarea #text id="import-text" class="input" rows="8" spellcheck="false" (input)="hasText.set(!!text.value.trim())"></textarea>
           </div>
           <div class="actions">
-            <button type="button" class="btn primary" (click)="store.importList(format(), text.value)" [disabled]="store.importing() || !text.value.trim()">Read the list</button>
+            <button type="button" class="btn primary" (click)="store.importList(format(), text.value)" [disabled]="store.importing() || !hasText()">Read the list</button>
           </div>
           @if (store.importError(); as err) {
             <p class="error" role="alert">{{ err }}</p>
@@ -232,6 +232,8 @@ export class SourceStep {
   ];
   protected readonly way = signal<Way>('presets');
   protected readonly format = signal<ImportFormat>('winget');
+  /** Whether the pasted list has any text (the template cannot read the textarea itself: the page is zoneless and OnPush). */
+  protected readonly hasText = signal(false);
   protected readonly groups = computed(() =>
     GROUP_ORDER.map((id) => ({ id, label: GROUP_LABEL[id], kinds: (this.store.kinds().value ?? []).filter((k: SourceKind) => k.group === id) })).filter((g) => g.kinds.length),
   );

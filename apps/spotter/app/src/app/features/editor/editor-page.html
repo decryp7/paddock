@@ -55,7 +55,7 @@
               <label for="scheme">How versions are written</label>
               <select id="scheme" class="input" [value]="draft().versions" (change)="setScheme($event)">
                 @for (s of schemes; track s.value) {
-                  <option [value]="s.value">{{ s.label }} ({{ s.help }})</option>
+                  <option [value]="s.value" [selected]="s.value === draft().versions">{{ s.label }} ({{ s.help }})</option>
                 }
               </select>
             </div>
@@ -94,7 +94,7 @@
               <label for="interval">Check</label>
               <select id="interval" class="input narrow" [value]="draft().intervalSecs" (change)="setInterval(+value($event))">
                 @for (p of intervalOptions(); track p.secs) {
-                  <option [value]="p.secs">{{ p.label }}</option>
+                  <option [value]="p.secs" [selected]="p.secs === draft().intervalSecs">{{ p.label }}</option>
                 }
               </select>
             </div>

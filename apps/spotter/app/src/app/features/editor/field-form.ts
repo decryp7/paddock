@@ -27,7 +27,7 @@ export interface FieldChange {
             @case ('choice') {
               <select class="input" [id]="'f-' + f.key" [value]="values()[f.key] ?? f.default" (change)="text(f, $event)">
                 @for (o of f.options; track o.value) {
-                  <option [value]="o.value">{{ o.label }}</option>
+                  <option [value]="o.value" [selected]="o.value === (values()[f.key] ?? f.default)">{{ o.label }}</option>
                 }
               </select>
             }
