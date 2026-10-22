@@ -553,6 +553,22 @@ describe('health, tuning, startup', () => {
     await expect(b.revertTuning(t.id)).rejects.toEqual({ code: 'badRequest', message: 'It is not applied.' });
     await expect(b.applyTuning('nope')).rejects.toMatchObject({ code: 'notFound' });
   });
+  it('tuning that needs administrator rights is refused, and a setting changed outside Dyno needs a forced revert', async () => {
+    const b = make();
+    const list = await b.tuning();
+    const admin = list.find((x) => x.needsAdmin && !x.applied)!;
+    expect(admin.blocked).toContain('administrator rights');
+    expect(list.find((x) => x.id === 'powerPlan')!.preview).toEqual(['Activate the power plan Balanced']);
+    await expect(b.applyTuning(admin.id)).rejects.toMatchObject({ code: 'accessDenied' });
+    await b.applyTuning('powerPlan');
+    b.changeTuningOutside('powerPlan');
+    expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(true);
+    await expect(b.revertTuning('powerPlan')).rejects.toMatchObject({ code: 'badRequest', message: expect.stringContaining('Something else changed') });
+    expect((await b.revertTuning('powerPlan', true)).title).toContain('Reverted');
+    expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(false);
+    b.changeTuningOutside('powerPlan'); // not applied: nothing to flag
+    expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(false);
+  });
   it('startup entries change state with the right wording', async () => {
     const b = make();
     const e = (await b.startupEntries())[0]!;

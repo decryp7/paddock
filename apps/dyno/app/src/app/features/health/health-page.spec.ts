@@ -28,33 +28,14 @@ describe('startupChoice', () => {
 });
 
 describe('dy-health-page', () => {
-  it('lists tuning suggestions and startup items, and applies a suggestion only on a click', async () => {
+  it('shows the score and the startup items, and links to the tuning page', async () => {
     const { f, el } = render();
     await settle(f);
-    expect(el.querySelector('h1')?.textContent).toContain('Health');
-    const apply = [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.getAttribute('aria-label')?.startsWith('Apply '));
-    expect(apply, 'a suggestion that can be applied').toBeDefined();
+    expect(el.querySelector('h1')?.textContent).toBe('Health');
+    expect(el.querySelector('a[href="/tuning"]')?.textContent).toContain('Tuning suggestions');
+    expect(el.querySelector('[aria-label="Tuning suggestions"]')).toBeNull();
     const store = TestBed.inject(HealthStore);
-    const before = store.tuning().filter((t) => t.applied).length;
-    apply!.click();
-    await settle(f);
-    expect(store.tuning().filter((t) => t.applied).length).toBe(before + 1);
     expect(el.querySelectorAll('[aria-label="Startup manager"] tbody tr').length).toBe(store.startup().length);
-  });
-
-  it('"Apply all safe" applies every suggestion that needs no administrator approval, in one click', async () => {
-    const { f, el } = render();
-    await settle(f);
-    const store = TestBed.inject(HealthStore);
-    const safe = store.tuning().filter((t) => !t.applied && !t.needsAdmin).length;
-    expect(safe).toBeGreaterThan(0);
-    const all = [...el.querySelectorAll<HTMLButtonElement>('button.primary')].find((b) => b.textContent?.includes(`Apply all safe (${safe})`));
-    expect(all).toBeDefined();
-    all!.click();
-    await settle(f);
-    await settle(f);
-    expect(store.tuning().filter((t) => !t.applied && !t.needsAdmin)).toHaveLength(0);
-    expect(store.tuning().filter((t) => t.needsAdmin && t.applied)).toHaveLength(0);
   });
 
   it('lists the startup items with the highest impact first', async () => {
@@ -85,11 +66,10 @@ describe('dy-health-page', () => {
     }
   });
 
-  it('a failed list shows its own error with Retry and leaves the other section alone', async () => {
-    const { f, el } = render(['tuning']);
+  it('a failed startup list shows its own error with Retry', async () => {
+    const { f, el } = render(['startupEntries']);
     await settle(f);
-    const section = el.querySelector('[aria-label="Tuning suggestions"]')!;
+    const section = el.querySelector('[aria-label="Startup manager"]')!;
     expect(section.querySelector('[role="alert"]')).not.toBeNull();
-    expect(el.querySelector('[aria-label="Startup manager"] table')).not.toBeNull();
   });
 });

@@ -590,6 +590,8 @@ export interface HealthReport {
   reasons: HealthReason[];
 }
 
+export type TuningCategory = 'power' | 'sleep' | 'battery' | 'developer' | 'appearance';
+
 export interface TuningSuggestion {
   id: string;
   title: string;
@@ -598,6 +600,15 @@ export interface TuningSuggestion {
   proposed: string;
   needsAdmin: boolean;
   applied: boolean;
+  category: TuningCategory;
+  /** The exact change, one line each, shown before anything is applied. */
+  preview: string[];
+  /** The exact inverse, one line each: what Revert does. */
+  undoPreview: string[];
+  /** Why it cannot be applied now (for example it needs administrator rights), or null. */
+  blocked: string | null;
+  /** Applied by Dyno, but something else changed the setting since: Revert asks before overwriting. */
+  changedOutside: boolean;
 }
 
 export type StartupLocation =

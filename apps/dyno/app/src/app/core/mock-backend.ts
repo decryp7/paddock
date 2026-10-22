@@ -826,16 +826,27 @@ export class MockBackend implements DynoBackend {
     return this.reply('applyTuning', () => this.setTuning(id, true), 500);
   }
 
-  revertTuning(id: string): Promise<ActivityEntry> {
-    return this.reply('revertTuning', () => this.setTuning(id, false), 500);
+  revertTuning(id: string, force = false): Promise<ActivityEntry> {
+    return this.reply('revertTuning', () => this.setTuning(id, false, force), 500);
   }
 
-  private setTuning(id: string, applied: boolean): ActivityEntry {
+  /** Makes the setting of an applied suggestion read differently, as if another program changed it (browser development and tests). */
+  changeTuningOutside(id: string): void {
+    const t = this.tuningList.find((x) => x.id === id);
+    if (t?.applied) t.changedOutside = true;
+  }
+
+  private setTuning(id: string, applied: boolean, force = false): ActivityEntry {
     const t = this.tuningList.find((x) => x.id === id);
     if (!t) throw err('notFound', 'Unknown tuning suggestion.');
     if (t.applied === applied) throw err('badRequest', applied ? 'It is already applied.' : 'It is not applied.');
+    if (applied && t.blocked) throw err('accessDenied', t.blocked);
+    if (!applied && t.changedOutside && !force) {
+      throw err('badRequest', 'Something else changed this setting since Dyno applied it. Revert anyway to put the earlier setting back.');
+    }
     t.applied = applied;
-    return this.log('tuning', applied ? t.title : `Reverted: ${t.title}`, applied ? `${t.current} → ${t.proposed}` : `Back to ${t.current}`, applied ? 'available' : 'notUndoable');
+    t.changedOutside = false;
+    return this.log('tuning', applied ? t.title : `Reverted: ${t.title}`, applied ? t.preview.join('; ') : t.undoPreview.join('; '), applied ? 'available' : 'notUndoable');
   }
 
   startupEntries(): Promise<StartupEntry[]> {

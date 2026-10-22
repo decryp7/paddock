@@ -176,7 +176,7 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     path: '/#/health',
     size: { width: 1440, height: 1500 },
     ready: async (page) => {
-      await expect(page.getByRole('heading', { name: 'Health & tuning' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Health', exact: true })).toBeVisible();
       await expect(page.getByRole('region', { name: 'Startup manager' }).getByRole('table')).toBeVisible();
     },
   },

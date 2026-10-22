@@ -108,7 +108,8 @@ export interface DynoBackend {
   health(): Promise<HealthReport>;
   tuning(): Promise<TuningSuggestion[]>;
   applyTuning(id: string): Promise<ActivityEntry>;
-  revertTuning(id: string): Promise<ActivityEntry>;
+  /** Puts the previous setting back; `force` overwrites a setting something else changed since Dyno applied it. */
+  revertTuning(id: string, force?: boolean): Promise<ActivityEntry>;
   startupEntries(): Promise<StartupEntry[]>;
   setStartupState(id: string, state: StartupState): Promise<ActivityEntry>;
 

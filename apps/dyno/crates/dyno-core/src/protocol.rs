@@ -173,6 +173,7 @@ pub enum Request {
         /// Its id.
         id: String,
         /// Put the previous setting back even though something else changed it since Dyno applied it.
+        #[serde(default)]
         force: bool,
     },
     /// Startup entries.
@@ -688,6 +689,20 @@ mod tests {
 
     fn round(m: &Message) -> Message {
         postcard::from_bytes(&postcard::to_stdvec(m).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_revert_without_force_does_not_overwrite_a_changed_setting() {
+        let r: Request = serde_json::from_str(r#"{"revertTuning":{"id":"powerPlan"}}"#).unwrap();
+        assert_eq!(
+            r,
+            Request::RevertTuning {
+                id: "powerPlan".into(),
+                force: false
+            }
+        );
+        let forced: Request = serde_json::from_str(r#"{"revertTuning":{"id":"x","force":true}}"#).unwrap();
+        assert!(matches!(forced, Request::RevertTuning { force: true, .. }));
     }
 
     #[test]

@@ -261,7 +261,7 @@ export function healthReasons(): HealthReason[] {
         preview: ['Add exclusion: C:\\dev\\**\\target', 'Add exclusion: C:\\dev\\**\\node_modules', 'Defender keeps scanning everything else'],
         needsAdmin: true,
         undoable: true,
-        kind: { tuning: 'defender-dev-exclusions' },
+        kind: { tuning: 'defenderDevFolders' },
       },
     },
     {
@@ -299,58 +299,35 @@ export function healthReasons(): HealthReason[] {
         preview: ['Exclude C:\\dev\\**\\target from indexing', 'Exclude C:\\dev\\**\\node_modules from indexing'],
         needsAdmin: false,
         undoable: true,
-        kind: { tuning: 'search-index-dev' },
+        kind: { tuning: 'indexDevFolders' },
       },
     },
   ];
 }
 
+const ADMIN_REASON = "Needs administrator rights. Dyno's privileged helper is not installed yet, so this cannot be applied from here.";
+
 export function demoTuning(): TuningSuggestion[] {
+  const t = (
+    id: string,
+    category: TuningSuggestion['category'],
+    title: string,
+    explanation: string,
+    [current, proposed]: [string, string],
+    [preview, undoPreview]: [string[], string[]],
+    needsAdmin = false,
+    applied = false,
+  ): TuningSuggestion => ({ id, category, title, explanation, current, proposed, preview, undoPreview, needsAdmin, applied, blocked: needsAdmin && !applied ? ADMIN_REASON : null, changedOutside: false });
   return [
+    t('powerPlan', 'power', 'Use the Balanced power plan while plugged in', 'Power saver keeps the CPU slow even on mains power. Balanced speeds up when you need it and still saves power when idle.', ['Power saver', 'Balanced'], [['Activate the power plan Balanced'], ['Activate the power plan Power saver']]),
+    t('sleepOnBattery', 'sleep', 'Sleep sooner when on battery', 'An idle laptop that never sleeps drains its battery in your bag. A short timer saves it; waking takes a keypress.', ['Never', '15 minutes'], [['Sleep after 15 minutes of idling when on battery'], ['Never sleep when on battery']]),
+    t('indexDevFolders', 'developer', 'Stop indexing your code folders', 'Search indexing re-reads build output every time you compile (3 folders). Excluding them keeps builds fast; you can still search them in your editor.', ['Indexed', 'Not indexed'], [['Exclude from search indexing: C:\\dev\\dyno', 'Exclude from search indexing: C:\\dev\\web', 'Exclude from search indexing: C:\\dev\\tools'], ['Include in search indexing: C:\\dev\\dyno', 'Include in search indexing: C:\\dev\\web', 'Include in search indexing: C:\\dev\\tools']]),
+    t('defenderDevFolders', 'developer', 'Exclude your code folders from Defender scanning', 'Defender scans every file a build writes, which can double build times. Files there are no longer scanned, so only do this for code you trust.', ['Scanned', 'Excluded'], [['Exclude from Microsoft Defender scanning: C:\\dev\\dyno'], ['Include in Microsoft Defender scanning: C:\\dev\\dyno']], true),
+    t('hibernate', 'sleep', 'Turn off hibernation to free disk space', 'Hibernation keeps a file about as large as part of your memory on the system drive. Sleep keeps working, Fast Startup turns off.', ['On', 'Off'], [['Turn hibernation off (frees the hibernation file)'], ['Turn hibernation on (reserves disk space for the hibernation file)']], true),
+    t('backgroundApps', 'appearance', 'Stop apps from running in the background', '14 Store apps may run in the background to fetch updates and show notifications. Turning this off saves memory and battery.', ['14 apps allowed', 'Off'], [['Stop apps from running in the background'], ['Let apps run in the background again']]),
     {
-      id: 'power-plan',
-      title: 'Best performance while plugged in',
-      explanation: 'Your laptop uses the Balanced power mode on AC. Best performance lets the CPU boost sooner; Dyno switches back on battery.',
-      current: 'Balanced',
-      proposed: 'Best performance (on AC)',
-      needsAdmin: false,
-      applied: false,
-    },
-    {
-      id: 'defender-dev-exclusions',
-      title: 'Defender exclusions for build output',
-      explanation: 'Microsoft Defender scans every file a compiler writes. Excluding build output (not source) makes builds about 20% faster.',
-      current: 'No exclusions',
-      proposed: 'Exclude C:\\dev\\**\\target and node_modules',
-      needsAdmin: true,
-      applied: false,
-    },
-    {
-      id: 'search-index-dev',
-      title: 'Stop indexing build folders',
-      explanation: 'Windows Search re-indexes build output after every build. Code and documents stay searchable.',
-      current: 'Indexed',
-      proposed: 'Excluded',
-      needsAdmin: false,
-      applied: false,
-    },
-    {
-      id: 'background-apps',
-      title: 'Fewer background apps',
-      explanation: '12 Store apps may run in the background. Most only need to while open.',
-      current: '12 allowed',
-      proposed: '4 allowed (Teams, Outlook, Phone Link, Clock)',
-      needsAdmin: false,
-      applied: false,
-    },
-    {
-      id: 'visual-effects',
-      title: 'Lighter visual effects',
-      explanation: 'Keeps smooth fonts and thumbnails but turns off animations and shadows under windows.',
-      current: 'Let Windows choose',
-      proposed: 'Custom (animations off)',
-      needsAdmin: false,
-      applied: true,
+      ...t('visualEffects', 'appearance', 'Animations and transparency off (applied by Dyno)', 'Dyno applied this change. Revert puts the previous setting back.', ['Applied', 'Best appearance'], [['Visual effects: best performance (no animations, shadows or transparency)'], ['Visual effects: best appearance']], false, true),
+      blocked: null,
     },
   ];
 }

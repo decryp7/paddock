@@ -18,7 +18,8 @@ export const NAV: NavItem[] = [
   { path: '/rules', label: 'CPU taming', icon: 'rules', keywords: 'rules profiles throttle cap protected gaming meeting battery' },
   { path: '/alarms', label: 'Alarms', icon: 'bell', keywords: 'alerts notifications acknowledge shelve mute thresholds custom rules' },
   { path: '/recorder', label: 'Flight recorder', icon: 'camera', keywords: 'timeline capture snapshot last ten minutes' },
-  { path: '/health', label: 'Health & tuning', icon: 'health', keywords: 'score tuning startup apps' },
+  { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
+  { path: '/tuning', label: 'Tuning', icon: 'sparkle', keywords: 'power plan sleep hibernation battery charge limit indexing visual effects background apps suggestions undo' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },
   { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences' },
 ];
