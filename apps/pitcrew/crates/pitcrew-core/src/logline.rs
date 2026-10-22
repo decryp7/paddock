@@ -85,6 +85,25 @@ pub fn classify(line: &str) -> RunnerLogEvent {
     }
 }
 
+/// The labels in a "declare successfully" line (`..., with labels: [macos-arm64 linux], declare successfully`), as
+/// the runner printed them (names only: the runner declares `name:host` labels by `name`). `None` for other lines.
+pub fn declared_labels(line: &str) -> Option<Vec<String>> {
+    let msg = message(line);
+    if !msg.contains("declare successfully") {
+        return None;
+    }
+    let rest = msg.split_once("with labels:")?.1;
+    let inner = rest.trim_start().strip_prefix('[')?.split_once(']')?.0;
+    Some(
+        inner
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|s| !s.is_empty())
+            .take(crate::config::MAX_LABELS * 2)
+            .map(|s| s.chars().take(crate::config::MAX_LABEL_LEN).collect())
+            .collect(),
+    )
+}
+
 /// Most `key=value` fields [`fields`] returns from one line.
 pub const MAX_FIELDS: usize = 64;
 
@@ -157,6 +176,24 @@ mod tests {
         assert_eq!(message(r#"level=error msg="say \"hi\"" error=x"#), r#"say "hi""#);
         assert_eq!(message("level=info msg=bare other=1"), "bare");
         assert_eq!(message("  plain text  "), "plain text");
+    }
+
+    #[test]
+    fn the_declared_labels_are_read_from_the_declare_line() {
+        let l = line("runner: build-pc, with version: v5.2.0, with labels: [windows-latest ubuntu:host], declare successfully");
+        assert_eq!(declared_labels(&l), Some(vec!["windows-latest".into(), "ubuntu:host".into()]));
+        assert_eq!(
+            declared_labels(&line("runner: x, with labels: [], declare successfully")),
+            Some(vec![])
+        );
+        assert_eq!(
+            declared_labels(&line("runner: x, with labels: [a, b], declare successfully")),
+            Some(vec!["a".into(), "b".into()])
+        );
+        assert_eq!(declared_labels(&line("runner: x, with labels: [a], something else")), None);
+        assert_eq!(declared_labels(&line("declare successfully")), None);
+        assert_eq!(declared_labels(&line("runner: x, with labels: a, declare successfully")), None);
+        assert_eq!(declared_labels(&line("Starting runner daemon")), None);
     }
 
     #[test]

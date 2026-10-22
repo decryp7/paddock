@@ -161,6 +161,9 @@ mod tests {
             started_at: Timestamp(0),
             finished_at: Timestamp(1),
             outcome: None,
+            peak_cpu_permille: 0,
+            peak_mem_bytes: 0,
+            leftovers: 0,
         };
         assert!(outcomes(&f, &[job], Some("t")).is_empty());
         let mut c = Cache {

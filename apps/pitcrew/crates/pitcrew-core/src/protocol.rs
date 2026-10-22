@@ -17,6 +17,9 @@ use crate::logs::LogLine;
 use crate::metrics::{MachineSample, UsagePoint};
 use crate::names::RunnerName;
 use crate::notify::Notification;
+use crate::process_policy::KeepFor;
+use crate::process_track::ProcessEntry;
+use crate::runner_config::{ConfigEdit, ConfigView, Preview};
 use crate::session::SessionState;
 use crate::time::Timestamp;
 use crate::update::{UpdateOutcome, UpdatePhase, UpdatePolicy};
@@ -27,7 +30,8 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
 /// The protocol version this build speaks. 2: push events, maintenance, settings, registration, history, disk.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// 3: the runner's configuration file (get, preview, save) and the processes a runner started.
+pub const PROTOCOL_VERSION: u32 = 3;
 /// Largest frame either side sends or accepts.
 pub const MAX_FRAME: usize = 1024 * 1024;
 /// Longest secret (registration token) accepted.
@@ -216,6 +220,57 @@ pub enum Request {
         /// How far back (capped at 90 days).
         range_hours: u32,
     },
+    /// The runner's `config.yaml`: its text, the form's view of it and the findings (ADR 0011).
+    GetRunnerConfig {
+        /// The runner.
+        runner: RunnerName,
+    },
+    /// What saving a change to the runner's `config.yaml` would do: the new text, a diff and the findings. Writes
+    /// nothing.
+    PreviewRunnerConfig {
+        /// The runner.
+        runner: RunnerName,
+        /// The change.
+        edit: ConfigEdit,
+    },
+    /// Saves a change to the runner's `config.yaml` (after a backup) and, when the runner must restart to use it,
+    /// restarts it after the current job.
+    SaveRunnerConfig {
+        /// The runner.
+        runner: RunnerName,
+        /// The change.
+        edit: ConfigEdit,
+        /// The fingerprint of the file the change was made against (from [`Response::RunnerConfig`]); the save is
+        /// refused when the file has changed since.
+        base: String,
+    },
+    /// The processes the runner started (its process tree), with their jobs and the leftovers (ADR 0012).
+    Processes {
+        /// The runner.
+        runner: RunnerName,
+    },
+    /// Asks one process of the runner's tree to stop (then ends it if it ignores the request).
+    StopProcess {
+        /// The runner.
+        runner: RunnerName,
+        /// The process.
+        pid: u32,
+        /// When the app saw it start (guards against a reused process id).
+        started_at: Option<Timestamp>,
+        /// The runner process itself may be stopped (the user chose it explicitly).
+        allow_runner: bool,
+    },
+    /// Keeps a leftover longer: adds time before the automatic cleanup stops it.
+    KeepProcess {
+        /// The runner.
+        runner: RunnerName,
+        /// The process.
+        pid: u32,
+        /// When the app saw it start.
+        started_at: Timestamp,
+        /// How much to add.
+        extra: KeepFor,
+    },
 }
 
 impl Request {
@@ -233,6 +288,9 @@ impl Request {
                 | Request::GetSettings
                 | Request::Diagnostics
                 | Request::Metrics { .. }
+                | Request::GetRunnerConfig { .. }
+                | Request::PreviewRunnerConfig { .. }
+                | Request::Processes { .. }
         )
     }
 }
@@ -294,6 +352,9 @@ pub struct RunnerSnapshot {
     /// What the runner and the processes it started use now (`None`: it is not running).
     #[serde(default)]
     pub usage: Option<Usage>,
+    /// How many processes a finished job left behind are still alive.
+    #[serde(default)]
+    pub leftovers: u32,
 }
 
 /// Disk use from the last scan.
@@ -368,6 +429,38 @@ pub struct DiagnosticsSection {
     pub text: String,
 }
 
+/// What happens to a runner after its configuration file changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RestartPlan {
+    /// The change does not affect the runner (comments or layout only).
+    NotNeeded,
+    /// The runner is not running; its next start uses the file.
+    NotRunning,
+    /// The runner restarts after its current job (at once when it is idle).
+    AfterJob,
+}
+
+/// The processes of a runner's tree (a query; see [`Request::Processes`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessList {
+    /// The runner process, when it runs.
+    pub runner_pid: Option<u32>,
+    /// No job runs now (leftovers may be stopped).
+    pub idle: bool,
+    /// Automatic cleanup of leftovers is on for this runner.
+    pub cleanup: bool,
+    /// The default time a leftover is kept after its job ended.
+    pub keep: KeepFor,
+    /// The rows: leftovers first, then the runner, then by memory.
+    pub entries: Vec<ProcessEntry>,
+    /// Rows were left out (the list is bounded).
+    pub truncated: bool,
+    /// When the process table was read.
+    pub taken_at: Timestamp,
+}
+
 /// A response from the service.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -437,6 +530,42 @@ pub enum Response {
         /// The runner's own CPU and memory (with its processes), oldest first; empty without a runner.
         #[serde(default)]
         usage: Vec<UsagePoint>,
+    },
+    /// The runner's configuration file.
+    RunnerConfig {
+        /// Its path.
+        path: String,
+        /// Its text (empty when the file does not exist yet).
+        text: String,
+        /// Fingerprint of the text, to send back with the save.
+        fingerprint: String,
+        /// The form's view of it.
+        view: ConfigView,
+        /// How many backups exist.
+        backups: u32,
+        /// A change is waiting for the runner to restart after its job.
+        restart_pending: bool,
+    },
+    /// What saving a change would do.
+    RunnerConfigPreview {
+        /// The preview.
+        preview: Preview,
+    },
+    /// A change was saved.
+    RunnerConfigSaved {
+        /// The backup of the previous file; `None` when there was no file.
+        backup: Option<String>,
+        /// What happens to the runner.
+        restart: RestartPlan,
+        /// Fingerprint of the file now.
+        fingerprint: String,
+        /// The keys that changed, dotted.
+        changed_keys: Vec<String>,
+    },
+    /// The runner's processes.
+    Processes {
+        /// The list.
+        list: ProcessList,
     },
     /// A pushed event (only on a subscribed connection).
     Event {
@@ -686,12 +815,83 @@ mod tests {
 
     #[test]
     fn queries_do_not_mutate() {
-        for q in [Request::Status, Request::Subscribe, Request::Diagnostics, Request::GetSettings] {
+        for q in [
+            Request::Status,
+            Request::Subscribe,
+            Request::Diagnostics,
+            Request::GetSettings,
+            Request::GetRunnerConfig { runner: name("a") },
+            Request::PreviewRunnerConfig {
+                runner: name("a"),
+                edit: ConfigEdit::Raw { text: String::new() },
+            },
+            Request::Processes { runner: name("a") },
+        ] {
             assert!(!q.mutates(), "{q:?}");
+        }
+        for m in [
+            Request::SaveRunnerConfig {
+                runner: name("a"),
+                edit: ConfigEdit::Raw { text: String::new() },
+                base: String::new(),
+            },
+            Request::StopProcess {
+                runner: name("a"),
+                pid: 5,
+                started_at: None,
+                allow_runner: false,
+            },
+            Request::KeepProcess {
+                runner: name("a"),
+                pid: 5,
+                started_at: Timestamp(1),
+                extra: KeepFor::hours(1),
+            },
+        ] {
+            assert!(m.mutates(), "{m:?}");
         }
         assert!(Request::Drain { runner: name("a") }.mutates());
         assert!(Request::CleanDisk { runner: name("a") }.mutates());
         assert!(!Request::Disk { runner: name("a") }.mutates());
+    }
+
+    #[test]
+    fn the_config_and_process_requests_use_the_documented_wire_format() {
+        let r = Request::SaveRunnerConfig {
+            runner: name("a"),
+            edit: ConfigEdit::Raw {
+                text: "log:\n  level: info\n".into(),
+            },
+            base: "abc".into(),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"saveRunnerConfig","runner":"a","edit":{"mode":"raw","text":"log:\n  level: info\n"},"base":"abc"}"#
+        );
+        assert_eq!(serde_json::from_str::<Request>(&json).unwrap(), r);
+        assert!(!format!("{r:?}").contains("level"), "the file's text is never in a debug print");
+        let r = Request::StopProcess {
+            runner: name("a"),
+            pid: 7,
+            started_at: Some(Timestamp(5)),
+            allow_runner: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            r#"{"type":"stopProcess","runner":"a","pid":7,"startedAt":5,"allowRunner":false}"#
+        );
+        let r = Request::KeepProcess {
+            runner: name("a"),
+            pid: 7,
+            started_at: Timestamp(5),
+            extra: KeepFor::hours(2),
+        };
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            r#"{"type":"keepProcess","runner":"a","pid":7,"startedAt":5,"extra":{"amount":2,"unit":"hours"}}"#
+        );
+        assert_eq!(serde_json::to_string(&RestartPlan::AfterJob).unwrap(), r#""afterJob""#);
     }
 
     #[test]

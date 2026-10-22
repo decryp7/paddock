@@ -295,6 +295,9 @@ mod tests {
             started_at: Timestamp(at - 1000),
             finished_at: Timestamp(at),
             outcome: None,
+            peak_cpu_permille: 0,
+            peak_mem_bytes: 0,
+            leftovers: 0,
         };
         let jobs = vec![
             fin(Some(1), 100 * DAY_MS + 10),

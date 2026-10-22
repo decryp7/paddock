@@ -77,6 +77,50 @@ pub enum HistoryKind {
         /// Entries that could not be deleted (tried again next time).
         failed: u32,
     },
+    /// The runner's `config.yaml` was saved from Pitcrew (ADR 0011).
+    ConfigSaved {
+        /// The runner restarts (after its job) to use it.
+        restart: bool,
+        /// The keys that changed, dotted; empty for an edit in the Advanced editor.
+        changed: Vec<String>,
+    },
+    /// After the restart the runner declared the labels Pitcrew expected.
+    LabelsVerified {
+        /// The labels the runner declared.
+        labels: Vec<String>,
+    },
+    /// After the restart the runner declared other labels than the file says.
+    LabelsMismatch {
+        /// The label names in the file.
+        expected: Vec<String>,
+        /// The label names the runner declared.
+        declared: Vec<String>,
+    },
+    /// A process the runner started was stopped (ADR 0012).
+    ProcessStopped {
+        /// Its program name.
+        name: String,
+        /// Its process id.
+        pid: u32,
+        /// How long it had been running, in milliseconds.
+        age_ms: u64,
+        /// The rule that applied (`default 10 min`, `*GradleDaemon* 3 h`, `you`).
+        rule: String,
+        /// Who decided.
+        by: StopReason,
+        /// It ignored the request and was ended.
+        forced: bool,
+    },
+}
+
+/// Who stopped a process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StopReason {
+    /// Automatic cleanup of a leftover.
+    Cleanup,
+    /// The user chose Stop.
+    User,
 }
 
 /// One event.
@@ -329,7 +373,13 @@ pub fn summarize(history: &History, now: Timestamp, days: u32, utc_offset_minute
                 at: e.at,
                 kind: MarkKind::Cleanup,
             }),
-            HistoryKind::Stopped | HistoryKind::Paused | HistoryKind::Resumed => {}
+            HistoryKind::Stopped
+            | HistoryKind::Paused
+            | HistoryKind::Resumed
+            | HistoryKind::ConfigSaved { .. }
+            | HistoryKind::LabelsVerified { .. }
+            | HistoryKind::LabelsMismatch { .. }
+            | HistoryKind::ProcessStopped { .. } => {}
         }
     }
     if let Some(s) = up_since {
@@ -439,6 +489,9 @@ mod tests {
                 started_at: Timestamp(from),
                 finished_at: Timestamp(to),
                 outcome: None,
+                peak_cpu_permille: 0,
+                peak_mem_bytes: 0,
+                leftovers: 0,
             },
         }
     }

@@ -152,6 +152,7 @@ mod tests {
             update: None,
             watchdog: None,
             cleanup: None,
+            processes: None,
             env: Default::default(),
         }
     }

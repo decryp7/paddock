@@ -20,6 +20,8 @@ serde_json = "1.0"
 sha2 = "0.11"
 thiserror = "2.0"
 toml = "1"
+# Parses the runner's config.yaml for validation (syntax and types); edits never re-serialise it (ADR 0011).
+serde_norway = "0.9"
 
 # Dependencies are optimised even in debug builds; workspace crates stay at opt-level 0 for fast rebuilds.
 [profile.dev.package."*"]

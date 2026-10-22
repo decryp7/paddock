@@ -9,6 +9,7 @@ use crate::distribution::RunnerKind;
 use crate::housekeeping::CleanupPolicy;
 use crate::logs::RotationPolicy;
 use crate::names::RunnerName;
+use crate::process_policy::{self, ProcessOverride, ProcessPolicy};
 use crate::restart::RestartPolicy;
 use crate::session::LoggedOffMode;
 use crate::update::{UpdatePolicy, UpdateTimeouts};
@@ -67,6 +68,8 @@ pub struct Defaults {
     pub logs: RotationPolicy,
     /// Disk housekeeping.
     pub cleanup: CleanupPolicy,
+    /// What happens to the processes a finished job leaves behind (ADR 0012).
+    pub processes: ProcessPolicy,
 }
 
 /// Where a runner runs on Windows (macOS always runs runners in the user's session, see ADR 0003).
@@ -121,6 +124,9 @@ pub struct RunnerConfig {
     /// Overrides the default disk housekeeping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cleanup: Option<CleanupPolicy>,
+    /// Overrides the default handling of leftover processes (its rules are tried first).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processes: Option<ProcessOverride>,
     /// Environment variables for the runner process (and so its jobs), over the login shell's `PATH` the service
     /// adds on macOS and Linux. Validated by [`crate::runner_env::validate_env`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -144,6 +150,11 @@ impl RunnerConfig {
     /// The cleanup policy in effect.
     pub fn cleanup_policy(&self, d: &Defaults) -> CleanupPolicy {
         self.cleanup.unwrap_or(d.cleanup)
+    }
+
+    /// The leftover-process policy in effect (the runner's overrides over the defaults).
+    pub fn process_policy(&self, d: &Defaults) -> ProcessPolicy {
+        process_policy::effective(&d.processes, self.processes.as_ref())
     }
 }
 
@@ -406,6 +417,14 @@ fn parse_defaults(value: Option<toml::Value>, problems: &mut Vec<ConfigProblem>)
     section(&mut t, "restart", &mut d.restart, problems);
     section(&mut t, "logs", &mut d.logs, problems);
     section(&mut t, "cleanup", &mut d.cleanup, problems);
+    section(&mut t, "processes", &mut d.processes, problems);
+    if let Err(reason) = process_policy::validate(&d.processes) {
+        problems.push(ConfigProblem::SectionIgnored {
+            section: "processes".into(),
+            reason,
+        });
+        d.processes = ProcessPolicy::default();
+    }
     d
 }
 
@@ -472,6 +491,9 @@ fn check_runner(r: &RunnerConfig) -> Result<(), String> {
         check_server_url(u)?;
     }
     crate::runner_env::validate_env(&r.env).map_err(|e| e.to_string())?;
+    if let Some(o) = &r.processes {
+        process_policy::validate_override(o)?;
+    }
     if r.labels.len() > MAX_LABELS {
         return Err(format!("it has more than {MAX_LABELS} labels"));
     }

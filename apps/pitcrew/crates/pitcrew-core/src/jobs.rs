@@ -107,6 +107,15 @@ pub struct FinishedJob {
     /// from the Gitea API when a read token is set (`gitea_api::with_outcomes`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<Conclusion>,
+    /// The highest CPU share of the runner's processes while the job ran, per mille of the whole machine.
+    #[serde(default)]
+    pub peak_cpu_permille: u32,
+    /// The highest resident memory of the runner's processes while the job ran.
+    #[serde(default)]
+    pub peak_mem_bytes: u64,
+    /// Processes of the job still alive when it ended (the service fills it in; see ADR 0012).
+    #[serde(default)]
+    pub leftovers: u32,
 }
 
 /// Whether a child process of the runner belongs to a job. The console host Windows attaches to every console
@@ -122,6 +131,8 @@ pub struct JobTracker {
     current: Option<CurrentJob>,
     children: bool,
     last_activity: Option<Timestamp>,
+    peak_cpu: u32,
+    peak_mem: u64,
 }
 
 impl JobTracker {
@@ -157,6 +168,14 @@ impl JobTracker {
         }
     }
 
+    /// What the runner's processes use now; the highest values while a job runs become the job's peaks.
+    pub fn observe_usage(&mut self, cpu_permille: u32, mem_bytes: u64) {
+        if self.current.is_some() {
+            self.peak_cpu = self.peak_cpu.max(cpu_permille);
+            self.peak_mem = self.peak_mem.max(mem_bytes);
+        }
+    }
+
     /// The runner process ended: so did its job.
     pub fn process_exited(&mut self, now: Timestamp) -> Option<FinishedJob> {
         self.children = false;
@@ -183,6 +202,9 @@ impl JobTracker {
             started_at: job.started_at,
             finished_at,
             outcome: None,
+            peak_cpu_permille: std::mem::take(&mut self.peak_cpu),
+            peak_mem_bytes: std::mem::take(&mut self.peak_mem),
+            leftovers: 0,
         })
     }
 }
