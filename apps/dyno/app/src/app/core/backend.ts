@@ -2,7 +2,17 @@ import { InjectionToken } from '@angular/core';
 import type {
   ActivityEntry,
   AgentStatus,
+  Alarm,
+  AlarmChange,
+  AlarmFilter,
+  AlarmStats,
   Alert,
+  BundlePreview,
+  HostName,
+  RecorderSnapshot,
+  RecorderSnapshotInfo,
+  SavedDiagnostics,
+  ShelveFor,
   Anomaly,
   AppInfo,
   CleanupCategory,
@@ -54,6 +64,8 @@ export interface DynoBackend {
   onAlert(listener: (a: Alert) => void): Unsubscribe;
   onActivity(listener: (a: ActivityEntry) => void): Unsubscribe;
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe;
+  /** Alarm changes pushed by the agent (new, repeated, returned, acknowledged, shelved, muted, noted). */
+  onAlarm(listener: (c: AlarmChange) => void): Unsubscribe;
 
   appInfo(): Promise<AppInfo>;
 
@@ -107,6 +119,30 @@ export interface DynoBackend {
   network(query: NetworkQuery): Promise<NetworkSnapshot>;
   /** Opens the lookup page for a public address in the default browser; `template` tests one that is not saved yet. */
   lookupIp(ip: string, template?: string): Promise<void>;
+
+  /** Reverse DNS through the OS resolver for up to 64 addresses; cached by the agent. Only on request, never in the background. */
+  resolveHosts(addresses: string[]): Promise<HostName[]>;
+
+  // Alarms (ISA-18.2 style): one open alarm per condition, acknowledge, shelve, mute, notes. Each change answers the changed alarms.
+  alarms(filter: AlarmFilter): Promise<Alarm[]>;
+  alarmStats(): Promise<AlarmStats>;
+  acknowledgeAlarms(ids: number[]): Promise<Alarm[]>;
+  shelveAlarm(id: number, until: ShelveFor): Promise<Alarm[]>;
+  unshelveAlarm(id: number): Promise<Alarm[]>;
+  muteRule(rule: string, muted: boolean): Promise<Alarm[]>;
+  noteAlarm(id: number, text: string): Promise<Alarm[]>;
+  /** The change log of one alarm, or of all alarms when `alarmId` is null, newest first (1..500). */
+  alarmHistory(alarmId: number | null, limit: number): Promise<AlarmChange[]>;
+
+  // Flight recorder: the last ten minutes at one-second resolution, saved on demand or when an alarm fires.
+  capture(): Promise<RecorderSnapshotInfo>;
+  recorderSnapshots(): Promise<RecorderSnapshotInfo[]>;
+  recorderSnapshot(id: number): Promise<RecorderSnapshot>;
+
+  // Diagnostics bundle: a redacted zip for a bug report. Nothing is written until the user picks a file.
+  diagnosticsPreview(): Promise<BundlePreview>;
+  /** Asks the user where to save (the OS save dialog) and writes the bundle there; resolves `null` when they cancel. */
+  saveDiagnostics(): Promise<SavedDiagnostics | null>;
 
   // Benchmarks: start only on a click; poll `benchmarks()` while a run is in progress.
   benchmarks(): Promise<BenchOverview>;

@@ -1,4 +1,4 @@
-import type { ConnectionRow, ListenerRow, NetOwner, NetworkQuery, NetworkSnapshot, SocketState } from '../api.types';
+import type { ConnectionRow, ListenerRow, NetOwner, NetworkQuery, NetworkSnapshot, SocketState, TrafficRow } from '../api.types';
 
 const proc = (pid: number, name: string, path: string): NetOwner => ({ kind: 'process', pid, name, path });
 const UNKNOWN: NetOwner = { kind: 'unknown', reason: 'The OS did not say which program owns this. It may belong to another user or the system; Dyno never runs elevated, the helper can look it up.' };
@@ -62,5 +62,42 @@ export function mockNetwork(q: NetworkQuery, at: number): NetworkSnapshot {
     (c) => (q.showLoopback || !c.remoteIsLoopback) && !q.exposedOnly && (!q.proto || q.proto === c.proto) && (!q.state || q.state === c.state) && hit([c.remotePort, c.remote, c.localPort, name(c.owner)]),
   );
   const ago = <T extends { firstSeen: number | null }>(r: T): T => ({ ...r, firstSeen: r.firstSeen === null ? null : at - r.firstSeen });
-  return { at, listeners: listeners.map(ago), connections: connections.map(ago), truncated: 0, unknownOwners: LISTENERS.filter((l) => l.owner.kind === 'unknown').length, note: null };
+  return {
+    at,
+    listeners: listeners.map(ago),
+    connections: connections.map(ago),
+    truncated: 0,
+    unknownOwners: LISTENERS.filter((l) => l.owner.kind === 'unknown').length,
+    note: null,
+    traffic: mockTraffic(at),
+    trafficNote: null,
+  };
+}
+
+const KB = 1024;
+
+/** Bytes per second per program (macOS only in the engine; the mock is a Mac). Moves a little with the clock. */
+export function mockTraffic(at: number): TrafficRow[] {
+  const wob = (seed: number) => 0.7 + 0.6 * Math.abs(Math.sin(at / 6000 + seed));
+  return [
+    { pid: 905, name: 'Google Chrome', rxBps: Math.round(420 * KB * wob(1)), txBps: Math.round(38 * KB * wob(2)) },
+    { pid: 1177, name: 'Slack', rxBps: Math.round(6 * KB * wob(3)), txBps: Math.round(2 * KB * wob(4)) },
+    { pid: 4410, name: 'cargo', rxBps: Math.round(1800 * KB * wob(5)), txBps: Math.round(12 * KB * wob(6)) },
+    { pid: 2290, name: 'Code Helper', rxBps: Math.round(3 * KB * wob(7)), txBps: Math.round(1 * KB * wob(8)) },
+    { pid: 1544, name: 'Spotify', rxBps: Math.round(48 * KB * wob(9)), txBps: Math.round(3 * KB * wob(10)) },
+  ];
+}
+
+const NAMES: Record<string, string> = {
+  '142.250.74.46': 'ams15s48-in-f14.1e100.net',
+  '151.101.65.69': 'cache.fastly-edge.example',
+  '52.94.236.248': 'ec2-52-94-236-248.compute-1.amazonaws.com',
+  '34.224.12.7': 'ec2-34-224-12-7.compute-1.amazonaws.com',
+  '151.101.129.91': 'static.crates-io.example',
+  '20.189.173.5': 'a20-189-173-5.deploy.static.akamaitechnologies.example',
+};
+
+/** A reverse-DNS answer: some addresses have names, some do not (a real resolver is the same). */
+export function mockHostName(address: string): string | null {
+  return NAMES[address] ?? null;
 }

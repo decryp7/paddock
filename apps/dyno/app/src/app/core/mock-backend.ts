@@ -1,4 +1,14 @@
 import type {
+  Alarm,
+  AlarmChange,
+  AlarmFilter,
+  AlarmStats,
+  BundlePreview,
+  HostName,
+  RecorderSnapshot,
+  RecorderSnapshotInfo,
+  SavedDiagnostics,
+  ShelveFor,
   ActiveAction,
   ActivityEntry,
   AgentStatus,
@@ -62,7 +72,8 @@ import {
   diskTree,
   healthReasons,
 } from './mock/data';
-import { mockNetwork } from './mock/network';
+import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
+import { mockHostName, mockNetwork } from './mock/network';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHistory } from './mock/history';
 import { mockInventory } from './mock/inventory';
@@ -159,6 +170,11 @@ export class MockBackend implements DynoBackend {
   private readonly alertListeners = new Set<(a: Alert) => void>();
   private readonly activityListeners = new Set<(a: ActivityEntry) => void>();
   private readonly agentListeners = new Set<(s: AgentStatus) => void>();
+  private readonly alarmListeners = new Set<(c: AlarmChange) => void>();
+  private alarmList: Alarm[] | null = null;
+  private snapshotInfos: RecorderSnapshotInfo[] | null = null;
+  /** Bundles the mock "saved", for tests. */
+  readonly savedBundles: SavedDiagnostics[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: MockOptions = {}) {
@@ -240,6 +256,11 @@ export class MockBackend implements DynoBackend {
   }
 
   /** One live tick (exposed for tests). */
+  onAlarm(listener: (c: AlarmChange) => void): Unsubscribe {
+    this.alarmListeners.add(listener);
+    return () => this.alarmListeners.delete(listener);
+  }
+
   tick(): void {
     const wantsProcesses = [...this.liveListeners.values()].includes('processes');
     const update = this.liveUpdate(wantsProcesses ? 'processes' : 'summary');
@@ -836,6 +857,127 @@ export class MockBackend implements DynoBackend {
 
   network(query: NetworkQuery): Promise<NetworkSnapshot> {
     return this.reply('network', () => mockNetwork(query, this.now()));
+  }
+
+  resolveHosts(addresses: string[]): Promise<HostName[]> {
+    return this.reply('resolveHosts', () => {
+      if (addresses.length > 64) throw err('badRequest', 'Resolve at most 64 addresses at a time.');
+      return addresses.map((address) => ({ address, name: mockHostName(address) }));
+    });
+  }
+
+  // -------------------------------------------------------------------------------------------- alarms
+
+  private alarmRows(): Alarm[] {
+    return (this.alarmList ??= demoAlarms(this.now()));
+  }
+
+  private changeAlarm(ids: number[], kind: AlarmChange['kind'], edit: (a: Alarm) => Alarm): Alarm[] {
+    const at = this.now();
+    const changed: Alarm[] = [];
+    this.alarmList = this.alarmRows().map((a) => {
+      if (!ids.includes(a.id)) return a;
+      const next = edit(a);
+      changed.push(next);
+      return next;
+    });
+    if (changed.length === 0) throw err('notFound', 'That alarm is gone.');
+    for (const alarm of changed) for (const l of this.alarmListeners) l({ kind, alarm: copy(alarm), notify: false, at });
+    return copy(changed);
+  }
+
+  alarms(filter: AlarmFilter): Promise<Alarm[]> {
+    return this.reply('alarms', () => copy(filterAlarms(this.alarmRows(), filter, this.now())));
+  }
+
+  alarmStats(): Promise<AlarmStats> {
+    return this.reply('alarmStats', () => demoStats(this.alarmRows()));
+  }
+
+  acknowledgeAlarms(ids: number[]): Promise<Alarm[]> {
+    return this.reply('acknowledgeAlarms', () => {
+      if (ids.length === 0 || ids.length > 500) throw err('badRequest', 'Choose between 1 and 500 alarms to acknowledge.');
+      const at = this.now();
+      return this.changeAlarm(ids, 'acknowledged', (a) => (a.state === 'active' ? { ...a, state: 'acknowledged', acknowledgedAt: at } : a.state === 'clearedUnacknowledged' ? { ...a, state: 'cleared', acknowledgedAt: at } : a));
+    });
+  }
+
+  shelveAlarm(id: number, until: ShelveFor): Promise<Alarm[]> {
+    return this.reply('shelveAlarm', () => {
+      const at = this.now();
+      const shelf = until === 'untilReboot' ? ('untilReboot' as const) : { until: typeof until === 'object' ? until.custom : until === 'oneHour' ? at + 60 * MIN : at + 12 * 60 * MIN };
+      if (typeof shelf === 'object' && shelf.until <= at) throw err('badRequest', 'Choose a time in the future to shelve the alarm until.');
+      return this.changeAlarm([id], 'shelved', (a) => ({ ...a, shelved: shelf }));
+    });
+  }
+
+  unshelveAlarm(id: number): Promise<Alarm[]> {
+    return this.reply('unshelveAlarm', () => this.changeAlarm([id], 'unshelved', (a) => ({ ...a, shelved: null })));
+  }
+
+  muteRule(rule: string, muted: boolean): Promise<Alarm[]> {
+    return this.reply('muteRule', () => {
+      const ids = this.alarmRows().filter((a) => a.rule === rule).map((a) => a.id);
+      if (ids.length === 0) return [];
+      return this.changeAlarm(ids, 'muted', (a) => ({ ...a, muted }));
+    });
+  }
+
+  noteAlarm(id: number, text: string): Promise<Alarm[]> {
+    return this.reply('noteAlarm', () => {
+      const t = text.trim();
+      if (!t || t.length > 200) throw err('badRequest', 'Write a note of 1 to 200 characters.');
+      const at = this.now();
+      return this.changeAlarm([id], 'noted', (a) => ({ ...a, notes: [...a.notes, { at, text: t }] }));
+    });
+  }
+
+  alarmHistory(alarmId: number | null, limit: number): Promise<AlarmChange[]> {
+    return this.reply('alarmHistory', () => copy(demoHistory(this.alarmRows()).filter((c) => alarmId === null || c.alarm.id === alarmId).slice(0, Math.min(500, Math.max(1, limit)))));
+  }
+
+  /** Whether the mock treats the alarm as shelved now (for tests). */
+  isShelved(a: Alarm): boolean {
+    return isShelved(a, this.now());
+  }
+
+  // ------------------------------------------------------------------------------ recorder, diagnostics
+
+  private snapshotRows(): RecorderSnapshotInfo[] {
+    return (this.snapshotInfos ??= demoSnapshotInfos(this.now()));
+  }
+
+  capture(): Promise<RecorderSnapshotInfo> {
+    return this.reply('capture', () => {
+      const info: RecorderSnapshotInfo = { id: Math.max(0, ...this.snapshotRows().map((x) => x.id)) + 1, at: this.now(), reason: 'manual', bytes: 400_000, samples: 600 };
+      this.snapshotInfos = [info, ...this.snapshotRows()];
+      return info;
+    });
+  }
+
+  recorderSnapshots(): Promise<RecorderSnapshotInfo[]> {
+    return this.reply('recorderSnapshots', () => copy(this.snapshotRows()));
+  }
+
+  recorderSnapshot(id: number): Promise<RecorderSnapshot> {
+    return this.reply('recorderSnapshot', () => {
+      const info = this.snapshotRows().find((x) => x.id === id);
+      if (!info) throw err('notFound', 'That snapshot was deleted.');
+      return demoSnapshot(info);
+    });
+  }
+
+  diagnosticsPreview(): Promise<BundlePreview> {
+    return this.reply('diagnosticsPreview', () => demoBundlePreview());
+  }
+
+  saveDiagnostics(): Promise<SavedDiagnostics | null> {
+    return this.reply('saveDiagnostics', () => {
+      const p = demoBundlePreview();
+      const saved = { path: '/Users/me/dyno-diagnostics.zip', bytes: Math.round(p.totalBytes * 0.22), files: p.files.length };
+      this.savedBundles.push(saved);
+      return saved;
+    });
   }
 
   /** The URLs the mock "opened", for tests. */

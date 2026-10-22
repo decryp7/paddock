@@ -690,6 +690,16 @@ export interface Settings {
   trayItems?: TrayItems;
   /** "Look up IP" templates (the engine fills the default when absent). */
   ipLookup?: IpLookupSettings;
+  /** Alarm behaviour: quiet hours, chatter detection, retention (the engine fills the default when absent). */
+  alarms?: AlarmConfig;
+  /** Keep the last ten minutes at one-second resolution for captures. */
+  flightRecorder?: boolean;
+  /** Rules that raise an alarm when a metric stays past a limit (all off until added and enabled). */
+  customAlerts?: CustomAlertRule[];
+  /** Alarms for new exposed listeners and new remote hosts (both off by default). */
+  networkAlerts?: NetworkAlerts;
+  /** Desktop notifications for new alarms (quiet hours and muted rules still apply). */
+  notifications?: boolean;
 }
 
 export interface PluginInfo {
@@ -1218,6 +1228,48 @@ export interface NetworkSnapshot {
   truncated: number;
   unknownOwners: number;
   note: string | null;
+  /** Bytes per second per program, where the OS gives them cheaply (macOS); empty otherwise. */
+  traffic?: TrafficRow[];
+  /** Why `traffic` is empty (shown as a one-line note), or null when it is available. */
+  trafficNote?: string | null;
+}
+
+/** What one program sent and received in the last interval. */
+export interface TrafficRow {
+  pid: number;
+  name: string;
+  rxBps: number;
+  txBps: number;
+}
+
+/** A reverse-DNS answer for an address (`name` is null when the address has no name or the lookup timed out). */
+export interface HostName {
+  address: string;
+  name: string | null;
+}
+
+/** `Settings.networkAlerts`. */
+export interface NetworkAlerts {
+  newExposedListener: boolean;
+  newRemoteHost: boolean;
+}
+
+/** What a custom alert rule measures; every value is a plain number in the unit the page shows. */
+export type CustomMetric = 'cpuTotal' | 'memoryUsed' | 'memoryPressure' | 'swap' | 'diskFree' | 'gpuLoad' | 'temperature' | 'battery';
+export type CustomOp = 'above' | 'below';
+
+/** `Settings.customAlerts` item: raise an alarm when `metric` is `op` `limit` for `forSecs` seconds. */
+export interface CustomAlertRule {
+  id: string;
+  name: string;
+  metric: CustomMetric;
+  op: CustomOp;
+  /** Percent for the percentage metrics, degrees Celsius for `temperature`. */
+  limit: number;
+  /** 0..3600: how long the condition must hold before the alarm is raised. */
+  forSecs: number;
+  severity: Severity;
+  enabled: boolean;
 }
 
 /** `Settings.ipLookup`: https templates; the browser opens them, Dyno never fetches. */

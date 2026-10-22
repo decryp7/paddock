@@ -3,7 +3,17 @@ import { listen } from '@tauri-apps/api/event';
 import type {
   ActivityEntry,
   AgentStatus,
+  Alarm,
+  AlarmChange,
+  AlarmFilter,
+  AlarmStats,
   Alert,
+  BundlePreview,
+  HostName,
+  RecorderSnapshot,
+  RecorderSnapshotInfo,
+  SavedDiagnostics,
+  ShelveFor,
   Anomaly,
   AppInfo,
   CleanupCategory,
@@ -53,6 +63,8 @@ export type DynoRequest = string | Record<string, Record<string, unknown>>;
 
 /** Every command fails with a `timeout` error after this long, so a panel shows an inline error with Retry, not a skeleton forever. */
 export const REQUEST_TIMEOUT_MS = 15_000;
+/** A command that waits for the person at an OS dialog may take as long as they do (within reason). */
+export const DIALOG_TIMEOUT_MS = 10 * 60_000;
 
 /** The push events of the shell. */
 export const EVENTS = {
@@ -60,6 +72,7 @@ export const EVENTS = {
   alert: 'dyno://alert',
   activity: 'dyno://activity',
   agent: 'dyno://agent',
+  alarm: 'dyno://alarm',
 } as const;
 
 /** One Tauri event shared by every UI listener: a single `listen`, fanned out, stopped with the last listener. */
@@ -100,6 +113,7 @@ export class TauriBackend implements DynoBackend {
   private readonly alertChannel: EventChannel<Alert>;
   private readonly activityChannel: EventChannel<ActivityEntry>;
   private readonly agentChannel: EventChannel<AgentStatus>;
+  private readonly alarmChannel: EventChannel<AlarmChange>;
   /** How many live listeners want the full process list; the agent sends it only while one does. */
   private processListeners = 0;
   private liveListeners = 0;
@@ -115,6 +129,7 @@ export class TauriBackend implements DynoBackend {
     this.alertChannel = new EventChannel(listenFn, EVENTS.alert);
     this.activityChannel = new EventChannel(listenFn, EVENTS.activity);
     this.agentChannel = new EventChannel(listenFn, EVENTS.agent);
+    this.alarmChannel = new EventChannel(listenFn, EVENTS.alarm);
   }
 
   // ------------------------------------------------------------------------------------------------ live data
@@ -145,6 +160,10 @@ export class TauriBackend implements DynoBackend {
 
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe {
     return this.agentChannel.add(listener);
+  }
+
+  onAlarm(listener: (c: AlarmChange) => void): Unsubscribe {
+    return this.alarmChannel.add(listener);
   }
 
   /** Tells the agent the detail level the UI needs now (only when it changed; nothing once nobody listens). */
@@ -311,6 +330,69 @@ export class TauriBackend implements DynoBackend {
     return this.request({ lookupIp: { ip, template: template ?? null } });
   }
 
+  resolveHosts(addresses: string[]): Promise<HostName[]> {
+    return this.request({ resolveHosts: { addresses } });
+  }
+
+  // ---------------------------------------------------------------------------------------------------- alarms
+
+  alarms(filter: AlarmFilter): Promise<Alarm[]> {
+    return this.request({ alarms: { filter } });
+  }
+
+  alarmStats(): Promise<AlarmStats> {
+    return this.request('alarmStats');
+  }
+
+  acknowledgeAlarms(ids: number[]): Promise<Alarm[]> {
+    return this.request({ acknowledgeAlarms: { ids } });
+  }
+
+  shelveAlarm(id: number, until: ShelveFor): Promise<Alarm[]> {
+    return this.request({ shelveAlarm: { id, until } });
+  }
+
+  unshelveAlarm(id: number): Promise<Alarm[]> {
+    return this.request({ unshelveAlarm: { id } });
+  }
+
+  muteRule(rule: string, muted: boolean): Promise<Alarm[]> {
+    return this.request({ muteRule: { rule, muted } });
+  }
+
+  noteAlarm(id: number, text: string): Promise<Alarm[]> {
+    return this.request({ noteAlarm: { id, text } });
+  }
+
+  alarmHistory(alarmId: number | null, limit: number): Promise<AlarmChange[]> {
+    return this.request({ alarmHistory: { alarmId, limit } });
+  }
+
+  // -------------------------------------------------------------------------------------- recorder, diagnostics
+
+  capture(): Promise<RecorderSnapshotInfo> {
+    return this.request('capture');
+  }
+
+  recorderSnapshots(): Promise<RecorderSnapshotInfo[]> {
+    return this.request('recorderSnapshots');
+  }
+
+  recorderSnapshot(id: number): Promise<RecorderSnapshot> {
+    return this.request({ recorderSnapshot: { id } });
+  }
+
+  diagnosticsPreview(): Promise<BundlePreview> {
+    return this.request('diagnosticsPreview');
+  }
+
+  /** The shell shows the OS save dialog (the webview never sees a path it chose itself) and asks the agent to write there. */
+  saveDiagnostics(): Promise<SavedDiagnostics | null> {
+    return this.command<SavedDiagnostics | null>('save_diagnostics', undefined, DIALOG_TIMEOUT_MS);
+  }
+
+  // ------------------------------------------------------------------------------------------------ benchmarks
+
   benchmarks(): Promise<BenchOverview> {
     return this.request('benchmarks');
   }
@@ -371,10 +453,10 @@ export class TauriBackend implements DynoBackend {
     return this.command<T>('dyno', { request });
   }
 
-  private async command<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  private async command<T>(cmd: string, args?: Record<string, unknown>, timeoutMs: number = this.timeoutMs): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject({ code: 'timeout', message: 'Dyno did not answer in time.' }), this.timeoutMs);
+      timer = setTimeout(() => reject({ code: 'timeout', message: 'Dyno did not answer in time.' }), timeoutMs);
     });
     try {
       return await Promise.race([args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args), timeout]);
