@@ -161,7 +161,10 @@ impl Supervisor {
             return err(ErrorCode::BadRequest, e);
         }
         match r.watch.keep(pid, started_at.0, extra) {
-            Ok(()) => Response::Ok,
+            Ok(()) => {
+                self.dirty = true;
+                Response::Ok
+            }
             Err(e) => err(ErrorCode::BadRequest, e),
         }
     }

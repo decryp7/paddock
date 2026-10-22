@@ -214,6 +214,43 @@ pub fn extend(ext: &mut Extensions, pid: u32, started_ms: u64, extra: Duration) 
     *e = e.saturating_add(u64::try_from(extra.as_millis()).unwrap_or(u64::MAX)).min(cap);
 }
 
+/// Most "keep longer" records the service remembers per runner.
+pub const MAX_KEEP_RECORDS: usize = 256;
+
+/// One "keep longer" extension as saved in the service state, so it survives a service restart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepRecord {
+    /// The process id.
+    pub pid: u32,
+    /// When the process started, in milliseconds (identifies it against a reused id).
+    pub started_ms: u64,
+    /// The time added, in milliseconds.
+    pub extra_ms: u64,
+}
+
+/// The extensions as records, sorted and bounded (for the state file).
+pub fn export_extensions(ext: &Extensions) -> Vec<KeepRecord> {
+    let mut v: Vec<KeepRecord> = ext
+        .iter()
+        .map(|(&(pid, started_ms), &extra_ms)| KeepRecord { pid, started_ms, extra_ms })
+        .collect();
+    v.sort_by_key(|k| (k.pid, k.started_ms));
+    v.truncate(MAX_KEEP_RECORDS);
+    v
+}
+
+/// Extensions from saved records: values are capped like [`extend`], zero and surplus records are dropped.
+pub fn import_extensions(records: &[KeepRecord]) -> Extensions {
+    let cap = MAX_EXTENSION_DAYS * 86_400_000;
+    records
+        .iter()
+        .take(MAX_KEEP_RECORDS)
+        .filter(|k| k.extra_ms > 0)
+        .map(|k| ((k.pid, k.started_ms), k.extra_ms.min(cap)))
+        .collect()
+}
+
 /// Drops extensions of processes that are gone.
 pub fn prune_extensions(ext: &mut Extensions, alive: &[ProcessMeta]) {
     ext.retain(|(pid, started), _| alive.iter().any(|m| m.pid == *pid && m.started_ms == Some(*started)));
@@ -740,5 +777,38 @@ mod tests {
             "a clock that went back never kills early"
         );
         let _ = KeepFor::minutes(1);
+    }
+
+    #[test]
+    fn extensions_round_trip_through_records_and_are_bounded() {
+        let mut ext = Extensions::new();
+        extend(&mut ext, 7, 100, Duration::from_secs(60));
+        extend(&mut ext, 3, 50, Duration::from_secs(5));
+        let records = export_extensions(&ext);
+        assert_eq!(records.iter().map(|k| k.pid).collect::<Vec<_>>(), vec![3, 7]);
+        assert_eq!(import_extensions(&records), ext);
+        let huge = [
+            KeepRecord {
+                pid: 1,
+                started_ms: 1,
+                extra_ms: u64::MAX,
+            },
+            KeepRecord {
+                pid: 2,
+                started_ms: 1,
+                extra_ms: 0,
+            },
+        ];
+        let back = import_extensions(&huge);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[&(1, 1)], MAX_EXTENSION_DAYS * 86_400_000);
+        let many: Vec<KeepRecord> = (0..1000)
+            .map(|i| KeepRecord {
+                pid: i,
+                started_ms: 1,
+                extra_ms: 1,
+            })
+            .collect();
+        assert_eq!(import_extensions(&many).len(), MAX_KEEP_RECORDS);
     }
 }

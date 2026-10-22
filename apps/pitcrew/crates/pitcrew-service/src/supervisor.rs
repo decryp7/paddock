@@ -416,6 +416,7 @@ impl Supervisor {
             label_check: None,
             cfg,
         };
+        runner.watch.restore_keeps(&st.keeps);
         // A runner the previous service instance started and that still runs: adopt it instead of starting a second.
         let bin = self.binary(&runner.cfg);
         self.probe.refresh_processes();
@@ -1795,6 +1796,11 @@ impl Supervisor {
     fn save_state(&mut self, now: Timestamp) {
         self.last_save = now;
         self.dirty = false;
+        for r in self.runners.values() {
+            if let Some(st) = self.state.runners.get_mut(r.cfg.name.as_str()) {
+                st.keeps = r.watch.keeps();
+            }
+        }
         match state::to_json(&self.state) {
             Ok(text) => {
                 if let Err(e) = store::write_atomic(&self.env.data_dir.join(STATE_FILE), &text) {

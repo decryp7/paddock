@@ -10,8 +10,8 @@ use pitcrew_core::history::StopReason;
 use pitcrew_core::jobs::FinishedJob;
 use pitcrew_core::process_policy::{KeepFor, ProcessPolicy};
 use pitcrew_core::process_track::{
-    self, check_stop_target, classify, due, entries, extend, leftover_count, next_step, prune_extensions, rule_label, Extensions, JobSpan,
-    ProcessMeta, Refusal, StopProgress, StopStep, Tracked,
+    self, check_stop_target, classify, due, entries, export_extensions, extend, import_extensions, leftover_count, next_step,
+    prune_extensions, rule_label, Extensions, JobSpan, KeepRecord, ProcessMeta, Refusal, StopProgress, StopStep, Tracked,
 };
 use pitcrew_core::protocol::ProcessList;
 use pitcrew_core::time::Timestamp;
@@ -131,6 +131,16 @@ impl ProcessWatch {
         let metas: Vec<ProcessMeta> = self.tracked.iter().map(|t| t.meta.clone()).collect();
         check_stop_target(pid, started_ms, runner_pid, service_pid, allow_runner, &metas)?;
         self.tracked.iter().find(|t| t.meta.pid == pid).ok_or(Refusal::NotInTree)
+    }
+
+    /// The "keep longer" extensions, for the state file.
+    pub fn keeps(&self) -> Vec<KeepRecord> {
+        export_extensions(&self.ext)
+    }
+
+    /// Restores extensions saved before a service restart.
+    pub fn restore_keeps(&mut self, records: &[KeepRecord]) {
+        self.ext = import_extensions(records);
     }
 
     /// Adds time before a leftover is stopped.

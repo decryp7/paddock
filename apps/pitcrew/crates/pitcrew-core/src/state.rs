@@ -8,6 +8,7 @@
 use crate::history::{History, HistoryEvent};
 use crate::housekeeping::CleanupReport;
 use crate::metrics::{MetricsStore, SizeSeries, UsageStore};
+use crate::process_track::KeepRecord;
 use crate::protocol::UpdateRecord;
 use crate::time::Timestamp;
 use crate::version::RunnerVersion;
@@ -45,6 +46,22 @@ pub struct RunnerState {
     pub usage: UsageStore,
     /// The process id of the runner the service last started (to adopt it after a service restart).
     pub pid: Option<u32>,
+    /// "Keep longer" extensions of leftover processes, so they survive a service restart. A damaged record is skipped.
+    #[serde(deserialize_with = "lenient_keeps")]
+    pub keeps: Vec<KeepRecord>,
+}
+
+/// Reads the records one by one: a damaged one is dropped, the rest load.
+fn lenient_keeps<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<KeepRecord>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    let Some(items) = v.as_array() else {
+        return Ok(Vec::new());
+    };
+    Ok(items
+        .iter()
+        .filter_map(|i| serde_json::from_value::<KeepRecord>(i.clone()).ok())
+        .take(crate::process_track::MAX_KEEP_RECORDS)
+        .collect())
 }
 
 impl Default for RunnerState {
@@ -61,6 +78,7 @@ impl Default for RunnerState {
             folder_sizes: SizeSeries::default(),
             usage: UsageStore::for_runner(),
             pid: None,
+            keeps: Vec::new(),
         }
     }
 }
@@ -211,5 +229,26 @@ mod tests {
         assert!(load(Some(&" ".repeat(MAX_STATE_BYTES + 1)), None).problems[0].contains("larger"));
         // A missing field gets its default: a runner is wanted unless the user stopped it.
         assert!(load(Some(r#"{"version":1,"runners":{"x":{}}}"#), None).state.runners["x"].wanted);
+    }
+
+    #[test]
+    fn keep_longer_records_persist_and_damage_is_tolerated() {
+        let mut s = ServiceState::default();
+        let mut r = RunnerState::default();
+        r.keeps = vec![KeepRecord {
+            pid: 4,
+            started_ms: 9,
+            extra_ms: 3_600_000,
+        }];
+        s.runners.insert("a".into(), r);
+        let back = load(Some(&to_json(&s).unwrap()), None);
+        assert_eq!(back.state.runners["a"].keeps, s.runners["a"].keeps);
+        // One damaged record is skipped; a non-list is ignored; an old file without the key loads.
+        let text =
+            r#"{"version":1,"runners":{"a":{"keeps":[{"pid":1,"startedMs":2,"extraMs":3},{"pid":"x"},7]},"b":{"keeps":"nope"},"c":{}}}"#;
+        let l = load(Some(text), None);
+        assert!(l.problems.is_empty(), "{:?}", l.problems);
+        assert_eq!(l.state.runners["a"].keeps.len(), 1);
+        assert!(l.state.runners["b"].keeps.is_empty() && l.state.runners["c"].keeps.is_empty());
     }
 }

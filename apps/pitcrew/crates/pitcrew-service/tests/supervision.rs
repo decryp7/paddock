@@ -123,6 +123,47 @@ impl Harness {
         Timestamp(self.clock.load(Ordering::SeqCst))
     }
 
+    /// Ends every process the test started: anything running from or inside the harness folder, and their descendants.
+    fn kill_leftover_processes(&self) {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let mut sys = System::new();
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing()
+                .with_exe(sysinfo::UpdateKind::Always)
+                .with_cwd(sysinfo::UpdateKind::Always),
+        );
+        let root = self.root.canonicalize().unwrap_or_else(|_| self.root.clone());
+        let mut doomed: std::collections::HashSet<Pid> = sys
+            .processes()
+            .iter()
+            .filter(|(_, p)| {
+                let inside = |q: Option<&std::path::Path>| q.is_some_and(|q| q.starts_with(&self.root) || q.starts_with(&root));
+                let cmd = p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ");
+                inside(p.exe()) || inside(p.cwd()) || cmd.contains(&*self.root.to_string_lossy())
+            })
+            .map(|(pid, _)| *pid)
+            .collect();
+        loop {
+            let before = doomed.len();
+            for (pid, p) in sys.processes() {
+                if p.parent().is_some_and(|pp| doomed.contains(&pp)) {
+                    doomed.insert(*pid);
+                }
+            }
+            if doomed.len() == before {
+                break;
+            }
+        }
+        let me = Pid::from_u32(std::process::id());
+        for pid in doomed.into_iter().filter(|p| *p != me) {
+            if let Some(p) = sys.process(pid) {
+                p.kill();
+            }
+        }
+    }
+
     /// Advances the fake clock by `step` and processes everything that arrived, a few times.
     fn pump(&mut self, step: Duration) {
         self.clock.fetch_add(step.as_millis() as u64, Ordering::SeqCst);
@@ -201,19 +242,10 @@ impl Harness {
 }
 
 impl Drop for Harness {
-    /// A failing test never leaves its fake runner (or the processes it started) running: everything whose program
-    /// or command line lives in this test's folder is killed, then the folder is removed.
+    /// A failing test never leaves its fake runner (or the processes it started) running: everything whose program,
+    /// working folder or command line is in this test's folder is killed with its descendants, then the folder goes.
     fn drop(&mut self) {
-        let root = self.root.to_string_lossy().to_string();
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        for p in sys.processes().values() {
-            let exe = p.exe().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
-            let cmd = p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ");
-            if exe.starts_with(&root) || cmd.contains(&root) {
-                p.kill();
-            }
-        }
+        self.kill_leftover_processes();
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
@@ -665,6 +697,13 @@ fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
     h.pump(Duration::from_secs(11 * 60));
     h.pump(Duration::from_secs(6));
     assert!(alive(row.pid), "an hour was added");
+    // The extension is in the state file, so a service restart does not lose it.
+    h.pump(Duration::from_secs(60));
+    let saved = std::fs::read_to_string(h.root.join("data").join("state.json")).unwrap();
+    assert!(
+        saved.contains(&format!("\"pid\":{}", row.pid)) && saved.contains("\"keeps\""),
+        "{saved}"
+    );
     // The runner itself cannot be "kept longer": only leftovers can.
     let me = h.processes().entries.into_iter().find(|e| e.is_runner).unwrap();
     let r = h.ask(Request::KeepProcess {
