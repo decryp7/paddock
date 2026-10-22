@@ -169,10 +169,13 @@ pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()>
 /// Draws a frame on an item: the pixels, the tooltip, and the Pause item's text.
 pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame, paused: bool) {
     let Some(tray) = app.tray_by_id(&tray_id(item)) else { return };
-    let icon = Image::new_owned(frame.icon.rgba.clone(), frame.icon.size, frame.icon.size);
-    // The drawn icon has its own colours: never a template image.
+    // macOS wants a template image (black with alpha; the menu bar tints it for light, dark and inactive states);
+    // Windows and Linux get Dyno's own colours.
+    let template = cfg!(target_os = "macos");
+    let drawn = if template { frame.icon.as_template() } else { frame.icon.clone() };
+    let icon = Image::new_owned(drawn.rgba, drawn.size, drawn.size);
     let _ = tray.set_icon(Some(icon));
-    let _ = tray.set_icon_as_template(false);
+    let _ = tray.set_icon_as_template(template);
     let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
     if let Some(state) = app.try_state::<TrayState>() {
         if let Some(p) = lock(&state.pause).get(item) {

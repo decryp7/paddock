@@ -51,6 +51,17 @@ impl Icon {
         }
     }
 
+    /// The icon as a macOS template image: every pixel black, its alpha kept. The menu bar tints a template itself (black
+    /// on a light bar, white on a dark one, dimmed when inactive), so colour is dropped; the track, the full ink and
+    /// the 60 % ink stay distinguishable because they differ in alpha.
+    pub fn as_template(&self) -> Icon {
+        let mut out = self.clone();
+        for i in (0..out.rgba.len()).step_by(4) {
+            out.rgba[i..i + 3].fill(0);
+        }
+        out
+    }
+
     fn put(&mut self, x: u32, y: u32, c: Rgba) {
         if x < self.size && y < self.size {
             let i = ((y * self.size + x) * 4) as usize;
@@ -386,5 +397,16 @@ mod tests {
         let g = render_graph_number(42.0, &[10.0, 90.0], 32, true);
         assert!(ink_pixels(&g) > 0);
         assert_eq!(render_graph_number(0.0, &[], 8, false).size, 16);
+    }
+
+    #[test]
+    fn a_template_icon_is_black_with_the_same_alpha() {
+        let icon = render_meter(60.0, 18, true);
+        let t = icon.as_template();
+        assert_eq!(t.size, icon.size);
+        assert!(t.rgba.iter().enumerate().all(|(i, b)| i % 4 == 3 || *b == 0));
+        let alphas = |i: &Icon| i.rgba.iter().skip(3).step_by(4).copied().collect::<Vec<_>>();
+        assert_eq!(alphas(&t), alphas(&icon));
+        assert!(alphas(&t).iter().any(|a| *a > 0), "something is drawn");
     }
 }
