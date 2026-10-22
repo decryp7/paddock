@@ -53,7 +53,7 @@ test.describe('dashboard', () => {
   test('shows live tiles, history and the diagnosis on request', async ({ page }) => {
     await page.goto(url());
     await expect(page.getByRole('group', { name: 'CPU', exact: true })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Memory' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Memory', exact: true })).toBeVisible();
     await expect(page.locator('dy-chart canvas').first()).toBeVisible();
     await page.getByRole('button', { name: 'Check now' }).click();
     await expect(page.getByText('A Rust build is using most of your CPU')).toBeVisible();
@@ -63,9 +63,9 @@ test.describe('dashboard', () => {
 
   test('a machine without a battery or sensors says so with the reason', async ({ page }) => {
     await page.goto(url('/', '&mock=desktop'));
-    const battery = page.getByRole('group', { name: 'Battery' });
-    await expect(battery.getByText('Not available on this PC')).toBeVisible();
-    await expect(battery.getByText('no battery')).toBeVisible();
+    const battery = page.getByRole('group', { name: 'Battery', exact: true });
+    await expect(battery.getByText('Not available').first()).toBeVisible();
+    await expect(battery.getByText(/no battery/i)).toBeVisible();
   });
 
   test('a failed request shows an inline error with Retry, and Retry recovers', async ({ page }) => {

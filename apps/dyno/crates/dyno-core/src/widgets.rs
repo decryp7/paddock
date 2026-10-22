@@ -405,7 +405,7 @@ impl Preset {
             // What the fixed dashboard used to show, as widgets: the verdict first, then the live tiles, the busiest apps,
             // what happened and the history.
             Preset::Overview => vec![
-                w("health", K::Health, M::CpuTotal, S),
+                w("health", K::Health, M::CpuTotal, Md),
                 w("diagnosis", K::Diagnosis, M::CpuTotal, Md),
                 w("issues", K::Issues, M::CpuTotal, S),
                 w("cpu", K::Cpu, M::CpuTotal, Md),
@@ -414,7 +414,6 @@ impl Preset {
                 w("network", K::Graph, M::NetworkDown, S),
                 w("gpu", K::Graph, M::GpuLoad, S),
                 w("battery", K::Ring, M::Battery, S),
-                hot(w("temp", K::BigNumber, M::Temperature, S), 80.0, 92.0),
                 w("top-cpu", K::TopProcesses, M::CpuTotal, Md),
                 w("top-memory", K::TopProcesses, M::Memory, Md),
                 w("events", K::Events, M::CpuTotal, Md),
@@ -839,7 +838,21 @@ mod tests {
     #[test]
     fn the_overview_recreates_the_old_fixed_dashboard() {
         let ids: Vec<String> = Preset::Overview.widgets().into_iter().map(|w| w.id).collect();
-        for needed in ["health", "diagnosis", "issues", "cpu", "memory", "disk", "network", "gpu", "battery", "top-cpu", "top-memory", "events", "history"] {
+        for needed in [
+            "health",
+            "diagnosis",
+            "issues",
+            "cpu",
+            "memory",
+            "disk",
+            "network",
+            "gpu",
+            "battery",
+            "top-cpu",
+            "top-memory",
+            "events",
+            "history",
+        ] {
             assert!(ids.iter().any(|i| i == needed), "the overview lacks {needed}");
         }
         for kind in ["cpu", "diagnosis", "events", "history", "consumers", "diskTrend"] {

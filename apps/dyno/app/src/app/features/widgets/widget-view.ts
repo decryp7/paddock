@@ -11,6 +11,7 @@ import { LiveStore } from '../../state/live.store';
 import { ANOMALY_LABEL } from '../../shared/labels';
 import type { Widget, WidgetKind } from '../../core/api.types';
 import { AnimatedNumber } from './animated-number';
+import { HealthHero } from '../dashboard/health-hero';
 import { CpuTile } from '../dashboard/tiles';
 import { DiagnosisCard } from '../dashboard/diagnosis-card';
 import { EventsFeed } from '../dashboard/events-feed';
@@ -41,9 +42,9 @@ const ICON: Record<WidgetKind, IconName> = {
  */
 @Component({
   selector: 'dy-widget',
-  imports: [Icon, Ring, Sparkline, AnimatedNumber, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { role: 'group', '[attr.aria-label]': 'title()', '[attr.data-kind]': 'widget().kind', '[class.own-card]': 'ownCard()' },
+  host: { '[attr.role]': 'ownCard() ? null : "group"', '[attr.aria-label]': 'ownCard() ? null : title()', '[attr.data-kind]': 'widget().kind', '[class.own-card]': 'ownCard()' },
   template: `
     @if (!ownCard()) {
     <header>
@@ -115,6 +116,9 @@ const ICON: Record<WidgetKind, IconName> = {
       @case ('consumers') { <dy-consumers-panel /> }
       @case ('diskTrend') { <dy-disk-trend-panel /> }
       @case ('health') {
+        @if (widget().size !== 's') {
+          <dy-health-hero />
+        } @else {
         @if (health.report(); as r) {
           <div class="ringrow">
             <dy-ring [value]="r.score" [tone]="gradeTone()" [label]="'Health score ' + r.score" style="--ring-size: 84px"><span class="rn num">{{ round(r.score) }}</span></dy-ring>
@@ -122,6 +126,7 @@ const ICON: Record<WidgetKind, IconName> = {
           </div>
         } @else {
           <p class="note">{{ health.reportError()?.message ?? 'Reading the health score…' }}</p>
+        }
         }
       }
     }
@@ -158,7 +163,7 @@ export class WidgetView {
 
   protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${metricLabel(this.widget().metric).toLowerCase()}` : PANEL_KINDS.includes(this.widget().kind) ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
   /** The panel kinds are cards of their own (they bring header, loading and error states). */
-  protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind));
+  protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind) || (this.widget().kind === 'health' && this.widget().size !== 's'));
   protected readonly icon = computed(() => ICON[this.widget().kind]);
   protected readonly reading = computed(() => readMetric(this.widget().metric, this.live.system()));
   protected readonly percent = computed(() => this.reading().percent !== null);

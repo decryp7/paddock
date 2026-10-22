@@ -14,7 +14,7 @@ const w = (id: string, kind: WidgetKind, metric: WidgetMetric, size: WidgetSize,
 
 export const PRESET_WIDGETS: Record<string, Widget[]> = {
   overview: [
-    w('health', 'health', 'cpuTotal', 's'),
+    w('health', 'health', 'cpuTotal', 'm'),
     w('diagnosis', 'diagnosis', 'cpuTotal', 'm'),
     w('issues', 'issues', 'cpuTotal', 's'),
     w('cpu', 'cpu', 'cpuTotal', 'm'),
@@ -23,7 +23,6 @@ export const PRESET_WIDGETS: Record<string, Widget[]> = {
     w('network', 'graph', 'networkDown', 's'),
     w('gpu', 'graph', 'gpuLoad', 's'),
     w('battery', 'ring', 'battery', 's'),
-    w('temp', 'bigNumber', 'temperature', 's', [80, 92]),
     w('top-cpu', 'topProcesses', 'cpuTotal', 'm'),
     w('top-memory', 'topProcesses', 'memory', 'm'),
     w('events', 'events', 'cpuTotal', 'm'),
