@@ -92,7 +92,8 @@ pub fn uninstall_from(unit_dir: &Path, ctl: Systemctl<'_>) -> Result<(), String>
 fn dirs() -> Result<(PathBuf, PathBuf), String> {
     let env = PathEnv::from_process();
     let unit_dir = systemd_unit_dir(&env).ok_or("HOME is not set, so the systemd user folder cannot be found")?;
-    let data_dir = super::spec::data_dir(super::spec::TargetOs::Linux, &env).ok_or("HOME is not set, so the data folder cannot be found")?;
+    let data_dir =
+        super::spec::data_dir(super::spec::TargetOs::Linux, &env).ok_or("HOME is not set, so the data folder cannot be found")?;
     Ok((PathBuf::from(unit_dir), PathBuf::from(data_dir)))
 }
 
@@ -141,7 +142,13 @@ mod tests {
         assert_eq!(*calls.borrow(), vec!["daemon-reload", "enable --now pitwall.service"]);
         assert!(!d.path().join("systemd/user/pitwall.service.new").exists());
         // Reinstalling replaces the file.
-        install_into(&d.path().join("systemd/user"), Path::new("/opt/p/pitwall-server"), &d.path().join("data"), &ctl).unwrap();
+        install_into(
+            &d.path().join("systemd/user"),
+            Path::new("/opt/p/pitwall-server"),
+            &d.path().join("data"),
+            &ctl,
+        )
+        .unwrap();
         assert!(std::fs::read_to_string(&file).unwrap().contains("/opt/p/pitwall-server"));
     }
 

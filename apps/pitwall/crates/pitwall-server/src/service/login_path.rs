@@ -36,7 +36,11 @@ pub fn parse_probe_output(out: &str) -> Option<String> {
 
 /// The shells to try: `$SHELL` if it is an absolute path to a file, then the platform's usual ones.
 pub fn shell_candidates(shell_var: Option<&str>, macos: bool, exists: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
-    let usual: &[&str] = if macos { &["/bin/zsh", "/bin/bash"] } else { &["/bin/bash", "/bin/sh"] };
+    let usual: &[&str] = if macos {
+        &["/bin/zsh", "/bin/bash"]
+    } else {
+        &["/bin/bash", "/bin/sh"]
+    };
     let mut out: Vec<PathBuf> = Vec::new();
     for s in shell_var.into_iter().chain(usual.iter().copied()) {
         let p = PathBuf::from(s);
@@ -99,7 +103,11 @@ mod tests {
         assert_eq!(parse_probe_output(&format!("{BEGIN}/a")), None, "unterminated");
         assert_eq!(parse_probe_output(&format!("{BEGIN}{END}")), None, "empty");
         assert_eq!(parse_probe_output(&format!("{BEGIN}/a\u{7}b{END}")), None, "control characters");
-        assert_eq!(parse_probe_output(&format!("{BEGIN}{}{END}", "/a:".repeat(MAX_PATH_LEN))), None, "too long");
+        assert_eq!(
+            parse_probe_output(&format!("{BEGIN}{}{END}", "/a:".repeat(MAX_PATH_LEN))),
+            None,
+            "too long"
+        );
     }
 
     #[test]
@@ -130,8 +138,15 @@ mod tests {
         #[test]
         fn a_login_shells_path_is_taken_and_its_noise_ignored() {
             let d = tempfile::tempdir().unwrap();
-            let sh = script(d.path(), "fakezsh", &format!("echo banner; printf '{BEGIN}/home/u/.nvm/bin:/opt/homebrew/bin{END}'"));
-            assert_eq!(ask_shell(&sh, Duration::from_secs(10)).unwrap(), "/home/u/.nvm/bin:/opt/homebrew/bin");
+            let sh = script(
+                d.path(),
+                "fakezsh",
+                &format!("echo banner; printf '{BEGIN}/home/u/.nvm/bin:/opt/homebrew/bin{END}'"),
+            );
+            assert_eq!(
+                ask_shell(&sh, Duration::from_secs(10)).unwrap(),
+                "/home/u/.nvm/bin:/opt/homebrew/bin"
+            );
         }
 
         #[test]

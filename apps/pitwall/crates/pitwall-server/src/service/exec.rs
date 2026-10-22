@@ -58,7 +58,10 @@ pub fn run_with_timeout(program: &OsStr, args: &[&str], env: &[(&str, &str)], ti
             Ok(None) if started.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("{} did not finish within {timeout:?} and was stopped", program.to_string_lossy()));
+                return Err(format!(
+                    "{} did not finish within {timeout:?} and was stopped",
+                    program.to_string_lossy()
+                ));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(20)),
             Err(e) => return Err(format!("waiting for {} failed: {e}", program.to_string_lossy())),
@@ -78,11 +81,23 @@ mod tests {
 
     #[test]
     fn output_and_status_are_returned() {
-        let o = run_with_timeout(OsStr::new("/bin/sh"), &["-c", "echo hi; echo oops >&2; exit 3"], &[], Duration::from_secs(10)).unwrap();
+        let o = run_with_timeout(
+            OsStr::new("/bin/sh"),
+            &["-c", "echo hi; echo oops >&2; exit 3"],
+            &[],
+            Duration::from_secs(10),
+        )
+        .unwrap();
         assert!(!o.success);
         assert_eq!(o.stdout.trim(), "hi");
         assert_eq!(o.stderr.trim(), "oops");
-        let o = run_with_timeout(OsStr::new("/bin/sh"), &["-c", "printf %s \"$X\""], &[("X", "v")], Duration::from_secs(10)).unwrap();
+        let o = run_with_timeout(
+            OsStr::new("/bin/sh"),
+            &["-c", "printf %s \"$X\""],
+            &[("X", "v")],
+            Duration::from_secs(10),
+        )
+        .unwrap();
         assert!(o.success && o.stdout == "v");
     }
 

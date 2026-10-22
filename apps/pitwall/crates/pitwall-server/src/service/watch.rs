@@ -31,12 +31,17 @@ pub fn activity_from(overview: &Value, downloads: &Value) -> Activity {
     let queue_idle = empty(overview.pointer("/queue/running")) && empty(overview.pointer("/queue/waiting"));
     let requests_idle = overview.pointer("/throughput/activeRequests").and_then(Value::as_u64) == Some(0);
     let active = |state: &str| {
-        serde_json::from_value::<DownloadState>(Value::String(state.to_string()))
-            .map_or(true, |s| !matches!(s, DownloadState::Done | DownloadState::Failed | DownloadState::Paused | DownloadState::Cancelled))
+        serde_json::from_value::<DownloadState>(Value::String(state.to_string())).map_or(true, |s| {
+            !matches!(
+                s,
+                DownloadState::Done | DownloadState::Failed | DownloadState::Paused | DownloadState::Cancelled
+            )
+        })
     };
-    let downloads_idle = downloads
-        .as_array()
-        .is_some_and(|all| all.iter().all(|d| d.get("state").and_then(Value::as_str).is_some_and(|s| !active(s))));
+    let downloads_idle = downloads.as_array().is_some_and(|all| {
+        all.iter()
+            .all(|d| d.get("state").and_then(Value::as_str).is_some_and(|s| !active(s)))
+    });
     if queue_idle && requests_idle && downloads_idle {
         Activity::Idle
     } else {
@@ -52,7 +57,9 @@ pub async fn ask_activity(dirs: &Dirs) -> Activity {
         .and_then(|t| pitwall_core::discovery::Discovery::parse(&t).ok())
         .and_then(|d| LoopbackPort::new(d.port));
     let key = std::fs::read_to_string(dirs.admin_key()).ok().map(|k| k.trim().to_string());
-    let (Some(port), Some(key)) = (port, key) else { return Activity::Busy };
+    let (Some(port), Some(key)) = (port, key) else {
+        return Activity::Busy;
+    };
     let client = Client::new(port, Some(key));
     let ask = |method: &str| {
         let client = client.clone();
@@ -69,8 +76,14 @@ pub async fn ask_activity(dirs: &Dirs) -> Activity {
 
 /// The loop: every `every`, restart (call `on_restart`, then return) when the program file changed and the server is
 /// idle. `stamp_now` and `activity` are injected so tests need neither a real file nor a real server.
-pub async fn watch<S, A, Fut>(started: Option<BinaryStamp>, supervised: bool, every: Duration, stamp_now: S, activity: A, on_restart: impl FnOnce())
-where
+pub async fn watch<S, A, Fut>(
+    started: Option<BinaryStamp>,
+    supervised: bool,
+    every: Duration,
+    stamp_now: S,
+    activity: A,
+    on_restart: impl FnOnce(),
+) where
     S: Fn() -> Option<BinaryStamp>,
     A: Fn() -> Fut,
     Fut: Future<Output = Activity>,
@@ -129,11 +142,20 @@ mod tests {
     #[test]
     fn idle_means_no_jobs_no_requests_and_no_downloads() {
         assert_eq!(activity_from(&overview(0, 0, 0), &json!([])), Activity::Idle);
-        assert_eq!(activity_from(&overview(0, 0, 0), &json!([{"state": "done"}, {"state": "paused"}, {"state": "failed"}])), Activity::Idle);
+        assert_eq!(
+            activity_from(
+                &overview(0, 0, 0),
+                &json!([{"state": "done"}, {"state": "paused"}, {"state": "failed"}])
+            ),
+            Activity::Idle
+        );
         assert_eq!(activity_from(&overview(1, 0, 0), &json!([])), Activity::Busy);
         assert_eq!(activity_from(&overview(0, 2, 0), &json!([])), Activity::Busy);
         assert_eq!(activity_from(&overview(0, 0, 1), &json!([])), Activity::Busy);
-        assert_eq!(activity_from(&overview(0, 0, 0), &json!([{"state": "downloading"}])), Activity::Busy);
+        assert_eq!(
+            activity_from(&overview(0, 0, 0), &json!([{"state": "downloading"}])),
+            Activity::Busy
+        );
         assert_eq!(activity_from(&overview(0, 0, 0), &json!([{"state": "selfTest"}])), Activity::Busy);
         // Unknown shapes and unknown states are treated as busy.
         assert_eq!(activity_from(&Value::Null, &json!([])), Activity::Busy);
@@ -202,13 +224,27 @@ mod tests {
         let a = BinaryStamp { len: 1, modified_ms: 1 };
         let done = tokio::time::timeout(
             Duration::from_secs(2),
-            watch(Some(a), false, Duration::from_millis(5), || None, || async { Activity::Idle }, || panic!("must not restart")),
+            watch(
+                Some(a),
+                false,
+                Duration::from_millis(5),
+                || None,
+                || async { Activity::Idle },
+                || panic!("must not restart"),
+            ),
         )
         .await;
         assert!(done.is_ok(), "returns at once");
         let done = tokio::time::timeout(
             Duration::from_secs(2),
-            watch(None, true, Duration::from_millis(5), || None, || async { Activity::Idle }, || panic!("must not restart")),
+            watch(
+                None,
+                true,
+                Duration::from_millis(5),
+                || None,
+                || async { Activity::Idle },
+                || panic!("must not restart"),
+            ),
         )
         .await;
         assert!(done.is_ok());

@@ -3,7 +3,7 @@ members = [
   "crates/pitwall-core",
   "crates/pitwall-loopback",
   "crates/pitwall-server",
-  # "app/src-tauri",
+  "app/src-tauri",
 ]
 resolver = "2"
 

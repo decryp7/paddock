@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Pitwall server as the user's launch agent, registered by the app with SMAppService.agent(plistName:) from
+     Contents/Library/LaunchAgents. BundleProgram is relative to the bundle. KeepAlive restarts the server when it
+     exits, which is also how it picks up a new version after an app update (it exits itself when idle).
+     PITWALL_SERVICE=1 tells the server it is supervised: it adds the login shell's PATH and watches for updates. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>net.decryptology.pitwall.service</string>
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/pitwall-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>pitwall-server</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PITWALL_SERVICE</key>
+        <string>1</string>
+    </dict>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>net.decryptology.pitwall</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+</dict>
+</plist>

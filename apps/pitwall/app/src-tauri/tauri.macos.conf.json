@@ -1,0 +1,41 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pitwall",
+        "width": 1200,
+        "height": 780,
+        "minWidth": 860,
+        "minHeight": 560,
+        "resizable": true,
+        "zoomHotkeysEnabled": false,
+        "dragDropEnabled": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 24
+        },
+        "transparent": true,
+        "windowEffects": {
+          "effects": [
+            "sidebar"
+          ],
+          "state": "followsWindowActiveState"
+        }
+      }
+    ]
+  },
+  "bundle": {
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "files": {
+        "Library/LaunchAgents/net.decryptology.pitwall.service.plist": "./macos/net.decryptology.pitwall.service.plist"
+      },
+      "signingIdentity": "-"
+    }
+  }
+}

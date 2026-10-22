@@ -117,7 +117,10 @@ pub fn data_dir(os: TargetOs, env: &PathEnv) -> Option<String> {
             .as_deref()
             .map(|a| os.join(a, &["Pitwall"]))
             .or_else(|| env.home.as_deref().map(|h| os.join(h, &["AppData", "Roaming", "Pitwall"]))),
-        TargetOs::MacOs => env.home.as_deref().map(|h| os.join(h, &["Library", "Application Support", "Pitwall"])),
+        TargetOs::MacOs => env
+            .home
+            .as_deref()
+            .map(|h| os.join(h, &["Library", "Application Support", "Pitwall"])),
         TargetOs::Linux => env
             .xdg_data_home
             .as_deref()
@@ -311,7 +314,10 @@ mod tests {
             home: Some("/Users/ana".into()),
             ..PathEnv::default()
         };
-        assert_eq!(data_dir(TargetOs::MacOs, &mac).unwrap(), "/Users/ana/Library/Application Support/Pitwall");
+        assert_eq!(
+            data_dir(TargetOs::MacOs, &mac).unwrap(),
+            "/Users/ana/Library/Application Support/Pitwall"
+        );
         assert_eq!(data_dir(TargetOs::Linux, &env()).unwrap(), "/home/ana/.local/share/pitwall");
         let xdg = PathEnv {
             xdg_data_home: Some("/data".into()),
@@ -356,10 +362,7 @@ mod tests {
 
     #[test]
     fn the_unit_goes_to_the_users_systemd_folder() {
-        assert_eq!(
-            systemd_unit_file(&env()).unwrap(),
-            "/home/ana/.config/systemd/user/pitwall.service"
-        );
+        assert_eq!(systemd_unit_file(&env()).unwrap(), "/home/ana/.config/systemd/user/pitwall.service");
         let xdg = PathEnv {
             xdg_config_home: Some("/cfg".into()),
             ..env()

@@ -1,0 +1,30 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pitwall",
+        "width": 1200,
+        "height": 780,
+        "minWidth": 860,
+        "minHeight": 560,
+        "resizable": true,
+        "zoomHotkeysEnabled": false,
+        "dragDropEnabled": false,
+        "transparent": true,
+        "windowEffects": { "effects": ["mica"] }
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "./windows/installer-hooks.nsh",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+[package]
+name = "pitwall-app"
+description = "Pitwall: tray app and window over the Pitwall server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[lib]
+name = "pitwall_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+# The shell depends on the management contract (pitwall-core) and the loopback-only HTTP client; never on
+# pitwall-server (the server is a separate process) and never on reqwest (ADR 0001).
+[dependencies]
+pitwall-core.workspace = true
+pitwall-loopback = { path = "../../crates/pitwall-loopback" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
+# "macos-private-api": the transparent window with vibrancy on macOS (tauri.macos.conf.json `macOSPrivateApi`); a no-op
+# elsewhere. It must sit here, not under a target table: tauri-build checks only this list against the config.
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-autostart = "2"
+# >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version). No "zip": Pitwall publishes v2
+# updater artifacts (the installers themselves). "rustls-tls" with the platform verifier trusts the OS certificate
+# store. The updater is the only outbound HTTP in the shell, and only when the user asks for an update check.
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# The OS credential store (Windows Credential Manager, macOS Keychain, Secret Service) for the app's copy of the
+# admin key; admin.key is the fallback.
+keyring = "4.2"
+
+[target.'cfg(windows)'.dependencies]
+# Asking the Service Control Manager whether the service is installed and running (no rights needed).
+windows-service = "0.8"
+# The taskbar's light/dark setting (for the tray icon), read only.
+winreg = "0.56"
+webview2-com = "0.39"
+# Starting `pitwall-server install` with Windows' own elevation prompt (ShellExecuteExW "runas").
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Registering the bundled launch agent with SMAppService (macOS 13+).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
+tauri = { version = "2.12.4", features = ["test"] }

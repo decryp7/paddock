@@ -8,6 +8,9 @@ use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() {
+    if let Some(code) = pitwall_server::service::dispatch() {
+        std::process::exit(code);
+    }
     let mut args = std::env::args().skip(1);
     let (mut port, mut dir, mut fake) = (None::<u16>, None::<String>, false);
     while let Some(a) = args.next() {

@@ -15,6 +15,7 @@ pub mod mgmt;
 pub mod paths;
 pub mod process;
 pub mod serving;
+pub mod service;
 pub mod system;
 
 /// Lock a mutex, recovering from poisoning.
