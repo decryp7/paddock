@@ -14,7 +14,7 @@ export interface ContextMenuItem {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'pw-menu' },
   template: `
-    <div cdkMenu aria-label="Context menu" (keydown.escape)="closed.emit()">
+    <div cdkMenu aria-label="Context menu" (keydown.escape)="closed.emit()" tabindex="-1">
       @for (item of items(); track item.label) {
         <button type="button" cdkMenuItem class="pw-menu-item" (cdkMenuItemTriggered)="item.run(); closed.emit()">{{ item.label }}</button>
       }

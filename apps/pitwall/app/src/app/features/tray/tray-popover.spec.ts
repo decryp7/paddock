@@ -3,7 +3,7 @@ import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
 import { patchState, type WritableStateSource } from '@ngrx/signals';
-import type { GpuSample, MemorySample, Overview, Throughput } from '../../core/api.types';
+import type { Overview } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';

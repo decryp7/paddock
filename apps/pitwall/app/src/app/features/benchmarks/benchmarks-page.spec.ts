@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- chart options are inspected untyped */
 import { MockBackend } from '../../core/mock-backend';
 import { FakeChart, button, render, settle } from '../../../testing/render';
 import { BenchmarksPage } from './benchmarks-page';

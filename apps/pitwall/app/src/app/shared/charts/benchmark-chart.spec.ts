@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- chart options are inspected untyped */
 import type { BenchmarkResult } from '../../core/api.types';
 import { THEME_TOKENS } from '../theme-tokens';
 import { benchmarkChart, latestPerRun } from './benchmark-chart';

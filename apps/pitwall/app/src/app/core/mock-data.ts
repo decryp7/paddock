@@ -379,7 +379,7 @@ export function demoHistory(range: HistoryRange, now: number, seed = 7): History
       });
     }
   }
-  events.push({ id: id++, at: start + span * 0.62, kind: 'engineRestarted', severity: 'warn', message: 'llama.cpp (Llama 3.2 3B) stopped responding and was restarted', modelId: ids[1]!, appId: null, reason: null });
+  events.push({ id, at: start + span * 0.62, kind: 'engineRestarted', severity: 'warn', message: 'llama.cpp (Llama 3.2 3B) stopped responding and was restarted', modelId: ids[1]!, appId: null, reason: null });
   events.sort((a, b) => a.at - b.at);
   return { range, stepMs, points, requestsByApp: byApp, requestsByModel: byModel, events };
 }

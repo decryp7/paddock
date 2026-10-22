@@ -143,7 +143,7 @@ describe('ModelsPage', () => {
 
   it('searches, opens a repo with fit verdicts and downloads a variant with its projector', async () => {
     const backend = new MockBackend();
-    const { el, settle, button, fixture } = await render(backend);
+    const { el, settle, fixture } = await render(backend);
     (el.querySelector('#tab-library') as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
     await settle();
     expect(el.querySelectorAll('pw-discover-tab .hit').length).toBe(12);

@@ -9,6 +9,15 @@ const NOW = new Date('2026-10-22T14:30:00').getTime();
 const SCREENS: { name: string; path: string; ready: string; prepare?: (page: Page) => Promise<void> }[] = [
   { name: 'dashboard', path: '/', ready: 'pw-echart' },
   { name: 'models', path: '/models', ready: 'h1' },
+  {
+    name: 'models-discover',
+    path: '/models',
+    ready: 'h1',
+    prepare: async (page) => {
+      await page.getByRole('tab', { name: /Discover/ }).click();
+      await expect(page.getByText('Recommended for this machine')).toBeVisible();
+    },
+  },
   { name: 'engines', path: '/engines', ready: 'h1' },
   { name: 'apps', path: '/apps', ready: 'h1' },
   { name: 'requests', path: '/requests', ready: 'h1' },
