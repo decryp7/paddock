@@ -504,6 +504,25 @@ async fn task_and_token_endpoints() {
     );
 }
 
+/// Extends `p` to 4 TiB without using disk: sparse on Unix; on Windows the file is marked sparse first (NTFS).
+#[allow(clippy::disallowed_methods)] // a test helper calling the OS tool directly
+fn make_sparse_huge(p: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    if !std::process::Command::new("fsutil")
+        .args(["sparse", "setflag"])
+        .arg(p)
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        return false;
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(p)
+        .and_then(|f| f.set_len(4 << 40))
+        .is_ok()
+}
+
 #[tokio::test]
 async fn a_model_that_cannot_fit_is_refused_with_a_typed_error_and_nothing_starts() {
     let h = harness(false).await;
@@ -514,7 +533,10 @@ async fn a_model_that_cannot_fit_is_refused_with_a_typed_error_and_nothing_start
     let mut b = common::gguf("llama");
     b.truncate(70_000);
     std::fs::write(&p, &b).unwrap();
-    std::fs::OpenOptions::new().write(true).open(&p).unwrap().set_len(4 << 40).unwrap();
+    if !make_sparse_huge(&p) {
+        eprintln!("skipped: this volume cannot hold a sparse 4 TiB file");
+        return;
+    }
     let r = h
         .call("POST", "/v1/chat/completions", Some(&key), Some(chat("huge-q4_k_m", false)), &[])
         .await;
