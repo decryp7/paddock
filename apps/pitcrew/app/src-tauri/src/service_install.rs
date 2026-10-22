@@ -217,8 +217,11 @@ mod imp {
     /// again. Returns whether it did. macOS may ask for approval again; [`state`] then says so.
     pub fn repair_registration() -> Result<bool, CommandError> {
         // SAFETY: a property read on a valid object.
-        let registered = unsafe { service().status() } == SMAppServiceStatus::Enabled;
-        if !registered
+        let status = unsafe { service().status() };
+        // NotFound: the app is not in a place macOS can register from (e.g. not in /Applications): nothing to repair.
+        // Any other status may be stale: after the app was replaced, macOS can report "not registered" while launchd
+        // still holds the old job and refuses to start the new binary, so launchd's own report decides below.
+        if status == SMAppServiceStatus::NotFound
             || crate::service_client::LocalServiceClient
                 .request(pitcrew_core::protocol::Request::Status)
                 .is_ok()
@@ -372,6 +375,15 @@ pub use imp::{install, state, uninstall};
 #[cfg(target_os = "macos")]
 pub use imp::repair_registration;
 
+/// How many times a run of the app checks for a stale service registration (macOS).
+pub const REPAIR_ATTEMPTS: u32 = 8;
+
+/// The wait before repair check `attempt`: 3 s first, then a minute apart (the service may restart onto a new binary
+/// only once its runners are idle).
+pub fn repair_delay(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_secs(if attempt == 0 { 3 } else { 60 })
+}
+
 /// Whether `launchctl print` of the launch agent shows a registration launchd can no longer start. macOS keeps the
 /// code requirement of the binary that was approved; a rebuilt, ad-hoc signed app has another identity, so launchd
 /// refuses the new service ("needs LWCR update", spawn failed, exit 78 EX_CONFIG) until it is registered again.
@@ -384,6 +396,13 @@ pub fn stale_registration(launchctl_print: &str) -> bool {
 #[cfg(test)]
 mod stale_tests {
     use super::stale_registration;
+
+    #[test]
+    fn repair_checks_soon_then_every_minute() {
+        assert_eq!(super::repair_delay(0).as_secs(), 3);
+        assert_eq!(super::repair_delay(1).as_secs(), 60);
+        const { assert!(super::REPAIR_ATTEMPTS >= 5) };
+    }
 
     #[test]
     fn a_registration_launchd_cannot_start_is_stale() {

@@ -2,6 +2,7 @@
 //! everything comes from the service through [`service_client::ServiceClient`], pushed by `events`.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod applog;
 pub mod commands;
 pub mod credentials;
 pub mod diagnostics;
@@ -79,11 +80,18 @@ pub fn run() {
             // macOS): register it again in the background, so the runners come back without the user's help.
             #[cfg(target_os = "macos")]
             std::thread::spawn(|| {
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                match service_install::repair_registration() {
-                    Ok(true) => eprintln!("Pitcrew: registered the service again (launchd refused the old registration)"),
-                    Ok(false) => {}
-                    Err(e) => eprintln!("Pitcrew: the service could not be registered again: {}", e.message),
+                // The service may only fail later (it restarts itself onto a new binary when idle), so keep checking
+                // while it does not answer, a bounded number of times per run of the app.
+                for attempt in 0..service_install::REPAIR_ATTEMPTS {
+                    std::thread::sleep(service_install::repair_delay(attempt));
+                    match service_install::repair_registration() {
+                        Ok(true) => {
+                            applog::write("registered the service again (launchd refused the old registration)");
+                            break;
+                        }
+                        Ok(false) => {}
+                        Err(e) => applog::write(&format!("the service could not be registered again: {}", e.message)),
+                    }
                 }
             });
             if let Err(e) = tray::create(app.handle()) {
