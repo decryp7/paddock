@@ -117,3 +117,37 @@ test.describe('Spotter against the mock backend', () => {
     await expect(page.getByRole('link', { name: 'Add your first watch' })).toBeVisible();
   });
 });
+
+test.describe('Check schedule', () => {
+  test('switches between every, at times and cron with a live preview', async ({ page }) => {
+    await page.goto('/#/watches/new');
+    await page.getByRole('button', { name: /Node\.js/ }).click();
+    await expect(page.getByRole('table', { name: 'Releases found' })).toBeVisible();
+    await page.getByRole('button', { name: 'Next' }).click();
+    await page.getByRole('button', { name: 'Next' }).click();
+    await expect(page.getByRole('heading', { name: 'Schedule' })).toBeVisible();
+
+    const modes = page.getByRole('group', { name: 'How to schedule checks' });
+    await expect(modes.getByRole('button', { name: 'Every…' })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '12 h' }).click();
+    await expect(page.getByText('Next check').first()).toBeVisible();
+
+    await modes.getByRole('button', { name: 'At times' }).click();
+    await page.getByRole('button', { name: 'Friday' }).click();
+    await page.getByRole('button', { name: 'Add a time' }).click();
+    await expect(page.getByRole('list', { name: 'Upcoming checks' }).getByRole('listitem')).toHaveCount(5);
+    await page.getByLabel('Time zone').fill('Nowhere/Land');
+    await page.getByLabel('Time zone').blur();
+
+    await modes.getByRole('button', { name: 'Cron' }).click();
+    const expr = page.getByLabel('Cron expression');
+    await expr.fill('* *');
+    await expect(page.getByRole('alert').filter({ hasText: 'five fields' })).toBeVisible();
+    await expr.fill('0 9 * * 1-5');
+    await expect(page.getByRole('list', { name: 'Upcoming checks' }).getByRole('listitem')).toHaveCount(5);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Next' }).click();
+    await expect(page.getByText('Cron 0 9 * * 1-5')).toBeVisible();
+  });
+});

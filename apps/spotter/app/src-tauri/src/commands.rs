@@ -199,6 +199,18 @@ pub async fn test_pattern(
         .into())
 }
 
+/// `preview_schedule`: a schedule in words with its next runs and warnings (a query; nothing is saved). Problems
+/// come back as the command error's list, which the editor shows under the field.
+#[tauri::command]
+pub async fn preview_schedule(
+    state: State<'_, Shared>,
+    schedule: spotter_core::schedule::Schedule,
+    source_kind: String,
+) -> Out<SchedulePreviewDto> {
+    text_ok("source kind", &source_kind)?;
+    Ok((&state.engine.preview_schedule(&schedule, &source_kind)?).into())
+}
+
 /// `version_schemes`: patterns to start from.
 #[tauri::command]
 pub async fn version_schemes(state: State<'_, Shared>) -> Out<Vec<SchemePresetDto>> {

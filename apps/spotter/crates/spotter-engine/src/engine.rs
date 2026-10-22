@@ -10,12 +10,14 @@ use crate::notifier::{Notifier, NullNotifier};
 use crate::pipeline::Checker;
 use crate::secrets::SecretStore;
 use crate::view::{DashboardView, EventView, ProductView, ReleaseView, SourcePreview, WatchDetail, WatchSummary, WhatsNewView};
+use spotter_core::calendar::LocalZone;
 use spotter_core::config::ConfigDoc;
 use spotter_core::dashboard::{self, Range, WatchInput};
 use spotter_core::import::{self, ImportFormat, Imported};
 use spotter_core::limits::MAX_WATCHES;
 use spotter_core::pack::{Pack, Preset};
 use spotter_core::render::PageRenderer;
+use spotter_core::schedule::{next_check, Schedule, SchedulePreview, Timing};
 use spotter_core::schema::{FieldKind, SourceKindSpec};
 use spotter_core::source::catalog;
 use spotter_core::source::web_page::{discover_feeds, DiscoveredFeed};
@@ -189,6 +191,27 @@ impl Engine {
         self.inner.svc.clock.now()
     }
 
+    /// The machine's time zone as the shell reported it.
+    pub(crate) fn local_zone(&self) -> LocalZone {
+        LocalZone {
+            name: self.inner.svc.clock.local_zone_name(),
+            offset_minutes: self.inner.svc.clock.utc_offset_minutes(),
+        }
+    }
+
+    /// When a watch is checked next if the check ran at `at`: its schedule, the source's minimum interval, backoff
+    /// after failures and jitter. A schedule that cannot be evaluated falls back to the longest interval, never to a
+    /// tight loop.
+    pub(crate) fn next_check_after(&self, spec: &WatchSpec, at: Timestamp, failures: u32) -> Timestamp {
+        let timing = Timing {
+            min_interval_secs: spec.source.min_interval_secs(),
+            failures,
+            jitter: self.inner.svc.random.unit(),
+        };
+        next_check(&spec.schedule, &self.local_zone(), at, timing)
+            .unwrap_or_else(|_| at.plus_secs(u64::from(spotter_core::limits::MAX_INTERVAL_SECS)))
+    }
+
     pub(crate) fn emit(&self, c: Change) {
         // No subscriber is fine.
         let _ = self.inner.changes.send(c);
@@ -299,7 +322,7 @@ impl Engine {
             last_check_ms: state.last_check.map(|t| t.0),
             next_check_ms: state.next_check.map(|t| t.0),
             failures: state.failures,
-            interval_secs: spotter_core::schedule::clamp_interval(spec.interval_secs),
+            schedule_text: spec.schedule.describe(),
             product_count: state.products.len() as u32,
             status: state.status,
         }
@@ -438,6 +461,13 @@ impl Engine {
         crate::preview::test_pattern(&resolved.versions, resolved.version_pattern.as_deref(), missing_older, text)
     }
 
+    /// Shows a schedule in words with its next runs, for the editor; nothing is saved. `source_kind` sets the minimum
+    /// interval (a folder may be scanned more often than a site is asked).
+    pub fn preview_schedule(&self, schedule: &Schedule, source_kind: &str) -> Result<SchedulePreview> {
+        let min = SourceConfig::new(source_kind, &[]).min_interval_secs();
+        spotter_core::schedule::preview(schedule, &self.local_zone(), self.now(), min).map_err(EngineError::Invalid)
+    }
+
     /// The patterns the wizard offers to start from (built-in and the user's packs).
     pub fn version_schemes(&self) -> Vec<spotter_core::pack::SchemeDef> {
         self.inner.pack.schemes.clone()
@@ -469,10 +499,12 @@ impl Engine {
         }
         let id = self.watch_id(&draft.id)?;
         let source_changed;
+        let mut schedule_changed = false;
         {
             let mut doc = lock(&self.inner.doc);
             match doc.watches.iter_mut().find(|w| w.id == draft.id) {
                 Some(existing) => {
+                    schedule_changed = existing.schedule != draft.schedule;
                     source_changed = existing.source != draft.source
                         || existing.versions != draft.versions
                         || existing.version_pattern != draft.version_pattern;
@@ -499,6 +531,17 @@ impl Engine {
             // A different source is a different history: start again with a fresh baseline.
             lock(&self.inner.states).remove(&id);
             self.inner.db.delete_watch(&id)?;
+        }
+        if schedule_changed && !source_changed {
+            // The new schedule counts from the last check, so "Next check" is right at once (and a check that is
+            // overdue under the new schedule runs once, not repeatedly).
+            let last = lock(&self.inner.states).get(&id).and_then(|s| s.last_check);
+            let next = self.next_check_after(&draft, last.unwrap_or_else(|| self.now()), 0);
+            if let Some(state) = lock(&self.inner.states).get_mut(&id) {
+                state.next_check = Some(next);
+                let snapshot = state.clone();
+                self.inner.db.save_state(&id, &snapshot)?;
+            }
         }
         self.save_config()?;
         self.emit(Change::Watches);
@@ -801,7 +844,7 @@ fn blank_spec() -> WatchSpec {
         version_pattern: None,
         include_prereleases: false,
         name_filter: String::new(),
-        interval_secs: 300,
+        schedule: Default::default(),
         notify: Default::default(),
         actions: Vec::new(),
         channels: Vec::new(),

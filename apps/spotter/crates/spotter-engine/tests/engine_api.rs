@@ -85,7 +85,7 @@ fn spec(url: &str) -> WatchSpec {
         version_pattern: None,
         include_prereleases: false,
         name_filter: String::new(),
-        interval_secs: 3600,
+        schedule: spotter_core::schedule::Schedule::every(3600),
         notify: Default::default(),
         actions: Vec::new(),
         channels: Vec::new(),

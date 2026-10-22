@@ -15,7 +15,7 @@ export function blankDraft(over: Partial<WatchDraft> = {}): WatchDraft {
     versionPattern: null,
     includePrereleases: false,
     nameFilter: '',
-    intervalSecs: 6 * 3600,
+    schedule: { mode: 'every', secs: 6 * 3600 },
     notify: { mode: 'every-new', nag: false, quietHours: null },
     actions: [{ kind: 'open-location' }],
     channels: [],

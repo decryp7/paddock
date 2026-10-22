@@ -100,7 +100,7 @@ impl PresetDef {
             version_pattern: self.version_pattern,
             include_prereleases: self.include_prereleases,
             name_filter: self.name_filter,
-            interval_secs: self.interval_secs.unwrap_or(6 * 3600),
+            schedule: crate::schedule::Schedule::every(self.interval_secs.unwrap_or(6 * 3600)),
             notify: NotificationPolicy::default(),
             actions: Vec::new(),
             channels: Vec::new(),

@@ -199,7 +199,7 @@ mod tests {
             version_pattern: Some(pattern.into()),
             include_prereleases: false,
             name_filter: String::new(),
-            interval_secs: 300,
+            schedule: spotter_core::schedule::Schedule::every(300),
             notify: Default::default(),
             actions: Vec::new(),
             channels: Vec::new(),

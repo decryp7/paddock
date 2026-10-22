@@ -3,7 +3,7 @@ import { blankDraft } from './draft';
 describe('blankDraft', () => {
   it('starts every watch from the same defaults', () => {
     const d = blankDraft();
-    expect(d).toMatchObject({ id: null, name: '', versions: 'semver', paused: false, intervalSecs: 6 * 3600 });
+    expect(d).toMatchObject({ id: null, name: '', versions: 'semver', paused: false, schedule: { mode: 'every', secs: 6 * 3600 } });
     expect(d.notify).toEqual({ mode: 'every-new', nag: false, quietHours: null });
     expect(d.actions).toEqual([{ kind: 'open-location' }]);
   });

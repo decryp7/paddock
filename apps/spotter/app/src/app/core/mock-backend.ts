@@ -19,6 +19,8 @@ import type {
   Release,
   RendererStatus,
   SchemePreset,
+  Schedule,
+  SchedulePreview,
   Settings,
   SourceKind,
   SourcePreview,
@@ -33,6 +35,7 @@ import type {
 import type { ReleaseTarget, SpotterBackend } from './backend';
 import { blankDraft } from './draft';
 import { DAY, HOUR, MINUTE, PRESETS, SOURCE_KINDS, makeReleases, rng } from './mock/mock-data';
+import { mockDescribe, mockSchedulePreview, mockScheduleProblems } from './mock/mock-schedule';
 import { MOCK_SCHEMES, mockExtraction, mockSuggest, mockTest, patternProblem } from './mock/mock-extraction';
 
 export type MockScenario = 'demo' | 'empty' | 'broken' | 'products';
@@ -274,9 +277,9 @@ export class MockBackend implements SpotterBackend {
       unseen: latest !== null && (w.ack === null || ackIdx === -1 || latestIdx < ackIdx),
       newerThanInstalled: w.installed === null || instIdx === -1 || latest === null ? null : latestIdx < instIdx,
       lastCheckMs: w.lastCheckMs,
-      nextCheckMs: w.spec.paused || w.lastCheckMs === null ? null : w.lastCheckMs + w.spec.intervalSecs * 1000,
+      nextCheckMs: w.spec.paused || w.lastCheckMs === null ? null : (mockSchedulePreview(w.spec.schedule, w.lastCheckMs).nextRunsMs[0] ?? null),
       failures: w.failures,
-      intervalSecs: w.spec.intervalSecs,
+      scheduleText: mockDescribe(w.spec.schedule),
       productCount: w.products?.length ?? 0,
     };
   }
@@ -384,6 +387,7 @@ export class MockBackend implements SpotterBackend {
       if (this.watches.some((w) => w.spec.name.toLowerCase() === draft.name.trim().toLowerCase() && w.spec.id !== draft.id)) {
         problems.push(`A watch named "${draft.name.trim()}" already exists.`);
       }
+      problems.push(...mockScheduleProblems(draft.schedule));
       if (problems.length) throw problem('invalid', 'The watch cannot be saved yet.', problems);
       const clean = (w: MockWatch) => {
         for (const [k, v] of Object.entries(secrets)) {
@@ -495,6 +499,15 @@ export class MockBackend implements SpotterBackend {
     return this.call('testPattern', () => {
       void missingOlder;
       return mockTest({ versions, versionPattern }, text);
+    });
+  }
+
+  previewSchedule(schedule: Schedule, sourceKind: string): Promise<SchedulePreview> {
+    return this.call('previewSchedule', () => {
+      void sourceKind;
+      const problems = mockScheduleProblems(schedule);
+      if (problems.length) throw problem('invalid', problems.join(' '), problems);
+      return mockSchedulePreview(schedule, this.now());
     });
   }
 

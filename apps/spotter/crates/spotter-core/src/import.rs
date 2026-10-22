@@ -69,7 +69,7 @@ fn draft(name: &str, source: SourceConfig, scheme: &str, interval_secs: u32) -> 
         version_pattern: None,
         include_prereleases: false,
         name_filter: String::new(),
-        interval_secs,
+        schedule: crate::schedule::Schedule::every(interval_secs),
         notify: Default::default(),
         actions: Vec::new(),
         channels: Vec::new(),

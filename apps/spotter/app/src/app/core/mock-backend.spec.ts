@@ -113,8 +113,8 @@ describe('MockBackend', () => {
       const dup = await rejection(b.saveWatch(githubDraft({ name: ' acme installer ' }), {}));
       expect(dup.problems[0]).toContain('already exists');
       const existing = (await b.getWatch('w-1')).spec;
-      const saved = await b.saveWatch({ ...existing, intervalSecs: 120 }, {});
-      expect(saved.intervalSecs).toBe(120);
+      const saved = await b.saveWatch({ ...existing, schedule: { mode: 'every', secs: 120 } }, {});
+      expect(saved.scheduleText).toBe('Every 2 minutes');
     });
 
     it('adds a new watch as pending, pushes the state and tracks secrets', async () => {
@@ -330,5 +330,50 @@ describe('mock data helpers', () => {
     expect(new Set(list.map((r) => r.version)).size).toBe(6);
     expect(list.every((r) => r.name.length > 0)).toBe(true);
     expect(DAY).toBe(86_400_000);
+  });
+
+  describe('previewSchedule', () => {
+    it('describes each mode and lists the next runs', async () => {
+      const b = make();
+      const every = await b.previewSchedule({ mode: 'every', secs: 900 }, 'github');
+      expect(every).toMatchObject({ description: 'Every 15 minutes', warnings: [] });
+      expect(every.nextRunsMs).toHaveLength(5);
+      const times = await b.previewSchedule({ mode: 'times', days: ['mon', 'tue', 'wed', 'thu', 'fri'], times: ['14:00', '09:00'], zone: 'Europe/Berlin' }, 'github');
+      expect(times.description).toBe('Weekdays at 09:00, 14:00 (Europe/Berlin)');
+      expect(times.nextRunsMs).toHaveLength(5);
+      expect(times.zone).toBe('Europe/Berlin');
+      const cron = await b.previewSchedule({ mode: 'cron', expr: '0 9 * * 1-5', zone: null }, 'github');
+      expect(cron.description).toBe('Cron 0 9 * * 1-5');
+      expect(cron.nextRunsMs[1]! - cron.nextRunsMs[0]!).toBe(3_600_000);
+    });
+
+    it('warns about schedules that are clamped', async () => {
+      const b = make();
+      expect((await b.previewSchedule({ mode: 'every', secs: 10 }, 'github')).warnings[0]).toContain('at most every minute');
+      expect((await b.previewSchedule({ mode: 'cron', expr: '* * * * *', zone: null }, 'github')).warnings[0]).toContain('clamped');
+    });
+
+    it('refuses what the engine would refuse, with what to fix', async () => {
+      const b = make();
+      expect((await rejection(b.previewSchedule({ mode: 'cron', expr: '', zone: null }, 'github'))).problems[0]).toContain('Enter a cron expression');
+      expect((await rejection(b.previewSchedule({ mode: 'cron', expr: '* *', zone: null }, 'github'))).problems[0]).toContain('has 2');
+      const times = await rejection(b.previewSchedule({ mode: 'times', days: [], times: [], zone: '??' }, 'github'));
+      expect(times.problems).toHaveLength(3);
+      expect(times.code).toBe('invalid');
+    });
+
+    it('refuses to save a watch with an unusable schedule', async () => {
+      const err = await rejection(make().saveWatch(githubDraft({ schedule: { mode: 'times', days: [], times: ['09:00'], zone: null } }), {}));
+      expect(err.problems).toContain('Pick at least one day.');
+    });
+
+    it('shows the schedule in words and the next check of a watch', async () => {
+      const b = make();
+      const list = await b.listWatches();
+      expect(list[0]!.scheduleText).toMatch(/^Every /);
+      const saved = await b.saveWatch({ ...(await b.getWatch(list[0]!.id)).spec, schedule: { mode: 'times', days: ['sun'], times: ['03:00'], zone: null } }, {});
+      expect(saved.scheduleText).toBe('Sun at 03:00');
+      expect(saved.nextCheckMs).toBeGreaterThan(saved.lastCheckMs ?? 0);
+    });
   });
 });

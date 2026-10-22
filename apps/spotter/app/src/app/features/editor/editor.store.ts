@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { DiscoveredFeed, ImportFormat, ImportResult, LatestBy, Preset, ProductSetting, SchemePreset, SourceKind, SourcePreview, WatchDraft, WatchSummary } from '../../core/api.types';
+import type { DiscoveredFeed, ImportFormat, ImportResult, LatestBy, Preset, ProductSetting, SchemePreset, Schedule, SchedulePreview, SourceKind, SourcePreview, WatchDraft, WatchSummary } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { blankDraft } from '../../core/draft';
@@ -19,6 +19,8 @@ export const STEPS: { id: EditorStep; label: string }[] = [
 
 /** How long edits are collected before the source is tested again. */
 export const PREVIEW_DEBOUNCE_MS = 500;
+/** How long schedule edits are collected before the preview is asked for again. */
+export const SCHEDULE_DEBOUNCE_MS = 300;
 
 interface EditorState {
   step: EditorStep;
@@ -31,6 +33,8 @@ interface EditorState {
   secretsSet: string[];
   loadedDraft: Loadable<WatchDraft>;
   preview: Loadable<SourcePreview>;
+  /** The schedule in words with its next runs, from the engine. */
+  schedulePreview: Loadable<SchedulePreview>;
   saving: boolean;
   problems: string[];
   feeds: DiscoveredFeed[] | null;
@@ -54,6 +58,7 @@ export const EditorStore = signalStore(
     secretsSet: [],
     loadedDraft: idle<WatchDraft>(),
     preview: idle<SourcePreview>(),
+    schedulePreview: idle<SchedulePreview>(),
     saving: false,
     problems: [],
     feeds: null,
@@ -85,12 +90,22 @@ export const EditorStore = signalStore(
     const settings = inject(SettingsStore);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let run = 0;
+    let scheduleTimer: ReturnType<typeof setTimeout> | undefined;
+    let scheduleRun = 0;
 
     const runPreview = async (): Promise<void> => {
       const mine = ++run;
       patchState(store, { preview: pending(store.preview()) });
       const next = await settle(store.preview(), () => backend.testSource(store.draft(), store.secrets()));
       if (mine === run) patchState(store, { preview: next });
+    };
+
+    const runSchedulePreview = async (): Promise<void> => {
+      const mine = ++scheduleRun;
+      patchState(store, { schedulePreview: pending(store.schedulePreview()) });
+      const { schedule, source } = store.draft();
+      const next = await settle(store.schedulePreview(), () => backend.previewSchedule(schedule, source.kind));
+      if (mine === scheduleRun) patchState(store, { schedulePreview: next });
     };
 
     const schedule = (): void => {
@@ -106,7 +121,14 @@ export const EditorStore = signalStore(
 
     return {
       runPreview,
+      runSchedulePreview,
       update,
+      /** Sets the schedule and asks the engine for its description and next runs (after a short pause). */
+      setSchedule(next: Schedule): void {
+        update((d) => ({ ...d, schedule: next }));
+        clearTimeout(scheduleTimer);
+        scheduleTimer = setTimeout(() => void runSchedulePreview(), SCHEDULE_DEBOUNCE_MS);
+      },
       async loadCatalog(): Promise<void> {
         patchState(store, { kinds: pending(store.kinds()), presets: pending(store.presets()) });
         patchState(store, { schemes: pending(store.schemes()) });
@@ -130,6 +152,7 @@ export const EditorStore = signalStore(
       },
       setStep(step: EditorStep): void {
         patchState(store, { step });
+        if ((step === 'notify' || step === 'review') && store.schedulePreview().value === null && !store.schedulePreview().loading) void runSchedulePreview();
         schedule();
         if (step === 'configure' || step === 'versions') {
           if (!store.missing().length && store.preview().value === null) void runPreview();
@@ -145,12 +168,12 @@ export const EditorStore = signalStore(
         this.setStep(STEPS[Math.max(store.stepIndex() - 1, 0)]?.id ?? 'source');
       },
       pickKind(kind: SourceKind): void {
-        patchState(store, { draft: draftFor(blankDraft(), kind, settings.settings().value?.defaultIntervalSecs ?? 6 * 3600), secrets: {}, preview: idle(), step: 'configure' });
+        patchState(store, { draft: draftFor(blankDraft(), kind, settings.settings().value?.defaultIntervalSecs ?? 6 * 3600), secrets: {}, preview: idle(), schedulePreview: idle(), step: 'configure' });
       },
       pickPreset(p: Preset): void {
         const kind = store.kinds().value?.find((k) => k.id === p.draft.source.kind);
-        const interval = settings.settings().value?.defaultIntervalSecs ?? p.draft.intervalSecs;
-        patchState(store, { draft: { ...structuredClone(p.draft), id: null, intervalSecs: interval }, secrets: {}, preview: idle(), step: 'configure' });
+        const interval = settings.settings().value?.defaultIntervalSecs ?? 6 * 3600;
+        patchState(store, { draft: { ...structuredClone(p.draft), id: null, schedule: { mode: 'every', secs: interval } }, secrets: {}, preview: idle(), schedulePreview: idle(), step: 'configure' });
         if (kind) schedule();
       },
       /** Sets the version pattern (which makes the scheme a custom one). */
@@ -203,6 +226,7 @@ export const EditorStore = signalStore(
           draft: { ...draftFor(blankDraft({ name: feed.title }), kind, settings.settings().value?.defaultIntervalSecs ?? 6 * 3600), source: { kind: 'feed', values: { url: feed.url } } },
           secrets: {},
           preview: idle<SourcePreview>(),
+          schedulePreview: idle<SchedulePreview>(),
           step: 'configure',
         });
         schedule();

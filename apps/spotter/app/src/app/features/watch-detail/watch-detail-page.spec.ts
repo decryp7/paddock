@@ -68,7 +68,7 @@ describe('WatchDetailPage', () => {
     expect(text(releaseRows(f)[0]!.querySelector('td.num'))).toMatch(/^\d+(\.\d+)?$/);
     expect(releaseRows(f).filter((r) => r.querySelector('.installed'))).toHaveLength(1);
     const settings = text(q(f, 'dl.kv'));
-    expect(settings).toContain('Checksevery 6 h');
+    expect(settings).toContain('ChecksEvery 6 hours');
     expect(settings).toContain('VersionsBuild number');
     expect(settings).toContain('NotifyEvery new release');
     expect(settings).toContain('Open the release location');

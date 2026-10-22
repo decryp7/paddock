@@ -16,7 +16,7 @@ describe('draft utils', () => {
   it('builds a fresh draft for a kind with the given interval, dropping the id', () => {
     const base = blankDraft({ id: 'old', name: 'Keep' });
     const d = draftFor(base, kind([field('a', { default: '1' })]), 900);
-    expect(d).toMatchObject({ id: null, name: 'Keep', intervalSecs: 900, source: { kind: 'k', values: { a: '1' } } });
+    expect(d).toMatchObject({ id: null, name: 'Keep', schedule: { mode: 'every', secs: 900 }, source: { kind: 'k', values: { a: '1' } } });
   });
 
   it('lists required non-secret fields without a value; blanks count as missing', () => {

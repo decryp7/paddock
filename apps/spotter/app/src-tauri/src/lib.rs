@@ -45,6 +45,7 @@ pub fn run() {
             commands::acknowledge_product,
             commands::suggest_pattern,
             commands::test_pattern,
+            commands::preview_schedule,
             commands::version_schemes,
             commands::reset_acknowledgement,
             commands::set_installed,

@@ -15,6 +15,8 @@ import type {
   Preset,
   RendererStatus,
   SchemePreset,
+  Schedule,
+  SchedulePreview,
   Settings,
   SourceKind,
   SourcePreview,
@@ -67,6 +69,8 @@ export interface SpotterBackend {
   suggestPattern(example: string, selections: PatternSelection[]): Promise<string>;
   /** Tries a version scheme on one name (computed in Rust). */
   testPattern(versions: VersionSchemeId, versionPattern: string | null, missingOlder: boolean, text: string): Promise<PatternTest>;
+  /** Describes a schedule and lists its next runs and warnings; a query, nothing is saved. Rejects with what to fix. */
+  previewSchedule(schedule: Schedule, sourceKind: string): Promise<SchedulePreview>;
   /** The patterns the helper offers to start from. */
   versionSchemes(): Promise<SchemePreset[]>;
 

@@ -12,7 +12,6 @@ use spotter_core::journal::{Event, EventKind};
 use spotter_core::limits::MAX_HISTORY;
 use spotter_core::notify::{digest_due, DigestMode};
 use spotter_core::release::{select, Release};
-use spotter_core::schedule::next_delay_secs;
 use spotter_core::source::folder::Snapshot;
 use spotter_core::source::SourceError;
 use spotter_core::state::MAX_PRODUCT_HISTORY;
@@ -214,8 +213,7 @@ impl Engine {
             let mut states = lock(&self.inner.states);
             let state = states.entry(id.clone()).or_default();
             let (fx, ok, error) = self.apply(&watch, state, gathered, cx);
-            let delay = next_delay_secs(watch.interval_secs, state.failures, self.inner.svc.random.unit());
-            state.next_check = Some(now.plus_secs(delay));
+            state.next_check = Some(self.next_check_after(spec, now, state.failures));
             (fx, state.clone(), ok, error)
         };
         self.inner.db.save_state(id, &snapshot)?;
@@ -290,7 +288,7 @@ impl Engine {
             let state = states.entry(id.clone()).or_default();
             let changed = state.set_invalid(message.clone());
             state.last_check = Some(now);
-            state.next_check = Some(now.plus_secs(u64::from(spotter_core::schedule::clamp_interval(spec.interval_secs))));
+            state.next_check = Some(self.next_check_after(spec, now, 0));
             (changed, state.clone())
         };
         self.inner.db.save_state(id, &snapshot)?;

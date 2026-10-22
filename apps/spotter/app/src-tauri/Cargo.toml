@@ -21,6 +21,7 @@ spotter-core.workspace = true
 spotter-engine.workspace = true
 spotter-render.workspace = true
 spotter-sources.workspace = true
+iana-time-zone = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 serde.workspace = true
 serde_json.workspace = true

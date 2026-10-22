@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { flush, makeMock } from '../../../testing/test-helpers';
-import { EditorStore, PREVIEW_DEBOUNCE_MS, STEPS } from './editor.store';
+import { EditorStore, PREVIEW_DEBOUNCE_MS, SCHEDULE_DEBOUNCE_MS, STEPS } from './editor.store';
 
 function setup() {
   const backend = makeMock();
@@ -28,7 +28,7 @@ describe('EditorStore', () => {
     expect(store.kind()?.id).toBe('github');
     expect(store.missing().map((f) => f.key)).toContain('repo');
     expect(store.stepIndex()).toBe(1);
-    expect(store.draft().intervalSecs).toBe(6 * 3600);
+    expect(store.draft().schedule).toEqual({ mode: 'every', secs: 6 * 3600 });
   });
 
   it('keeps the catalog error', async () => {
@@ -141,7 +141,7 @@ describe('EditorStore', () => {
     expect(store.draft().id).toBeNull();
     expect(store.draft().name).toBe(preset.name);
     expect(store.step()).toBe('configure');
-    expect(store.draft().intervalSecs).toBe(preset.draft.intervalSecs);
+    expect(store.draft().schedule).toEqual({ mode: 'every', secs: 6 * 3600 });
     store.pickPreset({ ...preset, draft: { ...preset.draft, source: { kind: 'unknown', values: {} } } });
     expect(store.kind()).toBeNull();
   });
@@ -236,6 +236,63 @@ describe('EditorStore', () => {
       expect(store.problems()).toEqual(['disk full']);
       store.update((d) => d);
       expect(store.problems()).toEqual([]);
+    });
+  });
+
+  describe('schedule', () => {
+    it('asks the engine for the preview once per burst of edits and keeps the draft in step', async () => {
+      vi.useFakeTimers();
+      const { backend, store } = setup();
+      await store.loadCatalog();
+      store.pickKind(github(store));
+      store.setSchedule({ mode: 'every', secs: 900 });
+      store.setSchedule({ mode: 'times', days: ['mon'], times: ['09:00'], zone: null });
+      expect(store.draft().schedule.mode).toBe('times');
+      expect(backend.calls.filter((c) => c === 'previewSchedule')).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(SCHEDULE_DEBOUNCE_MS + 1);
+      expect(backend.calls.filter((c) => c === 'previewSchedule')).toHaveLength(1);
+      expect(store.schedulePreview().value?.description).toBe('Mon at 09:00');
+      expect(store.schedulePreview().error).toBeNull();
+    });
+
+    it('keeps the engine\'s complaint, and the last good preview next to it', async () => {
+      vi.useFakeTimers();
+      const { store } = setup();
+      await store.loadCatalog();
+      store.pickKind(github(store));
+      await store.runSchedulePreview();
+      const good = store.schedulePreview().value;
+      expect(good?.description).toBe('Every 6 hours');
+      store.setSchedule({ mode: 'cron', expr: '* *', zone: null });
+      await vi.advanceTimersByTimeAsync(SCHEDULE_DEBOUNCE_MS + 1);
+      expect(store.schedulePreview().error?.problems[0]).toContain('five fields');
+      expect(store.schedulePreview().value).toBe(good);
+    });
+
+    it('ignores an answer that arrives after a newer request', async () => {
+      const { backend, store } = setup();
+      await store.loadCatalog();
+      const slow = new Promise<never>((_, reject) => setTimeout(() => reject({ code: 'internal', message: 'late', problems: [] }), 5));
+      vi.spyOn(backend, 'previewSchedule').mockReturnValueOnce(slow);
+      const first = store.runSchedulePreview();
+      await store.runSchedulePreview();
+      await first;
+      expect(store.schedulePreview().error).toBeNull();
+      expect(store.schedulePreview().value).not.toBeNull();
+    });
+
+    it('is fetched when the notify or review step opens, but only once', async () => {
+      const { backend, store } = setup();
+      await store.loadCatalog();
+      store.pickKind(github(store));
+      expect(store.schedulePreview().value).toBeNull();
+      store.setStep('notify');
+      await flush();
+      store.setStep('review');
+      await flush();
+      expect(backend.calls.filter((c) => c === 'previewSchedule')).toHaveLength(1);
+      store.pickKind(github(store));
+      expect(store.schedulePreview().value).toBeNull();
     });
   });
 });

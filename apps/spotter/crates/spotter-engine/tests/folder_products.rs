@@ -67,7 +67,7 @@ fn spec(dir: &Path, tweak: impl FnOnce(&mut WatchSpec)) -> WatchSpec {
         version_pattern: Some(ACME.into()),
         include_prereleases: false,
         name_filter: String::new(),
-        interval_secs: 60,
+        schedule: spotter_core::schedule::Schedule::every(60),
         notify: Default::default(),
         actions: Vec::new(),
         channels: Vec::new(),

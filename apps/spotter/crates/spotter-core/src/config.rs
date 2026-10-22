@@ -16,10 +16,11 @@ use crate::watch::{Settings, WatchSpec};
 use serde::Serialize;
 
 /// The schema this build writes.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// The oldest schema still read. Schema 1 files have no `tracking` table and no folder scale options; every new key
-/// is optional, so they load unchanged and are written back as schema 2.
+/// is optional, so they load unchanged. Schema 3 replaced a watch's `interval_secs` with a `schedule` table
+/// (`mode = "every" | "times" | "cron"`); older files are migrated on load and written back as schema 3.
 pub const OLDEST_SCHEMA: u32 = 1;
 
 /// The configuration.
@@ -90,7 +91,10 @@ pub fn parse(text: &str) -> Result<Loaded, String> {
             Vec::new()
         }
     };
-    for (i, w) in raw.into_iter().enumerate() {
+    for (i, mut w) in raw.into_iter().enumerate() {
+        if schema < 3 {
+            migrate_interval(&mut w);
+        }
         match w.try_into::<WatchSpec>() {
             Ok(spec) if watches.iter().any(|x| x.id == spec.id) => warnings.push(format!(
                 "Watch {} has the same id as another (\"{}\"); it was skipped.",
@@ -110,6 +114,20 @@ pub fn parse(text: &str) -> Result<Loaded, String> {
         warnings,
         migrated: false,
     })
+}
+
+/// Schema 2 to 3: `interval_secs = N` becomes `schedule = { mode = "every", secs = N }`.
+fn migrate_interval(watch: &mut toml::Value) {
+    let Some(table) = watch.as_table_mut() else { return };
+    let Some(old) = table.remove("interval_secs") else { return };
+    if table.contains_key("schedule") {
+        return;
+    }
+    let secs = old.as_integer().and_then(|n| u32::try_from(n.max(1)).ok()).unwrap_or(u32::MAX);
+    let mut schedule = toml::Table::new();
+    schedule.insert("mode".into(), "every".into());
+    schedule.insert("secs".into(), i64::from(secs).into());
+    table.insert("schedule".into(), toml::Value::Table(schedule));
 }
 
 /// Writes the configuration as TOML.
@@ -143,7 +161,7 @@ fn migrate_legacy(table: &toml::Table) -> Loaded {
         version_pattern: None,
         include_prereleases: false,
         name_filter: String::new(),
-        interval_secs: u32::try_from(interval.max(1)).unwrap_or(u32::MAX),
+        schedule: crate::schedule::Schedule::every(u32::try_from(interval.max(1)).unwrap_or(u32::MAX)),
         notify: NotificationPolicy {
             mode: NotifyMode::EveryNew,
             nag: naggy,
@@ -202,15 +220,15 @@ mod tests {
         assert!(l.migrated);
         let w = &l.doc.watches[0];
         assert_eq!(
-            (w.id.as_str(), w.versions.as_str(), w.interval_secs, w.notify.nag),
-            ("builds", "build-number", 30, true)
+            (w.id.as_str(), w.versions.as_str(), w.schedule.clone(), w.notify.nag),
+            ("builds", "build-number", crate::schedule::Schedule::every(30), true)
         );
         assert_eq!(w.source.values["path"], "\\\\server\\builds");
         assert_eq!(w.source.values["syntax"], "regex");
         assert!(crate::watch::Watch::parse(w).is_ok());
         let defaults = parse("file_regex = 'x'\ninterval_seconds = -5").unwrap();
         assert_eq!(defaults.doc.watches[0].source.values["path"], "/Volumes/Data/Test");
-        assert_eq!(defaults.doc.watches[0].interval_secs, 1);
+        assert_eq!(defaults.doc.watches[0].schedule, crate::schedule::Schedule::every(1));
         assert!(!defaults.doc.watches[0].notify.nag);
     }
 
@@ -220,7 +238,7 @@ mod tests {
             settings: Settings::default(),
             watches: vec![spec("a"), spec("a"), spec("c")],
         });
-        good = good.replacen("schema = 2", "schema = 2\n", 1);
+        good = good.replacen("schema = 3", "schema = 3\n", 1);
         let l = parse(&good).unwrap();
         assert_eq!(l.doc.watches.len(), 2);
         assert!(l.warnings[0].contains("same id"));
@@ -236,7 +254,7 @@ mod tests {
         let no_schema = parse("[settings]\ntheme = 'dark'").unwrap();
         assert!(no_schema.warnings[0].contains("no schema"));
 
-        assert!(parse("schema = 3").unwrap_err().contains("Update Spotter"));
+        assert!(parse("schema = 4").unwrap_err().contains("Update Spotter"));
         assert!(parse("schema = 0").is_err());
         assert!(parse("schema = 'x'").unwrap_err().contains("not a number"));
         assert!(parse("not toml [").unwrap_err().contains("not valid TOML"));
@@ -244,20 +262,91 @@ mod tests {
     }
 
     #[test]
-    fn schema_1_files_migrate_to_schema_2_with_defaults() {
+    fn schema_1_files_migrate_to_the_current_schema_with_defaults() {
         let old =
             "schema = 1\n[[watches]]\nid = 'a'\nname = 'A'\n[watches.source]\nkind = 'folder'\n[watches.source.values]\npath = '/x'\n";
         let l = parse(old).unwrap();
         assert!(l.warnings.is_empty(), "{:?}", l.warnings);
         assert_eq!(l.doc.watches[0].tracking, crate::tracking::Tracking::default());
         let written = render(&l.doc);
-        assert!(written.contains("schema = 2"));
+        assert!(written.contains("schema = 3"));
         assert_eq!(parse(&written).unwrap().doc, l.doc);
         // New keys round trip.
         let mut doc = l.doc.clone();
         doc.watches[0].tracking.latest_by = crate::release::LatestBy::Modified;
         doc.watches[0].tracking.products.only = vec!["PRO".into()];
         assert_eq!(parse(&render(&doc)).unwrap().doc, doc);
+    }
+
+    #[test]
+    fn schema_2_intervals_become_every_schedules() {
+        use crate::schedule::Schedule;
+        let old = "schema = 2\n[[watches]]\nid = 'a'\nname = 'A'\ninterval_secs = 900\n[watches.source]\nkind = 'folder'\n\
+                   [[watches]]\nid = 'b'\nname = 'B'\n[watches.source]\nkind = 'folder'\n\
+                   [[watches]]\nid = 'c'\nname = 'C'\ninterval_secs = 'x'\n[watches.source]\nkind = 'folder'\n";
+        let l = parse(old).unwrap();
+        assert!(l.warnings.is_empty(), "{:?}", l.warnings);
+        assert_eq!(l.doc.watches[0].schedule, Schedule::every(900));
+        assert_eq!(l.doc.watches[1].schedule, Schedule::default(), "no interval: the default");
+        assert_eq!(
+            l.doc.watches[2].schedule,
+            Schedule::every(u32::MAX),
+            "unreadable: clamped later by the schedule"
+        );
+        let written = render(&l.doc);
+        assert!(written.contains("schema = 3") && !written.contains("\ninterval_secs"));
+        assert!(written.contains("mode = \"every\""));
+        assert_eq!(parse(&written).unwrap().doc, l.doc);
+        // An unreadable watch table is left for the normal error path.
+        assert_eq!(parse("schema = 2\nwatches = [3]").unwrap().doc.watches.len(), 0);
+    }
+
+    #[test]
+    fn calendar_schedules_round_trip_through_toml() {
+        use crate::calendar::Weekday;
+        use crate::schedule::Schedule;
+        use crate::time::ClockTime;
+        let t = |h, m| ClockTime::new(h, m).unwrap();
+        let mut doc = ConfigDoc::default();
+        for (id, schedule) in [
+            (
+                "a",
+                Schedule::Times {
+                    days: Weekday::WEEKDAYS.to_vec(),
+                    times: vec![t(9, 0), t(14, 0)],
+                    zone: Some("Europe/Berlin".into()),
+                },
+            ),
+            (
+                "b",
+                Schedule::Times {
+                    days: vec![Weekday::Sun],
+                    times: vec![t(0, 5)],
+                    zone: None,
+                },
+            ),
+            (
+                "c",
+                Schedule::Cron {
+                    expr: "0 9 * * 1-5".into(),
+                    zone: None,
+                },
+            ),
+            (
+                "d",
+                Schedule::Cron {
+                    expr: "*/10 * * * *".into(),
+                    zone: Some("UTC".into()),
+                },
+            ),
+        ] {
+            let mut w = spec(id);
+            w.schedule = schedule;
+            doc.watches.push(w);
+        }
+        let back = parse(&render(&doc)).unwrap();
+        assert!(back.warnings.is_empty(), "{:?}", back.warnings);
+        assert_eq!(back.doc, doc);
     }
 
     #[test]

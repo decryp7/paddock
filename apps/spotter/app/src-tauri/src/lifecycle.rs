@@ -57,6 +57,12 @@ fn local_offset_minutes() -> i32 {
     chrono::Local::now().offset().fix().local_minus_utc() / 60
 }
 
+/// Tells the clock the machine's current UTC offset and time zone name (schedules follow daylight saving by name).
+fn refresh_local_time(clock: &spotter_engine::clock::SystemClock) {
+    clock.set_utc_offset_minutes(local_offset_minutes());
+    clock.set_local_zone_name(iana_time_zone::get_timezone().ok());
+}
+
 /// Opens the engine and starts its background work; returns the shared state.
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
     let default_dir = app
@@ -79,7 +85,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
         default_downloads.clone(),
     );
     let clock = Arc::new(spotter_engine::clock::SystemClock::new());
-    clock.set_utc_offset_minutes(local_offset_minutes());
+    refresh_local_time(&clock);
     let mut services = Services::new(Arc::new(credentials::KeyringSecrets));
     services.clock = clock.clone();
     services.notifier = Arc::new(notifier.clone());
@@ -112,7 +118,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::select! {
-                _ = tokio::time::sleep(Duration::from_secs(3600)) => clock.set_utc_offset_minutes(local_offset_minutes()),
+                _ = tokio::time::sleep(Duration::from_secs(3600)) => refresh_local_time(&clock),
                 _ = tick_stop.changed() => break,
             }
         }

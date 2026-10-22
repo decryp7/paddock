@@ -128,8 +128,8 @@ pub struct WatchSummary {
     pub next_check_ms: Option<i64>,
     /// Failures since the last success.
     pub failures: u32,
-    /// Seconds between checks.
-    pub interval_secs: u32,
+    /// When the watch is checked, in words (`Every 6 hours`, `Weekdays at 09:00 and 14:00`).
+    pub schedule_text: String,
     /// How many products the watch tracks (0 for a watch of one thing).
     pub product_count: u32,
 }

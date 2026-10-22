@@ -2,6 +2,7 @@
 //! scheduler, backoff and digests are tested with a manual clock.
 use spotter_core::time::Timestamp;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 /// The time source.
 pub trait Clock: Send + Sync {
@@ -9,12 +10,17 @@ pub trait Clock: Send + Sync {
     fn now(&self) -> Timestamp;
     /// The local time zone's offset from UTC in minutes (for quiet hours and digests).
     fn utc_offset_minutes(&self) -> i32;
+    /// The local time zone's IANA name (`Europe/Berlin`), when known; schedules use it to follow daylight saving.
+    fn local_zone_name(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The real clock. The shell sets the local offset (reading it is not thread-safe in some libc builds).
 #[derive(Debug, Default)]
 pub struct SystemClock {
     offset_minutes: AtomicI32,
+    zone_name: Mutex<Option<String>>,
 }
 
 impl SystemClock {
@@ -26,6 +32,11 @@ impl SystemClock {
     /// Sets the local offset from UTC in minutes.
     pub fn set_utc_offset_minutes(&self, minutes: i32) {
         self.offset_minutes.store(minutes, Ordering::Relaxed);
+    }
+
+    /// Sets the local time zone's IANA name.
+    pub fn set_local_zone_name(&self, name: Option<String>) {
+        *self.zone_name.lock().unwrap_or_else(PoisonError::into_inner) = name;
     }
 }
 
@@ -40,6 +51,10 @@ impl Clock for SystemClock {
     fn utc_offset_minutes(&self) -> i32 {
         self.offset_minutes.load(Ordering::Relaxed)
     }
+
+    fn local_zone_name(&self) -> Option<String> {
+        self.zone_name.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
 }
 
 /// A clock the test moves by hand.
@@ -47,6 +62,7 @@ impl Clock for SystemClock {
 pub struct ManualClock {
     now_ms: AtomicI64,
     offset_minutes: AtomicI32,
+    zone_name: Mutex<Option<String>>,
 }
 
 impl ManualClock {
@@ -55,6 +71,7 @@ impl ManualClock {
         ManualClock {
             now_ms: AtomicI64::new(now.0),
             offset_minutes: AtomicI32::new(0),
+            zone_name: Mutex::new(None),
         }
     }
 
@@ -73,6 +90,11 @@ impl ManualClock {
     pub fn set_utc_offset_minutes(&self, minutes: i32) {
         self.offset_minutes.store(minutes, Ordering::Relaxed);
     }
+
+    /// Sets the local time zone's IANA name.
+    pub fn set_local_zone_name(&self, name: Option<&str>) {
+        *self.zone_name.lock().unwrap_or_else(PoisonError::into_inner) = name.map(str::to_string);
+    }
 }
 
 impl Clock for ManualClock {
@@ -82,6 +104,10 @@ impl Clock for ManualClock {
 
     fn utc_offset_minutes(&self) -> i32 {
         self.offset_minutes.load(Ordering::Relaxed)
+    }
+
+    fn local_zone_name(&self) -> Option<String> {
+        self.zone_name.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 }
 
@@ -151,6 +177,9 @@ mod tests {
         assert_eq!(c.now(), Timestamp(5));
         c.set_utc_offset_minutes(-90);
         assert_eq!(c.utc_offset_minutes(), -90);
+        assert_eq!(c.local_zone_name(), None);
+        c.set_local_zone_name(Some("Europe/Berlin"));
+        assert_eq!(c.local_zone_name().as_deref(), Some("Europe/Berlin"));
     }
 
     #[test]
@@ -159,6 +188,9 @@ mod tests {
         assert!(c.now().0 > 1_700_000_000_000);
         c.set_utc_offset_minutes(120);
         assert_eq!(c.utc_offset_minutes(), 120);
+        assert_eq!(c.local_zone_name(), None);
+        c.set_local_zone_name(Some("Asia/Tokyo".into()));
+        assert_eq!(c.local_zone_name().as_deref(), Some("Asia/Tokyo"));
     }
 
     #[test]

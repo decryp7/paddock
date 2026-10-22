@@ -117,7 +117,7 @@ mod tests {
             version_pattern: None,
             include_prereleases: false,
             name_filter: String::new(),
-            interval_secs: 60,
+            schedule: spotter_core::schedule::Schedule::every(60),
             notify: Default::default(),
             actions: Vec::new(),
             channels: Vec::new(),
@@ -198,8 +198,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("plain");
         std::fs::write(&file, "x").unwrap();
-        let l = load(&file.join("spotter.toml"));
-        assert!(l.warnings[0].contains("could not be read"), "{:?}", l.warnings);
+        // Windows reports a path below a file as "not found" (which is a silent default), Unix as "not a directory".
+        #[cfg(unix)]
+        {
+            let l = load(&file.join("spotter.toml"));
+            assert!(l.warnings[0].contains("could not be read"), "{:?}", l.warnings);
+        }
         let p = dir.path().join("spotter.toml");
         std::fs::write(&p, "= = =").unwrap();
         std::fs::write(dir.path().join("spotter.toml.bak"), "also = = broken").unwrap();

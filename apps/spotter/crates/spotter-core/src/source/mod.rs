@@ -75,6 +75,16 @@ impl SourceConfig {
         }
     }
 
+    /// The shortest time between two checks of this source: a folder is local and may be scanned often, anything on
+    /// the network is checked politely.
+    pub fn min_interval_secs(&self) -> u32 {
+        if self.kind == "folder" {
+            crate::limits::MIN_INTERVAL_SECS
+        } else {
+            crate::schedule::MIN_SITE_INTERVAL_SECS
+        }
+    }
+
     /// The values as a [`Config`].
     pub fn config(&self) -> Config {
         Config(self.values.clone())

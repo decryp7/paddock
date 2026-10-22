@@ -121,6 +121,28 @@ export interface Tracking {
   };
 }
 
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+/** When a watch is checked (`spotter_core::schedule::Schedule`): every so often, at times of day, or a cron expression. */
+export type Schedule =
+  | { mode: 'every'; secs: number }
+  /** `times` are `HH:MM`; `zone` is an IANA name, or `null` for the computer's own. */
+  | { mode: 'times'; days: Weekday[]; times: string[]; zone: string | null }
+  | { mode: 'cron'; expr: string; zone: string | null };
+
+export type ScheduleMode = Schedule['mode'];
+
+/** A schedule in words with its next runs (computed in Rust; nothing is saved). */
+export interface SchedulePreview {
+  description: string;
+  /** The next runs (at most 5). */
+  nextRunsMs: number[];
+  /** For example a schedule that is clamped to the source's minimum interval. */
+  warnings: string[];
+  /** The time zone the times are in. */
+  zone: string;
+}
+
 /** A watch as edited and stored (`spotter_core::watch::WatchSpec`). */
 export interface WatchDraft {
   /** `null` for a new watch (the backend assigns one). */
@@ -132,7 +154,7 @@ export interface WatchDraft {
   includePrereleases: boolean;
   /** Glob on release names; empty for all. */
   nameFilter: string;
-  intervalSecs: number;
+  schedule: Schedule;
   notify: NotificationPolicy;
   actions: WatchAction[];
   channels: NotificationChannel[];
@@ -165,7 +187,8 @@ export interface WatchSummary {
   lastCheckMs: number | null;
   nextCheckMs: number | null;
   failures: number;
-  intervalSecs: number;
+  /** When the watch is checked, in words (computed in Rust). */
+  scheduleText: string;
   /** How many products the watch tracks (0 for a watch of one thing). */
   productCount: number;
 }

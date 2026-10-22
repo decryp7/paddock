@@ -441,7 +441,7 @@ mod tests {
             last_check_ms: None,
             next_check_ms: None,
             failures: 0,
-            interval_secs: 3600,
+            schedule_text: "Every hour".into(),
             product_count: 0,
         }
     }

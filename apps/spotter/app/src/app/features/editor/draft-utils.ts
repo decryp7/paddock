@@ -9,7 +9,7 @@ export function defaultValues(kind: SourceKind): Record<string, string> {
 
 /** A new draft for `kind` (the interval comes from the user's default). */
 export function draftFor(base: WatchDraft, kind: SourceKind, intervalSecs: number): WatchDraft {
-  return { ...base, id: null, source: { kind: kind.id, values: defaultValues(kind) }, intervalSecs };
+  return { ...base, id: null, source: { kind: kind.id, values: defaultValues(kind) }, schedule: { mode: 'every', secs: intervalSecs } };
 }
 
 /** Required fields (secrets excluded: they live in the credential store) that have no value yet. */

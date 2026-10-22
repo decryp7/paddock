@@ -3,8 +3,7 @@ import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
 import { BACKEND } from '../../core/backend';
 import type { ChannelKind, LatestBy, NotifyMode, VersionSchemeId, WatchAction } from '../../core/api.types';
-import { formatInterval } from '../../shared/format';
-import { INTERVAL_PRESETS, SCHEME_OPTIONS } from '../../shared/labels';
+import { SCHEME_OPTIONS } from '../../shared/labels';
 import { Panel } from '../../shared/ui/panel';
 import type { Loadable } from '../../state/loadable';
 import { ToastStore } from '../../state/toast.store';
@@ -14,12 +13,13 @@ import { ExtensionChips } from './extension-chips';
 import { FieldForm, type FieldChange } from './field-form';
 import { PatternHelper } from './pattern-helper';
 import { PreviewPanel } from './preview-panel';
+import { ScheduleEditor } from './schedule-editor';
 import { SourceStep } from './source-step';
 
 /** The add/edit wizard: source, configure (with a live test), versions, notifications and actions, review. */
 @Component({
   selector: 'sp-editor-page',
-  imports: [MatIcon, RouterLink, Panel, FieldForm, PreviewPanel, SourceStep, ExtensionChips, PatternHelper],
+  imports: [MatIcon, RouterLink, Panel, FieldForm, PreviewPanel, SourceStep, ExtensionChips, PatternHelper, ScheduleEditor],
   providers: [EditorStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './editor-page.html',
@@ -36,13 +36,7 @@ export class EditorPage {
 
   protected readonly steps = STEPS;
   protected readonly schemes = SCHEME_OPTIONS;
-  protected readonly intervals = INTERVAL_PRESETS;
-  protected readonly interval = formatInterval;
   protected readonly draft = this.store.draft;
-  protected readonly intervalOptions = computed(() => {
-    const secs = this.draft().intervalSecs;
-    return INTERVAL_PRESETS.some((p) => p.secs === secs) ? INTERVAL_PRESETS : [...INTERVAL_PRESETS, { secs, label: formatInterval(secs) }].sort((a, b) => a.secs - b.secs);
-  });
   protected readonly canNext = computed(() => {
     const s = this.store.step();
     if (s === 'source') return false;
@@ -96,10 +90,6 @@ export class EditorPage {
 
   protected setting(id: string) {
     return this.draft().tracking.products.settings[id];
-  }
-
-  protected setInterval(secs: number): void {
-    if (Number.isFinite(secs) && secs >= 60) this.store.update((d) => ({ ...d, intervalSecs: Math.round(secs) }));
   }
 
   protected setMode(e: Event): void {

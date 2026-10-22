@@ -16,6 +16,8 @@ import type {
   Preset,
   RendererStatus,
   SchemePreset,
+  Schedule,
+  SchedulePreview,
   Settings,
   SourceKind,
   SourcePreview,
@@ -108,6 +110,9 @@ export class TauriBackend implements SpotterBackend {
   }
   testPattern(versions: VersionSchemeId, versionPattern: string | null, missingOlder: boolean, text: string): Promise<PatternTest> {
     return this.run('test_pattern', { versions, versionPattern, missingOlder, text });
+  }
+  previewSchedule(schedule: Schedule, sourceKind: string): Promise<SchedulePreview> {
+    return this.run('preview_schedule', { schedule, sourceKind });
   }
   versionSchemes(): Promise<SchemePreset[]> {
     return this.run('version_schemes');

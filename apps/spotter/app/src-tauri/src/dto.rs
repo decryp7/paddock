@@ -9,6 +9,7 @@ use spotter_core::filter::VersionFilter;
 use spotter_core::notify::{DigestMode, NotificationChannel, NotificationPolicy, NotifyMode};
 use spotter_core::pack::{Preset, SchemeDef};
 use spotter_core::release::LatestBy;
+use spotter_core::schedule::{Schedule, SchedulePreview};
 use spotter_core::schema::{FieldKind, FieldSpec, SourceKindSpec};
 use spotter_core::source::web_page::DiscoveredFeed;
 use spotter_core::source::SourceConfig;
@@ -198,8 +199,8 @@ pub struct WatchDraftDto {
     pub include_prereleases: bool,
     /// Glob on release names.
     pub name_filter: String,
-    /// Seconds between checks.
-    pub interval_secs: u32,
+    /// When to check (`{"mode":"every","secs":3600}`, `times` or `cron`).
+    pub schedule: Schedule,
     /// When to notify.
     pub notify: NotificationPolicyDto,
     /// Actions on a new release.
@@ -327,7 +328,7 @@ impl WatchDraftDto {
             version_pattern: self.version_pattern,
             include_prereleases: self.include_prereleases,
             name_filter: self.name_filter,
-            interval_secs: self.interval_secs,
+            schedule: self.schedule,
             notify: self.notify.into(),
             actions: self.actions,
             channels: self.channels,
@@ -352,7 +353,7 @@ impl From<&WatchSpec> for WatchDraftDto {
             version_pattern: s.version_pattern.clone(),
             include_prereleases: s.include_prereleases,
             name_filter: s.name_filter.clone(),
-            interval_secs: s.interval_secs,
+            schedule: s.schedule.clone(),
             notify: s.notify.into(),
             actions: s.actions.clone(),
             channels: s.channels.clone(),
@@ -402,8 +403,8 @@ pub struct WatchSummaryDto {
     pub next_check_ms: Option<i64>,
     /// Failures since the last success.
     pub failures: u32,
-    /// Seconds between checks.
-    pub interval_secs: u32,
+    /// When the watch is checked, in words.
+    pub schedule_text: String,
     /// How many products the watch tracks.
     pub product_count: u32,
 }
@@ -427,7 +428,7 @@ impl From<&view::WatchSummary> for WatchSummaryDto {
             last_check_ms: w.last_check_ms,
             next_check_ms: w.next_check_ms,
             failures: w.failures,
-            interval_secs: w.interval_secs,
+            schedule_text: w.schedule_text.clone(),
             product_count: w.product_count,
         }
     }
@@ -861,6 +862,31 @@ impl From<&PatternTest> for PatternTestDto {
             error: t.error.clone(),
             read: t.read.as_ref().map(Into::into),
             ignored: t.ignored.clone(),
+        }
+    }
+}
+
+/// `SchedulePreview`: a schedule in words with its next runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulePreviewDto {
+    /// The schedule in words.
+    pub description: String,
+    /// The next runs (milliseconds since the epoch).
+    pub next_runs_ms: Vec<i64>,
+    /// Things worth knowing (a clamped schedule).
+    pub warnings: Vec<String>,
+    /// The time zone the times are in.
+    pub zone: String,
+}
+
+impl From<&SchedulePreview> for SchedulePreviewDto {
+    fn from(p: &SchedulePreview) -> Self {
+        SchedulePreviewDto {
+            description: p.description.clone(),
+            next_runs_ms: p.next_runs.iter().map(|t| t.0).collect(),
+            warnings: p.warnings.clone(),
+            zone: p.zone.clone(),
         }
     }
 }
@@ -1345,7 +1371,7 @@ mod tests {
         json!({
             "id": null, "name": "Example", "source": {"kind": "github", "values": {"repo": "o/r"}},
             "versions": "semver", "versionPattern": null, "includePrereleases": false, "nameFilter": "",
-            "intervalSecs": 3600,
+            "schedule": {"mode": "times", "days": ["mon", "fri"], "times": ["09:00", "14:30"], "zone": "Europe/Berlin"},
             "notify": {"mode": "newer-than-installed", "nag": true, "quietHours": {"start": "22:00", "end": "07:00"}},
             "actions": [{"kind": "open-location", "variant": "", "extension": ""},
                         {"kind": "download", "folder": "/tmp/x", "verify": true, "variant": "x64", "extension": "iso"},

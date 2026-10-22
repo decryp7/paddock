@@ -6,7 +6,7 @@ use crate::limits::{MAX_ACTIONS, MAX_NAME_CHARS};
 use crate::notify::{DigestMode, NotificationChannel, NotificationPolicy, MAX_CHANNELS};
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::ReleaseFilter;
-use crate::schedule::clamp_interval;
+use crate::schedule::Schedule;
 use crate::source::web_page::PageMode;
 use crate::source::{Source, SourceConfig};
 use crate::time::QuietHours;
@@ -88,9 +88,9 @@ pub struct WatchSpec {
     /// Only releases whose name matches this glob (empty for all).
     #[serde(default)]
     pub name_filter: String,
-    /// Seconds between checks.
-    #[serde(default = "default_interval")]
-    pub interval_secs: u32,
+    /// When to check.
+    #[serde(default)]
+    pub schedule: Schedule,
     /// When to notify.
     #[serde(default)]
     pub notify: NotificationPolicy,
@@ -127,8 +127,8 @@ pub struct Watch {
     pub scheme: VersionScheme,
     /// Which releases count.
     pub filter: ReleaseFilter,
-    /// Seconds between checks (clamped to the allowed range).
-    pub interval_secs: u32,
+    /// When to check.
+    pub schedule: Schedule,
     /// When to notify.
     pub notify: NotificationPolicy,
     /// What to do with a new release.
@@ -176,6 +176,7 @@ impl Watch {
         }
         problems.extend(spec.channels.iter().filter_map(|c| c.check().err()));
         problems.extend(spec.version_filter.check().err());
+        problems.extend(spec.schedule.check().err().into_iter().flatten());
         // A page watched for changes has no version to read: its releases are dated.
         let scheme = match (&source, scheme) {
             (Some(Source::WebPage(p)), Some(_)) if p.mode == PageMode::Change => Some(VersionScheme::Date),
@@ -193,7 +194,7 @@ impl Watch {
                     latest_by: spec.tracking.latest_by,
                     products: spec.tracking.products.only.clone(),
                 },
-                interval_secs: clamp_interval(spec.interval_secs),
+                schedule: spec.schedule.clone(),
                 notify: spec.notify,
                 actions: spec.actions.clone(),
                 channels: spec.channels.clone(),
@@ -294,7 +295,7 @@ pub(crate) mod tests {
             version_pattern: None,
             include_prereleases: false,
             name_filter: String::new(),
-            interval_secs: 60,
+            schedule: Schedule::every(60),
             notify: NotificationPolicy::default(),
             actions: Vec::new(),
             channels: Vec::new(),
@@ -322,13 +323,14 @@ pub(crate) mod tests {
     #[test]
     fn specs_parse_into_watches() {
         let w = Watch::parse(&spec("w1")).unwrap();
-        assert_eq!((w.name.as_str(), w.interval_secs, w.scheme.id()), ("Nightly", 60, "semver"));
+        assert_eq!(
+            (w.name.as_str(), w.schedule.clone(), w.scheme.id()),
+            ("Nightly", Schedule::every(60), "semver")
+        );
         let mut s = spec("w1");
-        s.interval_secs = 1;
         s.name_filter = "*.zip".into();
         s.notify.mode = NotifyMode::Off;
         let w = Watch::parse(&s).unwrap();
-        assert_eq!(w.interval_secs, crate::limits::MIN_INTERVAL_SECS);
         assert!(!w.filter.name.is_any());
         assert_eq!(w.spec, s);
     }
@@ -361,7 +363,7 @@ pub(crate) mod tests {
         assert_eq!(w.scheme.id(), "date", "a watched page has dated releases whatever was chosen");
         assert!(w.allow_local);
         let from_toml: WatchSpec = toml::from_str("id = \"a\"\nname = \"A\"\n[source]\nkind = \"folder\"").unwrap();
-        assert_eq!((from_toml.versions.as_str(), from_toml.interval_secs), ("semver", 300));
+        assert_eq!((from_toml.versions.as_str(), from_toml.schedule), ("semver", Schedule::every(300)));
     }
 
     #[test]

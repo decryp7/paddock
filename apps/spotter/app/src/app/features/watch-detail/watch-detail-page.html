@@ -184,7 +184,7 @@
             <section class="section" aria-labelledby="set-h">
               <h2 id="set-h">Settings</h2>
               <dl class="kv">
-                <dt>Checks</dt><dd>{{ interval(d.spec.intervalSecs) }}</dd>
+                <dt>Checks</dt><dd>{{ d.summary.scheduleText }}</dd>
                 <dt>Versions</dt><dd>{{ scheme() }}{{ d.spec.includePrereleases ? ', including pre-releases' : '' }}</dd>
                 @if (d.spec.tracking.latestBy !== 'version') {
                   <dt>Latest by</dt><dd>{{ latestByText(d.spec.tracking.latestBy) }}</dd>

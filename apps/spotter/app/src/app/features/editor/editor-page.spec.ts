@@ -2,6 +2,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { EditorPage } from './editor-page';
+import { SCHEDULE_DEBOUNCE_MS } from './editor.store';
 import { ToastStore } from '../../state/toast.store';
 import { SettingsStore } from '../../state/settings.store';
 import { appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
@@ -12,6 +13,10 @@ const routes = [
   { path: 'watches', component: Stub },
   { path: 'watches/:id', component: Stub },
 ];
+
+/** The pressed buttons of the schedule editor's segmented controls. */
+const pressed = (f: F) =>
+  Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('sp-schedule-editor [aria-pressed="true"]')).map((b) => text(b));
 
 type F = Awaited<ReturnType<typeof make>>['f'];
 
@@ -82,7 +87,7 @@ describe('EditorPage: adding a watch', () => {
     await click(f, card(f, 'GitHub'));
     await fill(f, '#f-repo', 'a/b');
     await goNext(f, 2);
-    expect(q<HTMLSelectElement>(f, '#interval').value).toBe('900');
+    expect(pressed(f)).toEqual(['Every…', '15 min', 'Minutes']);
   });
 
   it('groups the source kinds and walks the whole wizard to a saved watch', async () => {
@@ -119,27 +124,31 @@ describe('EditorPage: adding a watch', () => {
 
     // Notify
     await goNext(f);
-    expect(q<HTMLSelectElement>(f, '#interval').selectedOptions[0]!.textContent).toBe('6 hours');
-    await fill(f, '#interval', String(24 * 3600), 'change');
-    expect(q<HTMLSelectElement>(f, '#interval').selectedOptions[0]!.textContent).toBe('Daily');
-    await fill(f, '#minutes', '45', 'change');
-    expect(q<HTMLSelectElement>(f, '#interval').selectedOptions[0]!.textContent).toBe('every 45 min');
-    await fill(f, '#minutes', '0', 'change'); // below a minute: ignored
-    expect(q<HTMLSelectElement>(f, '#interval').selectedOptions[0]!.textContent).toBe('every 45 min');
+    expect(pressed(f)).toEqual(['Every…', '6 h', 'Hours']);
+    await click(f, byText(f.nativeElement, 'sp-schedule-editor button', 'Daily'));
+    expect(pressed(f)).toEqual(['Every…', 'Daily', 'Days']);
+    await fill(f, 'sp-schedule-editor input[aria-label="Interval"]', '45', 'change');
+    await click(f, byText(f.nativeElement, 'sp-schedule-editor button', 'Minutes'));
+    expect(pressed(f)).toEqual(['Every…', 'Minutes']);
+    await fill(f, 'sp-schedule-editor input[aria-label="Interval"]', '0', 'change'); // below one: ignored
+    expect((q(f, 'sp-schedule-editor input[aria-label="Interval"]') as HTMLInputElement).value).toBe('45');
+    await new Promise((r) => setTimeout(r, SCHEDULE_DEBOUNCE_MS + 50));
+    await settle(f);
+    expect(text(q(f, 'sp-schedule-editor .preview'))).toContain('Next check');
     await fill(f, '#mode', 'newer-than-installed', 'change');
 
     // Review
     await goNext(f);
     expect((q(f, '#name') as HTMLInputElement).value).toBe('tool');
     expect(text(q(f, 'dl'))).toContain('GitHub: owner/tool');
-    expect(text(q(f, 'dl'))).toContain('every 45 min');
+    expect(text(q(f, 'dl'))).toContain('Every 45 minutes');
     expect(button(f, 'Next')).toBeNull();
     await click(f, button(f, 'Add watch'));
     await flush(5);
     expect(router.url).toBe('/watches/w-100');
     expect(TestBed.inject(ToastStore).toasts().at(-1)).toMatchObject({ title: 'Watch added', body: 'tool' });
     const saved = (await backend.getWatch('w-100')).spec;
-    expect(saved).toMatchObject({ includePrereleases: true, nameFilter: '*-setup.exe', intervalSecs: 2700, notify: { mode: 'newer-than-installed' } });
+    expect(saved).toMatchObject({ includePrereleases: true, nameFilter: '*-setup.exe', schedule: { mode: 'every', secs: 2700 }, notify: { mode: 'newer-than-installed' } });
     expect(saved.filter).toEqual({ prefix: '1.', soakHours: 0 });
   });
 

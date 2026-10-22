@@ -123,18 +123,7 @@
         <div class="stack wide">
           <section class="stack" aria-labelledby="sch-h">
             <h2 id="sch-h">Schedule</h2>
-            <div class="field">
-              <label for="interval">Check</label>
-              <select id="interval" class="input narrow" [value]="draft().intervalSecs" (change)="setInterval(+value($event))">
-                @for (p of intervalOptions(); track p.secs) {
-                  <option [value]="p.secs" [selected]="p.secs === draft().intervalSecs">{{ p.label }}</option>
-                }
-              </select>
-            </div>
-            <div class="field">
-              <label for="minutes">Or every (minutes)</label>
-              <input id="minutes" class="input narrow" type="number" min="1" [value]="draft().intervalSecs / 60" (change)="setInterval(+value($event) * 60)" />
-            </div>
+            <sp-schedule-editor [schedule]="draft().schedule" [preview]="store.schedulePreview()" (scheduleChange)="store.setSchedule($event)" />
           </section>
 
           <section class="stack" aria-labelledby="not-h">
@@ -212,7 +201,7 @@
             </div>
             <dl class="surface kv">
               <dt>Source</dt><dd>{{ store.kind()?.label }}: {{ draft().source.values['url'] ?? draft().source.values['repo'] ?? draft().source.values['path'] ?? draft().source.values['image'] ?? draft().source.values['package'] ?? draft().source.values['project'] ?? draft().source.values['crate'] ?? '' }}</dd>
-              <dt>Checks</dt><dd>{{ interval(draft().intervalSecs) }}</dd>
+              <dt>Checks</dt><dd>{{ store.schedulePreview().value?.description ?? '—' }}</dd>
               <dt>Versions</dt><dd>{{ draft().versions }}{{ draft().includePrereleases ? ', with pre-releases' : '' }}</dd>
               <dt>Notify</dt><dd>{{ draft().notify.mode }}{{ draft().notify.nag ? ', keeps reminding' : '' }}</dd>
               <dt>Actions</dt><dd>{{ draft().actions.length }} configured, {{ draft().channels.length }} extra channel{{ draft().channels.length === 1 ? '' : 's' }}</dd>
