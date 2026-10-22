@@ -1,0 +1,32 @@
+[package]
+name = "pitcrew-app"
+description = "Pitcrew — a runner manager for Gitea and Forgejo: tray app and window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[lib]
+name = "pitcrew_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+pitcrew-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tauri = { version = "2.12.4", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+# >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version); see docs/releasing.md.
+# No "zip": Pitcrew publishes v2 updater artifacts (the installers themselves). "rustls-tls" with the platform verifier
+# trusts the OS certificate store, so update checks work behind TLS-inspecting proxies.
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
+
+[lints]
+workspace = true

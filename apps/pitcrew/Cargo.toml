@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pitcrew-core", "crates/pitcrew-service"]
+members = ["crates/pitcrew-core", "crates/pitcrew-service", "app/src-tauri"]
 resolver = "2"
 
 # Shared by every member: `edition.workspace = true` etc.

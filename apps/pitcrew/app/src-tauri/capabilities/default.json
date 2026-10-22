@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "the main window's webview: events only. Every Pitcrew command is an app command (no plugin commands are granted to the webview), so the UI cannot reach the file system, the shell or the updater directly",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}
