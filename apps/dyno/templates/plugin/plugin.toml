@@ -1,0 +1,10 @@
+# Installed as <Dyno data dir>/plugins/<id>/plugin.toml, next to the executable.
+id = "mine"
+name = "My plugin"
+version = "0.1.0"
+# dyno_plugin_api::API_VERSION of the dyno-plugin-api you built against.
+api_version = 1
+# The executable's file name in the same folder (".exe" is added on Windows). Defaults to the id.
+executable = "dyno-plugin-mine"
+# Any of "sensors", "cleanup", "actions".
+contributes = ["sensors"]

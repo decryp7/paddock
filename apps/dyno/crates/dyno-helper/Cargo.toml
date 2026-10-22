@@ -1,0 +1,15 @@
+[package]
+name = "dyno-helper"
+description = "Dyno's minimal privileged helper: a closed set of reversible system changes, each approved with a UAC/admin prompt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+dyno-core.workspace = true
+
+[lints]
+workspace = true

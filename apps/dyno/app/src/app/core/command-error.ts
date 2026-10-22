@@ -1,0 +1,45 @@
+import type { CommandError, ErrorCode } from './api.types';
+
+const CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
+  'agentUnavailable',
+  'notFound',
+  'accessDenied',
+  'unsupported',
+  'protected',
+  'badRequest',
+  'timeout',
+  'busy',
+  'internal',
+]);
+
+/** Any rejection from a command as a typed error (unknown shapes become `internal` with their text). */
+export function toCommandError(e: unknown): CommandError {
+  if (typeof e === 'object' && e !== null) {
+    const { code, message } = e as Record<string, unknown>;
+    if (typeof code === 'string' && CODES.has(code as ErrorCode) && typeof message === 'string') {
+      return { code: code as ErrorCode, message };
+    }
+  }
+  const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Something went wrong.';
+  return { code: 'internal', message };
+}
+
+/** A short next step for an error, shown under its message. */
+export function errorHint(code: ErrorCode): string | null {
+  switch (code) {
+    case 'agentUnavailable':
+      return 'The Dyno agent is not running. It restarts automatically; try again in a moment.';
+    case 'accessDenied':
+      return 'Windows or macOS refused. Some actions need the Dyno helper (an administrator prompt).';
+    case 'protected':
+      return 'Dyno never touches protected processes. Edit the protected list in Rules.';
+    case 'timeout':
+      return 'The request took too long. Try again.';
+    case 'busy':
+      return 'Dyno is busy with another task. Try again when it finishes.';
+    case 'notFound':
+      return 'It no longer exists (the process may have exited).';
+    default:
+      return null;
+  }
+}

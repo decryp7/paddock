@@ -1,0 +1,58 @@
+[workspace]
+members = [
+    "crates/dyno-core",
+    "crates/dyno-ipc",
+    "crates/dyno-plugin-api",
+    "crates/dyno-plugin-host",
+    "crates/dyno-platform",
+    "crates/dyno-agent",
+    "crates/dyno-helper",
+    "plugins/dyno-plugin-example",
+    # "app/src-tauri",
+]
+resolver = "2"
+
+# Shared by every member: `edition.workspace = true` etc.
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88"
+repository = "https://dev.decryptology.net/decryp7/dyno"
+version = "0.1.0"
+
+# Versions of the dependencies that two or more members use, so they stay on one version.
+[workspace.dependencies]
+dyno-core = { path = "crates/dyno-core" }
+dyno-ipc = { path = "crates/dyno-ipc" }
+dyno-plugin-api = { path = "crates/dyno-plugin-api" }
+dyno-plugin-host = { path = "crates/dyno-plugin-host" }
+dyno-platform = { path = "crates/dyno-platform" }
+dyno-agent = { path = "crates/dyno-agent" }
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+toml = "1"
+tempfile = "3"
+
+# Dependencies are optimised even in debug builds; workspace crates stay at opt-level 0 for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+debug = "line-tables-only"
+
+# Shipped builds (`cargo build --profile dist`, `tauri build -- --profile dist`).
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

@@ -1,0 +1,22 @@
+[package]
+# Rename: the crate, the binary and the id in plugin.toml usually share one name.
+name = "dyno-plugin-mine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# A standalone crate, not a member of Dyno's workspace.
+[workspace]
+
+[dependencies]
+# The only dependency a plugin needs. This path works inside a Dyno checkout (templates/plugin); in your own repository
+# use a git dependency pinned to the Dyno version you target:
+#   dyno-plugin-api = { git = "https://dev.decryptology.net/decryp7/dyno", tag = "v0.1.0" }
+dyno-plugin-api = { path = "../../crates/dyno-plugin-api" }
+
+# Small and fast to start: Dyno starts the plugin on demand and caps its memory.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
