@@ -306,8 +306,9 @@ fn usage_follows_the_runner_and_the_processes_it_started() {
     let during = h.status().usage.unwrap();
     assert!(during.mem_bytes > 0, "{during:?}");
     assert!(during.cpu_permille <= 1000);
-    // It exits, and drops out of the count while the runner stays.
-    h.until("the exited child is no longer counted", Duration::from_secs(6), |h| {
+    // It exits, and drops out of the count while the runner stays. The child lives `job_secs` (on Windows `ping -n 7`
+    // takes about 7 s, and a loaded runner is slower), so the deadline leaves room.
+    h.until("the exited child is no longer counted", Duration::from_secs(20), |h| {
         h.status().usage.is_some_and(|u| u.processes == 1)
     });
     // The history has the runner's series and the machine series carries the runners' share.
