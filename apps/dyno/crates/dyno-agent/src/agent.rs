@@ -203,6 +203,8 @@ pub struct Shared {
     pub network: crate::network::NetCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
+    /// Cleanup: categories, scans and the quarantine (deletes only on the user's confirmed click).
+    pub cleanup: crate::cleanup::centre::CleanupCentre,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -284,6 +286,15 @@ impl Shared {
         if let Some(n) = bench_note {
             core.log(t, ActivityKind::System, "Benchmark history reset".into(), n, UndoRecord::None, None);
         }
+        let (cleanup, cleanup_notes) = crate::cleanup::centre::CleanupCentre::load(
+            &dirs,
+            crate::cleanup::roots::Env::current(),
+            Box::new(crate::cleanup::trash::OsTrash),
+            t,
+        );
+        for n in cleanup_notes {
+            core.log(t, ActivityKind::System, "A cleanup pack was ignored".into(), n, UndoRecord::None, None);
+        }
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let Platform {
             sensors,
@@ -309,6 +320,7 @@ impl Shared {
             subs: Mutex::new(Vec::new()),
             reveal,
             bench,
+            cleanup,
             network: crate::network::NetCentre::new(
                 Box::new(dyno_platform::network::OsSockets),
                 Arc::new(dyno_platform::network::OsReverseDns),

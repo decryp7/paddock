@@ -277,12 +277,12 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             shared.request_stop();
             Ok(Reply::Ok)
         }
-        Request::CleanupCategories
+        r @ (Request::CleanupCategories
         | Request::ScanCleanup { .. }
         | Request::RunCleanup { .. }
         | Request::Quarantine
-        | Request::RestoreQuarantine { .. } => Err(not_built("Cleanup")),
-        Request::DiskUsage { .. } => Err(not_built("The disk space map")),
+        | Request::RestoreQuarantine { .. }
+        | Request::DiskUsage { .. }) => crate::handlers_cleanup::handle(shared, r),
         Request::Tuning | Request::ApplyTuning { .. } | Request::RevertTuning { .. } => Err(not_built("Tuning")),
         Request::WeeklyReport => Err(not_built("The weekly report")),
     }
@@ -499,7 +499,8 @@ fn undo(shared: &Arc<Shared>, id: &str) -> Result<ActivityEntry, AgentError> {
                 .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That startup item no longer exists."))?;
             startup.set_state(e, *previous)?;
         }
-        UndoRecord::None | UndoRecord::Tuning { .. } | UndoRecord::Quarantine { .. } => return Err(bad("That cannot be undone here yet.")),
+        UndoRecord::Quarantine { id: q, .. } => crate::handlers_cleanup::restore(shared, q)?,
+        UndoRecord::None | UndoRecord::Tuning { .. } => return Err(bad("That cannot be undone here yet.")),
     }
     let core = lock(&shared.core);
     core.store.mark_undone(id).map_err(internal)?;

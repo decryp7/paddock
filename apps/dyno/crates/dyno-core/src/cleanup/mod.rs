@@ -1,6 +1,7 @@
 //! Cleanup: the category catalog, the safety policy and scheduling (ADR 0005).
 
 pub mod catalog;
+pub mod pack;
 pub mod policy;
 
 pub use catalog::*;

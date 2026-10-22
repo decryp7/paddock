@@ -32,7 +32,7 @@ pub enum CleanupRisk {
     Personal,
 }
 
-/// The OS a category applies to.
+/// An OS a category applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Os {
@@ -40,8 +40,8 @@ pub enum Os {
     Windows,
     /// macOS only.
     Macos,
-    /// Both.
-    Any,
+    /// Linux (XDG folders).
+    Linux,
 }
 
 /// A symbolic place the agent resolves to folders.
@@ -106,260 +106,55 @@ pub enum Selector {
     DockerImages,
 }
 
-/// A built-in category.
+/// Where a category looks: a named place or a path template from a pack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RootRef {
+    /// A place Dyno resolves per OS.
+    Named(Root),
+    /// A pack's path template (`{home}/.cache/app`), expanded by the agent (see `pack::valid_template`).
+    Template(String),
+}
+
+/// A category, from the built-in pack or a user's pack.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CategorySpec {
     /// Stable id.
-    pub id: &'static str,
+    pub id: String,
     /// Name.
-    pub name: &'static str,
+    pub name: String,
     /// One sentence: what it is and what deleting it costs.
-    pub description: &'static str,
+    pub description: String,
     /// Group.
     pub group: CleanupGroup,
     /// Risk.
     pub risk: CleanupRisk,
-    /// Which OS.
-    pub os: Os,
+    /// Which OSes (empty: all).
+    pub os: Vec<Os>,
     /// Where.
-    pub roots: &'static [Root],
+    pub roots: Vec<RootRef>,
     /// What inside.
     pub selector: Selector,
     /// Only items not modified for this many days (0: any age).
     pub min_age_days: u32,
+    /// From the app (true) or a user's pack (false).
+    pub builtin: bool,
 }
 
-/// Every built-in category.
+impl CategorySpec {
+    /// Whether the category applies to `os`.
+    pub fn applies_to(&self, os: Os) -> bool {
+        self.os.is_empty() || self.os.contains(&os)
+    }
+}
+
+/// Every built-in category (the embedded pack, `builtin.toml`).
 pub fn catalog() -> Vec<CategorySpec> {
-    use CleanupGroup as G;
-    use CleanupRisk as R;
-    let c = |id, name, description, group, risk, os, roots, selector, min_age_days| CategorySpec {
-        id,
-        name,
-        description,
-        group,
-        risk,
-        os,
-        roots,
-        selector,
-        min_age_days,
-    };
-    vec![
-        c(
-            "userTemp",
-            "Temporary files",
-            "Files apps left in your temp folder. Only files older than two days are offered.",
-            G::System,
-            R::Safe,
-            Os::Any,
-            &[Root::UserTemp],
-            Selector::Children,
-            2,
-        ),
-        c(
-            "systemTemp",
-            "System temporary files",
-            "Windows' own temp folder. Items Windows still uses are skipped and listed.",
-            G::System,
-            R::Safe,
-            Os::Windows,
-            &[Root::SystemTemp],
-            Selector::Children,
-            2,
-        ),
-        c(
-            "updateLeftovers",
-            "Windows Update leftovers",
-            "Downloaded update packages already installed. Windows downloads them again if needed.",
-            G::System,
-            R::Safe,
-            Os::Windows,
-            &[Root::UpdateDownloads],
-            Selector::Children,
-            7,
-        ),
-        c(
-            "crashDumps",
-            "Crash dumps and reports",
-            "Memory dumps and error reports from apps that crashed. Useful only to send to a developer.",
-            G::System,
-            R::Safe,
-            Os::Any,
-            &[Root::CrashDumps, Root::ErrorReports],
-            Selector::Children,
-            3,
-        ),
-        c(
-            "thumbnails",
-            "Thumbnail cache",
-            "Preview images Explorer rebuilds as you browse folders.",
-            G::System,
-            R::Safe,
-            Os::Windows,
-            &[Root::ThumbnailCache],
-            Selector::Children,
-            0,
-        ),
-        c(
-            "appCaches",
-            "App caches",
-            "Caches apps rebuild on their own. Apps may be a little slower the first time.",
-            G::System,
-            R::Review,
-            Os::Macos,
-            &[Root::UserCaches],
-            Selector::Children,
-            7,
-        ),
-        c(
-            "oldLogs",
-            "Old logs",
-            "Log files older than 30 days.",
-            G::System,
-            R::Safe,
-            Os::Macos,
-            &[Root::UserLogs],
-            Selector::Children,
-            30,
-        ),
-        c(
-            "chromeCache",
-            "Chrome cache",
-            "Pages and images Chrome keeps to load sites faster. Sign-ins and history are kept.",
-            G::Browser,
-            R::Safe,
-            Os::Any,
-            &[Root::ChromeCache],
-            Selector::Children,
-            0,
-        ),
-        c(
-            "edgeCache",
-            "Edge cache",
-            "Pages and images Edge keeps to load sites faster. Sign-ins and history are kept.",
-            G::Browser,
-            R::Safe,
-            Os::Any,
-            &[Root::EdgeCache],
-            Selector::Children,
-            0,
-        ),
-        c(
-            "firefoxCache",
-            "Firefox cache",
-            "Firefox's page cache. Sign-ins and history are kept.",
-            G::Browser,
-            R::Safe,
-            Os::Any,
-            &[Root::FirefoxCache],
-            Selector::Children,
-            0,
-        ),
-        c(
-            "safariCache",
-            "Safari cache",
-            "Safari's page cache. Sign-ins and history are kept.",
-            G::Browser,
-            R::Safe,
-            Os::Macos,
-            &[Root::SafariCache],
-            Selector::Children,
-            0,
-        ),
-        c(
-            "downloadInstallers",
-            "Installers in Downloads",
-            "Setup files you downloaded more than 30 days ago. These are your files: Dyno never selects them for you.",
-            G::Downloads,
-            R::Personal,
-            Os::Any,
-            &[Root::Downloads],
-            Selector::Installers,
-            30,
-        ),
-        c(
-            "devArtifacts",
-            "Build output of idle projects",
-            "Rust target/ and node_modules folders of projects untouched for a while. The next build recreates them.",
-            G::Developer,
-            R::Review,
-            Os::Any,
-            &[Root::Projects],
-            Selector::DevArtifacts,
-            0,
-        ),
-        c(
-            "cargoCache",
-            "Cargo cache",
-            "Downloaded crates. Cargo downloads them again when a build needs them.",
-            G::Developer,
-            R::Review,
-            Os::Any,
-            &[Root::CargoCache],
-            Selector::Children,
-            30,
-        ),
-        c(
-            "npmCache",
-            "npm cache",
-            "Downloaded npm packages. npm downloads them again when needed.",
-            G::Developer,
-            R::Review,
-            Os::Any,
-            &[Root::NpmCache],
-            Selector::Children,
-            30,
-        ),
-        c(
-            "nugetCache",
-            "NuGet cache",
-            "Downloaded NuGet packages. Restores download them again.",
-            G::Developer,
-            R::Review,
-            Os::Any,
-            &[Root::NugetCache],
-            Selector::Children,
-            30,
-        ),
-        c(
-            "pipCache",
-            "pip cache",
-            "Downloaded Python packages and wheels.",
-            G::Developer,
-            R::Safe,
-            Os::Any,
-            &[Root::PipCache],
-            Selector::Children,
-            14,
-        ),
-        c(
-            "rustToolchains",
-            "Unused Rust toolchains",
-            "Rust toolchains that are neither the default nor used by a project override.",
-            G::Developer,
-            R::Review,
-            Os::Any,
-            &[Root::RustToolchains],
-            Selector::StaleToolchains,
-            0,
-        ),
-        c(
-            "dockerImages",
-            "Unused Docker images",
-            "Dangling images no container or tag uses. Removed through Docker, not as files.",
-            G::Docker,
-            R::Review,
-            Os::Any,
-            &[Root::DockerImages],
-            Selector::DockerImages,
-            0,
-        ),
-    ]
+    super::pack::builtin()
 }
 
 /// Categories for one OS.
 pub fn for_os(os: Os) -> Vec<CategorySpec> {
-    catalog().into_iter().filter(|c| c.os == Os::Any || c.os == os).collect()
+    catalog().into_iter().filter(|c| c.applies_to(os)).collect()
 }
 
 /// The UI's view of a category.
@@ -384,9 +179,9 @@ impl CategorySpec {
     /// The UI's view, `scheduled` from the user's settings (never for personal categories).
     pub fn view(&self, scheduled: bool) -> CleanupCategory {
         CleanupCategory {
-            id: self.id.into(),
-            name: self.name.into(),
-            description: self.description.into(),
+            id: self.id.clone(),
+            name: self.name.clone(),
+            description: self.description.clone(),
             group: self.group,
             risk: self.risk,
             scheduled: scheduled && self.risk != CleanupRisk::Personal,
@@ -401,13 +196,17 @@ mod tests {
     #[test]
     fn catalog_is_consistent() {
         let all = catalog();
-        let mut ids: Vec<_> = all.iter().map(|c| c.id).collect();
+        let mut ids: Vec<_> = all.iter().map(|c| c.id.as_str()).collect();
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), all.len(), "ids are unique");
-        assert!(all.iter().all(|c| !c.roots.is_empty() && !c.description.is_empty()));
-        assert!(for_os(Os::Windows).iter().all(|c| c.os != Os::Macos));
+        assert!(all.iter().all(|c| !c.roots.is_empty() && !c.description.is_empty() && c.builtin));
+        assert!(for_os(Os::Windows)
+            .iter()
+            .all(|c| c.applies_to(Os::Windows) && c.id != "safariCache"));
         assert!(for_os(Os::Macos).iter().any(|c| c.id == "safariCache"));
+        assert!(for_os(Os::Linux).iter().any(|c| c.id == "appCaches"), "Linux has categories");
+        assert!(for_os(Os::Linux).iter().all(|c| c.id != "systemTemp" && c.id != "safariCache"));
         let d = all.iter().find(|c| c.id == "downloadInstallers").unwrap();
         assert_eq!(d.risk, CleanupRisk::Personal);
         assert!(!d.view(true).scheduled, "personal files are never scheduled");
