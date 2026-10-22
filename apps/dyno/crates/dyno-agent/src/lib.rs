@@ -11,6 +11,7 @@ pub mod diagnostics;
 pub mod discovery;
 pub mod files;
 pub mod handlers;
+pub mod handlers_cleanup;
 pub mod inventory;
 pub mod network;
 pub mod paths;

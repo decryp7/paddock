@@ -83,3 +83,14 @@ Running a plugin by hand only prints that Dyno starts it itself.
 
 Test providers as plain Rust: they are ordinary methods. `dyno_plugin_api::handle(&plugin, request)` runs the same
 dispatch `serve` uses, without a connection, so a test can send `PluginRequest`s and check the `PluginReply`s.
+
+## Cleanup packs (tier 2, no code)
+
+A cleanup pack is a TOML file. The built-in one is `crates/dyno-core/src/cleanup/builtin.toml` (every key is shown there);
+yours go in the data folder's `packs/` folder (`*.toml`, at most 32 files of 128 KiB). One `format = 1` line, then
+`[[category]]` tables with `id`, `name`, `description`, `group`, `risk`, optional `os` (`windows`, `macos`, `linux`; empty
+means all), `paths` and optional `selector` (`children` or `installers`) and `min_age_days`. A path is a template: it starts with
+`{home}`, `{temp}`, `{cache}`, `{data}` or `{localAppData}`, then folder names (`*` stands for one whole level), for example
+`{home}/.gradle/caches`. Unknown keys, `..`, personal folders such as `{home}/Documents`, a `safe` risk with
+`min_age_days = 0`, ids that already exist and anything over the limits make Dyno ignore the whole pack and say which file and
+why in the activity log. Every path a pack yields still passes the cleanup policy (ADR 0005); a pack can narrow, never widen.

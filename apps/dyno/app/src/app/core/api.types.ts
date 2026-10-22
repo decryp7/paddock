@@ -535,6 +535,7 @@ export interface FailedItem {
 }
 
 export interface CleanupOutcome {
+  /** Bytes moved out of the scanned folders; the space is released when the quarantine ends or the Recycle Bin is emptied. */
   freedBytes: number;
   deleted: number;
   failed: FailedItem[];

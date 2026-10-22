@@ -78,6 +78,16 @@ impl Dirs {
     pub fn plugins(&self) -> PathBuf {
         self.root.join("plugins")
     }
+
+    /// Cleanup packs the user dropped in (`*.toml`).
+    pub fn packs(&self) -> PathBuf {
+        self.root.join("packs")
+    }
+
+    /// Where cleaned items wait for seven days.
+    pub fn quarantine(&self) -> PathBuf {
+        self.root.join("quarantine")
+    }
 }
 
 #[cfg(test)]
@@ -90,7 +100,7 @@ mod tests {
         assert_eq!(d.database(), Path::new("/x/dyno/dyno.db"));
         assert_eq!(d.discovery(), Path::new("/x/dyno/agent.json"));
         assert_eq!(d.root(), Path::new("/x/dyno"));
-        for p in [d.settings(), d.rules(), d.process_control(), d.logs(), d.plugins()] {
+        for p in [d.settings(), d.rules(), d.process_control(), d.logs(), d.plugins(), d.packs(), d.quarantine()] {
             assert!(p.starts_with("/x/dyno"));
         }
     }

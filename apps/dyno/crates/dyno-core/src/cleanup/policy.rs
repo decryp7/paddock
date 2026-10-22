@@ -101,7 +101,8 @@ pub struct FailedItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupOutcome {
-    /// Bytes freed (moved to the Recycle Bin counts once it is emptied; quarantine counts after 7 days).
+    /// Bytes moved out of the scanned folders. The disk space is released when the quarantine expires (7 days) or the
+    /// Recycle Bin is emptied.
     pub freed_bytes: u64,
     /// Items deleted.
     pub deleted: usize,

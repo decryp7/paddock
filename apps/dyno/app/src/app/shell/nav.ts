@@ -18,6 +18,7 @@ export const NAV: NavItem[] = [
   { path: '/rules', label: 'CPU taming', icon: 'rules', keywords: 'rules profiles throttle cap protected gaming meeting battery' },
   { path: '/alarms', label: 'Alarms', icon: 'bell', keywords: 'alerts notifications acknowledge shelve mute thresholds custom rules' },
   { path: '/recorder', label: 'Flight recorder', icon: 'camera', keywords: 'timeline capture snapshot last ten minutes' },
+  { path: '/cleanup', label: 'Cleanup', icon: 'cleanup', keywords: 'temp caches disk space free up quarantine trash recycle bin developer build output' },
   { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
   { path: '/tuning', label: 'Tuning', icon: 'sparkle', keywords: 'power plan sleep hibernation battery charge limit indexing visual effects background apps suggestions undo' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },
@@ -27,6 +28,5 @@ export const NAV: NavItem[] = [
 /** What is on the roadmap but has no screen: listed in one dialog, never as a route or a page of its own. */
 export const COMING: { label: string; icon: IconName; text: string }[] = [
   { label: 'Why slow', icon: 'why', text: 'A full page for the diagnosis: the likeliest cause, the evidence, memory leaks, periodic spikes and restart loops.' },
-  { label: 'Cleanup', icon: 'cleanup', text: 'Previews, then removes temp files, caches and developer leftovers to the Recycle Bin or Trash, with a disk space map.' },
   { label: 'Weekly report', icon: 'reports', text: 'A weekly health summary with the alarms of the week and what changed.' },
 ];

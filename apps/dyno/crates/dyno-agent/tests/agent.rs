@@ -530,3 +530,137 @@ fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
         assert!(ask(&peer, Request::SaveDiagnostics { path: bad }).is_err());
     }
 }
+
+// ------------------------------------------------------------------------------------------------------- cleanup
+
+/// An agent whose data folder holds a user pack for a folder the test creates in its own temp directory.
+fn start_with_cleanup_pack() -> (Harness, std::path::PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("cachey");
+    std::fs::create_dir_all(&work).unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    std::fs::create_dir_all(dirs.packs()).unwrap();
+    let name = tmp.path().file_name().unwrap().to_string_lossy().into_owned();
+    std::fs::write(
+        dirs.packs().join("test.toml"),
+        format!(
+            "format = 1\n[[category]]\nid = \"testcache\"\nname = \"Test cache\"\ndescription = \"A folder the test made.\"\ngroup = \"developer\"\nrisk = \"review\"\npaths = [\"{{temp}}/{name}/cachey\"]\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(dirs.packs().join("broken.toml"), "format = ").unwrap();
+    let fake = Fake::new();
+    let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
+    (
+        Harness {
+            running: Some(running),
+            fake,
+            dirs,
+            _tmp: tmp,
+        },
+        work,
+    )
+}
+
+#[test]
+fn cleanup_scans_without_deleting_runs_only_what_was_chosen_and_undoes() {
+    let (h, work) = start_with_cleanup_pack();
+    let peer = h.client();
+    std::fs::write(work.join("one"), b"11").unwrap();
+    std::fs::write(work.join("two"), b"2222").unwrap();
+    let Reply::Categories(cats) = ask(&peer, Request::CleanupCategories).unwrap() else {
+        panic!("categories")
+    };
+    assert!(cats.iter().any(|c| c.id == "testcache") && cats.iter().any(|c| c.id == "userTemp"));
+    // The broken pack is reported in the activity log and ignored.
+    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
+        panic!("log")
+    };
+    assert!(log.iter().any(|e| e.detail.contains("broken.toml")));
+    let Reply::Scan(scan) = ask(
+        &peer,
+        Request::ScanCleanup {
+            categories: vec!["testcache".into()],
+        },
+    )
+    .unwrap() else {
+        panic!("scan")
+    };
+    assert_eq!(scan.total_bytes, 6);
+    assert!(work.join("one").exists(), "a scan deletes nothing");
+    let two = scan.results[0].items.iter().find(|i| i.path.ends_with("two")).unwrap().id.clone();
+    // Errors: a made-up scan, a made-up item.
+    assert!(ask(
+        &peer,
+        Request::RunCleanup {
+            scan_id: "nope".into(),
+            item_ids: vec![two.clone()],
+            mode: dyno_core::cleanup::DeleteMode::Quarantine
+        }
+    )
+    .is_err());
+    assert!(ask(
+        &peer,
+        Request::RunCleanup {
+            scan_id: scan.id.clone(),
+            item_ids: vec!["x".into()],
+            mode: dyno_core::cleanup::DeleteMode::Quarantine
+        }
+    )
+    .unwrap_err()
+    .contains("not part"));
+    let Reply::Outcome(out) = ask(
+        &peer,
+        Request::RunCleanup {
+            scan_id: scan.id.clone(),
+            item_ids: vec![two],
+            mode: dyno_core::cleanup::DeleteMode::Quarantine,
+        },
+    )
+    .unwrap() else {
+        panic!("outcome")
+    };
+    assert_eq!((out.deleted, out.freed_bytes), (1, 4));
+    assert!(work.join("one").exists() && !work.join("two").exists());
+    let q = out.quarantine_id.unwrap();
+    let Reply::Quarantines(held) = ask(&peer, Request::Quarantine).unwrap() else {
+        panic!("quarantines")
+    };
+    assert_eq!((held[0].id.as_str(), held[0].item_count), (q.as_str(), 1));
+    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
+        panic!("log")
+    };
+    let entry = log.iter().find(|e| e.title.starts_with("Cleaned 1 item")).unwrap();
+    assert_eq!((entry.undo, entry.bytes), (UndoState::Available, Some(4)));
+    // Undo from the activity log puts it back and marks the entry undone.
+    let Reply::Activity(undone) = ask(
+        &peer,
+        Request::Undo {
+            activity_id: entry.id.clone(),
+        },
+    )
+    .unwrap() else {
+        panic!("undo")
+    };
+    assert_eq!(undone.undo, UndoState::Undone);
+    assert_eq!(std::fs::read(work.join("two")).unwrap(), b"2222");
+    assert!(ask(&peer, Request::RestoreQuarantine { id: q }).is_err(), "nothing left to restore");
+    // The disk map validates its path.
+    assert!(ask(
+        &peer,
+        Request::DiskUsage {
+            path: Some("relative".into())
+        }
+    )
+    .is_err());
+    let Reply::SizeTree(tree) = ask(
+        &peer,
+        Request::DiskUsage {
+            path: Some(work.to_string_lossy().into_owned()),
+        },
+    )
+    .unwrap() else {
+        panic!("tree")
+    };
+    assert_eq!(tree.bytes, 6);
+}

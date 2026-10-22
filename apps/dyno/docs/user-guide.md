@@ -49,6 +49,10 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
   afterwards, **Revert** asks before overwriting it (**Revert anyway**). Changes that need administrator rights are shown
   but cannot be applied yet.
 - **CPU taming, Cleanup, Reports, Why slow** are placeholders for now. Their engine parts exist (see
+- **Cleanup.** Tick what to scan and press Scan: nothing is deleted. Review the list (every item, its size and why it is offered),
+  untick what you want to keep, press Clean selected and confirm. Items wait 7 days in the quarantine (Undo, or Put back in the
+  list below) or go to the Recycle Bin / Trash. A scan older than an hour must be repeated; files in use are skipped and named.
+- **CPU taming, Health and tuning, Reports, Why slow** are placeholders for now. Their engine parts exist (see
   features.md); rules ship disabled and cannot act until you enable them.
 
 ## Undo
