@@ -91,8 +91,9 @@ impl BenchMetric {
 }
 
 /// How one kind ended.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "state")]
+///
+/// Tagged by `state` on the UI's JSON wire; a plain enum on the IPC (postcard cannot read self-describing enums).
+#[derive(Debug, Clone, PartialEq)]
 pub enum BenchStatus {
     /// Finished with these numbers.
     Done {
@@ -114,6 +115,70 @@ pub enum BenchStatus {
         /// What went wrong.
         reason: String,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "state")]
+enum StatusJson {
+    Done { metrics: Vec<BenchMetric> },
+    Unavailable { reason: String },
+    Stopped { reason: String },
+    Failed { reason: String },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum StatusBinary {
+    Done { metrics: Vec<BenchMetric> },
+    Unavailable { reason: String },
+    Stopped { reason: String },
+    Failed { reason: String },
+}
+
+macro_rules! status_from {
+    ($($wire:ident),*) => {$(
+        impl From<&BenchStatus> for $wire {
+            fn from(s: &BenchStatus) -> Self {
+                match s {
+                    BenchStatus::Done { metrics } => $wire::Done { metrics: metrics.clone() },
+                    BenchStatus::Unavailable { reason } => $wire::Unavailable { reason: reason.clone() },
+                    BenchStatus::Stopped { reason } => $wire::Stopped { reason: reason.clone() },
+                    BenchStatus::Failed { reason } => $wire::Failed { reason: reason.clone() },
+                }
+            }
+        }
+        impl From<$wire> for BenchStatus {
+            fn from(s: $wire) -> Self {
+                match s {
+                    $wire::Done { metrics } => BenchStatus::Done { metrics },
+                    $wire::Unavailable { reason } => BenchStatus::Unavailable { reason },
+                    $wire::Stopped { reason } => BenchStatus::Stopped { reason },
+                    $wire::Failed { reason } => BenchStatus::Failed { reason },
+                }
+            }
+        }
+    )*};
+}
+status_from!(StatusJson, StatusBinary);
+
+impl Serialize for BenchStatus {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if s.is_human_readable() {
+            StatusJson::from(self).serialize(s)
+        } else {
+            StatusBinary::from(self).serialize(s)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BenchStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<BenchStatus, D::Error> {
+        if d.is_human_readable() {
+            StatusJson::deserialize(d).map(BenchStatus::from)
+        } else {
+            StatusBinary::deserialize(d).map(BenchStatus::from)
+        }
+    }
 }
 
 /// One kind's result inside a run.
@@ -560,5 +625,24 @@ mod tests {
         assert!(warn.is_some());
         let (empty, warn) = BenchHistory::parse(r#"{"version":99,"runs":[]}"#);
         assert!(empty.runs.is_empty() && warn.is_some());
+    }
+
+    #[test]
+    fn every_status_crosses_the_ipc_and_the_ui_wire() {
+        let all = [
+            BenchStatus::Done {
+                metrics: vec![BenchMetric::higher("a", "A", 1.0, "x")],
+            },
+            BenchStatus::Unavailable { reason: "u".into() },
+            BenchStatus::Stopped { reason: "s".into() },
+            BenchStatus::Failed { reason: "f".into() },
+        ];
+        for st in all {
+            let bytes = postcard::to_stdvec(&st).unwrap();
+            assert_eq!(postcard::from_bytes::<BenchStatus>(&bytes).unwrap(), st, "postcard");
+            let json = serde_json::to_value(&st).unwrap();
+            assert!(json["state"].is_string(), "the UI shape is tagged by state");
+            assert_eq!(serde_json::from_value::<BenchStatus>(json).unwrap(), st);
+        }
     }
 }

@@ -40,6 +40,13 @@ test.describe('screens', () => {
     await expect(page.getByText('Top apps by CPU')).toBeVisible();
   });
 
+  test('a menu-bar item popover renders the compact dashboard, not the main window', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 520 });
+    await page.goto(url('/popover/cpu-1'));
+    await expect(page.getByRole('button', { name: /Open Dyno/ })).toBeVisible();
+    await expect(page.getByRole('navigation')).toHaveCount(0);
+  });
+
   test('the command palette opens with Ctrl+K and jumps to a screen', async ({ page }) => {
     await page.goto(url());
     await page.keyboard.press('Control+k');

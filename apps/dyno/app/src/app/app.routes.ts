@@ -9,6 +9,12 @@ export const routes: Routes = [
     loadComponent: () => import('./features/tray/tray').then((m) => m.Tray),
   },
   {
+    // Each menu-bar item opens its own popover window (`#/popover/<item id>`); every one shows the shared compact dashboard.
+    path: 'popover/:id',
+    title: 'Dyno',
+    loadComponent: () => import('./features/tray/tray').then((m) => m.Tray),
+  },
+  {
     path: '',
     component: Shell,
     children: [

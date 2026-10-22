@@ -110,8 +110,10 @@ pub fn exposure(addr: &IpAddr) -> Exposure {
 }
 
 /// Who owns a socket.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+///
+/// On the wire to the UI (JSON) it is tagged by `kind`; on the IPC (postcard, which cannot read self-describing
+/// enums) it is a plain enum. The two shapes are the private types below; see [`Owner`]'s `Serialize`/`Deserialize`.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Owner {
     /// A process Dyno could name.
     Process {
@@ -127,6 +129,73 @@ pub enum Owner {
         /// Why.
         reason: String,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+enum OwnerJson {
+    Process { pid: u32, name: String, path: Option<String> },
+    Unknown { reason: String },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum OwnerBinary {
+    Process { pid: u32, name: String, path: Option<String> },
+    Unknown { reason: String },
+}
+
+impl From<Owner> for OwnerJson {
+    fn from(o: Owner) -> Self {
+        match o {
+            Owner::Process { pid, name, path } => OwnerJson::Process { pid, name, path },
+            Owner::Unknown { reason } => OwnerJson::Unknown { reason },
+        }
+    }
+}
+impl From<Owner> for OwnerBinary {
+    fn from(o: Owner) -> Self {
+        match o {
+            Owner::Process { pid, name, path } => OwnerBinary::Process { pid, name, path },
+            Owner::Unknown { reason } => OwnerBinary::Unknown { reason },
+        }
+    }
+}
+impl From<OwnerJson> for Owner {
+    fn from(o: OwnerJson) -> Self {
+        match o {
+            OwnerJson::Process { pid, name, path } => Owner::Process { pid, name, path },
+            OwnerJson::Unknown { reason } => Owner::Unknown { reason },
+        }
+    }
+}
+impl From<OwnerBinary> for Owner {
+    fn from(o: OwnerBinary) -> Self {
+        match o {
+            OwnerBinary::Process { pid, name, path } => Owner::Process { pid, name, path },
+            OwnerBinary::Unknown { reason } => Owner::Unknown { reason },
+        }
+    }
+}
+
+impl Serialize for Owner {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if s.is_human_readable() {
+            OwnerJson::from(self.clone()).serialize(s)
+        } else {
+            OwnerBinary::from(self.clone()).serialize(s)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Owner {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Owner, D::Error> {
+        if d.is_human_readable() {
+            OwnerJson::deserialize(d).map(Owner::from)
+        } else {
+            OwnerBinary::deserialize(d).map(Owner::from)
+        }
+    }
 }
 
 const UNKNOWN_REASON: &str =
@@ -727,5 +796,33 @@ mod tests {
         ] {
             assert!(!s.label().is_empty());
         }
+    }
+
+    #[test]
+    fn owners_cross_the_ipc_and_the_ui_wire_in_their_own_shapes() {
+        let named = Owner::Process {
+            pid: 7,
+            name: "node".into(),
+            path: Some("/bin/node".into()),
+        };
+        let unknown = Owner::Unknown { reason: "r".into() };
+        for o in [named, unknown] {
+            let bytes = postcard::to_stdvec(&o).unwrap();
+            assert_eq!(postcard::from_bytes::<Owner>(&bytes).unwrap(), o, "postcard (the IPC)");
+            let json = serde_json::to_value(&o).unwrap();
+            assert!(
+                json["kind"] == "process" || json["kind"] == "unknown",
+                "the UI shape is tagged by kind"
+            );
+            assert_eq!(serde_json::from_value::<Owner>(json).unwrap(), o);
+        }
+    }
+
+    #[test]
+    fn a_populated_network_snapshot_survives_the_ipc() {
+        let snap = build(Timestamp(5), &rows(), &procs(), &NetworkQuery::default(), &Tracker::new());
+        assert!(!snap.connections.is_empty() && !snap.listeners.is_empty());
+        let bytes = postcard::to_stdvec(&snap).unwrap();
+        assert_eq!(postcard::from_bytes::<NetworkSnapshot>(&bytes).unwrap(), snap);
     }
 }
