@@ -47,8 +47,9 @@ says it is the job's). Peak CPU, peak memory and the number of survivors are sto
   (15 s) it is ended (SIGKILL / `taskkill /F`); a process that survives even that is given up on and reported;
 - every stop is logged in the runner's log and recorded in the history as `ProcessStopped` (name, pid, age, the rule used,
   who decided, whether it had to be ended), shown in Activity;
-- "Keep longer" adds time to one leftover (kept in memory per pid and start time, capped at 30 days in total; a service
-  restart forgets it, and the leftover then follows its rule again).
+- "Keep longer" adds time to one leftover (kept per pid and start time, capped at 30 days in total). The
+  extensions are saved in `state.json` (`keeps` per runner, at most 256, a damaged record is skipped) and restored when
+  the service starts; an extension whose process is gone is dropped at the next reading.
 
 **Stopping by hand** (`Request::StopProcess`) uses the same machinery and the same guard (`check_stop_target`), with a
 confirmation in the UI: the process must be in the runner's tree now, with the start time the app saw (a reused pid is
