@@ -88,6 +88,8 @@ CPU. Only installed builds that work on this machine are considered.
 
 ## Get a model
 
+![Discover: recommendations and the fit of each quantisation](screenshots/models-discover-light.png)
+
 Open **Models** then **Discover**.
 
 - **Recommended** lists models from the built-in starter catalog (and any catalog pack you added) that fit this machine (those that will not fit are left out), such as
@@ -155,6 +157,8 @@ Prefer to create a key yourself (for `curl`, an editor plugin, a script)? In **A
 a name and the permissions; the key is shown once in a dialog, so copy it then.
 
 ## API keys, permissions and limits
+
+![An app's usage over time and limits](screenshots/apps-detail-light.png)
 
 A key looks like `pw_` followed by 43 characters. Pitwall keeps only a hash of it and the first characters (`pw_3f9a1c...`)
 to tell keys apart, so a lost key cannot be shown again: add a new key to the app and revoke the old one.
@@ -372,6 +376,8 @@ With no `model`, Pitwall uses the default model from Settings, else a loaded one
 
 ## Model presets and aliases
 
+![The Presets tab](screenshots/models-presets-light.png)
+
 A preset gives an app a stable name and lets you decide what serves it. In **Models > Presets** press **New preset**:
 
 | Field | Meaning |
@@ -403,6 +409,8 @@ the model it resolved to. Presets are stored in `presets.json` in the data folde
 
 ## Parallel slots per model
 
+![Parallel slots and the fit table](screenshots/models-slots-light.png)
+
 A model can serve several requests at once. Each running request uses a *slot*, and every slot keeps its own context in memory,
 so more slots mean more memory. In **Models > Library**, the **Slots** button of a model opens a panel:
 
@@ -419,6 +427,8 @@ slot is an estimate, and the panel says so. Requests beyond a model's slots wait
 also says how many requests at once the machine could run.
 
 ## Model update notices
+
+![The Library with two update notices](screenshots/models-library-light.png)
 
 Hugging Face files change: a model is re-uploaded with a fix, or a better quantisation appears. Pitwall can tell you, and
 only tell you. It is **off until you turn it on**: Settings > **Model updates** > *Check for model updates*, then *Every week* or

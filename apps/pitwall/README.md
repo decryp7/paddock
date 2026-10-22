@@ -25,17 +25,24 @@ runs have not been done; see the [roadmap](docs/roadmap.md) for exactly what is 
 
 | Screen | Light | Dark |
 | --- | --- | --- |
-| Dashboard: memory, loaded models with idle countdown, tokens per second, queue, history | ![Dashboard, light](docs/screenshots/dashboard-light.png) | ![Dashboard, dark](docs/screenshots/dashboard-dark.png) |
-| Models: library, "will this fit?", downloads | ![Models, light](docs/screenshots/models-light.png) | ![Models, dark](docs/screenshots/models-dark.png) |
-| Engines: builds, self-test, roll back | ![Engines, light](docs/screenshots/engines-light.png) | ![Engines, dark](docs/screenshots/engines-dark.png) |
-| Apps and keys: pairing, permissions, limits | ![Apps, light](docs/screenshots/apps-light.png) | ![Apps, dark](docs/screenshots/apps-dark.png) |
-| Requests: recent requests, timing, chosen model | ![Requests, light](docs/screenshots/requests-light.png) | ![Requests, dark](docs/screenshots/requests-dark.png) |
-| Playground: chat and side-by-side comparison | ![Playground, light](docs/screenshots/playground-light.png) | ![Playground, dark](docs/screenshots/playground-dark.png) |
-| Benchmarks: speed on this machine | ![Benchmarks, light](docs/screenshots/benchmarks-light.png) | ![Benchmarks, dark](docs/screenshots/benchmarks-dark.png) |
-| Settings | ![Settings, light](docs/screenshots/settings-light.png) | ![Settings, dark](docs/screenshots/settings-dark.png) |
-| Tray / menu bar | ![Tray, light](docs/screenshots/tray-light.png) | ![Tray, dark](docs/screenshots/tray-dark.png) |
+| Dashboard: memory, loaded models with idle countdown, throughput, queue, usage by app, model-update notice, history | ![dashboard, light](docs/screenshots/dashboard-light.png) | ![dashboard, dark](docs/screenshots/dashboard-dark.png) |
+| Models, Library: disk, status, update marks | ![models-library, light](docs/screenshots/models-library-light.png) | ![models-library, dark](docs/screenshots/models-library-dark.png) |
+| Models, a model's detail: slots, idle override, engine pin | ![models-detail, light](docs/screenshots/models-detail-light.png) | ![models-detail, dark](docs/screenshots/models-detail-dark.png) |
+| Models, parallel slots: what each slot adds and the fit table | ![models-slots, light](docs/screenshots/models-slots-light.png) | ![models-slots, dark](docs/screenshots/models-slots-dark.png) |
+| Models, Discover: recommendations and "will it fit?" per quantisation | ![models-discover, light](docs/screenshots/models-discover-light.png) | ![models-discover, dark](docs/screenshots/models-discover-dark.png) |
+| Models, Presets: names apps send and what they resolve to | ![models-presets, light](docs/screenshots/models-presets-light.png) | ![models-presets, dark](docs/screenshots/models-presets-dark.png) |
+| Models, Downloads: progress, resume | ![models-downloads, light](docs/screenshots/models-downloads-light.png) | ![models-downloads, dark](docs/screenshots/models-downloads-dark.png) |
+| Engines: builds, pin, features, self-test, roll back | ![engines, light](docs/screenshots/engines-light.png) | ![engines, dark](docs/screenshots/engines-dark.png) |
+| Apps and keys: pairing, apps, permissions | ![apps, light](docs/screenshots/apps-light.png) | ![apps, dark](docs/screenshots/apps-dark.png) |
+| Apps, one app: usage over time, limits with progress | ![apps-detail, light](docs/screenshots/apps-detail-light.png) | ![apps-detail, dark](docs/screenshots/apps-detail-dark.png) |
+| Requests: log with timing and the chosen model | ![requests, light](docs/screenshots/requests-light.png) | ![requests, dark](docs/screenshots/requests-dark.png) |
+| Requests, one request: timing, routing, preset alias | ![requests-detail, light](docs/screenshots/requests-detail-light.png) | ![requests-detail, dark](docs/screenshots/requests-detail-dark.png) |
+| Playground: chat with a local model | ![playground, light](docs/screenshots/playground-light.png) | ![playground, dark](docs/screenshots/playground-dark.png) |
+| Benchmarks: speed on this machine | ![benchmarks, light](docs/screenshots/benchmarks-light.png) | ![benchmarks, dark](docs/screenshots/benchmarks-dark.png) |
+| Settings, including Model updates | ![settings, light](docs/screenshots/settings-light.png) | ![settings, dark](docs/screenshots/settings-dark.png) |
+| Tray popover (360x520) | ![Tray, light](docs/screenshots/tray-light.png) | ![Tray, dark](docs/screenshots/tray-dark.png) |
 
-The screenshots come from the browser build with the mock backend (`npm run screenshots` in `app/`); they show the
+The screenshots come from the browser build with the mock backend (`npm run screenshots` in `app/`; 1440x900 at 2x, long pages taller); they show the
 design, not measurements from a real machine.
 
 ## At a glance

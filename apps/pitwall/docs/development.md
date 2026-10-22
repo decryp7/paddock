@@ -59,7 +59,7 @@ npm ci
 npx ng serve        # browser build with the mock backend; no server needed
 npx ng test --watch=false
 npm run e2e         # Playwright (Chromium and WebKit) against the mock backend; npm run e2e:install first
-npm run screenshots # captures docs/screenshots/<screen>-<light|dark>.png from the mock backend
+npm run screenshots # 1440x900 @2x, light and dark, into docs/screenshots (see docs/design.md)
 ```
 
 The mock backend exists for browser development and UI tests only. It mimics the contract with plausible data and is

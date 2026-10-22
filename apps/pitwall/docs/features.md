@@ -243,7 +243,17 @@ server pushes updates over a live feed, so nothing is polled. Metrics are kept l
 
 ## Models page
 
-![Models](screenshots/models-light.png)
+![Models: library](screenshots/models-library-light.png)
+
+![A model's detail panel](screenshots/models-detail-light.png)
+
+![Parallel slots](screenshots/models-slots-light.png)
+
+![Discover](screenshots/models-discover-light.png)
+
+![Presets](screenshots/models-presets-light.png)
+
+![Downloads](screenshots/models-downloads-light.png)
 
 **Library** lists installed models with size, quantisation, capabilities, a Loaded badge and the idle countdown, with pin,
 idle time and engine choices, load, unload and delete. **Discover** shows recommendations from the catalog packs and searches
@@ -264,12 +274,16 @@ shows `pinned to <build>` with a small build menu per model. The pack engines ap
 
 ![Apps and keys](screenshots/apps-light.png)
 
+![One app: usage over time and limits](screenshots/apps-detail-light.png)
+
 Paired and manually created apps with their keys, last use, today's usage and a permissions editor; the pairing requests
 waiting for approval; create app, add key and revoke. A new key is shown once in a dialog. Works.
 
 ## Requests
 
 ![Requests](screenshots/requests-light.png)
+
+![One request, with the preset it asked for](screenshots/requests-detail-light.png)
 
 Recent requests with app, endpoint, model, how it was chosen, priority, queue time, time to first token, tokens and speed, cold
 start and status. Only metadata is kept by default. With **Keep request content** on (Settings > Privacy) the prompt and the

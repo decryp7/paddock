@@ -257,3 +257,29 @@ Waiting, then approved (the key is delivered once), denied or expired after five
 ![Pairing states](diagrams/svg/uml-state-pairing.svg)
 
 Source: [uml-state-pairing.drawio](diagrams/uml-state-pairing.drawio)
+
+## Screenshots
+
+Every screen and recently added feature has a light and a dark shot in [screenshots](screenshots/), 1440x900 logical at 2x
+(taller when the page scrolls; the tray is its real 360x520). They are captured from the browser build with the mock
+backend by `npm run screenshots` in `app/` (spec: `app/e2e/screenshots/capture.shot.ts`; `SHOT_ONLY=engines,tray` limits it).
+Re-capture after every layout change and commit them with the change.
+
+| Feature | Screenshot |
+| --- | --- |
+| Memory, loaded models, queue, usage by app, model-update notice, history | `dashboard` |
+| Library, update marks | `models-library` |
+| Model detail: slots, idle override, engine build pin | `models-detail` |
+| Parallel slots and fit table | `models-slots` |
+| Recommendations, fit per quantisation | `models-discover` |
+| Presets | `models-presets` |
+| Downloads | `models-downloads` |
+| Engines: pin, features, roll back | `engines` |
+| Apps, pairing, permissions | `apps` |
+| App usage chart and limits | `apps-detail` |
+| Request log | `requests` |
+| Request detail with preset alias | `requests-detail` |
+| Chat | `playground` |
+| Speed measurements | `benchmarks` |
+| Settings incl. Model updates | `settings` |
+| Tray popover | `tray` |

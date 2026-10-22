@@ -1,6 +1,6 @@
 # Pitwall — engineering rules for coding agents and contributors
 
-Pitwall is the local LLM server and manager of the suite (IMT, Pitcrew, Spotter, Dyno and any OpenAI, Anthropic or
+Pitwall is the local LLM server and manager of the suite (Debrief, Pitcrew, Spotter, Dyno and any OpenAI, Anthropic or
 Ollama compatible tool): a Rust core (`crates/pitwall-core`), the server (`crates/pitwall-server`), a
 Tauri 2 tray app (`app/src-tauri`) and an Angular UI (`app/src`). See README.md for what it does and `docs/adr/` for why
 it is built this way.
