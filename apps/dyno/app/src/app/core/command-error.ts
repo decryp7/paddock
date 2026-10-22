@@ -43,3 +43,8 @@ export function errorHint(code: ErrorCode): string | null {
       return null;
   }
 }
+
+/** The engine answers "not built yet" for features that are still to come: pages hide those panels instead of showing an error. */
+export function isNotBuilt(e: { code: string; message: string } | null): boolean {
+  return e !== null && (e.code === 'unsupported' || /not (built|implemented)/i.test(e.message));
+}

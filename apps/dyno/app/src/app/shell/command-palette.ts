@@ -151,10 +151,9 @@ export class CommandPalette {
         keywords: 'diagnose slow cause',
         run: () => {
           void this.diagnosis.run();
-          void this.router.navigateByUrl('/why-slow');
+          void this.router.navigateByUrl('/');
         },
       },
-      { id: 'clean', section: 'Actions', label: 'Clean now', hint: 'Preview first', icon: 'cleanup', keywords: 'cleanup scan free space', run: go('/cleanup?scan=1') },
       {
         id: 'pause',
         section: 'Actions',

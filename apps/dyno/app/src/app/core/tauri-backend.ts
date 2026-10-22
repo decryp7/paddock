@@ -45,6 +45,9 @@ export type ListenFn = <T>(event: string, handler: (event: { payload: T }) => vo
 /** The externally tagged Rust `Request` enum: a unit variant is a string, a data variant `{ variant: fields }`. */
 export type DynoRequest = string | Record<string, Record<string, unknown>>;
 
+/** Every command fails with a `timeout` error after this long, so a panel shows an inline error with Retry, not a skeleton forever. */
+export const REQUEST_TIMEOUT_MS = 15_000;
+
 /** The push events of the shell. */
 export const EVENTS = {
   live: 'dyno://live',
@@ -99,6 +102,8 @@ export class TauriBackend implements DynoBackend {
   constructor(
     private readonly call: InvokeFn = invoke,
     listenFn: ListenFn = listen as ListenFn,
+    /** How long a command may take before it fails with `timeout` (the first call in a fresh window can go unanswered). */
+    private readonly timeoutMs: number = REQUEST_TIMEOUT_MS,
   ) {
     this.live = new EventChannel(listenFn, EVENTS.live);
     this.alertChannel = new EventChannel(listenFn, EVENTS.alert);
@@ -325,10 +330,16 @@ export class TauriBackend implements DynoBackend {
   }
 
   private async command<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject({ code: 'timeout', message: 'Dyno did not answer in time.' }), this.timeoutMs);
+    });
     try {
-      return await (args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args));
+      return await Promise.race([args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args), timeout]);
     } catch (e) {
       throw toCommandError(e);
+    } finally {
+      clearTimeout(timer);
     }
   }
 }

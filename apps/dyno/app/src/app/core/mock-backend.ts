@@ -55,6 +55,7 @@ import {
   healthReasons,
 } from './mock/data';
 import { mockHistory } from './mock/history';
+import { type MockOs, type OsProfile, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
 
@@ -66,8 +67,12 @@ const DAY = 24 * 60 * MIN;
 /** Which machine the mock pretends to be: the laptop has everything; the desktop lacks a battery and sensors. */
 export type MockMachine = 'laptop' | 'desktop';
 
+export type { MockOs };
+
 export interface MockOptions {
   machine?: MockMachine;
+  /** The operating system the mock pretends to run on (default macOS). */
+  os?: MockOs;
   /** Simulated round-trip per request (skeletons show in the browser; 0 in unit tests). */
   latencyMs?: number;
   /** The clock (Playwright freezes it for stable screenshots). */
@@ -76,13 +81,19 @@ export interface MockOptions {
   fail?: ReadonlySet<string>;
 }
 
-/** Reads the mock options from the page's query string (`?mock=desktop&fail=health&latency=0`). */
+/**
+ * Reads the mock options from the page's query string: `?mock=` takes `windows`, `macos`, `linux` and/or `desktop`
+ * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay.
+ */
 export function mockOptionsFromUrl(search: string): MockOptions {
   const q = new URLSearchParams(search);
   const fail = q.get('fail');
   const latency = q.get('latency');
+  const tokens = (q.get('mock') ?? '').split(',').map((t) => t.trim().toLowerCase());
+  const os = (['windows', 'macos', 'linux'] as const).find((o) => tokens.includes(o));
   return {
-    machine: q.get('mock') === 'desktop' ? 'desktop' : 'laptop',
+    machine: tokens.includes('desktop') ? 'desktop' : 'laptop',
+    os: os ?? 'macos',
     latencyMs: latency !== null && Number.isFinite(Number(latency)) ? Number(latency) : 150,
     fail: new Set(fail ? fail.split(',') : []),
   };
@@ -90,8 +101,14 @@ export function mockOptionsFromUrl(search: string): MockOptions {
 
 const copy = <T>(v: T): T => structuredClone(v);
 
+/** Makes the window chrome follow the mock's OS in the browser build (the Tauri shell sets these before boot). */
+export function applyMockPlatform(search: string, root: HTMLElement): void {
+  if (root.dataset['platform']) return;
+  root.dataset['platform'] = mockOptionsFromUrl(search).os ?? 'macos';
+}
+
 /**
- * The backend for browser development and UI tests: a developer's Windows 11 laptop in the middle of a `cargo
+ * The backend for browser development and UI tests: a developer's laptop (macOS by default) in the middle of a `cargo
  * build`. Live values are a deterministic function of the clock; mutations change the mock's state so flows (undo,
  * profiles, pause, cleanup) can be exercised. It mimics the contract; it is never the reference for behaviour.
  */
@@ -101,6 +118,7 @@ export class MockBackend implements DynoBackend {
   private readonly now: () => number;
   private readonly fail: ReadonlySet<string>;
   private readonly start: number;
+  private readonly profile: OsProfile;
 
   private processes: MockProcess[];
   private readonly priorities = new Map<number, Priority>();
@@ -129,20 +147,21 @@ export class MockBackend implements DynoBackend {
 
   constructor(options: MockOptions = {}) {
     this.machine = options.machine ?? 'laptop';
+    this.profile = osProfile(options.os ?? 'macos');
     this.latencyMs = options.latencyMs ?? 0;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
     this.start = this.now();
-    this.processes = buildProcesses(this.start);
+    this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
     this.ruleSet = {
       rules: demoRules(),
-      protected: ['Spotify.exe', 'OBS64.exe'],
+      protected: [this.profile.os === 'windows' ? 'Spotify.exe' : 'Spotify', 'OBS'],
       builtInProtected: BUILT_IN_PROTECTED,
       profile: 'normal',
       profiles: PROFILES,
       paused: false,
     };
-    const rustc = this.processes.find((p) => p.name === 'rustc.exe')!;
+    const rustc = this.processes.find((p) => p.name === this.profile.names.rustc)!;
     this.priorities.set(rustc.pid, 'belowNormal');
     this.activeActions = [
       {
@@ -162,7 +181,7 @@ export class MockBackend implements DynoBackend {
       { id: 'snap-1', at: this.start - 3 * 60 * MIN, label: 'Before the build', processCount: this.processes.length - 7 },
       { id: 'snap-2', at: this.start - 20 * MIN, label: 'Morning baseline', processCount: this.processes.length - 2 },
     ];
-    this.snapshotData.set('snap-1', this.samplesAt(this.start / 1000 - 3 * 3600).filter((s) => s.name !== 'rustc.exe' && s.name !== 'cargo.exe'));
+    this.snapshotData.set('snap-1', this.samplesAt(this.start / 1000 - 3 * 3600).filter((s) => s.name !== this.profile.names.rustc && s.name !== this.profile.names.cargo));
     this.snapshotData.set('snap-2', this.samplesAt(this.start / 1000 - 1200).slice(0, -2));
   }
 
@@ -209,7 +228,7 @@ export class MockBackend implements DynoBackend {
   }
 
   appInfo(): Promise<AppInfo> {
-    return this.reply('appInfo', () => ({ version: '0.1.0', os: 'windows', updatesAvailable: false, updatesReason: 'Updates are not configured for this build (no signing key).' }));
+    return this.reply('appInfo', () => ({ version: '0.1.0', os: this.profile.os, updatesAvailable: false, updatesReason: 'Updates are not configured for this build (no signing key).' }));
   }
 
   /** The live sample at the current second. */
@@ -248,16 +267,16 @@ export class MockBackend implements DynoBackend {
   private system(t: number, samples: ProcessSample[]): SystemSample {
     const processCpu = samples.reduce((a, s) => a + s.cpu, 0);
     const total = clamp(processCpu + 1.4 + 0.6 * wobble(t, 500, 3), 0, 100);
-    const perCore = Array.from({ length: 16 }, (_, i) => round(clamp(total * (1 + 0.45 * wobble(t, 600 + i, 3)) + (i === 0 ? 6 : 0), 0, 100), 1));
-    const memTotal = Math.round(31.7 * GB);
+    const perCore = Array.from({ length: this.profile.cores }, (_, i) => round(clamp(total * (1 + 0.45 * wobble(t, 600 + i, 3)) + (i === 0 ? 6 : 0), 0, 100), 1));
+    const memTotal = this.profile.memoryTotal;
     const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + s.memory, 0) + 2.9 * GB);
     const diskRead = samples.reduce((a, s) => a + s.diskReadBps, 0);
     const diskWrite = samples.reduce((a, s) => a + s.diskWriteBps, 0);
-    const building = samples.some((s) => s.name === 'rustc.exe' && s.cpu > 1);
+    const building = samples.some((s) => s.name === this.profile.names.rustc && s.cpu > 1);
     const laptop = this.machine === 'laptop';
     return {
       at: t * 1000,
-      cpu: { total: round(total, 1), perCore, frequencyMhz: Math.round(4380 + 260 * wobble(t, 700, 4)), baseFrequencyMhz: 3800 },
+      cpu: { total: round(total, 1), perCore, frequencyMhz: Math.round(this.profile.cpuMaxMhz - 260 + 260 * wobble(t, 700, 4)), baseFrequencyMhz: this.profile.cpuBaseMhz },
       memory: {
         total: memTotal,
         used: Math.round(memUsed),
@@ -267,48 +286,43 @@ export class MockBackend implements DynoBackend {
         swapTotal: 24 * GB,
         pressure: { available: memUsed / memTotal > 0.85 ? 'critical' : memUsed / memTotal > 0.7 ? 'elevated' : 'normal' },
       },
-      disks: [
-        { id: 'C', name: 'Samsung PM9A1 NVMe', mount: 'C:\\', total: Math.round(953.8 * GB), free: Math.round((210 - (this.now() - this.start) / DAY * 5.1) * GB), removable: false },
-        { id: 'D', name: 'Seagate BarraCuda HDD', mount: 'D:\\', total: Math.round(1863 * GB), free: Math.round(1204 * GB), removable: false },
-      ],
+      disks: this.profile.disks((this.now() - this.start) / DAY),
       diskIo: {
         readBps: diskRead,
         writeBps: diskWrite,
         queue: { available: round(clamp((building ? 4.2 : 0.3) + (building ? 0.9 : 0.1) * wobble(t, 800, 3), 0, 64), 1) },
         busy: { available: round(clamp((building ? 88 : 9) + (building ? 7 : 5) * wobble(t, 801, 3), 0, 100), 1) },
       },
-      network: [
-        { name: 'Ethernet (USB-C dock)', rxBps: Math.round((3.8 + 2.2 * wobble(t, 810, 5)) * MB), txBps: Math.round((0.6 + 0.4 * wobble(t, 811, 5)) * MB) },
-        { name: 'Wi-Fi', rxBps: Math.round((0.12 + 0.1 * wobble(t, 812, 5)) * MB), txBps: Math.round((0.03 + 0.02 * wobble(t, 813, 5)) * MB) },
-      ],
+      network: this.profile.network((salt, period) => wobble(t, salt, period)),
       gpu: {
         available: {
-          name: 'NVIDIA GeForce RTX 4070 Laptop GPU',
+          name: this.profile.gpuName,
           utilization: round(clamp(9 + 6 * wobble(t, 820, 4), 0, 100), 1),
           memoryUsed: Math.round((2.3 + 0.1 * wobble(t, 821, 20)) * GB),
-          memoryTotal: 8 * GB,
+          memoryTotal: this.profile.os === 'macos' ? this.profile.memoryTotal : 8 * GB,
         },
       },
       battery: laptop
         ? { available: { charge: 86, source: 'ac', health: 87.2, cycles: 412, secondsToEmpty: null } }
-        : { unavailable: 'This PC has no battery.' },
+        : { unavailable: this.profile.noBattery },
       temperatures: laptop
         ? {
             available: [
-              { label: 'CPU package', celsius: round(clamp(78 + 4 * wobble(t, 830, 6), 30, 105), 1), critical: 100 },
+              { label: this.profile.cpuSensor, celsius: round(clamp(78 + 4 * wobble(t, 830, 6), 30, 105), 1), critical: 100 },
               { label: 'GPU', celsius: round(clamp(56 + 2 * wobble(t, 831, 8), 30, 100), 1), critical: 87 },
-              { label: 'NVMe (C:)', celsius: round(clamp(49 + 1.5 * wobble(t, 832, 10), 30, 90), 1), critical: 82 },
+              { label: 'SSD', celsius: round(clamp(49 + 1.5 * wobble(t, 832, 10), 30, 90), 1), critical: 82 },
             ],
           }
-        : { unavailable: 'The CPU does not report temperatures without a vendor driver (Dyno installs no drivers).' },
-      fans: laptop
-        ? {
-            available: [
-              { label: 'CPU fan', rpm: Math.round(4200 + 300 * wobble(t, 840, 6)) },
-              { label: 'GPU fan', rpm: Math.round(3100 + 200 * wobble(t, 841, 6)) },
-            ],
-          }
-        : { unavailable: 'The motherboard does not expose fan speeds to Windows.' },
+        : { unavailable: this.profile.noTemperatures },
+      fans:
+        laptop && this.profile.os !== 'macos'
+          ? {
+              available: [
+                { label: 'CPU fan', rpm: Math.round(4200 + 300 * wobble(t, 840, 6)) },
+                { label: 'GPU fan', rpm: Math.round(3100 + 200 * wobble(t, 841, 6)) },
+              ],
+            }
+          : { unavailable: this.profile.noFans },
       uptimeSecs: 12 * 86400 + 3 * 3600 + 14 * 60 + Math.floor((this.now() - this.start) / 1000),
     };
   }
@@ -326,35 +340,44 @@ export class MockBackend implements DynoBackend {
         parents.push({ pid: parent.pid, name: parent.name });
         cur = parent.parent;
       }
-      const system = p.user === 'SYSTEM' || p.exe === null;
-      const browser = p.name === 'chrome.exe';
+      const pr = this.profile;
+      const system = p.protectedReason !== null && p.protectedReason !== 'Protected: Dyno itself' ? true : p.exe === null;
+      const browser = p.name === pr.names.chrome;
+      const sep = pr.os === 'windows' ? '\\' : '/';
+      const dir = p.exe ? p.exe.slice(0, Math.max(p.exe.lastIndexOf(sep), 0)) : null;
+      const chromeData =
+        pr.os === 'windows'
+          ? `${pr.home}\\AppData\\Local\\Google\\Chrome\\User Data\\Default`
+          : pr.os === 'macos'
+            ? `${pr.home}/Library/Application Support/Google/Chrome/Default`
+            : `${pr.home}/.config/google-chrome/Default`;
       return {
         process: sample,
         commandLine: this.commandLine(p),
-        cwd: system ? null : p.exe?.replace(/\\[^\\]+$/, '') ?? null,
+        cwd: system ? null : dir,
         priority: this.priorities.get(p.pid) ?? 'normal',
-        affinity: this.affinities.get(p.pid) ?? 0xffff,
+        affinity: pr.os === 'macos' ? null : (this.affinities.get(p.pid) ?? 2 ** pr.cores - 1),
         efficiencyMode: this.efficiency.has(p.pid),
         threads: Math.round(8 + (p.memory / MB) * 0.08),
         handles: Math.round(180 + (p.memory / MB) * 1.4),
         parents,
         signature: system
-          ? { signed: 'Microsoft Windows' }
-          : p.name === 'rustc.exe' || p.name === 'cargo.exe'
+          ? { signed: pr.signer }
+          : p.name === pr.names.rustc || p.name === pr.names.cargo
             ? 'unsigned'
-            : { signed: publisher(p) },
+            : { signed: publisher(p, pr.signer) },
         openFiles: system
-          ? { unavailable: 'Windows does not list open files of protected system processes.' }
+          ? { unavailable: pr.openFilesDenied }
           : {
               items: {
                 items: browser
-                  ? ['C:\\Users\\alex\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\History', 'C:\\Users\\alex\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cookies', 'C:\\Users\\alex\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cache\\Cache_Data\\data_1']
-                  : [`${p.exe ?? ''}`, 'C:\\Windows\\System32\\en-US\\kernel32.dll.mui', 'C:\\dev\\dyno\\target\\debug\\deps\\dyno_core-4f2a.rlib'],
+                  ? [`${chromeData}${sep}History`, `${chromeData}${sep}Cookies`, `${chromeData}${sep}Cache${sep}Cache_Data${sep}data_1`]
+                  : [`${p.exe ?? ''}`, pr.libs[0] ?? '', `${pr.projectDir}${sep}target${sep}debug${sep}deps${sep}dyno_core-4f2a.rlib`],
                 truncated: false,
               },
             },
         connections: system
-          ? { unavailable: 'Needs the Dyno helper (administrator) for SYSTEM processes.' }
+          ? { unavailable: 'Needs the Dyno helper (administrator) for system processes.' }
           : {
               items: {
                 items: browser
@@ -367,27 +390,27 @@ export class MockBackend implements DynoBackend {
                 truncated: false,
               },
             },
-        modules: system
-          ? { unavailable: 'Windows does not list modules of protected system processes.' }
-          : { items: { items: ['ntdll.dll', 'KERNEL32.DLL', 'KERNELBASE.dll', 'ucrtbase.dll', 'USER32.dll', 'win32u.dll', 'GDI32.dll', 'ws2_32.dll', 'bcrypt.dll'], truncated: true } },
-        startupSource: p.group === 'teams' ? 'Run key (current user): Microsoft Teams' : p.group === 'docker' ? 'Run key (current user): Docker Desktop' : null,
+        modules: system ? { unavailable: pr.modulesDenied } : { items: { items: pr.libs, truncated: true } },
+        startupSource: p.group === 'teams' ? 'Login item: Microsoft Teams' : p.group === 'docker' ? 'Login item: Docker Desktop' : null,
       };
     });
   }
 
   private commandLine(p: MockProcess): string[] {
     const exe = p.exe ?? p.name;
+    const n = this.profile.names;
+    const src = this.profile.os === 'windows' ? 'crates\\dyno-core\\src\\lib.rs' : 'crates/dyno-core/src/lib.rs';
     switch (p.name) {
-      case 'chrome.exe':
+      case n.chrome:
         return [exe, '--type=renderer', '--lang=en-GB', '--renderer-client-id=42'];
-      case 'rustc.exe':
-        return [exe, '--crate-name', 'dyno_core', '--edition=2024', 'crates\\dyno-core\\src\\lib.rs', '--crate-type', 'lib', '-C', 'opt-level=3'];
-      case 'cargo.exe':
+      case n.rustc:
+        return [exe, '--crate-name', 'dyno_core', '--edition=2024', src, '--crate-type', 'lib', '-C', 'opt-level=3'];
+      case n.cargo:
         return [exe, 'build', '--release', '--workspace'];
       case 'svchost.exe':
         return [exe, '-k', 'netsvcs', '-p'];
-      case 'node.exe':
-        return [exe, 'node_modules\\@angular\\cli\\bin\\ng.js', 'serve'];
+      case n.node:
+        return [exe, 'node_modules/@angular/cli/bin/ng.js', 'serve'];
       default:
         return [exe];
     }
@@ -447,9 +470,9 @@ export class MockBackend implements DynoBackend {
         const p = this.processes.find((x) => x.name === name);
         return p ? [{ process: { pid: p.pid, started: p.started }, name: p.name, kind }] : [];
       };
-      if (lower.includes('target')) return [...pick('rustc.exe', 'Writes build output'), ...pick('Code.exe', 'rust-analyzer watches it'), ...pick('MsMpEng.exe', 'Scanning')];
-      if (lower.includes('chrome')) return pick('chrome.exe', 'Browser profile');
-      if (lower.endsWith('.log')) return pick('dyno-agent.exe', null);
+      if (lower.includes('target')) return [...pick(this.profile.names.rustc, 'Writes build output'), ...pick(this.profile.names.code, 'rust-analyzer watches it'), ...pick(this.profile.names.indexer, 'Indexing')];
+      if (lower.includes('chrome')) return pick(this.profile.names.chrome, 'Browser profile');
+      if (lower.endsWith('.log')) return pick(this.profile.names.agent, null);
       return [];
     });
   }
@@ -457,7 +480,7 @@ export class MockBackend implements DynoBackend {
   openLocation(target: ProcessRef): Promise<void> {
     return this.reply('openLocation', () => {
       const p = this.find(target);
-      if (!p.exe) throw err('unsupported', `${p.name} has no file on disk (it is part of the Windows kernel).`);
+      if (!p.exe) throw err('unsupported', `${p.name} has no file on disk (${this.profile.kernelNote}).`);
     });
   }
 
@@ -511,9 +534,9 @@ export class MockBackend implements DynoBackend {
       const now = this.now();
       const t = Math.floor(now / 1000);
       const samples = this.samplesAt(t);
-      const rustc = samples.filter((s) => s.name === 'rustc.exe');
+      const rustc = samples.filter((s) => s.name === this.profile.names.rustc);
       const rustcCpu = rustc.reduce((a, s) => a + s.cpu, 0);
-      const cargo = this.processes.find((p) => p.name === 'cargo.exe');
+      const cargo = this.processes.find((p) => p.name === this.profile.names.cargo);
       const io = this.system(t, samples).diskIo;
       const queue = 'available' in io.queue ? io.queue.available : 0;
       if (rustc.length === 0 || rustcCpu < 5) {
@@ -525,17 +548,17 @@ export class MockBackend implements DynoBackend {
         causes: [
           {
             kind: 'cpuHog',
-            title: `rustc.exe is using ${Math.round(rustcCpu)}% CPU`,
+            title: `${this.profile.names.rustc} is using ${Math.round(rustcCpu)}% CPU`,
             explanation: 'cargo is compiling dyno-core with 6 parallel rustc processes. Everything else waits for a free core; it ends when the build finishes.',
             confidence: 0.86,
             evidence: [
-              { label: 'rustc.exe (6)', value: `${Math.round(rustcCpu)}% CPU` },
+              { label: `${this.profile.names.rustc} (6)`, value: `${Math.round(rustcCpu)}% CPU` },
               { label: 'CPU total', value: `${Math.round(this.system(t, samples).cpu.total)}%` },
               { label: 'For', value: '6 min' },
             ],
             suggestions: cargo
               ? [
-                  { label: 'Lower the build’s priority', action: { process: { target: { pid: cargo.pid, started: cargo.started }, name: 'cargo.exe', action: { setPriority: 'belowNormal' } } } },
+                  { label: 'Lower the build’s priority', action: { process: { target: { pid: cargo.pid, started: cargo.started }, name: this.profile.names.cargo, action: { setPriority: 'belowNormal' } } } },
                   { label: 'Open the task manager', action: 'openTaskManager' },
                 ]
               : [{ label: 'Open the task manager', action: 'openTaskManager' }],
@@ -548,7 +571,7 @@ export class MockBackend implements DynoBackend {
             evidence: [
               { label: 'Disk queue', value: queue.toFixed(1) },
               { label: 'Disk busy', value: '92%' },
-              { label: 'Writes', value: '121 MB/s by rustc.exe' },
+              { label: 'Writes', value: `121 MB/s by ${this.profile.names.rustc}` },
             ],
             suggestions: [{ label: 'Wait for the build to finish', action: 'wait' }],
           },
@@ -558,8 +581,8 @@ export class MockBackend implements DynoBackend {
             explanation: 'Microsoft Defender inspects build output as it is written. Excluding build folders (not source) avoids it.',
             confidence: 0.41,
             evidence: [
-              { label: 'MsMpEng.exe', value: '4.1% CPU' },
-              { label: 'Scanning', value: 'C:\\dev\\dyno\\target' },
+              { label: this.profile.names.indexer, value: '4.1% CPU' },
+              { label: 'Scanning', value: `${this.profile.projectDir}${this.profile.os === 'windows' ? '\\' : '/'}target` },
             ],
             suggestions: [{ label: 'See tuning suggestions', action: 'openStartup' }],
           },
@@ -581,7 +604,14 @@ export class MockBackend implements DynoBackend {
   }
 
   history(range: HistoryRange, end: Timestamp | null): Promise<History> {
-    return this.reply('history', () => mockHistory(range, end, this.now()));
+    return this.reply('history', () => {
+      const h = mockHistory(range, end, this.now());
+      if (this.profile.os !== 'windows') {
+        const disks = this.profile.disks(0);
+        h.diskTrends.forEach((t, i) => (t.disk = disks[i]?.mount ?? t.disk));
+      }
+      return h;
+    });
   }
 
   activity(limit: number): Promise<ActivityEntry[]> {
@@ -847,12 +877,37 @@ export class MockBackend implements DynoBackend {
   }
 
   /** Runs `body` after the simulated latency and resolves with a copy (callers can't mutate the mock's state). */
+  /** Rewrites the Windows wording of the shared demo data for the other operating systems (mock only). */
+  private localize<T>(value: T): T {
+    if (this.profile.os === 'windows') return value;
+    const os = this.profile.os === 'macos' ? 'macOS' : 'Linux';
+    const fix = (text: string) =>
+      text
+        .replace(/\b([A-Za-z0-9_-]+)\.exe\b/gi, '$1')
+        .replace(/Windows services/g, `${os} services`)
+        .replace(/Windows started/g, this.profile.bootLabel)
+        .replace(/Drive C:/g, this.profile.primaryDisk)
+        .replace(/MsMpEng/g, this.profile.names.indexer)
+        .replace(/Windows Search/g, this.profile.os === 'macos' ? 'Spotlight' : 'GNOME Tracker')
+        .replace(/SearchIndexer/g, this.profile.names.indexer)
+        .replace(/Recycle Bin/g, this.profile.os === 'macos' ? 'Trash' : 'Trash')
+        .replace(/Microsoft Defender|Defender/g, this.profile.os === 'macos' ? 'XProtect' : 'The antivirus')
+        .replace(/\bWindows\b/g, os);
+    const walk = (v: unknown): unknown => {
+      if (typeof v === 'string') return fix(v);
+      if (Array.isArray(v)) return v.map(walk);
+      if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+      return v;
+    };
+    return walk(value) as T;
+  }
+
   private reply<T>(name: string, body: () => T, extraMs = 0): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const run = () => {
         try {
           if (this.fail.has(name)) throw err('internal', `The mock was asked to fail “${name}”.`);
-          resolve(copy(body()));
+          resolve(this.localize(copy(body())));
         } catch (e) {
           reject(e);
         }
@@ -868,7 +923,7 @@ function err(code: CommandError['code'], message: string): CommandError {
   return { code, message };
 }
 
-function publisher(p: MockProcess): string {
+function publisher(p: MockProcess, fallback: string): string {
   const map: Record<string, string> = {
     chrome: 'Google LLC',
     vscode: 'Microsoft Corporation',
@@ -885,5 +940,5 @@ function publisher(p: MockProcess): string {
     dyno: 'Dyno contributors',
     'dyno-agent': 'Dyno contributors',
   };
-  return map[p.group] ?? 'Microsoft Windows';
+  return map[p.group] ?? fallback;
 }

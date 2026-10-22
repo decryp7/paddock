@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { Planned } from '../planned/planned';
 
-/** Placeholder until the screen lands. */
+/** Placeholder until the screen is built (see {@link Planned}); the feature replaces this component and keeps the route. */
 @Component({
   selector: 'dy-cleanup-page',
+  imports: [Planned],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<div class="page"><h1>CleanupPage</h1></div>`,
+  template: `<dy-planned page="cleanup" />`,
 })
 export class CleanupPage {}

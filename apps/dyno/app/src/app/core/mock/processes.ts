@@ -5,7 +5,7 @@ const GB = 1024 ** 3;
 const MB = 1024 ** 2;
 
 /** One application in the mock catalogue: how many processes, and the totals they share. */
-interface AppSpec {
+export interface AppSpec {
   group: string;
   groupName: string;
   name: string;
@@ -97,19 +97,20 @@ export interface MockProcess {
 }
 
 /** Builds the process table once (deterministic pids and parents) relative to `start`. */
-export function buildProcesses(start: number): MockProcess[] {
+export function buildProcesses(start: number, specs: readonly AppSpec[] = APP_SPECS, rootPid = 4): MockProcess[] {
   const out: MockProcess[] = [];
   const firstOf = new Map<string, number>();
-  let nextPid = 4;
-  for (const spec of APP_SPECS) {
+  let nextPid = rootPid + 4;
+  const root = specs[0]!;
+  for (const spec of specs) {
     // Split the totals unevenly: the first process of a group does most of the work (the browser's main process).
     const weights = Array.from({ length: spec.count }, (_, i) => (i === 0 ? 3 : 0.4 + hash01(i, seedOf(spec.name)) * 1.6));
     const sum = weights.reduce((a, b) => a + b, 0);
     const parentKey = spec.parent?.replace(/-first$/, '');
     for (let i = 0; i < spec.count; i++) {
-      const pid = spec.name === 'System' ? 4 : nextPid;
+      const pid = spec === root ? rootPid : nextPid;
       nextPid += 4 + Math.floor(hash01(nextPid, 7) * 12) * 4;
-      const ownParent = i > 0 && spec.user === USER && !['conhost', 'pwsh', 'runtimebroker', 'dllhost'].includes(spec.group) ? firstOf.get(`${spec.group}:${spec.name}`) : undefined;
+      const ownParent = i > 0 && (spec.user === USER || spec.user === 'alex') && !['conhost', 'pwsh', 'zsh', 'bash', 'runtimebroker', 'dllhost', 'dock'].includes(spec.group) ? firstOf.get(`${spec.group}:${spec.name}`) : undefined;
       const parent = ownParent ?? (parentKey ? (firstOf.get(parentKey) ?? null) : null);
       if (i === 0) {
         if (!firstOf.has(spec.group)) firstOf.set(spec.group, pid);
@@ -118,7 +119,7 @@ export function buildProcesses(start: number): MockProcess[] {
       const w = weights[i]! / sum;
       out.push({
         pid,
-        parent: spec.name === 'System' ? null : parent,
+        parent: spec === root ? null : parent,
         name: spec.name,
         exe: spec.exe,
         user: spec.user,

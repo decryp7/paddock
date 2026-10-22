@@ -354,8 +354,14 @@ kbd,
   background-clip: padding-box;
 }
 
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .num,
@@ -386,6 +392,56 @@ kbd,
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* Native feel (the policy of Debrief ADR 0028): the shell is not a web page. Selection is opt-in with .dy-selectable;
+   text fields, code, paths and error details opt back in. */
+html {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-drag: none;
+  overscroll-behavior: none;
+}
+
+img,
+a {
+  -webkit-user-drag: none;
+}
+
+button,
+[role='button'],
+a,
+label,
+select,
+summary {
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable='true'],
+[role='textbox'],
+.dy-selectable,
+.dy-selectable *,
+pre,
+code,
+.mono {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+input,
+textarea,
+[contenteditable='true'],
+[role='textbox'],
+.dy-selectable,
+.dy-selectable *,
+pre,
+code,
+.mono {
+  cursor: text;
 }
 
 /* ----------------------------------------------------------------------------------------------------- buttons */
