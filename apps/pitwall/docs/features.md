@@ -159,7 +159,11 @@ Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR
   compares in constant time and writes `apps.json` atomically with a backup. A key can be created in the UI (shown once),
   added to an app, or revoked at any time. The app keeps its copy in the OS credential store. Works.
 - **Permissions and limits per app**: which models, the most urgent priority it may use, tools, the extended APIs, requests
-  per minute, tokens per UTC day, and concurrent requests. A refusal says what to change. Works.
+  per minute, requests per UTC day, tokens per UTC day and per month, concurrent requests, and a share of the machine's RAM
+  a request's model may occupy. A refusal says what to change; 80 % of a budget raises a warning event. Works.
+- **Usage per app over time**: requests, tokens, errors and peak memory (the footprint of the model that served the app)
+  in hourly and daily buckets with bounded retention, stored locally; an app detail view (24 h / 7 d / 30 d chart, limits
+  with progress, latest requests) and a Dashboard usage-by-app chart. Works.
 - **Keyless local access** (for Ollama-style tools that send no key) is a setting, **off** by default, and applies only to
   requests with no `Origin` header. Works.
 - **The admin key** (`admin.key`, owner-only) is what Pitwall's own window uses for the management API; apps never see it. Works.

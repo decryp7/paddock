@@ -98,6 +98,9 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 47 | Benchmarks > Run on the test model, then quit and start Pitwall again. | A tokens-per-second figure appears and is still listed after the restart (`benchmarks.json` in the data folder). |
 | 47a | Settings > Privacy > Keep request content on, make a request that contains a fake key (`pw_` followed by 30 letters), open it in Requests. | The prompt and the answer show; the key is shown as `[redacted]`; turning the setting off keeps no new content; restarting Pitwall empties the list. |
 | 47b | Settings > Updates > Check for updates (a build with an updater key only). | Nothing is contacted until you press the button; with an update, Install and restart. A build without a key says "Not configured". |
+| 47c | Make a few requests with an app's key, then Apps & keys > that app > Usage over time. Switch 24h, 7d, 30d and Tokens, Requests, Peak memory. | Totals match the requests made; the chart has one bar per period; peak memory equals the size of the model that served them (Models shows its memory); the Dashboard's Usage by app chart shows the same app, and its legend link opens the app. |
+| 47d | Set Requests per day to 3 for the app and make 4 requests; then set Memory share to 1 percent and make another. | The 4th answers 429 "this app has made its 3 requests for today ..."; the Limits list shows "Limit reached"; at 80 % (the 3rd of 4, or 2.4) a "Close to the limit" warning and one event appear; the memory share answers 403 naming the model's MiB and the share. Raising the limits lets requests through again. |
+| 47e | Quit Pitwall, damage `usage.json` (write `{ not json`), start it. | It starts; the app's usage comes back from `usage.json.bak` (at most 30 s older); with both damaged the charts start empty. |
 | 48 | Reduced-motion and large-text settings of the OS. | Animations are off; layouts survive. |
 
 ## Per-platform extras

@@ -236,6 +236,7 @@ Everything is in one per-user data folder (override with `PITWALL_HOME`): `%APPD
 | `partial/` | Engine archives being downloaded | |
 | `packs/` | The user's engine and model packs | At most 64 files of 256 KB |
 | `metrics.json` | Time series | Versioned, bounded retention (default 30 days) |
+| `usage.json` | Per-app usage over time (`pitwall_core::usage`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; hourly buckets 7 days, daily buckets 90 days, at most 256 apps per bucket (the rest count as `other`), saved every 30 s |
 | `logs/` | Service log | Never prompts or answers by default |
 
 The events feed (2000 entries) and the request list (500 entries) live in memory.

@@ -16,3 +16,4 @@ Numbered, with status, context, decision and consequences. ADRs are not renumber
 | [0010](0010-no-plugin-system.md) | No plugin system | accepted |
 | [0011](0011-declarative-packs.md) | Extend through declarative packs, not code | accepted |
 | 0012 | Native feel (after Debrief ADR 0028), written by another agent | in progress |
+| [0013](0013-usage-over-time.md) | Per-app usage over time, and limits that explain themselves | accepted (number provisional) |

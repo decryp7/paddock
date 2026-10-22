@@ -69,7 +69,7 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | MLX (Apple Silicon) and vLLM (Linux, NVIDIA) engines | Show as "not available" with the reason; **planned** |
 | Dedicated embedding and reranker adapters | Embeddings work through llama.cpp with an embedding model; rerank **planned** |
 | Real-engine automated test (`PITWALL_LLAMA_E2E=1`) | **Planned**; the smoke test is manual |
-| Usage per connected app | **Approved, partly built.** Per-app limits (requests per minute, tokens per day) are enforced with a typed, explained error today. Missing: tokens, requests and peak memory per app over time (a dashboard chart and an app detail view), stored locally with bounded retention |
+| Usage per connected app | **Built.** Requests, prompt and completion tokens, errors and peak memory per app in hourly buckets (7 days) and daily buckets (90 days), stored locally in `usage.json` (versioned, atomic, backup, tolerant of damage). The Apps page has an app detail with a 24 h / 7 d / 30 d chart, limits with progress and the latest requests; the Dashboard has a usage-by-app chart. Optional limits per app: requests per minute and per day, tokens per day and per month, concurrent requests and a memory share, each refused with a typed, explained error, with a warning event at 80 % |
 | Model update notices | **Approved, not built.** On a schedule, and only when offline mode allows, ask Hugging Face for newer revisions or better quantisations of installed models; notify and offer them, never download by themselves. Tests use a fake Hugging Face API |
 | Model presets and aliases | **Approved for v1, not built.** An app asks for a name such as `debrief-explain`; the user decides which model and parameters (context, temperature, system prompt, engine) serve it. Resolved in the core next to capability selection; shown in Models and in the request inspector |
 | Parallel slots per model, with their memory cost | **Approved for v1, not built.** Choose the number of parallel slots per model; the UI shows the memory each adds, and the fit check answers "how much context or concurrency fits" instead of only yes or no |
@@ -100,6 +100,6 @@ Debrief uses Pitwall when it is running and keeps its built-in AI as the default
    the three bundles were green on run 6056.
 2. **Design review P2/P3** from `design-review-pitwall.md` (sidebar header pill, quick-action row, history legend and event
    lane, playground chips, disk bar labels, tray sizes, page subtitles) and fresh light and dark screenshots of every screen.
-3. Per-app usage over time and the app detail view; model update notices; model presets and aliases; parallel slots with their
+3. Model update notices; model presets and aliases; parallel slots with their
    memory cost; the `pitwall` CLI; engine pin and capability gating (see the table above).
 4. Verify on real Windows and Linux machines: the OS pressure readers, the service flows, single instance, the first-run question.

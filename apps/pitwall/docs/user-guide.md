@@ -144,8 +144,27 @@ Per app (the permissions editor in **Apps & keys**):
 | Tools | Off by default: "this app may not use Pitwall's tools". |
 | Extended APIs | `/x/v1` calls that need it answer 403 when off. On by default. |
 | Requests per minute | 429 "rate limit: at most N requests per minute for this app; retry in a moment". |
+| Requests per day | 429 "this app has made its N requests for today; the budget resets at midnight UTC". |
 | Tokens per day | 429 "this app has used its N tokens for today; the budget resets at midnight UTC". |
+| Tokens per month | 429 "this app has used its N tokens for this month; the budget resets on the 1st at midnight UTC". |
+| Memory share | 403 "the model needs N MiB but this app may use at most P% of the machine's memory ...". The share is a percentage of the machine's RAM; it is checked against the footprint (RAM plus video memory) of the model that would serve the request. |
 | Concurrent requests | The app's extra requests wait in the queue. |
+
+Every budget is optional (leave the field empty for no limit) and exists next to the others; a request is refused by the first
+one it exceeds. Days and months count in UTC. When an app reaches 80 % of a budget, Pitwall adds a warning to the Dashboard's
+events feed (once per period) and the app's detail shows the bar in the "Close to the limit" state.
+
+### Usage per app
+
+Select an app in **Apps & keys** to see its **Usage over time**: requests, prompt and completion tokens, errors and peak memory
+for the last 24 hours or 7 days (hourly) or 30 days (daily), the **Limits** with a progress bar and a word for each (Within
+limit, Close to the limit, Limit reached) and the app's latest requests (time, endpoint, model, status, tokens, duration;
+never the prompt). The Dashboard's **Usage by app** chart shows the same for all apps together; its legend opens the app.
+
+*Peak memory* is the memory Pitwall attributes to the app: for each request, the footprint (RAM plus video memory) of the
+model that served it, which includes models its requests loaded or kept hot. In a period it is the largest such value, not a
+sum, and not a measurement of the app. Hourly figures are kept 7 days and daily figures 90 days in `usage.json` in the data
+folder, on this machine only; the file is rebuilt from nothing if it is damaged.
 
 Send the key as `Authorization: Bearer pw_...` (OpenAI and Ollama clients) or `x-api-key: pw_...` (Anthropic clients).
 Without a key you get 401 "a valid Pitwall API key is required. Create one in Pitwall > Apps & keys, or pair the app with POST
