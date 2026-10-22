@@ -130,8 +130,7 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
       background: var(--bg-active);
       border-radius: var(--r-full);
       &.live {
-        color: var(--text-on-accent);
-        background: var(--accent);
+        color: var(--text);
       }
     }
   `,

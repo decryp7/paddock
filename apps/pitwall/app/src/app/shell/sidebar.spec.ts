@@ -84,7 +84,7 @@ describe('Sidebar', () => {
     expect(el.querySelector('.mem-row .num')?.textContent).toContain('/');
     expect(m.ramTotal).toBeGreaterThan(0);
 
-    for (const [used, tone] of [[0.9, 'bad'], [0.75, 'warn'], [0.3, null]] as const) {
+    for (const [used, tone] of [[0.97, 'bad'], [0.9, 'warn'], [0.3, 'neutral']] as const) {
       live.disconnect();
       const be = new MockBackend({ now: () => NOW });
       const ov = await be.overview();

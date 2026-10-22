@@ -15,7 +15,7 @@ import { availabilityLook, type Look } from '../../shared/labels';
         <li [class.off]="e.availability.state !== 'available'">
           <div class="main">
             <span class="name">{{ e.name }}</span>
-            <span class="sub">
+            <span class="sub" [matTooltip]="reason(e)">
               @if (e.availability.state === 'available') {
                 {{ e.activeBuild ?? 'no build' }} · {{ e.processes }} {{ e.processes === 1 ? 'process' : 'processes' }}
               } @else {
@@ -23,7 +23,7 @@ import { availabilityLook, type Look } from '../../shared/labels';
               }
             </span>
           </div>
-          <span class="pill dot" [attr.data-tone]="look(e).tone" [matTooltip]="reason(e)">{{ look(e).label }}</span>
+          <span class="pill" [class.dot]="look(e).tone !== 'muted'" [attr.data-tone]="look(e).tone" [matTooltip]="reason(e)">{{ look(e).label }}</span>
         </li>
       }
     </ul>

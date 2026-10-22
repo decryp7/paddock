@@ -5,7 +5,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 import type { ThemeChoice } from '../core/api.types';
 import { LiveStore } from '../core/live.store';
 import { ThemeService } from '../core/theme';
-import { downloadActive } from '../shared/labels';
+import { downloadActive, loadTone } from '../shared/labels';
 import { bytes, percent } from '../shared/format';
 
 interface NavItem {
@@ -83,10 +83,10 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       @if (live.memory(); as m) {
         <a class="mem" routerLink="/" [attr.aria-label]="'Memory: ' + ramPct() + ' percent used'">
           <div class="mem-row"><span>RAM</span><span class="num">{{ ramUsed() }} / {{ ramTotal() }}</span></div>
-          <div class="meter" [attr.data-tone]="ramPct() > 85 ? 'bad' : ramPct() > 70 ? 'warn' : null"><span [style.width.%]="ramPct()"></span></div>
+          <div class="meter" [attr.data-tone]="tone(ramPct())"><span [style.width.%]="ramPct()"></span></div>
           @if (vramPct() !== null) {
             <div class="mem-row"><span>VRAM</span><span class="num">{{ vramText() }}</span></div>
-            <div class="meter"><span [style.width.%]="vramPct()"></span></div>
+            <div class="meter" [attr.data-tone]="tone(vramPct() ?? 0)"><span [style.width.%]="vramPct()"></span></div>
           }
         </a>
       }
@@ -228,10 +228,11 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
         width: 11px;
         height: 11px;
       }
+      /* Counts are neutral: the accent is for action and selection, not for numbers. */
       &.attention {
         justify-content: center;
-        color: var(--text-on-accent);
-        background: var(--accent);
+        color: var(--text);
+        background: var(--bg-active);
       }
     }
     .foot {
@@ -309,6 +310,7 @@ export class Sidebar {
 
   protected readonly pairings = computed(() => this.live.pairings().length);
   protected readonly downloading = computed(() => this.live.downloads().filter((d) => downloadActive(d.state)).length);
+  protected readonly tone = loadTone;
   protected readonly ramPct = computed(() => {
     const m = this.live.memory();
     return m ? percent(m.ramTotal - m.ramAvailable, m.ramTotal) : 0;

@@ -3,7 +3,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { LiveStore } from '../../core/live.store';
 import { bytes, gb, int, percent, rate } from '../../shared/format';
-import { pressureLook } from '../../shared/labels';
+import { loadTone, pressureLook } from '../../shared/labels';
 import { Skeleton } from '../../shared/ui/skeleton';
 
 /** The four live tiles at the top of the dashboard: memory, GPU memory, processors and throughput. */
@@ -44,7 +44,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
       @if (gpu(); as g) {
         @if (g.vramTotal !== null) {
           <div class="value num">{{ gbText(g.vramUsed) }}<span class="unit">GB</span><span class="of">of {{ gbText(g.vramTotal, 0) }} GB</span></div>
-          <div class="meter" [attr.data-tone]="vramPct() > 92 ? 'warn' : null"><span [style.width.%]="vramPct()"></span></div>
+          <div class="meter" [attr.data-tone]="tone(vramPct())"><span [style.width.%]="vramPct()"></span></div>
           <div class="foot">
             <span>Models <b class="num">{{ bytesText(modelVram()) }}</b></span>
             <span class="faint num">{{ bytesText(g.vramTotal - (g.vramUsed ?? 0)) }} free</span>
@@ -69,18 +69,16 @@ import { Skeleton } from '../../shared/ui/skeleton';
         }
       </div>
       @if (live.memory(); as m) {
-        <div class="bars">
+        <div class="value num">{{ heroLoad() }}<span class="unit">%</span><span class="of">{{ gpuLoad() === null ? 'CPU' : 'GPU' }}</span></div>
+        @if (gpuLoad() !== null) {
           <div class="bar-row">
             <span class="bar-label">CPU</span>
-            <div class="meter"><span [style.width.%]="m.cpuPercent"></span></div>
+            <div class="meter" [attr.data-tone]="tone(m.cpuPercent)"><span [style.width.%]="m.cpuPercent"></span></div>
             <span class="bar-val num">{{ round(m.cpuPercent) }}%</span>
           </div>
-          <div class="bar-row">
-            <span class="bar-label">GPU</span>
-            <div class="meter"><span [style.width.%]="gpu()?.utilisation ?? 0"></span></div>
-            <span class="bar-val num">{{ gpu()?.utilisation ?? '—' }}{{ gpu()?.utilisation !== null && gpu() ? '%' : '' }}</span>
-          </div>
-        </div>
+        } @else {
+          <div class="meter" [attr.data-tone]="tone(m.cpuPercent)"><span [style.width.%]="m.cpuPercent"></span></div>
+        }
         <div class="foot">
           <span>Commit <b class="num">{{ commit() }}</b></span>
           <span class="faint num">swap {{ bytesText(m.swapUsed) }}</span>
@@ -164,15 +162,16 @@ import { Skeleton } from '../../shared/ui/skeleton';
       font-weight: var(--fw-semibold);
       letter-spacing: -0.02em;
       line-height: 1;
+      font-variant-numeric: tabular-nums;
       .unit {
-        font-size: var(--fs-md);
+        font-size: var(--fs-base);
         font-weight: var(--fw-medium);
-        color: var(--text-2);
+        color: var(--text-3);
         letter-spacing: 0;
       }
       .of {
         margin-left: var(--sp-2);
-        font-size: var(--fs-sm);
+        font-size: var(--fs-base);
         font-weight: var(--fw-regular);
         color: var(--text-3);
         letter-spacing: 0;
@@ -238,8 +237,8 @@ import { Skeleton } from '../../shared/ui/skeleton';
       color: var(--text-2);
     }
     .bar-val {
-      font-size: var(--fs-md);
-      font-weight: var(--fw-semibold);
+      font-size: var(--fs-base);
+      font-weight: var(--fw-medium);
       text-align: right;
     }
     .trio {
@@ -282,6 +281,7 @@ export class StatTiles {
   protected readonly rateText = rate;
   protected readonly intText = int;
   protected readonly round = Math.round;
+  protected readonly tone = loadTone;
 
   protected readonly pressure = computed(() => {
     const m = this.live.memory();
@@ -296,6 +296,12 @@ export class StatTiles {
     return m ? Math.min(this.ramPct(), percent(m.pitwallRss, m.ramTotal)) : 0;
   });
   protected readonly gpu = computed(() => this.live.memory()?.gpus[0] ?? null);
+  /** The processors tile's hero: the GPU's load when the GPU reports it, else the CPU's. */
+  protected readonly gpuLoad = computed(() => this.gpu()?.utilisation ?? null);
+  protected readonly heroLoad = computed(() => {
+    const g = this.gpuLoad();
+    return Math.round(g ?? this.live.memory()?.cpuPercent ?? 0);
+  });
   protected readonly vramPct = computed(() => {
     const g = this.gpu();
     return g && g.vramTotal ? percent(g.vramUsed ?? 0, g.vramTotal) : 0;

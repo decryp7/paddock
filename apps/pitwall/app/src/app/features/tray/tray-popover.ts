@@ -3,7 +3,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { LiveStore } from '../../core/live.store';
 import { WINDOW_CONTROL } from '../../core/window-control';
 import { bytes, percent, rate } from '../../shared/format';
-import { pressureLook } from '../../shared/labels';
+import { loadTone, pressureLook } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
 import { HotModels } from '../dashboard/hot-models';
 
@@ -47,14 +47,14 @@ import { HotModels } from '../dashboard/hot-models';
             <span class="v num">{{ size(m.ramTotal - m.ramAvailable) }} <span class="faint">/ {{ size(m.ramTotal, 0) }}</span></span>
             <span class="pill dot" [attr.data-tone]="pressure()?.tone">{{ pressure()?.label }}</span>
           </div>
-          <div class="meter" [attr.data-tone]="ramPct() > 85 ? 'bad' : ramPct() > 70 ? 'warn' : null"><span [style.width.%]="ramPct()"></span></div>
+          <div class="meter" [attr.data-tone]="tone(ramPct())"><span [style.width.%]="ramPct()"></span></div>
           @if (vram(); as g) {
             <div class="row">
               <span class="k">VRAM</span>
               <span class="v num">{{ size(g.used) }} <span class="faint">/ {{ size(g.total, 0) }}</span></span>
               <span class="faint small">{{ g.util === null ? '' : g.util + '% busy' }}</span>
             </div>
-            <div class="meter"><span [style.width.%]="g.pct"></span></div>
+            <div class="meter" [attr.data-tone]="tone(g.pct)"><span [style.width.%]="g.pct"></span></div>
           }
         </section>
       }
@@ -248,6 +248,7 @@ export class TrayPopover {
     const m = this.live.memory();
     return m ? pressureLook(m.pressure) : null;
   });
+  protected readonly tone = loadTone;
   protected readonly ramPct = computed(() => {
     const m = this.live.memory();
     return m ? percent(m.ramTotal - m.ramAvailable, m.ramTotal) : 0;

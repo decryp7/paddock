@@ -63,6 +63,14 @@ export const CAPABILITY_LABEL: Record<Capability, string> = {
   transcription: 'Transcription',
 };
 
+/**
+ * The tone of a usage meter: neutral until it matters (calm by default), warning above 85 %, danger above 95 %.
+ * Accent is never used for usage: it means action and selection.
+ */
+export function loadTone(percent: number): 'neutral' | 'warn' | 'bad' {
+  return percent > 95 ? 'bad' : percent > 85 ? 'warn' : 'neutral';
+}
+
 export function pressureLook(p: MemoryPressure): Look {
   return { normal: { label: 'Normal', tone: 'ok' as Tone }, elevated: { label: 'Elevated', tone: 'warn' as Tone }, critical: { label: 'Critical', tone: 'bad' as Tone } }[p];
 }

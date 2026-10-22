@@ -19,6 +19,12 @@ export interface ThemeTokens {
   ok: string;
   warn: string;
   bad: string;
+  info: string;
+  /** The tinted pill backgrounds, as drawn over the card (the dark theme's translucent tints, blended). */
+  okTint: string;
+  warnTint: string;
+  badTint: string;
+  infoTint: string;
   grid: string;
   axis: string;
   tooltipBg: string;
@@ -34,10 +40,15 @@ export const THEME_TOKENS: Record<ResolvedTheme, ThemeTokens> = {
     text: '#15171c',
     text2: '#505561',
     text3: '#686d78',
-    accent: '#5a24b0',
-    ok: '#17803d',
-    warn: '#9a5b00',
-    bad: '#c8293a',
+    accent: '#6d3fd6',
+    ok: '#177244',
+    warn: '#8f5f00',
+    bad: '#c42b2b',
+    info: '#1f5fa8',
+    okTint: '#e3f5eb',
+    warnTint: '#fbf0d6',
+    badTint: '#fce6e6',
+    infoTint: '#e4eef9',
     grid: '#eef0f3',
     axis: '#d5d8de',
     tooltipBg: '#1b1d23',
@@ -50,10 +61,15 @@ export const THEME_TOKENS: Record<ResolvedTheme, ThemeTokens> = {
     text: '#ecedf0',
     text2: '#a3a7b0',
     text3: '#858a94',
-    accent: '#a98bf2',
-    ok: '#4cc77a',
-    warn: '#e7a83b',
-    bad: '#ff6b72',
+    accent: '#a58bfa',
+    ok: '#3dd68c',
+    warn: '#f2b84b',
+    bad: '#ff6b6b',
+    info: '#7db2e8',
+    okTint: '#1a3029',
+    warnTint: '#332c20',
+    badTint: '#352124',
+    infoTint: '#232b36',
     grid: '#1f2126',
     axis: '#2e3138',
     tooltipBg: '#e9eaee',

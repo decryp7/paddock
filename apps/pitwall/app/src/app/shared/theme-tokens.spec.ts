@@ -50,6 +50,21 @@ describe.each(THEMES)('%s theme tokens', (theme) => {
     for (const c of [t.ok, t.warn, t.bad]) expect(contrast(c, t.surface)).toBeGreaterThanOrEqual(4.5);
   });
 
+  it('status text is readable on its own tinted pill background (the pills carry a word too)', () => {
+    const pairs = [
+      [t.ok, t.okTint],
+      [t.warn, t.warnTint],
+      [t.bad, t.badTint],
+      [t.info, t.infoTint],
+    ] as const;
+    for (const [fg, bg] of pairs) expect(contrast(fg, bg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the accent is not a status colour: it stays apart from warning and danger in hue and is readable as text', () => {
+    expect(t.accent).not.toBe(t.info);
+    expect(contrast(t.accent, t.surface)).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('keeps neighbouring series apart for protanopia and deuteranopia (ΔE ≥ 8) and for normal vision (ΔE ≥ 15)', () => {
     expect(t.series.length).toBe(8);
     expect(worstAdjacent(t.series, 'protan')).toBeGreaterThanOrEqual(8);

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Job, Priority } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { compact, duration } from '../../shared/format';
@@ -10,7 +11,7 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
 /** Queue depth by priority and the running and waiting jobs, each cancellable. */
 @Component({
   selector: 'pw-queue-card',
-  imports: [MatIconModule],
+  imports: [MatIconModule, MatTooltipModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.queue(); as q) {
@@ -51,7 +52,9 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
                 </div>
               }
             </div>
-            <button type="button" class="btn ghost sm" [attr.aria-label]="'Cancel ' + appName(j.appId) + ' ' + j.kind" [disabled]="live.isBusy()('job:' + j.id)" (click)="live.cancelJob(j.id)">Cancel</button>
+            <button type="button" class="btn ghost icon sm cancel" [attr.aria-label]="'Cancel ' + appName(j.appId) + ' ' + j.kind" matTooltip="Cancel request" [disabled]="live.isBusy()('job:' + j.id)" (click)="live.cancelJob(j.id)">
+              <mat-icon svgIcon="pw:close" aria-hidden="true" />
+            </button>
           </li>
         }
       </ul>
@@ -81,8 +84,9 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
         background: var(--bg-card);
       }
       .n {
-        font-size: var(--fs-lg);
+        font-size: var(--fs-xl);
         font-weight: var(--fw-semibold);
+        line-height: 1.2;
       }
       .k {
         display: flex;
@@ -123,6 +127,21 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
         &:first-child {
           border-top: none;
         }
+      }
+    }
+    /* Cancel is a quiet icon that appears with the pointer or keyboard focus, not a row of text buttons. */
+    .cancel {
+      opacity: 0;
+      transition: opacity var(--dur-fast) var(--ease);
+    }
+    li:hover .cancel,
+    li:focus-within .cancel,
+    .cancel:focus-visible {
+      opacity: 1;
+    }
+    @media (hover: none) {
+      .cancel {
+        opacity: 1;
       }
     }
     .status {

@@ -76,13 +76,16 @@ describe('StatTiles', () => {
     expect(t.querySelector('.gpu-name')!.textContent).toBe('RTX 4070');
     expect(text(t.querySelector('.value')!)).toBe('6.0GBof12GB');
     expect((t.querySelector('.meter span') as HTMLElement).style.width).toBe('50%');
-    expect(t.querySelector('.meter')!.getAttribute('data-tone')).toBeNull();
+    expect(t.querySelector('.meter')!.getAttribute('data-tone')).toBe('neutral');
     expect(text(t.querySelector('.foot')!)).toBe('Models0B6.0GBfree');
   });
 
-  it('warns when VRAM is nearly full', async () => {
-    const { tile } = await mount((o) => ({ ...o, memory: mem({ gpus: [gpu({ vramUsed: 11.5 * GiB })] }) }));
+  it('stays neutral until VRAM is nearly full, then warns, then turns to danger', async () => {
+    const { tile } = await mount((o) => ({ ...o, memory: mem({ gpus: [gpu({ vramUsed: 10.5 * GiB })] }) }));
     expect(tile(1).querySelector('.meter')!.getAttribute('data-tone')).toBe('warn');
+    TestBed.resetTestingModule();
+    const full = await mount((o) => ({ ...o, memory: mem({ gpus: [gpu({ vramUsed: 11.7 * GiB })] }) }));
+    expect(full.tile(1).querySelector('.meter')!.getAttribute('data-tone')).toBe('bad');
   });
 
   it('shortens AMD and Intel GPU names and keeps others', async () => {
@@ -107,14 +110,16 @@ describe('StatTiles', () => {
     const { tile } = await mount((o) => ({ ...o, memory: mem({ gpus: [] }) }));
     expect(text(tile(1))).toContain('NoGPU');
     expect(text(tile(1))).toContain('ModelsrunontheCPU.');
-    expect(text(tile(2))).toContain('GPU—');
+    expect(text(tile(2))).toContain('CPU');
+    expect(tile(2).querySelector('.bar-row')).toBeNull();
   });
 
   it('shows CPU and GPU load, commit charge and swap', async () => {
     const { tile } = await mount((o) => ({ ...o, memory: mem() }));
     const t = tile(2);
-    const rows = Array.from(t.querySelectorAll('.bar-row')).map(text);
-    expect(rows).toEqual(['CPU24%','GPU40%']);
+    expect(text(t.querySelector('.value')!)).toBe('40%GPU');
+    expect(Array.from(t.querySelectorAll('.bar-row')).map(text)).toEqual(['CPU24%']);
+    expect(t.querySelector('.bar-row .meter')!.getAttribute('data-tone')).toBe('neutral');
     expect(text(t.querySelector('.foot')!)).toBe('Commit50%swap1.0GB');
     expect(t.querySelector('.pill')).toBeNull();
   });
@@ -123,7 +128,7 @@ describe('StatTiles', () => {
     const { tile } = await mount((o) => ({ ...o, memory: mem({ commitUsed: null, commitLimit: null, foregroundBusy: true, gpus: [gpu({ utilisation: null })] }) }));
     const t = tile(2);
     expect(text(t.querySelector('.foot')!)).toContain('Commit—');
-    expect(text(t.querySelectorAll('.bar-row')[1]!)).toBe('GPU—');
+    expect(text(t.querySelector('.value')!)).toBe('24%CPU');
     expect(t.querySelector('.pill')!.textContent).toBe('Yielding');
   });
 

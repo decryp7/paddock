@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import { CdkConnectedOverlay, CdkOverlayOrigin } from '@angular/cdk/overlay';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
@@ -34,7 +35,7 @@ export function contextText(tokens: number | null): string {
 /** The local library: disk usage with clean-up, and every model with load, pin, idle override and delete. */
 @Component({
   selector: 'pw-library-tab',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState],
+  imports: [MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, EmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Disk" icon="disk" [loading]="store.loading()" [error]="store.disk() ? null : store.error()" [ready]="!!store.disk()" [skeletonLines]="2" (retry)="store.load()">
@@ -115,13 +116,29 @@ export function contextText(tokens: number | null): string {
                     }
                   </td>
                   <td>
-                    <label class="sr-only" [for]="'idle-' + m.id">Release {{ m.name }} when idle</label>
-                    <select class="select idle" [id]="'idle-' + m.id" [disabled]="m.pinned || store.isBusy()('model:' + m.id)" (change)="setIdle(m, $any($event.target).value)">
-                      <option value="" [selected]="m.idleSecs === null">Global setting</option>
-                      @for (s of idleOptions(m.idleSecs); track s) {
-                        <option [value]="s" [selected]="m.idleSecs === s">After {{ secs(s) }}</option>
-                      }
-                    </select>
+                    <button
+                      type="button"
+                      class="btn ghost sm idle-btn"
+                      [id]="'idle-' + m.id"
+                      cdkOverlayOrigin
+                      #origin="cdkOverlayOrigin"
+                      [disabled]="m.pinned || store.isBusy()('model:' + m.id)"
+                      [attr.aria-label]="'Release ' + m.name + ' when idle: ' + idleLabel(m.idleSecs)"
+                      aria-haspopup="menu"
+                      [attr.aria-expanded]="idleOpen() === m.id"
+                      (click)="toggleIdle(m.id)"
+                    >
+                      {{ idleLabel(m.idleSecs) }}<mat-icon svgIcon="pw:chevron-down" aria-hidden="true" />
+                    </button>
+                    <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="origin" [cdkConnectedOverlayOpen]="idleOpen() === m.id" (overlayOutsideClick)="idleOpen.set(null)" (detach)="idleOpen.set(null)">
+                      <div class="pop" role="menu" tabindex="-1" [attr.aria-label]="'Release ' + m.name + ' when idle'" (keydown.escape)="idleOpen.set(null)">
+                        <p class="pop-title">Release when idle</p>
+                        <button type="button" role="menuitemradio" class="opt" [attr.aria-checked]="m.idleSecs === null" (click)="chooseIdle(m, '')">Global setting</button>
+                        @for (s of idleOptions(m.idleSecs); track s) {
+                          <button type="button" role="menuitemradio" class="opt" [attr.aria-checked]="m.idleSecs === s" (click)="chooseIdle(m, '' + s)">After {{ secs(s) }}</button>
+                        }
+                      </div>
+                    </ng-template>
                   </td>
                   <td>
                     @if (m.loaded) {
@@ -215,6 +232,64 @@ export function contextText(tokens: number | null): string {
     .scroll {
       overflow-x: auto;
       margin-top: var(--sp-2);
+    }
+    /* The action column stays in view whatever the window width, so Load / Unload never clip; a soft edge shows
+       that the table scrolls under it. */
+    .table th:last-child,
+    .table td:last-child {
+      position: sticky;
+      right: 0;
+      z-index: 1;
+      width: 1%;
+      background: var(--bg-card);
+      box-shadow: -10px 0 8px -8px color-mix(in srgb, var(--text) 14%, transparent);
+    }
+    .table tr:hover td:last-child {
+      background: color-mix(in srgb, var(--bg-card) 94%, var(--text));
+    }
+    .idle-btn {
+      gap: 2px;
+      padding: 0 6px 0 8px;
+      color: var(--text-2);
+      font-variant-numeric: tabular-nums;
+      mat-icon {
+        width: 14px;
+        height: 14px;
+      }
+    }
+    .pop {
+      display: flex;
+      flex-direction: column;
+      min-width: 168px;
+      padding: var(--sp-1);
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-pop);
+    }
+    .pop-title {
+      padding: 4px 8px 6px;
+      font-size: var(--fs-sm);
+      color: var(--text-3);
+    }
+    .opt {
+      display: block;
+      height: 28px;
+      padding: 0 8px;
+      font: inherit;
+      text-align: left;
+      color: var(--text);
+      background: none;
+      border: none;
+      border-radius: var(--r-md);
+      cursor: default;
+      &:hover {
+        background: var(--bg-hover);
+      }
+      &[aria-checked='true'] {
+        font-weight: var(--fw-semibold);
+        color: var(--accent);
+      }
     }
     .table th:first-child,
     .table td:first-child {
@@ -313,6 +388,22 @@ export class LibraryTab {
     const days = this.store.disk()?.unusedAfterDays ?? 30;
     return n ? `Delete ${n} ${n === 1 ? 'model' : 'models'} unused for ${days} days (${bytes(this.store.unusedBytes())})` : `No model has been unused for ${days} days`;
   });
+
+  protected readonly idleOpen = signal<string | null>(null);
+
+  /** The trigger's text: the model's own idle time, or "Global". */
+  protected idleLabel(secs: number | null): string {
+    return secs === null ? 'Global' : `After ${seconds(secs)}`;
+  }
+
+  protected toggleIdle(id: string): void {
+    this.idleOpen.update((open) => (open === id ? null : id));
+  }
+
+  protected chooseIdle(m: LocalModel, value: string): void {
+    this.idleOpen.set(null);
+    this.setIdle(m, value);
+  }
 
   protected setIdle(m: LocalModel, value: string): void {
     void this.store.setIdle(m.id, value === '' ? null : Number(value));

@@ -15,15 +15,16 @@
   /* The operating system's UI font (ADR 0012): San Francisco on macOS, Segoe UI Variable on Windows, the desktop font on Linux. */
   --font-sans: system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Cantarell, Ubuntu, 'Noto Sans', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
-  --fs-2xs: 10.5px;
-  --fs-xs: 11px;
+  /* Nothing below 12 px (suite design guide): the two smallest steps are the same size. */
+  --fs-2xs: 12px;
+  --fs-xs: 12px;
   --fs-sm: 12px;
   --fs-base: 13px;
   --fs-md: 14px;
   --fs-lg: 16px;
   --fs-xl: 20px;
   --fs-2xl: 24px;
-  --fs-3xl: 30px;
+  --fs-3xl: 28px; /* the hero number of a tile: 28 px semibold, tabular */
   --lh-tight: 1.2;
   --lh: 1.45;
   --fw-regular: 400;
@@ -80,18 +81,18 @@
   --text-2: #505561;
   --text-3: #686d78;
   --text-on-accent: #ffffff;
-  --accent: #5a24b0;
-  --accent-hover: #4a1c96;
-  --accent-soft: rgba(90, 36, 176, 0.08);
-  --accent-ring: rgba(90, 36, 176, 0.45);
-  --ok: #17803d;
-  --ok-soft: rgba(23, 128, 61, 0.1);
-  --warn: #9a5b00;
-  --warn-soft: rgba(196, 122, 0, 0.12);
-  --bad: #c8293a;
-  --bad-soft: rgba(200, 41, 58, 0.09);
-  --info: #5a24b0;
-  --info-soft: rgba(90, 36, 176, 0.08);
+  --accent: #6d3fd6;
+  --accent-hover: #5a2fbd;
+  --accent-soft: rgba(109, 63, 214, 0.09);
+  --accent-ring: rgba(109, 63, 214, 0.45);
+  --ok: #177244;
+  --ok-soft: #e3f5eb;
+  --warn: #8f5f00;
+  --warn-soft: #fbf0d6;
+  --bad: #c42b2b;
+  --bad-soft: #fce6e6;
+  --info: #1f5fa8;
+  --info-soft: #e4eef9;
   --track: #e8eaee;
   --skeleton: #eceef2;
   --skeleton-shine: #f6f7f9;
@@ -122,18 +123,18 @@
   --text-2: #a3a7b0;
   --text-3: #858a94;
   --text-on-accent: #0b0c0f;
-  --accent: #a98bf2;
-  --accent-hover: #bba3f6;
-  --accent-soft: rgba(169, 139, 242, 0.14);
-  --accent-ring: rgba(169, 139, 242, 0.55);
-  --ok: #4cc77a;
-  --ok-soft: rgba(76, 199, 122, 0.13);
-  --warn: #e7a83b;
-  --warn-soft: rgba(231, 168, 59, 0.14);
-  --bad: #ff6b72;
-  --bad-soft: rgba(255, 107, 114, 0.13);
-  --info: #a98bf2;
-  --info-soft: rgba(169, 139, 242, 0.14);
+  --accent: #a58bfa;
+  --accent-hover: #b8a2fc;
+  --accent-soft: rgba(165, 139, 250, 0.14);
+  --accent-ring: rgba(165, 139, 250, 0.55);
+  --ok: #3dd68c;
+  --ok-soft: rgba(61, 214, 140, 0.14);
+  --warn: #f2b84b;
+  --warn-soft: rgba(242, 184, 75, 0.14);
+  --bad: #ff6b6b;
+  --bad-soft: rgba(255, 107, 107, 0.14);
+  --info: #7db2e8;
+  --info-soft: rgba(125, 178, 232, 0.14);
   --track: #22242a;
   --skeleton: #1b1d22;
   --skeleton-shine: #24262c;
@@ -519,12 +520,16 @@ textarea.input {
     background: var(--bad-soft);
   }
   &[data-tone='info'] {
-    color: var(--accent);
-    background: var(--accent-soft);
+    color: var(--info);
+    background: var(--info-soft);
   }
+  /* Neutral ("Not installed", "Idle"): grey, no status dot, no border. */
   &[data-tone='muted'] {
     color: var(--text-3);
     background: var(--bg-hover);
+    &::before {
+      content: none;
+    }
   }
   &.outline {
     background: transparent;
@@ -663,6 +668,13 @@ textarea.input {
   }
   &[data-tone='ok'] > span {
     background: var(--ok);
+  }
+  /* Calm by default: a usage meter is neutral and only turns warn (> 85 %) or bad (> 95 %) when it matters. */
+  &[data-tone='neutral'] > span {
+    background: color-mix(in srgb, var(--text-3) 75%, transparent);
+  }
+  &[data-tone='accent'] > span {
+    background: var(--accent);
   }
 }
 

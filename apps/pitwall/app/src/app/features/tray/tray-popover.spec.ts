@@ -73,9 +73,10 @@ describe('TrayPopover', () => {
       const { el } = await mount({ patch: (o) => ({ ...o, memory: { ...o.memory, ramTotal: 100 * GiB, ramAvailable: avail * GiB } }) });
       return el.querySelector('.mem .meter')!.getAttribute('data-tone');
     };
-    expect(await level(60)).toBeNull();
-    expect(await level(25)).toBe('warn');
-    expect(await level(10)).toBe('bad');
+    expect(await level(60)).toBe('neutral');
+    expect(await level(25)).toBe('neutral');
+    expect(await level(10)).toBe('warn');
+    expect(await level(3)).toBe('bad');
   });
 
   it('hides VRAM when the GPU does not report it, and shows no idle percentage when unknown', async () => {

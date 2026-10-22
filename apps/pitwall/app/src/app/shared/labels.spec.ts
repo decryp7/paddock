@@ -12,8 +12,17 @@ import {
   selfTestLook,
   severityTone,
   statusTone,
+  loadTone,
 } from './labels';
 import { ICONS } from './icons';
+
+describe('loadTone', () => {
+  it('is neutral until 85 %, warning to 95 % and danger above', () => {
+    expect([0, 50, 85].map(loadTone)).toEqual(['neutral', 'neutral', 'neutral']);
+    expect([86, 95].map(loadTone)).toEqual(['warn', 'warn']);
+    expect(loadTone(96)).toBe('bad');
+  });
+});
 
 describe('labels', () => {
   it('maps every state to a label and a tone', () => {

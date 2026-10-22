@@ -101,15 +101,20 @@ describe('ModelsPage', () => {
     await settle();
     expect(el.querySelector('button[aria-label="Unpin Gemma 3 12B"]')).not.toBeNull();
 
-    const select = el.querySelector('#idle-llama-3\\.2-3b-instruct-q5_k_m') as HTMLSelectElement;
-    select.value = '600';
-    select.dispatchEvent(new Event('change'));
-    await settle();
-    expect((await backend.localModels()).find((m) => m.id === 'llama-3.2-3b-instruct-q5_k_m')?.idleSecs).toBe(600);
-    select.value = '';
-    select.dispatchEvent(new Event('change'));
-    await settle();
-    expect((await backend.localModels()).find((m) => m.id === 'llama-3.2-3b-instruct-q5_k_m')?.idleSecs).toBeNull();
+    const idleOf = async () => (await backend.localModels()).find((m) => m.id === 'llama-3.2-3b-instruct-q5_k_m')?.idleSecs;
+    const choose = async (label: string) => {
+      (el.querySelector('#idle-llama-3\\.2-3b-instruct-q5_k_m') as HTMLButtonElement).click();
+      await settle();
+      const opt = Array.from(document.querySelectorAll<HTMLButtonElement>('.pop [role="menuitemradio"]')).find((o) => o.textContent?.trim() === label)!;
+      opt.click();
+      await settle();
+    };
+    await choose('After 10 min');
+    expect(await idleOf()).toBe(600);
+    expect(el.querySelector('#idle-llama-3\\.2-3b-instruct-q5_k_m')?.textContent).toContain('After 10 min');
+    await choose('Global setting');
+    expect(await idleOf()).toBeNull();
+    expect(document.querySelector('.pop')).toBeNull();
 
     (el.querySelector('button[aria-label="Delete BGE reranker v2 m3"]') as HTMLButtonElement).click();
     await settle();
