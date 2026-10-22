@@ -1,0 +1,57 @@
+[package]
+name = "spotter-app"
+description = "Spotter — watches for new releases anywhere and tells you the moment one appears: tray app and window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[lib]
+name = "spotter_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+spotter-core.workspace = true
+spotter-plugin-api.workspace = true
+spotter-plugin-host.workspace = true
+spotter-sources.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+directories = "6"
+getrandom = "0.3"
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2.7"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2.7"
+tauri-plugin-single-instance = "2.5"
+# >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version); see docs/releasing.md.
+# No "zip": Spotter publishes v2 updater artifacts (the installers themselves).
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
+thiserror.workspace = true
+tokio.workspace = true
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
+
+# Tokens live in the OS credential store: Windows Credential Manager, macOS Keychain (Secret Service on Linux).
+keyring = "4"
+
+[target.'cfg(windows)'.dependencies]
+# Native toasts with action buttons (Open, Mark as seen); the notification plugin has no actions on desktop.
+tauri-winrt-notification = "0.8"
+# The taskbar's light/dark setting, to pick the tray icon variant.
+winreg = "0.55"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

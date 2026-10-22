@@ -1,0 +1,235 @@
+/* Spotter's design tokens. Components only use var(--…); nothing outside this file names a raw colour.
+
+   Colour roles
+   - Layers: --canvas (window) < --rail-bg < --pane (page) < --surface (cards) < --surface-2/3 (insets, wells).
+   - Text: --text (primary, ≥ 12:1), --text-2 (secondary, ≥ 6:1), --text-3 (muted, ≥ 4.5:1 on --surface and --pane).
+   - Accent: Spotter amber. Large fills use --accent-bg with the dark ink --on-accent (#3A2600, ≥ 8:1 on the amber);
+     amber is too light for text on light surfaces, so accent text uses --accent (a deep amber in light, ≥ 4.8:1).
+   - Status roles ok / warn / bad / info / neutral: each text colour is ≥ 4.5:1 on --surface and on its own -soft tint
+     in both themes. Their hues (teal, orange, vermillion, blue, grey) stay apart under protanopia, deuteranopia and
+     tritanopia, and every status is also shown with a word and an icon shape, never by colour alone.
+   - Charts: the validated categorical order (blue, orange, aqua, yellow, magenta, green, violet), checked with the
+     data-viz palette validator against both card surfaces on adjacent pairs (stacked bars and grouped bars). */
+
+:root {
+  color-scheme: light dark;
+
+  /* Type */
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI Variable', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI Variable', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-3xl: 30px;
+  --text-4xl: 40px;
+  --text-hero: 56px;
+  --leading-tight: 1.2;
+  --leading: 1.5;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --tracking-tight: -0.02em;
+  --tracking-caps: 0.07em;
+
+  /* Space (4 px grid) */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* Motion (all of it is switched off under prefers-reduced-motion in _base.scss) */
+  --duration-instant: 80ms;
+  --duration-fast: 120ms;
+  --duration: 180ms;
+  --duration-slow: 280ms;
+  --duration-slower: 420ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  /* Layers */
+  --z-sticky: 10;
+  --z-rail: 20;
+  --z-topbar: 25;
+  --z-overlay: 1000;
+  --z-toast: 1100;
+
+  /* Layout */
+  --rail-width: 68px;
+  --topbar-height: 56px;
+  --titlebar-inset: 0px;
+  --control-height: 32px;
+  --control-height-sm: 26px;
+  --control-height-lg: 38px;
+  --page-max: 1480px;
+}
+
+@mixin light {
+  --canvas: #eceef1;
+  --rail-bg: #e6e8ec;
+  --pane: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f6f7f9;
+  --surface-3: #eceef1;
+  --surface-raised: #ffffff;
+  --hover: rgb(20 22 28 / 0.045);
+  --active: rgb(20 22 28 / 0.08);
+  --border: #e3e5ea;
+  --border-strong: #cfd2d9;
+  --text: #14161b;
+  --text-2: #4e5361;
+  --text-3: #686d7a;
+  --text-on-tint: #14161b;
+
+  --accent: #8a5800;
+  --accent-bg: #f4b315;
+  --accent-bg-hover: #e5a50a;
+  --accent-bg-active: #d79a05;
+  --on-accent: #3a2600;
+  --accent-soft: #fdf3d8;
+  --accent-line: #e9b949;
+  --focus-ring: #b77a00;
+
+  --ok: #0b7563;
+  --warn: #a14700;
+  --bad: #c22f1c;
+  --info: #1f5fc4;
+  --neutral: #5b606b;
+
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
+  --chart-6: #008300;
+  --chart-7: #6250d6;
+  --chart-muted: #b9bcc5;
+  --chart-faint: #dcdee3;
+  --chart-grid: #eceef1;
+  --chart-axis: #d2d4da;
+
+  --shadow-xs: 0 1px 0 rgb(16 18 27 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(16 18 27 / 0.06), 0 0 0 1px rgb(16 18 27 / 0.02);
+  --shadow-md: 0 1px 2px rgb(16 18 27 / 0.05), 0 6px 16px -4px rgb(16 18 27 / 0.08);
+  --shadow-lg: 0 2px 6px rgb(16 18 27 / 0.06), 0 24px 48px -12px rgb(16 18 27 / 0.22);
+  --scrim: rgb(16 18 27 / 0.36);
+  --skeleton: #eceef1;
+  --skeleton-shine: #f6f7f9;
+  --hero-glow: rgb(244 179 21 / 0.16);
+}
+
+@mixin dark {
+  --canvas: #0b0c0f;
+  --rail-bg: #0e0f13;
+  --pane: #121317;
+  --surface: #191a1f;
+  --surface-2: #1f2026;
+  --surface-3: #282a31;
+  --surface-raised: #1f2026;
+  --hover: rgb(255 255 255 / 0.045);
+  --active: rgb(255 255 255 / 0.08);
+  --border: #25272e;
+  --border-strong: #353841;
+  --text: #ededf0;
+  --text-2: #a6aab4;
+  --text-3: #8b8f9a;
+  --text-on-tint: #ededf0;
+
+  --accent: #f6c344;
+  --accent-bg: #f4b315;
+  --accent-bg-hover: #ffc532;
+  --accent-bg-active: #e5a50a;
+  --on-accent: #3a2600;
+  --accent-soft: #2e2611;
+  --accent-line: #8d6a14;
+  --focus-ring: #f4b315;
+
+  --ok: #3fc1a5;
+  --warn: #ff9f5a;
+  --bad: #ff7d6e;
+  --info: #72aaff;
+  --neutral: #a6aab4;
+
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
+  --chart-6: #008300;
+  --chart-7: #9085e9;
+  --chart-muted: #5a5e69;
+  --chart-faint: #3a3d46;
+  --chart-grid: #23252b;
+  --chart-axis: #353841;
+
+  --shadow-xs: 0 1px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.45);
+  --shadow-md: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 20px -6px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 28px 56px -12px rgb(0 0 0 / 0.65);
+  --scrim: rgb(0 0 0 / 0.6);
+  --skeleton: #1f2026;
+  --skeleton-shine: #282a31;
+  --hero-glow: rgb(244 179 21 / 0.1);
+}
+
+:root {
+  @include light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    @include dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  @include dark;
+}
+
+/* Brand tile colours (the app icon): large fills only. */
+:root {
+  --brand-top: #ffd257;
+  --brand: #f4b315;
+  --brand-bottom: #e59600;
+  --brand-ink: #3a2600;
+}
+
+/* Status tints: the status colour over the surface, keeping its text ≥ 4.5:1. */
+:root {
+  --ok-soft: color-mix(in srgb, var(--ok) 13%, var(--surface));
+  --warn-soft: color-mix(in srgb, var(--warn) 13%, var(--surface));
+  --bad-soft: color-mix(in srgb, var(--bad) 13%, var(--surface));
+  --info-soft: color-mix(in srgb, var(--info) 13%, var(--surface));
+  --neutral-soft: color-mix(in srgb, var(--neutral) 13%, var(--surface));
+  --ok-line: color-mix(in srgb, var(--ok) 32%, transparent);
+  --warn-line: color-mix(in srgb, var(--warn) 32%, transparent);
+  --bad-line: color-mix(in srgb, var(--bad) 32%, transparent);
+  --info-line: color-mix(in srgb, var(--info) 32%, transparent);
+  --neutral-line: color-mix(in srgb, var(--neutral) 28%, transparent);
+}
+
+/* macOS: the hidden title bar leaves the traffic lights over the top of the rail. */
+:root[data-platform='macos'] {
+  --titlebar-inset: 28px;
+}

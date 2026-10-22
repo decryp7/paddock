@@ -1,0 +1,47 @@
+{
+  "name": "spotter-app",
+  "version": "0.1.0",
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build",
+    "watch": "ng build --watch --configuration development",
+    "test": "ng test",
+    "lint": "ng lint",
+    "tauri": "tauri",
+    "e2e": "playwright test",
+    "screenshots": "playwright test --project=screenshots"
+  },
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "dependencies": {
+    "@angular/cdk": "^22.2.3",
+    "@angular/common": "^22.2.0",
+    "@angular/compiler": "^22.2.0",
+    "@angular/core": "^22.2.0",
+    "@angular/forms": "~22.2.0",
+    "@angular/material": "^22.2.3",
+    "@angular/platform-browser": "^22.2.0",
+    "@angular/router": "~22.2.0",
+    "@ngrx/signals": "^22.0.1",
+    "@tauri-apps/api": "^2.12.4",
+    "echarts": "^6.1.0",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^22.2.3",
+    "@angular/cli": "^22.2.3",
+    "@angular/compiler-cli": "^22.2.0",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
+    "@tauri-apps/cli": "^2.12.3",
+    "@vitest/coverage-v8": "^5.0.5",
+    "angular-eslint": "^22.6.0",
+    "eslint": "^10.13.0",
+    "jsdom": "^30.1.3",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^5.0.5"
+  }
+}
