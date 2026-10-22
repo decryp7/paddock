@@ -540,13 +540,36 @@ mod tests {
         assert!(s.chunk("[DONE]").unwrap().is_empty());
         assert!(s.finish().is_none());
         let mut s = Stream::new();
-        s.chunk(r#"{"choices":[],"timings":{"prompt_per_second":1.0,"predicted_per_second":2.0,"cache_n":123}}"#).unwrap();
-        assert!(matches!(s.finish(), Some(ChatEvent::Done { timings: Some(Timings { cached_tokens: 123, .. }), .. })));
+        s.chunk(r#"{"choices":[],"timings":{"prompt_per_second":1.0,"predicted_per_second":2.0,"cache_n":123}}"#)
+            .unwrap();
+        assert!(matches!(
+            s.finish(),
+            Some(ChatEvent::Done {
+                timings: Some(Timings { cached_tokens: 123, .. }),
+                ..
+            })
+        ));
         let req = ChatRequest {
             messages: vec![crate::chat::Message::text(Role::User, "x")],
             ..Default::default()
         };
         assert_eq!(chat_body(&req, "a", Some(3))["id_slot"], 3);
+        let launch = Launch {
+            model: "m".into(),
+            mmproj: None,
+            alias: "a".into(),
+            port: 1,
+            context: 512,
+            gpu_layers: None,
+            threads: 0,
+            parallel: 1,
+            kind: ServeKind::Chat,
+            cache_ram_mib: 0,
+            slot_save_path: Some("/data/slots".into()),
+        };
+        let a = args(&launch);
+        let at = a.iter().position(|x| x == "--slot-save-path").unwrap();
+        assert_eq!(a[at + 1], "/data/slots");
         assert!(chat_body(&req, "a", None).get("id_slot").is_none());
         let mut s = Stream::new();
         s.chunk(r#"{"choices":[{"delta":{"content":""},"finish_reason":"length"}]}"#)

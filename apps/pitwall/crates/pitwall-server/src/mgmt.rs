@@ -155,6 +155,16 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             ok(())
         }
         "release_memory" => ok(st.serving.release_all()),
+        "cache_info" => ok(st.cache_info()),
+        "clear_cache" => {
+            let scope: pitwall_core::cache::ClearRequest = arg(a, "scope")?;
+            let mut n = st.caches.clear(&scope.scope());
+            if matches!(scope, pitwall_core::cache::ClearRequest::All) {
+                n += crate::warm::drop_prefix(&st.dirs.slots(), "", None);
+            }
+            st.event(EventKind::PresetChanged, Severity::Info, format!("Cleared {n} cached item(s)."));
+            ok(n)
+        }
         "apply_preset" => {
             let p: mgmt::Preset = arg(a, "preset")?;
             let mut s = st.cfg();
@@ -222,6 +232,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             st.serving.unload(&id, pitwall_core::memory::ReleaseReason::Manual);
             st.serving.retry(&id);
             st.library.delete(&id).map_err(|e| err(mgmt::ErrorCode::NotFound, e.to_string()))?;
+            st.invalidate_model(&id);
             ok(())
         }
         "load_model" => {
@@ -322,6 +333,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "remove_build" => {
             let id: String = arg(a, "buildId")?;
             st.llama.remove(&id).map_err(|e| err(mgmt::ErrorCode::NotFound, e.to_string()))?;
+            st.invalidate_engine();
             ok(())
         }
         "select_build" => {
@@ -370,6 +382,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                 }
             }
             update_prefs(st, &id, |p| p.engine = engine.filter(|e| e != "llama.cpp"))?;
+            st.invalidate_model(&id);
             ok(())
         }
         "apps" => ok(apps(st)),
@@ -1203,6 +1216,7 @@ fn preset_entries(st: &AppState) -> Vec<mgmt::PresetEntry> {
 /// hands the new list to serving. Returns the saved preset (or the removed one) as JSON.
 fn edit_presets(st: &AppState, change: impl FnOnce(&mut Presets, &Known) -> Result<mgmt::ModelPreset, PresetError>) -> R<Value> {
     let _gate = lock(&st.presets_gate);
+    let before = st.serving.presets().list().to_vec();
     let models: Vec<ModelId> = st.library.local().iter().map(|f| f.id.clone()).collect();
     let engines = st.preset_engines();
     let mut next = st.serving.presets();
@@ -1220,6 +1234,11 @@ fn edit_presets(st: &AppState, change: impl FnOnce(&mut Presets, &Known) -> Resu
             format!("the presets could not be saved ({e}); check the disk and try again"),
         )
     })?;
+    // Whatever a changed, renamed or deleted preset cached is dropped now.
+    let after = next.list().to_vec();
+    for p in before.iter().filter(|p| !after.contains(p)) {
+        st.invalidate_preset(p.alias.as_str());
+    }
     st.serving.set_presets(next);
     ok(saved)
 }

@@ -514,7 +514,9 @@ impl Engine for LlamaCpp {
     }
 
     fn build_tag(&self, model: &str) -> String {
-        self.select_for(Some(model)).map(|s| s.build.as_str().to_string()).unwrap_or_default()
+        self.select_for(Some(model))
+            .map(|s| s.build.as_str().to_string())
+            .unwrap_or_default()
     }
 
     fn availability(&self) -> Availability {

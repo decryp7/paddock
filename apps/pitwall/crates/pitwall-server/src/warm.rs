@@ -47,6 +47,23 @@ pub fn drop_prefix(dir: &Path, prefix: &str, keep: Option<&str>) -> u64 {
     n
 }
 
+/// Deletes every file of a preset, whatever the model (the preset was changed or deleted).
+pub fn drop_alias(dir: &Path, alias: &str) -> u64 {
+    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+    let mut n = 0;
+    for e in rd.filter_map(Result::ok) {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let of_alias = name
+            .get(9..)
+            .and_then(|rest| rest.strip_prefix(alias))
+            .is_some_and(|rest| rest.starts_with('.') && rest.len() == ".".len() + 16 + ".bin".len());
+        if of_alias && std::fs::remove_file(e.path()).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
 /// Deletes files unused for `max_days`, then the oldest until the total is within [`MAX_TOTAL_BYTES`]. Returns how many
 /// went. At most `max` files are examined.
 pub fn sweep(dir: &Path, max_days: u32, now: Millis, max: usize) -> u64 {
@@ -116,8 +133,14 @@ mod tests {
         }
         assert_eq!(drop_prefix(d.path(), &preset_prefix("m", "fast"), Some(&new)), 1);
         assert!(!d.path().join(&old).exists() && d.path().join(&new).exists() && d.path().join(&other).exists());
-        assert_eq!(drop_prefix(d.path(), &model_prefix("m"), None), 2);
-        assert_eq!(usage(d.path()), (0, 0));
+        let aliased = file_name("zz", "fast", "fp", "p");
+        std::fs::write(d.path().join(&aliased), b"x").unwrap();
+        std::fs::write(d.path().join("notes.txt"), b"x").unwrap();
+        assert_eq!(drop_alias(d.path(), "fast"), 2, "the alias on any model, and only it");
+        assert!(d.path().join(&other).exists() && d.path().join("notes.txt").exists());
+        assert_eq!(drop_alias(&d.path().join("missing"), "fast"), 0);
+        assert_eq!(drop_prefix(d.path(), &model_prefix("m"), None), 1);
+        assert_eq!(usage(d.path()), (1, 1), "only the unrelated file is left");
         assert_eq!(drop_prefix(&d.path().join("missing"), "x", None), 0);
     }
 

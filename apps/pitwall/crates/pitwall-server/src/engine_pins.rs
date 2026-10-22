@@ -83,6 +83,7 @@ fn finish(st: &AppState, pins: EnginePins, headline: String) -> R<PinChange> {
     st.save_pins(&pins)
         .map_err(|e| CommandError::new(ErrorCode::Internal, format!("could not save the engine pins: {e}")))?;
     st.llama.set_pins(pins.clone());
+    st.invalidate_engine();
     let later = on_next_load(st, &pins);
     let message = if later.is_empty() {
         headline
@@ -106,6 +107,7 @@ pub fn record_change(st: &AppState, before: Option<BuildId>) {
     if current(st).as_ref() == Some(&before) {
         return;
     }
+    st.invalidate_engine();
     let _gate = lock(&st.pins_gate);
     let mut pins = st.llama.pins();
     pins.remember(before);

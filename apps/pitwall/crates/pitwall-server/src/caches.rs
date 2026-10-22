@@ -104,7 +104,8 @@ impl Caches {
 
     /// Stores an embedding.
     pub fn store_vector(&self, key: Key, v: &[f32], meta: Meta, now: Millis) {
-        self.store(Kind::Embedding).put(Kind::Embedding, key, cache::encode_vector(v), meta, now);
+        self.store(Kind::Embedding)
+            .put(Kind::Embedding, key, cache::encode_vector(v), meta, now);
     }
 
     /// Removes the entries in scope from both stores; returns how many went.
@@ -146,7 +147,11 @@ impl Caches {
             let st: KindStats = self.store_for(kind, &s).stats(kind);
             let disk_wanted = s.storage(kind) == CacheStorage::Disk;
             KindInfo {
-                storage: if disk_wanted && self.disk.is_none() { CacheStorage::Memory } else { s.storage(kind) },
+                storage: if disk_wanted && self.disk.is_none() {
+                    CacheStorage::Memory
+                } else {
+                    s.storage(kind)
+                },
                 entries: st.entries,
                 bytes: st.bytes,
                 max_bytes: l.max_bytes,
@@ -206,7 +211,15 @@ mod tests {
         {
             let c = Caches::open(&db, &disk_settings(), 0);
             c.store_response([1; 32], &out("hi"), meta(), 10);
-            c.store_response([2; 32], &ChatOutput { finish: None, ..out("cut") }, meta(), 10);
+            c.store_response(
+                [2; 32],
+                &ChatOutput {
+                    finish: None,
+                    ..out("cut")
+                },
+                meta(),
+                10,
+            );
             c.store_vector([3; 32], &[0.5, 1.5], meta(), 10);
             c.flush();
             assert_eq!(c.response(&[1; 32], 11).unwrap().text, "hi");

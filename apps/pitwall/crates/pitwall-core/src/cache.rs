@@ -139,7 +139,9 @@ pub fn encode_vector(v: &[f32]) -> Vec<u8> {
 
 /// A vector from bytes (`None` when the length is not a whole number of floats).
 pub fn decode_vector(b: &[u8]) -> Option<Vec<f32>> {
-    (b.len() % 4 == 0).then(|| b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+    b.len()
+        .is_multiple_of(4)
+        .then(|| b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
 }
 
 /// Which cache.
@@ -373,10 +375,12 @@ impl Part {
 
     fn evict_to(&mut self, budget: u64) {
         while self.bytes > budget {
-            let Some(oldest) = self.entries.iter().min_by_key(|(_, e)| e.used).map(|(k, _)| *k) else {
-                break;
-            };
-            self.remove(&oldest);
+            let oldest = self.entries.iter().min_by_key(|(_, e)| e.used).map(|(k, _)| *k);
+            // No entry left means no bytes left: the loop ends either way.
+            match oldest {
+                Some(k) => self.remove(&k),
+                None => self.bytes = 0,
+            }
         }
     }
 }
@@ -395,7 +399,10 @@ impl MemoryStore {
             entries: HashMap::new(),
         };
         MemoryStore {
-            parts: Mutex::new(HashMap::from([(Kind::Response, part(response)), (Kind::Embedding, part(embedding))])),
+            parts: Mutex::new(HashMap::from([
+                (Kind::Response, part(response)),
+                (Kind::Embedding, part(embedding)),
+            ])),
         }
     }
 
@@ -444,7 +451,12 @@ impl CacheStore for MemoryStore {
     fn clear(&self, scope: &Scope) -> u64 {
         let mut n = 0;
         for (kind, p) in self.parts().iter_mut() {
-            let doomed: Vec<Key> = p.entries.iter().filter(|(_, e)| scope.covers(*kind, &e.meta)).map(|(k, _)| *k).collect();
+            let doomed: Vec<Key> = p
+                .entries
+                .iter()
+                .filter(|(_, e)| scope.covers(*kind, &e.meta))
+                .map(|(k, _)| *k)
+                .collect();
             n += doomed.len() as u64;
             for k in doomed {
                 p.remove(&k);
@@ -638,7 +650,7 @@ mod tests {
     fn replay_is_the_stream_the_answer_was() {
         let o = ChatOutput {
             reasoning: "think".into(),
-            text: "é".repeat(100),
+            text: format!("a{}", "é".repeat(100)),
             ..out("")
         };
         let events = replay(&o);
@@ -752,7 +764,10 @@ mod tests {
         s.put(Kind::Embedding, [2; 32], vec![2], Meta::default(), 0);
         assert!(s.get(Kind::Embedding, &[1; 32], 90).is_some());
         assert!(s.get(Kind::Embedding, &[1; 32], 180).is_some(), "used at 90, so kept to 190");
-        assert!(s.get(Kind::Embedding, &[2; 32], 180).is_none(), "idle since 0, expired though never swept");
+        assert!(
+            s.get(Kind::Embedding, &[2; 32], 180).is_none(),
+            "idle since 0, expired though never swept"
+        );
     }
 
     #[test]
@@ -783,5 +798,6 @@ mod tests {
         .join();
         put(&s, [9; 32], b"x", 0);
         assert_eq!(s.get(Kind::Response, &[9; 32], 1).unwrap(), b"x");
+        s.flush();
     }
 }

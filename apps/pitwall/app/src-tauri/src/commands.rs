@@ -107,6 +107,16 @@ impl Validate for PresetDraft {
     }
 }
 
+impl Validate for pitwall_core::cache::ClearRequest {
+    fn validate(&self, field: &str) -> Result<(), CommandError> {
+        use pitwall_core::cache::ClearRequest;
+        match self {
+            ClearRequest::App { app_id: s } | ClearRequest::Model { model_id: s } => s.validate(field),
+            _ => Ok(()),
+        }
+    }
+}
+
 impl Validate for PlaygroundRequest {
     fn validate(&self, field: &str) -> Result<(), CommandError> {
         if self.model_id.len() > MAX_TEXT {
@@ -200,6 +210,12 @@ rpc!(
 rpc!(
     /// Unloads every model that may be unloaded.
     release_memory => "release_memory");
+rpc!(
+    /// What the caches hold (ADR 0019).
+    cache_info => "cache_info");
+rpc!(
+    /// Clears cached answers, embeddings and saved prompt prefixes in a scope.
+    clear_cache => "clear_cache", scope: pitwall_core::cache::ClearRequest = "scope");
 rpc!(
     /// Applies a memory preset.
     apply_preset => "apply_preset", preset: Preset = "preset");
@@ -468,6 +484,15 @@ mod tests {
         r.model_id = "m".repeat(MAX_TEXT + 1);
         assert!(r.validate("r").is_err());
         assert!(AppPermissions::default().validate("p").is_ok());
+        assert!(pitwall_core::cache::ClearRequest::All.validate("scope").is_ok());
+        assert!(pitwall_core::cache::ClearRequest::App { app_id: "debrief".into() }
+            .validate("scope")
+            .is_ok());
+        assert!(pitwall_core::cache::ClearRequest::Model {
+            model_id: "m".repeat(MAX_TEXT + 1)
+        }
+        .validate("scope")
+        .is_err());
         let draft = |alias: &str| PresetDraft {
             alias: alias.into(),
             target: "m".into(),
@@ -477,6 +502,8 @@ mod tests {
             max_tokens: None,
             system_prompt: None,
             engine: None,
+            cache_responses: false,
+            keep_warm: false,
         };
         assert!(draft("debrief-explain").validate("preset").is_ok());
         assert!(draft(&"a".repeat(MAX_TEXT + 1)).validate("preset").is_err());

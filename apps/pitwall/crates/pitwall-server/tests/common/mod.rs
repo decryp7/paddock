@@ -41,9 +41,19 @@ pub struct FakeEngine {
     /// Chat requests being served right now and the most that were at once.
     pub live: Arc<AtomicUsize>,
     pub peak: Arc<AtomicUsize>,
+    /// What `timings.cache_n` (prompt tokens reused from the prompt cache) reports.
+    pub cache_n: Arc<AtomicU64>,
+    /// The inputs of every embeddings request the engine received.
+    pub embeds: Arc<std::sync::Mutex<Vec<Vec<String>>>>,
+    /// `POST /slots/{n}?action=...` calls: `"{n}:{action}:{body}"`.
+    pub slot_calls: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
-const SSE: &str = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2},\"timings\":{\"prompt_per_second\":100.0,\"predicted_per_second\":50.0}}\n\ndata: [DONE]\n\n";
+fn sse(cache_n: u64) -> String {
+    format!(
+        "data: {{\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"Hello\"}},\"finish_reason\":null}}]}}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\" world\"}},\"finish_reason\":null}}]}}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":5,\"completion_tokens\":2}},\"timings\":{{\"prompt_per_second\":100.0,\"predicted_per_second\":50.0,\"cache_n\":{cache_n}}}}}\n\ndata: [DONE]\n\n"
+    )
+}
 
 impl Engine for FakeEngine {
     fn kind(&self) -> EngineKind {
@@ -63,16 +73,28 @@ impl Engine for FakeEngine {
                 return Err(EngineError::Start("the fake engine refuses to start".into()));
             }
             let erases = self.erases.clone();
+            let (cache_n, embeds, slot_calls) = (self.cache_n.clone(), self.embeds.clone(), self.slot_calls.clone());
             let app = Router::new()
                 .route(
                     "/slots/{slot}",
-                    post(move || {
-                        let erases = erases.clone();
-                        async move {
-                            erases.fetch_add(1, Ordering::SeqCst);
-                            axum::Json(json!({"id_slot": 0, "n_erased": 1}))
-                        }
-                    }),
+                    post(
+                        move |axum::extract::Path(slot): axum::extract::Path<u32>,
+                              axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+                              body: axum::body::Bytes| {
+                            let (erases, slot_calls) = (erases.clone(), slot_calls.clone());
+                            async move {
+                                let action = q.get("action").cloned().unwrap_or_default();
+                                slot_calls
+                                    .lock()
+                                    .unwrap()
+                                    .push(format!("{slot}:{action}:{}", String::from_utf8_lossy(&body)));
+                                if action == "erase" {
+                                    erases.fetch_add(1, Ordering::SeqCst);
+                                }
+                                axum::Json(json!({"id_slot": slot, "n_erased": 1}))
+                            }
+                        },
+                    ),
                 )
                 .route("/health", get(|| async { axum::Json(json!({"status": "ok"})) }))
                 .route(
@@ -87,7 +109,7 @@ impl Engine for FakeEngine {
                     "/v1/chat/completions",
                     post(move |body: axum::body::Bytes| {
                         let bodies = bodies.clone();
-                        let (delay, live, peak) = (delay.clone(), live.clone(), peak.clone());
+                        let (delay, live, peak, cache_n) = (delay.clone(), live.clone(), peak.clone(), cache_n.clone());
                         async move {
                             let now = live.fetch_add(1, Ordering::SeqCst) + 1;
                             peak.fetch_max(now, Ordering::SeqCst);
@@ -96,13 +118,33 @@ impl Engine for FakeEngine {
                             if let Ok(v) = serde_json::from_slice::<Value>(&body) {
                                 bodies.lock().unwrap().push(v);
                             }
-                            ([("content-type", "text/event-stream")], SSE).into_response()
+                            ([("content-type", "text/event-stream")], sse(cache_n.load(Ordering::SeqCst))).into_response()
                         }
                     }),
                 )
                 .route(
                     "/v1/embeddings",
-                    post(|| async { axum::Json(json!({"data": [{"index": 0, "embedding": [0.5, 0.25]}], "usage": {"prompt_tokens": 3}})) }),
+                    post(move |body: axum::body::Bytes| {
+                        let embeds = embeds.clone();
+                        async move {
+                            let inputs: Vec<String> = serde_json::from_slice::<Value>(&body)
+                                .ok()
+                                .and_then(|v| {
+                                    v["input"]
+                                        .as_array()
+                                        .map(|a| a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect())
+                                })
+                                .unwrap_or_default();
+                            let data: Vec<Value> = inputs
+                                .iter()
+                                .enumerate()
+                                .map(|(i, t)| json!({"index": i, "embedding": [t.len() as f64, 0.25]}))
+                                .collect();
+                            let n = inputs.len() as u64;
+                            embeds.lock().unwrap().push(inputs);
+                            axum::Json(json!({"data": data, "usage": {"prompt_tokens": 3 * n}}))
+                        }
+                    }),
                 );
             let listener = tokio::net::TcpListener::bind(("127.0.0.1", l.port))
                 .await
@@ -136,6 +178,9 @@ pub struct Harness {
     pub parallels: Arc<std::sync::Mutex<Vec<u32>>>,
     pub delay_ms: Arc<AtomicU64>,
     pub peak: Arc<AtomicUsize>,
+    pub cache_n: Arc<AtomicU64>,
+    pub embeds: Arc<std::sync::Mutex<Vec<Vec<String>>>>,
+    pub slot_calls: Arc<std::sync::Mutex<Vec<String>>>,
     pub dir: tempfile::TempDir,
 }
 
@@ -171,6 +216,9 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
     let parallels = Arc::new(std::sync::Mutex::new(vec![]));
     let delay_ms = Arc::new(AtomicU64::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
+    let cache_n = Arc::new(AtomicU64::new(0));
+    let embeds = Arc::new(std::sync::Mutex::new(vec![]));
+    let slot_calls = Arc::new(std::sync::Mutex::new(vec![]));
     let engine: Arc<dyn Engine> = Arc::new(FakeEngine {
         starts: starts.clone(),
         erases: erases.clone(),
@@ -181,6 +229,9 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
         delay_ms: delay_ms.clone(),
         live: Arc::new(AtomicUsize::new(0)),
         peak: peak.clone(),
+        cache_n: cache_n.clone(),
+        embeds: embeds.clone(),
+        slot_calls: slot_calls.clone(),
     });
     let st = AppState::open(dirs.clone(), Some(engine)).await;
     let _ = Hardware::default();
@@ -202,6 +253,9 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
         parallels,
         delay_ms,
         peak,
+        cache_n,
+        embeds,
+        slot_calls,
         dir,
     }
 }
@@ -286,6 +340,9 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
         parallels: Arc::new(std::sync::Mutex::new(vec![])),
         delay_ms: Arc::new(AtomicU64::new(0)),
         peak: Arc::new(AtomicUsize::new(0)),
+        cache_n: Arc::new(AtomicU64::new(0)),
+        embeds: Arc::new(std::sync::Mutex::new(vec![])),
+        slot_calls: Arc::new(std::sync::Mutex::new(vec![])),
         dir,
     }
 }

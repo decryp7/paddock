@@ -64,7 +64,10 @@ fn create_private(path: &Path) {
 
 fn side_files(path: &Path) -> [PathBuf; 2] {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    [path.with_file_name(format!("{name}-wal")), path.with_file_name(format!("{name}-shm"))]
+    [
+        path.with_file_name(format!("{name}-wal")),
+        path.with_file_name(format!("{name}-shm")),
+    ]
 }
 
 fn set_up(path: &Path, flags: OpenFlags) -> rusqlite::Result<Connection> {
@@ -115,7 +118,10 @@ impl SqliteStore {
             }
         };
         let reader = set_up(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| format!("the cache database cannot be read: {e}"))?;
-        let limits: Limiter = Arc::new(Mutex::new(HashMap::from([(Kind::Response, response), (Kind::Embedding, embedding)])));
+        let limits: Limiter = Arc::new(Mutex::new(HashMap::from([
+            (Kind::Response, response),
+            (Kind::Embedding, embedding),
+        ])));
         let pending: Pending = Arc::default();
         let last_error: Arc<Mutex<Option<String>>> = Arc::default();
         let (tx, rx) = sync_channel(QUEUE);
@@ -227,9 +233,7 @@ fn sweep(c: &Connection, kind: Kind, exp: Expiry, now: Millis, max: u64) -> u64 
     let col = if exp.sliding { "used" } else { "created" };
     let Some(cutoff) = now.checked_sub(ttl) else { return 0 };
     let cutoff = cutoff as i64;
-    let sql = format!(
-        "DELETE FROM entries WHERE kind=?1 AND key IN (SELECT key FROM entries WHERE kind=?1 AND {col} <= ?2 LIMIT ?3)"
-    );
+    let sql = format!("DELETE FROM entries WHERE kind=?1 AND key IN (SELECT key FROM entries WHERE kind=?1 AND {col} <= ?2 LIMIT ?3)");
     c.execute(&sql, params![kind.name(), cutoff, i64::try_from(max).unwrap_or(i64::MAX)])
         .map_or(0, |n| n as u64)
 }
@@ -237,7 +241,11 @@ fn sweep(c: &Connection, kind: Kind, exp: Expiry, now: Millis, max: u64) -> u64 
 /// Evicts least recently used entries until the kind is within its size cap.
 fn trim(c: &Connection, kind: Kind, limits: &Limiter) -> rusqlite::Result<()> {
     let Some(l) = limits_for(limits, kind) else { return Ok(()) };
-    let total: i64 = c.query_row("SELECT coalesce(sum(size),0) FROM entries WHERE kind=?1", params![kind.name()], |r| r.get(0))?;
+    let total: i64 = c.query_row(
+        "SELECT coalesce(sum(size),0) FROM entries WHERE kind=?1",
+        params![kind.name()],
+        |r| r.get(0),
+    )?;
     let mut over = total - i64::try_from(l.max_bytes).unwrap_or(i64::MAX);
     if over <= 0 {
         return Ok(());
@@ -334,8 +342,12 @@ impl CacheStore for SqliteStore {
 /// Which `kind` strings a database holds (used by tests and the integrity check).
 #[allow(dead_code)]
 pub fn kinds_in(path: &Path) -> Vec<Kind> {
-    let Ok(c) = set_up(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else { return vec![] };
-    let Ok(mut q) = c.prepare("SELECT DISTINCT kind FROM entries") else { return vec![] };
+    let Ok(c) = set_up(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+        return vec![];
+    };
+    let Ok(mut q) = c.prepare("SELECT DISTINCT kind FROM entries") else {
+        return vec![];
+    };
     q.query_map([], |r| r.get::<_, String>(0))
         .map(|rows| rows.filter_map(Result::ok).filter_map(|k| kind_of(&k)).collect())
         .unwrap_or_default()
@@ -424,7 +436,10 @@ mod tests {
         s.flush();
         assert!(s.get(Kind::Embedding, &[1; 32], 1800).is_some(), "sliding: kept to 1900");
         s.flush();
-        assert!(s.get(Kind::Response, &[1; 32], 1000).is_none(), "answers expire 1000 after they were stored");
+        assert!(
+            s.get(Kind::Response, &[1; 32], 1000).is_none(),
+            "answers expire 1000 after they were stored"
+        );
         s.flush();
         assert_eq!(s.stats(Kind::Response).entries, 0, "the late read removed it");
         // A pending store is expired by the same rule.
@@ -464,7 +479,16 @@ mod tests {
         assert_eq!(s.clear(&Scope::App("debrief".into())), 2);
         assert_eq!(s.clear(&Scope::Model("m2".into())), 1);
         assert_eq!(s.clear(&Scope::Kind(Kind::Embedding)), 0);
-        s.put(Kind::Response, [6; 32], vec![1], Meta { preset: "fast".into(), ..meta("x", "m9") }, 0);
+        s.put(
+            Kind::Response,
+            [6; 32],
+            vec![1],
+            Meta {
+                preset: "fast".into(),
+                ..meta("x", "m9")
+            },
+            0,
+        );
         assert_eq!(s.clear(&Scope::Preset("fast".into())), 1);
         assert_eq!(s.clear(&Scope::All), 1);
         assert_eq!(s.stats(Kind::Response).entries, 0);
@@ -478,7 +502,11 @@ mod tests {
     fn a_corrupt_file_is_renamed_aside_and_recreated() {
         let d = tempfile::tempdir().unwrap();
         let path = d.path().join("cache.sqlite");
-        std::fs::write(&path, b"this is not a database at all, just text that is long enough to look like one").unwrap();
+        std::fs::write(
+            &path,
+            b"this is not a database at all, just text that is long enough to look like one",
+        )
+        .unwrap();
         let s = open(d.path(), 1000);
         s.put(Kind::Response, [1; 32], vec![1], meta("a", "m"), 0);
         s.flush();
@@ -503,14 +531,21 @@ mod tests {
         s.put(Kind::Embedding, [1; 32], vec![1], meta("a", "m"), 0);
         s.flush();
         assert_eq!(s.stats(Kind::Embedding).entries, 1);
-        let v: i64 = Connection::open(&path).unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let v: i64 = Connection::open(&path)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
     }
 
     #[test]
     fn an_unusable_location_is_an_error_the_caller_can_show() {
         let d = tempfile::tempdir().unwrap();
-        let e = SqliteStore::open(&d.path().join("missing").join("cache.sqlite"), lim(1, None, false), lim(1, None, false));
+        let e = SqliteStore::open(
+            &d.path().join("missing").join("cache.sqlite"),
+            lim(1, None, false),
+            lim(1, None, false),
+        );
         assert!(e.is_err());
     }
 }

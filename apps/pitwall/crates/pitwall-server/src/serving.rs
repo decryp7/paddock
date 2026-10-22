@@ -682,7 +682,11 @@ impl Serving {
             .into_iter()
             .find(|f| f.id == r.id)
             .map_or_else(String::new, |f| format!("{}-{}", f.size, f.modified));
-        let wanted = r.preset.as_ref().and_then(|p| p.engine.clone()).or_else(|| self.settings().prefs(&r.id).engine);
+        let wanted = r
+            .preset
+            .as_ref()
+            .and_then(|p| p.engine.clone())
+            .or_else(|| self.settings().prefs(&r.id).engine);
         let (engine, build) = self
             .engine_for(wanted.as_deref())
             .map_or_else(|_| (String::new(), String::new()), |e| (e.id(), e.build_tag(r.id.as_str())));
@@ -716,7 +720,11 @@ impl Serving {
         if ok {
             crate::warm::touch(&path);
             lock(&busy.model().warm).insert(0, file.to_string());
-            self.event(EventKind::ContextReleased, Severity::Info, format!("Restored the saved prompt prefix for {}.", busy.model().id));
+            self.event(
+                EventKind::ContextReleased,
+                Severity::Info,
+                format!("Restored the saved prompt prefix for {}.", busy.model().id),
+            );
         } else {
             let _ = std::fs::remove_file(&path);
         }
@@ -747,7 +755,11 @@ impl Serving {
                     }
                 }
             }
-            me.event(EventKind::ContextReleased, Severity::Info, format!("Saved the prompt prefixes of {}.", h.id));
+            me.event(
+                EventKind::ContextReleased,
+                Severity::Info,
+                format!("Saved the prompt prefixes of {}.", h.id),
+            );
         });
     }
 

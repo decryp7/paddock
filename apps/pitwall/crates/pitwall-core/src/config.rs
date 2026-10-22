@@ -464,10 +464,20 @@ impl Settings {
             return Err("Network ▸ LAN port must differ from Server ▸ Port".into());
         }
         range("Privacy ▸ Keep metrics (days)", self.privacy.metrics_retention_days, 1, 365)?;
-        range("Caching ▸ Prompt cache (MiB)", self.cache.prompt_cache_mib.unwrap_or(0), 0, 64 * 1024)?;
+        range(
+            "Caching ▸ Prompt cache (MiB)",
+            self.cache.prompt_cache_mib.unwrap_or(0),
+            0,
+            64 * 1024,
+        )?;
         range("Caching ▸ Embeddings cache (MiB)", self.cache.embeddings_max_mib, 1, 64 * 1024)?;
         if self.cache.embeddings_ttl_secs != 0 {
-            range("Caching ▸ Embeddings kept (s)", self.cache.embeddings_ttl_secs, 60, 3650 * 24 * 3600)?;
+            range(
+                "Caching ▸ Embeddings kept (s)",
+                self.cache.embeddings_ttl_secs,
+                60,
+                3650 * 24 * 3600,
+            )?;
         }
         range("Caching ▸ Answers cache (MiB)", self.cache.responses_max_mib, 1, 64 * 1024)?;
         if self.cache.responses_ttl_secs != 0 {
@@ -547,6 +557,91 @@ pub fn load(primary: Option<&str>, backup: Option<&str>) -> (Settings, Loaded) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cache_settings_have_documented_defaults_expiry_and_limits() {
+        use crate::cache::Kind;
+        let c = CacheSettings::default();
+        assert!(c.prefix_affinity && c.embeddings);
+        assert_eq!(
+            (c.responses_storage, c.embeddings_storage),
+            (CacheStorage::Disk, CacheStorage::Disk)
+        );
+        let (r, e) = (c.expiry(Kind::Response), c.expiry(Kind::Embedding));
+        assert_eq!((r.ttl, r.sliding), (Some(7 * 24 * 3600 * 1000), false));
+        assert_eq!((e.ttl, e.sliding), (Some(90 * 24 * 3600 * 1000), true));
+        assert_eq!(c.limits(Kind::Response).max_bytes, 256 * MIB);
+        assert_eq!(c.limits(Kind::Embedding).max_bytes, 512 * MIB);
+        assert_eq!(
+            (c.storage(Kind::Response), c.storage(Kind::Embedding)),
+            (c.responses_storage, c.embeddings_storage)
+        );
+        assert_eq!(
+            CacheSettings {
+                responses_ttl_secs: 0,
+                ..c.clone()
+            }
+            .expiry(Kind::Response)
+            .ttl,
+            None
+        );
+        // "Never" survives a save and load (TOML has no null).
+        let never = Settings {
+            cache: CacheSettings {
+                responses_ttl_secs: 0,
+                embeddings_storage: CacheStorage::Memory,
+                ..c
+            },
+            ..Settings::default()
+        };
+        let (back, _) = load(Some(&never.to_toml()), None);
+        assert_eq!(back.cache, never.cache);
+        assert_eq!(back.ui().cache, never.cache);
+        assert!(never.validate().is_ok());
+        for bad in [
+            CacheSettings {
+                responses_max_mib: 0,
+                ..never.cache.clone()
+            },
+            CacheSettings {
+                embeddings_max_mib: 0,
+                ..never.cache.clone()
+            },
+            CacheSettings {
+                responses_ttl_secs: 5,
+                ..never.cache.clone()
+            },
+            CacheSettings {
+                embeddings_ttl_secs: 5,
+                ..never.cache.clone()
+            },
+            CacheSettings {
+                keep_warm_days: 0,
+                ..never.cache.clone()
+            },
+            CacheSettings {
+                prompt_cache_mib: Some(1 << 20),
+                ..never.cache.clone()
+            },
+        ] {
+            assert!(Settings {
+                cache: bad,
+                ..never.clone()
+            }
+            .validate()
+            .is_err());
+        }
+        let merged = never
+            .with_ui(UiSettings {
+                cache: CacheSettings {
+                    keep_warm_days: 3,
+                    ..never.cache.clone()
+                },
+                ..never.ui()
+            })
+            .unwrap();
+        assert_eq!(merged.cache.keep_warm_days, 3);
+    }
+
     use super::*;
 
     #[test]

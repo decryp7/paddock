@@ -128,6 +128,8 @@ pub fn run() {
             commands::events,
             commands::set_serving,
             commands::release_memory,
+            commands::cache_info,
+            commands::clear_cache,
             commands::apply_preset,
             commands::cancel_job,
             commands::local_models,

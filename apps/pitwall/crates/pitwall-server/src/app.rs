@@ -29,6 +29,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
 const MAX_RECORDS: usize = 500;
+/// The server counts as idle after this long without a request (the clean-up pass may then run early).
+const IDLE_SWEEP_AFTER: u64 = 5 * 60 * 1000;
+/// An idle server runs the pass at most this often.
+const IDLE_SWEEP_EVERY: u64 = 15 * 60 * 1000;
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -177,7 +181,11 @@ impl AppState {
         let update_source: RwLock<Arc<dyn crate::updates::RepoSource>> =
             RwLock::new(Arc::new(crate::updates::HfSource::new(egress.clone())));
         let (live, _) = broadcast::channel(256);
-        let caches = Caches::open(&dirs.cache_db(), &settings.read().map(|s| s.cache.clone()).unwrap_or_default(), now_ms());
+        let caches = Caches::open(
+            &dirs.cache_db(),
+            &settings.read().map(|s| s.cache.clone()).unwrap_or_default(),
+            now_ms(),
+        );
         serving.set_slots_dir(dirs.slots());
         let st = Arc::new(AppState {
             dirs,
@@ -270,6 +278,37 @@ impl AppState {
         st
     }
 
+    /// A model was removed or its engine changed: its cached answers and saved prompt prefixes go now.
+    pub fn invalidate_model(&self, id: &ModelId) {
+        self.caches.clear(&pitwall_core::cache::Scope::Model(id.to_string()));
+        crate::warm::drop_prefix(&self.dirs.slots(), &crate::warm::model_prefix(id.as_str()), None);
+    }
+
+    /// The engine build that serves models changed: everything computed by the old one goes now.
+    pub fn invalidate_engine(&self) {
+        self.caches.clear(&pitwall_core::cache::Scope::All);
+        crate::warm::drop_prefix(&self.dirs.slots(), "", None);
+    }
+
+    /// A preset changed or was deleted: what was cached under it goes now.
+    pub fn invalidate_preset(&self, alias: &str) {
+        self.caches.clear(&pitwall_core::cache::Scope::Preset(alias.to_string()));
+        crate::warm::drop_alias(&self.dirs.slots(), alias);
+    }
+
+    /// What the caches hold, for Settings.
+    pub fn cache_info(&self) -> pitwall_core::cache::Info {
+        let (files, bytes) = crate::warm::usage(&self.dirs.slots());
+        self.caches.info(files, bytes)
+    }
+
+    /// One clean-up pass: expired cache entries and stale saved prompt prefixes, bounded. Returns how many went.
+    pub fn sweep_caches(&self) -> u64 {
+        let now = now_ms();
+        let days = self.cfg().cache.keep_warm_days;
+        self.caches.sweep(now) + crate::warm::sweep(&self.dirs.slots(), days, now, 10_000)
+    }
+
     /// A copy of the settings.
     pub fn cfg(&self) -> Settings {
         self.settings.read().map(|s| s.clone()).unwrap_or_default()
@@ -318,6 +357,7 @@ impl AppState {
     /// Start the background tasks: release loop, live feed, metrics sampling.
     pub fn spawn_tasks(self: &Arc<Self>) {
         self.serving.spawn_tick_loop();
+        self.spawn_cache_sweeper();
         self.start_update_schedule();
         let me = self.clone();
         tokio::spawn(async move {
@@ -518,6 +558,26 @@ impl AppState {
             requests_per_min: r.len() as f64,
             active_requests: self.serving.queue().1 as u32,
         }
+    }
+
+    /// The clean-up pass: at start-up, then hourly, and when the server has been idle for a while (checked every
+    /// minute; the pass itself is bounded and runs off the request path).
+    pub fn spawn_cache_sweeper(self: &Arc<Self>) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            let st = me.clone();
+            let _ = tokio::task::spawn_blocking(move || st.sweep_caches()).await;
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                let now = now_ms();
+                let idle = now.saturating_sub(me.last_request_at.load(std::sync::atomic::Ordering::SeqCst)) >= IDLE_SWEEP_AFTER;
+                let since = now.saturating_sub(me.caches.next_sweep_at().saturating_sub(crate::caches::SWEEP_EVERY));
+                if me.caches.sweep_due(now) || (idle && since >= IDLE_SWEEP_EVERY) {
+                    let st = me.clone();
+                    let _ = tokio::task::spawn_blocking(move || st.sweep_caches()).await;
+                }
+            }
+        });
     }
 
     /// Run the whole pipeline for a chat-like request and start generating.
@@ -857,7 +917,11 @@ impl Recorder {
             cache_hit: hit,
             cache_miss: self.cache == Some(pitwall_core::cache::Outcome::Miss),
             prefix_tokens: u64::from(reused),
-            saved_tokens: if hit { u64::from(usage.prompt_tokens) + u64::from(usage.completion_tokens) } else { 0 },
+            saved_tokens: if hit {
+                u64::from(usage.prompt_tokens) + u64::from(usage.completion_tokens)
+            } else {
+                0
+            },
         });
         if let Some(c) = self.cache_store.take().filter(|_| !failed) {
             self.st.caches.store_response(c.key, &c.acc, c.meta, now);

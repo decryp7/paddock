@@ -336,6 +336,35 @@ fn series_of(app_id: String, points: Vec<Counters>) -> AppUsageSeries {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_hit_rate_counts_eligible_requests_only() {
+        assert_eq!(Counters::default().hit_rate(), None);
+        let c = Counters {
+            cache_hits: 3,
+            cache_misses: 1,
+            ..Default::default()
+        };
+        assert_eq!(c.hit_rate(), Some(0.75));
+        let mut u = Usage::default();
+        u.record(&UsageEvent {
+            at: NOW,
+            app: "a",
+            cache_hit: true,
+            saved_tokens: 7,
+            ..Default::default()
+        });
+        u.record(&UsageEvent {
+            at: NOW,
+            app: "a",
+            cache_miss: true,
+            prefix_tokens: 4,
+            ..Default::default()
+        });
+        let day = u.series(UsageRange::Day, NOW, None);
+        let t = day.totals;
+        assert_eq!((t.cache_hits, t.cache_misses, t.saved_tokens, t.prefix_tokens), (1, 1, 7, 4));
+    }
+
     use super::*;
 
     fn ev(at: Millis, app: &str, p: u64, c: u64, mem: u64, failed: bool) -> UsageEvent<'_> {

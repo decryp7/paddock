@@ -459,15 +459,15 @@ async fn embed(
         vec![None; keys.len()]
     };
     let missing: Vec<usize> = (0..vectors.len()).filter(|i| vectors[*i].is_none()).collect();
-    let outcome = on.then(|| {
-        if bypass {
-            pitwall_core::cache::Outcome::Bypass
-        } else if missing.is_empty() {
-            pitwall_core::cache::Outcome::Hit
-        } else {
-            pitwall_core::cache::Outcome::Miss
-        }
-    });
+    let outcome = if !on {
+        None
+    } else if bypass {
+        Some(pitwall_core::cache::Outcome::Bypass)
+    } else if missing.is_empty() {
+        Some(pitwall_core::cache::Outcome::Hit)
+    } else {
+        Some(pitwall_core::cache::Outcome::Miss)
+    };
     let saved: u64 = vectors
         .iter()
         .zip(&req.input)

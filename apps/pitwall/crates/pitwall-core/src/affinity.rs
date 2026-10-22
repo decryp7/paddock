@@ -6,7 +6,7 @@
 //! choice to llama-server.
 
 use crate::chat::{ChatRequest, Part, Role};
-use crate::{MIB, GIB};
+use crate::{GIB, MIB};
 use sha2::{Digest, Sha256};
 
 /// Identifies a conversation's prefix.
@@ -138,8 +138,14 @@ mod tests {
         ]);
         assert_eq!(a, prefix_key("opencode", &later));
         assert_ne!(a, prefix_key("other", &later));
-        assert_ne!(a, prefix_key("opencode", &req(&[(Role::System, "other rules"), (Role::User, "fix it")])));
-        assert_ne!(a, prefix_key("opencode", &req(&[(Role::System, "rules"), (Role::User, "different")])));
+        assert_ne!(
+            a,
+            prefix_key("opencode", &req(&[(Role::System, "other rules"), (Role::User, "fix it")]))
+        );
+        assert_ne!(
+            a,
+            prefix_key("opencode", &req(&[(Role::System, "rules"), (Role::User, "different")]))
+        );
         let image = ChatRequest {
             messages: vec![Message {
                 parts: vec![Part::Image(crate::chat::Image {
