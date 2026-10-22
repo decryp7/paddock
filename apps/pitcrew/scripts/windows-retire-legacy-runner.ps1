@@ -33,6 +33,15 @@ $ErrorActionPreference = 'Stop'
 
 function Say([string]$Text, [string]$Color = 'Gray') { Write-Host $Text -ForegroundColor $Color }
 
+# A task action's text. Actions differ by type (an exec action has Execute and Arguments, a COM handler ClassId and
+# Data), and strict mode throws on a property an object lacks, so read only the ones it has.
+function ActionText($Action) {
+    $props = $Action.PSObject.Properties
+    @('Execute', 'Arguments', 'WorkingDirectory', 'ClassId', 'Data' | ForEach-Object {
+            if ($props[$_] -and $props[$_].Value) { [string]$props[$_].Value }
+        }) -join ' '
+}
+
 if (-not (Test-Path -LiteralPath $RunnerDir -PathType Container)) {
     Say "The runner folder $RunnerDir does not exist; nothing to retire." Yellow
     exit 0
@@ -49,7 +58,7 @@ if (-not $elevated) { Say '  (not elevated: tasks or services created elevated c
 $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
         $t = $_
         $t.TaskName -like 'GiteaRunner*' -or @($t.Actions | Where-Object {
-                ("$($_.Execute) $($_.Arguments) $($_.WorkingDirectory)").ToLowerInvariant().Contains($needle)
+                (ActionText $_).ToLowerInvariant().Contains($needle)
             }).Count -gt 0
     })
 $services = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object {
@@ -62,7 +71,7 @@ $scripts = @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue
 
 Say ''
 Say "Scheduled tasks ($($tasks.Count)):"
-foreach ($t in $tasks) { Say "  $($t.TaskPath)$($t.TaskName)  [$($t.State)]  $(@($t.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join '; ')" }
+foreach ($t in $tasks) { Say "  $($t.TaskPath)$($t.TaskName)  [$($t.State)]  $(@($t.Actions | ForEach-Object { ActionText $_ }) -join '; ')" }
 Say "Services ($($services.Count)):"
 foreach ($s in $services) { Say "  $($s.Name)  [$($s.State)]  $($s.PathName)" }
 Say "Runner processes ($($runners.Count)):"
