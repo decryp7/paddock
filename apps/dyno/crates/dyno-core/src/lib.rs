@@ -14,6 +14,7 @@ pub mod grouping;
 pub mod health;
 pub mod helper;
 pub mod history;
+pub mod inventory;
 pub mod metrics;
 pub mod ports;
 pub mod process;
