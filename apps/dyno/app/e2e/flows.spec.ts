@@ -252,3 +252,42 @@ test.describe('inventory', () => {
     await expect(page.getByText(/cannot be upgraded/).first()).toBeVisible();
   });
 });
+
+test.describe('widgets', () => {
+  test('edit the dashboard: add a widget from the gallery, resize, save; a preset swaps the layout', async ({ page }) => {
+    await page.goto(url());
+    await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
+    await expect(page.getByRole('group', { name: 'CPU', exact: true }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Edit dashboard' }).click();
+    const before = await page.locator('dy-widget').count();
+    await page.getByRole('button', { name: 'Add widget' }).click();
+    await expect(page.getByRole('region', { name: 'Widget gallery' })).toBeVisible();
+    await page.getByRole('region', { name: 'Widget gallery' }).getByRole('button', { name: /Big number/ }).click();
+    await expect(page.locator('dy-widget')).toHaveCount(before + 1);
+    await page.getByRole('toolbar').last().getByRole('button', { name: 'L', exact: true }).click();
+    await page.getByRole('button', { name: 'Save dashboard' }).click();
+    await expect(page.getByText('Dashboard saved')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Edit dashboard' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Edit dashboard' }).click();
+    await page.getByLabel('Preset').selectOption('developer');
+    await expect(page.locator('dy-widget[data-kind="heatmap"]')).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('dy-widget[data-kind="heatmap"]')).toHaveCount(0);
+  });
+
+  test('menu bar items: add several, reorder, preview follows, save', async ({ page }) => {
+    await page.goto(url('/settings'));
+    const section = page.getByRole('region', { name: 'Menu bar items' });
+    await expect(section.getByRole('listitem')).toHaveCount(2);
+    await section.getByRole('button', { name: 'Add item' }).click();
+    await section.getByRole('button', { name: 'Add item' }).click();
+    await expect(section.getByRole('listitem')).toHaveCount(4);
+    await expect(section.getByRole('button', { name: 'Add item' })).toBeDisabled();
+    await section.getByLabel('Style of item 3').selectOption('ring');
+    await section.getByRole('button', { name: 'Move up' }).nth(3).click();
+    await expect(section.getByRole('img', { name: /Menu bar preview/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Settings saved')).toBeVisible();
+  });
+});

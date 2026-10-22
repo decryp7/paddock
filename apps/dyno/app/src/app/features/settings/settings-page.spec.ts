@@ -33,7 +33,7 @@ describe('SettingsPage', () => {
   it('renders the sections once loaded and shows no save bar while clean', async () => {
     const { el, saveButton, store } = await make();
     expect(el.querySelector('h1')?.textContent).toBe('Settings');
-    for (const name of ['Appearance', 'Measuring', 'Tray', 'Alerts', 'Plugins', 'About']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
+    for (const name of ['Appearance', 'Measuring', 'Menu bar items', 'Alerts', 'Plugins', 'About']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
     expect(saveButton()).toBeUndefined();
     expect(store.settings()).not.toBeNull();
   });
@@ -81,13 +81,16 @@ describe('SettingsPage', () => {
     expect(saveButton()).toBeDefined();
     document.documentElement.removeAttribute('data-theme');
   });
-  it('tray metric checkboxes toggle membership', async () => {
-    const { f, el, saveButton } = await make();
-    const boxes = el.querySelectorAll<HTMLInputElement>('[aria-label="Tray metrics"] input');
-    expect(boxes.length).toBe(5);
-    boxes[0]!.click();
+  it('menu bar items: adding one makes the page dirty and Save stores trayItems', async () => {
+    const { f, el, saveButton, mock } = await make();
+    expect(el.querySelectorAll('section[aria-label="Menu bar items"] li')).toHaveLength(2);
+    [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Add item'))!.click();
     f.detectChanges();
-    expect(saveButton()).toBeDefined();
+    expect(el.querySelectorAll('section[aria-label="Menu bar items"] li')).toHaveLength(3);
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    expect(spy.mock.calls[0]![0].trayItems!.items).toHaveLength(3);
   });
   it('a rejected save keeps the draft and the bar and toasts the engine message', async () => {
     const { f, mock, el, saveButton } = await make();

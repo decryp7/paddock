@@ -1,24 +1,17 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { Settings, Theme, TrayMetric, TrayStyle } from '../../core/api.types';
+import type { Settings, Theme, TrayItem } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
 import { SettingsStore } from '../../state/settings.store';
-
-const TRAY_METRICS: { id: TrayMetric; label: string }[] = [
-  { id: 'cpu', label: 'CPU' },
-  { id: 'memory', label: 'Memory' },
-  { id: 'disk', label: 'Disk' },
-  { id: 'network', label: 'Network' },
-  { id: 'gpu', label: 'GPU' },
-];
+import { TrayItemsEditor } from './tray-items-editor';
 
 /** Settings: appearance, start-up, sampling and retention, the tray, alert thresholds, the observe-only posture, plugins and About. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [FormsModule, Switch, AsyncState, Icon],
+  imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -97,24 +90,10 @@ const TRAY_METRICS: { id: TrayMetric; label: string }[] = [
               </div>
             </section>
 
-            <section class="card" aria-label="Tray">
-              <h2>Tray and menu bar</h2>
-              <div class="row">
-                <div class="lbl"><strong>Metrics in the icon</strong><small>Which readings the tray icon draws live.</small></div>
-                <div class="checks" role="group" aria-label="Tray metrics">
-                  @for (m of trayMetrics; track m.id) {
-                    <label class="check"><input type="checkbox" [checked]="d.tray.metrics.includes(m.id)" (change)="toggleMetric(m.id)" /> {{ m.label }}</label>
-                  }
-                </div>
-              </div>
-              <div class="row">
-                <div class="lbl"><strong>Style</strong><small>Small bars or a short history graph.</small></div>
-                <div class="seg" role="radiogroup" aria-label="Tray style">
-                  @for (s of trayStyles; track s.id) {
-                    <button type="button" role="radio" [attr.aria-checked]="d.tray.style === s.id" (click)="set({ tray: { ...d.tray, style: s.id } })">{{ s.label }}</button>
-                  }
-                </div>
-              </div>
+            <section class="card" aria-label="Menu bar items">
+              <h2>Menu bar items</h2>
+              <p class="sub">What the tray / menu-bar icon draws live. Add up to four, drag to reorder; the preview follows your choices.</p>
+              <dy-tray-items-editor [items]="d.trayItems?.items ?? []" (itemsChange)="setTrayItems($event)" />
             </section>
 
             <section class="card" aria-label="Alerts">
@@ -183,6 +162,7 @@ const TRAY_METRICS: { id: TrayMetric; label: string }[] = [
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
     .num-in { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); white-space: nowrap; }
     .num-in .input { width: 80px; text-align: right; }
+    .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }
     .checks { display: flex; gap: var(--sp-3); flex-wrap: wrap; justify-content: flex-end; }
     .check { display: inline-flex; align-items: center; gap: 6px; }
     .posture { display: flex; gap: var(--sp-4); border-color: color-mix(in srgb, var(--ok) 30%, var(--border)); }
@@ -204,11 +184,6 @@ export class SettingsPage implements OnInit {
     { id: 'system', label: 'System', icon: 'monitor' },
     { id: 'dark', label: 'Dark', icon: 'moon' },
     { id: 'light', label: 'Light', icon: 'sun' },
-  ];
-  protected readonly trayMetrics = TRAY_METRICS;
-  protected readonly trayStyles: { id: TrayStyle; label: string }[] = [
-    { id: 'graph', label: 'Graph' },
-    { id: 'bars', label: 'Bars' },
   ];
   protected readonly systemIntervals = [500, 1000, 2000, 5000];
   protected readonly processIntervals = [1000, 2000, 5000, 10000];
@@ -249,12 +224,8 @@ export class SettingsPage implements OnInit {
   protected setAlerts(p: Partial<Settings['alerts']>): void {
     this.draft.update((d) => (d ? { ...d, alerts: { ...d.alerts, ...p } } : d));
   }
-  protected toggleMetric(m: TrayMetric): void {
-    this.draft.update((d) => {
-      if (!d) return d;
-      const has = d.tray.metrics.includes(m);
-      return { ...d, tray: { ...d.tray, metrics: has ? d.tray.metrics.filter((x) => x !== m) : [...d.tray.metrics, m] } };
-    });
+  protected setTrayItems(items: TrayItem[]): void {
+    this.draft.update((d) => (d ? { ...d, trayItems: { version: d.trayItems?.version ?? 1, items } } : d));
   }
   protected async save(): Promise<void> {
     const d = this.draft();

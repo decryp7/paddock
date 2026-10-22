@@ -60,6 +60,64 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     path: '/#/inventory',
     ready: async (page) => void (await expect(page.getByRole('img', { name: /Unified memory/ })).toBeVisible()),
   },
+  {
+    name: 'widgets-overview',
+    path: '/#/',
+    ready: async (page) => {
+      await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
+      await expect(page.locator('dy-widget').first()).toBeVisible();
+      await page.clock.runFor(2_000);
+    },
+  },
+  {
+    name: 'widgets-edit',
+    path: '/#/',
+    ready: async (page) => {
+      await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
+      await page.getByRole('button', { name: 'Edit dashboard' }).click();
+      await page.getByRole('button', { name: 'Add widget' }).click();
+      await expect(page.getByRole('region', { name: 'Widget gallery' })).toBeVisible();
+      await page.clock.runFor(2_000);
+    },
+  },
+  {
+    name: 'widgets-developer',
+    path: '/#/',
+    ready: async (page) => {
+      await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
+      await page.getByRole('button', { name: 'Edit dashboard' }).click();
+      await page.getByLabel('Preset').selectOption('developer');
+      await page.clock.runFor(2_000);
+    },
+  },
+  {
+    name: 'widgets-gaming',
+    path: '/#/',
+    ready: async (page) => {
+      await page.getByRole('group', { name: 'Dashboard layout' }).getByRole('button', { name: 'Widgets' }).click();
+      await page.getByRole('button', { name: 'Edit dashboard' }).click();
+      await page.getByLabel('Preset').selectOption('gaming');
+      await page.clock.runFor(2_000);
+    },
+  },
+  {
+    name: 'settings-menu-bar',
+    path: '/#/settings',
+    ready: async (page) => {
+      const section = page.getByRole('region', { name: 'Menu bar items' });
+      await section.getByRole('button', { name: 'Add item' }).click();
+      await section.getByRole('button', { name: 'Add item' }).click();
+      await section.getByLabel('Style of item 1').selectOption('graphAndNumber');
+      await section.getByLabel('Metric of item 2').selectOption('memory');
+      await section.getByLabel('Style of item 2').selectOption('ring');
+      await section.getByLabel('Metric of item 3').selectOption('networkDown');
+      await section.getByLabel('Style of item 3').selectOption('lineGraph');
+      await section.getByLabel('Metric of item 4').selectOption('temperature');
+      await section.getByLabel('Style of item 4').selectOption('number');
+      await section.scrollIntoViewIfNeeded();
+      await page.clock.runFor(2_000);
+    },
+  },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why slow' })).toBeVisible()) },
   { name: 'rules', path: '/#/rules', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'CPU taming' })).toBeVisible()) },
   { name: 'cleanup', path: '/#/cleanup', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Cleanup' })).toBeVisible()) },
