@@ -429,7 +429,7 @@ mod tests {
             "server": server(true), "memory": sample(), "models": [model("A", GB, 0)], "engines": [],
             "queue": {"running": [], "waiting": [], "depth": {"interactive": 0, "background": 0, "batch": 0}},
             "throughput": {"promptTps": 0.0, "genTps": 12.0, "ttftP50Ms": 0.0, "requestsPerMin": 0.0, "activeRequests": 0},
-            "apps": [], "preset": "balanced", "pairings": []
+            "apps": [], "preset": "balanced", "pairings": [], "issues": []
         });
         let o: Overview = serde_json::from_value(overview).unwrap();
         let mut m = TrayModel::new();
