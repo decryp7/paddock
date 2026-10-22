@@ -92,14 +92,25 @@ pub async fn scan(req: ScanRequest) -> Result<Scan, SourceError> {
     std::thread::spawn(move || {
         let _ = tx.send(scan_now(&req));
     });
+    await_scan(rx, wait, &path, limits.max_entries, limits.timeout_secs).await
+}
+
+/// The result of the listing thread, or a message when it ended without one or took longer than `wait`.
+async fn await_scan(
+    rx: tokio::sync::oneshot::Receiver<Result<Scan, Stop>>,
+    wait: Duration,
+    path: &str,
+    max_entries: u32,
+    timeout_secs: u32,
+) -> Result<Scan, SourceError> {
     match tokio::time::timeout(wait, rx).await {
         Ok(Ok(Ok(scan))) => Ok(scan),
-        Ok(Ok(Err(stop))) => Err(explain_stop(&path, stop, limits.max_entries, limits.timeout_secs)),
+        Ok(Ok(Err(stop))) => Err(explain_stop(path, stop, max_entries, timeout_secs)),
         Ok(Err(_)) => Err(SourceError::Failed(format!("Listing {path} stopped unexpectedly."))),
         Err(_) => Err(SourceError::Unreachable(format!(
             "{path} did not answer within {} seconds. {} Spotter will try again.",
             wait.as_secs(),
-            offline_hint(&path)
+            offline_hint(path)
         ))),
     }
 }
@@ -813,5 +824,101 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(e, SourceError::Unreachable(_)), "{e:?}");
+    }
+
+    #[tokio::test]
+    async fn a_listing_thread_that_vanishes_or_hangs_is_a_message() {
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<Scan, Stop>>();
+        drop(tx);
+        let e = await_scan(rx, Duration::from_secs(1), "/x", 10, 5).await.unwrap_err();
+        assert!(matches!(&e, SourceError::Failed(m) if m.contains("stopped unexpectedly")), "{e:?}");
+        let (_tx, rx) = tokio::sync::oneshot::channel::<Result<Scan, Stop>>();
+        let e = await_scan(rx, Duration::from_millis(20), "//server/share", 10, 5)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&e, SourceError::Unreachable(m) if m.contains("did not answer") && m.contains("offline")),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn stop_reasons_are_explained() {
+        let e = explain_stop("/x", Stop::TooManyMatches, 10, 5);
+        assert!(
+            matches!(&e, SourceError::InvalidConfig(m) if m.contains("Too many matches") && m.contains("/x")),
+            "{e:?}"
+        );
+        assert!(matches!(explain_stop("/x", Stop::TooMany, 10, 5), SourceError::InvalidConfig(_)));
+        assert!(matches!(explain_stop("/x", Stop::TooSlow, 10, 5), SourceError::Unreachable(_)));
+    }
+
+    #[tokio::test]
+    async fn more_matches_than_the_cap_is_a_message() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 0..=spotter_core::limits::MAX_FOLDER_MATCHES {
+            std::fs::write(d.path().join(format!("f{i}.bin")), b"").unwrap();
+        }
+        let src = source(d.path(), &[("maxEntries", "1000000")]);
+        let e = scan(request(src)).await.unwrap_err();
+        assert!(
+            matches!(&e, SourceError::InvalidConfig(m) if m.contains("Too many matches")),
+            "{e:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unchanged_files_keep_their_hash_and_settling_is_skipped() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "a/small.bin", "abc");
+        touch(d.path(), "a/big.bin", &"x".repeat(1_100_000));
+        touch(d.path(), "top.bin", "top");
+        let extra = [("depth", "1"), ("hashBelowMib", "1"), ("settleSeconds", "1")];
+        let first = scan(request(source(d.path(), &extra))).await.unwrap();
+        let hashed = first.snapshot.entries.iter().filter(|e| e.hash.is_some()).count();
+        assert_eq!(hashed, 2, "the file above the limit is not hashed");
+        let mut again = request(source(d.path(), &extra));
+        again.previous = Some(first.snapshot.clone());
+        let second = scan(again).await.unwrap();
+        assert_eq!(second.stats.settling, 0);
+        assert_eq!(second.snapshot.entries.iter().filter(|e| e.hash.is_some()).count(), 2);
+    }
+
+    #[tokio::test]
+    async fn new_files_in_sub_folders_settle_before_they_count() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "sub/new.bin", "abc");
+        let mut req = request(source(d.path(), &[("depth", "1"), ("settleSeconds", "1")]));
+        req.settle = true;
+        let s = scan(req).await.unwrap();
+        assert_eq!(names(&s), ["new.bin"]);
+        assert_eq!(s.stats.settling, 0, "a file that did not change while waiting stays");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlinks_count_and_unreadable_folders_are_handled() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "real.bin", "abc");
+        symlink(d.path().join("real.bin"), d.path().join("link.bin")).unwrap();
+        touch(d.path(), "locked/inner.bin", "x");
+        let locked = d.path().join("locked");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable = std::fs::read_dir(&locked).is_ok();
+        let s = scan(request(source(d.path(), &[("depth", "1")]))).await.unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(names(&s).contains(&"link.bin".to_string()), "{:?}", names(&s));
+        if !readable {
+            assert!(!names(&s).contains(&"inner.bin".to_string()), "an unreadable sub-folder is skipped");
+        }
+        // An unreadable root is an access message.
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = std::fs::read_dir(d.path()).is_err();
+        let r = scan(request(source(d.path(), &[]))).await;
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        if denied {
+            assert!(matches!(r, Err(SourceError::Unauthorized(_))), "{r:?}");
+        }
     }
 }

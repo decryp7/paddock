@@ -47,6 +47,26 @@ impl LaunchOptions {
     }
 }
 
+/// Flags that keep a throwaway browser quick and predictable on a cold, loaded machine (a CI runner, a fresh VM):
+/// no GPU process (a virtual machine without a GPU spends many seconds on failed GPU start-ups), no component or
+/// field-trial downloads, no crash reporter, and no throttling of a window nobody can see (an off-screen window is
+/// "occluded", which delays timers and the load of its page). None of them changes what a page can detect about
+/// automation.
+pub const STABILITY_FLAGS: &[&str] = &[
+    "--disable-gpu",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-domain-reliability",
+    "--disable-breakpad",
+    "--disable-hang-monitor",
+    "--metrics-recording-only",
+    "--no-service-autorun",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,msEdgeShopping,msEdgeSync",
+];
+
 /// The command-line arguments. `--enable-automation` keeps Chrome's "controlled by automated test software"
 /// banner and `navigator.webdriver = true`; nothing hides either. No extensions, no sync.
 pub fn args(data_dir: &Path, mode: Mode) -> Vec<String> {
@@ -63,6 +83,7 @@ pub fn args(data_dir: &Path, mode: Mode) -> Vec<String> {
         "--use-mock-keychain".into(),
         "--window-size=1100,800".into(),
     ];
+    a.extend(STABILITY_FLAGS.iter().map(|f| f.to_string()));
     match mode {
         Mode::OffScreen => a.push("--window-position=-32000,-32000".into()),
         Mode::Headless => a.push("--headless=new".into()),
@@ -70,6 +91,14 @@ pub fn args(data_dir: &Path, mode: Mode) -> Vec<String> {
     }
     a.push("about:blank".into());
     a
+}
+
+/// How long the browser may take to start (before the page's own time budget begins).
+pub const START_LIMIT: Duration = Duration::from_secs(20);
+
+/// The wall-clock cap for a render whose page gets `page_budget`: the start allowance, the page and a margin.
+pub fn lifetime_for(page_budget: Duration) -> Duration {
+    START_LIMIT + page_budget + Duration::from_secs(10)
 }
 
 const NONE: u8 = 0;
@@ -232,7 +261,7 @@ fn cleanup(dir: &Path) {
 
 /// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint.
 fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
-    let end = Instant::now() + Duration::from_secs(20);
+    let end = Instant::now() + START_LIMIT;
     loop {
         if let Ok(s) = std::fs::read_to_string(dir.join("DevToolsActivePort")) {
             let mut l = s.lines();
@@ -264,6 +293,31 @@ mod tests {
         assert!(a.contains(&"--window-position=-32000,-32000".to_string()));
         assert!(a.contains(&"--user-data-dir=/tmp/p".to_string()));
         assert!(a.contains(&"--disable-extensions".to_string()));
+    }
+
+    #[test]
+    fn carries_the_stability_flags_in_every_mode() {
+        for mode in [Mode::OffScreen, Mode::Headless, Mode::OnScreen] {
+            let a = args(Path::new("/p"), mode);
+            for f in [
+                "--disable-gpu",
+                "--disable-component-update",
+                "--disable-backgrounding-occluded-windows",
+            ] {
+                assert!(a.contains(&f.to_string()), "{mode:?} lacks {f}");
+            }
+            assert!(
+                a.iter().filter(|x| x.starts_with("--disable-features=")).count() == 1,
+                "one --disable-features only"
+            );
+            assert_eq!(a.last().map(String::as_str), Some("about:blank"));
+        }
+    }
+
+    #[test]
+    fn the_wall_clock_cap_covers_start_and_page() {
+        assert_eq!(lifetime_for(Duration::from_secs(40)), Duration::from_secs(70));
+        assert!(lifetime_for(Duration::ZERO) > START_LIMIT);
     }
 
     #[test]

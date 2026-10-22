@@ -1,7 +1,7 @@
 //! The Spotter-specific part: [`ChromiumRenderer`] implements [`PageRenderer`] on top of the driver modules.
 
 use crate::discover::{self, Browser};
-use crate::launch::{Chromium, EndedBy, LaunchOptions, Mode};
+use crate::launch::{self, Chromium, EndedBy, LaunchOptions, Mode};
 use crate::page::Outcome;
 use crate::ready::{Readiness, Rule};
 use crate::Error;
@@ -75,9 +75,11 @@ fn blocking_render(
     selector: Option<String>,
     timeout: Duration,
 ) -> Result<RenderedPage, RenderError> {
-    let started = Instant::now();
     let failed = |e: Error| RenderError::Failed(e.to_string());
     let browser = Chromium::launch(&exe, &opts).map_err(failed)?;
+    // The page's budget starts when the browser is up: a cold start (first run, antivirus scan, a loaded runner) has
+    // its own limit and must not eat the time the page was promised. The watchdog still caps the whole render.
+    let started = Instant::now();
     let left = |reason: &'static str| {
         timeout
             .checked_sub(started.elapsed())
@@ -125,7 +127,7 @@ impl ChromiumRenderer {
         opts.mode = self.mode;
         opts.memory_cap = self.memory_cap;
         // The watchdog is the backstop behind the page's own deadline.
-        opts.max_lifetime = timeout + Duration::from_secs(10);
+        opts.max_lifetime = launch::lifetime_for(timeout);
         let (url, sel) = (url.to_string(), wait_selector.map(str::to_string));
         tokio::task::spawn_blocking(move || blocking_render(exe, opts, url, sel, timeout))
             .await

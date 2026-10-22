@@ -134,7 +134,12 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
         .await
         .unwrap_err();
     assert!(matches!(e, RenderError::Failed(_)), "{e:?}");
-    assert!(t.elapsed() < Duration::from_secs(30), "took {:?}", t.elapsed());
+    // Start-up has its own limit; the hang itself must end at the 6 s page budget, not at the watchdog.
+    assert!(
+        t.elapsed() < spotter_render::launch::lifetime_for(Duration::from_secs(6)),
+        "took {:?}",
+        t.elapsed()
+    );
     assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
     assert_no_leftovers(&marker);
 }

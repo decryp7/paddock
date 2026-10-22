@@ -191,3 +191,84 @@ async fn post_ntfy(fetcher: &PoliteFetcher, target: &str, n: &Notification, allo
     }
     post(fetcher, req, &url).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spotter_core::notify::NotificationChannel;
+
+    struct OnlyNotify;
+    impl Notifier for OnlyNotify {
+        fn notify(&self, _: &Notification) {}
+    }
+
+    fn note(location: &str, channel: NotificationChannel) -> Notification {
+        Notification {
+            kind: NotificationKind::NewRelease,
+            watch_id: None,
+            title: "Title".into(),
+            body: "Body".into(),
+            release: Some(spotter_core::release::Release {
+                version: spotter_core::version::VersionScheme::Semver.extract("1.0.0").unwrap(),
+                name: "app".into(),
+                location: location.into(),
+                published_at: None,
+                size: None,
+                sha256: None,
+                detail: Default::default(),
+            }),
+            channels: vec![channel],
+        }
+    }
+
+    #[test]
+    fn the_default_and_null_notifiers_do_nothing_and_do_not_panic() {
+        let n = note(
+            "https://x/1",
+            NotificationChannel {
+                kind: ChannelKind::Email,
+                target: String::new(),
+            },
+        );
+        OnlyNotify.notify(&n);
+        NullNotifier.notify(&n);
+        OnlyNotify.run_actions(&ActionRequest {
+            watch_id: "a".into(),
+            watch_name: "A".into(),
+            release: n.release.clone().unwrap(),
+            actions: Vec::new(),
+        });
+        assert_eq!(kind_name(ChannelKind::Webhook), "Webhook");
+        assert_eq!(kind_name(ChannelKind::Ntfy), "ntfy");
+        assert_eq!(kind_name(ChannelKind::Email), "E-mail");
+    }
+
+    #[tokio::test]
+    async fn failures_name_the_channel_and_a_release_without_a_web_address_has_no_click_target() {
+        let fetcher = PoliteFetcher::new(crate::fetch::FetchConfig::new("test")).unwrap();
+        // Nothing listens on port 1: each delivery fails and says which channel.
+        for (kind, target) in [
+            (ChannelKind::Ntfy, "http://127.0.0.1:1/topic"),
+            (ChannelKind::Webhook, "http://127.0.0.1:1/hook"),
+        ] {
+            let n = note(
+                "C:/not/a/web/address",
+                NotificationChannel {
+                    kind,
+                    target: target.into(),
+                },
+            );
+            let failures = deliver(&fetcher, &n, true).await;
+            assert_eq!(failures.len(), 1, "{failures:?}");
+            assert!(failures[0].starts_with(&format!("{} channel:", kind_name(kind))), "{failures:?}");
+        }
+        let email = note(
+            "https://x",
+            NotificationChannel {
+                kind: ChannelKind::Email,
+                target: "a@b.test".into(),
+            },
+        );
+        assert!(deliver(&fetcher, &email, true).await.is_empty());
+    }
+}

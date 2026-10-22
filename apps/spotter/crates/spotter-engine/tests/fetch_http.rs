@@ -219,3 +219,28 @@ async fn a_dead_server_is_unreachable() {
         .unwrap_err();
     assert!(matches!(e, SourceError::Unreachable(_)), "{e:?}");
 }
+
+#[tokio::test]
+async fn credentials_do_not_follow_a_redirect_to_another_host() {
+    let (base, seen) = serve(|path, base| match path {
+        "/start" => reply(
+            302,
+            &format!("Location: {}/landing\r\n", base.replace("127.0.0.1", "localhost")),
+            "",
+        ),
+        _ => reply(200, "", "ok"),
+    })
+    .await;
+    let f = fetcher(|_| {});
+    let req = HttpRequest::get(format!("{base}/start")).header("Authorization", "Bearer secret");
+    let got = f.get(&req, &local()).await.unwrap();
+    assert_eq!(body_of(got).0, b"ok");
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(seen[0].to_lowercase().contains("authorization: bearer secret"));
+    assert!(
+        !seen[1].to_lowercase().contains("authorization"),
+        "the token stayed with the first host: {}",
+        seen[1]
+    );
+}
