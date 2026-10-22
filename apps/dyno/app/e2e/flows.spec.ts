@@ -11,7 +11,11 @@ test.describe('screens', () => {
     for (const [label, heading] of [
       ['Processes', 'Processes'],
       ['Inventory', 'Inventory'],
+      ['CPU taming', 'CPU taming'],
+      ['Alarms', 'Alarms'],
+      ['Flight recorder', 'Flight recorder'],
       ['Health & tuning', 'Health & tuning'],
+      ['Diagnostics', 'Diagnostics bundle'],
       ['Settings', 'Settings'],
       ['Dashboard', 'Dashboard'],
     ] as const) {

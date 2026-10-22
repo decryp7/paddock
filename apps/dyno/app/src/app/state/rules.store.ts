@@ -12,12 +12,14 @@ interface RulesState {
   error: CommandError | null;
   /** A change is being saved (disables the controls that would race it). */
   saving: boolean;
+  /** The engine's message for the last rejected change, for forms that show it inline. */
+  saveError: CommandError | null;
 }
 
 /** The rule set: profiles, rules, the protected list and the pause switch. Shared by the shell and the Rules page. */
 export const RulesStore = signalStore(
   { providedIn: 'root' },
-  withState<RulesState>({ ruleSet: null, loading: false, error: null, saving: false }),
+  withState<RulesState>({ ruleSet: null, loading: false, error: null, saving: false, saveError: null }),
   withComputed(({ ruleSet }) => ({
     loaded: computed(() => ruleSet() !== null),
     profile: computed(() => ruleSet()?.profile ?? 'normal'),
@@ -29,8 +31,8 @@ export const RulesStore = signalStore(
     }),
   })),
   withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier), activity = inject(ActivityStore)) => {
-    async function mutate(run: () => Promise<RuleSet>, done: (rs: RuleSet) => string | null): Promise<boolean> {
-      patchState(store, { saving: true });
+    async function mutate(run: () => Promise<RuleSet>, done: (rs: RuleSet) => string | null, quiet = false): Promise<boolean> {
+      patchState(store, { saving: true, saveError: null });
       try {
         const ruleSet = await run();
         patchState(store, { ruleSet, saving: false, error: null });
@@ -38,8 +40,9 @@ export const RulesStore = signalStore(
         if (message) notifier.show(message);
         return true;
       } catch (e) {
-        patchState(store, { saving: false });
-        notifier.error(toCommandError(e));
+        const saveError = toCommandError(e);
+        patchState(store, { saving: false, saveError });
+        if (!quiet) notifier.error(saveError);
         return false;
       }
     }
@@ -69,13 +72,13 @@ export const RulesStore = signalStore(
           () => (paused ? 'All rules paused. Everything Dyno did was released.' : 'Rules resumed'),
         );
       },
-      /** Saves a changed or new rule (matched by id). */
-      saveRule(rule: Rule): Promise<boolean> {
+      /** Saves a changed or new rule (matched by id). `quiet` leaves a rejection to the caller (`saveError`) instead of a toast. */
+      saveRule(rule: Rule, quiet = false): Promise<boolean> {
         const rs = store.ruleSet();
         if (!rs) return Promise.resolve(false);
         const exists = rs.rules.some((r) => r.id === rule.id);
         const rules = exists ? rs.rules.map((r) => (r.id === rule.id ? rule : r)) : [...rs.rules, rule];
-        return mutate(() => backend.saveRules({ ...rs, rules }), () => (exists ? `Saved “${rule.name}”` : `Added “${rule.name}”`));
+        return mutate(() => backend.saveRules({ ...rs, rules }), () => (exists ? `Saved “${rule.name}”` : `Added “${rule.name}”`), quiet);
       },
       deleteRule(id: string): Promise<boolean> {
         const rs = store.ruleSet();

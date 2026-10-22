@@ -185,6 +185,19 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     },
   },
   { name: 'settings', path: '/#/settings', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()) },
+  { name: 'rules', path: '/#/rules', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'CPU taming' })).toBeVisible()) },
+  { name: 'alarms', path: '/#/alarms', ready: async (page) => void (await expect(page.getByRole('button', { name: /Acknowledge all/ })).toBeVisible()) },
+  {
+    name: 'alarms-rules',
+    path: '/#/alarms',
+    size: { width: 1440, height: 1500 },
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Rules', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Add rule' })).toBeVisible();
+    },
+  },
+  { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },
+  { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Save bundle/ })).toBeVisible()) },
   {
     name: 'coming',
     path: '/#/',

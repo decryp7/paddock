@@ -144,4 +144,16 @@ describe('RulesStore', () => {
     expect(await store.release({ pid: 1, started: 1 })).toBe(false);
     expect(last(notifier)).toMatchObject({ tone: 'bad', text: 'That action was already released.' });
   });
+  it('keeps a rejected quiet save for inline display without a toast, and clears it on the next change', async () => {
+    const { store, mock, notifier } = setup();
+    await store.load();
+    const rule = store.ruleSet()!.rules[0]!;
+    const spy = vi.spyOn(mock, 'saveRules').mockRejectedValueOnce({ code: 'badRequest', message: 'No.' });
+    expect(await store.saveRule(rule, true)).toBe(false);
+    expect(store.saveError()?.message).toBe('No.');
+    expect(notifier.toasts().length).toBe(0);
+    spy.mockRestore();
+    expect(await store.saveRule(rule, true)).toBe(true);
+    expect(store.saveError()).toBeNull();
+  });
 });

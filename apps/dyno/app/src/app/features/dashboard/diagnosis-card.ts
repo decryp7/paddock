@@ -4,10 +4,11 @@ import { ComingDialog } from '../../shell/coming-dialog';
 import { Dialogs } from '../../shared/dialog';
 import type { Suggestion } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { formatCount, formatFraction } from '../../shared/format';
+import { formatCount, formatFraction, formatPercent, formatRate } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { CAUSE_ICON } from '../../shared/labels';
 import { DiagnosisStore } from '../../state/diagnosis.store';
+import { LiveStore } from '../../state/live.store';
 
 /** "Why is my PC slow?": one button, and the engine's latest answer (headline, top cause, evidence, what to do). */
 @Component({
@@ -68,6 +69,13 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
           <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. It only suggests: nothing changes until you click.</p>
         }
       </div>
+      @if (stats(); as st) {
+        <dl class="stats num" aria-label="Right now">
+          @for (x of st; track x.k) {
+            <div><dt>{{ x.k }}</dt><dd [title]="x.v">{{ x.v }}</dd></div>
+          }
+        </dl>
+      }
     </section>
   `,
   styles: `
@@ -89,6 +97,11 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
     .others dy-icon { --icon-size: 14px; color: var(--text-3); }
     .others .t { flex: 1; }
     .faint { color: var(--text-3); }
+    .card { display: flex; flex-direction: column; }
+    .body { flex: 1; }
+    .stats { margin: 0; padding: var(--sp-3) var(--sp-4); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); border-top: 1px solid var(--border-subtle); }
+    .stats dt { color: var(--text-3); font-size: var(--fs-sm); }
+    .stats dd { margin: 2px 0 0; font: var(--fw-semibold) var(--fs-md) / 1.3 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .err { display: flex; gap: var(--sp-3); align-items: flex-start; }
     .err .text { flex: 1; display: grid; }
     .err .text span { color: var(--text-2); font-size: var(--fs-sm); }
@@ -98,6 +111,21 @@ export class DiagnosisCard {
   protected readonly store = inject(DiagnosisStore);
   protected readonly router = inject(Router);
   private readonly dialogs = inject(Dialogs);
+  private readonly live = inject(LiveStore);
+  /** The numbers the diagnosis weighs, as they are right now (formatting only; the engine does the reasoning). */
+  protected readonly stats = computed(() => {
+    const u = this.live.update();
+    if (!u) return null;
+    const sys = u.system;
+    const memPct = sys.memory.total > 0 ? (sys.memory.used / sys.memory.total) * 100 : 0;
+    const top = u.topCpu[0];
+    return [
+      { k: 'CPU', v: formatPercent(sys.cpu.total, 0) },
+      { k: 'Memory', v: formatPercent(memPct, 0) },
+      { k: 'Disk', v: formatRate(sys.diskIo.readBps + sys.diskIo.writeBps) },
+      { k: 'Busiest', v: top ? top.name : '—' },
+    ];
+  });
   protected readonly cause = computed(() => this.store.diagnosis()?.causes[0] ?? null);
   protected readonly hint = computed(() => {
     const e = this.store.error();

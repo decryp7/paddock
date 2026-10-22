@@ -80,7 +80,7 @@ function readCollapsed(): boolean {
       <header class="topbar" [attr.data-tauri-drag-region]="platform.overlayTitleBar ? '' : null">
         <button type="button" class="search" (click)="openPalette()" aria-haspopup="dialog" aria-label="Search and commands">
           <dy-icon name="search" />
-          <span>Search apps, screens and actions…</span>
+          <span>Search</span>
           <span class="keys"><kbd>{{ platform.mod }}</kbd><kbd>K</kbd></span>
         </button>
         <span class="spacer" [attr.data-tauri-drag-region]="platform.overlayTitleBar ? '' : null"></span>
@@ -125,7 +125,7 @@ function readCollapsed(): boolean {
 
     .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--content-bg); }
     .topbar { display: flex; align-items: center; gap: var(--sp-3); height: var(--topbar-h); padding: 0 var(--sp-4) 0 var(--sp-6); border-bottom: 1px solid var(--border); flex: none; }
-    .search { display: flex; align-items: center; gap: var(--sp-2); width: min(420px, 40vw); height: var(--control-h); padding: 0 var(--sp-2) 0 var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-3); font: var(--fs-base) var(--font-sans); cursor: pointer; text-align: left; transition: border-color var(--dur-fast) var(--ease-out); }
+    .search { display: flex; align-items: center; gap: var(--sp-2); width: 176px; height: var(--control-h); padding: 0 var(--sp-2) 0 var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-3); font: var(--fs-base) var(--font-sans); cursor: pointer; text-align: left; transition: border-color var(--dur-fast) var(--ease-out); }
     .search:hover { border-color: var(--border-strong); }
     .search dy-icon { --icon-size: 15px; }
     .search > span:first-of-type { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
