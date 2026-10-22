@@ -96,7 +96,6 @@ function readCollapsed(): Set<string> {
         </div>
         @if (tab() === 'connections') {
           <button type="button" class="tog" [attr.aria-pressed]="store.resolveNames()" title="Look up host names through your DNS resolver. Off by default: each address is sent to it." (click)="store.setResolveNames(!store.resolveNames())"><dy-icon name="check" /> Host names</button>
-          <button type="button" class="tog" [attr.aria-pressed]="showLocal()" (click)="showLocal.set(!showLocal())"><dy-icon name="check" /> Local address</button>
         }
       </div>
 

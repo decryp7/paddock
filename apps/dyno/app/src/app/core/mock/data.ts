@@ -70,7 +70,7 @@ export function demoRules(): Rule[] {
     {
       id: 'browser-background',
       name: 'Browsers in the background',
-      enabled: true,
+      enabled: false,
       condition: { target: { apps: ['chrome.exe', 'msedge.exe', 'firefox.exe'] }, cpuAbove: 15, forSecs: 120, when: ['userActive'] },
       ladder: [
         { action: 'efficiencyMode', afterSecs: 0 },
@@ -82,7 +82,7 @@ export function demoRules(): Rule[] {
     {
       id: 'meeting-builds',
       name: 'Builds step aside during calls',
-      enabled: true,
+      enabled: false,
       condition: { target: { apps: ['rustc.exe', 'cargo.exe', 'node.exe', 'MSBuild.exe'] }, cpuAbove: 30, forSecs: 20, when: ['userActive'] },
       ladder: [
         { action: 'lowerPriority', afterSecs: 0 },
@@ -94,7 +94,7 @@ export function demoRules(): Rule[] {
     {
       id: 'battery-saver',
       name: 'Save battery',
-      enabled: true,
+      enabled: false,
       condition: { target: 'anyApp', cpuAbove: 25, forSecs: 60, when: ['onBattery'] },
       ladder: [
         { action: 'efficiencyMode', afterSecs: 0 },

@@ -130,7 +130,10 @@ const copy = <T>(v: T): T => structuredClone(v);
 /** Makes the window chrome follow the mock's OS in the browser build (the Tauri shell sets these before boot). */
 export function applyMockPlatform(search: string, root: HTMLElement): void {
   if (root.dataset['platform']) return;
-  root.dataset['platform'] = mockOptionsFromUrl(search).os ?? 'macos';
+  // `chrome=macos|windows|linux` shows another OS's window chrome and shortcut glyphs than the mock machine's (screenshots).
+  const chrome = new URLSearchParams(search).get('chrome');
+  const os = chrome === 'macos' || chrome === 'windows' || chrome === 'linux' ? chrome : (mockOptionsFromUrl(search).os ?? 'macos');
+  root.dataset['platform'] = os;
 }
 
 /**

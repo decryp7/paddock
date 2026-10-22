@@ -16,10 +16,6 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
   // A fake clock starting at a fixed time: the mock's live values are a function of the clock, so every run is identical.
   await page.clock.install({ time: FROZEN });
   await page.emulateMedia({ colorScheme: theme });
-  // Every screenshot shows the macOS chrome and shortcut glyphs, whatever machine the mock imitates.
-  await page.addInitScript(() => {
-    document.documentElement.dataset['platform'] = 'macos';
-  });
   void mock;
 }
 
@@ -190,9 +186,9 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
   {
     name: 'alarms-rules',
     path: '/#/alarms',
-    size: { width: 1440, height: 1500 },
+    size: { width: 1440, height: 1300 },
     ready: async (page) => {
-      await page.getByRole('button', { name: 'Rules', exact: true }).click();
+      await page.getByRole('tab', { name: 'Rules' }).click();
       await expect(page.getByRole('button', { name: 'Add rule' })).toBeVisible();
     },
   },
@@ -221,7 +217,7 @@ for (const theme of ['dark', 'light'] as const) {
     test(`${screen.name} (${theme})`, async ({ page }) => {
       if (screen.size) await page.setViewportSize(screen.size);
       await prepare(page, theme);
-      await page.goto(`${screen.path.replace('/#/', `/?latency=0${screen.mock ? `&mock=${screen.mock}` : ''}#/`)}`);
+      await page.goto(`${screen.path.replace('/#/', `/?latency=0&chrome=macos${screen.mock ? `&mock=${screen.mock}` : ''}#/`)}`);
       await expect(page.locator('dy-shell, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);
       await screen.ready(page);

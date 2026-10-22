@@ -32,6 +32,14 @@ describe('applyMockPlatform', () => {
     applyMockPlatform('?mock=windows', root);
     expect(root.dataset['platform']).toBe('windows');
   });
+  it('can show another OS chrome than the machine the mock imitates (screenshots)', () => {
+    const root = document.createElement('html');
+    applyMockPlatform('?mock=windows&chrome=macos', root);
+    expect(root.dataset['platform']).toBe('macos');
+    const other = document.createElement('html');
+    applyMockPlatform('?mock=windows&chrome=bogus', other);
+    expect(other.dataset['platform']).toBe('windows');
+  });
   it('defaults to macOS and never overrides what the shell set', () => {
     const root = document.createElement('html');
     applyMockPlatform('', root);
