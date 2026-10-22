@@ -385,7 +385,7 @@ async fn embeddings_need_an_embedding_model() {
 async fn an_engine_pack_serves_a_model_through_a_real_child_process() {
     // The pack launches this very binary as an OpenAI-compatible engine (`--fake-engine`).
     let dir = tempfile::tempdir().unwrap();
-    let exe = env!("CARGO_BIN_EXE_pitwall-server");
+    let exe = common::runnable_server(dir.path());
     let packs = dir.path().join("packs");
     std::fs::create_dir_all(&packs).unwrap();
     std::fs::write(
@@ -580,7 +580,7 @@ async fn benchmarks_are_kept_and_models_report_their_engine() {
 
 /// A pack whose engine process exits shortly after it starts serving: a crashing engine, as a real child process.
 fn crashy_pack(dir: &std::path::Path, die_after_ms: u64) {
-    let exe = env!("CARGO_BIN_EXE_pitwall-server");
+    let exe = common::runnable_server(dir);
     let packs = dir.join("packs");
     std::fs::create_dir_all(&packs).unwrap();
     std::fs::write(

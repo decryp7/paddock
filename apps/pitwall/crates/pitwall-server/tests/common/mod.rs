@@ -235,3 +235,21 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
         dir,
     }
 }
+
+/// A copy of the freshly built `pitwall-server` inside `dir` (a temp folder), for tests that launch it as a real child process.
+///
+/// The build folder can sit on a mount that forbids execution (`noexec` workspace volumes in CI containers give
+/// `Permission denied (os error 13)`), whereas the temp folder is meant for running things. Returns the copy's path.
+pub fn runnable_server(dir: &std::path::Path) -> String {
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let name = if cfg!(windows) { "pitwall-server.exe" } else { "pitwall-server" };
+    let target = bin.join(name);
+    std::fs::copy(env!("CARGO_BIN_EXE_pitwall-server"), &target).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    target.to_string_lossy().into_owned()
+}
