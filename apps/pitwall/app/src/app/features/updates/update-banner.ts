@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { bytes } from '../../shared/format';
 import { UPDATE_KIND_LABEL } from '../../shared/labels';
 import { UpdatesStore } from './updates.store';
@@ -15,18 +16,18 @@ export const SHOWN = 3;
  */
 @Component({
   selector: 'pw-update-banner',
-  imports: [MatIconModule, RouterLink],
+  imports: [MatIconModule, MatTooltipModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (store.count() > 0) {
       @if (mode() === 'summary') {
-        <section class="banner summary" role="status" aria-label="Model updates">
+        <section class="banner callout summary" data-tone="info" role="status" aria-label="Model updates">
           <mat-icon svgIcon="pw:download" aria-hidden="true" />
           <span class="text"><b class="num">{{ store.count() }}</b> {{ store.count() === 1 ? 'model update is' : 'model updates are' }} available. Pitwall only tells you; nothing downloads until you choose.</span>
           <a class="btn sm" routerLink="/models">Review</a>
         </section>
       } @else {
-        <section class="banner" role="region" aria-label="Model updates">
+        <section class="banner callout" data-tone="info" role="region" aria-label="Model updates">
           <header>
             <mat-icon svgIcon="pw:download" aria-hidden="true" />
             <p><b class="num">{{ store.count() }}</b> {{ store.count() === 1 ? 'update' : 'updates' }} available for models you downloaded. <span class="faint">Pitwall only tells you; nothing downloads until you choose.</span></p>
@@ -35,14 +36,14 @@ export const SHOWN = 3;
             @for (n of shown(); track n.id) {
               <li [attr.data-kind]="n.kind">
                 <div class="what">
-                  <span class="line"><b class="mono">{{ n.modelId }}</b><span class="tag">Update available: {{ kind[n.kind] }}</span></span>
+                  <span class="line"><b>{{ n.modelId }}</b><span class="kind">Update available: {{ kind[n.kind] }}</span></span>
                   <span class="why">{{ n.summary }}</span>
                   <span class="meta num">{{ n.file }} · {{ size(n.sizeBytes) }} · {{ n.repo }}</span>
                 </div>
                 <div class="act">
-                  <button type="button" class="btn primary sm" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Get ' + n.file" (click)="store.get(n)">Get it</button>
-                  <button type="button" class="btn sm" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Remind me about ' + n.modelId + ' in a week'" (click)="store.dismiss(n.id, 7)">Remind me in a week</button>
-                  <button type="button" class="btn ghost icon sm" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Dismiss the update for ' + n.modelId" (click)="store.dismiss(n.id, null)"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
+                  <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Get ' + n.file" matTooltip="Get it" (click)="store.get(n)"><mat-icon svgIcon="pw:download" aria-hidden="true" /></button>
+                  <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Remind me about ' + n.modelId + ' in a week'" matTooltip="Remind me in a week" (click)="store.dismiss(n.id, 7)"><mat-icon svgIcon="pw:clock" aria-hidden="true" /></button>
+                  <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()(n.id)" [attr.aria-label]="'Dismiss the update for ' + n.modelId" matTooltip="Dismiss" (click)="store.dismiss(n.id, null)"><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
                 </div>
               </li>
             }
@@ -61,12 +62,8 @@ export const SHOWN = 3;
     .banner {
       display: grid;
       gap: var(--sp-2);
-      padding: var(--sp-3) var(--sp-4);
-      background: var(--accent-soft);
-      border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
-      border-radius: var(--r-lg);
       mat-icon {
-        color: var(--accent);
+        color: var(--info);
       }
     }
     .summary {
@@ -88,15 +85,31 @@ export const SHOWN = 3;
       padding: 0;
       list-style: none;
     }
+    /* The updates are rows inside the callout, set apart by hairlines: no card per update. */
     li {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: var(--sp-3);
-      padding: var(--sp-2) var(--sp-3);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-md);
+      padding: var(--sp-2) 0;
+      border-top: 1px solid var(--border-soft);
+    }
+    li .reveal {
+      opacity: 0;
+    }
+    li:hover .reveal,
+    li:focus-within .reveal,
+    li .reveal:focus-visible {
+      opacity: 1;
+    }
+    @media (hover: none) {
+      li .reveal {
+        opacity: 1;
+      }
+    }
+    .kind {
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
     .what {
       display: grid;
@@ -114,8 +127,8 @@ export const SHOWN = 3;
       color: var(--text-2);
     }
     .meta {
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
       overflow-wrap: anywhere;
     }
     .act {

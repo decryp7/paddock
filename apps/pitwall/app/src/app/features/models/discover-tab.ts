@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Fit, QuantVariant, Recommendation } from '../../core/api.types';
 import { ago, bytes, compact, concurrencyText } from '../../shared/format';
@@ -21,7 +22,7 @@ export function fitDetail(f: Fit): string {
 /** Hugging Face search (GGUF) and a repo's quantisation variants, each with a "will this fit?" verdict. */
 @Component({
   selector: 'pw-discover-tab',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState],
+  imports: [MatIconModule, MatTooltipModule, MatSlideToggleModule, Panel, EmptyState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel class="recs" heading="Recommended for this machine" icon="sparkles" [sub]="recsSub()" [flush]="true" [loading]="store.packsLoading()" [error]="store.packsError()" [ready]="!!store.packs()" [skeletonLines]="3" (retry)="store.loadPacks()">
@@ -37,24 +38,19 @@ export function fitDetail(f: Fit): string {
         } @else {
           <ul class="rec-list" aria-label="Recommended models">
             @for (r of p.recommendations; track r.id) {
-              <li class="rec">
-                <div class="rec-main">
-                  <span class="rec-name">{{ r.name }}</span>
-                  <span class="rec-meta num">{{ r.quant ?? 'GGUF' }} · {{ size(r.sizeBytes) }} · {{ ctxText(r.contextTokens) }} context</span>
-                  <span class="tags">
-                    @for (t of r.tags; track t) {
-                      <span class="tag">{{ t }}</span>
-                    }
-                  </span>
-                </div>
-                <span class="pill dot" [attr.data-tone]="recLook(r).tone" [matTooltip]="r.fit.message">{{ recLook(r).label }}</span>
-                <button type="button" class="btn sm" [class.primary]="r.fit.verdict === 'fits'" [disabled]="store.isBusy()('rec:' + r.id) || r.fit.verdict === 'wontFit' || isLocal(r)" [attr.aria-label]="'Download ' + r.name" (click)="store.downloadRecommendation(r)">
+              <li class="rec row">
+                <span class="rec-name" [matTooltip]="r.repo" matTooltipShowDelay="600">{{ r.name }}</span>
+                <span class="rec-meta num">{{ r.quant ?? 'GGUF' }} · {{ size(r.sizeBytes) }} · {{ ctxText(r.contextTokens) }}</span>
+                <span class="status" [attr.data-tone]="recLook(r).tone" [matTooltip]="r.fit.message">{{ recLook(r).label }}</span>
+                <span class="rec-act">
                   @if (isLocal(r)) {
-                    <mat-icon svgIcon="pw:check" aria-hidden="true" />In library
+                    <span class="faint in-lib">In library</span>
                   } @else {
-                    <mat-icon svgIcon="pw:download" aria-hidden="true" />Download
+                    <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()('rec:' + r.id) || r.fit.verdict === 'wontFit'" [attr.aria-label]="'Download ' + r.name" matTooltip="Download" (click)="store.downloadRecommendation(r)">
+                      <mat-icon svgIcon="pw:download" aria-hidden="true" />
+                    </button>
                   }
-                </button>
+                </span>
               </li>
             }
           </ul>
@@ -65,8 +61,8 @@ export function fitDetail(f: Fit): string {
     <form class="search" role="search" (submit)="$event.preventDefault(); store.search(q.value)">
       <mat-icon svgIcon="pw:search" aria-hidden="true" />
       <label class="sr-only" for="hf-q">Search Hugging Face for GGUF models</label>
-      <input #q id="hf-q" class="input" type="search" placeholder="Search GGUF models on Hugging Face — e.g. qwen3, gemma, llama" [value]="store.query()" autocomplete="off" />
-      <button type="submit" class="btn primary" [disabled]="store.searching()">Search</button>
+      <input #q id="hf-q" class="input" type="search" placeholder="Search GGUF models on Hugging Face — e.g. qwen3, gemma, llama" [value]="store.query()" autocomplete="off" (input)="typed.set(q.value.trim() !== '')" />
+      <button type="submit" class="btn" [class.primary]="hasText()" [disabled]="store.searching()">Search</button>
     </form>
 
     <div class="cols">
@@ -86,11 +82,6 @@ export function fitDetail(f: Fit): string {
                     <span>updated {{ when(r.updatedAt, now()) }}</span>
                   }
                 </span>
-                <span class="tags">
-                  @for (t of r.tags.slice(0, 3); track t) {
-                    <span class="tag">{{ t }}</span>
-                  }
-                </span>
               </button>
             </li>
           }
@@ -106,13 +97,13 @@ export function fitDetail(f: Fit): string {
         }
         @if (store.repo(); as repo) {
           @if (repo.gated) {
-            <p class="note" role="note"><mat-icon svgIcon="pw:lock" aria-hidden="true" />This repo is gated: accept its licence on Hugging Face first.</p>
+            <p class="callout" data-tone="warn" role="note"><mat-icon svgIcon="pw:lock" aria-hidden="true" />This repo is gated: accept its licence on Hugging Face first.</p>
           }
           @if (repo.projectors.length) {
-            <label class="proj">
-              <input type="checkbox" [checked]="withProjector()" (change)="withProjector.set($any($event.target).checked)" />
-              <span>Include the vision projector <span class="mono">{{ repo.projectors[0]!.file }}</span> ({{ size(repo.projectors[0]!.sizeBytes) }}) for image input</span>
-            </label>
+            <div class="proj">
+              <mat-slide-toggle hideIcon aria-labelledby="lbl-proj" [checked]="withProjector()" (change)="withProjector.set($event.checked)" />
+              <span id="lbl-proj">Include the vision projector <span class="mono">{{ repo.projectors[0]!.file }}</span> ({{ size(repo.projectors[0]!.sizeBytes) }}) for image input</span>
+            </div>
           }
           <table class="table">
             <thead>
@@ -135,19 +126,21 @@ export function fitDetail(f: Fit): string {
                   </td>
                   <td class="right num">{{ size(v.sizeBytes) }}</td>
                   <td>
-                    <span class="pill dot" [attr.data-tone]="look(v).tone" [matTooltip]="v.fit.message">{{ look(v).label }}</span>
+                    <span class="status" [attr.data-tone]="look(v).tone" [matTooltip]="v.fit.message">{{ look(v).label }}</span>
                     @if (v.fit.verdict !== 'wontFit' && v.fit.verdict !== 'unknown') {
                       <span class="faint parts">{{ concurrency(v.maxSlots) }}</span>
                     }
                   </td>
                   <td class="needs" [matTooltip]="v.fit.message">{{ detail(v.fit) }}</td>
-                  <td class="right">
+                  <td class="act">
                     @if (v.downloaded) {
-                      <span class="pill" data-tone="muted"><mat-icon svgIcon="pw:check" aria-hidden="true" />In library</span>
+                      <span class="faint in-lib">In library</span>
                     } @else {
-                      <button type="button" class="btn sm" [class.primary]="v.fit.verdict === 'fits'" [disabled]="store.isBusy()('download:' + v.file)" [attr.aria-label]="'Download ' + v.file" (click)="download(v)">
-                        <mat-icon svgIcon="pw:download" aria-hidden="true" />Download
-                      </button>
+                      <span class="row-actions">
+                        <button type="button" class="btn ghost icon sm reveal" [disabled]="store.isBusy()('download:' + v.file)" [attr.aria-label]="'Download ' + v.file" matTooltip="Download" (click)="download(v)">
+                          <mat-icon svgIcon="pw:download" aria-hidden="true" />
+                        </button>
+                      </span>
                     }
                   </td>
                 </tr>
@@ -210,40 +203,47 @@ export function fitDetail(f: Fit): string {
         border-color: var(--accent);
       }
     }
+    /* A recommendation is one line: name, what it is, the verdict, and a download that appears on hover. */
     .rec-list {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-      gap: 1px;
       margin: 0;
-      padding: 0 var(--sp-2) var(--sp-2);
+      padding: 0 0 var(--sp-1);
       list-style: none;
     }
     .rec {
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(160px, 1.2fr) minmax(0, 1fr) 80px 96px;
       align-items: center;
       gap: var(--sp-3);
-      padding: var(--sp-2) var(--sp-2);
-      border-radius: var(--r-md);
+      min-height: 40px;
+      padding: 0 var(--sp-4);
+      border-top: 1px solid var(--border-soft);
       &:hover {
         background: var(--bg-hover);
       }
     }
-    .rec-main {
-      display: flex;
-      flex: 1;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
+    .rec .reveal {
+      opacity: 0;
+    }
+    .rec:hover .reveal,
+    .rec:focus-within .reveal,
+    .rec .reveal:focus-visible {
+      opacity: 1;
+    }
+    .rec-act {
+      justify-self: end;
+    }
+    .in-lib {
+      font-size: var(--fs-sm);
     }
     .rec-name {
-      font-weight: var(--fw-medium);
+      font-weight: var(--fw-semibold);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .rec-meta {
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
     .cols {
       display: grid;
@@ -288,34 +288,20 @@ export function fitDetail(f: Fit): string {
     .meta {
       display: flex;
       gap: var(--sp-3);
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
       span {
         display: inline-flex;
         align-items: center;
         gap: 3px;
       }
       mat-icon {
-        width: 11px;
-        height: 11px;
+        width: 12px;
+        height: 12px;
       }
     }
-    .tags {
-      display: flex;
-      gap: 4px;
-    }
-    .note {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
+    .callout {
       margin-bottom: var(--sp-3);
-      padding: var(--sp-2) var(--sp-3);
-      font-size: var(--fs-sm);
-      background: var(--warn-soft);
-      border-radius: var(--r-md);
-      mat-icon {
-        color: var(--warn);
-      }
     }
     .proj {
       display: flex;
@@ -324,9 +310,6 @@ export function fitDetail(f: Fit): string {
       margin-bottom: var(--sp-3);
       font-size: var(--fs-sm);
       color: var(--text-2);
-      input {
-        accent-color: var(--accent);
-      }
     }
     .table {
       margin: 0 calc(-1 * var(--sp-4));
@@ -345,15 +328,15 @@ export function fitDetail(f: Fit): string {
     }
     .parts {
       margin-left: var(--sp-2);
-      font-size: var(--fs-xs);
+      font-size: var(--fs-sm);
+    }
+    .table td.act {
+      width: 1%;
+      text-align: right;
     }
     .needs {
       font-size: var(--fs-sm);
       color: var(--text-2);
-    }
-    .pill mat-icon {
-      width: 11px;
-      height: 11px;
     }
   `,
 })
@@ -361,6 +344,9 @@ export class DiscoverTab implements OnInit {
   readonly now = input.required<number>();
   protected readonly store = inject(ModelsStore);
   protected readonly withProjector = signal(true);
+  /** The search field has text: only then is Search the page's primary action. */
+  protected readonly typed = signal(false);
+  protected readonly hasText = computed(() => this.typed() || this.store.query().trim() !== '');
   protected readonly size = bytes;
   protected readonly count = compact;
   protected readonly when = ago;

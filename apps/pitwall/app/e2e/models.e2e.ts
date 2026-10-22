@@ -94,7 +94,8 @@ test.describe('models', () => {
     await page.getByRole('button', { name: 'Save preset' }).click();
     await expect(list).not.toContainText('Model removed');
 
-    await page.getByRole('button', { name: 'Delete dyno-notes' }).click();
+    await page.getByRole('button', { name: 'More actions for dyno-notes' }).click();
+    await page.getByRole('menuitem', { name: 'Delete…' }).click();
     await page.getByRole('button', { name: 'Delete preset' }).click();
     await expect(list.getByRole('row', { name: /dyno-notes/ })).toHaveCount(0);
   });

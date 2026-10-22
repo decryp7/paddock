@@ -4,6 +4,9 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import type { ModelPreset, PresetEntry, PresetStatus } from '../../core/api.types';
 import { presetStatusLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
+import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
+import { RowMenu } from '../../shared/ui/row-menu';
+import { isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
 import { defaultsSummary, EMPTY_FORM, formOf, parseForm, type PresetField, type PresetForm } from './preset-form';
@@ -25,7 +28,7 @@ export function statusDetail(s: PresetStatus): string {
 /** Model presets and aliases (ADR 0014): apps send the alias as `model`; here the user decides what serves it. */
 @Component({
   selector: 'pw-presets-tab',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState],
+  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, RowMenu],
   providers: [PresetsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -51,33 +54,20 @@ export function statusDetail(s: PresetStatus): string {
             </thead>
             <tbody>
               @for (e of store.entries(); track e.preset.alias) {
-                <tr [class.editing]="store.editor()?.editing === e.preset.alias">
+                <tr tabindex="0" [class.editing]="store.editor()?.editing === e.preset.alias" (click)="onRowClick(e.preset, $event)" (keydown)="onRowKey(e.preset, $event)" (contextmenu)="onRowMenu(e.preset, $event)">
                   <td class="alias"><span class="mono pitwall-selectable">{{ e.preset.alias }}</span></td>
-                  <td><span class="mono target pitwall-selectable">{{ e.preset.target }}</span></td>
-                  <td>
-                    <span class="pill dot" [attr.data-tone]="look(e).tone" [matTooltip]="detail(e)">{{ look(e).label }}</span>
-                    @if (e.status.state === 'ready') {
-                      <span class="serves mono">{{ e.status.modelId }}</span>
-                    } @else {
-                      <span class="why">{{ message(e) }}</span>
-                    }
+                  <td><span class="mono target pitwall-selectable" [matTooltip]="e.preset.target" matTooltipShowDelay="600">{{ e.preset.target }}</span></td>
+                  <td class="serves">
+                    <span class="status" [attr.data-tone]="look(e).tone" [matTooltip]="detail(e)">{{ look(e).label }}</span>
+                    <span class="via" [class.mono]="e.status.state === 'ready'" [matTooltip]="e.status.state === 'ready' ? e.status.modelId : message(e)">{{ e.status.state === 'ready' ? e.status.modelId : message(e) }}</span>
                   </td>
-                  <td>
-                    <span class="tags">
-                      @for (d of defaults(e.preset); track d) {
-                        <span class="tag">{{ d }}</span>
-                      }
-                      @if (e.preset.systemPrompt !== null) {
-                        <span class="tag">system prompt</span>
-                      }
-                    </span>
-                  </td>
-                  <td class="right">
-                    <span class="actions">
-                      <button type="button" class="btn sm" [attr.aria-label]="'Edit ' + e.preset.alias" [disabled]="store.deleting().includes(e.preset.alias)" (click)="openEdit(e.preset)">Edit</button>
-                      <button type="button" class="btn ghost icon sm del" [attr.aria-label]="'Delete ' + e.preset.alias" matTooltip="Delete" [disabled]="store.deleting().includes(e.preset.alias)" (click)="remove(e.preset.alias)">
-                        <mat-icon svgIcon="pw:trash" aria-hidden="true" />
+                  <td class="defs"><span [matTooltip]="defaultsText(e.preset)" matTooltipShowDelay="600">{{ defaultsText(e.preset) || '—' }}</span></td>
+                  <td class="act">
+                    <span class="row-actions">
+                      <button type="button" class="btn ghost icon sm reveal" [attr.aria-label]="'Edit ' + e.preset.alias" matTooltip="Edit" [disabled]="store.deleting().includes(e.preset.alias)" (click)="openEdit(e.preset)">
+                        <mat-icon svgIcon="pw:edit" aria-hidden="true" />
                       </button>
+                      <pw-row-menu [items]="menuItems(e.preset)" [label]="'More actions for ' + e.preset.alias" />
                     </span>
                   </td>
                 </tr>
@@ -156,7 +146,7 @@ export function statusDetail(s: PresetStatus): string {
               }
               @if (p.status; as s) {
                 <p [class.faint]="!!p.problem">
-                  <span class="pill dot" [attr.data-tone]="statusLook(s).tone">{{ statusLook(s).label }}</span>
+                  <span class="status" [attr.data-tone]="statusLook(s).tone">{{ statusLook(s).label }}</span>
                   @if (s.state === 'ready') {
                     <span>Would serve <b class="mono">{{ s.modelId }}</b> ({{ s.reason }}).</span>
                   } @else {
@@ -191,33 +181,41 @@ export function statusDetail(s: PresetStatus): string {
       overflow-x: auto;
       margin-top: var(--sp-2);
     }
-    .del:hover {
-      color: var(--bad);
-    }
     .alias {
       font-weight: var(--fw-medium);
     }
     .target,
-    .serves {
+    .via {
       font-size: var(--fs-sm);
-      word-break: break-all;
     }
+    .target {
+      display: block;
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* One line per preset: the verdict, then what serves it (or why nothing does), truncated with a tooltip. */
     .serves {
-      display: block;
-      margin-top: 2px;
+      max-width: 340px;
+    }
+    .via {
+      display: inline-block;
+      max-width: 220px;
+      margin-left: var(--sp-2);
+      overflow: hidden;
+      vertical-align: bottom;
+      text-overflow: ellipsis;
       color: var(--text-2);
     }
-    .why {
-      display: block;
-      max-width: 38ch;
-      margin-top: 2px;
-      font-size: var(--fs-xs);
+    .defs {
+      max-width: 260px;
+      overflow: hidden;
+      font-size: var(--fs-sm);
       color: var(--text-2);
+      text-overflow: ellipsis;
     }
-    .tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
+    .table td.act {
+      width: 1%;
     }
     tr.editing td {
       background: var(--accent-soft);
@@ -278,7 +276,6 @@ export function statusDetail(s: PresetStatus): string {
     .preview {
       padding: var(--sp-3);
       background: var(--bg-sunken);
-      border: 1px solid var(--border-soft);
       border-radius: var(--r-md);
       p {
         display: flex;
@@ -306,6 +303,7 @@ export class PresetsTab {
   protected readonly store = inject(PresetsStore);
   protected readonly models = inject(ModelsStore);
   private readonly confirm = inject(Confirm);
+  private readonly menu = inject(ContextMenuService);
   protected readonly aliasMax = ALIAS_MAX;
   protected readonly promptMax = PROMPT_MAX;
   protected readonly autoExamples = AUTO_EXAMPLES;
@@ -367,6 +365,42 @@ export class PresetsTab {
 
   protected async save(): Promise<void> {
     if (this.canSave()) await this.store.save(this.parsed().draft);
+  }
+
+  /** What a preset defaults, on one line: `temperature 0.3 · max 800 tokens · system prompt`. */
+  protected defaultsText(p: ModelPreset): string {
+    return [...defaultsSummary(p), ...(p.systemPrompt !== null ? ['system prompt'] : [])].join(' · ');
+  }
+
+  /** The list behind the row's "..." button and right-click. Delete is only here and asks first. */
+  protected menuItems(p: ModelPreset): ContextMenuItem[] {
+    return [
+      { label: 'Edit', run: () => this.openEdit(p) },
+      { label: 'Delete…', run: () => void this.remove(p.alias), danger: true, divider: true, disabled: this.store.deleting().includes(p.alias) },
+    ];
+  }
+
+  protected onRowClick(p: ModelPreset, e: Event): void {
+    if (!(e.target as HTMLElement).closest('button')) this.openEdit(p);
+  }
+
+  protected onRowKey(p: ModelPreset, e: KeyboardEvent): void {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.openEdit(p);
+    } else if (isMenuKey(e)) {
+      e.preventDefault();
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      this.menu.open(r.left + 48, r.bottom - 8, this.menuItems(p));
+    } else {
+      moveRowFocus(e);
+    }
+  }
+
+  protected onRowMenu(p: ModelPreset, e: MouseEvent): void {
+    e.preventDefault();
+    this.menu.open(e.clientX, e.clientY, this.menuItems(p));
   }
 
   protected async remove(alias: string): Promise<void> {

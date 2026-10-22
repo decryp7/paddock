@@ -30,7 +30,9 @@ export function etaMs(d: Download): number | null {
           <div class="main">
             <div class="top">
               <span class="name mono">{{ d.name }}</span>
-              <span class="pill dot" [attr.data-tone]="look(d).tone">{{ look(d).label }}</span>
+              @if (d.state !== 'downloading') {
+                <span class="status" [attr.data-tone]="look(d).tone">{{ look(d).label }}</span>
+              }
             </div>
             @if (d.state !== 'done' && d.state !== 'cancelled') {
               <div class="meter" [attr.data-tone]="d.state === 'failed' ? 'bad' : d.state === 'paused' ? 'warn' : null" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="pct(d)" [attr.aria-label]="'Progress of ' + d.name">
@@ -53,7 +55,9 @@ export function etaMs(d: Download): number | null {
             }
           </div>
           @if (downloadActive(d.state) || d.state === 'paused') {
-            <button type="button" class="btn sm" [disabled]="store.isBusy()('cancel:' + d.id)" [attr.aria-label]="'Cancel ' + d.name" [matTooltip]="d.state === 'paused' ? 'Discard the partial file' : 'Stop the download'" (click)="store.cancelDownload(d.id)">Cancel</button>
+            <button type="button" class="btn ghost icon sm cancel" [disabled]="store.isBusy()('cancel:' + d.id)" [attr.aria-label]="'Cancel ' + d.name" [matTooltip]="d.state === 'paused' ? 'Discard the partial file' : 'Stop the download'" (click)="store.cancelDownload(d.id)">
+              <mat-icon svgIcon="pw:close" aria-hidden="true" />
+            </button>
           }
         </li>
       }
@@ -75,6 +79,20 @@ export function etaMs(d: Download): number | null {
       &:first-child {
         border-top: none;
         padding-top: 0;
+      }
+    }
+    /* Cancel is a quiet icon on hover or focus, like every row action. */
+    .cancel {
+      opacity: 0;
+    }
+    li:hover .cancel,
+    li:focus-within .cancel,
+    .cancel:focus-visible {
+      opacity: 1;
+    }
+    @media (hover: none) {
+      .cancel {
+        opacity: 1;
       }
     }
     .ic {
@@ -103,6 +121,7 @@ export function etaMs(d: Download): number | null {
       gap: var(--sp-3);
     }
     .name {
+      font-size: var(--fs-sm);
       font-weight: var(--fw-medium);
       overflow: hidden;
       text-overflow: ellipsis;
@@ -112,8 +131,8 @@ export function etaMs(d: Download): number | null {
       display: flex;
       flex-wrap: wrap;
       gap: var(--sp-2);
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
       span + span::before {
         content: '·';
         margin-right: var(--sp-2);

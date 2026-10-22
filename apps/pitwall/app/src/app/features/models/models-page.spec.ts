@@ -239,7 +239,7 @@ describe('ModelsPage', () => {
     expect(el.textContent).toContain("Won't fit");
     expect(el.textContent).toContain('In library');
     expect(el.querySelector('pw-discover-tab tbody')?.textContent).toMatch(/up to \d+ requests at once|one request at a time/);
-    (el.querySelector('pw-discover-tab input[type="checkbox"]') as HTMLInputElement).click();
+    (el.querySelector('pw-discover-tab mat-slide-toggle button') as HTMLButtonElement).click();
     fixture.detectChanges();
     (el.querySelector('button[aria-label^="Download gemma-3-12b-it-Q2_K"]') as HTMLButtonElement).click();
     await settle();
@@ -250,6 +250,28 @@ describe('ModelsPage', () => {
     expect(el.textContent).toContain('Pick a repo');
   });
 
+  it('lists recommendations as one-line rows with a verdict dot and a hover download, and no repeated tags', async () => {
+    const { el, settle, button } = await render();
+    (el.querySelector('#tab-discover') as HTMLButtonElement).click();
+    await settle();
+    const rows = el.querySelectorAll('pw-discover-tab .rec-list .rec');
+    expect(rows.length).toBe(7);
+    expect(rows[0]!.querySelector('.status')).not.toBeNull();
+    expect(rows[0]!.querySelector('.pill, .tag')).toBeNull();
+    expect(rows[0]!.querySelector('button.reveal')?.getAttribute('aria-label')).toBe('Download Nomic Embed Text v1.5');
+    // Every result carries "gguf": it is not information, so no tag chips at all.
+    expect(el.querySelector('pw-discover-tab .hit .tag')).toBeNull();
+    // Search is the page's primary action only while the field has text.
+    const search = Array.from(el.querySelectorAll('pw-discover-tab form button')).find((b) => b.textContent!.trim() === 'Search') as HTMLButtonElement;
+    expect(search.classList.contains('primary')).toBe(false);
+    const input = el.querySelector('#hf-q') as HTMLInputElement;
+    input.value = 'qwen';
+    input.dispatchEvent(new Event('input'));
+    await settle();
+    expect(search.classList.contains('primary')).toBe(true);
+    expect(button).toBeDefined();
+  });
+
   it('shows downloads with progress, speed and the resumable state, and cancels them', async () => {
     const backend = new MockBackend();
     const { el, settle, live } = await render(backend);
@@ -258,7 +280,9 @@ describe('ModelsPage', () => {
     expect(el.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Downloads');
     const items = el.querySelectorAll('pw-downloads-list li');
     expect(items.length).toBe(2);
-    expect(items[0]!.textContent).toContain('Downloading');
+    // A running download shows its bar and speed, not a status word; only the exceptions get one.
+    expect(items[0]!.querySelector('.status')).toBeNull();
+    expect(items[0]!.querySelector('[role="progressbar"]')).not.toBeNull();
     expect(items[0]!.textContent).toContain('/s');
     expect(items[1]!.textContent).toContain('Paused · resumable');
     expect(items[1]!.textContent).toContain('Connection reset');

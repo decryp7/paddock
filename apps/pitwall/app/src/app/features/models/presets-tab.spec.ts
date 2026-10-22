@@ -45,7 +45,14 @@ async function render(backend: PitwallBackend = new MockBackend(), confirm = tru
     await new Promise((r) => setTimeout(r, PREVIEW_DELAY_MS + 20));
     await settle();
   };
-  return { fixture, el, settle, button, type, typeAndPreview };
+  /** Runs an item of a preset's "..." menu. */
+  const menu = async (alias: string, item: string) => {
+    button(`More actions for ${alias}`).click();
+    await settle();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    await settle();
+  };
+  return { fixture, el, settle, button, type, typeAndPreview, menu };
 }
 
 describe('statusDetail', () => {
@@ -211,13 +218,12 @@ describe('PresetsTab', () => {
 
   it('asks before deleting, and deletes only when confirmed', async () => {
     const no = await render(new MockBackend(), false);
-    no.button('Delete legacy-explain').click();
-    await no.settle();
+    expect(no.el.querySelector('button[aria-label="Delete legacy-explain"]')).toBeNull();
+    await no.menu('legacy-explain', 'Delete…');
     expect(no.el.querySelectorAll('tbody tr').length).toBe(4);
     TestBed.resetTestingModule();
     const yes = await render(new MockBackend(), true);
-    yes.button('Delete legacy-explain').click();
-    await yes.settle();
+    await yes.menu('legacy-explain', 'Delete…');
     expect(yes.el.querySelectorAll('tbody tr').length).toBe(3);
     expect(yes.el.textContent).not.toContain('legacy-explain');
   });
