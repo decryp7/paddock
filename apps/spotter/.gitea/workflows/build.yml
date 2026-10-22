@@ -434,7 +434,12 @@ jobs:
           find artifacts -name '*.sig' -delete
           cat artifacts/latest.json
 
-      - uses: https://gitea.com/actions/release-action@main
-        with:
-          files: artifacts/**/*
-          api_key: ${{ secrets.RELEASE_TOKEN }}
+      # Plain API calls instead of gitea.com/actions/release-action, which is a Go action and the runner image has no Go.
+      - name: Publish the release
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          node --test scripts/release/publish.test.mjs
+          node scripts/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" \
+            --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
