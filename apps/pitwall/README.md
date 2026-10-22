@@ -1,71 +1,168 @@
+<div align="center">
+
 # Pitwall
 
-**The private, local AI server your apps talk to.** Pitwall runs language models on your own computer and gives
-every app one place to use them — through the standard OpenAI-, Anthropic- and Ollama-compatible APIs, plus a few
-extras built for the apps in the suite (Debrief, Pitcrew, Spotter, Dyno). Like the pit wall in a race, it's where
-every car radios in.
+**The private, local AI server your apps talk to.**
+
+Pitwall runs language models on your own computer and gives every app one place to use them, through the standard
+OpenAI-, Anthropic- and Ollama-compatible APIs plus a few extras built for the app suite (Debrief, Pitcrew, Spotter,
+Dyno). Like the pit wall in a race, it is where every car radios in.
+
+</div>
 
 > **Local only.** Nothing you ask and nothing the model answers ever leaves your computer. No cloud models, no
-> telemetry. The only network traffic is downloading engines and models you asked for — and offline mode turns even
-> that off. See [ADR 0001](docs/adr/0001-local-only.md).
+> telemetry, no crash upload. The only network traffic is downloading engines and models you asked for, and offline
+> mode turns even that off. This is the first architecture decision and is enforced in code and tests:
+> [ADR 0001](docs/adr/0001-local-only.md).
 
-**Status: in development.** The pure core (API formats, queue, memory policy, model selection, keys, metrics) is
-written and tested; the server and the app are next. Nothing here is ready to install yet.
+**Status: in development.** The server works end to end on macOS (Apple Silicon): a Metal llama.cpp build was
+installed through the app flow with checksum and self-test, a Hugging Face model downloaded with its SHA-256 verified,
+and OpenAI, Anthropic and Ollama requests (streaming and not, plus JSON-schema output) were answered at about 213
+tokens per second with a 0.5B model on an M4 Pro. The Tauri app, the installers and the Windows and Linux real-model
+runs are not finished; see the [roadmap](docs/roadmap.md) for exactly what is verified and what is planned.
 
-## What it will do
+## Screenshots
 
-- **Engines:** llama.cpp first (CPU, Vulkan, CUDA, Metal builds chosen for your hardware), with pinned, checksummed
-  downloads, a self-test after every update and automatic rollback. MLX, vLLM, whisper.cpp and embedding/reranker
-  engines later.
-- **Model library:** search and download GGUF models from Hugging Face with a "will this fit?" check before you
-  download, resumable verified downloads, quantisation variants, and cleanup of models you don't use.
+| Screen | Light | Dark |
+| --- | --- | --- |
+| Dashboard: memory, loaded models with idle countdown, tokens per second, queue, history | ![Dashboard, light](docs/screenshots/dashboard-light.png) | ![Dashboard, dark](docs/screenshots/dashboard-dark.png) |
+| Models: library, "will this fit?", downloads | ![Models, light](docs/screenshots/models-light.png) | ![Models, dark](docs/screenshots/models-dark.png) |
+| Engines: builds, self-test, roll back | ![Engines, light](docs/screenshots/engines-light.png) | ![Engines, dark](docs/screenshots/engines-dark.png) |
+| Apps and keys: pairing, permissions, limits | ![Apps, light](docs/screenshots/apps-light.png) | ![Apps, dark](docs/screenshots/apps-dark.png) |
+| Requests: recent requests, timing, chosen model | ![Requests, light](docs/screenshots/requests-light.png) | ![Requests, dark](docs/screenshots/requests-dark.png) |
+| Playground: chat and side-by-side comparison | ![Playground, light](docs/screenshots/playground-light.png) | ![Playground, dark](docs/screenshots/playground-dark.png) |
+| Benchmarks: speed on this machine | ![Benchmarks, light](docs/screenshots/benchmarks-light.png) | ![Benchmarks, dark](docs/screenshots/benchmarks-dark.png) |
+| Settings | ![Settings, light](docs/screenshots/settings-light.png) | ![Settings, dark](docs/screenshots/settings-dark.png) |
+| Tray / menu bar | ![Tray, light](docs/screenshots/tray-light.png) | ![Tray, dark](docs/screenshots/tray-dark.png) |
+
+The screenshots come from the browser build with the mock backend (`npm run screenshots` in `app/`); they show the
+design, not measurements from a real machine.
+
+## At a glance
+
+![Pitwall at a glance: apps and tools call one local server on 127.0.0.1; the server queues requests, loads models into llama.cpp engine processes when they fit, releases them when idle, and answers in OpenAI, Anthropic or Ollama form; the app and tray manage it; only user-requested downloads leave the machine](docs/diagrams/svg/pitwall-overview.svg)
+
+A Rust core decides everything (what fits, what to release, what runs next, which model to use, which URL may be
+fetched); a windowless Rust server carries the decisions out, keeps serving when the window is closed, and runs each
+loaded model in its own engine process; a Tauri app with a tray and an Angular UI manages it. Details:
+[architecture](docs/architecture.md) and every design diagram in [docs/design.md](docs/design.md).
+
+## Why Pitwall
+
+- **One model in memory for every app.** Debrief, Pitcrew, Spotter, Dyno and any OpenAI, Anthropic or Ollama client
+  share it, instead of each loading its own.
+- **Private by construction.** One audited outbound client, loopback-only listening, `Host` and `Origin` checks,
+  per-app keys stored hashed, engines that run with a scrubbed environment and no network of their own.
+- **Memory that looks after itself.** Models load on first use, are released when idle or when the machine needs the
+  memory, and are never released while answering. A request that cannot fit gets a clear error, not swap.
+- **No lock-in to one engine.** llama.cpp today; others behind the `Engine` trait or a declarative TOML pack.
+
+## Features
+
+Every feature, with its status, is in [docs/features.md](docs/features.md).
+
+- **Engines.** llama.cpp with pinned, checksummed builds chosen for your hardware (Metal, CUDA, Vulkan, CPU, ...), a
+  self-test after every install and discard of a build that fails it. Planned: MLX, vLLM, whisper.cpp.
+- **Model library.** Search and download GGUF models from Hugging Face, a "will this fit?" check before you download,
+  resumable downloads verified against the published SHA-256, quantisation variants, delete and disk usage.
 - **Standard APIs** on `127.0.0.1:11435`: OpenAI (`/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`,
-  `/v1/audio/transcriptions`, `/v1/models`), Anthropic Messages (`/v1/messages`) and Ollama (`/api/chat`,
-  `/api/generate`, `/api/tags`, `/api/embed`), with streaming, tool calls, vision and JSON-schema output.
-- **Extras for apps (`/x/v1`):** pick a model by capability (`auto:vision,8k,fast`), a priority queue (interactive
-  before background before batch) with cancel and progress, knowledge collections (local RAG), task endpoints
-  (summarise, classify, extract, translate), token counting, a response cache, and per-app usage and limits.
-- **Memory that looks after itself:** live system RAM/VRAM monitoring, models released when idle and reloaded on the
-  next request, release under memory pressure (never a model that is answering), and presets: Low memory, Balanced,
-  Performance.
-- **Security:** per-app keys approved with a pairing code and kept in the OS credential store, per-app permissions,
-  `Host`/`Origin` checks against DNS rebinding; sharing on your own network only if you turn it on (TLS, pinned
-  certificate).
-- **Engines as separate processes:** each engine is an `Engine` adapter run as its own process under the server, so a
-  crashing engine never takes Pitwall down. There is no plugin system (ADR 0010).
-- **The app:** a dashboard (memory, loaded models with their idle countdown, tokens per second, queue, per-app
-  usage, history), model and engine managers, apps and keys, a request inspector, a chat playground with side-by-side
-  comparison, benchmarks on your hardware, and a tray / menu-bar view.
+  `/v1/models`), Anthropic Messages (`/v1/messages`) and Ollama (`/api/chat`, `/api/generate`, `/api/tags`, `/api/ps`,
+  `/api/embed`), with streaming, tool calls, vision and JSON-schema output.
+- **Extras for apps** under `/x/v1`: pick a model by capability (`auto:vision,8k,fast`), priorities (interactive before
+  background before batch) with cancel, pairing, task endpoints, token helpers, provenance headers on every answer.
+- **Memory management.** Presets (Low memory, Balanced, Performance), idle and deep-idle release, pressure release,
+  pinned models, a countdown on the dashboard.
+- **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits, an offline mode.
+- **Packs.** Add engines and model lists with TOML files, no code ([user guide](docs/user-guide.md#packs)).
+- **The app.** Dashboard, models, engines, apps, requests, playground, benchmarks, settings, tray.
+
+Not built yet: LAN sharing with TLS, a response cache, knowledge collections (RAG), MCP and tool hosting, speech to
+text, stored benchmarks. See the [roadmap](docs/roadmap.md).
+
+## Install
+
+There are no installers yet: they are built by the release workflow once the Tauri app lands and are unsigned until
+the signing keys exist ([releasing](docs/releasing.md)). Per-OS notes: [macOS](docs/macos.md),
+[Linux](docs/linux.md), [Windows](docs/windows.md). Until then, build the server from source:
+
+```sh
+cargo build -p pitwall-server --release
+./target/release/pitwall-server --help
+```
+
+Requirements: Rust 1.88 or newer. Engines and models are downloaded from inside Pitwall, never bundled.
+
+## Quick start
+
+With the server running (`cargo run -p pitwall-server`, or the app once it ships):
+
+```sh
+# 1. The server answers on 127.0.0.1 only
+curl http://127.0.0.1:11435/x/v1/health
+
+# 2. Install an engine and download a model: Pitwall > Engines and Pitwall > Models.
+#    From the command line the management API does the same with the admin key in <data folder>/admin.key:
+KEY=$(cat "$HOME/Library/Application Support/Pitwall/admin.key")        # macOS path; see docs/user-guide.md
+curl -s -X POST http://127.0.0.1:11435/mgmt/v1/rpc/engines -H "Authorization: Bearer $KEY"
+
+# 3. Create an API key in Pitwall > Apps (or pair an app), then use any client:
+export OPENAI_BASE_URL=http://127.0.0.1:11435/v1
+export OPENAI_API_KEY=pw_your_key_here
+```
+
+The step-by-step version, with what to expect at each point, is the [user guide](docs/user-guide.md).
+
+## API examples
+
+```sh
+# OpenAI chat (add "stream": true for server-sent events)
+curl http://127.0.0.1:11435/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","messages":[{"role":"user","content":"Say hello in five words."}]}'
+
+# Anthropic Messages (the key goes in x-api-key)
+curl http://127.0.0.1:11435/v1/messages \
+  -H "x-api-key: $OPENAI_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
+  -d '{"model":"auto:chat","max_tokens":64,"messages":[{"role":"user","content":"Say hello."}]}'
+
+# Ollama chat
+curl http://127.0.0.1:11435/api/chat -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","messages":[{"role":"user","content":"Say hello."}],"stream":false}'
+```
+
+Every answer carries `X-Pitwall-Model`, `X-Pitwall-Engine` and `X-Pitwall-Chosen-By`, and `X-Pitwall-Cold-Start-Ms`
+when the model had to be loaded first. More examples (streaming, JSON-schema output, priorities, pairing) are in the
+[user guide](docs/user-guide.md). The model names you can use are the ids shown in the Models screen and by
+`GET /v1/models`.
 
 ## For app developers
 
-Apps find Pitwall through a `discovery.json` file (or port 11435), pair once with a six-digit code the user approves,
-then use the OpenAI-compatible API with a few headers for priority and provenance. Debrief keeps its own built-in AI as
-the default and offline fallback. See [ADR 0009](docs/adr/0009-app-integration-contract.md).
+Apps find Pitwall through `discovery.json` in its data folder (or port 11435), pair once with a six-digit code the user
+approves, then use the OpenAI-compatible API with a few headers for priority and provenance. Debrief keeps its own
+built-in AI as the default and offline fallback. See
+[ADR 0009](docs/adr/0009-app-integration-contract.md) and [ADR 0003](docs/adr/0003-api-surface-and-compatibility.md).
 
 ## Repository
 
 | Path | What it is |
-|---|---|
-| `crates/pitwall-core` | Pure logic: API formats, scheduler, memory policy, selection, keys, metrics, settings |
+| --- | --- |
+| `crates/pitwall-core` | Pure logic: API formats, scheduler, memory policy, selection, keys, metrics, settings, packs |
 | `crates/pitwall-loopback` | HTTP client that can only talk to `127.0.0.1` (engines) |
-| `crates/pitwall-server` | The server (in progress) |
-| `app/` | Angular UI (Tauri shell to come) |
-| `docs/adr` | Architecture decisions |
+| `crates/pitwall-server` | The server: engines, library, serving, auth, HTTP APIs, management API |
+| `app/` | Angular UI (the Tauri shell in `app/src-tauri` is being built) |
+| `docs/` | [Architecture](docs/architecture.md), [design diagrams](docs/design.md), [features](docs/features.md), [user guide](docs/user-guide.md), [development](docs/development.md), [releasing](docs/releasing.md), [roadmap](docs/roadmap.md), [testing manual](docs/testing-manual.md), [ADRs](docs/adr/README.md) |
 
-Engineering rules for contributors and coding agents are in [AGENTS.md](AGENTS.md).
+Engineering rules for contributors and coding agents are in [AGENTS.md](AGENTS.md); lessons from the other suite apps
+are in [docs/suite-lessons.md](docs/suite-lessons.md).
 
-## Roadmap
+## Documentation
 
-1. Server: engines (llama.cpp), model library and downloads, serving with load-on-first-use and idle release, the
-   standard APIs, `/x/v1` and the management API, the no-network test.
-2. Tauri app: tray / menu bar, dashboard and screens, updater, start at login; Windows installer and macOS `.dmg`.
-3. ADRs for the architecture, API compatibility, engines, queue, memory release, security and metrics;
-   `docs/development.md`, `docs/releasing.md`; CI on Linux, Windows and macOS.
-4. Knowledge collections, task endpoints, MCP and tool hosting, benchmarks.
-5. More engines: MLX, whisper.cpp, embeddings and rerankers, vLLM.
-6. Debrief integration (its side), then Pitcrew, Spotter and Dyno.
+- [Features](docs/features.md) and the [user guide](docs/user-guide.md)
+- [macOS](docs/macos.md), [Linux](docs/linux.md) and [Windows](docs/windows.md) guides
+- [Architecture](docs/architecture.md), [design diagrams](docs/design.md), [decisions](docs/adr/README.md)
+- [Development](docs/development.md), [releasing](docs/releasing.md), [testing manual](docs/testing-manual.md)
+- [Roadmap](docs/roadmap.md)
 
 ## Licence
 
-MIT OR Apache-2.0.
+MIT OR Apache-2.0 ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
