@@ -70,6 +70,8 @@ pub fn dispatch() -> Option<i32> {
     None
 }
 
+/// Prints a verb's outcome and gives its exit code (Windows' own verb runner reports for itself).
+#[cfg_attr(windows, allow(dead_code))]
 fn report(result: Result<String, String>) -> i32 {
     match result {
         Ok(m) => {

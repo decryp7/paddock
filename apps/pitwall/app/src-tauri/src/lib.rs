@@ -206,10 +206,10 @@ pub fn run() {
     // Closing the window destroys it and Pitwall stays in the tray (a hidden webview could come back blank on macOS and
     // kept its memory); Open in the tray, or the Dock icon on macOS, creates it again. Quit exits.
     app.run(|app, event| match event {
-        tauri::RunEvent::ExitRequested { code, api, .. } => {
-            if shell::handle(app, Lifecycle::ExitRequested { code }) == window::Reaction::KeepRunning {
-                api.prevent_exit();
-            }
+        tauri::RunEvent::ExitRequested { code, api, .. }
+            if shell::handle(app, Lifecycle::ExitRequested { code }) == window::Reaction::KeepRunning =>
+        {
+            api.prevent_exit();
         }
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {

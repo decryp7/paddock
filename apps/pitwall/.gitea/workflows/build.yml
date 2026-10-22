@@ -215,7 +215,7 @@ jobs:
         run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
 
       - name: Script tests
-        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/ci/
+        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/ci/*.test.mjs
 
       # ADR 0001: reqwest is referenced only in crates/pitwall-server/src/egress.rs.
       - name: Privacy (outbound HTTP only through egress.rs)
