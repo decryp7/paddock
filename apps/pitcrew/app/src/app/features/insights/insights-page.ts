@@ -39,9 +39,9 @@ export class InsightsPage implements OnInit {
     const d = this.data();
     if (!d) return [];
     return [
+      { label: 'Success rate', value: formatPermille(d.successPermille) },
       { label: 'Average queue time', value: formatDuration(d.queue.avgMs) },
       { label: '95th percentile queue time', value: formatDuration(d.queue.p95Ms) },
-      { label: 'Jobs measured', value: formatCount(d.jobs) },
     ];
   });
   protected readonly footer = computed(() => {

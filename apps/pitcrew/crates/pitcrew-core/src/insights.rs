@@ -178,6 +178,8 @@ pub struct Insights {
     pub jobs: u32,
     /// Jobs whose outcome the server told.
     pub jobs_with_outcome: u32,
+    /// Success share of all jobs with a known outcome, per mille (`None`: none known).
+    pub success_permille: Option<u32>,
     /// Repositories, most jobs first.
     pub repos: Vec<RepoInsight>,
     /// The slowest jobs by average duration.
@@ -319,6 +321,12 @@ pub fn compute(jobs: &[InsightJob], now: Timestamp, range_days: u32, utc_offset_
         })
         .collect();
     repo_rows.sort_by(|a, b| b.jobs.cmp(&a.jobs).then_with(|| a.repo.cmp(&b.repo)));
+    let (all_ok, all_bad) = in_range.iter().fold((0u32, 0u32), |(s, f), j| match j.conclusion {
+        Conclusion::Success => (s + 1, f),
+        Conclusion::Failure => (s, f + 1),
+        _ => (s, f),
+    });
+    out.success_permille = permille(all_ok, all_ok + all_bad);
     repo_rows.truncate(MAX_REPOS);
     out.repos = repo_rows;
 
@@ -529,6 +537,8 @@ mod tests {
         }
         let r = compute(&jobs, now(), 7, 0);
         assert_eq!((r.range_days, r.jobs, r.jobs_with_outcome), (7, 13, 13));
+        // 7 successes (5 test: 3 ok, 4 build) and 6 failures (2 test, 4 lint) of 13 known outcomes.
+        assert_eq!(r.success_permille, Some(538));
         assert_eq!(r.slowest[0].job, "build");
         assert_eq!((r.slowest[0].avg_ms, r.slowest[0].runs), (40 * 60_000, 4));
         assert_eq!(r.flaky.len(), 1, "{:?}", r.flaky);

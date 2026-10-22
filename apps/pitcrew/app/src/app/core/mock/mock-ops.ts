@@ -83,6 +83,7 @@ export function demoInsights(now: number, days: number): Insights {
     rangeDays: days,
     jobs: total,
     jobsWithOutcome: total - 14,
+    successPermille: 892,
     repos,
     slowest: [
       { repo: 'acme/mobile-app', job: 'build (macos-latest)', runs: 18, avgMs: 22 * MINUTE + 40_000, p95Ms: 31 * MINUTE, maxMs: 38 * MINUTE },

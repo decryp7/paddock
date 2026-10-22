@@ -29,11 +29,12 @@ describe('InsightsPage', () => {
     expect([...el.querySelectorAll('.segmented button')].map((b) => text(b))).toEqual(['7 days', '14 days', '30 days', '90 days']);
     for (const h of ['Advice', 'Success rate per repository', 'Slowest jobs', 'Flaky jobs', 'Runner load']) expect(text(el)).toContain(h);
     expect([...el.querySelectorAll('.kpi')].map((k) => text(k.querySelector('.faint')))).toEqual([
+      'Success rate',
       'Average queue time',
       '95th percentile queue time',
-      'Jobs measured',
     ]);
     expect(el.querySelectorAll('.kpi .hero').length).toBe(3);
+    expect(text(el.querySelector('.kpi .hero'))).toBe('89%');
     expect(text(el.querySelector('[data-testid="repos-foot"]'))).toMatch(/jobs in total, [\d,]+ with a known outcome/);
     expect(el.querySelector('thead th')?.textContent).not.toMatch(/^[A-Z ]+$/);
   });

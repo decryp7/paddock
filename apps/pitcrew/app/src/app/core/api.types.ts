@@ -863,6 +863,8 @@ export interface Insights {
   rangeDays: number;
   jobs: number;
   jobsWithOutcome: number;
+  /** Success share of all jobs with a known outcome, per mille. */
+  successPermille: number | null;
   repos: RepoInsight[];
   slowest: JobStat[];
   flaky: FlakyJob[];
