@@ -13,6 +13,8 @@ import type {
   AppPermissions,
   AppUsageSeries,
   BenchmarkResult,
+  BuildCapability,
+  Capability,
   Engine,
   EventKind,
   Fit,
@@ -219,6 +221,26 @@ export function demoLoaded(now: number, idleSecs = 600): LoadedModel[] {
   ];
 }
 
+/** The capability floors of the engine's matrix (capabilities.json), as the mock shows them. */
+const CAPABILITY_FLOORS: ReadonlyArray<readonly [Capability, string, number]> = [
+  ['chat', 'Chat and completion', 0],
+  ['json', 'JSON and JSON-schema output', 3000],
+  ['tools', 'Tool calling', 4600],
+  ['vision', 'Image input (vision projector)', 5600],
+  ['embeddings', 'Embeddings', 3000],
+  ['rerank', 'Reranking', 4100],
+];
+
+/** What a build with this release tag supports, in the engine's own words. */
+export function demoBuildCapabilities(tag: string): BuildCapability[] {
+  const have = Number(tag.replace(/^b/, '')) || 0;
+  return CAPABILITY_FLOORS.map(([capability, label, min]) =>
+    have >= min
+      ? { capability, label, status: 'supported', minBuild: null, hint: null }
+      : { capability, label, status: 'needsBuild', minBuild: min, hint: `Install llama.cpp b${min} or newer in Engines, or unpin the old build.` },
+  );
+}
+
 export function demoEngines(now: number): Engine[] {
   return [
     {
@@ -230,7 +252,7 @@ export function demoEngines(now: number): Engine[] {
       builds: [
         { id: 'cuda-13', tag: 'b11669', label: 'CUDA 13 (NVIDIA)', sizeBytes: 412 * MiB, selfTest: 'passed', selfTestMessage: 'CUDA0: NVIDIA GeForce RTX 4070 (12282 MiB)', devices: ['CUDA0: NVIDIA GeForce RTX 4070'], active: true, outdated: true },
         { id: 'vulkan', tag: 'b11669', label: 'Vulkan', sizeBytes: 38 * MiB, selfTest: 'passed', selfTestMessage: 'Vulkan0: NVIDIA GeForce RTX 4070', devices: ['Vulkan0: NVIDIA GeForce RTX 4070'], active: false, outdated: true },
-        { id: 'cpu', tag: 'b11602', label: 'CPU (AVX2)', sizeBytes: 24 * MiB, selfTest: 'notRun', selfTestMessage: null, devices: ['CPU'], active: false, outdated: true },
+        { id: 'cpu', tag: 'b4300', label: 'CPU (AVX2)', sizeBytes: 24 * MiB, selfTest: 'notRun', selfTestMessage: null, devices: ['CPU'], active: false, outdated: true },
       ],
       catalog: [
         { id: 'cuda-13', label: 'CUDA 13 (NVIDIA)', tag: 'b11702', downloadBytes: 398 * MiB, suggested: true, installed: false },
@@ -243,7 +265,7 @@ export function demoEngines(now: number): Engine[] {
         { pid: 20112, modelId: 'llama-3.2-3b-instruct-q5_k_m', health: 'healthy', restarts: 1, rssBytes: 0.6 * GiB, startedAt: now - 14 * MIN },
         { pid: 9960, modelId: 'nomic-embed-text-v1.5-f16', health: 'healthy', restarts: 0, rssBytes: 0.21 * GiB, startedAt: now - 5 * HOUR },
       ],
-      rollbackTo: 'b11602',
+      rollbackTo: 'vulkan',
     },
     {
       kind: 'pack',

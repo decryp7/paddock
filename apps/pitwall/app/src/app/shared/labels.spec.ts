@@ -13,6 +13,7 @@ import {
   pressureLook,
   presetStatusLook,
   selfTestLook,
+  capabilityLook,
   severityTone,
   statusTone,
   loadTone,
@@ -95,5 +96,13 @@ describe('presetStatusLook', () => {
     expect(presetStatusLook({ state: 'stale', message: 'm' })).toEqual({ label: 'Model removed', tone: 'bad' });
     expect(presetStatusLook({ state: 'noMatch', message: 'm' })).toEqual({ label: 'No model matches', tone: 'warn' });
     expect(presetStatusLook({ state: 'shadowed', message: 'm' })).toEqual({ label: 'Shadowed by a model', tone: 'warn' });
+  });
+
+  it('words a build capability: supported, needs a named build, not supported', () => {
+    const base = { capability: 'vision' as const, label: 'Image input', hint: null };
+    expect(capabilityLook({ ...base, status: 'supported', minBuild: null })).toEqual({ label: 'Supported', tone: 'ok' });
+    expect(capabilityLook({ ...base, status: 'needsBuild', minBuild: 5600 })).toEqual({ label: 'Needs b5600', tone: 'warn' });
+    expect(capabilityLook({ ...base, status: 'needsBuild', minBuild: null }).label).toBe('Needs a newer build');
+    expect(capabilityLook({ ...base, status: 'notSupported', minBuild: null })).toEqual({ label: 'Not supported', tone: 'bad' });
   });
 });

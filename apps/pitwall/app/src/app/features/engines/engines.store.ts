@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { CatalogBuild, CommandError, Engine, InstalledBuild, PackNote } from '../../core/api.types';
+import type { BuildCapability, CatalogBuild, CommandError, Engine, EnginePinState, InstalledBuild, PackNote, PinChange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
@@ -12,21 +12,27 @@ interface EnginesState {
   /** Pack files that were skipped, and non-fatal notes about loaded ones. */
   packProblems: PackNote[];
   packWarnings: PackNote[];
+  /** Engine pins and roll back (ADR 0018); null until loaded, and when the call fails the Engines page still works. */
+  pins: EnginePinState | null;
+  /** What each installed build supports, by build id. */
+  capabilities: Record<string, BuildCapability[]>;
   error: CommandError | null;
-  /** Actions in flight, by key (`install:<id>`, `remove:<id>:<tag>`, `select`, `rollback`). */
+  /** Actions in flight, by key (`install:<id>`, `remove:<id>:<tag>`, `select`, `rollback`, `pin`). */
   busy: Record<string, true>;
 }
 
-const initial: EnginesState = { engines: [], loading: false, loaded: false, packProblems: [], packWarnings: [], error: null, busy: {} };
+const initial: EnginesState = { engines: [], loading: false, loaded: false, packProblems: [], packWarnings: [], pins: null, capabilities: {}, error: null, busy: {} };
 
 /** The Engines screen: llama.cpp builds (installed, catalog, choice, rollback), processes and planned engines. */
 export const EnginesStore = signalStore(
   withState(initial),
-  withComputed(({ engines, busy }) => ({
+  withComputed(({ engines, busy, pins }) => ({
     /** The engines that can serve today (llama.cpp first). */
     available: computed(() => engines().filter((e) => e.availability.state === 'available' || e.builds.length > 0 || e.kind === 'pack')),
     /** Planned or unsupported engines, shown with their honest reason. */
     planned: computed(() => engines().filter((e) => e.availability.state !== 'available' && e.builds.length === 0 && e.kind !== 'pack')),
+    /** The build pinned for all models. */
+    pinnedGlobal: computed(() => pins()?.global ?? null),
     isBusy: computed(() => (key: string) => key in busy()),
   })),
   withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => {
@@ -49,18 +55,25 @@ export const EnginesStore = signalStore(
         } catch {
           patchState(store, { packProblems: [], packWarnings: [] });
         }
+        // Pins and capabilities are secondary too: without them the page shows builds, just no pin controls.
+        try {
+          const [pins, caps] = await Promise.all([backend.enginePins(), backend.buildCapabilities()]);
+          patchState(store, { pins, capabilities: Object.fromEntries(caps.map((c) => [c.buildId, c.capabilities])) });
+        } catch {
+          patchState(store, { pins: null, capabilities: {} });
+        }
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
       }
     }
 
     /** Runs an action with a busy flag, then reloads; a failure becomes a toast and the last good data stays. */
-    async function act(key: string, fn: () => Promise<unknown>, ok: string): Promise<boolean> {
+    async function act<T>(key: string, fn: () => Promise<T>, ok: string | ((result: T) => string)): Promise<boolean> {
       if (key in store.busy()) return false;
       setBusy(key, true);
       try {
-        await fn();
-        toasts.ok(ok);
+        const result = await fn();
+        toasts.ok(typeof ok === 'string' ? ok : ok(result));
         await load();
         return true;
       } catch (e) {
@@ -88,8 +101,15 @@ export const EnginesStore = signalStore(
         return act('select', () => backend.selectBuild(choice), choice === 'auto' ? 'Pitwall picks the build automatically.' : 'Build selected. Models use it from their next load.');
       },
 
+      /** Rolls back to the previous good build and pins it; the toast says which loaded models switch on their next load. */
       rollback(): Promise<boolean> {
-        return act('rollback', () => backend.rollbackBuild(), 'Rolled back to the previous build.');
+        return act('rollback', () => backend.rollbackBuild(), (c: PinChange) => c.message);
+      },
+
+      /** Pins a build for all models, or unpins it when it is the pinned one. */
+      togglePin(build: InstalledBuild): Promise<boolean> {
+        const pinned = store.pins()?.global === build.id;
+        return act('pin', () => backend.setGlobalPin(pinned ? null : build.id), (c: PinChange) => c.message);
       },
     };
   }),

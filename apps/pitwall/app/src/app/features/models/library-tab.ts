@@ -116,6 +116,18 @@ export function contextText(tokens: number | null): string {
                     } @else {
                       <span class="faint">llama.cpp</span>
                     }
+                    @if (!m.engine && store.enginePins() && store.pinnableBuilds().length) {
+                      <label class="sr-only" [for]="'pin-' + m.id">Engine build for {{ m.name }}</label>
+                      <select class="select idle pin-select" [id]="'pin-' + m.id" [disabled]="store.isBusy()('pin:' + m.id)" (change)="setPin(m, $any($event.target).value)">
+                        <option value="" [selected]="!store.pinOf()(m.id)">Build: follows global choice</option>
+                        @for (b of store.pinnableBuilds(); track b.id) {
+                          <option [value]="b.id" [selected]="store.pinOf()(m.id)?.buildId === b.id">Pin to {{ b.label }} {{ b.tag }}</option>
+                        }
+                      </select>
+                      @if (store.pinOf()(m.id); as pin) {
+                        <span class="pill pinned-build" data-tone="info" [matTooltip]="m.loaded ? 'Loaded models keep their engine until they are loaded again' : 'Used from the next load'">pinned to {{ pin.buildId }}{{ pin.tag ? ' ' + pin.tag : '' }}</span>
+                      }
+                    }
                   </td>
                   <td>
                     <button
@@ -198,6 +210,14 @@ export function contextText(tokens: number | null): string {
     :host {
       display: grid;
       gap: var(--sp-3);
+    }
+    .pin-select {
+      display: block;
+      margin-top: 4px;
+    }
+    .pinned-build {
+      margin-top: 4px;
+      color: var(--accent);
     }
     .disk {
       display: flex;
@@ -444,6 +464,10 @@ export class LibraryTab {
 
   protected setIdle(m: LocalModel, value: string): void {
     void this.store.setIdle(m.id, value === '' ? null : Number(value));
+  }
+
+  protected setPin(m: LocalModel, value: string): void {
+    void this.store.setPin(m.id, value === '' ? null : value);
   }
 
   protected setEngine(m: LocalModel, value: string): void {

@@ -121,6 +121,18 @@ export function selfTestLook(s: SelfTest): Look {
   return map[s];
 }
 
+/** A build's verdict on one capability, in words: supported, needs a newer build (named), or not supported. */
+export function capabilityLook(c: BuildCapability): Look {
+  switch (c.status) {
+    case 'supported':
+      return { label: 'Supported', tone: 'ok' };
+    case 'needsBuild':
+      return { label: c.minBuild === null ? 'Needs a newer build' : `Needs b${c.minBuild}`, tone: 'warn' };
+    case 'notSupported':
+      return { label: 'Not supported', tone: 'bad' };
+  }
+}
+
 export function fitLook(v: FitVerdict): Look {
   const map: Record<FitVerdict, Look> = {
     fits: { label: 'Fits', tone: 'ok' },

@@ -9,6 +9,7 @@ import type {
   AppPermissions,
   AppUpdateStatus,
   BenchmarkResult,
+  BuildCapabilities,
   CommandError,
   Fit,
   CreatedKey,
@@ -18,6 +19,9 @@ import type {
   Download,
   Engine,
   EngineIssue,
+  EnginePinState,
+  PinChange,
+  RollbackTarget,
   History,
   UsageRange,
   UsageSeries,
@@ -55,6 +59,7 @@ import {
   VRAM_TOTAL,
   demoApps,
   demoBenchmarks,
+  demoBuildCapabilities,
   demoEngines,
   demoEvents,
   demoFit,
@@ -129,6 +134,7 @@ export class MockBackend implements PitwallBackend {
   private events_: PitwallEvent[];
   private settings_: Settings;
   private engines_: Engine[];
+  private pins_: { global: string | null; models: Record<string, string>; history: string[] } = { global: null, models: {}, history: ['vulkan'] };
   private downloads_: Download[] = [];
   private readonly requests_: RequestRecord[];
   private presets_: ModelPreset[];
@@ -634,18 +640,110 @@ export class MockBackend implements PitwallBackend {
     return this.reply('selectBuild', () => {
       const e = this.engines_[0]!;
       if (choice !== 'auto' && !e.builds.some((b) => b.id === choice)) this.fail('notFound', `No installed build ${choice}.`);
+      const before = e.builds.find((b) => b.active)?.id;
       e.buildChoice = choice;
-      const pick = choice === 'auto' ? (e.builds.find((b) => b.selfTest === 'passed' && b.id.startsWith('cuda')) ?? e.builds[0]) : e.builds.find((b) => b.id === choice);
-      for (const b of e.builds) b.active = b === pick;
+      this.refreshActive(before);
     });
   }
 
-  rollbackBuild(): Promise<void> {
+  rollbackBuild(): Promise<PinChange> {
     return this.reply('rollbackBuild', () => {
       const e = this.engines_[0]!;
-      if (!e.rollbackTo) this.fail('conflict', 'There is nothing to roll back to.');
-      e.rollbackTo = null;
+      const before = e.builds.find((b) => b.active)?.id;
+      const { target, blocked } = this.rollbackTarget();
+      if (!target) this.fail('conflict', blocked ?? 'There is no earlier engine build to go back to.');
+      this.pins_.global = target.buildId;
+      this.refreshActive(before);
+      const later = before === target.buildId ? [] : this.loaded.map((l) => l.modelId);
+      return this.pinChange(`Rolled back to ${target.buildId} ${target.tag} and pinned it for all models; unpin it to follow the automatic choice again.`, later);
     });
+  }
+
+  enginePins(): Promise<EnginePinState> {
+    return this.reply('enginePins', () => this.pinState());
+  }
+
+  setGlobalPin(buildId: string | null): Promise<PinChange> {
+    return this.reply('setGlobalPin', () => {
+      const e = this.engines_[0]!;
+      if (buildId !== null) this.checkPinnable(buildId, 'pinned for all models');
+      const before = e.builds.find((b) => b.active)?.id;
+      this.pins_.global = buildId;
+      this.refreshActive(before);
+      const now = e.builds.find((b) => b.active)?.id;
+      return this.pinChange(buildId ? `${buildId} is pinned for all models.` : 'All models follow the automatic engine choice again.', before === now ? [] : this.loaded.map((l) => l.modelId));
+    });
+  }
+
+  setModelPin(modelId: string, buildId: string | null): Promise<PinChange> {
+    return this.reply('setModelPin', () => {
+      if (!this.library.some((x) => x.id === modelId)) this.fail('notFound', `No model ${modelId}.`);
+      if (buildId !== null) this.checkPinnable(buildId, `pinned for ${modelId}`);
+      if (buildId === null) delete this.pins_.models[modelId];
+      else this.pins_.models[modelId] = buildId;
+      const running = this.loaded.some((l) => l.modelId === modelId) && buildId !== null && buildId !== this.engines_[0]!.builds.find((b) => b.active)?.id;
+      return this.pinChange(buildId ? `${modelId} is pinned to ${buildId}.` : `${modelId} follows the global choice again.`, running ? [modelId] : []);
+    });
+  }
+
+  buildCapabilities(): Promise<BuildCapabilities[]> {
+    return this.reply('buildCapabilities', () => this.engines_[0]!.builds.map((b) => ({ buildId: b.id, tag: b.tag, capabilities: demoBuildCapabilities(b.tag) })));
+  }
+
+  /** A pin only goes to a build that is installed and passed its self-test (the engine's rule). */
+  private checkPinnable(buildId: string, scope: string): void {
+    const b = this.engines_[0]!.builds.find((x) => x.id === buildId);
+    if (!b) this.fail('notFound', `The engine build ${buildId} is ${scope} but is not installed. Install it in Engines, or remove the pin.`);
+    if (b.selfTest !== 'passed') this.fail('conflict', `The engine build ${buildId} is ${scope} but failed its self-test. Reinstall it in Engines, or remove the pin.`);
+  }
+
+  /** Recomputes which build serves models in general, remembers the one it replaced, and where roll back goes. */
+  private refreshActive(before: string | undefined): void {
+    const e = this.engines_[0]!;
+    const pick = this.pins_.global
+      ? e.builds.find((b) => b.id === this.pins_.global)
+      : e.buildChoice === 'auto'
+        ? (e.builds.find((b) => b.selfTest === 'passed' && b.id.startsWith('cuda')) ?? e.builds[0])
+        : e.builds.find((b) => b.id === e.buildChoice);
+    for (const b of e.builds) b.active = b === pick;
+    if (before && pick && before !== pick.id) this.pins_.history = [before, ...this.pins_.history.filter((h) => h !== before)].slice(0, 8);
+    e.rollbackTo = this.rollbackTarget().target?.buildId ?? null;
+  }
+
+  private rollbackTarget(): { target: RollbackTarget | null; blocked: string | null } {
+    const e = this.engines_[0]!;
+    const current = e.builds.find((b) => b.active)?.id;
+    const failed: string[] = [];
+    let gone = false;
+    for (const id of this.pins_.history.filter((h) => h !== current)) {
+      const b = e.builds.find((x) => x.id === id);
+      if (b?.selfTest === 'passed') return { target: { buildId: b.id, tag: b.tag }, blocked: null };
+      if (b) failed.push(id);
+      else gone = true;
+    }
+    if (failed.length) return { target: null, blocked: `The earlier engine build(s) ${failed.join(', ')} failed their self-test, so Pitwall will not go back to them. Reinstall one in Engines.` };
+    return { target: null, blocked: gone ? 'The earlier engine builds are no longer installed. Install one in Engines.' : 'There is no earlier engine build to go back to.' };
+  }
+
+  private pinState(): EnginePinState {
+    const e = this.engines_[0]!;
+    const tag = (id: string) => e.builds.find((b) => b.id === id)?.tag ?? null;
+    const { target, blocked } = this.rollbackTarget();
+    return {
+      global: this.pins_.global,
+      models: Object.entries(this.pins_.models).map(([modelId, buildId]) => ({ modelId, buildId, tag: tag(buildId) })),
+      active: e.builds.find((b) => b.active)?.id ?? null,
+      activeSource: this.pins_.global ? 'pinned for all models' : 'chosen automatically',
+      rollbackTo: target,
+      rollbackBlocked: blocked,
+      problems: [],
+    };
+  }
+
+  private pinChange(message: string, later: string[]): PinChange {
+    const note = later.length ? ` Loaded models keep their current engine until they are loaded again: ${later.join(', ')}.` : '';
+    this.engines_[0]!.rollbackTo = this.rollbackTarget().target?.buildId ?? null;
+    return { state: this.pinState(), appliesOnNextLoad: later, message: message + note };
   }
 
   // ---- Model presets and aliases -----------------------------------------------------------------------------

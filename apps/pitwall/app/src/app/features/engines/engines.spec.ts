@@ -52,7 +52,8 @@ describe('EnginesStore', () => {
     expect(await store.install(store.available()[0]!.catalog[0]!)).toBe(true);
     expect((await backend.downloads())[0]!.kind).toBe('engine');
     expect(await store.rollback()).toBe(true);
-    expect(store.available()[0]!.rollbackTo).toBeNull();
+    expect(store.pins()?.global).toBe('vulkan');
+    expect(toasts.toasts().at(-1)?.message).toContain('Rolled back to vulkan b11669');
     expect(toasts.toasts().at(-1)?.tone).toBe('ok');
   });
 
@@ -62,9 +63,10 @@ describe('EnginesStore', () => {
     const active = store.available()[0]!.builds.find((b) => b.active)!;
     expect(await store.remove(active)).toBe(false);
     expect(toasts.toasts().at(-1)?.message).toContain('in use');
-    expect(await store.rollback()).toBe(true);
+    const first = store.rollback();
     expect(await store.rollback()).toBe(false);
-    expect(toasts.toasts().at(-1)?.message).toContain('nothing to roll back');
+    expect(await first).toBe(true);
+    expect(toasts.toasts().at(-1)?.tone).toBe('ok');
     const a = store.select('vulkan');
     expect(store.isBusy()('select')).toBe(true);
     expect(await store.select('cpu')).toBe(false);
@@ -107,7 +109,7 @@ describe('EnginesPage', () => {
     expect(el.textContent).toContain('Self-test passed');
     expect(el.textContent).toContain('Not tested');
     expect(el.querySelector('.build.suggested')?.textContent).toContain('Suggested');
-    expect(el.textContent).toContain('Roll back to b11602');
+    expect(el.textContent).toContain('Roll back to Vulkan b11669');
     expect(el.textContent).toContain('Healthy');
     const planned = el.querySelectorAll('.planned li');
     expect(planned.length).toBe(3);
@@ -136,25 +138,26 @@ describe('EnginesPage', () => {
     expect(el.textContent).toContain('b11702');
     live.disconnect();
 
-    (el.querySelector('button[aria-label="Remove CPU (AVX2) b11602"]') as HTMLButtonElement).click();
+    (el.querySelector('button[aria-label="Remove CPU (AVX2) b4300"]') as HTMLButtonElement).click();
     await settle();
-    expect(el.querySelector('button[aria-label="Remove CPU (AVX2) b11602"]')).toBeNull();
+    expect(el.querySelector('button[aria-label="Remove CPU (AVX2) b4300"]')).toBeNull();
 
     const rollback = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Roll back'))!;
     rollback.click();
     await settle();
-    expect(el.textContent).not.toContain('Roll back to');
+    // Vulkan was chosen first, so roll back went to the CUDA build, pinned it, and now offers Vulkan as the way back.
+    expect(el.textContent).toContain('Pinned to CUDA 13 (NVIDIA) b11702 for all models');
   });
 
   it('does nothing when a confirmation is declined', async () => {
     const { el, settle } = await render(new MockBackend(), false);
-    (el.querySelector('button[aria-label="Remove CPU (AVX2) b11602"]') as HTMLButtonElement).click();
+    (el.querySelector('button[aria-label="Remove CPU (AVX2) b4300"]') as HTMLButtonElement).click();
     Array.from(el.querySelectorAll('button'))
       .find((b) => b.textContent?.includes('Roll back'))!
       .click();
     await settle();
-    expect(el.querySelector('button[aria-label="Remove CPU (AVX2) b11602"]')).not.toBeNull();
-    expect(el.textContent).toContain('Roll back to b11602');
+    expect(el.querySelector('button[aria-label="Remove CPU (AVX2) b4300"]')).not.toBeNull();
+    expect(el.textContent).toContain('Roll back to Vulkan b11669');
   });
 
   it('shows an error with Retry, and Retry loads again', async () => {

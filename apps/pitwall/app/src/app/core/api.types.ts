@@ -179,6 +179,64 @@ export interface Engine {
   rollbackTo: string | null;
 }
 
+/** One model's engine pin (ADR 0018). */
+export interface ModelEnginePin {
+  modelId: string;
+  buildId: string;
+  /** The pinned build's release tag; null when it is not installed any more. */
+  tag: string | null;
+}
+
+/** Where a one-click roll back goes. */
+export interface RollbackTarget {
+  buildId: string;
+  tag: string;
+}
+
+/** The engine pins, what roll back goes to, and why not when it cannot. */
+export interface EnginePinState {
+  /** The build pinned for all models. */
+  global: string | null;
+  models: ModelEnginePin[];
+  /** The build that serves models in general now. */
+  active: string | null;
+  /** Why it was chosen, in words: `pinned for all models`, `chosen automatically`. */
+  activeSource: string;
+  rollbackTo: RollbackTarget | null;
+  /** Why roll back is not possible, when it is not. */
+  rollbackBlocked: string | null;
+  /** Pins that cannot be used now (build uninstalled or failed its self-test), each with what to do. */
+  problems: string[];
+}
+
+/** The result of changing a pin or rolling back. */
+export interface PinChange {
+  state: EnginePinState;
+  /** Loaded models that keep their current engine: the change applies when they next load. */
+  appliesOnNextLoad: string[];
+  message: string;
+}
+
+export type CapabilityStatus = 'supported' | 'needsBuild' | 'notSupported';
+
+/** Whether one build supports one capability. */
+export interface BuildCapability {
+  capability: Capability;
+  label: string;
+  status: CapabilityStatus;
+  /** The llama.cpp release number that would serve it (`needsBuild`). */
+  minBuild: number | null;
+  /** What to do, or why not. */
+  hint: string | null;
+}
+
+/** What an installed build can do. */
+export interface BuildCapabilities {
+  buildId: string;
+  tag: string;
+  capabilities: BuildCapability[];
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Queue and throughput
 

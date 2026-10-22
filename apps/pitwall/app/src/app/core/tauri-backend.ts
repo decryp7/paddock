@@ -5,6 +5,9 @@ import type {
   AppPermissions,
   AppUpdateStatus,
   BenchmarkResult,
+  BuildCapabilities,
+  EnginePinState,
+  PinChange,
   CreatedKey,
   DiskUsage,
   SlotFit,
@@ -177,8 +180,20 @@ export class TauriBackend implements PitwallBackend {
   selectBuild(choice: string): Promise<void> {
     return this.run('select_build', { choice });
   }
-  rollbackBuild(): Promise<void> {
+  rollbackBuild(): Promise<PinChange> {
     return this.run('rollback_build');
+  }
+  enginePins(): Promise<EnginePinState> {
+    return this.run('engine_pins');
+  }
+  setGlobalPin(buildId: string | null): Promise<PinChange> {
+    return this.run('set_global_pin', { buildId });
+  }
+  setModelPin(modelId: string, buildId: string | null): Promise<PinChange> {
+    return this.run('set_model_pin', { modelId, buildId });
+  }
+  buildCapabilities(): Promise<BuildCapabilities[]> {
+    return this.run('build_capabilities');
   }
 
   // Model presets and aliases

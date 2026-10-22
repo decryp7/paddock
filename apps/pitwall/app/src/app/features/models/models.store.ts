@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { CommandError, DiskUsage, HfModel, HfRepo, LocalModel, PackEngine, PacksInfo, QuantVariant, Recommendation, SlotsChange } from '../../core/api.types';
+import type { CommandError, DiskUsage, EnginePinState, HfModel, HfRepo, InstalledBuild, LocalModel, PackEngine, PacksInfo, PinChange, QuantVariant, Recommendation, SlotsChange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
@@ -31,6 +31,9 @@ interface ModelsState {
   /** Ids of the pack engines that have an installed build, and every loaded pack engine. */
   installedPacks: string[];
   packEngines: PackEngine[];
+  /** The llama.cpp builds installed and the engine pins, for each model's pin menu (secondary, like the pack lists). */
+  llamaBuilds: InstalledBuild[];
+  enginePins: EnginePinState | null;
   /** Actions in flight, by key (`model:<id>`, `download:<file>`, `cancel:<id>`, `cleanup`). */
   busy: Record<string, true>;
 }
@@ -57,13 +60,15 @@ const initial: ModelsState = {
   packTags: [],
   installedPacks: [],
   packEngines: [],
+  llamaBuilds: [],
+  enginePins: null,
   busy: {},
 };
 
 /** The Models screen: the local library with disk usage, Hugging Face search and a repo's quantisation variants. */
 export const ModelsStore = signalStore(
   withState(initial),
-  withComputed(({ library, disk, busy, packEngines, installedPacks }) => ({
+  withComputed(({ library, disk, busy, packEngines, installedPacks, llamaBuilds, enginePins }) => ({
     /** Engines a model can be pinned to besides llama.cpp: pack engines that are installed. */
     engineChoices: computed<PackEngine[]>(() => {
       const have = new Set(installedPacks());
@@ -79,6 +84,10 @@ export const ModelsStore = signalStore(
         .filter((m) => ids.has(m.id))
         .reduce((s, m) => s + m.sizeBytes, 0);
     }),
+    /** Builds a model can be pinned to: installed and passed their self-test. */
+    pinnableBuilds: computed(() => llamaBuilds().filter((b) => b.selfTest === 'passed')),
+    /** A model's pin, with the build's release tag. */
+    pinOf: computed(() => (modelId: string) => enginePins()?.models.find((p) => p.modelId === modelId) ?? null),
     isBusy: computed(() => (key: string) => key in busy()),
   })),
   withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => {
@@ -90,12 +99,12 @@ export const ModelsStore = signalStore(
     };
 
     /** Runs an action with a busy flag; a failure becomes a toast and the last good data stays. */
-    async function act(key: string, fn: () => Promise<unknown>, ok?: string): Promise<boolean> {
+    async function act<T>(key: string, fn: () => Promise<T>, ok?: string | ((result: T) => string)): Promise<boolean> {
       if (key in store.busy()) return false;
       setBusy(key, true);
       try {
-        await fn();
-        if (ok) toasts.ok(ok);
+        const result = await fn();
+        if (ok) toasts.ok(typeof ok === 'string' ? ok : ok(result));
         return true;
       } catch (e) {
         toasts.error(toCommandError(e));
@@ -130,9 +139,18 @@ export const ModelsStore = signalStore(
     async function loadInstalledPacks(): Promise<void> {
       try {
         const [engines, packs] = await Promise.all([backend.engines(), backend.packs()]);
-        patchState(store, { installedPacks: engines.filter((e) => e.kind === 'pack').flatMap((e) => e.builds.map((b) => b.id)), packEngines: packs.engines });
+        patchState(store, {
+          installedPacks: engines.filter((e) => e.kind === 'pack').flatMap((e) => e.builds.map((b) => b.id)),
+          packEngines: packs.engines,
+          llamaBuilds: engines.find((e) => e.kind === 'llama.cpp')?.builds ?? [],
+        });
       } catch {
-        patchState(store, { installedPacks: [], packEngines: [] });
+        patchState(store, { installedPacks: [], packEngines: [], llamaBuilds: [] });
+      }
+      try {
+        patchState(store, { enginePins: await backend.enginePins() });
+      } catch {
+        patchState(store, { enginePins: null });
       }
     }
 
@@ -193,6 +211,12 @@ export const ModelsStore = signalStore(
       async setEngine(id: string, engine: string | null): Promise<void> {
         const ok = await act(`model:${id}`, () => backend.setModelEngine(id, engine), engine === null ? 'Uses llama.cpp.' : 'Engine saved. The model uses it from its next load.');
         if (ok) patchState(store, { library: store.library().map((m) => (m.id === id ? { ...m, engine } : m)) });
+      },
+
+      /** Pins a model to an installed llama.cpp build (null: follows the global choice). A loaded model keeps its engine until its next load; the toast says so. */
+      async setPin(id: string, buildId: string | null): Promise<void> {
+        const ok = await act(`pin:${id}`, () => backend.setModelPin(id, buildId), (c: PinChange) => c.message);
+        if (ok) patchState(store, { enginePins: await backend.enginePins().catch(() => store.enginePins()) });
       },
 
       cancelDownload(id: string): Promise<boolean> {

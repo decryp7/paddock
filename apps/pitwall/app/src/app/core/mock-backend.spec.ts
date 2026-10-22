@@ -210,9 +210,61 @@ describe('MockBackend', () => {
     await mock.selectBuild('auto');
     expect((await mock.engines())[0]!.builds.find((b) => b.active)?.id).toBe('cuda-13');
     await expect(mock.selectBuild('metal')).rejects.toMatchObject({ code: 'notFound' });
-    await mock.removeBuild('cpu', 'b11602');
-    await mock.rollbackBuild();
-    await expect(mock.rollbackBuild()).rejects.toMatchObject({ code: 'conflict' });
+    await mock.removeBuild('cpu', 'b4300');
+  });
+
+  it('pins builds, rolls back to the previous good one and says which loaded models switch later', async () => {
+    const mock = new MockBackend({ now: clock });
+    expect((await mock.enginePins()).rollbackTo).toEqual({ buildId: 'vulkan', tag: 'b11669' });
+    await expect(mock.setGlobalPin('metal')).rejects.toMatchObject({ code: 'notFound', message: expect.stringContaining('Install it in Engines') });
+    await expect(mock.setGlobalPin('cpu')).rejects.toMatchObject({ code: 'conflict', message: expect.stringContaining('self-test') });
+    const pinned = await mock.setGlobalPin('vulkan');
+    expect(pinned.state).toMatchObject({ global: 'vulkan', active: 'vulkan', activeSource: 'pinned for all models' });
+    expect(pinned.appliesOnNextLoad.length).toBeGreaterThan(0);
+    expect(pinned.message).toContain('until they are loaded again');
+    expect((await mock.engines())[0]!.builds.find((b) => b.active)?.id).toBe('vulkan');
+    // cuda-13 was in use before, so roll back goes there and pins it.
+    const back = await mock.rollbackBuild();
+    expect(back.state).toMatchObject({ global: 'cuda-13', active: 'cuda-13' });
+    expect(back.message).toContain('Rolled back to cuda-13 b11669');
+    const free = await mock.setGlobalPin(null);
+    expect(free.state.global).toBeNull();
+    expect(free.state.activeSource).toBe('chosen automatically');
+  });
+
+  it('refuses to roll back when no earlier build is usable', async () => {
+    const mock = new MockBackend({ now: clock });
+    await mock.removeBuild('vulkan', 'b11669');
+    await expect(mock.rollbackBuild()).rejects.toMatchObject({ code: 'conflict', message: expect.stringContaining('no longer installed') });
+    expect((await mock.enginePins()).rollbackBlocked).toContain('no longer installed');
+    expect((await mock.enginePins()).rollbackTo).toBeNull();
+    const fresh = new MockBackend({ now: clock, empty: true });
+    await fresh.selectBuild('cuda-13');
+    await expect(fresh.rollbackBuild()).resolves.toBeDefined();
+  });
+
+  it('pins one model, validating the model and the build', async () => {
+    const mock = new MockBackend({ now: clock });
+    const id = (await mock.localModels())[0]!.id;
+    await expect(mock.setModelPin('nope', 'vulkan')).rejects.toMatchObject({ code: 'notFound' });
+    await expect(mock.setModelPin(id, 'metal')).rejects.toMatchObject({ code: 'notFound' });
+    const c = await mock.setModelPin(id, 'vulkan');
+    expect(c.state.models).toEqual([{ modelId: id, buildId: 'vulkan', tag: 'b11669' }]);
+    expect(c.message).toContain(`${id} is pinned to vulkan`);
+    const off = await mock.setModelPin(id, null);
+    expect(off.state.models).toEqual([]);
+    expect(off.message).toContain('follows the global choice');
+  });
+
+  it('reports what each build supports from its release number', async () => {
+    const mock = new MockBackend({ now: clock });
+    const caps = await mock.buildCapabilities();
+    const by = (id: string) => caps.find((c) => c.buildId === id)!.capabilities;
+    expect(by('cuda-13').every((c) => c.status === 'supported')).toBe(true);
+    const old = by('cpu');
+    expect(old.find((c) => c.capability === 'vision')).toMatchObject({ status: 'needsBuild', minBuild: 5600 });
+    expect(old.find((c) => c.capability === 'tools')?.hint).toContain('b4600');
+    expect(old.find((c) => c.capability === 'embeddings')?.status).toBe('supported');
   });
 
   it('manages apps, keys and pairings', async () => {

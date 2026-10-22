@@ -1,10 +1,10 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import type { Engine, InstalledBuild } from '../../core/api.types';
+import type { BuildCapability, Engine, InstalledBuild } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ago, bytes, percent } from '../../shared/format';
-import { availabilityLook, downloadActive, healthLook, selfTestLook } from '../../shared/labels';
+import { availabilityLook, capabilityLook, downloadActive, healthLook, selfTestLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { EnginesStore } from './engines.store';
@@ -47,10 +47,19 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
           </select>
         </div>
         <p class="hint">Automatic picks the fastest installed build that passed its self-test on this hardware.</p>
-        @if (e.rollbackTo) {
-          <button type="button" class="btn" [disabled]="store.isBusy()('rollback')" (click)="rollback()"><mat-icon svgIcon="pw:rollback" aria-hidden="true" />Roll back to {{ e.rollbackTo }}</button>
+        @if (rollbackTarget(); as t) {
+          <button type="button" class="btn" [disabled]="store.isBusy()('rollback')" (click)="rollback()"><mat-icon svgIcon="pw:rollback" aria-hidden="true" />Roll back to {{ t.label }} {{ t.tag }}</button>
+        } @else if (rollbackBlocked(); as why) {
+          <p class="hint" data-test="rollback-blocked">Roll back is not available: {{ why }}</p>
         }
       </div>
+
+      @if (pinnedLabel(); as p) {
+        <p class="pinned-note" role="status"><mat-icon svgIcon="pw:pin" aria-hidden="true" />{{ p }}</p>
+      }
+      @for (problem of problems(); track problem) {
+        <p class="pin-problem" role="alert">{{ problem }}</p>
+      }
 
       <h3>Installed builds</h3>
       @if (e.builds.length === 0) {
@@ -64,6 +73,9 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
               <th scope="col" class="right">Size</th>
               <th scope="col">Self-test</th>
               <th scope="col">Devices</th>
+              @if (canPin()) {
+                <th scope="col">Version pin</th>
+              }
               <th scope="col"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
@@ -85,12 +97,52 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
                 <td class="right num">{{ size(b.sizeBytes) }}</td>
                 <td><span class="pill dot" [attr.data-tone]="test(b).tone" [matTooltip]="b.selfTestMessage ?? ''">{{ test(b).label }}</span></td>
                 <td class="devices" [matTooltip]="b.devices.join(', ')">{{ b.devices.join(', ') || '—' }}</td>
+                @if (canPin()) {
+                  <td>
+                    <button
+                      type="button"
+                      class="btn sm pin"
+                      [class.pinned]="isPinned(b)"
+                      [attr.aria-pressed]="isPinned(b)"
+                      [attr.aria-label]="(isPinned(b) ? 'Unpin ' : 'Pin ') + b.label + ' ' + b.tag + ' for all models'"
+                      [matTooltip]="isPinned(b) ? 'Pinned for all models: automatic choice is off. Click to unpin.' : b.selfTest === 'passed' ? 'Use this build for all models, even when a better one is installed' : 'Only builds that passed their self-test can be pinned'"
+                      [disabled]="store.isBusy()('pin') || (!isPinned(b) && b.selfTest !== 'passed')"
+                      (click)="store.togglePin(b)"
+                    >
+                      <mat-icon [svgIcon]="isPinned(b) ? 'pw:pin' : 'pw:unpin'" aria-hidden="true" />{{ isPinned(b) ? 'Pinned' : 'Pin' }}
+                    </button>
+                  </td>
+                }
                 <td class="right">
+                  <button type="button" class="btn ghost sm caps-toggle" [attr.aria-expanded]="capsOpen().has(b.id)" [attr.aria-controls]="'caps-' + b.id" [attr.aria-label]="'What ' + b.label + ' ' + b.tag + ' supports'" (click)="toggleCaps(b.id)">
+                    Features
+                  </button>
                   <button type="button" class="btn ghost icon sm del" [attr.aria-label]="'Remove ' + b.label + ' ' + b.tag" [matTooltip]="b.active ? 'In use: choose another build first' : 'Remove'" [disabled]="b.active || store.isBusy()('remove:' + b.id + ':' + b.tag)" (click)="remove(b)">
                     <mat-icon svgIcon="pw:trash" aria-hidden="true" />
                   </button>
                 </td>
               </tr>
+              @if (capsOpen().has(b.id)) {
+                <tr class="caps-row">
+                  <td [id]="'caps-' + b.id" [attr.colspan]="canPin() ? 7 : 6">
+                    @if (capsOf(b); as list) {
+                      <ul class="caps" [attr.aria-label]="'Features of ' + b.label + ' ' + b.tag">
+                        @for (c of list; track c.capability) {
+                          <li>
+                            <span class="pill dot" [attr.data-tone]="capLook(c).tone">{{ capLook(c).label }}</span>
+                            <span class="cap-name">{{ c.label }}</span>
+                            @if (c.hint) {
+                              <span class="faint">{{ c.hint }}</span>
+                            }
+                          </li>
+                        }
+                      </ul>
+                    } @else {
+                      <p class="faint">The engine did not report what this build supports.</p>
+                    }
+                  </td>
+                </tr>
+              }
             }
           </tbody>
         </table>
@@ -306,6 +358,50 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     .none {
       font-size: var(--fs-sm);
     }
+    .btn.pin.pinned {
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+      background: var(--accent-soft);
+    }
+    .pinned-note {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      margin: var(--sp-2) 0 0;
+      font-size: var(--fs-sm);
+      color: var(--accent);
+      mat-icon {
+        width: 14px;
+        height: 14px;
+      }
+    }
+    .pin-problem {
+      margin: var(--sp-2) 0 0;
+      font-size: var(--fs-sm);
+      color: var(--bad);
+    }
+    .caps-row td {
+      padding-top: 0;
+      background: var(--bg-sunken);
+    }
+    .caps {
+      display: grid;
+      gap: var(--sp-2);
+      margin: var(--sp-2) 0;
+      padding: 0;
+      list-style: none;
+      li {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--sp-3);
+        font-size: var(--fs-sm);
+      }
+      .cap-name {
+        min-width: 220px;
+        font-weight: var(--fw-medium);
+      }
+    }
   `,
 })
 export class EngineCard {
@@ -328,14 +424,53 @@ export class EngineCard {
   protected readonly activeBuild = computed(() => this.engine().builds.find((b) => b.active) ?? null);
   protected readonly installing = computed(() => this.live.downloads().filter((d) => d.kind === 'engine' && ownsDownload(this.engine().name, d.name) && downloadActive(d.state)));
 
+  protected readonly capLook = capabilityLook;
+  /** Pin controls exist for llama.cpp only (pack engines have a single build), and once the engine reported its pins. */
+  protected readonly canPin = computed(() => this.engine().kind === 'llama.cpp' && this.store.pins() !== null);
+  protected readonly capsOpen = signal<ReadonlySet<string>>(new Set());
+  protected readonly problems = computed(() => (this.canPin() ? (this.store.pins()?.problems ?? []) : []));
+  protected readonly rollbackTarget = computed(() => {
+    const t = this.canPin() ? this.store.pins()?.rollbackTo : null;
+    if (!t) return null;
+    const b = this.engine().builds.find((x) => x.id === t.buildId);
+    return { id: t.buildId, tag: t.tag, label: b?.label ?? t.buildId };
+  });
+  /** Why roll back is not offered (only when the engine has builds to talk about). */
+  protected readonly rollbackBlocked = computed(() => (this.canPin() && this.engine().builds.length > 0 ? (this.store.pins()?.rollbackBlocked ?? null) : null));
+  /** `Pinned to Vulkan b11669 for all models`, words rather than colour alone. */
+  protected readonly pinnedLabel = computed(() => {
+    const id = this.canPin() ? this.store.pins()?.global : null;
+    const b = id ? this.engine().builds.find((x) => x.id === id) : null;
+    return id ? `Pinned to ${b ? `${b.label} ${b.tag}` : id} for all models. Automatic choice is off until you unpin it.` : null;
+  });
+
+  protected isPinned(b: InstalledBuild): boolean {
+    return this.store.pins()?.global === b.id;
+  }
+
+  protected capsOf(b: InstalledBuild): BuildCapability[] | null {
+    return this.store.capabilities()[b.id] ?? null;
+  }
+
+  protected toggleCaps(id: string): void {
+    const next = new Set(this.capsOpen());
+    if (!next.delete(id)) next.add(id);
+    this.capsOpen.set(next);
+  }
+
   protected async remove(b: InstalledBuild): Promise<void> {
     const ok = await this.confirm.ask({ title: `Remove ${b.label} ${b.tag}?`, message: `Frees ${bytes(b.sizeBytes)}. You can install it again from the catalog.`, confirm: 'Remove', danger: true });
     if (ok) await this.store.remove(b);
   }
 
   protected async rollback(): Promise<void> {
-    const to = this.engine().rollbackTo;
-    const ok = await this.confirm.ask({ title: `Roll back to ${to}?`, message: 'Models that are loaded keep running; they use the previous build from their next load.', confirm: 'Roll back' });
+    const to = this.rollbackTarget();
+    if (!to) return;
+    const ok = await this.confirm.ask({
+      title: `Roll back to ${to.label} ${to.tag}?`,
+      message: `${to.label} ${to.tag} is pinned for all models until you unpin it. Models that are loaded keep running; they use it from their next load.`,
+      confirm: 'Roll back',
+    });
     if (ok) await this.store.rollback();
   }
 }

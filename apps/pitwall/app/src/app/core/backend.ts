@@ -4,6 +4,9 @@ import type {
   AppPermissions,
   AppUpdateStatus,
   BenchmarkResult,
+  BuildCapabilities,
+  EnginePinState,
+  PinChange,
   CreatedKey,
   DiskUsage,
   SlotFit,
@@ -86,7 +89,16 @@ export interface PitwallBackend {
   installBuild(buildId: string): Promise<Download>;
   removeBuild(buildId: string, tag: string): Promise<void>;
   selectBuild(choice: string): Promise<void>;
-  rollbackBuild(): Promise<void>;
+  /** Goes back to the previous good build and pins it for all models; says which loaded models switch on their next load. */
+  rollbackBuild(): Promise<PinChange>;
+  /** The engine pins, what roll back goes to, and why not when it cannot. */
+  enginePins(): Promise<EnginePinState>;
+  /** Pins a build for all models (null: unpins). */
+  setGlobalPin(buildId: string | null): Promise<PinChange>;
+  /** Pins a build for one model (null: unpins). */
+  setModelPin(modelId: string, buildId: string | null): Promise<PinChange>;
+  /** What each installed build supports (vision, tools, embeddings, rerank, JSON-schema output). */
+  buildCapabilities(): Promise<BuildCapabilities[]>;
 
   // Apps and keys
   apps(): Promise<AppInfo[]>;
