@@ -32,3 +32,6 @@ logs/
 .claude/
 .DS_Store
 ._*
+
+# Diagram PNG exports (review copies; the SVGs are committed)
+/docs/diagrams/png/
