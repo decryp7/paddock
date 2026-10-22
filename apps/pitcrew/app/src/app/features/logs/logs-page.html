@@ -1,0 +1,82 @@
+<div class="page logs">
+  <header class="page-header">
+    <div>
+      <h1>Logs</h1>
+      <p class="subtitle">The runner’s own output, newest at the bottom. Search is plain text.</p>
+    </div>
+  </header>
+
+  @if (status.status() && names().length === 0) {
+    <section class="card"><pc-empty-state icon="logs" title="No runners" text="Logs appear once a runner is registered." /></section>
+  } @else {
+    <div class="toolbar">
+      <label>
+        <span class="visually-hidden">Runner</span>
+        <select class="select" [value]="selected() ?? ''" (change)="pick($any($event.target).value)">
+          @for (n of names(); track n) {
+            <option [value]="n" [selected]="n === selected()">{{ n }}</option>
+          }
+        </select>
+      </label>
+      <div class="search">
+        <mat-icon svgIcon="pc:search" aria-hidden="true" />
+        <input #q class="input" type="search" placeholder="Search this runner’s log" aria-label="Search the log" maxlength="200" (input)="onQuery(q.value)" (keydown.escape)="clear(q)" />
+        @if (store.query()) {
+          <button type="button" class="btn ghost icon sm" aria-label="Clear the search" (click)="clear(q)"><mat-icon svgIcon="pc:x" aria-hidden="true" /></button>
+        }
+      </div>
+      <span class="spacer"></span>
+      @if (store.results(); as r) {
+        <span class="faint count" role="status">{{ r.length }} {{ r.length === 1 ? 'match' : 'matches' }}{{ r.length >= 500 ? ' (newest 500)' : '' }}</span>
+      } @else {
+        <span class="faint count num">{{ store.lines().length }} lines</span>
+      }
+      <button type="button" class="btn" [attr.aria-pressed]="store.following()" [class.on]="store.following()" (click)="toggleFollow()" [disabled]="!!store.results()">
+        <mat-icon svgIcon="pc:follow" aria-hidden="true" />
+        {{ store.following() ? 'Following' : 'Follow' }}
+        @if (store.following() && !store.results()) {
+          <span class="dot pulse live" aria-hidden="true"></span>
+        }
+      </button>
+      <button type="button" class="btn icon" (click)="reveal()" aria-label="Show the log folder" matTooltip="Show the log folder"><mat-icon svgIcon="pc:folder" aria-hidden="true" /></button>
+    </div>
+
+    @if (store.error(); as e) {
+      <div class="callout danger" role="alert">
+        <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+        <div class="callout-body"><strong>The log could not be loaded</strong><span class="muted">{{ e.message }}</span></div>
+        <button type="button" class="btn sm" (click)="selected() && store.open(selected()!)"><mat-icon svgIcon="pc:refresh" aria-hidden="true" />Retry</button>
+      </div>
+    }
+
+    <div class="card viewer">
+      @if (store.loading() && store.lines().length === 0) {
+        <div class="loading" aria-busy="true" aria-label="Loading the log">
+          @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
+            <span class="skeleton" [style.width.%]="40 + ((i * 17) % 50)"></span>
+          }
+        </div>
+      } @else if (shown().length === 0) {
+        <p class="none faint">{{ store.results() ? 'No lines match.' : 'The log is empty.' }}</p>
+      } @else {
+        <cdk-virtual-scroll-viewport class="viewport" [itemSize]="row" (scrolledIndexChange)="onScroll()" role="log" aria-label="Log lines" [attr.aria-live]="store.following() ? 'off' : null">
+          <div *cdkVirtualFor="let l of shown(); trackBy: trackSeq" class="line" [class]="'tone-' + l.tone">
+            <span class="seq">{{ l.seq }}</span>
+            <span class="time">{{ l.time ?? '' }}</span>
+            <span class="lvl">{{ l.level ?? '' }}</span>
+            <span class="msg"
+              >@for (p of l.parts; track $index) {
+                @if (p.match) {
+                  <mark>{{ p.text }}</mark>
+                } @else {
+                  {{ p.text }}
+                }
+              }</span
+            >
+            <button type="button" class="copy" aria-label="Copy this line" (click)="copy(l)"><mat-icon svgIcon="pc:copy" aria-hidden="true" /></button>
+          </div>
+        </cdk-virtual-scroll-viewport>
+      }
+    </div>
+  }
+</div>
