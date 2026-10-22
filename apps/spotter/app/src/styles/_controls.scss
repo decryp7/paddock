@@ -188,10 +188,13 @@ textarea.input {
   font-variant-numeric: tabular-nums;
 }
 
+/* Version numbers are text people read, not code: the system UI font, semibold, with figures that line up. Monospace
+   stays for small aligned columns, the pattern editor, hashes, paths and regexes. */
 .ver {
-  font-family: var(--pd-font-mono);
+  font-family: inherit;
   font-variant-numeric: tabular-nums;
   font-weight: var(--pd-weight-semibold);
+  letter-spacing: -0.01em;
 }
 
 .truncate {
