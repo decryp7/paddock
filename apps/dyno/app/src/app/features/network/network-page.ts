@@ -72,6 +72,7 @@ function readCollapsed(): Set<string> {
           }
           @if (thisPc(); as ip) { <span class="this-pc">This PC {{ ip }}</span> }
         </p>
+        @if (s.trafficNote; as why) { <p class="faint traffic-note">{{ why }}</p> }
       }
 
       <div class="bar" role="group" aria-label="Filters">

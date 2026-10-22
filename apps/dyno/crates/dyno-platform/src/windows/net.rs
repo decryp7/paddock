@@ -50,7 +50,7 @@ fn v6(addr: [u8; 16], p: u32) -> String {
 }
 
 /// Rows of a `{ dwNumEntries; ROW table[] }` table in `buf`.
-fn rows<T: Copy>(buf: &[u8]) -> Vec<T> {
+pub(super) fn rows<T: Copy>(buf: &[u8]) -> Vec<T> {
     let Some(head) = buf.get(..4) else { return Vec::new() };
     let n = u32::from_ne_bytes([head[0], head[1], head[2], head[3]]) as usize;
     // Rows start after the count, at the row type's alignment (4 for every table here).
@@ -82,7 +82,7 @@ fn table(fetch: impl Fn(Option<*mut core::ffi::c_void>, &mut u32) -> u32) -> Opt
     None
 }
 
-fn tcp(family: u32) -> Option<Vec<u8>> {
+pub(super) fn tcp(family: u32) -> Option<Vec<u8>> {
     table(|p, size| {
         // SAFETY: `p` is None (size query) or a buffer of `*size` bytes.
         unsafe { GetExtendedTcpTable(p, size, false, family, TCP_TABLE_OWNER_PID_ALL, 0) }

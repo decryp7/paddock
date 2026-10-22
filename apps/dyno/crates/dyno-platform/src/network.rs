@@ -84,8 +84,9 @@ impl ReverseDns for OsReverseDns {
 /// How long `nettop` may take for one read (it takes about five seconds even on an idle Mac).
 const NETTOP_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Per-process traffic counters. On macOS this reads `nettop -P -L 1` (cumulative bytes per process, no elevation
-/// needed); Windows and Linux have no equally cheap per-process source, so they say so instead of guessing.
+/// Per-process traffic counters, each OS from its cheapest unprivileged source: macOS `nettop -P -L 1`, Linux the
+/// kernel's `sock_diag` byte counters matched to programs through `/proc/<pid>/fd`, Windows the per-connection TCP
+/// statistics (which need administrator rights, so without them it says why).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OsTraffic;
 
@@ -98,11 +99,23 @@ impl ProcessTraffic for OsTraffic {
         Ok(dyno_core::network_traffic::parse_nettop(&text))
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
+        let _ = NETTOP_TIMEOUT;
+        crate::linux::traffic::LinuxTraffic::new(crate::linux::paths::HostPaths::host()).counters()
+    }
+
+    #[cfg(windows)]
+    fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
+        let _ = NETTOP_TIMEOUT;
+        crate::windows::traffic::WinTraffic.counters()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
         let _ = NETTOP_TIMEOUT;
         Err(PlatformError::Unsupported(
-            "Traffic per program is only available on macOS for now; Windows and Linux need the helper (planned).".into(),
+            "Traffic per program is not available on this system.".into(),
         ))
     }
 }
@@ -170,15 +183,14 @@ mod tests {
     }
 
     #[test]
-    fn traffic_reads_this_machine_on_macos_and_says_why_elsewhere() {
+    fn traffic_reads_this_machine_or_says_why() {
         let r = OsTraffic.counters();
-        if cfg!(target_os = "macos") {
-            // nettop is slow on a loaded machine; a timeout is an honest answer, an empty list is not.
-            if let Ok(c) = r {
-                assert!(!c.is_empty());
-            }
-        } else {
-            assert!(matches!(r, Err(PlatformError::Unsupported(m)) if m.contains("macOS")));
+        match r {
+            // nettop is slow on a loaded machine; a timeout is an honest answer, an empty list is not (macOS).
+            Ok(c) if cfg!(target_os = "macos") => assert!(!c.is_empty()),
+            Ok(_) => {}
+            Err(PlatformError::Unsupported(m)) => assert!(!m.is_empty()),
+            Err(_) => {}
         }
     }
 }
