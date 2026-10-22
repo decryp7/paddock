@@ -68,25 +68,29 @@ pub fn run() {
         .setup(|app| {
             tray::create(app.handle())?;
             events::start(app.handle().clone());
-            // Started at log-in: stay in the tray.
+            // Started at log-in: stay in the tray, without a webview.
             if std::env::args().any(|a| a == "--hidden") {
                 use tauri::Manager;
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
+                if let Some(w) = app.get_webview_window(tray::MAIN) {
+                    let _ = w.destroy();
                 }
             }
             Ok(())
         })
-        .on_window_event(|window, event| {
-            // Closing the window keeps Pitcrew in the tray (Quit is in the tray menu).
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-            }
-        })
-        .run(tauri::generate_context!());
-    if let Err(e) = result {
-        eprintln!("Pitcrew could not start: {e}");
-        std::process::exit(1);
-    }
+        .build(tauri::generate_context!());
+    let app = match result {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("Pitcrew could not start: {e}");
+            std::process::exit(1);
+        }
+    };
+    // Closing the window destroys it and Pitcrew stays in the tray (a hidden webview could come back blank on macOS
+    // and kept its memory); Open in the tray, or the app's Dock icon on macOS, creates it again. Quit exits.
+    app.run(|app, event| match event {
+        tauri::RunEvent::ExitRequested { code, api, .. } if tray::keeps_running(code) => api.prevent_exit(),
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => tray::show_main(app),
+        _ => {}
+    });
 }
