@@ -1,7 +1,7 @@
 # Features
 
 What Pitcrew does, with screenshots. The [README](../README.md) has the short version, the [user guide](user-guide.md)
-covers installing, registering runners and everyday use, and [development](development.md) covers building and testing.
+covers installing, registering runners and everyday use ([macOS](macos.md), [Linux](linux.md)), and [development](development.md) covers building and testing.
 
 > The screenshots are captured automatically from the UI running against the built-in mock backend (plausible demo data),
 > in dark and light themes. See [Screenshots and browser tests](development.md#screenshots-and-browser-tests). Items marked
@@ -30,8 +30,11 @@ covers installing, registering runners and everyday use, and [development](devel
 
 - **A small Rust service owns the runners.** On Windows it is a service under the Service Control Manager (automatic,
   delayed start, recovery actions); on macOS a per-user launch agent registered with `SMAppService`
-  ([ADR 0003](adr/0003-service-model.md)). Installing it is done from the app (**Settings ▸ Service**); elevation prompts
+  ([ADR 0003](adr/0003-service-model.md)); on Linux a systemd user service
+  ([ADR 0009](adr/0009-linux-service-and-runner-environment.md)). Installing it is done from the app (**Settings ▸ Service**); elevation prompts
   are the operating system's own, and Pitcrew never handles passwords.
+- **Runners get the login shell's `PATH`** (macOS and Linux): launchd and systemd start services with a minimal one, so the service asks the user's login shell for what a terminal has and passes it to each runner at every (re)start. A runner can set its own variables in `pitcrew.toml` (`[runners.env]`, validated: at most 32, `PITCREW_*` and `GITEA_RUNNER_*` reserved).
+- **The service replaces itself.** After an update of the app, the service notices that its program changed and restarts when no job or update runs; the new process adopts the runners.
 - **The app is optional once the service runs.** Closing the window keeps Pitcrew in the tray; quitting the app never
   stops the runners; the service keeps supervising if the app crashes or is updated.
 - **Where a runner runs (Windows).** Each runner runs in the logged-on user's desktop session by default, so jobs that
@@ -117,7 +120,7 @@ covers installing, registering runners and everyday use, and [development](devel
 
 ![Runner load and history](screenshots/dashboard-load-dark.png)
 
-- **Jobs per day, uptime, average job duration, an events feed** (restarts, stalls, updates, cleanups) and **update
+- **Jobs per day (jobs per hour for the 24-hour range), uptime, average job duration, an events feed** (restarts, stalls, updates, cleanups) and **update
   results**. With a read-only Gitea token (kept in the OS credential store) it also shows job outcomes and **queue
   wait**; without one it says what to add.
 
@@ -173,6 +176,7 @@ covers installing, registering runners and everyday use, and [development](devel
   rolled back or failed, a new version (notify-only policy), low disk and cleanups. Only transitions are announced: a
   runner that stays stalled is announced once. They can be switched off in Settings.
 - **Open at log-in** is a toggle.
+- **Window lifecycle.** Closing the window destroys it and frees the webview; the tray's Open item (and the macOS Dock icon) recreate it. Where there is no tray (Linux without a status-notifier host) closing the window quits the app. Tray actions and notifications can deep-link into the app (`pitcrew://navigate`, for example a runner's logs).
 
 ## Settings
 
@@ -204,6 +208,8 @@ covers installing, registering runners and everyday use, and [development](devel
 
 ## Security and privacy
 
+- **Native feel.** Text is selectable only where it is meant to be (paths, names, logs), the browser's context menu, reload, zoom and drops are blocked ([ADR 0008](adr/0008-native-feel.md)).
+- **Calls time out** and show an inline Retry instead of hanging a panel.
 - **Local only.** The app and the service talk over a private local stream; there is no telemetry and no remote content
   in the app.
 - **Least privilege.** The webview gets events only; the service re-validates every request; elevation is the OS's own
@@ -221,12 +227,12 @@ covers installing, registering runners and everyday use, and [development](devel
 
 | | Windows 10/11 | macOS 13+ | Linux |
 | --- | --- | --- | --- |
-| Service | Windows service, LocalSystem | Per-user launch agent (`SMAppService`) | In progress: systemd units (not in the code yet) |
-| IPC | Named pipe with an ACL | 0600 Unix socket | 0600 Unix socket |
-| Runners | User's desktop session or session 0 | The user's GUI session | In progress |
+| Service | Windows service, LocalSystem | Per-user launch agent (`SMAppService`) | systemd user service (`Restart=always`), no root |
+| IPC | Named pipe with an ACL | 0600 Unix socket | 0600 Unix socket in `$XDG_RUNTIME_DIR/pitcrew` |
+| Runners | User's desktop session or session 0 | The user's GUI session, login-shell `PATH` | The user's session, login-shell `PATH` |
 | Credential store | Credential Manager | Keychain | Secret Service |
-| Installer | NSIS | `.dmg` (ad-hoc signed, not notarised) | Planned |
-| Verified | Windows CI runner; not yet on a dedicated build machine | A real Mac, 2026-10-22 | Not yet |
+| Installer | NSIS | `.dmg` (ad-hoc signed, not notarised) | `.deb` and AppImage |
+| Verified | Windows CI runner; not yet on a dedicated build machine | A real Mac, 2026-10-22 | Rust tests and the fake-runner service tests in a Linux container and CI; `systemctl`, the tray and the bundles not yet on a real desktop ([linux.md](linux.md)) |
 
 Runner kinds: Gitea's runner today; Forgejo's runner and GitHub's self-hosted runner are planned
 ([roadmap](roadmap.md)).

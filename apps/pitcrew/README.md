@@ -1,61 +1,81 @@
+<div align="center">
+
+<img src="app/src-tauri/icons-src/pitcrew-icon.svg" alt="Pitcrew icon" width="96" height="96">
+
 # Pitcrew
 
 **A runner manager for Gitea and Forgejo.** Pitcrew installs, runs, watches and updates the CI runners on your build
-machines — Gitea's runner (`gitea-runner`, formerly `act_runner`) first, Forgejo's runner next, and later GitHub's
-self-hosted runner — on **Windows, macOS and Linux**.
+machines: Gitea's runner (`gitea-runner`, formerly `act_runner`) first, Forgejo's runner next, and later GitHub's
+self-hosted runner, on **Windows, macOS and Linux**.
 
 A pit crew keeps the car going without stopping the race: Pitcrew restarts a runner that crashed or stalled, and
 updates it between jobs, so the builds keep running.
 
-> **Status: v0.1.0, unreleased.** The supervisor, watchdog, updates with roll-back, housekeeping, dashboard and tray
-> are built and tested; the macOS path was verified on a real Mac on 2026-10-22. No release is published yet. See
-> [Status](#status).
+</div>
+
+> **Status: v0.1.0, unreleased.** The supervisor, watchdog, updates with roll-back, housekeeping, dashboard, tray and
+> Linux support are built and tested; the macOS path was verified on a real Mac on 2026-10-22. No release is published yet.
+> See [Status](#status).
 
 ![The dashboard](docs/screenshots/dashboard-dark.png)
 
-## Why
+## At a glance
 
-Keeping a self-hosted runner healthy usually ends up as a pile of scripts: a scheduled task that starts it at log-on,
-a supervisor loop that restarts it with backoff and rotates its log, a watchdog that restarts it when its polls keep
-timing out, and a daily job that downloads a new binary and swaps it when no job runs. That works until it doesn't,
-and nobody can see what it is doing. Pitcrew does the same work as a proper service, with a window and a tray icon
-that show what is going on, and adds what the scripts lack: roll-back of bad updates, crash-loop protection, several
-runners per machine and macOS support.
+![Pitcrew at a glance: the outside world (server, release hosts, the OS) meets a service that supervises runners, restarts stalled or crashed ones, updates them safely and cleans their disks; a window and tray show and control it over one local IPC; a pure Rust core holds the rules](docs/diagrams/pitcrew-overview.svg)
 
-## What it does
+A privileged-when-needed **service** keeps the runners going whether or not the window is open; an unprivileged **app**
+(window and tray) shows and controls them over one local IPC; a pure Rust **core** holds every rule (stall detection,
+restart back-off, the update state machine, housekeeping plans). Details: [architecture](docs/architecture.md) and every
+design diagram in [docs/design.md](docs/design.md).
 
-1. **Runs the runner as a service.** A small Rust service: a Windows service under the Service Control Manager, or a
-   per-user launch agent on macOS registered with `SMAppService` ([ADR 0003](docs/adr/0003-service-model.md)). On
-   Windows each runner runs either in the logged-on user's desktop session (default; jobs that need a desktop, such as
-   WebView2 tests, work) or in the service session. Installing the service is done from the app; elevation prompts
-   are the OS's own, and Pitcrew never handles passwords.
-2. **Supervisor and watchdog** ([ADR 0006](docs/adr/0006-supervision-and-housekeeping.md)). Per runner: process
-   alive, registered, polling OK, job running (with repository, job, run link and elapsed time). A runner whose
-   polls keep timing out while no job runs is **stalled** and restarted. Restarts back off; repeated exits are a
-   **crash loop**: restarts pause and you are notified. A running job is never killed. Pause, resume and drain
-   (finish the current job, then stop) are one click.
-3. **Safe updates with roll-back** ([ADR 0002](docs/adr/0002-runner-auto-update.md)). Checks the official runner
-   releases on a schedule, downloads the binary for the platform, verifies its SHA-256 from two hosts, waits until the
-   runner is idle, swaps the binary, restarts it and waits for the server to accept it, and **rolls back**
-   automatically if it does not. Per runner: automatic, ask first or manual; pin or skip a version; an update window.
-4. **Housekeeping.** Cleans each runner's work and cache folders on a schedule or on demand, warns when the disk is
-   low, and records what it freed.
+## Why Pitcrew
+
+Keeping a self-hosted runner healthy usually ends up as a pile of scripts: a scheduled task that starts it at log-on, a
+supervisor loop that restarts it with back-off and rotates its log, a watchdog that restarts it when its polls keep timing
+out, and a daily job that downloads a new binary and swaps it when no job runs. That works until it doesn't, and nobody
+can see what it is doing. Pitcrew does the same work as a proper service, with a window and a tray icon that show what is
+going on, and adds what the scripts lack:
+
+- **Safe by design.** A running job is never killed; updates wait for an idle runner, are verified against two hosts and
+  roll back automatically.
+- **Visible.** A dashboard, per-runner pages, an activity timeline, logs, notifications and a tray icon that shows the
+  worst state.
+- **Several runners per machine,** each with its own folder, labels, policies and session.
+- **Cross-platform.** Windows, macOS and Linux with the OS's own service manager and credential store.
+- **Local only.** No telemetry; tokens live in the OS credential store; Pitcrew never handles passwords.
+
+## Key features
+
+Every feature, with screenshots, is in [docs/features.md](docs/features.md).
+
+1. **Runs the runner as a service.** A small Rust service: a Windows service under the Service Control Manager, a per-user
+   launch agent on macOS (`SMAppService`) or a systemd user service on Linux
+   ([ADR 0003](docs/adr/0003-service-model.md), [0009](docs/adr/0009-linux-service-and-runner-environment.md)). On
+   Windows each runner runs in the logged-on user's desktop session (default; desktop jobs such as WebView2 tests work) or
+   in the service session. Installing the service is done from the app; elevation prompts are the OS's own.
+2. **Supervisor and watchdog** ([ADR 0006](docs/adr/0006-supervision-and-housekeeping.md)). Per runner: process alive,
+   registered, polling OK, job running (repository, job, run link, elapsed time). A runner whose polls keep timing out
+   while no job runs is **stalled** and restarted. Restarts back off; repeated exits are a **crash loop**: restarts pause
+   and you are notified. Pause, resume and drain (finish the current job, then stop) are one click.
+3. **Safe updates with roll-back** ([ADR 0002](docs/adr/0002-runner-auto-update.md)). Checks the official runner releases
+   on a schedule, downloads the binary for the platform, verifies its SHA-256 from two hosts, waits until the runner is
+   idle, swaps the binary, restarts it, waits for the server to accept it and **rolls back** automatically if it does not.
+   Per runner: automatic, ask first or manual; pin or skip a version; an update window.
+4. **Housekeeping.** Cleans each runner's work and cache folders on a schedule or on demand, warns when the disk is low and
+   records what it freed.
 5. **Dashboard** ([ADR 0007](docs/adr/0007-runner-scoped-metrics.md)). Live runner cards, tiles for what the runners use
-   (CPU and memory of each runner and every process it started, not the whole machine; free disk stays machine-wide;
-   a muted line gives the machine's totals), CPU and memory history with the runners stacked on the rest of the
-   machine, per-runner trends on the runner page, jobs per day, an uptime
-   timeline with restarts, stalls and updates marked, an events feed and quick actions. With a read-only Gitea token
-   (kept in the OS credential store) it also shows job outcomes. History is local and bounded.
-6. **Tray and notifications.** The tray icon (Windows notification area, macOS menu bar) shows the worst state of all
-   runners. Closing the window keeps Pitcrew running; quitting the app never stops the runners. Notifications for
-   stalls, crash loops, updates, roll-backs and low disk are configurable.
-7. **Several runners per machine**, each with its own folder, labels and session, in a versioned `pitcrew.toml` that
-   tolerates damage (falls back to the last good copy, skips one bad entry). An existing registered runner folder is
-   adopted as it is: no registration happens.
-8. **Pitcrew updates itself** with the Tauri updater: minisign-signed releases, opt-in
-   ([docs/releasing.md](docs/releasing.md)).
+   (CPU and memory of each runner and everything it started, not the whole machine), history, jobs per day, an uptime
+   timeline with restarts, stalls and updates marked, an events feed and quick actions. With a read-only Gitea token it
+   also shows job outcomes and queue wait.
+6. **Tray and notifications.** The tray icon shows the worst state of all runners. Closing the window keeps Pitcrew
+   running; quitting the app never stops the runners.
+7. **Runner environment.** On macOS and Linux jobs get your login shell's `PATH`, and a runner can set its own variables
+   (`[runners.env]`).
+8. **Adopts existing runners.** A registered runner folder is used as it is; configuration is a versioned `pitcrew.toml`
+   that tolerates damage.
+9. **Updates itself** with the Tauri updater: minisign-signed releases, opt-in ([docs/releasing.md](docs/releasing.md)).
 
-## Screenshots
+### Screenshots
 
 Taken against the mock backend (`docs/screenshots`, dark and light for every screen).
 
@@ -66,10 +86,17 @@ Taken against the mock backend (`docs/screenshots`, dark and light for every scr
 | ![Logs](docs/screenshots/logs-dark.png) | ![Register a runner](docs/screenshots/register-wizard-dark.png) |
 | ![Settings](docs/screenshots/settings-light.png) | ![Disk and cleanup](docs/screenshots/runner-disk-light.png) |
 
-## Install
+## Quick start
 
-No release is published yet; build the installer yourself ([Building](#building)) or take the CI artifacts of a `v*`
-tag or the nightly run.
+No release is published yet; build the installer yourself ([Building from source](#building-from-source)) or take the CI
+artifacts of a `v*` tag or the nightly run. Then, in three steps:
+
+1. **Install** and turn on the service (**Settings > Service**), per OS below.
+2. **Register a runner:** **Register runner**, enter the server URL and a registration token (or adopt an existing runner
+   folder). Pitcrew downloads, verifies, registers and starts it; the card turns **Idle**.
+3. **Watch it:** the Dashboard, the tray and the notifications tell you about stalls, crash loops, updates and low disk.
+
+The user guide has the details: [docs/user-guide.md](docs/user-guide.md).
 
 ### Windows
 
@@ -99,15 +126,39 @@ runs it). Jobs get your login shell's `PATH` (so `node`, `cargo`... are found), 
 `pitcrew.toml` (`[runners.env]`). The tray needs a status-notifier host (GNOME: the AppIndicator extension). Build,
 verification script and details: [docs/linux.md](docs/linux.md).
 
-## Architecture
+## Status
 
-A pure core, a privileged service and an unprivileged app that talk over one local IPC.
+| Area | State |
+| --- | --- |
+| Core | Built and unit-tested (rules, update state machine with roll-back, config migration, protocol). |
+| Service | Supervisor, IPC, session launch, updates and cleanup built; end-to-end tests drive the real supervisor with a fake runner. Windows service, macOS launch agent and Linux systemd unit have their own CI coverage. |
+| App | Dashboard, runners, activity, logs, updates (including Pitcrew's own check and install), settings and the register wizard against the real service. |
+| macOS | Verified on a real Mac on 2026-10-22 (bundle, `SMAppService`, adopting a runner folder). Jobs get the login shell's `PATH`. |
+| Linux | systemd user service, XDG paths, `.deb` and AppImage bundles. Rust tests, the service against a fake runner and the unit text run in a Linux container and on the `ubuntu-latest` CI jobs; the `systemctl` calls, the tray and the bundles are not yet verified on a real desktop. |
+| Windows | Built and tested on the Windows CI runner; not yet verified end to end on a dedicated build machine. |
+| Installers | CI builds a Windows NSIS installer, a macOS `.dmg` and a Linux `.deb` and AppImage on tags, nightly and manual runs. Not yet published. |
 
-| Part | Where | Role |
-| --- | --- | --- |
-| Core | `crates/pitcrew-core` | Pure rules, no I/O, time passed in: controller (start, stop, backoff, stalls, drain), jobs, update policy and state machine, housekeeping, history, metrics, notifications, config, protocol. |
-| Service | `crates/pitcrew-service` | One supervisor thread, workers for slow work, launch adapters, the IPC server (named pipe with ACL / 0600 Unix socket), the SCM, launchd and systemd integration. |
-| App | `app/src-tauri`, `app/src` | Tauri 2 shell (tray, window, commands, credentials, updater) and the Angular UI over a `BACKEND` token (Tauri or mock). |
+## Roadmap
+
+Planned work is in [docs/roadmap.md](docs/roadmap.md): Forgejo's runner, GitHub's self-hosted runner, Developer ID signing
+and notarisation, headless-host service modes, per-runner `env` on Windows.
+
+## Documentation
+
+| Document | What it covers |
+| --- | --- |
+| [docs/features.md](docs/features.md) | Every feature, with screenshots |
+| [docs/user-guide.md](docs/user-guide.md) | Installing, registering runners, everyday use, configuration, troubleshooting |
+| [docs/architecture.md](docs/architecture.md) | Overview, the core, service and app, state and files, security |
+| [docs/design.md](docs/design.md) | All design diagrams on one page (C4, deployment, use cases, domain, flows, states) |
+| [docs/diagrams/STYLE.md](docs/diagrams/STYLE.md) | The diagram style guide |
+| [docs/macos.md](docs/macos.md) | Build, install, register and verify on macOS |
+| [docs/linux.md](docs/linux.md) | Build, install, register and verify on Linux |
+| [docs/development.md](docs/development.md) | Building, testing, CI/CD, project layout, where to add things |
+| [docs/releasing.md](docs/releasing.md) | Releases and signed updates |
+| [docs/testing-manual.md](docs/testing-manual.md) | Manual tests that need a real desktop and server |
+| [docs/roadmap.md](docs/roadmap.md) | Planned work and engineering follow-ups |
+| [docs/adr/](docs/adr/0001-architecture.md) | Architecture decision records 0001 to 0010 |
 
 Decisions: [0001 architecture](docs/adr/0001-architecture.md), [0002 runner auto-update](docs/adr/0002-runner-auto-update.md),
 [0003 service model](docs/adr/0003-service-model.md), [0004 IPC protocol and ACL](docs/adr/0004-ipc-protocol-and-acl.md),
@@ -116,32 +167,7 @@ Decisions: [0001 architecture](docs/adr/0001-architecture.md), [0002 runner auto
 [0009 Linux service and runner environment](docs/adr/0009-linux-service-and-runner-environment.md),
 [0010 design system](docs/adr/0010-design-system.md).
 
-## Status
-
-| Area | State |
-| --- | --- |
-| Core | Built and unit-tested (rules, update state machine with roll-back, config migration, protocol). |
-| Service | Supervisor, IPC, session launch, updates and cleanup built; end-to-end tests drive the real supervisor with a fake runner. Windows service and macOS launch agent have their own CI jobs. |
-| App | Dashboard, runners, activity, logs, updates, settings and the register wizard against the real service. The Pitcrew self-update UI (check, download, restart) is not built yet: the updater plugin is wired and About reports whether the build can update. |
-| macOS | Verified on a real Mac on 2026-10-22 (bundle, `SMAppService`, adopting a runner folder). Jobs get the login shell's `PATH` since the launchd start-up fix of the same day. |
-| Linux | systemd user service, XDG paths, `.deb` and AppImage bundles, `scripts/linux-bootstrap.sh` / `linux-verify.sh`. Rust tests, the service against a fake runner and the unit text run in a Linux container and on the `ubuntu-latest` CI jobs; the `systemctl` calls, the tray and the bundles are not yet verified on a real desktop. |
-| Windows | Built and tested on the Windows CI runner; not yet verified end to end on a dedicated build machine. |
-| Installers | CI builds a Windows NSIS installer and a macOS `.dmg` on tags, nightly and manual runs. Not yet published. |
-
-## Roadmap
-
-1. Pitcrew self-update UI (check, download, restart) on top of the wired updater plugin.
-2. Forgejo's runner (user-provided binary on Windows/macOS, OpenPGP-verified updates on Linux).
-3. Developer ID signing and notarisation for the macOS build.
-4. Later: GitHub's self-hosted runner, LaunchDaemon mode for headless Macs and a systemd system unit for headless Linux
-   hosts, the per-runner `env` on Windows.
-
-After an update the service restarts itself (when no job runs) to run its new program ([ADR 0009](docs/adr/0009-linux-service-and-runner-environment.md)).
-
-Dedicated build Macs: since the macOS service is a launch agent, enable automatic log-in for the CI user so the
-runners start after a reboot.
-
-## Building
+## Building from source
 
 Prerequisites: Rust stable (1.88+), Node 24, and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/)
 for your OS (WebView2 on Windows, Xcode command line tools on macOS; on Linux `libwebkit2gtk-4.1-dev` and friends).
@@ -157,15 +183,30 @@ cargo run -p pitcrew-service -- check-config
 
 On a Mac, `bash scripts/macos-bootstrap.sh` checks the prerequisites and builds the `.app` and `.dmg`
 ([docs/macos.md](docs/macos.md)); on Linux, `bash scripts/linux-bootstrap.sh` builds the `.deb` and the AppImage
-([docs/linux.md](docs/linux.md)).
+([docs/linux.md](docs/linux.md)). More in [docs/development.md](docs/development.md).
 
-More in [docs/development.md](docs/development.md); releasing and the update signing key in
-[docs/releasing.md](docs/releasing.md); engineering rules in [AGENTS.md](AGENTS.md).
+## Contributing
+
+Read [AGENTS.md](AGENTS.md) first: it sets the design principles, the security and robustness rules and the quality gates.
+Build, test and CI details are in [docs/development.md](docs/development.md). Use
+[Conventional Commits](https://www.conventionalcommits.org/); releases are `v*` tags following semver
+([docs/releasing.md](docs/releasing.md)).
+
+## Security and privacy
+
+- The service never trusts the app and the app never trusts the webview: every IPC field is validated in Rust, the
+  protocol is local only (named pipe with an ACL, or a 0600 Unix socket) and bounded.
+- Pitcrew never handles passwords. Runner tokens and `.runner` files are never read, logged or stored; registration tokens
+  pass straight to the runner's `register` command; secrets live only in the OS credential store.
+- Nothing unverified is installed: HTTPS, a SHA-256 from two hosts that must agree, a version check and roll-back. Pitcrew's
+  own updates are minisign-signed and opt-in.
+- Tauri capabilities are least-privilege and the CSP has no `unsafe-eval` and no remote origins. No telemetry.
+- Found a vulnerability? Please report it privately to the maintainers rather than in a public issue.
 
 ## Name and trademarks
 
-"Gitea" and "Forgejo" are trademarks of their respective owners. Pitcrew is an independent project and not
-affiliated with or endorsed by either; it manages their runners, which speak the same protocol.
+"Gitea" and "Forgejo" are trademarks of their respective owners. Pitcrew is an independent project and not affiliated with
+or endorsed by either; it manages their runners, which speak the same protocol.
 
 ## Licence
 

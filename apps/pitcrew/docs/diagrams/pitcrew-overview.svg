@@ -29,7 +29,7 @@
   </style>
   <rect class="bg" width="1240" height="870"/>
   <text class="title" x="30" y="52">Pitcrew</text>
-  <text class="sub" x="30" y="80">A runner manager for Gitea and Forgejo: install, run, watch, update and clean CI runners · Windows and macOS, Linux in progress</text>
+  <text class="sub" x="30" y="80">A runner manager for Gitea and Forgejo: install, run, watch, update and clean CI runners · Windows, macOS and Linux</text>
   <text class="sub" x="30" y="104">keep running → update safely → show everything</text>
   <rect class="col" x="30" y="130" width="330" height="560" rx="14"/>
   <text class="h" x="54" y="164">Outside Pitcrew</text>
@@ -119,5 +119,5 @@
   <text class="m" x="568" y="820">see and control</text>
   <rect class="box core" x="692" y="808" width="22" height="14" rx="4"/>
   <text class="m" x="722" y="820">pure core</text>
-  <text class="m" x="30" y="846">One local IPC joins app and service: named pipe or Unix socket, JSON frames, pushed status events. Windows and macOS today; Linux in progress.</text>
+  <text class="m" x="30" y="846">One local IPC joins app and service: named pipe or Unix socket, JSON frames, pushed status events. Windows, macOS and Linux.</text>
 </svg>

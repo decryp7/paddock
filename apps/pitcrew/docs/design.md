@@ -36,7 +36,7 @@ Source: [c4-1-context.drawio](diagrams/c4-1-context.drawio)
 
 The runnable units: the Tauri app (Angular UI, Rust shell, tray) in the user's session, the Pitcrew service that owns
 the runners, the runner processes it starts, and the files it keeps. The app can be closed or crash without touching the
-runners. The service is a Windows service, a macOS launch agent and, in progress, a systemd unit on Linux. See ADR
+runners. The service is a Windows service, a macOS launch agent or a Linux systemd user service. See ADR
 [0001](adr/0001-architecture.md), [0003](adr/0003-service-model.md) and [0004](adr/0004-ipc-protocol-and-acl.md).
 
 ![C4 containers](diagrams/svg/c4-2-containers.svg)
@@ -45,7 +45,7 @@ Source: [c4-2-containers.drawio](diagrams/c4-2-containers.drawio)
 
 ### Level 3 — core components
 
-Inside `pitcrew-core`: supervision of one runner (log classifier, job tracker, session rules, watchdog, restart policy,
+Inside `pitcrew-core` (including the runner environment, self-restart decision and service paths): supervision of one runner (log classifier, job tracker, session rules, watchdog, restart policy,
 controller, health), updates (release locations, checksums, versions, policy, update machine), housekeeping and metrics,
 records and configuration, and the wire types the app shares. Everything here is pure: time is passed in, and decisions
 go out as values (ADR [0002](adr/0002-runner-auto-update.md), [0006](adr/0006-supervision-and-housekeeping.md),
@@ -59,7 +59,7 @@ Source: [c4-3-components-core.drawio](diagrams/c4-3-components-core.drawio)
 
 Inside `pitcrew-service`: the command line and host, the platform adapters, the IPC server, the supervisor at the
 centre, and everything slow or OS-specific behind it (launcher and process control, probe, runner log file, store,
-worker steps, HTTPS client, cleanup).
+worker steps, HTTPS client, cleanup, login environment).
 
 ![C4 service components](diagrams/svg/c4-3-components-service.svg)
 
@@ -67,8 +67,8 @@ Source: [c4-3-components-service.drawio](diagrams/c4-3-components-service.drawio
 
 ## Deployment
 
-Where each part runs on a build machine, per OS. Linux is drawn dashed because it is in progress: the core knows the
-Linux release names and the service computes a Linux data folder, but the service cannot be installed there yet.
+Where each part runs on a build machine, per OS. Each OS has its own service manager, data folder and IPC endpoint; on Linux the service is a systemd user
+service (ADR [0009](adr/0009-linux-service-and-runner-environment.md), [Linux guide](linux.md)).
 
 ![Deployment](diagrams/svg/uml-deployment.svg)
 

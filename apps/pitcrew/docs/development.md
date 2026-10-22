@@ -8,7 +8,8 @@ crates/pitcrew-service   the background service: supervision, OS service integra
 app/src-tauri            the Tauri 2 shell: tray, window, commands, updater
 app/src                  the Angular UI (standalone components, signals, SignalStores)
 scripts/                 commit-lint, release manifest (latest.json), sidecar.mjs, check-index.mjs, macos-bootstrap.sh, macos-verify.sh
-docs/adr/                architecture decisions
+docs/adr/                architecture decisions (0001-0010)
+docs/diagrams/           draw.io sources (.drawio) and exported SVGs; see design.md
 .gitea/workflows/        CI
 ```
 
@@ -55,7 +56,13 @@ Review the images before committing them.
 `bash scripts/macos-bootstrap.sh [--check]` checks the prerequisites and builds the `.app` and `.dmg` (nothing is
 installed system-wide); `bash scripts/macos-verify.sh` checks an installed Pitcrew (read-only). See [macos.md](macos.md).
 
-The data folder is `%ProgramData%\Pitcrew` on Windows and `~/Library/Application Support/Pitcrew` on macOS.
+### On Linux
+
+`bash scripts/linux-bootstrap.sh [--check]` checks the prerequisites and builds the `.deb` and the AppImage;
+`bash scripts/linux-verify.sh` checks an installed Pitcrew (read-only). See [linux.md](linux.md).
+
+The data folder is `%ProgramData%\Pitcrew` on Windows, `~/Library/Application Support/Pitcrew` on macOS and
+`~/.local/share/Pitcrew` on Linux (`$XDG_DATA_HOME/Pitcrew`).
 
 ### The Windows service
 
@@ -109,3 +116,46 @@ and `Square*`/`StoreLogo` files (Pitcrew ships no mobile or Store packages).
 tests), `frontend` (lint, build, unit tests with coverage); `bundle` (Windows NSIS and macOS `.dmg`) on `v*` tags, the
 nightly run and manual runs; the `release` job publishes the installers, release notes (git-cliff) and `latest.json`.
 See [releasing.md](releasing.md).
+
+## Architecture documents and diagrams
+
+- Prose: [architecture.md](architecture.md); every diagram on one page: [design.md](design.md); decisions:
+  [adr/](adr/0001-architecture.md). Update them with the code: a change to a module, a protocol message, a state or a
+  platform changes the matching diagram and paragraph in the same commit.
+- Diagrams are draw.io files in `docs/diagrams/*.drawio` (uncompressed XML) following
+  [diagrams/STYLE.md](diagrams/STYLE.md). After editing one, export all of them:
+
+  ```sh
+  bash scripts/export-diagrams.sh   # needs draw.io desktop (DRAWIO overrides the executable) and node
+  ```
+
+  It writes `docs/diagrams/svg/<name>.svg`, which `design.md` and the README embed. `pitcrew-overview.svg` is a
+  hand-written SVG (light and dark palette) and is edited directly. Open the exported SVGs and check them for overlaps and
+  clipped text before committing.
+- Screenshots: `SCREENSHOTS=1 npx playwright test --project=screenshots` (see above).
+
+## Where to add things
+
+- **A protocol message:** `pitcrew_core::protocol` (`Request`/`Response`), the supervisor's `request` handler, the app's
+  DTOs (`app/src-tauri/src/dto.rs`) and `app/src/app/core/api.types.ts` in the same change; bump `PROTOCOL_VERSION` if the
+  meaning of an existing message changes. Queries must not mutate (`Request::mutates`).
+- **A rule** (stall, restart, update, cleanup, status): a pure function or state machine in `pitcrew-core` with a unit
+  test first; the service only feeds it inputs and carries out its actions.
+- **A runner kind:** a `RunnerKind` variant with its release description in `distribution.rs` (and a discovery parser if
+  needed), then the service adapter; update the diagrams that name the kinds.
+- **An OS:** a `platform` adapter (`dispatch`, `install`, `uninstall`), launcher behaviour, `service_paths` and
+  `service_spec`; add the target to the type-check commands above and a guide like [linux.md](linux.md).
+- **A screen:** a standalone component, a SignalStore if it has state, and the backend method on both the Tauri backend
+  and the mock; component styles use the tokens ([ADR 0010](adr/0010-design-system.md)).
+
+## Tests
+
+| Layer | Where | Runs |
+| --- | --- | --- |
+| Core unit tests (rules, state machines, parsing, migration) | `crates/pitcrew-core/src` | `cargo test -p pitcrew-core`; coverage target 99 % lines |
+| Service integration tests against a fake runner and a controllable clock | `crates/pitcrew-service/tests`, `examples/fake_runner.rs` | `cargo test -p pitcrew-service` (Windows, Linux, macOS CI) |
+| Transport tests (the real pipe or socket) | `crates/pitcrew-service/tests/transport.rs` | same |
+| App commands against a fake `ServiceClient` | `app/src-tauri/src` | `cargo test --workspace` |
+| UI unit and component tests | `app/src/**/*.spec.ts` | `npx ng test --watch=false` |
+| Browser flows with the mock backend | `app/e2e` | `npx playwright test` |
+| Things that need a real desktop | [testing-manual.md](testing-manual.md) | by hand before a release |

@@ -6,7 +6,7 @@ This page ties together the design diagrams in [`docs/diagrams/`](diagrams/), al
 service (`crates/pitcrew-service`) that supervises the runners and carries out the core's decisions, a thin Tauri 2
 shell (`app/src-tauri`) and an Angular UI (`app/src/app`) that only talk to the service through one local IPC.
 
-The diagrams follow [diagrams/STYLE.md](diagrams/STYLE.md): planned or in-progress work (not in the code yet) is drawn
+The diagrams follow [diagrams/STYLE.md](diagrams/STYLE.md): planned work (not in the code yet) is drawn
 with a dashed outline and "(planned)" after its name.
 
 ## Overview
@@ -42,7 +42,7 @@ flowchart LR
   values, files as strings or bytes, and decisions go out as typed values.
 - **Service** (`crates/pitcrew-service`): one supervisor thread owns every runner, workers do the slow steps, an async
   IPC server answers the app. It runs as a Windows service (LocalSystem), as a per-user launch agent on macOS, and
-  (in progress, not in the code yet) as a systemd unit on Linux.
+  as a systemd user service on Linux ([ADR 0009](adr/0009-linux-service-and-runner-environment.md)).
 - **App** (`app/src-tauri`, `app/src`): a tray icon and a window for the logged-on user. It holds no runner state of its
   own, so it can be closed, restarted or updated while the runners keep working.
 
@@ -58,7 +58,7 @@ The modules group into five areas (see the level 3 diagram, [core components](de
 | Updates | `distribution`, `checksum`, `version`, `update::policy`, `update::machine` | Where each runner kind publishes releases; whether two checksum hosts agree; which version is newer; whether, when and to which version to update; the phases of an update and when to roll back. |
 | Housekeeping and metrics | `housekeeping`, `usage`, `metrics` | What a cleanup deletes and in which order; which processes belong to a runner; the tiered CPU, memory and disk series. |
 | Records and configuration | `config`, `history`, `state` | The versioned `pitcrew.toml` and how damage is tolerated; the bounded event history and its per-day summaries; the persisted service state. |
-| Wire and helpers | `protocol`, `names`, `layout`, `logs`, `notify`, `redact`, `gitea_api`, `service_spec`, `time`, `platform` | The messages between app and service; validated names; the folder layout of a runner; bounded log search; what the user is told; secret masking; Gitea API URLs and parsing; the launch agent plist; timestamps. |
+| Wire and helpers | `protocol`, `names`, `layout`, `logs`, `notify`, `redact`, `gitea_api`, `service_spec`, `service_paths`, `runner_env`, `self_update`, `time`, `platform` | The messages between app and service; validated names; the folder layout of a runner; bounded log search; what the user is told; secret masking; Gitea API URLs and parsing; the launch agent plist and the systemd unit; data folder and socket paths per OS; the login-shell `PATH` and the per-runner `[runners.env]` table; whether the service should restart because its program changed; timestamps. |
 
 Rules that hold everywhere in the core:
 
@@ -95,10 +95,12 @@ The service is deliberately thin around the core (level 3, [service components](
 - **Transport** (`ipc.rs`). A named pipe with an ACL on Windows, a 0600 Unix socket elsewhere; hello first; bounded
   frames; at most 32 connections; a subscription turns a connection into an event stream
   ([ADR 0004](adr/0004-ipc-protocol-and-acl.md)).
+- **Login environment** (`login_env.rs`). launchd and the systemd user manager start the service with a minimal `PATH`, and runners inherit it. At each runner start the service asks the user's login shell (`$SHELL -l -i -c`, 5 s timeout, bounded, cached 60 s) for the `PATH` a terminal has, with a fallback, and merges the runner's `[runners.env]` table (validated in the core). macOS and Linux; Windows runners keep the service's or the user's environment ([ADR 0009](adr/0009-linux-service-and-runner-environment.md)).
+- **Self-restart** (`host.rs`, core `self_update`). launchd and systemd keep an old service process alive after the app is updated, so the service fingerprints its own executable and exits cleanly when it changed and no job or update runs; the service manager (`KeepAlive`, `Restart=always`) starts the new program, which adopts the runners. The watch is off on Windows, where the app or installer restarts the service.
 - **Store** (`store.rs`, `paths.rs`). Bounded reads; atomic writes that keep a `.bak`; the data folder per OS.
 - **Platform adapters** (`platform/`). Windows: the Service Control Manager entry point, install and uninstall, and the
-  session FFI (the one module of Win32 calls, every `unsafe` block justified). macOS: the launch agent. Elsewhere: not
-  supported yet (Linux is in progress).
+  session FFI (the one module of Win32 calls, every `unsafe` block justified). macOS: the launch agent. Linux: the systemd user unit
+  (`~/.config/systemd/user/pitcrew.service`, written and enabled with `systemctl --user`, no root).
 
 ### App
 
@@ -107,7 +109,7 @@ The service is deliberately thin around the core (level 3, [service components](
   (credential store, Gitea API with the read token, diagnostics bundle, service install, Pitcrew's own updater). One
   subscription thread (`events.rs`) forwards pushed events to the UI and the tray and shows native notifications; it
   reconnects with back-off. Capabilities are least-privilege: the webview gets events only, never the file system, the
-  shell or the updater.
+  shell or the updater. Window lifecycle: closing the window destroys it (the webview's memory is freed); the tray's Open item and the macOS Dock icon recreate it; with no tray (Linux without a status-notifier host) closing the window quits the app. `pitcrew://navigate` events open a page such as `/logs/<runner>` from a tray action or a notification. The UI follows the native-feel policy of [ADR 0008](adr/0008-native-feel.md) and the design system of [ADR 0010](adr/0010-design-system.md); calls have timeouts with an inline Retry.
 - **Angular UI** (`app/src/app`). Standalone components and signals; state in SignalStores (`StatusStore`, `DashboardStore`,
   `ActivityStore`, `LogsStore`, `SettingsStore`, `ServiceStore`); components never call `invoke` directly but use the
   backend injected by the `BACKEND` token (the Tauri backend, or the mock for browser development and tests). The
@@ -124,7 +126,10 @@ The service is deliberately thin around the core (level 3, [service components](
 | [0004](adr/0004-ipc-protocol-and-acl.md) | Framed JSON over a named pipe with an ACL or a 0600 socket; pushed status events instead of polling. |
 | [0005](adr/0005-credential-storage.md) | Secrets only in the OS credential store, owned by the app; registration tokens pass through and are never stored by Pitcrew. |
 | [0006](adr/0006-supervision-and-housekeeping.md) | One supervisor thread with pure controllers; jobs from log lines plus child processes; the stall rule; housekeeping; history and metrics. |
-| [0007](adr/0007-runner-scoped-metrics.md) | The dashboard measures the runners and everything they started, not the whole machine. |
+| [0007](adr/0007-runner-scoped-metrics.md) | The dashboard measures the runners and everything they started, not the whole machine; thread entries are left out of the process table. |
+| [0008](adr/0008-native-feel.md) | The window behaves like a desktop application: opt-in selection, one context-menu policy, browser keys and drops blocked. |
+| [0009](adr/0009-linux-service-and-runner-environment.md) | Linux: a systemd user service, XDG paths, the login shell's `PATH` for runners (macOS and Linux), `[runners.env]`. |
+| [0010](adr/0010-design-system.md) | Tokens first, measured accessibility, shared partials and components, standard loading, empty and error states. |
 
 ## Behaviour in text
 
@@ -177,11 +182,11 @@ reported with a message that says to install the same Pitcrew version for both.
 | `logs/service.log` | the data folder | The service's own log, never runner output or secrets. |
 | `<runner dir>/logs/runner.log` | each runner's folder | The runner's output plus `supervisor:` lines; rotated at 10 MB, five files. |
 | `<runner dir>/bin/<binary>`, `.previous`, `.download` | each runner's folder | The installed binary, the one kept for roll-back, a download in progress. |
-| `pitcrew.sock` | the data folder (macOS, Linux) | The IPC socket, mode 0600. |
+| `pitcrew.sock` | the data folder (macOS); `$XDG_RUNTIME_DIR/pitcrew` (Linux) | The IPC socket, mode 0600. |
 | `job-outcomes.json` | the app's data folder | A bounded cache of finished-job outcomes from the Gitea API. |
 
 The data folder is `%ProgramData%\Pitcrew` on Windows, `~/Library/Application Support/Pitcrew` on macOS and
-`$XDG_CONFIG_HOME/pitcrew` (else `~/.config/pitcrew`) for the Linux paths the service already computes.
+`$XDG_DATA_HOME/Pitcrew` (default `~/.local/share/Pitcrew`) on Linux. The Unix socket is in `$XDG_RUNTIME_DIR/pitcrew` on Linux when that is set (else the data folder), mode 0600 in a 0700 folder.
 
 ## Security and robustness
 
@@ -199,10 +204,11 @@ The data folder is `%ProgramData%\Pitcrew` on Windows, `~/Library/Application Su
 
 - **A new runner kind** (Forgejo's runner, later GitHub's): a new `RunnerKind` with its release description in
   `distribution.rs` and a service adapter; the rest works on the kind's description.
-- **A new OS**: a new `platform` adapter behind `dispatch`, `install` and `uninstall`, and a launcher that knows where
+- **A new OS**: a new `platform` adapter behind `dispatch`, `install` and `uninstall` (as Linux's `platform/linux.rs`), and a launcher that knows where
   runners should run.
 - **New behaviour for users** is configuration (policies, windows, rules) in `pitcrew.toml`, documented in
   `pitcrew_core::config`, not a hard-coded special case.
 
 See also: [features](features.md), [user guide](user-guide.md), [development](development.md),
-[macOS guide](macos.md).
+[macOS guide](macos.md), [Linux guide](linux.md), and the ADRs [0001](adr/0001-architecture.md) to
+[0010](adr/0010-design-system.md).
