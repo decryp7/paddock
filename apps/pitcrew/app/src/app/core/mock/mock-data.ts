@@ -545,6 +545,13 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
       disk: { folderBytes: 71.2 * GB, freeBytes: 18.6 * GB, low: true },
       nextCleanupAt: now + 4 * MINUTE,
       usage: null,
+      updateLoop: {
+        target: '5.3.0',
+        kind: 'failing',
+        attempts: 3,
+        cause:
+          'The update failed 3 times in 7 days. Last reason: the checksums from dl.gitea.com and gitea.com differ. Automatic updates to it are paused; fix the cause (disk, network, permissions) and install it by hand, or skip the version.',
+      },
     });
   }
   const legacy = byName.get('legacy-ci');
@@ -559,6 +566,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
       checkedAt: null,
       disk: { folderBytes: 9.3 * GB, freeBytes: 196 * GB, low: false },
       usage: null,
+      hold: { reasons: ['schedule'], paused: true, minutesLeft: 95 },
     });
   }
   return out;
