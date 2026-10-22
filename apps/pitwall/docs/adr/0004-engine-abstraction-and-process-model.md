@@ -68,12 +68,18 @@ unit tests cover archive handling, the self-test and rollback metadata with fake
   implementation.
 - One process per model costs memory per model (accounted for in ADR 0006) but isolates failures.
 
+## Restart and crash-loop guard (built)
+
+`pitwall_core::supervise` wraps `backoff`: when the release tick finds a loaded model's process dead it plans a restart after
+1 s, 2 s, 4 s up to 60 s (reset after 5 healthy minutes). After more than five crashes in ten minutes the model is marked
+failed: no more automatic starts, requests get a typed error that says what to check, and the Dashboard lists the model with a
+Retry button (`load_model` clears the history). A start that fails while serving a request counts toward the guard but does not
+schedule background restarts. Tested with a fake engine process that exits after a delay.
+
 ## Not built yet
 
 - MLX, vLLM, whisper.cpp, reranker adapters: `Planned` stubs only. Pack engines have no grammar-constrained output unless
   the engine supports it and no `/props`.
-- Automatic restart with backoff: `pitwall_core::backoff` (1 s to 60 s, reset after 5 healthy minutes, give up after 5 crashes
-  in 10 minutes) is written and tested but the server does not use it. A dead engine is dropped and reloaded on the next request.
 - Below-normal process priority is applied on Windows only; Unix children run at normal priority.
 - Memory caps on engine processes beyond the fit check and release policy.
 - Real runs on Windows, Linux, CUDA and Vulkan.

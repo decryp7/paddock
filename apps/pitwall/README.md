@@ -77,7 +77,7 @@ Every feature, with its status, is in [docs/features.md](docs/features.md).
 - **The app.** Dashboard, models, engines, apps, requests, playground, benchmarks, settings, tray.
 
 Not built yet: LAN sharing with TLS, a response cache, knowledge collections (RAG), MCP and tool hosting, speech to
-text, stored benchmarks. See the [roadmap](docs/roadmap.md).
+text. See the [roadmap](docs/roadmap.md).
 
 ## Install
 

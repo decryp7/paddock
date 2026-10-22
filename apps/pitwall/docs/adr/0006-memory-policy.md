@@ -57,10 +57,19 @@ countdown (`idle_release_at`) and every release is an event with its reason (`id
 - Estimates are estimates: the fit check leaves margin and the real resident size is read from the engine process
   (`rss`) after loading.
 
+## OS signals and context release (built)
+
+`pitwall_server::os_signals` reads the OS every tick: Linux PSI (`/proc/pressure/memory`), macOS `sysctl
+kern.memorystatus_vm_pressure_level` and `pmset -g assertions` (a display-sleep assertion means a full-screen app), Windows
+`QueryMemoryResourceNotification` and `SHQueryUserNotificationState`. `pitwall_core::pressure` holds the pure parsing and
+thresholds (PSI `some` avg10 >= 10 is warn, `full` avg10 >= 5 is critical) and feeds `memory::System`. A source that is missing
+reads as normal. `ReleaseContext` erases the engine's slots (`POST /slots/{n}?action=erase`) once per idle period and the next
+request resets it.
+
 ## Not built yet
 
-- "Release context first": the policy emits `ReleaseContext` actions at half the idle time, but the server's tick carries out
-  only unloads, so the setting has no effect yet.
-- The foreground-busy and OS-pressure readings depend on the platform probes in `system.rs`; they are not verified on
-  every OS. Only macOS has been run for real.
+- Clearing the context frees the engine's cached prompts and KV contents; the KV buffer itself is allocated for the engine's
+  life and is returned only when the weights are unloaded.
+- Foreground detection is not available on Linux. The OS-pressure and foreground readings (`os_signals.rs`) have run for real
+  on macOS only; the Windows and Linux readers are exercised by their CI runners.
 - Notifications for each release (`notifyOnRelease`) are a stored setting; the shell does not act on it yet.

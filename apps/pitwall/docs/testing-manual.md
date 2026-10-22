@@ -47,7 +47,11 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 20 | Pause serving, send a request. | 503 "Pitwall has paused serving. Resume it in Pitwall's window or tray menu." Resume; requests work. |
 | 21 | Send 6 simultaneous requests with `X-Pitwall-Priority: batch` and one interactive. | The interactive one starts first; all complete; `GET /x/v1/jobs` shows the queue while they run. `DELETE /x/v1/jobs/<id>` for a queued one cancels it. |
 | 22 | Load a model that does not fit (a large model on a small machine). | The verdict says Won't fit before download; if forced, the request fails with `insufficient_memory`, the machine does not start swapping. |
-| 23 | Kill the `llama-server` process of a loaded model. | Within a few seconds the event feed says the engine exited and that it reloads on the next request; the next request works. Pitwall itself is unaffected. |
+| 23 | Kill the `llama-server` process of a loaded model. | Within about five seconds the event feed says the engine exited unexpectedly and is restarting in 1 s; the model is loaded again by itself and the Dashboard shows no problem. Pitwall itself is unaffected. |
+| 23a | Kill it again each time it comes back, six times within ten minutes (the delays double: 1, 2, 4, 8 s). | After the sixth the Dashboard shows the model with "keeps crashing", the reason and a Retry button; a request for it gets an error saying Pitwall stopped restarting it. Retry loads it again. |
+| 23b | Memory pressure: with a model loaded and idle, fill memory with another program (macOS `memory_pressure -l warn`; Linux `stress-ng --vm 1 --vm-bytes 90%`; Windows: open many large apps) until the OS reports pressure. | Within five seconds the idle model is released with reason pressure (event feed); a busy model is not touched. |
+| 23c | Idle context: set a model's release time to 2 minutes (Models > Release when idle), use it once and wait 70 seconds. | The event feed says the context was cleared and the weights stay loaded; after two minutes the model is released. |
+| 23d | Start Pitwall a second time (double-click the app again; Windows/Linux also launch from the command line). | No second tray icon appears; the existing window comes to the front (rebuilt if it was closed). Autostart at login while it is already running changes nothing. |
 
 ## Engines, packs and failures
 
@@ -77,7 +81,7 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 
 | # | Steps | Expected |
 |---|-------|----------|
-| 38 | Install the service from the app (start at login is in Settings > General; the app's install action calls the same verbs as `pitwall-server install`, `status` and `uninstall`; the platform guides describe the manual route). macOS: approve in System Settings > Login Items. Windows: the UAC prompt. Check it: Windows `sc.exe query Pitwall`; macOS `launchctl print gui/$(id -u)/net.decryptology.pitwall.service`; Linux `systemctl --user status pitwall.service`. | The service runs; `GET /x/v1/health` answers. |
+| 38 | First run (no service installed, nothing asked before): the window opens with "Run Pitwall's server in the background?". Choose Run in the background (or later use Settings > Background service > Install service; Remove service undoes it). macOS: approve in System Settings > General > Login Items (macOS 13 or later). Windows: the administrator (UAC) prompt, installed with the NSIS installer `Pitwall_<version>_x64-setup.exe`. Linux: no prompt (a systemd user unit). "No thanks" is remembered; "Not now" asks again next time. Start at login is a separate switch in Settings > General (your OS's login item). Check the service: Windows `sc.exe query Pitwall`; macOS `launchctl print gui/$(id -u)/net.decryptology.pitwall.service`; Linux `systemctl --user status pitwall.service`. | The service runs; `GET /x/v1/health` answers. |
 | 39 | Kill the server process. | The OS restarts it within about 10 seconds (Windows: recovery actions at 10 s, 60 s, 5 min; systemd `RestartSec=10`; launchd KeepAlive). The window reconnects. |
 | 40 | Log out and in (Linux: with `loginctl enable-linger $USER` the server also runs with nobody logged in). | The server is running again without opening the app. |
 | 41 | Close the window; use the tray/menu-bar icon > Open. Repeat three times; on macOS also use the Dock icon. | The window reopens with content every time (never blank). Quit from the tray exits the app; the server keeps running. Linux with no tray: closing the window quits the app only. |
@@ -91,12 +95,16 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 44 | Walk every screen (Dashboard, Models, Engines, Apps & keys, Requests, Playground, Benchmarks, Settings, tray popover) in light and dark and with the system theme changing. | Readable, no clipped text, status colours always with words or shapes; keyboard focus rings visible; text is not selectable except where it should be (log text, ids). |
 | 45 | Disconnect the server (stop it) while the window is open. | Panels show an inline error with Retry, never an endless skeleton. |
 | 46 | Run a chat in the Playground, cancel it midway. | Generation stops; the job leaves the queue. |
-| 47 | Benchmarks > Run on the test model. | A tokens-per-second figure appears. Known limitation: results are not saved across restarts. |
+| 47 | Benchmarks > Run on the test model, then quit and start Pitwall again. | A tokens-per-second figure appears and is still listed after the restart (`benchmarks.json` in the data folder). |
+| 47a | Settings > Privacy > Keep request content on, make a request that contains a fake key (`pw_` followed by 30 letters), open it in Requests. | The prompt and the answer show; the key is shown as `[redacted]`; turning the setting off keeps no new content; restarting Pitwall empties the list. |
+| 47b | Settings > Updates > Check for updates (a build with an updater key only). | Nothing is contacted until you press the button; with an update, Install and restart. A build without a key says "Not configured". |
 | 48 | Reduced-motion and large-text settings of the OS. | Animations are off; layouts survive. |
 
 ## Per-platform extras
 
-- **macOS:** install from the `.dmg` (unsigned: right-click > Open the first time, or allow in System Settings > Privacy and
+- **Real-engine automated run (any platform):** `PITWALL_LLAMA_E2E=1 cargo test -p pitwall-server --test llama_e2e` downloads the
+  pinned engine build and a tiny model into a temporary folder, asks one chat question and deletes everything. It is off in CI.
+- **macOS (13 or later):** install from the `.dmg` (unsigned: right-click > Open the first time, or allow in System Settings > Privacy and
   Security); the Metal build uses the GPU (`--list-devices` shows `MTL0`). Run `scripts/ci/macos-verify-bundle.sh` on a built
   bundle.
 - **Linux:** install the `.deb` and run the AppImage; with an NVIDIA card check `nvidia-smi` shows the process under the CUDA

@@ -57,8 +57,10 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
   then replaces the old one. A build that fails its self-test is discarded and the previous build stays active; the Engines page
   can also switch back to the previous build. Works.
 - **One process per model.** Each model runs in its own `llama-server` child process on a loopback port with a private key,
-  started with a scrubbed environment and killed with Pitwall. A crashing engine never takes Pitwall down: the model is forgotten
-  and loads again on the next request. Works.
+  started with a scrubbed environment and killed with Pitwall. A crashing engine never takes Pitwall down: it is restarted
+  after 1 s, 2 s, 4 s and so on (at most 60 s); after five crashes in ten minutes Pitwall stops, the Dashboard shows the model
+  with the reason and a Retry button, and requests for it get a clear error instead of another doomed start. Works (tested
+  with an engine process that exits by itself).
 - **Planned engines say so.** MLX (Apple Silicon), vLLM (Linux with an NVIDIA GPU) and whisper.cpp (speech to text) appear
   on the Engines page as "not available" with the reason. Planned, no adapter yet.
 - **External and downloadable engines through packs**, for example llamafile (built in, experimental). See
@@ -224,8 +226,9 @@ waiting for approval; create app, add key and revoke. A new key is shown once in
 ![Requests](screenshots/requests-light.png)
 
 Recent requests with app, endpoint, model, how it was chosen, priority, queue time, time to first token, tokens and speed, cold
-start and status. Only metadata is kept. The prompt and response are hidden; showing them needs **Keep request content** in
-Settings and the inspector for the text is not available yet. Works (metadata); content inspection planned.
+start and status. Only metadata is kept by default. With **Keep request content** on (Settings > Privacy) the prompt and the
+answer of the latest 50 requests are kept in memory on this computer, with keys and tokens masked, up to 64 KB each, and shown
+on demand; they are never written to disk and are gone when Pitwall stops. Works.
 
 ## Playground
 
@@ -240,7 +243,8 @@ yet.
 ![Benchmarks](screenshots/benchmarks-light.png)
 
 Run a short generation on a model to measure tokens per second and time to first token on this hardware. The run works; keeping
-results between sessions (and feeding them to "fast" model selection) is **planned**, today the list starts empty.
+results is **built**: they are saved (`benchmarks.json`, versioned, one per model) and "fast" model selection prefers the model
+that measured faster on this machine. Works.
 
 ## Tray
 
