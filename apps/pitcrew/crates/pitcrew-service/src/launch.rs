@@ -7,12 +7,15 @@
 //!   since a service has no console of its own (ADR 0003). The runner then stops polling and finishes a running job.
 //! - Kill (only after the stop timeout and only while no job runs): the whole process tree.
 
-use crate::process::{quiet_command, run_with_timeout};
+use crate::process::quiet_command;
+#[cfg(windows)]
+use crate::process::run_with_timeout;
 use pitcrew_core::logline::MAX_LINE_LEN;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
 use std::sync::Arc;
+#[cfg(windows)]
 use std::time::Duration;
 
 /// Receives the runner's output, one line at a time (from reader threads).
@@ -200,6 +203,7 @@ pub fn kill_tree(pid: u32) {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use std::time::Duration;
 
     fn collect() -> (LineSink, Arc<Mutex<Vec<String>>>) {
         let got = Arc::new(Mutex::new(vec![]));

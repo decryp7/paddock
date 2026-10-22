@@ -18,7 +18,8 @@ app/src-tauri/gen/schemas/
 
 # Logs and local runtime data (never commit runner logs, tokens or .runner files)
 *.log
-logs/
+/logs/
+**/runners/*/logs/
 .runner
 *.runner
 *.key

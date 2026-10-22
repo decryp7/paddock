@@ -21,7 +21,9 @@ pitcrew-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tauri = { version = "2.12.4", features = ["tray-icon", "image-png"] }
+# "macos-private-api": the transparent window with vibrancy on macOS (tauri.macos.conf.json `macOSPrivateApi`); a no-op
+# elsewhere. It must sit here, not under a target table: tauri-build checks only this list against the config.
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
@@ -47,8 +49,6 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", 
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Registering the bundled launch agent with SMAppService (macOS 13+, ADR 0003).
-# Transparent window with vibrancy (tauri.macos.conf.json `macOSPrivateApi`).
-tauri = { version = "2.12.4", features = ["macos-private-api"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
