@@ -286,6 +286,28 @@ fn an_unregistered_runner_is_registered_from_the_app() {
 }
 
 #[test]
+fn registering_a_folder_that_is_registered_already_adopts_it() {
+    // The wizard's "existing runner folder" sends AddRunner, then Register: the registered folder is used as it is.
+    let mut h = Harness::new("adopt", "mode=ok\n", true);
+    h.pump(Duration::from_secs(1));
+    let before = std::fs::read(h.runner_dir.join(".runner")).unwrap();
+    let r = h.ask(Request::Register {
+        runner: h.name.clone(),
+        server_url: "https://git.example.com".into(),
+        token: Secret::new("unused-token").unwrap(),
+        display_name: None,
+    });
+    assert_eq!(r, Response::Ok);
+    assert_eq!(
+        std::fs::read(h.runner_dir.join(".runner")).unwrap(),
+        before,
+        "the registration is kept as it is"
+    );
+    h.until("running", Duration::from_millis(200), |h| h.status().status == RunnerStatus::Idle);
+    h.finish();
+}
+
+#[test]
 fn settings_and_bad_requests_are_validated() {
     let mut h = Harness::new("cfg", "mode=ok\n", true);
     let Response::Settings { mut config, .. } = h.ask(Request::GetSettings) else {

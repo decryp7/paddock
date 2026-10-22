@@ -112,7 +112,7 @@ pub enum Done {
     /// A cleanup.
     Cleaned(CleanupReport, Option<Reply>),
     /// A registration.
-    Registered(Result<(), String>, Reply),
+    Registered(Result<work::Registered, String>, Reply),
 }
 
 /// What the supervisor needs from its surroundings (all replaceable in tests).
@@ -1031,9 +1031,15 @@ impl Supervisor {
                 }
             }
             Done::Registered(res, reply) => match res {
-                Ok(()) => {
+                Ok(how) => {
                     r.registered = true;
-                    r.log.supervisor(now, "registered with the server");
+                    r.log.supervisor(
+                        now,
+                        match how {
+                            work::Registered::New => "registered with the server",
+                            work::Registered::Adopted => "adopted a folder that is registered already; the token was not used",
+                        },
+                    );
                     let actions = r.ctl.handle(Input::Start, now);
                     self.act(name, actions, now);
                     self.spawn_version_probe(name);

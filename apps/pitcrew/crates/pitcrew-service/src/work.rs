@@ -209,12 +209,20 @@ pub fn ensure_runner_config(binary: &Path, config: &Path, dir: &Path) -> Result<
     crate::store::write_atomic(config, &layout::adjust_generated_config(&out.stdout, dir)).map_err(|e| e.to_string())
 }
 
-/// Runs the runner's `register` command. Errors are redacted (the token never appears in them).
-pub fn register(r: &Registration<'_>) -> Result<(), String> {
+/// How a registration ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Registered {
+    /// The runner's `register` command registered the folder with the server.
+    New,
+    /// The folder was registered already (an adopted runner folder): it is used as it is and the token is not sent.
+    Adopted,
+}
+
+/// Runs the runner's `register` command, unless the folder is registered already. Errors are redacted (the token
+/// never appears in them).
+pub fn register(r: &Registration<'_>) -> Result<Registered, String> {
     if r.dir.join(layout::REGISTRATION_FILE).exists() {
-        return Err(
-            "this folder is registered already; remove the runner on the server and delete its .runner file to register it again".into(),
-        );
+        return Ok(Registered::Adopted);
     }
     ensure_runner_config(r.binary, &r.config, r.dir)?;
     let mut cmd = quiet_command(r.binary);
@@ -223,7 +231,7 @@ pub fn register(r: &Registration<'_>) -> Result<(), String> {
     let out = run_with_timeout(cmd, REGISTER_TIMEOUT).map_err(|e| e.to_string())?;
     let text = format!("{}\n{}", out.stdout, out.stderr).replace(r.token, "[redacted]");
     if out.success && r.dir.join(layout::REGISTRATION_FILE).exists() {
-        Ok(())
+        Ok(Registered::New)
     } else {
         let last: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).rev().take(3).collect();
         let detail = last.into_iter().rev().collect::<Vec<_>>().join(" / ");
