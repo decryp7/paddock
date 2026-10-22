@@ -519,6 +519,8 @@ export interface CommandError {
     | 'permissionDenied'
     | 'busy'
     | 'cancelled'
-    | 'internal';
+    | 'internal'
+    /** Raised by the UI, not the shell: a call did not answer in time (`call-timeout.ts`). */
+    | 'timeout';
   message: string;
 }

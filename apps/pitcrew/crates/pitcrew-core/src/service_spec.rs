@@ -107,7 +107,8 @@ pub fn systemd_quote(word: &str) -> String {
 
 /// Renders the unit. `KillMode=mixed` sends the stop signal to the service only and kills leftovers (runners that
 /// ignored the service's own graceful stop) after `TimeoutStopSec`; the service stops the runners itself, waiting for
-/// a running job. The unit restarts the service if it fails (at most every 10 s). Lingering (running without a
+/// a running job. The unit restarts the service whenever it exits on its own (a crash, or the clean exit after the program was replaced,
+/// `self_update`) but not after `systemctl stop` (at most every 10 s). Lingering (running without a
 /// log-in) is the user's choice: `loginctl enable-linger` (docs/linux.md).
 pub fn systemd_unit(spec: &SystemdUnitSpec) -> String {
     let exec: Vec<String> = spec.exec.iter().map(|a| systemd_quote(a)).collect();
@@ -122,7 +123,7 @@ Wants=network-online.target
 Type=simple
 ExecStart={exec}
 WorkingDirectory={wd}
-Restart=on-failure
+Restart=always
 RestartSec=10
 KillMode=mixed
 TimeoutStopSec=300
@@ -200,7 +201,7 @@ mod tests {
         });
         assert!(unit.contains("ExecStart=\"/home/ci/.local/share/Pitcrew/bin/pitcrew-service\" \"run\"\n"));
         assert!(unit.contains("WantedBy=default.target"));
-        assert!(unit.contains("Restart=on-failure") && unit.contains("KillMode=mixed"));
+        assert!(unit.contains("Restart=always") && unit.contains("KillMode=mixed"));
         assert!(unit.contains("WorkingDirectory=\"/home/ci/.local/share/Pitcrew\""));
         assert_eq!(SYSTEMD_UNIT, "pitcrew.service");
     }

@@ -10,6 +10,7 @@ const CODES: ReadonlySet<CommandError['code']> = new Set([
   'busy',
   'cancelled',
   'internal',
+  'timeout',
 ]);
 
 /** Any rejection from a command as a typed error (unknown shapes become `internal` with their text). */

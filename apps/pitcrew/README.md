@@ -136,6 +136,8 @@ Decisions: [0001 architecture](docs/adr/0001-architecture.md), [0002 runner auto
 4. Later: GitHub's self-hosted runner, LaunchDaemon mode for headless Macs and a systemd system unit for headless Linux
    hosts, the per-runner `env` on Windows.
 
+After an update the service restarts itself (when no job runs) to run its new program ([ADR 0009](docs/adr/0009-linux-service-and-runner-environment.md)).
+
 Dedicated build Macs: since the macOS service is a launch agent, enable automatic log-in for the CI user so the
 runners start after a reboot.
 

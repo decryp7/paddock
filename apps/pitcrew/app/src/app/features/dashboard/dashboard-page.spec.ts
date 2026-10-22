@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { timeoutError } from '../../core/call-timeout';
 import { MockBackend } from '../../core/mock-backend';
 import { RegisterLauncher } from '../../layout/register-launcher';
 import { appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
@@ -133,6 +134,18 @@ describe('DashboardPage', () => {
     await settle(f, 6);
     expect(text(el)).not.toContain('Machine metrics could not be loaded');
     expect(el.querySelector('pc-machine-tiles')).not.toBeNull();
+  });
+
+  it('shows a timed-out request as an inline error with Retry instead of skeletons forever', async () => {
+    configure();
+    vi.spyOn(mock, 'activity').mockRejectedValue(timeoutError(15_000));
+    const { f, el } = await mount();
+    expect(text(el)).toContain('Activity could not be loaded');
+    expect(text(el)).toContain('did not answer within 15 seconds');
+    vi.mocked(mock.activity).mockRestore();
+    byText<HTMLButtonElement>(el, 'pc-load-state button', 'Retry')!.click();
+    await settle(f, 6);
+    expect(text(el)).not.toContain('Activity could not be loaded');
   });
 
   it('refreshes on a timer while visible', async () => {

@@ -32,6 +32,7 @@ use pitcrew_core::protocol::{
     DiagnosticsSection, DiskUse, ErrorCode, Request, Response, RunnerSnapshot, ServiceError, ServiceEvent, ServiceInfo, UpdateRecord,
 };
 use pitcrew_core::redact::redact;
+use pitcrew_core::self_update::{self, BinaryStamp, RestartDecision};
 use pitcrew_core::session::{self, LaunchTarget, NoLaunch, SessionState};
 use pitcrew_core::state::{self, ServiceState, MAX_STATE_BYTES};
 use pitcrew_core::time::Timestamp;
@@ -128,6 +129,9 @@ pub struct Env {
     pub platform: Platform,
     /// The `PATH` to give runners at each start (the user's login shell's on macOS and Linux); `None`: the service's own.
     pub base_path: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+    /// A fingerprint of the service's own program file, or `None` when it cannot be told (or on Windows, where the
+    /// app or installer restarts the service): a change makes an idle service restart itself (`self_update`).
+    pub exe_stamp: Arc<dyn Fn() -> Option<BinaryStamp> + Send + Sync>,
     /// The clock.
     pub clock: Arc<dyn Fn() -> Timestamp + Send + Sync>,
     /// Local time: weekday, time of day and the UTC offset in minutes.
@@ -161,6 +165,19 @@ fn unreachable_time() -> TimeOfDay {
 
 /// The real environment.
 pub fn os_env(data_dir: PathBuf) -> Env {
+    let exe_stamp: Arc<dyn Fn() -> Option<BinaryStamp> + Send + Sync> = if cfg!(windows) {
+        Arc::new(|| None)
+    } else {
+        let exe = std::env::current_exe().ok();
+        Arc::new(move || {
+            let meta = std::fs::metadata(exe.as_ref()?).ok()?;
+            let modified_ms = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+            Some(BinaryStamp {
+                len: meta.len(),
+                modified_ms: u64::try_from(modified_ms).ok()?,
+            })
+        })
+    };
     let base_path: Arc<dyn Fn() -> Option<String> + Send + Sync> = if cfg!(windows) {
         Arc::new(|| None)
     } else {
@@ -169,6 +186,7 @@ pub fn os_env(data_dir: PathBuf) -> Env {
     };
     Env {
         base_path,
+        exe_stamp,
         data_dir,
         launcher: Box::new(crate::launcher::OsLauncher),
         sources: Sources::public(),
@@ -238,6 +256,9 @@ pub struct Supervisor {
     last_status: String,
     started_at: Timestamp,
     last_probe: Timestamp,
+    started_stamp: Option<BinaryStamp>,
+    last_exe_check: Timestamp,
+    exe_wait_logged: bool,
     last_sample: Timestamp,
     /// All runners together, per probe tick, for the current sample period.
     usage_total: UsageAcc,
@@ -256,6 +277,7 @@ impl Supervisor {
     /// A supervisor over the configuration and state in `env.data_dir`. `tx` is the sending side of its channel.
     pub fn new(env: Env, tx: Sender<Msg>) -> Self {
         let now = (env.clock)();
+        let env_stamp = env.exe_stamp.clone();
         let mut service_log = LogWriter::open(&env.data_dir.join("logs"), "service.log", RotationPolicy::default());
         service_log.supervisor(now, &format!("Pitcrew service {SERVICE_VERSION} starting"));
 
@@ -301,6 +323,9 @@ impl Supervisor {
             last_status: String::new(),
             started_at: now,
             last_probe: Timestamp(0),
+            started_stamp: (env_stamp)(),
+            last_exe_check: now,
+            exe_wait_logged: false,
             last_sample: Timestamp(0),
             usage_total: UsageAcc::default(),
             last_save: now,
@@ -403,8 +428,35 @@ impl Supervisor {
                 last_tick = now;
                 self.tick(now);
             }
+            if self.restart_for_new_program(now) {
+                break;
+            }
         }
         self.shutdown();
+    }
+
+    /// Whether the service should exit now because its own program was replaced on disk (checked every 30 s). The
+    /// service manager starts the new program, which adopts the runners; a running job or update postpones it.
+    pub fn restart_for_new_program(&mut self, now: Timestamp) -> bool {
+        if now.since(self.last_exe_check) < Duration::from_secs(30) {
+            return false;
+        }
+        self.last_exe_check = now;
+        let busy = self.runners.values().any(|r| r.jobs.running(now) || r.update_worker);
+        match self_update::decide(self.started_stamp, (self.env.exe_stamp)(), busy) {
+            RestartDecision::Stay => false,
+            RestartDecision::WaitForIdle => {
+                if !self.exe_wait_logged {
+                    self.exe_wait_logged = true;
+                    self.log_service(now, "the Pitcrew service program was replaced: restarting when no job runs");
+                }
+                false
+            }
+            RestartDecision::Restart => {
+                self.log_service(now, "the Pitcrew service program was replaced: restarting to run the new one");
+                true
+            }
+        }
     }
 
     /// Handles one message.

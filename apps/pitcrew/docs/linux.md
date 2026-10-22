@@ -86,6 +86,12 @@ jobs:
       - run: uname -a && node --version
 ```
 
+## After updating Pitcrew
+
+launchd/systemd keep the old service process running after the app is updated or reinstalled. The service notices that
+its own program changed on disk and restarts itself once no job (or update) is running; the new process adopts the
+runners. (AppImage on Linux: turn the service on again once after an update to refresh its copy.) ADR 0009.
+
 ## Logs and files
 
 | What | Where |

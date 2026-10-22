@@ -50,6 +50,7 @@ struct Harness {
     root: PathBuf,
     runner_dir: PathBuf,
     name: RunnerName,
+    exe: Arc<AtomicU64>,
 }
 
 impl Harness {
@@ -80,11 +81,19 @@ impl Harness {
         std::fs::write(data.join("pitcrew.toml"), toml).unwrap();
         let clock = Arc::new(AtomicU64::new(pitcrew_service::cleanup::now().0));
         let c = clock.clone();
+        let exe = Arc::new(AtomicU64::new(1));
+        let exe2 = exe.clone();
         let env = Env {
             data_dir: data,
             launcher: Box::new(OsLauncher),
             sources: Sources::public(),
             platform: pitcrew_core::platform::Platform::current().unwrap(),
+            exe_stamp: Arc::new(move || {
+                Some(pitcrew_core::self_update::BinaryStamp {
+                    len: exe2.load(Ordering::SeqCst),
+                    modified_ms: 0,
+                })
+            }),
             base_path: Arc::new(|| Some("/pitcrew/test-path:/usr/bin:/bin".to_string())),
             clock: Arc::new(move || Timestamp(c.load(Ordering::SeqCst))),
             local: Arc::new(|_| {
@@ -106,6 +115,7 @@ impl Harness {
             root,
             runner_dir,
             name: RunnerName::parse(test).unwrap(),
+            exe,
         }
     }
 
@@ -422,5 +432,26 @@ fn a_manual_cleanup_reports_what_it_did() {
     assert!(!h.runner_dir.join("bin").join(format!("gitea-runner{EXE}.download")).exists());
     assert!(h.runner_dir.join("work/old-job").exists(), "a folder changed minutes ago is kept");
     assert!(count(&h.history(), |k| matches!(k, HistoryKind::Cleanup { .. })) == 1);
+    h.finish();
+}
+
+#[test]
+fn a_replaced_service_program_restarts_the_service_only_when_no_job_runs() {
+    let mut h = Harness::new("selfup", "mode=job\njob_secs=3\n", true);
+    h.until("job seen", Duration::from_secs(6), |h| h.status().current_job.is_some());
+    let t = |h: &Harness, extra: u64| Timestamp(h.now().0 + extra);
+    // Unchanged: never.
+    assert!(!h.sup.restart_for_new_program(t(&h, 60_000)));
+    // Replaced while a job runs: wait.
+    h.exe.store(2, Ordering::SeqCst);
+    assert!(!h.sup.restart_for_new_program(t(&h, 120_000)));
+    // Checked at most every 30 s.
+    assert!(!h.sup.restart_for_new_program(t(&h, 121_000)));
+    // The job ended: restart (the service manager starts the new program, which adopts the runners).
+    h.until("job done", Duration::from_secs(6), |h| h.status().current_job.is_none());
+    for _ in 0..6 {
+        h.pump(Duration::from_secs(60));
+    }
+    assert!(h.sup.restart_for_new_program(t(&h, 600_000)));
     h.finish();
 }

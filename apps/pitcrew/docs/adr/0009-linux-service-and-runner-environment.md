@@ -58,6 +58,15 @@ characters, values up to 4096 characters without control characters, and the `PI
 are reserved. A runner with an invalid `env` is skipped with a problem, like any invalid entry. On Windows the runner
 keeps the service's or the user's own environment (the table is not applied there yet).
 
+### The service restarts itself when its program is replaced (macOS and Linux)
+
+launchd and systemd keep the old process after the app is updated or reinstalled, so the service would run old code. It
+fingerprints its own executable (size and modification time, `self_update::BinaryStamp`) at start and compares every
+30 s. When it changed (`self_update::decide`, pure): with a job or an update running it logs once and waits; when idle it
+exits cleanly, and launchd (`KeepAlive`) or systemd (`Restart=always`, which still honours `systemctl stop`) starts the
+new program, which adopts the runners as after any restart. A file that is momentarily missing (an update replacing it)
+is ignored. On Windows the app or the installer restarts the service, so the watch is off.
+
 ## Consequences
 
 - A stopgap `runner.envs: PATH` in a runner's `config.yaml` is no longer needed on macOS and Linux.
