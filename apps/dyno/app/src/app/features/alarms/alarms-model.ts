@@ -1,6 +1,5 @@
 import type { Alarm, AlarmChange, AlarmConfig, AlarmQuietHours, AlarmState, CustomAlertRule, CustomMetric, Severity, Shelf } from '../../core/api.types';
 import { formatClock, formatDate } from '../../shared/format';
-import { needsAcknowledge } from '../../state/alarm-list';
 
 // The open-list helpers live with the state (the store uses them); re-exported for the page code and its specs.
 export { mergeAlarms, needsAcknowledge, prependChange, sortOpen } from '../../state/alarm-list';

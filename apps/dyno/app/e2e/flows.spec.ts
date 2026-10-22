@@ -28,9 +28,9 @@ test.describe('screens', () => {
   test('unbuilt features are listed in one dialog and have no route', async ({ page }) => {
     await page.goto(url());
     await page.getByRole('button', { name: /Coming/ }).click();
-    await expect(page.getByRole('dialog').getByText('Cleanup')).toBeVisible();
+    await expect(page.getByRole('dialog').getByText('Administrator tuning')).toBeVisible();
     await page.keyboard.press('Escape');
-    await page.goto(url('/cleanup'));
+    await page.goto(url('/issues'));
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
   });
 
@@ -172,7 +172,7 @@ test.describe('processes', () => {
 test.describe('settings', () => {
   test('the theme switch applies at once and Save stores it', async ({ page }) => {
     await page.goto(url('/settings'));
-    await expect(page.getByText('Observe-only by default')).toBeVisible();
+    await expect(page.getByText(/Dyno measures first/)).toBeVisible();
     await page.getByRole('radio', { name: 'Dark' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await page.getByRole('radio', { name: 'Light' }).click();
