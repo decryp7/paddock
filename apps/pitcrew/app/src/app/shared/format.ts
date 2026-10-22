@@ -75,6 +75,11 @@ export function formatDay(at: number): string {
   return new Date(at).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 }
 
+/** `14:00` for an hourly axis (the hour's start in local time). */
+export function formatHour(at: number): string {
+  return new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 /** `22 Oct` for a long range axis. */
 export function formatShortDate(at: number): string {
   return new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });

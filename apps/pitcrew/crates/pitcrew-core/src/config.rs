@@ -14,7 +14,7 @@ use crate::session::LoggedOffMode;
 use crate::update::{UpdatePolicy, UpdateTimeouts};
 use crate::watchdog::StallRule;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 /// The schema version this Pitcrew writes.
@@ -121,6 +121,10 @@ pub struct RunnerConfig {
     /// Overrides the default disk housekeeping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cleanup: Option<CleanupPolicy>,
+    /// Environment variables for the runner process (and so its jobs), over the login shell's `PATH` the service
+    /// adds on macOS and Linux. Validated by [`crate::runner_env::validate_env`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 /// Longest server URL Pitcrew keeps.
@@ -467,6 +471,7 @@ fn check_runner(r: &RunnerConfig) -> Result<(), String> {
     if let Some(u) = &r.server_url {
         check_server_url(u)?;
     }
+    crate::runner_env::validate_env(&r.env).map_err(|e| e.to_string())?;
     if r.labels.len() > MAX_LABELS {
         return Err(format!("it has more than {MAX_LABELS} labels"));
     }
@@ -529,6 +534,20 @@ enabled = false
 mode = "manual"
 pinned = "5.1.0"
 "#;
+
+    #[test]
+    fn a_runner_env_table_loads_round_trips_and_bad_ones_skip_the_runner() {
+        let text = "schema_version = 1\n[[runners]]\nname = \"a\"\nkind = \"gitea-runner\"\ndir = \"/r/a\"\n[runners.env]\nPATH = \"/x/bin\"\nNODE_ENV = \"ci\"\n";
+        let l = load(Some(text), None);
+        assert_eq!(l.problems, vec![]);
+        assert_eq!(l.config.runners[0].env.get("PATH").map(String::as_str), Some("/x/bin"));
+        let again = load(Some(&to_toml(&l.config).unwrap()), None);
+        assert_eq!(again.config.runners[0].env, l.config.runners[0].env);
+        let bad = text.replace("NODE_ENV", "1BAD");
+        let l = load(Some(&bad), None);
+        assert!(l.config.runners.is_empty());
+        assert!(l.problems.iter().any(|p| p.to_string().contains("1BAD")), "{:?}", l.problems);
+    }
 
     #[test]
     fn a_missing_file_gives_defaults_to_save() {

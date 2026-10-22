@@ -31,6 +31,8 @@ pub struct ActivityReply {
     pub summary: HistorySummary,
     /// Jobs per day by outcome.
     pub job_days: Vec<JobDay>,
+    /// The same by local hour over the last 24 hours (the 24 h view).
+    pub job_hours: Vec<JobDay>,
     /// The newest events, newest first.
     pub events: Vec<HistoryEvent>,
     /// Whether a Gitea read token is set for the runner's server.

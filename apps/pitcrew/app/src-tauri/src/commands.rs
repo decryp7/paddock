@@ -11,7 +11,7 @@ use crate::service_client::{ClientError, ServiceClient};
 use crate::{credentials, diagnostics, gitea, service_install, updater};
 use pitcrew_core::config::{check_server_url, Config, RunnerConfig};
 use pitcrew_core::distribution::RunnerKind;
-use pitcrew_core::gitea_api::{job_days, RunDetails};
+use pitcrew_core::gitea_api::{job_days, job_hours, with_outcomes, RunDetails};
 use pitcrew_core::names::RunnerName;
 use pitcrew_core::protocol::{DiagnosticsSection, Request, Response, Secret};
 use pitcrew_core::version::RunnerVersion;
@@ -118,6 +118,7 @@ pub fn runner_config(req: &RegisterRequest, data_dir: &str) -> Result<RunnerConf
         update: None,
         watchdog: None,
         cleanup: None,
+        env: Default::default(),
     })
 }
 
@@ -274,7 +275,7 @@ pub async fn runner_activity<R: Runtime>(
         .status()
         .and_then(|s| s.runners.into_iter().find(|r| r.name == n).and_then(|r| r.server_url));
     blocking(move || {
-        let (summary, events) = match ask(
+        let (mut summary, events) = match ask(
             c.as_ref(),
             Request::History {
                 runner: n,
@@ -288,9 +289,12 @@ pub async fn runner_activity<R: Runtime>(
         let token = server.as_deref().and_then(|s| credentials::get(credentials::API_SERVICE, s));
         let details = gitea::outcomes(&cache, &summary.recent_jobs, token.as_deref());
         let job_days = job_days(&summary.recent_jobs, &details, summary.to, days, utc_offset_minutes);
+        let job_hours = job_hours(&summary.recent_jobs, &details, summary.to, 24, utc_offset_minutes);
+        summary.recent_jobs = with_outcomes(&summary.recent_jobs, &details);
         Ok(ActivityReply {
             summary,
             job_days,
+            job_hours,
             events,
             has_api_token: token.is_some(),
         })

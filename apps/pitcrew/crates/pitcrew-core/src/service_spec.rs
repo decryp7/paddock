@@ -1,5 +1,5 @@
 //! How the Pitcrew service is registered with the OS (ADR 0003): the Windows service's identity and recovery
-//! actions, and the macOS launch agent's property list.
+//! actions, the macOS launch agent's property list and the Linux systemd user unit.
 
 use std::time::Duration;
 
@@ -11,6 +11,9 @@ pub const WINDOWS_DISPLAY_NAME: &str = "Pitcrew runner manager";
 pub const WINDOWS_DESCRIPTION: &str = "Keeps CI runners for Gitea and Forgejo running, healthy and up to date.";
 /// The launchd label of the macOS launch agent.
 pub const LAUNCHD_LABEL: &str = "net.decryptology.pitcrew.service";
+
+/// The systemd user unit's name on Linux.
+pub const SYSTEMD_UNIT: &str = "pitcrew.service";
 
 /// What the Service Control Manager does when the service itself fails: restart it after these delays (the last
 /// one repeats), forgetting failures after `reset_after`. The runners have their own supervision inside the service.
@@ -74,6 +77,65 @@ pub fn launch_agent_plist(spec: &LaunchAgentSpec) -> String {
     )
 }
 
+/// The Linux systemd user unit that runs the service in the user's session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemdUnitSpec {
+    /// The service program and its arguments.
+    pub exec: Vec<String>,
+    /// The working directory.
+    pub working_directory: String,
+}
+
+/// Quotes one word of an `ExecStart=` line: systemd splits on whitespace, honours double quotes and backslash
+/// escapes, and expands `%` specifiers and `$` variables, so those are doubled.
+pub fn systemd_quote(word: &str) -> String {
+    let mut out = String::with_capacity(word.len() + 2);
+    out.push('"');
+    for c in word.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '%' => out.push_str("%%"),
+            '$' => out.push_str("$$"),
+            '\n' | '\r' => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Renders the unit. `KillMode=mixed` sends the stop signal to the service only and kills leftovers (runners that
+/// ignored the service's own graceful stop) after `TimeoutStopSec`; the service stops the runners itself, waiting for
+/// a running job. The unit restarts the service whenever it exits on its own (a crash, or the clean exit after the program was replaced,
+/// `self_update`) but not after `systemctl stop` (at most every 10 s). Lingering (running without a
+/// log-in) is the user's choice: `loginctl enable-linger` (docs/linux.md).
+pub fn systemd_unit(spec: &SystemdUnitSpec) -> String {
+    let exec: Vec<String> = spec.exec.iter().map(|a| systemd_quote(a)).collect();
+    format!(
+        "[Unit]
+Description=Pitcrew runner manager
+Documentation=https://dev.decryptology.net/decryp7/Pitcrew
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={exec}
+WorkingDirectory={wd}
+Restart=always
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=300
+
+[Install]
+WantedBy=default.target
+",
+        exec = exec.join(" "),
+        wd = systemd_quote(&spec.working_directory),
+    )
+}
+
 fn xml_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -129,5 +191,26 @@ mod tests {
         assert!(SCM_RESET_AFTER > SCM_RESTART_DELAYS[2]);
         assert!(!WINDOWS_SERVICE_NAME.contains(' '));
         assert!(!WINDOWS_DESCRIPTION.is_empty() && !WINDOWS_DISPLAY_NAME.is_empty());
+    }
+
+    #[test]
+    fn the_systemd_unit_runs_the_service_in_the_users_session() {
+        let unit = systemd_unit(&SystemdUnitSpec {
+            exec: vec!["/home/ci/.local/share/Pitcrew/bin/pitcrew-service".into(), "run".into()],
+            working_directory: "/home/ci/.local/share/Pitcrew".into(),
+        });
+        assert!(unit.contains("ExecStart=\"/home/ci/.local/share/Pitcrew/bin/pitcrew-service\" \"run\"\n"));
+        assert!(unit.contains("WantedBy=default.target"));
+        assert!(unit.contains("Restart=always") && unit.contains("KillMode=mixed"));
+        assert!(unit.contains("WorkingDirectory=\"/home/ci/.local/share/Pitcrew\""));
+        assert_eq!(SYSTEMD_UNIT, "pitcrew.service");
+    }
+
+    #[test]
+    fn systemd_words_are_quoted_so_nothing_is_expanded_or_split() {
+        assert_eq!(systemd_quote("/opt/my apps/x"), "\"/opt/my apps/x\"");
+        assert_eq!(systemd_quote("50%$HOME"), "\"50%%$$HOME\"");
+        assert_eq!(systemd_quote("a\"b\\c"), "\"a\\\"b\\\\c\"");
+        assert_eq!(systemd_quote("a\nExecStart=/bin/evil"), "\"a ExecStart=/bin/evil\"");
     }
 }

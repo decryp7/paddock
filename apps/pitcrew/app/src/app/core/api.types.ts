@@ -65,7 +65,12 @@ export interface FinishedJob {
   info: JobInfo;
   startedAt: Timestamp;
   finishedAt: Timestamp;
+  /** How the server says it ended; present only with a Gitea read token (`gitea_api::Conclusion`). */
+  outcome?: JobConclusion;
 }
+
+/** `gitea_api::Conclusion`. */
+export type JobConclusion = 'success' | 'failure' | 'cancelled' | 'skipped' | 'unknown';
 
 export interface UpdatePlan {
   from: Version | null;
@@ -317,6 +322,8 @@ export interface JobDay {
 export interface ActivityReply {
   summary: HistorySummary;
   jobDays: JobDay[];
+  /** The same by local hour over the last 24 hours. */
+  jobHours: JobDay[];
   /** The newest events, newest first (at most 200), for the events feed. */
   events: HistoryEvent[];
   /** Whether a Gitea read token is set for the runner's server. */
@@ -512,6 +519,8 @@ export interface CommandError {
     | 'permissionDenied'
     | 'busy'
     | 'cancelled'
-    | 'internal';
+    | 'internal'
+    /** Raised by the UI, not the shell: a call did not answer in time (`call-timeout.ts`). */
+    | 'timeout';
   message: string;
 }

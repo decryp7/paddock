@@ -160,6 +160,7 @@ mod tests {
             },
             started_at: Timestamp(0),
             finished_at: Timestamp(1),
+            outcome: None,
         };
         assert!(outcomes(&f, &[job], Some("t")).is_empty());
         let mut c = Cache {

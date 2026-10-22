@@ -66,9 +66,10 @@ WebView2, which does not work in session 0 where services run, nor as SYSTEM (it
   (documented in the README). A **LaunchDaemon mode** (`/Library/LaunchDaemons`, `UserName` set to the CI user,
   installed with the administrator's authorization) is the planned option for headless hosts whose jobs need no GUI.
 
-### Linux (later)
+### Linux: a systemd user service
 
-systemd: a user unit with lingering for GUI-less runners in the user's account, or a system unit with `User=`.
+Decided in [ADR 0009](0009-linux-service-and-runner-environment.md): a user unit like the macOS agent, lingering
+optional and never run by Pitcrew; a system unit with `User=` remains the option for headless hosts.
 
 ## Consequences
 

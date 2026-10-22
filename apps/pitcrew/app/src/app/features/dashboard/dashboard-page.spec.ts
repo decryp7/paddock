@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { timeoutError } from '../../core/call-timeout';
 import { MockBackend } from '../../core/mock-backend';
 import { RegisterLauncher } from '../../layout/register-launcher';
 import { appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
@@ -38,6 +39,18 @@ describe('DashboardPage', () => {
     expect(text(el.querySelector('.updates'))).toContain('Updated');
     expect(text(el)).toContain('Outcomes of');
     expect(text(el.querySelector('pc-events-feed'))).not.toBe('');
+  });
+
+  it('shows jobs per hour in the 24 h range', async () => {
+    configure();
+    const { f, el } = await mount();
+    const page = f.componentInstance as unknown as { store: { setRange(r: '24h' | '7d' | '30d'): Promise<void> } };
+    await page.store.setRange('24h');
+    await settle(f, 6);
+    expect(text(el)).toContain('Jobs per hour');
+    await page.store.setRange('7d');
+    await settle(f, 6);
+    expect(text(el)).toContain('Jobs per day');
   });
 
   it('loads details of the running job into its tile', async () => {
@@ -121,6 +134,18 @@ describe('DashboardPage', () => {
     await settle(f, 6);
     expect(text(el)).not.toContain('Machine metrics could not be loaded');
     expect(el.querySelector('pc-machine-tiles')).not.toBeNull();
+  });
+
+  it('shows a timed-out request as an inline error with Retry instead of skeletons forever', async () => {
+    configure();
+    vi.spyOn(mock, 'activity').mockRejectedValue(timeoutError(15_000));
+    const { f, el } = await mount();
+    expect(text(el)).toContain('Activity could not be loaded');
+    expect(text(el)).toContain('did not answer within 15 seconds');
+    vi.mocked(mock.activity).mockRestore();
+    byText<HTMLButtonElement>(el, 'pc-load-state button', 'Retry')!.click();
+    await settle(f, 6);
+    expect(text(el)).not.toContain('Activity could not be loaded');
   });
 
   it('refreshes on a timer while visible', async () => {

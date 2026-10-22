@@ -438,6 +438,7 @@ mod tests {
                 info: JobInfo::default(),
                 started_at: Timestamp(from),
                 finished_at: Timestamp(to),
+                outcome: None,
             },
         }
     }

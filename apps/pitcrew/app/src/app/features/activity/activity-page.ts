@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, untracked } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import type { ActivityReply } from '../../core/api.types';
+import type { ActivityReply, JobConclusion } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { ThemeService } from '../../core/theme.service';
 import { Chart } from '../../shared/charts/chart';
@@ -106,6 +106,22 @@ export class ActivityPage {
   protected ago(at: number): string {
     return formatRelative(at, this.clock.now());
   }
+  /** The result badge of a job whose outcome the server told (needs a Gitea read token). */
+  protected outcome(c: JobConclusion | undefined): { label: string; tone: string } | null {
+    switch (c) {
+      case 'success':
+        return { label: 'Succeeded', tone: 'success' };
+      case 'failure':
+        return { label: 'Failed', tone: 'danger' };
+      case 'cancelled':
+        return { label: 'Cancelled', tone: 'neutral' };
+      case 'skipped':
+        return { label: 'Skipped', tone: 'neutral' };
+      default:
+        return null;
+    }
+  }
+
   protected took(from: number, to: number): string {
     return formatDuration(to - from);
   }

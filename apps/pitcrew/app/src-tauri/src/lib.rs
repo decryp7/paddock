@@ -8,6 +8,7 @@ pub mod diagnostics;
 pub mod dto;
 pub mod events;
 pub mod gitea;
+pub mod native_feel;
 pub mod service_client;
 pub mod service_install;
 pub mod tray;
@@ -66,10 +67,26 @@ pub fn run() {
             commands::reveal_logs,
         ])
         .setup(|app| {
-            tray::create(app.handle())?;
+            if let Err(e) = tray::create(app.handle()) {
+                // Linux without a status-notifier host or libayatana-appindicator: the window is then the only way
+                // in, so closing it must exit (see `tray::keeps_running`).
+                if cfg!(target_os = "linux") {
+                    eprintln!("Pitcrew: no tray icon ({e}); closing the window will quit the app");
+                    use tauri::Manager;
+                    app.manage(tray::NoTray);
+                } else {
+                    return Err(e.into());
+                }
+            }
             events::start(app.handle().clone());
-            // Started at log-in: stay in the tray, without a webview.
-            if std::env::args().any(|a| a == "--hidden") {
+            {
+                use tauri::Manager;
+                if let Some(w) = app.get_webview_window(tray::MAIN) {
+                    native_feel::apply(&w);
+                }
+            }
+            // Started at log-in: stay in the tray, without a webview (only when there is a tray to come back from).
+            if std::env::args().any(|a| a == "--hidden") && tray::has_tray(app.handle()) {
                 use tauri::Manager;
                 if let Some(w) = app.get_webview_window(tray::MAIN) {
                     let _ = w.destroy();
@@ -88,7 +105,7 @@ pub fn run() {
     // Closing the window destroys it and Pitcrew stays in the tray (a hidden webview could come back blank on macOS
     // and kept its memory); Open in the tray, or the app's Dock icon on macOS, creates it again. Quit exits.
     app.run(|app, event| match event {
-        tauri::RunEvent::ExitRequested { code, api, .. } if tray::keeps_running(code) => api.prevent_exit(),
+        tauri::RunEvent::ExitRequested { code, api, .. } if tray::keeps_running(code, tray::has_tray(app)) => api.prevent_exit(),
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => tray::show_main(app),
         _ => {}

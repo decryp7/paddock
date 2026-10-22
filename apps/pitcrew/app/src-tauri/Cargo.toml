@@ -44,6 +44,7 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 windows-service = "0.8"
 # The taskbar's light/dark setting (for the tray icon), read only.
 winreg = "0.56"
+webview2-com = "0.39"
 # Starting `pitcrew-service install` with Windows' own elevation prompt (ShellExecuteExW "runas").
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
 

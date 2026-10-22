@@ -50,10 +50,16 @@ struct Harness {
     root: PathBuf,
     runner_dir: PathBuf,
     name: RunnerName,
+    exe: Arc<AtomicU64>,
 }
 
 impl Harness {
     fn new(test: &str, fake: &str, registered: bool) -> Harness {
+        Harness::with_runner_toml(test, fake, registered, "")
+    }
+
+    /// `runner_toml` is appended to the runner's table (e.g. an `[runners.env]` table).
+    fn with_runner_toml(test: &str, fake: &str, registered: bool, runner_toml: &str) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
         let root = std::env::temp_dir().join(format!("pitcrew-it-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -69,17 +75,26 @@ impl Harness {
             std::fs::write(runner_dir.join(".runner"), "{}").unwrap();
         }
         let toml = format!(
-            "schema_version = 1\n[defaults.update]\nmode = \"manual\"\n[defaults.cleanup]\nautomatic = false\n[[runners]]\nname = \"{test}\"\nkind = \"gitea-runner\"\ndir = '{}'\nsession = \"service\"\nlabels = [\"x\"]\n",
+            "schema_version = 1\n[defaults.update]\nmode = \"manual\"\n[defaults.cleanup]\nautomatic = false\n[[runners]]\nname = \"{test}\"\nkind = \"gitea-runner\"\ndir = '{}'\nsession = \"service\"\nlabels = [\"x\"]\n{runner_toml}",
             runner_dir.display()
         );
         std::fs::write(data.join("pitcrew.toml"), toml).unwrap();
         let clock = Arc::new(AtomicU64::new(pitcrew_service::cleanup::now().0));
         let c = clock.clone();
+        let exe = Arc::new(AtomicU64::new(1));
+        let exe2 = exe.clone();
         let env = Env {
             data_dir: data,
             launcher: Box::new(OsLauncher),
             sources: Sources::public(),
             platform: pitcrew_core::platform::Platform::current().unwrap(),
+            exe_stamp: Arc::new(move || {
+                Some(pitcrew_core::self_update::BinaryStamp {
+                    len: exe2.load(Ordering::SeqCst),
+                    modified_ms: 0,
+                })
+            }),
+            base_path: Arc::new(|| Some("/pitcrew/test-path:/usr/bin:/bin".to_string())),
             clock: Arc::new(move || Timestamp(c.load(Ordering::SeqCst))),
             local: Arc::new(|_| {
                 (
@@ -100,6 +115,7 @@ impl Harness {
             root,
             runner_dir,
             name: RunnerName::parse(test).unwrap(),
+            exe,
         }
     }
 
@@ -213,6 +229,23 @@ fn a_runner_that_exits_is_restarted_after_the_backoff() {
     h.until("second start", Duration::from_millis(100), |h| {
         count(&h.history(), |k| *k == HistoryKind::Started) >= 2
     });
+    h.finish();
+}
+
+#[test]
+fn runners_start_with_the_login_path_and_their_own_env() {
+    let mut h = Harness::with_runner_toml("envy", "mode=ok\n", true, "[runners.env]\nCI_FLAG = \"yes\"\n");
+    let dump = h.runner_dir.join("env.txt");
+    h.until("the runner wrote its environment", Duration::from_millis(100), |_| dump.exists());
+    let text = std::fs::read_to_string(&dump).unwrap();
+    assert!(text.contains("PATH=/pitcrew/test-path:/usr/bin:/bin\n"), "{text}");
+    assert!(text.contains("CI_FLAG=yes\n"), "{text}");
+    h.finish();
+    // A runner's own PATH replaces the login one.
+    let mut h = Harness::with_runner_toml("envy2", "mode=ok\n", true, "[runners.env]\nPATH = \"/only/this\"\n");
+    let dump = h.runner_dir.join("env.txt");
+    h.until("the runner wrote its environment", Duration::from_millis(100), |_| dump.exists());
+    assert!(std::fs::read_to_string(&dump).unwrap().contains("PATH=/only/this\n"));
     h.finish();
 }
 
@@ -399,5 +432,26 @@ fn a_manual_cleanup_reports_what_it_did() {
     assert!(!h.runner_dir.join("bin").join(format!("gitea-runner{EXE}.download")).exists());
     assert!(h.runner_dir.join("work/old-job").exists(), "a folder changed minutes ago is kept");
     assert!(count(&h.history(), |k| matches!(k, HistoryKind::Cleanup { .. })) == 1);
+    h.finish();
+}
+
+#[test]
+fn a_replaced_service_program_restarts_the_service_only_when_no_job_runs() {
+    let mut h = Harness::new("selfup", "mode=job\njob_secs=3\n", true);
+    h.until("job seen", Duration::from_secs(6), |h| h.status().current_job.is_some());
+    let t = |h: &Harness, extra: u64| Timestamp(h.now().0 + extra);
+    // Unchanged: never.
+    assert!(!h.sup.restart_for_new_program(t(&h, 60_000)));
+    // Replaced while a job runs: wait.
+    h.exe.store(2, Ordering::SeqCst);
+    assert!(!h.sup.restart_for_new_program(t(&h, 120_000)));
+    // Checked at most every 30 s.
+    assert!(!h.sup.restart_for_new_program(t(&h, 121_000)));
+    // The job ended: restart (the service manager starts the new program, which adopts the runners).
+    h.until("job done", Duration::from_secs(6), |h| h.status().current_job.is_none());
+    for _ in 0..6 {
+        h.pump(Duration::from_secs(60));
+    }
+    assert!(h.sup.restart_for_new_program(t(&h, 600_000)));
     h.finish();
 }

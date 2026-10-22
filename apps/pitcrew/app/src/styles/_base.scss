@@ -182,3 +182,88 @@ pre,
     scroll-behavior: auto !important;
   }
 }
+
+/* Native feel (ADR 0008): the shell is not a web page. Selection is opt-in with .pc-selectable; text fields, code and
+   the places that show copyable content (log lines, paths, errors, runner names) opt back in. */
+html {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-drag: none;
+  overscroll-behavior: none;
+}
+
+img,
+a {
+  -webkit-user-drag: none;
+}
+
+button,
+[role='button'],
+a,
+label,
+select,
+summary {
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable='true'],
+[role='textbox'],
+.pc-selectable,
+.pc-selectable *,
+pre,
+code,
+.mono,
+.callout-body,
+.callout-body *,
+[role='log'] .line {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+input,
+textarea,
+[contenteditable='true'],
+[role='textbox'] {
+  cursor: text;
+}
+
+.pc-selectable,
+.pc-selectable *,
+pre,
+code,
+.mono,
+.callout-body,
+[role='log'] .line {
+  cursor: text;
+}
+
+/* The interface font is the operating system's. */
+:root {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', Cantarell, Ubuntu, 'Noto Sans', sans-serif;
+  --font-display: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', Cantarell, Ubuntu, 'Noto Sans', sans-serif;
+}
+
+/* Thin overlay-style scrollbars drawn from theme tokens (WebKit and Blink; Firefox uses scrollbar-color above). */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--border-strong) padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3) padding-box;
+}

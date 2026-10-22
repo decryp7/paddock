@@ -157,6 +157,7 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     };
     match tauri::WebviewWindowBuilder::from_config(app, &cfg).and_then(|b| b.build()) {
         Ok(w) => {
+            crate::native_feel::apply(&w);
             let _ = w.set_focus();
         }
         Err(e) => eprintln!("Pitcrew could not open its window: {e}"),
@@ -166,10 +167,20 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
 /// The main window's label (`tauri.conf.json`).
 pub const MAIN: &str = "main";
 
-/// Whether an exit request leaves the app running: closing the last window does (Pitcrew stays in the tray);
-/// Quit (an explicit exit code) does not.
-pub fn keeps_running(exit_code: Option<i32>) -> bool {
-    exit_code.is_none()
+/// Marks an app whose tray icon could not be created (Linux without an appindicator): there is no way back to a
+/// closed window, so closing it must exit.
+pub struct NoTray;
+
+/// Whether the app has a tray icon.
+pub fn has_tray<R: Runtime>(app: &AppHandle<R>) -> bool {
+    use tauri::Manager;
+    app.try_state::<NoTray>().is_none()
+}
+
+/// Whether an exit request leaves the app running: closing the last window does when there is a tray to reopen it
+/// from; Quit (an explicit exit code) never does.
+pub fn keeps_running(exit_code: Option<i32>, tray: bool) -> bool {
+    exit_code.is_none() && tray
 }
 
 /// A menu item id for a runner action: `runner:<action>:<name>`.
@@ -340,8 +351,10 @@ mod tests {
 
     #[test]
     fn closing_the_last_window_keeps_running_and_quit_exits() {
-        assert!(keeps_running(None));
-        assert!(!keeps_running(Some(0)));
+        assert!(keeps_running(None, true));
+        assert!(!keeps_running(Some(0), true));
+        // No tray (Linux without an appindicator): the window is the only way in, so closing it exits.
+        assert!(!keeps_running(None, false));
     }
 
     #[test]

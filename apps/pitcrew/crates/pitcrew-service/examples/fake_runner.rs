@@ -8,6 +8,7 @@
 //!   `silent` never declares (an update that is not accepted).
 //! - `--version` prints `gitea-runner version v<version>`, where the version is the text after `FAKEVER:` at the end
 //!   of the executable file (tests append it to their copy), else 5.2.0.
+//! - Writes `PATH` and `CI_FLAG` from its environment to `env.txt` next to the configuration file.
 //! - Ctrl+Break / SIGTERM: logs the shutdown line and exits 0 (waiting for a running job first).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
 
@@ -81,6 +82,14 @@ fn main() {
     }
 
     let s = settings(config.as_deref());
+    // The environment it was started with, for tests of what the service passes (`PATH`, `CI_FLAG`).
+    if let Some(dir) = config.as_deref().and_then(|c| std::path::Path::new(c).parent()) {
+        let dump: String = ["PATH", "CI_FLAG"]
+            .iter()
+            .map(|k| format!("{k}={}\n", std::env::var(k).unwrap_or_default()))
+            .collect();
+        let _ = std::fs::write(dir.join("env.txt"), dump);
+    }
     let mode = s.get("mode").cloned().unwrap_or_else(|| "ok".into());
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();

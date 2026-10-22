@@ -11,6 +11,7 @@ pub mod ipc;
 pub mod launch;
 pub mod launcher;
 pub mod logfile;
+pub mod login_env;
 pub mod net;
 pub mod paths;
 pub mod platform;

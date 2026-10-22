@@ -270,6 +270,7 @@ mod tests {
             update: None,
             watchdog: None,
             cleanup: None,
+            env: Default::default(),
         }
     }
 

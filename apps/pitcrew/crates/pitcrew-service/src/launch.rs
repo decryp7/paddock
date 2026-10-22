@@ -30,6 +30,9 @@ pub struct LaunchSpec {
     pub args: Vec<String>,
     /// Its working directory.
     pub dir: PathBuf,
+    /// Variables set (over the service's own environment) for the process: the login shell's `PATH` on macOS and
+    /// Linux, then the runner's `env` table.
+    pub env: Vec<(String, String)>,
 }
 
 /// A running runner process.
@@ -91,7 +94,9 @@ pub struct ChildProcess {
 /// Starts `spec` as a child with piped output, in its own process group, without a console window.
 pub fn spawn_child(spec: &LaunchSpec, sink: LineSink) -> Result<ChildProcess, String> {
     let mut cmd = quiet_command(&spec.program);
-    cmd.args(&spec.args).current_dir(&spec.dir);
+    cmd.args(&spec.args)
+        .current_dir(&spec.dir)
+        .envs(spec.env.iter().map(|(k, v)| (k, v)));
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     {
@@ -243,12 +248,14 @@ mod tests {
                 program: "cmd.exe".into(),
                 args: vec!["/d".into(), "/c".into(), "echo out && echo err 1>&2".into()],
                 dir: std::env::temp_dir(),
+                env: vec![],
             }
         } else {
             LaunchSpec {
                 program: "/bin/sh".into(),
                 args: vec!["-c".into(), "echo out; echo err 1>&2".into()],
                 dir: std::env::temp_dir(),
+                env: vec![],
             }
         };
         let mut p = spawn_child(&spec, sink).unwrap();
@@ -277,6 +284,7 @@ mod tests {
                 program: "/no/such/gitea-runner".into(),
                 args: vec![],
                 dir: std::env::temp_dir(),
+                env: vec![],
             },
             sink,
         )

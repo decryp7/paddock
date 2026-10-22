@@ -4,12 +4,13 @@ import { ThemeService } from './core/theme.service';
 import { ConnectionBanner } from './layout/connection-banner';
 import { Sidebar } from './layout/sidebar';
 import { Toasts } from './layout/toasts';
+import { CopyMenuHost } from './shared/ui/copy-menu';
 import { StatusStore } from './state/status.store';
 
 /** The main window: sidebar, connection banner, the routed page, and toasts. */
 @Component({
   selector: 'pc-root',
-  imports: [RouterOutlet, Sidebar, ConnectionBanner, Toasts],
+  imports: [RouterOutlet, Sidebar, ConnectionBanner, Toasts, CopyMenuHost],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <a class="skip-link" href="#main" (click)="skip($event)">Skip to content</a>
@@ -24,6 +25,7 @@ import { StatusStore } from './state/status.store';
       </div>
     </div>
     <pc-toasts />
+    <pc-copy-menu />
   `,
   styles: `
     :host {

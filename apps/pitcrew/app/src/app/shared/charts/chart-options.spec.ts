@@ -82,6 +82,11 @@ describe('jobsPerDayOption', () => {
     expect(o['dataZoom']).toHaveLength(2);
     expect(o['grid'].bottom).toBe(28);
   });
+  it('labels hourly buckets with the hour', () => {
+    const o = jobsPerDayOption([day(0, { success: 1 })], t, false, true) as Opt;
+    expect(o['xAxis'].data[0]).toMatch(/\d{2}[:.]\d{2}/);
+    expect(o['tooltip'].formatter([{ dataIndex: 0 }])).toMatch(/\d{2}[:.]\d{2} · 1 job/);
+  });
   it('formats the tooltip and axis', () => {
     const days = [day(0, { success: 1 }), ...Array.from({ length: 15 }, (_, i) => day(i + 1, { success: 2, failure: 1 }))];
     const o = jobsPerDayOption(days, t, false) as Opt;

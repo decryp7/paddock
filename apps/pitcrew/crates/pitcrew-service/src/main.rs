@@ -31,7 +31,7 @@ fn execute(command: Command) -> Result<(), Error> {
             Ok(())
         }
         Command::Run => host::run_foreground(data_dir()?),
-        Command::Status => pitcrew_service::status::print(&data_dir()?),
+        Command::Status => pitcrew_service::status::print(&paths::socket_dir().map_or_else(data_dir, Ok)?),
         Command::Service => platform::dispatch(),
         Command::Install => platform::install(),
         Command::Uninstall => platform::uninstall(),

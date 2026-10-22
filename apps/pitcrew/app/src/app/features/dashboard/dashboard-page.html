@@ -66,7 +66,7 @@
       <div class="grid">
         <article class="card span-2">
           <header class="card-header">
-            <h3>Jobs per day</h3>
+            <h3>{{ hourly() ? 'Jobs per hour' : 'Jobs per day' }}</h3>
             <span class="meta">{{ jobTotal() }} {{ jobTotal() === 1 ? 'job' : 'jobs' }}</span>
           </header>
           <div class="card-body">
@@ -78,7 +78,7 @@
                   <a routerLink="/settings" [queryParams]="{ section: 'tokens' }">Add a token</a>
                 </div>
               }
-              <pc-chart [option]="jobsOption()" [height]="224" [label]="'Jobs per day by outcome, ' + jobTotal() + ' jobs in the range'" />
+              <pc-chart [option]="jobsOption()" [height]="224" [label]="(hourly() ? 'Jobs per hour by outcome, ' : 'Jobs per day by outcome, ') + jobTotal() + ' jobs in the range'" />
             </pc-load-state>
           </div>
         </article>

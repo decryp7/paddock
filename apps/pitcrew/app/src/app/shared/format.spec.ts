@@ -4,6 +4,7 @@ import {
   formatCount,
   formatDateTime,
   formatDay,
+  formatHour,
   formatDuration,
   formatElapsed,
   formatPermille,
@@ -88,6 +89,7 @@ describe('locale-dependent times', () => {
     expect(formatTime(at)).toBe(new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
     expect(formatDay(at)).toContain('22');
     expect(formatShortDate(at)).toContain('22');
+    expect(formatHour(at)).toMatch(/14[:.]05/);
     expect(formatDateTime(at)).toContain('22');
     expect(formatDateTime(null)).toBe('—');
     expect(formatDateTime(undefined)).toBe('—');
