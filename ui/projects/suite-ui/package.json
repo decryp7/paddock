@@ -1,0 +1,38 @@
+{
+  "name": "@decryp7/suite-ui",
+  "version": "0.1.0",
+  "description": "The shared design system of the app suite: tokens, components and chart theme.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://dev.decryptology.net/decryp7/suite-kit.git",
+    "directory": "ui"
+  },
+  "keywords": [
+    "design-system",
+    "design-tokens",
+    "angular",
+    "ui-components",
+    "echarts",
+    "accessibility",
+    "dark-mode"
+  ],
+  "sideEffects": false,
+  "peerDependencies": {
+    "@angular/common": "^22.0.0",
+    "@angular/core": "^22.0.0",
+    "echarts": "^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "echarts": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "tslib": "^2.3.0"
+  },
+  "exports": {
+    "./css/*": "./css/*",
+    "./scss/*": "./scss/*"
+  }
+}

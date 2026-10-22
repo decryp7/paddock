@@ -1,0 +1,100 @@
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+
+export type SuMetricSize = 'display' | 'title' | 'body';
+/** Which direction of change is an improvement; `none` keeps the delta neutral (calm by default). */
+export type SuGoodDirection = 'up' | 'down' | 'none';
+export type SuDeltaTone = 'good' | 'bad' | 'neutral';
+
+/** Tone of a delta: colour only appears when the caller says which direction is good. */
+export function deltaTone(delta: number, good: SuGoodDirection): SuDeltaTone {
+  if (delta === 0 || good === 'none') return 'neutral';
+  return (delta > 0) === (good === 'up') ? 'good' : 'bad';
+}
+
+/** Formats a number with thousands separators and a fixed number of decimals (when given). */
+export function formatNumber(value: number, decimals: number | undefined, locale?: string): string {
+  if (!Number.isFinite(value)) return '—';
+  const options: Intl.NumberFormatOptions =
+    decimals === undefined ? { maximumFractionDigits: 2 } : { minimumFractionDigits: decimals, maximumFractionDigits: decimals };
+  return new Intl.NumberFormat(locale, options).format(value);
+}
+
+/** A number as the hero of a card: tabular, the unit a smaller muted sibling, an optional delta with arrow and sign. */
+@Component({
+  selector: 'su-metric',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '[class]': '"su-metric su-metric--" + size()' },
+  template: `
+    <span class="line">
+      <span class="value">{{ text() }}</span>
+      @if (unit()) {
+        <span class="unit">{{ unit() }}</span>
+      }
+    </span>
+    @if (hasDelta()) {
+      <span [class]="'delta delta--' + tone()">
+        <span class="su-visually-hidden">{{ deltaAria() }}</span>
+        <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" focusable="false">
+          <path [attr.d]="arrowPath()" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span aria-hidden="true">{{ deltaText() }}</span>
+        @if (deltaLabel()) {
+          <span class="delta-label" aria-hidden="true">{{ deltaLabel() }}</span>
+        }
+      </span>
+    }
+  `,
+  styles: `
+    :host { display: inline-flex; flex-direction: column; gap: var(--su-space-1); font-variant-numeric: tabular-nums; }
+    .line { display: inline-flex; align-items: baseline; gap: var(--su-space-1); }
+    .value { font-weight: var(--su-weight-semibold); color: var(--su-text); }
+    .unit { color: var(--su-text-muted); font-size: var(--su-text-body); font-weight: var(--su-weight-regular); }
+    :host(.su-metric--display) .value { font-size: var(--su-text-display); line-height: var(--su-lh-display); }
+    :host(.su-metric--title) .value { font-size: var(--su-text-title); line-height: var(--su-lh-title); }
+    :host(.su-metric--body) .value { font-size: var(--su-text-body); line-height: var(--su-lh-body); }
+    :host(.su-metric--body) .unit { font-size: var(--su-text-label); }
+    .delta { display: inline-flex; align-items: center; gap: var(--su-space-1); font-size: var(--su-text-label); line-height: var(--su-lh-label); color: var(--su-text-muted); }
+    .delta--good { color: var(--su-success); }
+    .delta--bad { color: var(--su-danger); }
+    .delta-label { color: var(--su-text-muted); }
+    .su-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  `,
+})
+export class SuMetric {
+  /** The number (formatted with thousands separators) or a ready-made string. */
+  readonly value = input.required<number | string | null>();
+  readonly unit = input<string>('');
+  /** Fixed decimals for numeric values; omitted: up to 2. */
+  readonly decimals = input<number | undefined>(undefined);
+  readonly size = input<SuMetricSize>('display');
+  /** Change against the comparison period, in the same unit as the delta label (e.g. percent points). */
+  readonly delta = input<number | null>(null);
+  readonly deltaUnit = input<string>('');
+  /** What the delta is against, e.g. "vs last week". */
+  readonly deltaLabel = input<string>('');
+  readonly goodDirection = input<SuGoodDirection>('none');
+  readonly locale = input<string | undefined>(undefined);
+
+  protected readonly text = computed(() => {
+    const v = this.value();
+    if (v === null) return '—';
+    return typeof v === 'number' ? formatNumber(v, this.decimals(), this.locale()) : v;
+  });
+  protected readonly hasDelta = computed(() => this.delta() !== null);
+  protected readonly tone = computed(() => deltaTone(this.delta() ?? 0, this.goodDirection()));
+  protected readonly deltaText = computed(() => {
+    const d = this.delta() ?? 0;
+    const sign = d > 0 ? '+' : d < 0 ? '−' : '';
+    return `${sign}${formatNumber(Math.abs(d), undefined, this.locale())}${this.deltaUnit()}`;
+  });
+  protected readonly arrowPath = computed(() => {
+    const d = this.delta() ?? 0;
+    return d > 0 ? 'M6 10V2M2.5 5.5 6 2l3.5 3.5' : d < 0 ? 'M6 2v8M2.5 6.5 6 10l3.5-3.5' : 'M2 6h8';
+  });
+  protected readonly deltaAria = computed(() => {
+    const d = this.delta() ?? 0;
+    const dir = d > 0 ? 'Up' : d < 0 ? 'Down' : 'No change';
+    const amount = d === 0 ? '' : ` ${formatNumber(Math.abs(d), undefined, this.locale())}${this.deltaUnit()}`;
+    return `${dir}${amount}${this.deltaLabel() ? ' ' + this.deltaLabel() : ''}`;
+  });
+}

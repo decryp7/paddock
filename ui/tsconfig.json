@@ -1,0 +1,26 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "target": "ES2022",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "paths": { "@decryp7/suite-ui": ["./projects/suite-ui/src/public-api.ts"] }
+  },
+  "angularCompilerOptions": { "strictInjectionParameters": true, "strictInputAccessModifiers": true, "strictTemplates": true },
+  "files": [],
+  "references": [
+    { "path": "./projects/suite-ui/tsconfig.lib.json" },
+    { "path": "./projects/suite-ui/tsconfig.spec.json" },
+    { "path": "./projects/gallery/tsconfig.app.json" }
+  ]
+}

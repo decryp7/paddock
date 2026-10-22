@@ -1,0 +1,213 @@
+// Base styles: reset subset, native feel (Debrief ADR 0028), focus, scrollbars, selection.
+// Selection is opt-in with .su-selectable (or text fields, pre/code); the app shell is not selectable.
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--su-bg);
+  color: var(--su-text);
+  font-family: var(--su-font-sans);
+  font-size: var(--su-text-body);
+  line-height: var(--su-lh-body);
+  font-weight: var(--su-weight-regular);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  // Native feel: the shell is not selectable, has the default cursor and no rubber-banding.
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: var(--su-text-title);
+  line-height: var(--su-lh-title);
+  font-weight: var(--su-weight-semibold);
+}
+
+h2 {
+  font-size: var(--su-text-subtitle);
+  line-height: var(--su-lh-subtitle);
+  font-weight: var(--su-weight-semibold);
+}
+
+h3 {
+  font-size: var(--su-text-body);
+  line-height: var(--su-lh-body);
+  font-weight: var(--su-weight-semibold);
+}
+
+a {
+  color: var(--su-accent);
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-user-drag: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+img,
+svg {
+  -webkit-user-drag: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: default;
+}
+
+code,
+kbd,
+pre,
+.su-mono {
+  font-family: var(--su-font-mono);
+  font-size: 0.95em;
+}
+
+.su-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.su-muted {
+  color: var(--su-text-muted);
+}
+
+// Selection is opt-in.
+.su-selectable,
+input,
+textarea,
+[contenteditable],
+[role='textbox'],
+pre,
+code {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+.su-selectable {
+  cursor: auto;
+}
+
+::selection {
+  background: var(--su-accent-tint);
+}
+
+// Focus: keyboard only, 2 px accent ring with a 2 px offset.
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--su-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--su-radius-tag);
+}
+
+// Thin, overlay-style scrollbars (8 px, 12 px on hover).
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--su-border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar:hover {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--su-border-strong);
+  border-radius: var(--su-radius-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.su-visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+// Splash: plain markup in index.html (no inline style, CSP), replaced by Angular once it renders.
+.su-splash {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--su-space-3);
+  background: var(--su-bg);
+  color: var(--su-text-muted);
+  font-size: var(--su-text-body);
+  opacity: 0;
+  animation: su-splash-in var(--su-duration) var(--su-ease-enter) 400ms forwards;
+}
+
+.su-splash__logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 22%;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--su-accent) 80%, #fff), var(--su-accent-fill));
+}
+
+@keyframes su-splash-in {
+  to {
+    opacity: 1;
+  }
+}
+
+// Transparent page for tray/menu-bar popups; the OS material or the popover surface sits behind the content.
+html.su-tray,
+html.su-tray body {
+  background: transparent;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

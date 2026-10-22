@@ -1,0 +1,33 @@
+/* Gallery layout only; every colour and size comes from the suite-ui tokens. */
+.gal-page { max-width: var(--su-content-max); margin: 0 auto; padding: var(--su-space-6); display: flex; flex-direction: column; gap: var(--su-space-8); height: 100%; overflow-y: auto; }
+.gal-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--su-space-4); }
+.gal-bar h1 { margin-right: auto; }
+.gal-section { display: flex; flex-direction: column; gap: var(--su-space-3); padding: var(--su-space-4); background: var(--su-bg); }
+.gal-section > h2 { font-size: var(--su-text-subtitle); }
+.gal-section > p { color: var(--su-text-muted); }
+.gal-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--su-card-gap); }
+.gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--su-card-gap); }
+.gal-box { background: var(--su-surface-1); border: 1px solid var(--su-hairline); border-radius: var(--su-radius-card); }
+.gal-chart { height: 240px; width: 100%; }
+.gal-tray-stage { padding: var(--su-space-6); display: flex; justify-content: center; background: var(--su-surface-2); border-radius: var(--su-radius-card); }
+.gal-btn { min-height: var(--su-button-height); padding: 0 var(--su-space-3); border-radius: var(--su-radius-control); border: 1px solid var(--su-border-control); background: var(--su-surface-2); color: var(--su-text); font-weight: var(--su-weight-medium); }
+.gal-btn--primary { background: var(--su-accent-fill); border-color: transparent; color: var(--su-on-accent); }
+.gal-btn--primary:hover { background: var(--su-accent-fill-hover); }
+.gal-btn--icon { min-width: var(--su-button-height); padding: 0; }
+.gal-list { list-style: none; margin: 0; padding: 0; }
+.gal-list li { display: flex; align-items: center; gap: var(--su-space-2); min-height: var(--su-row-height); border-bottom: 1px solid var(--su-hairline); }
+.gal-list li:last-child { border-bottom: 0; }
+.gal-list .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gal-num { font-variant-numeric: tabular-nums; color: var(--su-text-muted); }
+.gal-swatches { display: flex; gap: var(--su-space-1); }
+.gal-swatch { width: 28px; height: 28px; border-radius: var(--su-radius-tag); }
+.gal-swatch--1 { background: var(--su-chart-1); } .gal-swatch--2 { background: var(--su-chart-2); }
+.gal-swatch--3 { background: var(--su-chart-3); } .gal-swatch--4 { background: var(--su-chart-4); }
+.gal-swatch--5 { background: var(--su-chart-5); } .gal-swatch--6 { background: var(--su-chart-6); }
+.gal-swatch--7 { background: var(--su-chart-7); } .gal-swatch--8 { background: var(--su-chart-8); }
+.gal-swatch--s1 { background: var(--su-seq-1); } .gal-swatch--s2 { background: var(--su-seq-2); }
+.gal-swatch--s3 { background: var(--su-seq-3); } .gal-swatch--s4 { background: var(--su-seq-4); }
+.gal-swatch--s5 { background: var(--su-seq-5); } .gal-swatch--s6 { background: var(--su-seq-6); }
+.gal-skel-card { padding: var(--su-card-padding); display: flex; flex-direction: column; gap: var(--su-space-2); width: 240px; }
+.gal-inline { display: flex; align-items: center; gap: var(--su-space-2); }
+.gal-tray-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: var(--su-space-2); padding-bottom: var(--su-space-2); }

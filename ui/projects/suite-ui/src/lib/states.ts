@@ -1,0 +1,87 @@
+import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+
+/** Empty state: icon, what is missing (title), why or what happens next, and one next-step action in `[slot=action]`. */
+@Component({
+  selector: 'su-empty-state',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { role: 'status' },
+  template: `
+    <span class="icon">
+      <ng-content select="[slot=icon]">
+        <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
+          <path d="M3.5 13.5 6 5.5h12l2.5 8M3.5 13.5v5h17v-5M3.5 13.5h5l1 2h5l1-2h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </ng-content>
+    </span>
+    <h3 class="title">{{ heading() }}</h3>
+    @if (description()) {
+      <p class="description">{{ description() }}</p>
+    }
+    <div class="action"><ng-content select="[slot=action]" /></div>
+  `,
+  styles: `
+    :host { display: flex; flex-direction: column; align-items: center; gap: var(--su-space-2); padding: var(--su-space-8) var(--su-space-4); text-align: center; }
+    .icon { display: inline-flex; color: var(--su-text-muted); }
+    .title { margin: 0; font-size: var(--su-text-subtitle); line-height: var(--su-lh-subtitle); font-weight: var(--su-weight-semibold); }
+    .description { margin: 0; max-width: 48ch; color: var(--su-text-muted); font-size: var(--su-text-body); line-height: var(--su-lh-body); }
+    .action { margin-top: var(--su-space-2); }
+    .action:empty { display: none; }
+  `,
+})
+export class SuEmptyState {
+  /** What is missing, stated as the benefit or the state ("No runners yet"). */
+  readonly heading = input.required<string>();
+  /** Why, or what happens next. */
+  readonly description = input<string>('');
+}
+
+/**
+ * Error state: what failed in plain words (never a raw exception as the headline), the likely cause, Retry and an
+ * optional secondary action (e.g. "Open logs").
+ */
+@Component({
+  selector: 'su-error-state',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { role: 'alert' },
+  template: `
+    <span class="icon">
+      <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
+        <path d="M8 2.75h8L21.25 8v8L16 21.25H8L2.75 16V8L8 2.75ZM9 9l6 6M15 9l-6 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </span>
+    <h3 class="title">{{ heading() }}</h3>
+    @if (cause()) {
+      <p class="cause">{{ cause() }}</p>
+    }
+    <div class="actions">
+      <button type="button" class="retry" [disabled]="busy()" (click)="retry.emit()">{{ retryLabel() }}</button>
+      @if (secondaryLabel()) {
+        <button type="button" class="secondary" (click)="secondary.emit()">{{ secondaryLabel() }}</button>
+      }
+    </div>
+  `,
+  styles: `
+    :host { display: flex; flex-direction: column; align-items: center; gap: var(--su-space-2); padding: var(--su-space-8) var(--su-space-4); text-align: center; }
+    .icon { display: inline-flex; color: var(--su-danger); }
+    .title { margin: 0; font-size: var(--su-text-subtitle); line-height: var(--su-lh-subtitle); font-weight: var(--su-weight-semibold); }
+    .cause { margin: 0; max-width: 48ch; color: var(--su-text-muted); }
+    .actions { display: flex; gap: var(--su-space-2); margin-top: var(--su-space-2); }
+    button { min-height: var(--su-button-height); padding: 0 var(--su-space-3); border-radius: var(--su-radius-control); font-weight: var(--su-weight-medium); border: 1px solid var(--su-border-control); background: var(--su-surface-2); color: var(--su-text); }
+    button:hover:not(:disabled) { background: var(--su-surface-3); }
+    button:disabled { opacity: 0.5; }
+    .retry { background: var(--su-accent-fill); border-color: transparent; color: var(--su-on-accent); }
+    .retry:hover:not(:disabled) { background: var(--su-accent-fill-hover); }
+  `,
+})
+export class SuErrorState {
+  /** What failed, in plain words: "Can't reach the Gitea server". */
+  readonly heading = input.required<string>();
+  /** Likely cause and what to do. */
+  readonly cause = input<string>('');
+  readonly retryLabel = input<string>('Retry');
+  readonly secondaryLabel = input<string>('');
+  /** A retry is in flight: the button is disabled. */
+  readonly busy = input<boolean>(false);
+  readonly retry = output<void>();
+  readonly secondary = output<void>();
+}

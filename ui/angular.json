@@ -1,0 +1,67 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "cli": { "packageManager": "npm", "analytics": false },
+  "newProjectRoot": "projects",
+  "projects": {
+    "suite-ui": {
+      "projectType": "library",
+      "root": "projects/suite-ui",
+      "sourceRoot": "projects/suite-ui/src",
+      "prefix": "su",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:ng-packagr",
+          "configurations": {
+            "production": { "tsConfig": "projects/suite-ui/tsconfig.lib.prod.json" },
+            "development": { "tsConfig": "projects/suite-ui/tsconfig.lib.json" }
+          },
+          "defaultConfiguration": "production"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "projects/suite-ui/tsconfig.spec.json",
+            "runner": "vitest",
+            "coverageReporters": ["text-summary", "text", "lcov"],
+            "coverageExclude": ["**/*.spec.ts", "**/test-setup.ts", "**/public-api.ts"],
+            "setupFiles": ["projects/suite-ui/src/test-setup.ts"]
+          }
+        }
+      }
+    },
+    "gallery": {
+      "projectType": "application",
+      "root": "projects/gallery",
+      "sourceRoot": "projects/gallery/src",
+      "prefix": "gal",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "projects/gallery/src/main.ts",
+            "tsConfig": "projects/gallery/tsconfig.app.json",
+            "styles": ["projects/suite-ui/css/suite.css", "projects/gallery/src/styles.css"]
+          },
+          "configurations": {
+            "production": {
+              "outputHashing": "all",
+              "optimization": { "scripts": true, "styles": { "minify": true, "inlineCritical": false }, "fonts": false },
+              "budgets": [{ "type": "initial", "maximumWarning": "1.5MB", "maximumError": "3MB" }]
+            },
+            "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": { "buildTarget": "gallery:build:production" },
+            "development": { "buildTarget": "gallery:build:development" }
+          },
+          "defaultConfiguration": "development"
+        }
+      }
+    }
+  }
+}
