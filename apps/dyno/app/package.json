@@ -4,11 +4,14 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
-    "build": "ng build",
+    "build": "ng build && node scripts/check-index.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:scripts": "node --test scripts/check-index.test.mjs",
+    "e2e": "playwright test --workers=1",
+    "screenshots": "SCREENSHOTS=1 playwright test --project=screenshots --workers=1"
   },
   "private": true,
   "license": "MIT OR Apache-2.0",

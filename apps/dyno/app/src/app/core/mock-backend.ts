@@ -451,12 +451,18 @@ export class MockBackend implements DynoBackend {
       for (const p of targets) this.affinities.set(p.pid, action.setAffinity);
       title = `Changed the cores ${label} may use`;
     } else if ('setEfficiencyMode' in action) {
-      for (const p of targets) (action.setEfficiencyMode ? this.efficiency.add(p.pid) : this.efficiency.delete(p.pid));
+      for (const p of targets) {
+        if (action.setEfficiencyMode) this.efficiency.add(p.pid);
+        else this.efficiency.delete(p.pid);
+      }
       title = `Efficiency mode ${action.setEfficiencyMode ? 'on' : 'off'} for ${label}`;
     } else {
       const cap = action.setCpuCap;
       const share = cap === null ? 0 : cap / targets.length;
-      for (const p of targets) (cap === null ? this.caps.delete(p.pid) : this.caps.set(p.pid, share));
+      for (const p of targets) {
+        if (cap === null) this.caps.delete(p.pid);
+        else this.caps.set(p.pid, share);
+      }
       title = cap === null ? `Removed the CPU cap of ${label}` : `Capped ${label} at ${cap}% CPU`;
     }
     return this.log('manual', title, 'From the task manager', undo);

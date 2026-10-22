@@ -1,0 +1,70 @@
+import { TestBed } from '@angular/core/testing';
+import { BACKEND } from '../core/backend';
+import { MockBackend } from '../core/mock-backend';
+import { Notifier } from '../shared/notifier';
+import { ActivityStore } from './activity.store';
+import { DiagnosisStore } from './diagnosis.store';
+
+const NOW = 1_700_000_000_000;
+
+function setup() {
+  const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+  return { mock, store: TestBed.inject(DiagnosisStore), notifier: TestBed.inject(Notifier), activity: TestBed.inject(ActivityStore) };
+}
+
+describe('DiagnosisStore', () => {
+  it('run stores the diagnosis', async () => {
+    const { store } = setup();
+    await store.run();
+    expect(store.diagnosis()?.headline).toBeTruthy();
+    expect(store.running()).toBe(false);
+  });
+  it('run failure keeps the error and clears running', async () => {
+    const { store, mock } = setup();
+    vi.spyOn(mock, 'whySlow').mockRejectedValue({ code: 'agentUnavailable', message: 'down' });
+    await store.run();
+    expect(store.error()).toEqual({ code: 'agentUnavailable', message: 'down' });
+    expect(store.running()).toBe(false);
+    expect(store.diagnosis()).toBeNull();
+  });
+  it('ensure runs only when there is no diagnosis and nothing running', async () => {
+    const { store, mock } = setup();
+    const spy = vi.spyOn(mock, 'whySlow');
+    await store.ensure();
+    await store.ensure();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+  it('loads anomalies or reports the failure', async () => {
+    const { store, mock } = setup();
+    await store.loadAnomalies();
+    expect(store.anomaliesLoaded()).toBe(true);
+    expect(store.anomalies().length).toBeGreaterThan(0);
+    vi.spyOn(mock, 'anomalies').mockRejectedValue({ code: 'timeout', message: 't' });
+    await store.loadAnomalies();
+    expect(store.anomaliesError()?.code).toBe('timeout');
+  });
+  it('act logs the entry, toasts with Undo and the undo works', async () => {
+    const { store, mock, notifier, activity } = setup();
+    const ps = (await mock.liveUpdate('processes')).processes!;
+    const p = ps.find((x) => x.name === 'cargo')!;
+    expect(await store.act({ pid: p.pid, started: p.started }, { setPriority: 'idle' })).toBe(true);
+    expect(activity.entries()[0]?.title).toContain('priority');
+    const toast = notifier.toasts().at(-1)!;
+    expect(toast.action?.label).toBe('Undo');
+    const undo = vi.spyOn(activity, 'undo');
+    toast.action!.run();
+    expect(undo).toHaveBeenCalled();
+  });
+  it('act with a non-undoable result has no Undo button', async () => {
+    const { store, mock, notifier } = setup();
+    vi.spyOn(mock, 'act').mockResolvedValue({ id: 'x', at: NOW, kind: 'manual', title: 'Ended', detail: '', undo: 'notUndoable', bytes: null });
+    expect(await store.act({ pid: 1, started: 1 }, 'end')).toBe(true);
+    expect(notifier.toasts().at(-1)?.action).toBeNull();
+  });
+  it('act failure toasts an error and returns false', async () => {
+    const { store, notifier } = setup();
+    expect(await store.act({ pid: 999999, started: 1 }, 'end')).toBe(false);
+    expect(notifier.toasts().at(-1)).toMatchObject({ tone: 'bad', text: 'The process has exited.' });
+  });
+});

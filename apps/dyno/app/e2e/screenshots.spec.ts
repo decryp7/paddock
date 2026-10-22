@@ -34,7 +34,11 @@ const SCREENS: { name: string; path: string; ready: (page: Page) => Promise<void
     name: 'processes',
     path: '/#/processes',
     ready: async (page) => {
-      await expect(page.getByRole('treegrid, grid, table').first()).toBeVisible();
+      await expect(page.getByRole('treegrid')).toBeVisible();
+      await page.getByRole('button', { name: 'Expand Rust build (cargo)' }).click();
+      await page.locator('[role=row][data-key^="p"]').first().click();
+      await expect(page.getByRole('complementary', { name: 'Process details' }).getByText('Command line')).toBeVisible();
+      await page.clock.runFor(1_000);
     },
   },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why slow' })).toBeVisible()) },

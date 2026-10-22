@@ -1,0 +1,55 @@
+[package]
+name = "dyno-app"
+description = "Dyno: measures, explains and tunes your PC (tray app and window over the Dyno agent)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[lib]
+name = "dyno_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+dyno-core.workspace = true
+dyno-ipc.workspace = true
+# Only for `Dirs`, `Discovery` and `service::Service` (the agent's per-user service registration); the app never links to
+# the sensors by calling them (ADR 0002: the agent measures, the app is a client).
+dyno-agent.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# "macos-private-api": the transparent window with vibrancy on macOS (tauri.macos.conf.json `macOSPrivateApi`); a no-op
+# elsewhere. It must sit here, not under a target table: tauri-build checks only this list against the config.
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+# >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version). No "zip": updater artifacts are the
+# installers themselves. The platform verifier trusts the OS certificate store (TLS-inspecting proxies).
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
+
+[target.'cfg(windows)'.dependencies]
+# The taskbar's light/dark setting (tray icon) and the Windows build number (Mica), read only.
+winreg = "0.56"
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Registering the bundled launch agent with SMAppService (macOS 13+).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
+
+[dev-dependencies]
+# Tests start an in-process agent over the fake platform (never the real sensors).
+dyno-platform.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

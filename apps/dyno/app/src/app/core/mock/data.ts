@@ -487,7 +487,7 @@ export function demoSettings(): Settings {
     theme: 'system',
     launchAtLogin: true,
     sampling: { intervalMs: 1000, processIntervalMs: 2000 },
-    retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90 },
+    retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },
     tray: { metrics: ['cpu', 'memory', 'disk'], style: 'graph' },
     alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10 },
     cleanup: { schedule: 'weekly', categories: CLEANUP_CATEGORIES.filter((c) => c.scheduled).map((c) => c.id), mode: 'quarantine', devProjectAgeDays: 30 },

@@ -160,7 +160,7 @@ export class Shell implements OnInit {
   });
   protected readonly overheadTip = computed(() => {
     const o = this.live.overhead();
-    return o ? `Dyno's own use, measured by its agent. Sampling every ${formatDuration(o.samplingIntervalMs / 1000)}, processes every ${formatDuration(o.processIntervalMs / 1000)}.` : '';
+    return o ? `Dyno's own use, measured by its agent (CPU is a share of one core). Sampling every ${formatDuration(o.samplingIntervalMs / 1000)}, processes every ${formatDuration(o.processIntervalMs / 1000)}.` : '';
   });
 
   protected readonly agentText = computed(() => {

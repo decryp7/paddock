@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
-import type { AppInfo, CommandError, PluginInfo, Settings } from '../core/api.types';
+import type { AppInfo, CommandError, PluginInfo, Settings, Theme } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { ThemeService } from '../core/theme';
@@ -34,6 +34,10 @@ export const SettingsStore = signalStore(
         .appInfo()
         .then((appInfo) => patchState(store, { appInfo }))
         .catch(() => undefined);
+    },
+    /** Previews a theme choice before it is saved. */
+    applyTheme(t: Theme): void {
+      theme.set(t);
     },
     async loadPlugins(): Promise<void> {
       patchState(store, { pluginsError: null });

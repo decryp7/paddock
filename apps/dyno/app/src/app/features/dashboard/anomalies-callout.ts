@@ -17,9 +17,8 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
           <strong>{{ n === 1 ? 'Dyno noticed something unusual' : 'Dyno noticed ' + count(n) + ' unusual patterns' }}</strong>
           <ul>
             @for (a of store.anomalies().slice(0, 3); track a.id) {
-              <li>
-                <dy-icon [name]="icon(a.kind)" /><span><b>{{ label(a.kind) }}:</b> {{ a.title }}.</span>
-                <span class="why truncate">{{ a.explanation }}</span>
+              <li [title]="a.explanation">
+                <dy-icon [name]="icon(a.kind)" /><span><b>{{ label(a.kind) }}:</b> {{ a.title }}</span>
               </li>
             }
           </ul>
@@ -34,7 +33,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
     .txt { flex: 1; min-width: 0; display: grid; gap: 2px; }
     ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; font-size: var(--fs-sm); color: var(--text-2); }
     li dy-icon { --icon-size: 13px; vertical-align: -2px; }
-    li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: baseline; column-gap: 6px; }
+    li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 6px; }
     .why { color: var(--text-3); }
     b { font-weight: var(--fw-medium); color: var(--text-1); }
   `,

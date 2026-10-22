@@ -84,7 +84,9 @@ export function rankItems<T extends { label: string; keywords: string }>(items: 
             [id]="'palette-' + item.id"
             [attr.aria-selected]="i === active()"
             (mousemove)="active.set(i)"
+            tabindex="-1"
             (click)="choose(item)"
+            (keydown.enter)="choose(item)"
           >
             <dy-icon [name]="item.icon" />
             <span class="label truncate">{{ item.label }}</span>

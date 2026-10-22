@@ -318,8 +318,10 @@ export type HistoryRange = 'hour' | 'day' | 'week' | 'month';
 export interface HistoryPoint {
   at: Timestamp;
   cpu: number;
+  cpuMin: number;
   cpuMax: number;
   memory: number;
+  memoryMin: number;
   memoryMax: number;
   diskReadBps: number;
   diskWriteBps: number;
@@ -650,7 +652,7 @@ export interface Settings {
   theme: Theme;
   launchAtLogin: boolean;
   sampling: { intervalMs: number; processIntervalMs: number };
-  retention: { rawHours: number; minuteDays: number; quarterHourDays: number };
+  retention: { rawHours: number; minuteDays: number; quarterHourDays: number; hourDays: number };
   tray: { metrics: TrayMetric[]; style: TrayStyle };
   alerts: {
     enabled: boolean;

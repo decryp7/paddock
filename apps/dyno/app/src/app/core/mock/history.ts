@@ -49,8 +49,10 @@ function point(at: number, now: number): HistoryPoint {
   return {
     at,
     cpu: round(cpu, 1),
+    cpuMin: round(clamp(cpu - 2 - 6 * smoothNoise(t, 13, 600), 0, cpu), 1),
     cpuMax: round(cpuMax, 1),
     memory: round(memory, 1),
+    memoryMin: round(clamp(memory - 1.5, 0, memory), 1),
     memoryMax: round(memoryMax, 1),
     diskReadBps: Math.round((4 + 60 * io) * MB * (0.6 + 0.4 * smoothNoise(t, 5, 300))),
     diskWriteBps: Math.round((2 + 120 * io) * MB * (0.6 + 0.4 * smoothNoise(t, 6, 300))),

@@ -57,14 +57,15 @@ import { TopApps } from './top-apps';
       <dy-anomalies-callout />
 
       <div class="grid" [class.no-hero]="!showHero()">
+        <dy-cpu-tile />
+        <dy-memory-tile />
+        <dy-disks-tile />
+
         @if (showHero()) {
           <dy-health-hero class="hero" />
         }
         <dy-diagnosis-card class="diag" />
 
-        <dy-cpu-tile />
-        <dy-memory-tile />
-        <dy-disks-tile />
         <dy-network-tile />
         <dy-gpu-tile />
         <dy-battery-tile />

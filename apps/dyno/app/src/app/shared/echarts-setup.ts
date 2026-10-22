@@ -13,6 +13,7 @@ import {
   TooltipComponent,
 } from 'echarts/components';
 import { init, use } from 'echarts/core';
+import { LegacyGridContainLabel } from 'echarts/features';
 import { CanvasRenderer } from 'echarts/renderers';
 
 use([
@@ -27,6 +28,7 @@ use([
   MarkLineComponent,
   MarkAreaComponent,
   CanvasRenderer,
+  LegacyGridContainLabel,
 ]);
 
 export { init };
