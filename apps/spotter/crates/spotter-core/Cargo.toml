@@ -10,7 +10,6 @@ authors = ["decryp7"]
 publish = false
 
 [dependencies]
-spotter-plugin-api.workspace = true
 quick-xml.workspace = true
 regex.workspace = true
 serde.workspace = true

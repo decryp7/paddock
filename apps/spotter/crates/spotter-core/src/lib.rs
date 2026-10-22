@@ -19,8 +19,9 @@ pub mod journal;
 pub mod limits;
 pub mod notify;
 pub mod pattern;
-pub mod plugin_health;
+
 pub mod release;
+pub mod schema;
 pub mod schedule;
 pub mod source;
 pub mod state;

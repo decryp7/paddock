@@ -7,7 +7,7 @@ use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::Candidate;
 use crate::time::Timestamp;
 use serde::Deserialize;
-use spotter_plugin_api::Config;
+use crate::schema::Config;
 
 /// Which forge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

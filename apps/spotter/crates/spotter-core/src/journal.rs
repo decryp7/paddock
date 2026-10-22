@@ -51,13 +51,6 @@ pub enum EventKind {
         /// Why.
         message: String,
     },
-    /// A plugin crashed, timed out or was quarantined.
-    PluginIssue {
-        /// The plugin's id.
-        plugin: String,
-        /// What happened.
-        message: String,
-    },
 }
 
 /// One event.

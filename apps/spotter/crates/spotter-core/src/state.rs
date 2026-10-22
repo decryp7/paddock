@@ -25,9 +25,7 @@ pub enum WatchStatus {
     Unreachable(String),
     /// Credentials are missing or were refused.
     AuthNeeded(String),
-    /// The plugin failed or is quarantined.
-    PluginError(String),
-    /// The watch's configuration is not valid (e.g. its plugin is not installed).
+    /// The watch's configuration is not valid (e.g. an unknown source kind).
     Invalid(String),
     /// Any other failure.
     Failed(String),
@@ -40,7 +38,6 @@ impl WatchStatus {
         match e {
             SourceError::Unreachable(_) => WatchStatus::Unreachable(m),
             SourceError::Unauthorized(_) => WatchStatus::AuthNeeded(m),
-            SourceError::Plugin(_) => WatchStatus::PluginError(m),
             SourceError::InvalidConfig(_) => WatchStatus::Invalid(m),
             SourceError::NotFound(_) | SourceError::InvalidResponse(_) | SourceError::Failed(_) => WatchStatus::Failed(m),
         }
@@ -440,7 +437,6 @@ mod tests {
         let cases = [
             (SourceError::Unreachable("m".into()), "Unreachable"),
             (SourceError::Unauthorized("m".into()), "AuthNeeded"),
-            (SourceError::Plugin("m".into()), "PluginError"),
             (SourceError::InvalidConfig("m".into()), "Invalid"),
             (SourceError::NotFound("m".into()), "Failed"),
             (SourceError::InvalidResponse("m".into()), "Failed"),

@@ -7,7 +7,7 @@ use super::SourceError;
 use crate::limits::MAX_CANDIDATES;
 use crate::release::Candidate;
 use serde::Deserialize;
-use spotter_plugin_api::Config;
+use crate::schema::Config;
 
 /// A container image source.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -6,7 +6,7 @@ use crate::notify::NotificationPolicy;
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::ReleaseFilter;
 use crate::schedule::clamp_interval;
-use crate::source::{PluginKinds, Source, SourceConfig};
+use crate::source::{Source, SourceConfig};
 use crate::version::VersionScheme;
 use serde::{Deserialize, Serialize};
 
@@ -125,7 +125,7 @@ pub struct Watch {
 
 impl Watch {
     /// Parses a spec; the error lists every problem.
-    pub fn parse(spec: &WatchSpec, plugins: &dyn PluginKinds) -> Result<Watch, Vec<String>> {
+    pub fn parse(spec: &WatchSpec) -> Result<Watch, Vec<String>> {
         let mut problems = Vec::new();
         let id = WatchId::parse(&spec.id).map_err(|e| problems.push(e)).ok();
         let name = spec.name.trim().to_string();
@@ -134,7 +134,7 @@ impl Watch {
         } else if name.chars().count() > MAX_NAME_CHARS {
             problems.push(format!("The name is too long (at most {MAX_NAME_CHARS} characters)."));
         }
-        let source = Source::parse(&spec.source, plugins).map_err(|e| problems.extend(e)).ok();
+        let source = Source::parse(&spec.source).map_err(|e| problems.extend(e)).ok();
         let scheme = VersionScheme::parse(&spec.versions, spec.version_pattern.as_deref())
             .map_err(|e| problems.push(e))
             .ok();
@@ -204,9 +204,6 @@ pub struct Settings {
     /// The check interval new watches start with.
     #[serde(default = "default_interval")]
     pub default_interval_secs: u32,
-    /// Plugins that are installed but switched off.
-    #[serde(default)]
-    pub disabled_plugins: Vec<String>,
 }
 
 impl Default for Settings {
@@ -218,7 +215,6 @@ impl Default for Settings {
             check_app_updates: false,
             downloads_folder: None,
             default_interval_secs: default_interval(),
-            disabled_plugins: Vec::new(),
         }
     }
 }
@@ -267,13 +263,13 @@ pub(crate) mod tests {
 
     #[test]
     fn specs_parse_into_watches() {
-        let w = Watch::parse(&spec("w1"), &()).unwrap();
+        let w = Watch::parse(&spec("w1")).unwrap();
         assert_eq!((w.name.as_str(), w.interval_secs, w.scheme.id()), ("Nightly", 60, "semver"));
         let mut s = spec("w1");
         s.interval_secs = 1;
         s.name_filter = "*.zip".into();
         s.notify.mode = NotifyMode::Off;
-        let w = Watch::parse(&s, &()).unwrap();
+        let w = Watch::parse(&s).unwrap();
         assert_eq!(w.interval_secs, crate::limits::MIN_INTERVAL_SECS);
         assert!(!w.filter.name.is_any());
         assert_eq!(w.spec, s);
@@ -289,12 +285,12 @@ pub(crate) mod tests {
             folder: "".into(),
             verify: true,
         }];
-        let problems = Watch::parse(&s, &()).unwrap_err();
+        let problems = Watch::parse(&s).unwrap_err();
         assert_eq!(problems.len(), 5, "{problems:?}");
         let mut long = spec("x");
         long.name = "n".repeat(MAX_NAME_CHARS + 1);
         long.actions = vec![Action::OpenLocation; MAX_ACTIONS + 1];
-        assert_eq!(Watch::parse(&long, &()).unwrap_err().len(), 2);
+        assert_eq!(Watch::parse(&long).unwrap_err().len(), 2);
     }
 
     #[test]

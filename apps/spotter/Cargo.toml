@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/spotter-core", "crates/spotter-plugin-api", "crates/spotter-plugin-host", "crates/spotter-sources", "plugins/spotter-plugin-example", "plugins/template"]
+members = ["crates/spotter-core", "crates/spotter-sources"]
 resolver = "2"
 
 # Shared by every member: `edition.workspace = true` etc.
@@ -13,10 +13,7 @@ version = "0.2.0"
 # Versions of the dependencies that two or more members use, so they stay on one version.
 [workspace.dependencies]
 spotter-core = { path = "crates/spotter-core" }
-spotter-plugin-api = { path = "crates/spotter-plugin-api" }
-spotter-plugin-host = { path = "crates/spotter-plugin-host" }
 spotter-sources = { path = "crates/spotter-sources" }
-postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 quick-xml = "0.42"
 regex = "1.12"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "system-proxy"] }

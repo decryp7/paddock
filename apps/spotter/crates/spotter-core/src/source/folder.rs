@@ -5,7 +5,7 @@
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::Candidate;
 use crate::time::Timestamp;
-use spotter_plugin_api::Config;
+use crate::schema::Config;
 
 /// Which entries a folder source looks at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

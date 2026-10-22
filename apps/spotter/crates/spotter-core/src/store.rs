@@ -1,9 +1,8 @@
-//! The state file `state.json`: per-watch state, the dashboard's journal and plugin health. Versioned and tolerant:
+//! The state file `state.json`: per-watch state, the dashboard's journal. Versioned and tolerant:
 //! an unreadable file or entry falls back to empty state with a warning (the watches re-check and re-baseline).
 
 use crate::journal::Journal;
 use crate::limits::MAX_STATE_BYTES;
-use crate::plugin_health::PluginHealth;
 use crate::state::WatchState;
 use crate::watch::WatchId;
 use serde::{Deserialize, Serialize};
@@ -22,8 +21,6 @@ pub struct StateDoc {
     pub watches: BTreeMap<WatchId, WatchState>,
     /// The dashboard's history.
     pub journal: Journal,
-    /// Per plugin id.
-    pub plugins: BTreeMap<String, PluginHealth>,
 }
 
 /// Parses `state.json`, keeping what can be read.
@@ -71,9 +68,6 @@ pub fn parse_state(text: &str) -> (StateDoc, Vec<String>) {
             Journal::default()
         });
     }
-    if let Some(p) = raw.get("plugins") {
-        doc.plugins = serde_json::from_value(p.clone()).unwrap_or_default();
-    }
     (doc, warnings)
 }
 
@@ -96,7 +90,6 @@ mod tests {
         let id = WatchId::parse("a").unwrap();
         doc.watches.insert(id.clone(), WatchState::default());
         doc.journal.record(Timestamp(1), Some(id), EventKind::Recovered);
-        doc.plugins.insert("p".into(), PluginHealth::default());
         let text = render_state(&doc);
         let (back, warnings) = parse_state(&text);
         assert!(warnings.is_empty());

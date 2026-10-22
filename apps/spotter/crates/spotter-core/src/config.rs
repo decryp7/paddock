@@ -2,7 +2,7 @@
 //!
 //! - A newer schema than this build knows is refused (the caller keeps the file and starts with defaults).
 //! - Damage is contained: bad settings fall back to the defaults, one bad watch is skipped with a warning, the rest
-//!   load. Watches that parse as specs but not as watches (e.g. their plugin is missing) are kept: the app shows
+//!   load. Watches that parse as specs but not as watches (e.g. an unknown source kind) are kept: the app shows
 //!   them with the problem instead of dropping them on the next save.
 //! - The old app's `app.toml` (figment: `path`, `file_regex`, `interval_seconds`, `naggy`) becomes one folder watch
 //!   with the old build-number scheme; its acknowledged version (`version.txt`) is read by
@@ -199,7 +199,7 @@ mod tests {
         );
         assert_eq!(w.source.values["path"], "\\\\server\\builds");
         assert_eq!(w.source.values["syntax"], "regex");
-        assert!(crate::watch::Watch::parse(w, &()).is_ok());
+        assert!(crate::watch::Watch::parse(w).is_ok());
         let defaults = parse("file_regex = 'x'\ninterval_seconds = -5").unwrap();
         assert_eq!(defaults.doc.watches[0].source.values["path"], "/Volumes/Data/Test");
         assert_eq!(defaults.doc.watches[0].interval_secs, 1);

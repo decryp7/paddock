@@ -1,7 +1,7 @@
 //! The configuration schema of a source kind: which fields its form has, and the values a user entered.
 //!
-//! Built-in sources and plugins describe their settings with the same [`FieldSpec`]s; the app renders the form from
-//! them and checks entered values with [`FieldSpec::check`] before it saves a watch (the plugin checks again).
+//! Built-in sources and source packs describe their settings with [`FieldSpec`]s; the app renders the form from
+//! them and checks entered values with [`FieldSpec::check`] before it saves a watch (the engine checks again).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -166,6 +166,32 @@ pub fn check_all(fields: &[FieldSpec], config: &Config) -> Result<(), Vec<String
         Ok(())
     } else {
         Err(problems)
+    }
+}
+
+/// A source kind: an id, how it is shown and its configuration form.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceKindSpec {
+    /// Stable id (`[a-z0-9-]+`).
+    pub id: String,
+    /// Display name.
+    pub label: String,
+    /// One sentence about it.
+    pub description: String,
+    /// The form.
+    pub fields: Vec<FieldSpec>,
+}
+
+impl SourceKindSpec {
+    /// A kind without fields.
+    pub fn new(id: &str, label: &str, description: &str) -> SourceKindSpec {
+        SourceKindSpec { id: id.into(), label: label.into(), description: description.into(), fields: Vec::new() }
+    }
+
+    /// The same kind with one more field.
+    pub fn with_field(mut self, field: FieldSpec) -> SourceKindSpec {
+        self.fields.push(field);
+        self
     }
 }
 

@@ -7,7 +7,7 @@ use super::SourceError;
 use crate::checksum::Sha256Digest;
 use crate::release::Candidate;
 use crate::time::Timestamp;
-use spotter_plugin_api::Config;
+use crate::schema::Config;
 
 /// Where a release's location comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]

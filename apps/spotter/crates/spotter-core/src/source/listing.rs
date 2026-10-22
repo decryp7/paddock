@@ -6,7 +6,7 @@ use crate::limits::MAX_CANDIDATES;
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::Candidate;
 use regex::Regex;
-use spotter_plugin_api::Config;
+use crate::schema::Config;
 use std::sync::OnceLock;
 use url::Url;
 

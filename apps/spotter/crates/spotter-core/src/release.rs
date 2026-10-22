@@ -7,7 +7,6 @@ use crate::pattern::NamePattern;
 use crate::time::Timestamp;
 use crate::version::{Version, VersionScheme};
 use serde::{Deserialize, Serialize};
-use spotter_plugin_api::WireRelease;
 
 /// One thing a source found, before its version is read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,20 +38,6 @@ impl Candidate {
             size: None,
             sha256: None,
             prerelease: false,
-        }
-    }
-}
-
-impl From<WireRelease> for Candidate {
-    fn from(w: WireRelease) -> Candidate {
-        Candidate {
-            version_text: w.version,
-            name: w.name,
-            location: w.location,
-            published_at: w.published_at_ms.map(Timestamp),
-            size: w.size,
-            sha256: w.sha256.as_deref().and_then(Sha256Digest::parse),
-            prerelease: w.prerelease,
         }
     }
 }
@@ -209,16 +194,5 @@ mod tests {
         let many = (0..MAX_CANDIDATES + 10).map(|i| Candidate::named(&format!("1.{i}"), "l")).collect();
         let s = select(many, &VersionScheme::Semver, &ReleaseFilter::default(), usize::MAX);
         assert_eq!(s.releases.len(), MAX_CANDIDATES);
-    }
-
-    #[test]
-    fn wire_releases_become_candidates() {
-        let mut w = WireRelease::new("v1", "n", "l");
-        w.published_at_ms = Some(5);
-        w.sha256 = Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into());
-        w.prerelease = true;
-        let c = Candidate::from(w);
-        assert_eq!(c.published_at, Some(Timestamp(5)));
-        assert!(c.sha256.is_some() && c.prerelease && c.version_text == "v1");
     }
 }

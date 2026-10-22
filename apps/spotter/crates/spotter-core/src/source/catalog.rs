@@ -1,7 +1,7 @@
 //! The built-in source kinds and their forms. The app renders the add-watch form from these, exactly as it does
 //! for plugin kinds.
 
-use spotter_plugin_api::{ChoiceOption, FieldKind, FieldSpec, SourceKindSpec};
+use crate::schema::{ChoiceOption, FieldKind, FieldSpec, SourceKindSpec};
 
 /// A folder, mounted drive or share.
 pub const FOLDER: &str = "folder";

@@ -4,7 +4,7 @@
 //! - [`http`]: HTTP with bounded bodies and the registry token dance.
 //! - [`download`]: downloads and copies with resume and checksum verification.
 //!
-//! Plugin sources are run by `spotter-plugin-host`; [`checker`] builds a port implementation for every other plan.
+//! [`checker`] builds a port implementation for every plan.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod download;
@@ -54,17 +54,16 @@ pub mod checker {
         }
     }
 
-    /// The checker for a plan; `None` for plugin plans (the plugin host runs those).
-    pub fn for_plan(plan: Plan, http: &Http, credentials: Option<(String, String)>) -> Option<Box<dyn ReleaseSource>> {
+    /// The checker for a plan.
+    pub fn for_plan(plan: Plan, http: &Http, credentials: Option<(String, String)>) -> Box<dyn ReleaseSource> {
         match plan {
-            Plan::Folder(f) => Some(Box::new(FolderChecker(f))),
-            Plan::Http { request, parser } => Some(Box::new(HttpChecker {
+            Plan::Folder(f) => Box::new(FolderChecker(f)),
+            Plan::Http { request, parser } => Box::new(HttpChecker {
                 http: http.clone(),
                 request,
                 parser,
                 credentials,
-            })),
-            Plan::Plugin { .. } => None,
+            }),
         }
     }
 }

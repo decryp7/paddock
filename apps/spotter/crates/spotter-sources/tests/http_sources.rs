@@ -115,7 +115,7 @@ async fn serve() -> String {
 }
 
 fn source(kind: &str, values: &[(&str, &str)]) -> Source {
-    Source::parse(&SourceConfig::new(kind, values), &()).unwrap()
+    Source::parse(&SourceConfig::new(kind, values)).unwrap()
 }
 
 #[tokio::test]
@@ -123,7 +123,7 @@ async fn forge_answers_are_listed() {
     let base = serve().await;
     let http = Http::new("test").unwrap();
     let src = source("github", &[("repo", "o/r"), ("server", &base)]);
-    let checker = for_plan(src.plan(&Default::default()), &http, None).unwrap();
+    let checker = for_plan(src.plan(&Default::default()), &http, None);
     let c = checker.list(10).await.unwrap();
     assert_eq!(c.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["One two", "v1.1.0"]);
     assert_eq!(checker.list(1).await.unwrap().len(), 1);

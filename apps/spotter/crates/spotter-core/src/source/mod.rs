@@ -2,7 +2,7 @@
 //!
 //! A watch stores its source as a kind id and the values of that kind's form ([`SourceConfig`]); loading parses it
 //! into a typed [`Source`] once. Checking a source is split the ports-and-adapters way: [`Source::plan`] says what
-//! to read (a folder, an HTTP request, a plugin call) and how to parse the answer; an adapter performs the I/O
+//! to read (a folder, an HTTP request) and how to parse the answer; an adapter performs the I/O
 //! behind the [`ReleaseSource`] port and hands the bytes back to the core's parsers.
 
 pub mod catalog;
@@ -17,8 +17,7 @@ pub mod listing;
 
 use crate::release::Candidate;
 use serde::{Deserialize, Serialize};
-use spotter_plugin_api::schema::check_all;
-use spotter_plugin_api::{Config, ErrorKind, FieldKind, PluginError, SourceKindSpec};
+use crate::schema::{check_all, Config};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -33,7 +32,7 @@ pub use listing::WebDirectorySource;
 /// A source as stored: its kind and the values of the kind's form. Secret fields are never stored here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceConfig {
-    /// A built-in kind id (`folder`, `github`, …) or `<plugin>/<kind>` for a plugin's kind.
+    /// A built-in kind id (`folder`, `github`, …).
     pub kind: String,
     /// The entered values by field key.
     #[serde(default, deserialize_with = "scalars")]
@@ -74,7 +73,7 @@ impl SourceConfig {
         }
     }
 
-    /// The values as a plugin [`Config`].
+    /// The values as a [`Config`].
     pub fn config(&self) -> Config {
         Config(self.values.clone())
     }
@@ -96,8 +95,6 @@ pub enum SourceError {
     InvalidConfig(String),
     /// The answer could not be read.
     InvalidResponse(String),
-    /// The plugin failed (crashed, timed out, broke the protocol, or is quarantined).
-    Plugin(String),
     /// Anything else.
     Failed(String),
 }
@@ -111,7 +108,6 @@ impl SourceError {
             | SourceError::NotFound(m)
             | SourceError::InvalidConfig(m)
             | SourceError::InvalidResponse(m)
-            | SourceError::Plugin(m)
             | SourceError::Failed(m) => m,
         }
     }
@@ -124,18 +120,6 @@ impl std::fmt::Display for SourceError {
 }
 
 impl std::error::Error for SourceError {}
-
-impl From<PluginError> for SourceError {
-    fn from(e: PluginError) -> SourceError {
-        match e.kind {
-            ErrorKind::Unreachable => SourceError::Unreachable(e.message),
-            ErrorKind::Unauthorized => SourceError::Unauthorized(e.message),
-            ErrorKind::NotFound => SourceError::NotFound(e.message),
-            ErrorKind::InvalidConfig | ErrorKind::Unsupported => SourceError::InvalidConfig(e.message),
-            ErrorKind::Failed => SourceError::Failed(e.message),
-        }
-    }
-}
 
 /// A boxed future, so the port can be used as a trait object without an async runtime in the core.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -167,17 +151,6 @@ pub enum Source {
     Container(ContainerSource),
     /// A JSON API read with selectors (also the package registries).
     JsonApi(JsonApiSource),
-    /// A plugin's source kind.
-    Plugin {
-        /// The plugin's id.
-        plugin: String,
-        /// The kind's id within the plugin.
-        kind: String,
-        /// The stored values.
-        config: Config,
-        /// Keys of its secret fields.
-        secret_keys: Vec<String>,
-    },
 }
 
 /// What to read for a check.
@@ -193,15 +166,6 @@ pub enum Plan {
         request: HttpRequest,
         /// How to read the answer.
         parser: Parser,
-    },
-    /// Ask a plugin.
-    Plugin {
-        /// The plugin's id.
-        plugin: String,
-        /// The kind's id.
-        kind: String,
-        /// The values, secrets included.
-        config: Config,
     },
 }
 
@@ -233,51 +197,12 @@ impl Parser {
     }
 }
 
-/// Finds a plugin's kind by its full id (`<plugin>/<kind>`).
-pub trait PluginKinds {
-    /// The kind's description, `None` when no enabled plugin offers it.
-    fn kind(&self, id: &str) -> Option<SourceKindSpec>;
-}
-
-impl PluginKinds for () {
-    fn kind(&self, _: &str) -> Option<SourceKindSpec> {
-        None
-    }
-}
-
-impl<F: Fn(&str) -> Option<SourceKindSpec>> PluginKinds for F {
-    fn kind(&self, id: &str) -> Option<SourceKindSpec> {
-        self(id)
-    }
-}
-
 impl Source {
     /// Parses a stored source. Checks the values against the kind's form first; the error lists every problem.
-    pub fn parse(cfg: &SourceConfig, plugins: &dyn PluginKinds) -> Result<Source, Vec<String>> {
+    pub fn parse(cfg: &SourceConfig) -> Result<Source, Vec<String>> {
         let config = cfg.config();
         if !config.within_limits() {
             return Err(vec!["The source settings are too large.".into()]);
-        }
-        if let Some((plugin, kind)) = cfg.kind.split_once('/') {
-            let spec = plugins.kind(&cfg.kind).ok_or_else(|| {
-                vec![format!(
-                    "No installed plugin offers the source kind \"{}\". Install or enable the plugin \"{plugin}\".",
-                    cfg.kind
-                )]
-            })?;
-            check_all(&spec.fields, &config)?;
-            let secret_keys = spec
-                .fields
-                .iter()
-                .filter(|f| f.kind == FieldKind::Secret)
-                .map(|f| f.key.clone())
-                .collect();
-            return Ok(Source::Plugin {
-                plugin: plugin.into(),
-                kind: kind.into(),
-                config,
-                secret_keys,
-            });
         }
         let spec = catalog::builtin(&cfg.kind).ok_or_else(|| vec![format!("\"{}\" is not a kind of source.", cfg.kind)])?;
         check_all(&spec.fields, &config)?;
@@ -300,7 +225,6 @@ impl Source {
         match self {
             Source::Forge(_) | Source::JsonApi(_) => vec![catalog::TOKEN.into()],
             Source::Container(_) => vec![catalog::TOKEN.into()],
-            Source::Plugin { secret_keys, .. } => secret_keys.clone(),
             Source::Folder(_) | Source::WebDirectory(_) | Source::Feed { .. } => Vec::new(),
         }
     }
@@ -330,17 +254,6 @@ impl Source {
                 request: j.request(token),
                 parser: Parser::Json(j.clone()),
             },
-            Source::Plugin { plugin, kind, config, .. } => {
-                let mut config = config.clone();
-                for (k, v) in secrets {
-                    config.0.insert(k.clone(), v.clone());
-                }
-                Plan::Plugin {
-                    plugin: plugin.clone(),
-                    kind: kind.clone(),
-                    config,
-                }
-            }
         }
     }
 
@@ -353,7 +266,6 @@ impl Source {
             Source::Forge(f) => f.describe(),
             Source::Container(c) => c.describe(),
             Source::JsonApi(j) => j.describe(),
-            Source::Plugin { plugin, kind, .. } => format!("{plugin}/{kind}"),
         }
     }
 
@@ -372,16 +284,6 @@ impl Source {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use spotter_plugin_api::FieldSpec;
-
-    fn plugin_kinds(id: &str) -> Option<SourceKindSpec> {
-        (id == "demo/files").then(|| {
-            SourceKindSpec::new("files", "Files", "d")
-                .with_field(FieldSpec::new("dir", "Dir", FieldKind::Text).required())
-                .with_field(FieldSpec::new("key", "Key", FieldKind::Secret))
-        })
-    }
-
     #[test]
     fn every_builtin_kind_parses_and_plans() {
         let cases = [
@@ -400,7 +302,7 @@ mod tests {
         ];
         let secrets: Secrets = [("token".to_string(), " t ".to_string())].into();
         for cfg in cases {
-            let s = Source::parse(&cfg, &()).unwrap_or_else(|e| panic!("{}: {e:?}", cfg.kind));
+            let s = Source::parse(&cfg).unwrap_or_else(|e| panic!("{}: {e:?}", cfg.kind));
             assert!(!s.describe().is_empty());
             let plan = s.plan(&secrets);
             match (&s, plan) {
@@ -413,40 +315,22 @@ mod tests {
 
     #[test]
     fn bad_configs_list_their_problems() {
-        assert!(Source::parse(&SourceConfig::new("folder", &[]), &()).unwrap_err()[0].contains("required"));
-        assert!(Source::parse(&SourceConfig::new("teleport", &[]), &()).unwrap_err()[0].contains("not a kind"));
+        assert!(Source::parse(&SourceConfig::new("folder", &[])).unwrap_err()[0].contains("required"));
+        assert!(Source::parse(&SourceConfig::new("teleport", &[])).unwrap_err()[0].contains("not a kind"));
         let big = SourceConfig::new("folder", &[("path", &"x".repeat(5000))]);
-        assert!(Source::parse(&big, &()).unwrap_err()[0].contains("too large"));
+        assert!(Source::parse(&big).unwrap_err()[0].contains("too large"));
         let bad_repo = SourceConfig::new("github", &[("repo", "no-slash")]);
-        assert!(Source::parse(&bad_repo, &()).is_err());
-        assert!(Source::parse(&SourceConfig::new("feed", &[("url", "ftp://x")]), &()).is_err());
-    }
-
-    #[test]
-    fn plugin_kinds_parse_and_get_their_secrets() {
-        let cfg = SourceConfig::new("demo/files", &[("dir", "/x")]);
-        assert!(Source::parse(&cfg, &()).unwrap_err()[0].contains("Install or enable the plugin \"demo\""));
-        let s = Source::parse(&cfg, &plugin_kinds).unwrap();
-        assert_eq!(s.secret_keys(), ["key"]);
-        assert_eq!(s.describe(), "demo/files");
-        let Plan::Plugin { plugin, kind, config } = s.plan(&[("key".to_string(), "s3cret".to_string())].into()) else {
-            panic!("plugin plan")
-        };
-        assert_eq!(
-            (plugin.as_str(), kind.as_str(), config.get("key"), config.get("dir")),
-            ("demo", "files", Some("s3cret"), Some("/x"))
-        );
-        assert!(Source::parse(&SourceConfig::new("demo/files", &[]), &plugin_kinds).is_err());
-        assert_eq!(cfg.config().get("dir"), Some("/x"));
+        assert!(Source::parse(&bad_repo).is_err());
+        assert!(Source::parse(&SourceConfig::new("feed", &[("url", "ftp://x")])).is_err());
     }
 
     #[test]
     fn registry_credentials_only_for_images_with_a_token() {
-        let img = Source::parse(&SourceConfig::new("container", &[("image", "nginx")]), &()).unwrap();
+        let img = Source::parse(&SourceConfig::new("container", &[("image", "nginx")])).unwrap();
         assert_eq!(img.registry_credentials(&Secrets::new()), None);
         let with: Secrets = [("token".to_string(), "t".to_string())].into();
         assert_eq!(img.registry_credentials(&with), Some(("token".into(), "t".into())));
-        let feed = Source::parse(&SourceConfig::new("feed", &[("url", "https://a.b/f")]), &()).unwrap();
+        let feed = Source::parse(&SourceConfig::new("feed", &[("url", "https://a.b/f")])).unwrap();
         assert_eq!(feed.registry_credentials(&with), None);
         assert!(feed.secret_keys().is_empty());
     }
@@ -474,23 +358,10 @@ a = [1]"
     }
 
     #[test]
-    fn errors_carry_their_message_and_map_from_plugins() {
-        let all = [
-            (ErrorKind::Unreachable, "Unreachable"),
-            (ErrorKind::Unauthorized, "Unauthorized"),
-            (ErrorKind::NotFound, "NotFound"),
-            (ErrorKind::InvalidConfig, "InvalidConfig"),
-            (ErrorKind::Unsupported, "InvalidConfig"),
-            (ErrorKind::Failed, "Failed"),
-        ];
-        for (kind, name) in all {
-            let e = SourceError::from(PluginError::new(kind, "m"));
-            assert!(format!("{e:?}").starts_with(name));
-            assert_eq!(e.to_string(), "m");
-        }
-        for e in [SourceError::InvalidResponse("r".into()), SourceError::Plugin("p".into())] {
+    fn errors_carry_their_message() {
+        for e in [SourceError::InvalidResponse("r".into()), SourceError::Unreachable("u".into())] {
             assert_eq!(e.message().len(), 1);
+            assert_eq!(e.to_string(), e.message());
         }
-        assert_eq!(<() as PluginKinds>::kind(&(), "x"), None);
     }
 }
