@@ -504,7 +504,8 @@ jobs:
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
-          BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+          # Public URL, not github.server_url: inside Gitea runners that is the internal http address.
+          BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
           node --test scripts/release/latest-json.test.mjs
           if ! find artifacts -name '*.sig' | grep -q .; then
