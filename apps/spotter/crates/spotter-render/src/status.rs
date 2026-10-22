@@ -74,7 +74,7 @@ pub fn compose(f: Found) -> RendererStatus {
     let how = if f.can_download {
         "Install Edge, Chrome or Chromium, or download Chromium in Settings."
     } else {
-        "Install Edge, Chrome or Chromium (a downloadable build is not available in this version)."
+        "Install Edge, Chrome or Chromium (no downloadable build exists for this platform)."
     };
     RendererStatus {
         kind: RendererKind::None,

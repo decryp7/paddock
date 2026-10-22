@@ -110,15 +110,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_embedded_manifest_parses_but_is_not_configured() {
+    fn the_embedded_manifest_pins_every_platform_to_its_versioned_https_url() {
         let m = Manifest::embedded();
-        assert_eq!(m.version, "UNCONFIGURED");
-        assert!(m.platform.len() >= 4);
-        for e in &m.platform {
-            let err = m.pinned(&e.key).unwrap_err().to_string();
-            assert!(err.contains("not configured yet"), "{err}");
+        assert!(
+            m.version.split('.').count() == 4 && m.version.split('.').all(|p| p.parse::<u32>().is_ok()),
+            "{}",
+            m.version
+        );
+        let keys: Vec<&str> = m.platform.iter().map(|e| e.key.as_str()).collect();
+        for want in ["windows-x86_64", "macos-aarch64", "macos-x86_64", "linux-x86_64"] {
+            assert!(keys.contains(&want), "{want} missing");
         }
-        assert!(!m.is_configured(&platform_key()));
+        for e in &m.platform {
+            let p = m.pinned(&e.key).unwrap_or_else(|err| panic!("{}: {err}", e.key));
+            assert!(
+                p.url.starts_with("https://storage.googleapis.com/chrome-for-testing-public/"),
+                "{}",
+                p.url
+            );
+            assert!(
+                p.url.contains(&format!("/{}/", m.version)),
+                "the URL names the pinned version: {}",
+                p.url
+            );
+            assert_eq!(p.sha256.len(), 64);
+        }
+        let mut unique: Vec<&str> = m.platform.iter().map(|e| e.sha256.as_str()).collect();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), m.platform.len(), "every archive has its own hash");
+        assert!(m.is_configured("macos-aarch64"));
+        assert!(!m.is_configured("plan9-mips"));
     }
 
     #[test]

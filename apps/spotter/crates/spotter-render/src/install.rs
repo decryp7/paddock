@@ -67,6 +67,13 @@ pub fn extract_verified(archive: &Path, expected_sha256: &str, dest: &Path) -> R
         if let Some(p) = out.parent() {
             std::fs::create_dir_all(p).map_err(|e| err(e.to_string()))?;
         }
+        if f.is_symlink() {
+            // macOS builds link their frameworks (`Versions/Current`); a link is recreated only when it stays inside.
+            let mut target = String::new();
+            f.read_to_string(&mut target).map_err(|e| err(e.to_string()))?;
+            link_inside(dest, &out, &target)?;
+            continue;
+        }
         let mut o = std::fs::File::create(&out).map_err(|e| err(e.to_string()))?;
         std::io::copy(&mut f, &mut o).map_err(|e| err(e.to_string()))?;
         #[cfg(unix)]
@@ -75,6 +82,41 @@ pub fn extract_verified(archive: &Path, expected_sha256: &str, dest: &Path) -> R
             let _ = std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode));
         }
     }
+    Ok(())
+}
+
+/// Creates the symbolic link `link` -> `target` when `target` is relative and resolves inside `root`; anything else
+/// (an absolute target, a path that climbs out of the tree) is refused like a zip-slip path.
+fn link_inside(root: &Path, link: &Path, target: &str) -> Result<()> {
+    use std::path::Component;
+    let t = Path::new(target);
+    if target.is_empty() || target.contains('\0') || t.is_absolute() {
+        return Err(err("the archive contains an unsafe link"));
+    }
+    let mut at: Vec<_> = link
+        .parent()
+        .unwrap_or(root)
+        .strip_prefix(root)
+        .map_err(|_| err("the archive contains an unsafe link"))?
+        .components()
+        .collect();
+    for c in t.components() {
+        match c {
+            Component::Normal(_) => at.push(c),
+            Component::ParentDir => {
+                at.pop().ok_or_else(|| err("the archive contains a link that leaves its folder"))?;
+            }
+            Component::CurDir => {}
+            _ => return Err(err("the archive contains an unsafe link")),
+        }
+    }
+    #[cfg(unix)]
+    {
+        let _ = std::fs::remove_file(link);
+        std::os::unix::fs::symlink(target, link).map_err(|e| err(e.to_string()))?;
+    }
+    #[cfg(not(unix))]
+    let _ = link;
     Ok(())
 }
 
@@ -271,5 +313,32 @@ mod tests {
     #[test]
     fn self_test_fails_for_a_missing_program() {
         assert!(self_test(Path::new("/nonexistent/x")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_inside_the_tree_are_recreated_and_links_out_of_it_are_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let make = |name: &str, target: &str| {
+            let a = d.path().join(format!("{name}.zip"));
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&a).unwrap());
+            z.start_file("app/Versions/1/lib", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            z.write_all(b"x").unwrap();
+            z.add_symlink("app/Versions/Current", target, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            z.finish().unwrap();
+            a
+        };
+        let ok = make("ok", "1");
+        extract_verified(&ok, &sha256_file(&ok).unwrap(), &d.path().join("out")).unwrap();
+        let link = d.path().join("out/app/Versions/Current");
+        assert!(link.is_symlink());
+        assert!(link.join("lib").is_file(), "the link resolves inside the tree");
+        for (i, bad) in ["/etc", "../../../..", "../../../../etc"].iter().enumerate() {
+            let a = make(&format!("bad{i}"), bad);
+            let out = d.path().join(format!("out{i}"));
+            assert!(extract_verified(&a, &sha256_file(&a).unwrap(), &out).is_err(), "{bad}");
+        }
     }
 }

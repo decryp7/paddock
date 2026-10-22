@@ -4,7 +4,7 @@
 mod support;
 
 use spotter_render::discover::Os;
-use spotter_render::install::{install, install_pinned, sha256_file};
+use spotter_render::install::{install_pinned, sha256_file};
 use spotter_render::manifest::Pinned;
 use std::io::Write;
 use std::path::Path;
@@ -91,10 +91,29 @@ async fn http_errors_and_failed_self_tests_install_nothing() {
     assert!(e.to_string().contains("does not contain a browser"));
 }
 
+/// Needs a real Chrome for Testing archive for this platform: `SPOTTER_TEST_CHROMIUM_ZIP=/path/to.zip cargo test -p
+/// spotter-render --test install -- --ignored`. Checks that the archive's hash matches the shipped manifest, that it
+/// extracts (with its links) and that the browser answers `--version`.
 #[tokio::test]
-async fn the_shipped_manifest_says_it_is_not_configured_yet() {
-    let tmp = tempfile::tempdir().unwrap();
-    let e = install(tmp.path(), &|_, _| {}).await.unwrap_err();
-    assert!(e.to_string().contains("not configured yet"), "{e}");
-    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+#[ignore = "needs a downloaded Chrome for Testing archive"]
+async fn the_real_pinned_archive_extracts_and_runs() {
+    let Ok(zip) = std::env::var("SPOTTER_TEST_CHROMIUM_ZIP") else {
+        return;
+    };
+    let zip = Path::new(&zip);
+    let manifest = spotter_render::manifest::Manifest::embedded();
+    let pinned = manifest.pinned(&spotter_render::manifest::platform_key()).unwrap();
+    assert_eq!(sha256_file(zip).unwrap(), pinned.sha256, "the archive is not the pinned build");
+    let out = tempfile::tempdir().unwrap();
+    spotter_render::install::extract_verified(zip, &pinned.sha256, &out.path().join("tree")).unwrap();
+    let os = if cfg!(windows) {
+        Os::Windows
+    } else if cfg!(target_os = "macos") {
+        Os::Mac
+    } else {
+        Os::Linux
+    };
+    let exe = spotter_render::install::locate_executable(&out.path().join("tree"), os).unwrap();
+    let version = spotter_render::install::self_test(&exe.path).unwrap();
+    assert!(version.contains(&manifest.version[..3]), "{version}");
 }
