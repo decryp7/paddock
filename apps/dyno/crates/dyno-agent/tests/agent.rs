@@ -2,7 +2,7 @@
 
 //! The agent end to end over the fake platform: a real IPC connection, a real SQLite file in a temp folder.
 
-use dyno_agent::cli::{ask, connect};
+use dyno_agent::cli::{ask, ask_within, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::activity::UndoState;
@@ -252,16 +252,19 @@ fn a_wrong_token_is_refused_and_the_agent_keeps_serving() {
     ask(&peer, Request::Settings).unwrap();
 }
 
+/// A generous deadline for requests that query the real machine (a loaded Windows runner needs well over 15 s).
+const SLOW: std::time::Duration = std::time::Duration::from_secs(120);
+
 #[test]
 fn the_inventory_is_read_once_and_cached() {
     let h = Harness::start();
     let peer = h.client();
-    let Reply::Inventory(a) = ask(&peer, Request::Inventory).unwrap() else {
+    let Reply::Inventory(a) = ask_within(&peer, Request::Inventory, SLOW).unwrap() else {
         panic!("inventory")
     };
     assert!(!a.os.is_empty());
     assert!(a.memory.total() > 0);
-    let Reply::Inventory(b) = ask(&peer, Request::Inventory).unwrap() else {
+    let Reply::Inventory(b) = ask_within(&peer, Request::Inventory, SLOW).unwrap() else {
         panic!("inventory")
     };
     assert_eq!(*a, *b);
@@ -503,7 +506,7 @@ fn the_flight_recorder_captures_on_request_and_when_an_alarm_fires() {
 fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
     let h = Harness::start();
     let peer = h.client();
-    let Reply::DiagnosticsPreview(p) = ask(&peer, Request::DiagnosticsPreview).unwrap() else {
+    let Reply::DiagnosticsPreview(p) = ask_within(&peer, Request::DiagnosticsPreview, SLOW).unwrap() else {
         panic!("preview")
     };
     let names: Vec<&str> = p.files.iter().map(|f| f.path.as_str()).collect();

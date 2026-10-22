@@ -67,7 +67,12 @@ pub fn connect(dirs: &Dirs) -> Result<(Peer<Message>, Discovery), String> {
 
 /// Sends one request and unwraps the reply.
 pub fn ask(peer: &Peer<Message>, request: Request) -> Result<Reply, String> {
-    match peer.call(Message::Request(Box::new(request)), Duration::from_secs(15)) {
+    ask_within(peer, request, Duration::from_secs(15))
+}
+
+/// Like [`ask`] with an explicit deadline, for requests that read slow system sources (hardware inventory, diagnostics).
+pub fn ask_within(peer: &Peer<Message>, request: Request, within: Duration) -> Result<Reply, String> {
+    match peer.call(Message::Request(Box::new(request)), within) {
         Ok(Message::Reply(r)) => (*r).map_err(|e| e.message),
         Ok(_) => Err("The agent sent something unexpected.".into()),
         Err(e) => Err(e.to_string()),

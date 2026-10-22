@@ -135,7 +135,8 @@ mod tests {
     #[test]
     fn dotdot_is_refused() {
         let f = fx();
-        let sneaky = f.root.join("..").join("cachey").join("a.bin");
+        // Built as text: `Path::join("..")` on a Windows verbatim path pops a folder instead of keeping the segment.
+        let sneaky = PathBuf::from(format!("{0}{1}..{1}cachey{1}a.bin", f.root.display(), std::path::MAIN_SEPARATOR));
         std::fs::write(f.root.join("a.bin"), b"x").unwrap();
         let err = recheck(
             &item(&sneaky, false, Timestamp(0)),

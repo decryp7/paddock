@@ -345,7 +345,7 @@ mod tests {
         assert!(out.failed[0].reason.contains("outside"), "{:?}", out.failed);
         assert!(outside.exists());
         // And a path with `..`.
-        s.results[0].items[0].path = format!("{}/../outside.txt", f.cache.display());
+        s.results[0].items[0].path = format!("{0}{1}..{1}outside.txt", f.cache.display(), std::path::MAIN_SEPARATOR);
         let out = go(&f, &s, &ids(&s), DeleteMode::Quarantine, now(), &[]).unwrap();
         assert!(out.failed[0].reason.contains("plain full path"));
         assert!(outside.exists());

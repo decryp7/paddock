@@ -354,7 +354,7 @@ mod tests {
         b.finish();
         let manifest = t.path().join("quarantine/q-3/manifest.json");
         let text = std::fs::read_to_string(&manifest).unwrap();
-        let dotdot = src.join("..").join("escaped.txt");
+        let dotdot = PathBuf::from(format!("{0}{1}..{1}escaped.txt", src.display(), std::path::MAIN_SEPARATOR));
         std::fs::write(&manifest, text.replace(&json_escaped(&src.join("a.txt")), &json_escaped(&dotdot))).unwrap();
         let r = q.restore("q-3").unwrap();
         assert!(r.failed[0].reason.contains("plain full path"), "{:?}", r.failed);

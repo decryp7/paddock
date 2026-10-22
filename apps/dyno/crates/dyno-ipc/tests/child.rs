@@ -39,7 +39,8 @@ fn a_child_that_exits_at_once_fails_the_launch_quickly() {
     let t = Instant::now();
     let err = launch::<String>(&spec("exit"), PeerOptions::new(), LONG).err().unwrap();
     assert!(
-        matches!(&err, IpcError::Io { message, .. } if message.contains("exited")),
+        // Either the exit is noticed first, or the closed stream is: both are a quick, typed failure of the launch.
+        matches!(&err, IpcError::Closed) || matches!(&err, IpcError::Io { message, .. } if message.contains("exited")),
         "{err:?}"
     );
     assert!(t.elapsed() < Duration::from_secs(5));
