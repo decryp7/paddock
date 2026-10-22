@@ -76,7 +76,7 @@ export function mockNetwork(q: NetworkQuery, at: number): NetworkSnapshot {
 
 const KB = 1024;
 
-/** Bytes per second per program (macOS only in the engine; the mock is a Mac). Moves a little with the clock. */
+/** Bytes per second per program (the engine reads it on macOS and Linux; on Windows it says why not, as `trafficNote`; the mock is a Mac). Moves a little with the clock. */
 export function mockTraffic(at: number): TrafficRow[] {
   const wob = (seed: number) => 0.7 + 0.6 * Math.abs(Math.sin(at / 6000 + seed));
   return [

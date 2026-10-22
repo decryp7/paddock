@@ -13,11 +13,12 @@ mod hwmon;
 mod locks;
 mod os_control;
 mod packages;
-mod paths;
+pub mod paths;
 mod sensors;
 mod startup;
 mod sys;
 mod tools;
+pub mod traffic;
 
 use crate::processes::SysinfoProcesses;
 use crate::sensors::SysinfoSensors;

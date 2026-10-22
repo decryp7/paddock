@@ -50,6 +50,11 @@ process list can be taken and compared.
 
 ![Processes](screenshots/processes-dark.png)
 
+
+**Network traffic per program** (Network page, process details): macOS from `nettop`, Linux from the kernel's per-socket TCP byte
+counters (no root; other users' programs are not attributed), Windows needs administrator rights for the OS counters and says so
+until the helper does it. Where it cannot be read the page shows the reason instead of zeros.
+
 ## Why is it slow?
 
 **Engine only.** `WhySlow` returns a diagnosis: a headline and causes (kind, confidence, evidence, suggestions such as "lower

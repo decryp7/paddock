@@ -14,6 +14,8 @@ pub mod lnk;
 pub mod lsof;
 pub mod mac_tools;
 pub mod powercfg;
+pub mod sock_diag;
 pub mod startup_approved;
+pub mod win_estats;
 pub mod time;
 pub mod win_facts;

@@ -32,7 +32,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-10 | Watched folders with keep-for times | planned |
 | WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
 | WP-12 | Performance counters browser | planned |
-| WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Windows/Linux say why not), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
+| WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Linux `sock_diag` byte counters + `/proc/<pid>/fd`, no admin; Windows per-connection TCP statistics, which need administrator rights, so it says so until the helper), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
 | WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | planned |
 | WP-14 | Backup health checks | planned |
 | WP-15 | Declarative TOML packs | planned |
@@ -229,8 +229,8 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
   template in the browser; private, loopback, link-local and CGNAT addresses are refused. No country database is bundled.
 - **Page.** One dense table with a sticky header and virtualised rows, group rows by program or remote host (collapsed state
   remembered), a summary strip, a detail panel and keyboard control; program icons are initial avatars.
-- **Open.** Reverse DNS through the OS resolver (on demand, switchable) and the remote host name column; per-connection or
-  per-process traffic rates and sparklines in group rows; a row context menu; the user column in the detail panel;
+- **Open.** Reverse DNS through the OS resolver (on demand, switchable) and the remote host name column; per-connection traffic
+  rates, Windows traffic through the helper (IPv6 and ETW as well), UDP bytes; per-process traffic rates and sparklines in group rows; a row context menu; the user column in the detail panel;
   the tab in process details; resolving other users' sockets through the helper; rules that alert on a new non-loopback
   listener; redacting remote IPs in diagnostics bundles unless the user opts in; ASN column (the ASN lookup template is
   stored but no ASN is known yet).

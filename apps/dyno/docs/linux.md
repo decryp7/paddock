@@ -53,6 +53,9 @@ any command in the same container; `--clean-volumes` deletes its two named volum
 - Sensors: sysinfo plus PSI (`/proc/pressure`), `/proc/diskstats`, hwmon temperatures and fans, GPU where exposed.
 - Process details from `/proc` (command line, working directory, open files, autostart origin); other users' processes are out
   of sight without root.
+- Network traffic per program: cumulative TCP bytes per socket from the kernel's `sock_diag` (`tcp_info`, kernel 4.1 or later, any
+  user may ask) matched to programs through `/proc/<pid>/fd`. Other users' programs are not attributed without root; UDP has no
+  byte counters; bytes of a connection that closed between two reads are not counted. Without netlink access the Network page says so.
 - Control: SIGTERM/SIGKILL, SIGSTOP/SIGCONT, `nice` and affinity (per thread: efficiency mode and affinity walk the threads;
   plain priority changes only the main thread, roadmap G3), CPU caps as a 100 ms duty cycle.
 - Startup list: XDG autostart entries and systemd user units. Cleanup has no Linux categories yet (roadmap G1).

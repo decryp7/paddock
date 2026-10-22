@@ -98,4 +98,16 @@ describe('NetworkStore', () => {
     expect((await store.forProcess(4120)).listeners.length).toBeGreaterThan(0);
     expect(store.query()).toEqual(before);
   });
+
+  it('passes on why traffic per program is not available, as the engine words it', async () => {
+    const { mock, store } = setup();
+    const why = 'Traffic per program is not available without administrator rights on Windows.';
+    const real = mock.network.bind(mock);
+    vi.spyOn(mock, 'network').mockImplementation(async (q) => ({ ...(await real(q)), traffic: [], trafficNote: why }));
+    const n = await store.forProcess(905);
+    expect(n.traffic).toBeNull();
+    expect(n.note).toBe(why);
+    await store.load();
+    expect(store.snapshot()!.trafficNote).toBe(why);
+  });
 });
