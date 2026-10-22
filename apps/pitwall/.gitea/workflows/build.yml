@@ -76,6 +76,11 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: catthehacker/ubuntu:act-latest
+    env:
+      # The checkout lives on a container volume where hard links come out as empty, non-executable files: cargo's
+      # target/debug/pitwall-server (a hard link to the real binary) was 0 bytes, so the tests that start the server
+      # as a child process failed with "Permission denied" and "Exec format error". Build on the container's own disk.
+      CARGO_TARGET_DIR: /tmp/pitwall-target
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
