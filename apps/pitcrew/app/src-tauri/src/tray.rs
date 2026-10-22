@@ -142,13 +142,45 @@ pub fn dark_taskbar() -> bool {
     }
 }
 
-/// Shows and focuses the main window.
+/// Shows and focuses the main window, creating it again from the configuration when it was closed (closing the
+/// window destroys it: the app keeps running in the tray without a webview).
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(w) = app.get_webview_window("main") {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
+        return;
     }
+    let Some(cfg) = app.config().app.windows.iter().find(|w| w.label == MAIN).cloned() else {
+        return;
+    };
+    match tauri::WebviewWindowBuilder::from_config(app, &cfg).and_then(|b| b.build()) {
+        Ok(w) => {
+            crate::native_feel::apply(&w);
+            let _ = w.set_focus();
+        }
+        Err(e) => eprintln!("Pitcrew could not open its window: {e}"),
+    }
+}
+
+/// The main window's label (`tauri.conf.json`).
+pub const MAIN: &str = "main";
+
+/// Marks an app whose tray icon could not be created (Linux without an appindicator): there is no way back to a
+/// closed window, so closing it must exit.
+pub struct NoTray;
+
+/// Whether the app has a tray icon.
+pub fn has_tray<R: Runtime>(app: &AppHandle<R>) -> bool {
+    use tauri::Manager;
+    app.try_state::<NoTray>().is_none()
+}
+
+/// Whether an exit request leaves the app running: closing the last window does when there is a tray to reopen it
+/// from; Quit (an explicit exit code) never does.
+pub fn keeps_running(exit_code: Option<i32>, tray: bool) -> bool {
+    exit_code.is_none() && tray
 }
 
 /// A menu item id for a runner action: `runner:<action>:<name>`.
@@ -315,6 +347,14 @@ mod tests {
         assert_eq!(state_of(RunnerStatus::Busy), TrayState::Busy);
         assert_eq!(state_of(RunnerStatus::Stalled), TrayState::Warning);
         assert_eq!(tray_state(&[]), TrayState::Ok);
+    }
+
+    #[test]
+    fn closing_the_last_window_keeps_running_and_quit_exits() {
+        assert!(keeps_running(None, true));
+        assert!(!keeps_running(Some(0), true));
+        // No tray (Linux without an appindicator): the window is the only way in, so closing it exits.
+        assert!(!keeps_running(None, false));
     }
 
     #[test]
