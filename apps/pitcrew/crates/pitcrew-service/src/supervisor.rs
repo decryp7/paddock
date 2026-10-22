@@ -125,6 +125,8 @@ pub struct Env {
     pub sources: Sources,
     /// This machine.
     pub platform: Platform,
+    /// The `PATH` to give runners at each start (the user's login shell's on macOS and Linux); `None`: the service's own.
+    pub base_path: Arc<dyn Fn() -> Option<String> + Send + Sync>,
     /// The clock.
     pub clock: Arc<dyn Fn() -> Timestamp + Send + Sync>,
     /// Local time: weekday, time of day and the UTC offset in minutes.
@@ -158,7 +160,14 @@ fn unreachable_time() -> TimeOfDay {
 
 /// The real environment.
 pub fn os_env(data_dir: PathBuf) -> Env {
+    let base_path: Arc<dyn Fn() -> Option<String> + Send + Sync> = if cfg!(windows) {
+        Arc::new(|| None)
+    } else {
+        let login = crate::login_env::LoginPath::new();
+        Arc::new(move || Some(login.get()))
+    };
     Env {
+        base_path,
         data_dir,
         launcher: Box::new(crate::launcher::OsLauncher),
         sources: Sources::public(),
@@ -583,6 +592,7 @@ impl Supervisor {
                         program: bin.path.clone(),
                         args: layout::daemon_args(&layout::runner_config(&r.cfg)),
                         dir: r.cfg.dir.clone(),
+                        env: pitcrew_core::runner_env::runner_environment((self.env.base_path)().as_deref(), &r.cfg.env),
                     };
                     let generation = r.generation + 1;
                     let tx = self.tx.clone();

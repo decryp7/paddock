@@ -3,6 +3,7 @@ import { provideRouter, withComponentInputBinding, withHashLocation } from '@ang
 import { routes } from './app.routes';
 import { BACKEND, isTauri, type PitcrewBackend } from './core/backend';
 import { MockBackend, type MockScenario } from './core/mock-backend';
+import { provideNativeFeel } from './core/native-feel';
 import { applyWindowChrome } from './core/window-chrome';
 import { TauriBackend } from './core/tauri-backend';
 import { provideIcons } from './shared/icons';
@@ -27,6 +28,7 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes, withHashLocation(), withComponentInputBinding()),
     provideIcons(),
+    provideNativeFeel(),
     // Inside the app the real Tauri backend; in the browser build (development, UI tests) the mock.
     { provide: BACKEND, useFactory: () => (isTauri() ? new TauriBackend() : browserBackend()) },
     provideAppInitializer(async () => {

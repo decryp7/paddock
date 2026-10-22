@@ -118,6 +118,7 @@ pub fn runner_config(req: &RegisterRequest, data_dir: &str) -> Result<RunnerConf
         update: None,
         watchdog: None,
         cleanup: None,
+        env: Default::default(),
     })
 }
 

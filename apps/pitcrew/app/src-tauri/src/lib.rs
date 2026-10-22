@@ -8,6 +8,7 @@ pub mod diagnostics;
 pub mod dto;
 pub mod events;
 pub mod gitea;
+pub mod native_feel;
 pub mod service_client;
 pub mod service_install;
 pub mod tray;
@@ -68,6 +69,12 @@ pub fn run() {
         .setup(|app| {
             tray::create(app.handle())?;
             events::start(app.handle().clone());
+            {
+                use tauri::Manager;
+                if let Some(w) = app.get_webview_window("main") {
+                    native_feel::apply(&w);
+                }
+            }
             // Started at log-in: stay in the tray.
             if std::env::args().any(|a| a == "--hidden") {
                 use tauri::Manager;

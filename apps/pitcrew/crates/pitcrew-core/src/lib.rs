@@ -24,6 +24,7 @@ pub mod platform;
 pub mod protocol;
 pub mod redact;
 pub mod restart;
+pub mod runner_env;
 pub mod service_spec;
 pub mod session;
 pub mod state;

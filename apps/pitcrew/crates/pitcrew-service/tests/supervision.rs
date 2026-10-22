@@ -54,6 +54,11 @@ struct Harness {
 
 impl Harness {
     fn new(test: &str, fake: &str, registered: bool) -> Harness {
+        Harness::with_runner_toml(test, fake, registered, "")
+    }
+
+    /// `runner_toml` is appended to the runner's table (e.g. an `[runners.env]` table).
+    fn with_runner_toml(test: &str, fake: &str, registered: bool, runner_toml: &str) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
         let root = std::env::temp_dir().join(format!("pitcrew-it-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -69,7 +74,7 @@ impl Harness {
             std::fs::write(runner_dir.join(".runner"), "{}").unwrap();
         }
         let toml = format!(
-            "schema_version = 1\n[defaults.update]\nmode = \"manual\"\n[defaults.cleanup]\nautomatic = false\n[[runners]]\nname = \"{test}\"\nkind = \"gitea-runner\"\ndir = '{}'\nsession = \"service\"\nlabels = [\"x\"]\n",
+            "schema_version = 1\n[defaults.update]\nmode = \"manual\"\n[defaults.cleanup]\nautomatic = false\n[[runners]]\nname = \"{test}\"\nkind = \"gitea-runner\"\ndir = '{}'\nsession = \"service\"\nlabels = [\"x\"]\n{runner_toml}",
             runner_dir.display()
         );
         std::fs::write(data.join("pitcrew.toml"), toml).unwrap();
@@ -80,6 +85,7 @@ impl Harness {
             launcher: Box::new(OsLauncher),
             sources: Sources::public(),
             platform: pitcrew_core::platform::Platform::current().unwrap(),
+            base_path: Arc::new(|| Some("/pitcrew/test-path:/usr/bin".to_string())),
             clock: Arc::new(move || Timestamp(c.load(Ordering::SeqCst))),
             local: Arc::new(|_| {
                 (
@@ -205,6 +211,23 @@ fn a_runner_that_exits_is_restarted_after_the_backoff() {
     h.until("second start", Duration::from_millis(100), |h| {
         count(&h.history(), |k| *k == HistoryKind::Started) >= 2
     });
+    h.finish();
+}
+
+#[test]
+fn runners_start_with_the_login_path_and_their_own_env() {
+    let mut h = Harness::with_runner_toml("envy", "mode=ok\n", true, "[runners.env]\nCI_FLAG = \"yes\"\n");
+    let dump = h.runner_dir.join("env.txt");
+    h.until("the runner wrote its environment", Duration::from_millis(100), |_| dump.exists());
+    let text = std::fs::read_to_string(&dump).unwrap();
+    assert!(text.contains("PATH=/pitcrew/test-path:/usr/bin\n"), "{text}");
+    assert!(text.contains("CI_FLAG=yes\n"), "{text}");
+    h.finish();
+    // A runner's own PATH replaces the login one.
+    let mut h = Harness::with_runner_toml("envy2", "mode=ok\n", true, "[runners.env]\nPATH = \"/only/this\"\n");
+    let dump = h.runner_dir.join("env.txt");
+    h.until("the runner wrote its environment", Duration::from_millis(100), |_| dump.exists());
+    assert!(std::fs::read_to_string(&dump).unwrap().contains("PATH=/only/this\n"));
     h.finish();
 }
 
