@@ -201,7 +201,7 @@ pub struct ConnectionRow {
 }
 
 /// What the page asks for.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct NetworkQuery {
     /// Show loopback-only listeners and connections to this PC (hidden by default: they are noise).
@@ -214,18 +214,6 @@ pub struct NetworkQuery {
     pub exposed_only: bool,
     /// Matches a port, an address or a program name (case-insensitive).
     pub search: String,
-}
-
-impl Default for NetworkQuery {
-    fn default() -> Self {
-        NetworkQuery {
-            show_loopback: false,
-            proto: None,
-            state: None,
-            exposed_only: false,
-            search: String::new(),
-        }
-    }
 }
 
 impl NetworkQuery {
