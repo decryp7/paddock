@@ -16,7 +16,7 @@ fn connect(_data: &std::path::Path) -> Box<dyn Stream> {
         let attempt = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .open(pitcrew_service::ipc::PIPE_NAME)
+            .open(pitcrew_service::ipc::pipe_name(_data))
             .map(|f| Box::new(f) as Box<dyn Stream>);
         #[cfg(unix)]
         let attempt =

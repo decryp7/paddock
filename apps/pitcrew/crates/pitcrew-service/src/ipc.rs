@@ -17,8 +17,32 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::Semaphore;
 
-/// The pipe's name on Windows.
+/// The pipe's name on Windows for the installed service (its data folder is `%ProgramData%\Pitcrew`).
 pub const PIPE_NAME: &str = r"\\.\pipe\pitcrew";
+
+/// The pipe of the service whose data folder is `data_dir`: the installed service's folder has [`PIPE_NAME`]; any
+/// other folder (tests, development) has a name of its own, so it never collides with a service installed on the
+/// same machine (a CI runner supervised by Pitcrew runs Pitcrew's tests).
+pub fn pipe_name(data_dir: &std::path::Path) -> String {
+    let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
+    let installed = pitcrew_core::service_paths::data_dir(pitcrew_core::platform::Os::Windows, &env);
+    pipe_name_for(data_dir, installed.as_deref())
+}
+
+/// [`pipe_name`] with the installed service's folder given (pure). Folders compare without case and trailing
+/// separators, as Windows paths do.
+pub fn pipe_name_for(data_dir: &std::path::Path, installed: Option<&std::path::Path>) -> String {
+    let norm = |p: &std::path::Path| p.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase();
+    let dir = norm(data_dir);
+    if installed.is_some_and(|i| norm(i) == dir) {
+        return PIPE_NAME.to_string();
+    }
+    // FNV-1a: stable across builds and platforms, no dependency.
+    let hash = dir.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    format!("{PIPE_NAME}-{hash:016x}")
+}
 /// The socket's file name in the data folder elsewhere.
 pub const SOCKET_FILE: &str = pitcrew_core::service_paths::SOCKET_FILE;
 /// Most connections at once.
@@ -150,7 +174,7 @@ mod platform {
     //! the pipe's creation.
     #![allow(unsafe_code)]
 
-    use super::{connection, Msg, PIPE_NAME, PIPE_SDDL};
+    use super::{connection, Msg, PIPE_SDDL};
     use std::sync::mpsc::Sender;
     use std::sync::Arc;
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
@@ -160,7 +184,7 @@ mod platform {
     use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
     use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 
-    fn create(first: bool) -> std::io::Result<NamedPipeServer> {
+    fn create(name: &str, first: bool) -> std::io::Result<NamedPipeServer> {
         let wide: Vec<u16> = PIPE_SDDL.encode_utf16().chain(std::iter::once(0)).collect();
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
         // SAFETY: `wide` is NUL-terminated and outlives the call; the descriptor is freed below after the pipe
@@ -178,8 +202,7 @@ mod platform {
             .reject_remote_clients(true)
             .max_instances(super::MAX_CONNECTIONS + 1);
         // SAFETY: `attributes` points at a valid descriptor for the duration of the call.
-        let result =
-            unsafe { options.create_with_security_attributes_raw(PIPE_NAME, (&mut attributes as *mut SECURITY_ATTRIBUTES).cast()) };
+        let result = unsafe { options.create_with_security_attributes_raw(name, (&mut attributes as *mut SECURITY_ATTRIBUTES).cast()) };
         // SAFETY: allocated by the conversion above and no longer used.
         unsafe {
             let _ = LocalFree(Some(HLOCAL(descriptor.0)));
@@ -187,13 +210,14 @@ mod platform {
         result
     }
 
-    pub async fn serve(tx: Sender<Msg>, _data_dir: std::path::PathBuf, permits: Arc<Semaphore>) -> Result<(), String> {
+    pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf, permits: Arc<Semaphore>) -> Result<(), String> {
+        let name = super::pipe_name(&data_dir);
         let mut server =
-            create(true).map_err(|e| format!("the pipe {PIPE_NAME} could not be created ({e}); is another Pitcrew service running?"))?;
+            create(&name, true).map_err(|e| format!("the pipe {name} could not be created ({e}); is another Pitcrew service running?"))?;
         loop {
             server.connect().await.map_err(|e| e.to_string())?;
             let connected = server;
-            server = create(false).map_err(|e| e.to_string())?;
+            server = create(&name, false).map_err(|e| e.to_string())?;
             let Ok(permit) = permits.clone().acquire_owned().await else {
                 return Ok(());
             };
@@ -346,5 +370,34 @@ mod tests {
         ));
         task.await.unwrap();
         assert_eq!(timeout_for(&Request::Status), Duration::from_secs(120));
+    }
+}
+
+#[cfg(test)]
+mod pipe_name_tests {
+    use super::{pipe_name_for, PIPE_NAME};
+    use std::path::Path;
+
+    #[test]
+    fn the_installed_folder_keeps_the_pipe_and_any_other_folder_gets_its_own() {
+        let installed = Path::new(r"C:\ProgramData\Pitcrew");
+        assert_eq!(pipe_name_for(installed, Some(installed)), PIPE_NAME);
+        assert_eq!(pipe_name_for(Path::new(r"c:\programdata\pitcrew\"), Some(installed)), PIPE_NAME);
+        let test = pipe_name_for(Path::new(r"C:\Temp\pitcrew-transport-42"), Some(installed));
+        assert!(
+            test.starts_with(&format!("{PIPE_NAME}-")) && test.len() == PIPE_NAME.len() + 17,
+            "{test}"
+        );
+        assert_eq!(
+            test,
+            pipe_name_for(Path::new(r"C:\Temp\pitcrew-transport-42"), Some(installed)),
+            "stable"
+        );
+        assert_ne!(test, pipe_name_for(Path::new(r"C:\Temp\pitcrew-transport-43"), Some(installed)));
+        assert_ne!(
+            pipe_name_for(installed, None),
+            PIPE_NAME,
+            "no ProgramData: never the installed pipe"
+        );
     }
 }

@@ -19,7 +19,7 @@ fn connect(_socket_dir: &Path) -> Result<Box<dyn Stream>, Error> {
         let f = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .open(crate::ipc::PIPE_NAME)
+            .open(crate::ipc::pipe_name(_socket_dir))
             .map_err(unavailable)?;
         Ok(Box::new(f))
     }
