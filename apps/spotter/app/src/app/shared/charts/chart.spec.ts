@@ -95,3 +95,11 @@ describe('Chart', () => {
     expect(chart.options).toHaveLength(1);
   });
 });
+
+describe('the real chart loader', () => {
+  it('loads ECharts lazily and returns a factory without drawing anything', async () => {
+    const loader = TestBed.inject(CHART_LOADER);
+    const factory = await loader(TestBed.inject(ThemeService).chartTokens());
+    expect(typeof factory).toBe('function');
+  });
+});
