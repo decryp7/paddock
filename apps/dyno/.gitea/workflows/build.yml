@@ -428,7 +428,8 @@ jobs:
           if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
             mkdir -p ../target
-            node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
+            # A secret pasted with a trailing newline is not valid base64: strip all whitespace.
+            node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY.replace(/\s+/g, "") } } }))' > ../target/updater.conf.json
             npx tauri build --bundles "$bundles" --config ../target/updater.conf.json -- --profile dist
           else
             echo '::warning::No updater signing secrets: this build cannot update itself.'
