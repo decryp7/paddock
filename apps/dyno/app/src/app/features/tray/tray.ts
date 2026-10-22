@@ -45,7 +45,7 @@ import { SettingsStore } from '../../state/settings.store';
           <div class="cell">
             <span class="k"><dy-icon name="memory" /> Memory</span>
             <span class="v num">{{ pct(mem()) }}</span>
-            <dy-sparkline [values]="live.series().memory" [max]="100" label="Memory" style="--spark-h: 28px" />
+            <dy-sparkline [values]="live.series().memory" [max]="100" [zoom]="true" color="var(--chart-1)" label="Memory" style="--spark-h: 28px" />
           </div>
           <div class="cell">
             <span class="k"><dy-icon name="disk" /> Disk</span>

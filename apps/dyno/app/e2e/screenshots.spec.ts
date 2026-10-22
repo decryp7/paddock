@@ -212,8 +212,9 @@ for (const theme of ['dark', 'light'] as const) {
       }
       if (screen.name === 'tray') {
         // Only the popover plus a margin, not the empty wallpaper below it.
-        const bottom = await page.evaluate(() => Math.ceil(document.querySelector('dy-tray')?.getBoundingClientRect().bottom ?? 600));
-        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`), clip: { x: 0, y: 0, width: 440, height: Math.min(660, bottom + 24) } });
+        const box = await page.getByRole('button', { name: /Open Dyno/ }).boundingBox();
+        const bottom = Math.ceil((box?.y ?? 560) + (box?.height ?? 40));
+        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`), clip: { x: 0, y: 0, width: 440, height: Math.max(480, bottom + 28) } });
       } else {
         await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`) });
       }
