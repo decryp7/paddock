@@ -7,11 +7,11 @@
 export type Theme = 'system' | 'light' | 'dark';
 
 /** A watch's status after its last check (`spotter_core::state::WatchStatus`). */
-export type WatchStatusKind = 'pending' | 'ok' | 'noMatch' | 'unreachable' | 'authNeeded' | 'pluginError' | 'invalid' | 'failed';
+export type WatchStatusKind = 'pending' | 'ok' | 'noMatch' | 'unreachable' | 'authNeeded' | 'needsYou' | 'invalid' | 'failed';
 
 export interface WatchStatus {
   kind: WatchStatusKind;
-  /** Why, for failures (written for the user by the engine). */
+  /** Why, for failures (written for the user by the engine). `needsYou`: a page asked for a login or captcha. */
   message: string | null;
 }
 
@@ -49,6 +49,22 @@ export interface NotificationPolicy {
 }
 
 /** An action on a new release. `run-command` never goes through a shell. */
+export type ChannelKind = 'webhook' | 'ntfy' | 'email';
+
+/** An extra place to send a notification to (off unless added). The address/URL is stored in the config; secrets are not. */
+export interface NotificationChannel {
+  kind: ChannelKind;
+  target: string;
+}
+
+/** Narrows which versions count (`spotter_core::release::ReleaseFilter`). */
+export interface VersionFilter {
+  /** Only versions matching this prefix (`1.` ...), empty for all. */
+  prefix: string;
+  /** Hours a release must exist before it is announced (soak time), 0 for none. */
+  soakHours: number;
+}
+
 export type WatchAction =
   | { kind: 'open-location' }
   | { kind: 'download'; folder: string; verify: boolean }
@@ -68,6 +84,8 @@ export interface WatchDraft {
   intervalSecs: number;
   notify: NotificationPolicy;
   actions: WatchAction[];
+  channels: NotificationChannel[];
+  filter: VersionFilter;
   paused: boolean;
 }
 
@@ -75,7 +93,7 @@ export interface WatchDraft {
 export interface WatchSummary {
   id: string;
   name: string;
-  /** Source kind id (`folder`, `github`, `manifest-file/lines`). */
+  /** Source kind id (`folder`, `github`). */
   sourceKind: string;
   /** Source kind label (`GitHub`). */
   sourceLabel: string;
@@ -119,7 +137,7 @@ export interface WatchDetail {
 
 export type FieldKind = 'text' | 'url' | 'folder' | 'secret' | 'integer' | 'toggle' | 'choice';
 
-/** One field of a source kind's form (`spotter_plugin_api::FieldSpec`). */
+/** One field of a source kind's form (`spotter_core::schema::FieldSpec`). */
 export interface FieldSpec {
   key: string;
   label: string;
@@ -135,16 +153,14 @@ export interface FieldSpec {
   options: { value: string; label: string }[];
 }
 
-export type SourceGroup = 'files' | 'web' | 'forge' | 'registry' | 'plugin';
+export type SourceGroup = 'files' | 'web' | 'forge' | 'registry';
 
-/** A kind of source, built in or from a plugin. The add-watch form is rendered from `fields`. */
+/** A built-in kind of source. The add-watch form is rendered from `fields`. */
 export interface SourceKind {
   id: string;
   label: string;
   description: string;
   group: SourceGroup;
-  /** The plugin's name for plugin kinds. */
-  plugin: string | null;
   fields: FieldSpec[];
 }
 
@@ -161,6 +177,41 @@ export interface SourcePreview {
   prereleasesSkipped: number;
   namesSkipped: number;
   tookMs: number;
+}
+
+/** A ready-made watch for well-known software (a declarative pack). */
+export interface Preset {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  /** The draft to start from; the user can still edit it. */
+  draft: WatchDraft;
+}
+
+/** A feed found on a web page (auto-discovery). */
+export interface DiscoveredFeed {
+  url: string;
+  title: string;
+}
+
+/** Which browser renders JavaScript pages (ADR 0002). */
+export type RendererKind = 'chromium-installed' | 'chromium-downloaded' | 'os-webview' | 'none';
+
+export interface RendererStatus {
+  kind: RendererKind;
+  /** Browser name and version, or why none is available and what to do. */
+  detail: string;
+  /** A pinned Chromium can be downloaded on request. */
+  canDownload: boolean;
+}
+
+export type ImportFormat = 'winget' | 'brewfile' | 'opml';
+
+export interface ImportResult {
+  /** Drafts built from the list, not yet saved. */
+  drafts: WatchDraft[];
+  skipped: string[];
 }
 
 export type DashboardRange = '30d' | '90d' | '1y';
@@ -205,7 +256,7 @@ export interface Dashboard {
   computeMicros: number;
 }
 
-export type AppEventKind = 'new-release' | 'check-failed' | 'recovered' | 'download-finished' | 'action-failed' | 'plugin-issue';
+export type AppEventKind = 'new-release' | 'check-failed' | 'recovered' | 'download-finished' | 'action-failed' | 'needs-you';
 
 /** One entry of the events feed. Fields not used by a kind are null. */
 export interface AppEvent {
@@ -220,7 +271,6 @@ export interface AppEvent {
   size: number | null;
   verified: boolean | null;
   action: string | null;
-  plugin: string | null;
 }
 
 export interface Settings {
@@ -230,28 +280,18 @@ export interface Settings {
   checkAppUpdates: boolean;
   downloadsFolder: string | null;
   defaultIntervalSecs: number;
-  disabledPlugins: string[];
-}
-
-export interface PluginInfo {
-  id: string;
-  name: string;
-  version: string | null;
-  dir: string;
-  kinds: { id: string; label: string }[];
-  /** Why it cannot be used (not loaded). */
-  problem: string | null;
-  disabled: boolean;
-  quarantined: boolean;
-  lastProblem: string | null;
-  strikes: number;
+  /** 'off' announces at once; otherwise releases are collected into one notification. */
+  digest: 'off' | 'daily' | 'weekly';
+  /** Global quiet hours; per-watch quiet hours add to these. */
+  quietHours: QuietHours | null;
+  /** Use an OS webview when no Chromium browser is found (labelled as such). */
+  allowOsWebview: boolean;
 }
 
 export interface AppInfo {
   version: string;
   configPath: string;
   logsDir: string;
-  pluginsDir: string;
   downloadsDir: string;
   /** Problems found while loading the configuration and state (worked around). */
   warnings: string[];
@@ -273,7 +313,7 @@ export interface AppUpdateCheck {
   notes: string | null;
 }
 
-export type OpenTarget = 'config' | 'logs' | 'plugins' | 'downloads';
+export type OpenTarget = 'config' | 'logs' | 'downloads';
 
 /** A command error (`app/src-tauri/src/dto.rs` `CommandError`). */
 export interface CommandError {

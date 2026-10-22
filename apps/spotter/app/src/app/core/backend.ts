@@ -7,7 +7,11 @@ import type {
   Dashboard,
   DashboardRange,
   OpenTarget,
-  PluginInfo,
+  DiscoveredFeed,
+  ImportFormat,
+  ImportResult,
+  Preset,
+  RendererStatus,
   Settings,
   SourceKind,
   SourcePreview,
@@ -63,11 +67,15 @@ export interface SpotterBackend {
   chooseFolder(): Promise<string | null>;
   chooseProgram(): Promise<string | null>;
 
-  // Plugins
-  plugins(): Promise<PluginInfo[]>;
-  rescanPlugins(): Promise<PluginInfo[]>;
-  setPluginEnabled(id: string, enabled: boolean): Promise<PluginInfo[]>;
-  resetPlugin(id: string): Promise<PluginInfo[]>;
+  // Presets, discovery, rendering, imports
+  presets(): Promise<Preset[]>;
+  /** Finds feeds a page advertises (blog and release feeds). */
+  discoverFeeds(url: string): Promise<DiscoveredFeed[]>;
+  rendererStatus(): Promise<RendererStatus>;
+  /** Downloads the pinned, checksum-verified Chromium (on request only). */
+  installRenderer(): Promise<RendererStatus>;
+  /** Builds drafts from a winget export, Brewfile or OPML text. */
+  importList(format: ImportFormat, text: string): Promise<ImportResult>;
 
   // Spotter's own updates
   appUpdateStatus(): Promise<AppUpdateStatus>;
