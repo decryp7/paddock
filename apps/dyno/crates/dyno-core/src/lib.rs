@@ -9,6 +9,7 @@ pub mod alarms;
 pub mod anomaly;
 pub mod cleanup;
 pub mod diagnosis;
+pub mod diagnostics;
 pub mod facts;
 pub mod forecast;
 pub mod grouping;

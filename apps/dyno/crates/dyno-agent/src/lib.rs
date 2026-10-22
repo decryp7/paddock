@@ -6,6 +6,7 @@ pub mod agent;
 pub mod alarms;
 pub mod cleanup;
 pub mod cli;
+pub mod diagnostics;
 pub mod discovery;
 pub mod files;
 pub mod handlers;

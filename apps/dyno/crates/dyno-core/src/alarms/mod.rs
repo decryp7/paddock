@@ -1117,11 +1117,25 @@ mod tests {
             rule: "a".into(),
             muted: true,
         });
+        let id = e.alarms()[0].id;
+        e.apply(AlarmEvent::Acknowledge {
+            ids: vec![id],
+            at: Timestamp(500),
+        });
         let r = AlarmEngine::restore(AlarmConfig::default(), e.alarms(), e.muted_rules());
+        assert_eq!(r.stats(Timestamp(0)).mean_time_to_acknowledge_ms, Some(499));
         assert_eq!(r.alarms().len(), 1);
         assert_eq!(r.muted_rules(), vec!["a".to_string()]);
         let mut r = r;
         assert_eq!(r.apply(raise("b:1", Severity::Info, 2))[0].alarm.id, 2);
+        for i in 0..MAX_ACK_SAMPLES + 5 {
+            let c = r.apply(raise(&format!("ack:{i}"), Severity::Info, 10 + i as i64));
+            r.apply(AlarmEvent::Acknowledge {
+                ids: vec![c[0].alarm.id],
+                at: Timestamp(20 + i as i64),
+            });
+        }
+        assert!(r.stats(Timestamp(0)).mean_time_to_acknowledge_ms.is_some());
         let c = AlarmConfig {
             chatter_transitions: 0,
             chatter_window_minutes: 0,

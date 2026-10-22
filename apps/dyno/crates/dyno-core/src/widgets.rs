@@ -89,14 +89,11 @@ pub enum WidgetKind {
 impl WidgetKind {
     fn name(self) -> &'static str {
         match self {
-            WidgetKind::Graph => "graph",
-            WidgetKind::BigNumber => "big number",
-            WidgetKind::Bars => "bars",
             WidgetKind::Ring => "ring",
             WidgetKind::Heatmap => "heat map",
             WidgetKind::TopProcesses => "top processes",
-            WidgetKind::Issues => "issues",
-            WidgetKind::Health => "health",
+            // The other kinds show any metric, so they never appear in an error.
+            _ => "widget",
         }
     }
 
@@ -837,6 +834,12 @@ mod tests {
         assert_eq!(t.validate(), Err(WidgetError::BadAccent));
         t.options.accent = Some("#1A2b3c".into());
         assert_eq!(t.validate(), Ok(()));
+        let mut c = widget("c");
+        c.kind = WidgetKind::Heatmap;
+        c.metric = Metric::PerfCounter("\\Memory\\Pages/sec".into());
+        assert!(c.validate().unwrap_err().to_string().contains("counter \\Memory"));
+        c.metric = Metric::Fan;
+        assert!(c.validate().unwrap_err().to_string().contains("Fan"));
         assert!(WidgetError::DuplicateId("a".into()).to_string().contains("\"a\""));
         assert!(WidgetError::TooMany { what: "widgets", max: 3 }.to_string().contains("3"));
         let ok = Widget::new("p", WidgetKind::Ring, Metric::Process("chrome".into()), WidgetSize::S);
@@ -975,7 +978,7 @@ mod tests {
         let (n, dropped) = t.clone().normalised_counting();
         assert_eq!((n.items.len(), dropped), (4, 3));
         let TrayItemStyle::Number { unit, label } = &n.items[0].style else {
-            panic!("number")
+            unreachable!("the items were built with Number styles")
         };
         assert_eq!((unit.chars().count(), label.chars().count()), (MAX_UNIT, MAX_LABEL));
         assert!(!unit.contains('\n'));

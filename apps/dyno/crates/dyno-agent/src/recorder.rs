@@ -1,7 +1,7 @@
 //! The flight recorder: the last ten minutes at one-second resolution in a hard-bounded ring ([`Ring`]), saved as a
 //! snapshot on request or when a serious alarm fires. The ring is fed from the sampler's existing system sample (no
 //! extra OS calls); the only extra cost is asking the sampler to tick the system sample at one second while Dyno is
-//! well inside its CPU budget ([`system_interval_ms`]).
+//! well inside its CPU budget (`dyno_core::recorder::system_interval_ms`).
 
 use crate::store::Store;
 use dyno_core::alarms::{AlarmChange, ChangeKind};
@@ -50,6 +50,11 @@ impl Recorder {
     /// Whether nothing was recorded yet.
     pub fn is_empty(&self) -> bool {
         self.ring.is_empty()
+    }
+
+    /// The ring as a snapshot document without storing it; `None` while nothing was recorded.
+    pub fn snapshot(&self, reason: CaptureReason, now: Timestamp) -> Option<RecorderSnapshot> {
+        (!self.ring.is_empty()).then(|| RecorderSnapshot::new(now, reason, self.ring.samples()))
     }
 
     /// Saves the ring as a snapshot.

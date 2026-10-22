@@ -609,6 +609,8 @@ mod tests {
         assert_eq!(channel_letter("Controller0-ChannelA-DIMM0"), Some('A'));
         assert_eq!(channel_letter("DIMM A2"), Some('A'));
         assert_eq!(channel_letter("SODIMM"), None);
+        assert_eq!(channel_letter("DIMM1"), None);
+        assert_eq!(channel_letter("DIMM_B2"), Some('B'));
         assert_eq!(channel_letter("channel"), None);
     }
 

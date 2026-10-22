@@ -2,7 +2,7 @@
 //! the activity log, alerts, snapshots, boots, app starts and crashes, and health scores.
 //!
 //! Tables added after v1 (all `IF NOT EXISTS`, so the schema number stays 1): `alarms` and `alarm_events`
-//! ([`alarms`]), `recorder_snapshots` ([`recorder`]). Names reserved for later work, not created yet: `baselines`
+//! (`store/alarms.rs`), `recorder_snapshots` (`store/recorder.rs`). Names reserved for later work, not created yet: `baselines`
 //! (per-metric time-of-week learned statistics), `ssd_wear` and `battery_trend` (slow health trends).
 //!
 //! The database is a cache of the past, never the only copy of anything the user made: a damaged file is moved

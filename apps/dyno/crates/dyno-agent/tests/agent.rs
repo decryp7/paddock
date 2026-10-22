@@ -407,3 +407,25 @@ fn the_flight_recorder_captures_on_request_and_when_an_alarm_fires() {
     assert!(snap.samples.iter().all(|s| s.memory_total > 0 && !s.cpu_cores.is_empty()));
     assert!(ask(&peer, Request::RecorderSnapshot { id: 9_999 }).is_err());
 }
+
+#[test]
+fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
+    let h = Harness::start();
+    let peer = h.client();
+    let Reply::DiagnosticsPreview(p) = ask(&peer, Request::DiagnosticsPreview).unwrap() else {
+        panic!("preview")
+    };
+    let names: Vec<&str> = p.files.iter().map(|f| f.path.as_str()).collect();
+    assert!(names.contains(&"system/inventory.json") && names.contains(&"settings.json") && names.contains(&"manifest.json"));
+    assert!(p.total_bytes > 0);
+    let dest = h._tmp.path().join("diag.zip");
+    let Reply::DiagnosticsSaved(saved) = ask(&peer, Request::SaveDiagnostics { path: dest.to_string_lossy().into_owned() }).unwrap() else {
+        panic!("saved")
+    };
+    assert_eq!(saved.files as usize, p.files.len());
+    assert!(std::fs::metadata(&dest).unwrap().len() == saved.bytes);
+    // Refused: relative path, wrong extension, missing folder.
+    for bad in ["diag.zip".to_string(), h._tmp.path().join("diag.txt").to_string_lossy().into_owned(), h._tmp.path().join("nope").join("d.zip").to_string_lossy().into_owned()] {
+        assert!(ask(&peer, Request::SaveDiagnostics { path: bad }).is_err());
+    }
+}

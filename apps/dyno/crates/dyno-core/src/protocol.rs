@@ -256,6 +256,14 @@ pub enum Request {
         /// Its id.
         id: u64,
     },
+    /// What a diagnostics bundle would contain, with sizes and what was redacted; nothing is written. Appended.
+    DiagnosticsPreview,
+    /// Write the diagnostics bundle to this path (chosen by the user in a save dialog: absolute, ending in `.zip`,
+    /// in an existing folder). Appended.
+    SaveDiagnostics {
+        /// The destination.
+        path: String,
+    },
 }
 
 /// Dyno's own cost.
@@ -481,6 +489,10 @@ pub enum Reply {
     RecorderSnapshots(Vec<crate::recorder::RecorderSnapshotInfo>),
     /// A flight recorder snapshot with its samples. Appended.
     RecorderSnapshot(Box<crate::recorder::RecorderSnapshot>),
+    /// The bundle's listing. Appended.
+    DiagnosticsPreview(Box<crate::diagnostics::BundlePreview>),
+    /// The bundle was written. Appended.
+    DiagnosticsSaved(crate::diagnostics::SavedDiagnostics),
 }
 
 impl Reply {
@@ -519,6 +531,8 @@ impl Reply {
             Reply::Captured(x) => v(x),
             Reply::RecorderSnapshots(x) => v(x),
             Reply::RecorderSnapshot(x) => v(x),
+            Reply::DiagnosticsPreview(x) => v(x),
+            Reply::DiagnosticsSaved(x) => v(x),
         }
     }
 }
@@ -678,6 +692,7 @@ mod tests {
             Reply::AlarmStats(Box::default()),
             Reply::AlarmChanges(vec![]),
             Reply::RecorderSnapshots(vec![]),
+            Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics { path: "/x.zip".into(), bytes: 1, files: 1 }),
             Reply::RecorderSnapshot(Box::new(crate::recorder::RecorderSnapshot::new(Timestamp(0), crate::recorder::CaptureReason::Manual, vec![]))),
         ];
         for r in all {

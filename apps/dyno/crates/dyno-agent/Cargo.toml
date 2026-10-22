@@ -22,6 +22,8 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 trash = "5"
+# The diagnostics bundle (MIT; the same build as Debrief's: deflate via the Rust zlib-rs, no C code).
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 [target.'cfg(unix)'.dependencies]

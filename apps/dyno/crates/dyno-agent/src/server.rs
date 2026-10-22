@@ -1,5 +1,20 @@
 //! The IPC server: accepts apps on the agent's private endpoint, answers their requests and feeds each subscriber
 //! its own bounded queue (ADR 0002). Writes `agent.json` so the app can find the endpoint and token.
+//!
+//! # Local API versioning (design note, no behaviour here)
+//!
+//! The app protocol is [`PROTOCOL_VERSION`] plus the append-only rule in `dyno_core::protocol`: new `Request`, `Reply`
+//! and `Message` variants go at the END of their enums, so an older peer reading a newer variant fails that one frame
+//! (reported as a protocol error) instead of misreading others. Anything else (reordering, removing or changing a
+//! variant, changing a field's type) bumps `PROTOCOL_VERSION`, which `connect` checks in the handshake.
+//!
+//! A command-line client (`dyno status`, `dyno capture`, `dyno alarms`...) is meant to be a second kind of peer on the
+//! SAME endpoint: it reads the same discovery file (`agent.json`: endpoint, token, protocol version), connects with
+//! the same token and speaks the same `Request`/`Reply` frames, so a request added for the app is available to the CLI
+//! without new server code, and every handler keeps validating its arguments because it cannot know who is asking.
+//! The CLI must therefore check `protocolVersion` in `agent.json` before connecting and say "update Dyno" when it is
+//! newer than the CLI knows. The optional local web API (`Settings.webApi`) is a separate, opt-in adapter that maps
+//! HTTP onto these same requests; it is not a second protocol.
 
 use crate::agent::{lock, Shared, Sub};
 use crate::discovery::Discovery;
