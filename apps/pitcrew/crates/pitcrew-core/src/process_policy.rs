@@ -463,8 +463,11 @@ mod tests {
     #[test]
     fn validation_gives_clear_messages() {
         let mut p = ProcessPolicy {
-        keep: KeepFor { amount: 0, unit: TimeUnit::Minutes },
-        ..ProcessPolicy::default()
+            keep: KeepFor {
+                amount: 0,
+                unit: TimeUnit::Minutes,
+            },
+            ..ProcessPolicy::default()
         };
         assert!(validate(&p).unwrap_err().contains("at least 1"));
         p.keep = KeepFor {
