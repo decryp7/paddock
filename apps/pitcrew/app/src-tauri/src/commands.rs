@@ -38,7 +38,7 @@ impl From<ClientError> for CommandError {
     }
 }
 
-fn name(s: &str) -> Result<RunnerName, CommandError> {
+pub(crate) fn name(s: &str) -> Result<RunnerName, CommandError> {
     RunnerName::parse(s).map_err(|e| CommandError::bad(e.to_string()))
 }
 
@@ -61,14 +61,14 @@ fn expect_ok(r: Response) -> Result<(), CommandError> {
     }
 }
 
-fn unexpected(r: Response) -> CommandError {
+pub(crate) fn unexpected(r: Response) -> CommandError {
     CommandError::internal(format!(
         "the service gave an unexpected answer ({})",
         serde_json::to_string(&r).unwrap_or_default().chars().take(80).collect::<String>()
     ))
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, CommandError> + Send + 'static) -> Result<T, CommandError> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, CommandError> + Send + 'static) -> Result<T, CommandError> {
     tauri::async_runtime::spawn_blocking(f)
         .await
         .map_err(|e| CommandError::internal(format!("the request failed: {e}")))?

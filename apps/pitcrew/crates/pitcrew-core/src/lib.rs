@@ -8,6 +8,7 @@
 pub mod checksum;
 pub mod config;
 pub mod controller;
+pub mod debrief_link;
 pub mod disk_guard;
 pub mod distribution;
 pub mod gitea_api;

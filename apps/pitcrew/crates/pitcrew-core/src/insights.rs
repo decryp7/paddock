@@ -192,6 +192,30 @@ pub struct Insights {
     pub advice: Vec<Advice>,
 }
 
+/// The insight jobs of one runner's finished jobs, with the server's details by job id where they are known. Jobs of a
+/// masked or unknown repository are left out (nothing to group them by).
+pub fn from_finished(
+    runner: &str,
+    jobs: &[crate::jobs::FinishedJob],
+    details: &std::collections::HashMap<u64, crate::gitea_api::JobDetails>,
+) -> Vec<InsightJob> {
+    jobs.iter()
+        .filter_map(|j| {
+            let repo = j.info.known_repository()?.to_string();
+            let d = j.info.job_id.and_then(|id| details.get(&id));
+            Some(InsightJob {
+                runner: runner.to_string(),
+                repo,
+                job: j.info.job.clone().unwrap_or_else(|| "(unnamed job)".to_string()),
+                started: j.started_at,
+                finished: j.finished_at,
+                conclusion: d.map(|d| d.conclusion).or(j.outcome).unwrap_or(Conclusion::Unknown),
+                queued_ms: d.and_then(|d| d.queued_ms),
+            })
+        })
+        .collect()
+}
+
 fn percentile(sorted: &[u64], p: u32) -> u64 {
     if sorted.is_empty() {
         return 0;
@@ -589,6 +613,39 @@ mod tests {
         });
         assert!(advise(&i).iter().any(|a| a.kind == AdviceKind::SuccessDropped));
         assert!(advise(&Insights::default()).is_empty());
+    }
+
+    #[test]
+    fn finished_jobs_become_insight_jobs_and_masked_repositories_are_left_out() {
+        use crate::gitea_api::JobDetails;
+        use crate::jobs::{FinishedJob, JobInfo};
+        let mk = |repo: &str, id: u64| FinishedJob {
+            info: JobInfo {
+                repository: Some(repo.into()),
+                job: Some("build".into()),
+                job_id: Some(id),
+                ..JobInfo::default()
+            },
+            started_at: Timestamp(1000),
+            finished_at: Timestamp(5000),
+            outcome: None,
+            peak_cpu_permille: 0,
+            peak_mem_bytes: 0,
+            leftovers: 0,
+        };
+        let mut details = std::collections::HashMap::new();
+        details.insert(
+            1,
+            JobDetails {
+                conclusion: Conclusion::Failure,
+                queued_ms: Some(7),
+            },
+        );
+        let out = from_finished("mac", &[mk("o/app", 1), mk("***/app", 2), mk("o/lib", 3)], &details);
+        assert_eq!(out.len(), 2);
+        assert_eq!((out[0].conclusion, out[0].queued_ms), (Conclusion::Failure, Some(7)));
+        assert_eq!(out[1].conclusion, Conclusion::Unknown);
+        assert_eq!(out[0].runner, "mac");
     }
 
     #[test]

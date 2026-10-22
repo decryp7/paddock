@@ -142,6 +142,9 @@ fn connection<R: Runtime>(app: &AppHandle<R>, c: ConnectionState) {
 
 fn notify<R: Runtime>(app: &AppHandle<R>, n: &Notification) {
     let _ = app.notification().builder().title(&n.title).body(&n.body).show();
+    if let Ok(dir) = app.path().app_data_dir() {
+        crate::channels::dispatch_in_background(dir, n);
+    }
 }
 
 /// A key of what the tray menu shows, so it is rebuilt only when that changes (rebuilding closes an open menu).

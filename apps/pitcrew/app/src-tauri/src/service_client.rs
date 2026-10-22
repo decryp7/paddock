@@ -117,7 +117,9 @@ fn with_timeout<T: Send + 'static>(
 pub fn timeout_for(r: &Request) -> Duration {
     match r {
         Request::Register { .. } => Duration::from_secs(16 * 60),
-        Request::Disk { .. } | Request::CleanDisk { .. } => Duration::from_secs(11 * 60),
+        Request::Disk { .. } | Request::CleanDisk { .. } | Request::EnginePrune { .. } | Request::CacheClean { .. } => {
+            Duration::from_secs(11 * 60)
+        }
         _ => Duration::from_secs(130),
     }
 }

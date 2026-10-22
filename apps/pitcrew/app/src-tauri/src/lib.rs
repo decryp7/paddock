@@ -3,13 +3,16 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod applog;
+pub mod channels;
 pub mod commands;
 pub mod credentials;
 pub mod diagnostics;
 pub mod dto;
 pub mod events;
 pub mod gitea;
+pub mod handoff;
 pub mod native_feel;
+pub mod ops;
 pub mod service_client;
 pub mod service_install;
 pub mod tray;
@@ -74,6 +77,21 @@ pub fn run() {
             commands::export_diagnostics,
             commands::open_url,
             commands::reveal_logs,
+            ops::fleet_insights,
+            ops::engine_report,
+            ops::engine_prune_preview,
+            ops::engine_prune,
+            ops::cache_report,
+            ops::cache_preview,
+            ops::cache_clean,
+            ops::debrief_status,
+            ops::open_in_debrief,
+            ops::channels_get,
+            ops::channels_save,
+            ops::channel_secret_set,
+            ops::channel_secret_clear,
+            ops::channel_secret_present,
+            ops::channel_test,
         ])
         .setup(|app| {
             // After an update launchd may refuse the registered service (a rebuilt app has a new code identity on
