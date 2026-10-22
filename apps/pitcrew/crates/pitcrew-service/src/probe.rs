@@ -56,7 +56,13 @@ impl Probe {
     /// its own, with the process's executable and parent, so a thread id could be taken for a process id (and
     /// signalled, adopted or counted twice).
     fn processes(&self) -> impl Iterator<Item = (&Pid, &sysinfo::Process)> {
-        self.sys.processes().iter().filter(|(_, p)| p.thread_kind().is_none())
+        // Threads are not processes (Linux lists them), and a zombie has already exited: it only waits for its parent
+        // to reap it (in a container without an init it may never be), so it uses nothing and must never be stopped
+        // or counted again.
+        self.sys
+            .processes()
+            .iter()
+            .filter(|(_, p)| p.thread_kind().is_none() && p.status() != sysinfo::ProcessStatus::Zombie)
     }
 
     /// Logical cores of the machine (the denominator of every CPU share).

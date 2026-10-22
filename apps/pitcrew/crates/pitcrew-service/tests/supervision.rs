@@ -290,7 +290,8 @@ fn a_stalled_runner_is_stopped_gracefully_and_restarted() {
 
 #[test]
 fn stop_waits_for_the_running_job() {
-    let mut h = Harness::new("busy", "mode=job\njob_secs=4\n", true);
+    // The job lasts long enough that a loaded CI runner still sees it running between two status calls.
+    let mut h = Harness::new("busy", "mode=job\njob_secs=10\n", true);
     h.until("job seen", Duration::from_secs(6), |h| h.status().current_job.is_some());
     let s = h.status();
     assert_eq!(s.status, RunnerStatus::Busy);
@@ -305,7 +306,7 @@ fn stop_waits_for_the_running_job() {
             break;
         }
     }
-    h.until("stopped after the job", Duration::from_secs(6), |h| {
+    h.until("stopped after the job", Duration::from_secs(25), |h| {
         h.status().status == RunnerStatus::Stopped
     });
     let hist = h.history();
