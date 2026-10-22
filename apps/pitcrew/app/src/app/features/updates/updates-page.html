@@ -70,6 +70,18 @@
           @if (r.updatePhase.phase !== 'idle') {
             <pc-update-progress class="progress" [phase]="r.updatePhase" [now]="clock.now()" />
           }
+          @if (deadline(r); as d) {
+            <div class="last">
+              <span class="badge" [class.warning]="d.warn" [class.outline]="!d.warn">{{ d.text }}</span>
+              <span class="muted truncate">A newer release has been available since {{ when(r.deadline!.behindSince) }}. Neither Gitea nor Forgejo enforces a deadline; this is your own reminder.</span>
+            </div>
+          }
+          @if (r.updateLoop; as l) {
+            <div class="loop callout warning" role="status">
+              <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+              <div class="callout-body"><strong>Updating to {{ l.target }} keeps failing</strong><span>{{ l.cause }}</span></div>
+            </div>
+          }
           @if (look(r); as l) {
             <div class="last">
               <span class="badge" [class]="l.tone">{{ l.label }}</span>

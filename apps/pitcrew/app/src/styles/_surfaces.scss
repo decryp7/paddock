@@ -181,7 +181,8 @@ a.badge {
     vertical-align: middle;
   }
 
-  tr:last-child td {
+  tr:last-child td,
+  tbody tr:last-child th {
     border-bottom: 0;
   }
 

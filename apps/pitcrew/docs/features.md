@@ -33,7 +33,7 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 
 ## A service that keeps runners running
 
-![The runners page](screenshots/runners-dark.png)
+![The runners page](screenshots/dark/runners.png)
 
 - **A small Rust service owns the runners.** On Windows it is a service under the Service Control Manager (automatic,
   delayed start, recovery actions); on macOS a per-user launch agent registered with `SMAppService`
@@ -55,7 +55,7 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 
 ## Supervision and the watchdog
 
-![A runner's page](screenshots/runner-detail-dark.png)
+![A runner's page](screenshots/dark/runner-detail.png)
 
 - **One status per runner**, computed by the core from the facts: Idle, Busy, Draining, Stalled, Starting, Degraded,
   Updating, CrashLoop, NotRegistered, WaitingForLogon, Paused and Stopped. The tray and the window show the worst state.
@@ -79,7 +79,7 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 
 ## Safe updates with roll-back
 
-![Updating a runner](screenshots/runner-updates-light.png)
+![Updating a runner](screenshots/light/runner-updates.png)
 
 - **Official releases only.** The service reads the latest version from `dl.gitea.com`, downloads the binary for the
   platform over HTTPS (size-capped, with a timeout), and computes its SHA-256 while streaming
@@ -101,7 +101,7 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 
 ## Housekeeping
 
-![Disk and cleanup](screenshots/runner-disk-light.png)
+![Disk and cleanup](screenshots/light/runner-disk.png)
 
 - **Cleans a runner's folder** (`work/`, `cache/`, leftover downloads, old binary names, rotated logs beyond the keep
   count), only while no job and no update runs, never entries changed in the last 10 minutes, and keeps
@@ -140,7 +140,7 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 
 ## Dashboard
 
-![The dashboard](screenshots/dashboard-dark.png)
+![The dashboard](screenshots/dark/dashboard.png)
 
 - **Runner cards** with status, the running job (repository, job, elapsed time, link), version, restarts in 24 hours and
   quick actions.
@@ -149,13 +149,13 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
   machine's totals ([ADR 0007](adr/0007-runner-scoped-metrics.md)). A tile shows what Pitcrew itself costs.
 - **History:** CPU and memory with the runners stacked on the rest of the machine, over a range you choose.
 
-![Runner load and history](screenshots/dashboard-load-dark.png)
+![Runner load and history](screenshots/dark/dashboard-load.png)
 
 - **Jobs per day (jobs per hour for the 24-hour range), uptime, average job duration, an events feed** (restarts, stalls, updates, cleanups) and **update
   results**. With a read-only Gitea token (kept in the OS credential store) it also shows job outcomes and **queue
   wait**; without one it says what to add.
 
-![Dashboard history](screenshots/dashboard-history-light.png)
+![Dashboard history](screenshots/light/dashboard-history.png)
 
 ## Runners and a runner's page
 
@@ -232,7 +232,7 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
 
 ## Activity and history
 
-![Activity](screenshots/activity-light.png)
+![Activity](screenshots/light/activity.png)
 
 - **A timeline per runner** of when it was up and busy, with marks for crashes, stalls, crash loops, failed launches,
   updates, roll-backs, postponed updates and cleanups.
@@ -243,7 +243,7 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
 
 ## Logs
 
-![Logs](screenshots/logs-dark.png)
+![Logs](screenshots/dark/logs.png)
 
 - **The runner's own output**, newest at the bottom, with Pitcrew's `supervisor:` lines (starts, stalls, updates,
   registration) in the same stream.
@@ -253,7 +253,7 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
 
 ## Registering and adopting runners
 
-![Register wizard](screenshots/register-wizard-dark.png)
+![Register wizard](screenshots/dark/register-wizard.png)
 
 - **A wizard** asks for the server URL, the registration token, a name in Pitcrew and on the server, labels, a new folder
   or an existing runner folder, and (Windows) where the runner runs and what it does while nobody is logged on.
@@ -277,7 +277,7 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
 
 ## Settings
 
-![Settings](screenshots/settings-light.png)
+![Settings](screenshots/light/settings.png)
 
 - **General:** theme (dark, light, system), open at log-in, notifications.
 - **Service:** whether the service is installed and running, install and remove, and the service's version, uptime and
@@ -291,9 +291,9 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
   support.
 - **About:** version, licence.
 
-![Settings defaults](screenshots/settings-defaults-light.png)
+![Settings defaults](screenshots/light/settings-defaults.png)
 
-![Gitea tokens](screenshots/settings-tokens-dark.png)
+![Gitea tokens](screenshots/dark/settings-tokens.png)
 
 ## Pitcrew's own updates
 
@@ -315,7 +315,7 @@ A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-an
 - **Failures are contained**: a bad configuration entry is skipped, damaged files fall back to a backup, a panel that
   fails shows an inline error with Retry.
 
-![Service unavailable](screenshots/service-unavailable-dark.png)
+![Service unavailable](screenshots/dark/service-unavailable.png)
 
 - When the service cannot be reached the window and the tray say so, with the reason and the next step, and the app
   reconnects by itself.

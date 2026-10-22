@@ -149,8 +149,8 @@
                 }
                 @if (usagePeak(); as p) {
                   <div class="trends">
-                    <div><span class="faint small">CPU, peak {{ p.cpu }}</span><pc-sparkline [values]="usageCpu()" [max]="1000" [width]="320" [height]="40" /></div>
-                    <div><span class="faint small">Memory, peak {{ p.mem }}</span><pc-sparkline style="color: var(--chart-3)" [values]="usageMem()" [width]="320" [height]="40" /></div>
+                    <div><span class="faint small">CPU, peak {{ p.cpu }}</span><pc-sparkline style="color: var(--chart-4)" [values]="usageCpu()" [max]="1000" [width]="320" [height]="72" /></div>
+                    <div><span class="faint small">Memory, peak {{ p.mem }}</span><pc-sparkline style="color: var(--chart-1)" [values]="usageMem()" [width]="320" [height]="72" /></div>
                   </div>
                 }
               </div>

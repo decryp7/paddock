@@ -17,7 +17,7 @@ updates it between jobs, so the builds keep running.
 > Linux support are built and tested; the macOS path was verified on a real Mac on 2026-10-22. No release is published yet.
 > See [Status](#status).
 
-![The dashboard](docs/screenshots/dashboard-dark.png)
+![The dashboard](docs/screenshots/dark/dashboard.png)
 
 ## At a glance
 
@@ -61,14 +61,22 @@ Every feature, with screenshots, is in [docs/features.md](docs/features.md).
    on a schedule, downloads the binary for the platform, verifies its SHA-256 from two hosts, waits until the runner is
    idle, swaps the binary, restarts it, waits for the server to accept it and **rolls back** automatically if it does not.
    Per runner: automatic, ask first or manual; pin or skip a version; an update window.
-4. **Housekeeping.** Cleans each runner's work and cache folders on a schedule or on demand, warns when the disk is low and
-   records what it freed.
+4. **Housekeeping and disk safety.** Cleans each runner's work and cache folders on a schedule or on demand, and records
+   what it freed. A **low-disk guard** drains runners before the disk is full and resumes them when space is back
+   ([ADR 0013](docs/adr/0013-holds-low-disk-guard-and-pause-windows.md)); **pause windows** keep runners off at set times or
+   while the machine is busy. **Storage** reports the container engine and the Actions cache, with preview-then-confirm
+   pruning ([ADR 0016](docs/adr/0016-container-engine-hygiene-and-actions-cache.md)).
 5. **Dashboard** ([ADR 0007](docs/adr/0007-runner-scoped-metrics.md)). Live runner cards, tiles for what the runners use
    (CPU and memory of each runner and everything it started, not the whole machine), history, jobs per day, an uptime
    timeline with restarts, stalls and updates marked, an events feed and quick actions. With a read-only Gitea token it
    also shows job outcomes and queue wait.
 6. **Tray and notifications.** The tray icon shows the worst state of all runners. Closing the window keeps Pitcrew
-   running; quitting the app never stops the runners.
+   running; quitting the app never stops the runners. Optional **webhook, ntfy and email** channels with secrets in the OS
+   credential store ([ADR 0017](docs/adr/0017-notification-channels.md)).
+   **Insights**: slow and flaky jobs, queue time, success rates per repository and capacity advice
+   ([ADR 0015](docs/adr/0015-workflow-insights-and-capacity-advice.md)); **update deadline** countdown and update-loop
+   detection ([ADR 0014](docs/adr/0014-update-deadline-and-update-loops.md)); **open a job's log in Debrief**
+   ([ADR 0018](docs/adr/0018-open-in-debrief.md)).
 7. **Runner environment.** On macOS and Linux jobs get your login shell's `PATH`, and a runner can set its own variables
    (`[runners.env]`).
 8. **Adopts existing runners.** A registered runner folder is used as it is; configuration is a versioned `pitcrew.toml`
@@ -83,14 +91,25 @@ Every feature, with screenshots, is in [docs/features.md](docs/features.md).
 
 ### Screenshots
 
-Taken against the mock backend (`docs/screenshots`, dark and light for every screen).
+Taken against the mock backend with invented data (1440 x 900 at 2x; `docs/screenshots/<theme>/`, every screen in both themes).
+
+**Dark**
 
 | | |
 | --- | --- |
-| ![Runners](docs/screenshots/runners-dark.png) | ![Runner detail](docs/screenshots/runner-detail-dark.png) |
-| ![Activity](docs/screenshots/activity-light.png) | ![Runner updates](docs/screenshots/runner-updates-light.png) |
-| ![Logs](docs/screenshots/logs-dark.png) | ![Register a runner](docs/screenshots/register-wizard-dark.png) |
-| ![Settings](docs/screenshots/settings-light.png) | ![Disk and cleanup](docs/screenshots/runner-disk-light.png) |
+| ![Dashboard](docs/screenshots/dark/dashboard.png) | ![Runner detail](docs/screenshots/dark/runner-detail.png) |
+| ![Insights](docs/screenshots/dark/insights.png) | ![Storage: prune preview](docs/screenshots/dark/storage-prune.png) |
+| ![Activity jobs with Open in Debrief](docs/screenshots/dark/activity-jobs.png) | ![Disk guard and pause windows](docs/screenshots/dark/settings-disk-guard.png) |
+| ![Notification channels](docs/screenshots/dark/settings-channels.png) | ![Runner updates](docs/screenshots/dark/runner-updates.png) |
+
+**Light**
+
+| | |
+| --- | --- |
+| ![Dashboard](docs/screenshots/light/dashboard.png) | ![Runner detail](docs/screenshots/light/runner-detail.png) |
+| ![Insights](docs/screenshots/light/insights.png) | ![Storage: prune preview](docs/screenshots/light/storage-prune.png) |
+| ![Activity jobs with Open in Debrief](docs/screenshots/light/activity-jobs.png) | ![Disk guard and pause windows](docs/screenshots/light/settings-disk-guard.png) |
+| ![Notification channels](docs/screenshots/light/settings-channels.png) | ![Runner updates](docs/screenshots/light/runner-updates.png) |
 
 ## Quick start
 

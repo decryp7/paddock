@@ -5,7 +5,7 @@ import type { AppUpdateInfo, AppUpdateStatus, CommandError, RunnerSnapshot, Upda
 import { BACKEND } from '../../core/backend';
 import { ClockService } from '../../core/clock.service';
 import { toCommandError } from '../../core/command-error';
-import { formatDateTime, formatRelative } from '../../shared/format';
+import { formatDateTime, formatRelative, plural } from '../../shared/format';
 import { outcomeLook, updateModeLabel } from '../../shared/labels';
 import { UpdatePolicyEditor } from '../../shared/policy/update-policy-editor';
 import { EmptyState } from '../../shared/ui/empty-state';
@@ -82,6 +82,15 @@ export class UpdatesPage {
   protected mode(r: RunnerSnapshot): string {
     return updateModeLabel(r.updatePolicy.mode) + (r.updatePolicy.pinned ? ` · pinned to ${r.updatePolicy.pinned}` : '');
   }
+  /** The countdown to the owner's reminder, while an update waits (ADR 0014). */
+  protected deadline(r: RunnerSnapshot): { text: string; warn: boolean } | null {
+    const d = r.deadline;
+    if (!d || !r.updateTarget) return null;
+    const n = Math.abs(d.daysLeft);
+    const text = d.state === 'overdue' ? `Overdue by ${plural(n, 'day')}` : d.daysLeft === 0 ? 'Due today' : `Due in ${plural(n, 'day')}`;
+    return { text, warn: d.state !== 'ok' };
+  }
+
   protected busy(r: RunnerSnapshot): boolean {
     return this.status.inFlight()[r.name] !== undefined;
   }

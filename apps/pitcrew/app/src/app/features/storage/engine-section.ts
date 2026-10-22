@@ -51,7 +51,7 @@ import { ENGINE_NAMES, PRUNE_LABELS, countOf, errorSentence } from './storage-la
                     <p class="hero num">{{ c.size }}</p>
                     <p class="muted small">{{ c.counts }}</p>
                     <div class="meter" aria-hidden="true"><span [style.width.%]="c.percent"></span></div>
-                    <p class="small"><strong class="num">{{ c.reclaimable }}</strong> <span class="muted">can be reclaimed</span></p>
+                    <p class="small"><strong class="num">{{ c.reclaimable }}</strong>&nbsp;<span class="muted">can be reclaimed</span></p>
                   </div>
                 </article>
               }
@@ -150,7 +150,7 @@ import { ENGINE_NAMES, PRUNE_LABELS, countOf, errorSentence } from './storage-la
                         }
                       </tbody>
                     </table>
-                    <p class="total"><strong class="num">{{ p.total }}</strong> <span class="muted">would be freed. Nothing has been deleted.</span></p>
+                    <p class="total"><strong class="num">{{ p.total }}</strong>&nbsp;<span class="muted">would be freed. Nothing has been deleted.</span></p>
                   </div>
                 }
 

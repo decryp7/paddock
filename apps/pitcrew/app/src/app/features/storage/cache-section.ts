@@ -159,7 +159,7 @@ const REASONS: Record<CacheReason, string> = { old: 'older than limit', overLimi
                         </tbody>
                       </table>
                     }
-                    <p class="total"><strong class="num">{{ p.total }}</strong> <span class="muted">in {{ p.count }} would be freed. Nothing has been deleted.</span></p>
+                    <p class="total"><strong class="num">{{ p.total }}</strong>&nbsp;<span class="muted">in {{ p.count }} would be freed. Nothing has been deleted.</span></p>
                   </div>
                 }
 
