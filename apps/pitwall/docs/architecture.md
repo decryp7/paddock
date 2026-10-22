@@ -31,7 +31,7 @@ Engines (llama.cpp today) are third-party binaries that Pitwall downloads, check
 process per loaded model. There is no plugin system ([ADR 0010](adr/0010-no-plugin-system.md)); extension is by
 declarative TOML packs ([ADR 0011](adr/0011-declarative-packs.md)).
 
-![Pitwall at a glance](diagrams/svg/pitwall-overview.svg)
+![Pitwall at a glance](diagrams/pitwall-overview.svg)
 
 What leaves the machine: only downloads the user asked for (engine releases from GitHub, models from Hugging Face),
 over HTTPS, from an allow-list of hosts, with every redirect hop checked again. Offline mode turns even that off.
@@ -41,7 +41,9 @@ Prompts and answers never leave the process tree on `127.0.0.1`.
 
 ### Core (`crates/pitwall-core`)
 
-![Core components](diagrams/svg/c4-3-components-core.svg)
+![Core components: serving decisions](diagrams/svg/c4-3-core-serving.svg)
+
+The other parts of the core are in [design.md](design.md#level-3--core-components).
 
 Pure functions and types, 99 % line coverage as a target. The modules, grouped by job (see the crate documentation
 in `lib.rs`):
@@ -59,7 +61,9 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 
 ### Server (`crates/pitwall-server`)
 
-![Server components](diagrams/svg/c4-3-components-server.svg)
+![Server components: request path](diagrams/svg/c4-3-server-requests.svg)
+
+![Server components: engines and outbound](diagrams/svg/c4-3-server-edges.svg)
 
 | Module | Responsibility |
 | --- | --- |
@@ -80,7 +84,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 
 ### App (`app/`)
 
-![UI components](diagrams/svg/c4-3-components-ui.svg)
+![UI components: state and backend](diagrams/svg/c4-3-ui-state.svg)
 
 The Angular UI is the presentation layer. Standalone components with signals and OnPush, SignalStores for state,
 Angular CDK for behaviour and accessibility, Angular Material selectively, Apache ECharts for charts, and Pitwall's
@@ -123,7 +127,9 @@ real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.m
 
 ### A chat request
 
-![Chat request sequence](diagrams/svg/uml-seq-chat-request.svg)
+![Chat request: admit and queue](diagrams/svg/uml-seq-chat-admit.svg)
+
+![Chat request: load and answer](diagrams/svg/uml-seq-chat-serve.svg)
 
 1. **The gate** (`http::gate`). The `Host` header must name this machine (loopback names, or none); a browser
    `Origin` must be loopback or Pitwall's own window; the credential is `Authorization: Bearer pw_...` or

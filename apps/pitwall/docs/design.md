@@ -1,12 +1,13 @@
 # Pitwall design
 
 All of Pitwall's design diagrams on one page, from the big picture down to individual flows. Each image is exported
-from its editable draw.io source (linked under the image) with
-[`scripts/export-diagrams.sh`](../scripts/export-diagrams.sh); edit the `.drawio`, then re-run the script. The style
+from its editable draw.io source (linked under the image), which a small generator under
+[`diagrams/src`](diagrams/src/README.md) writes; export with
+[`scripts/export-diagrams.sh`](../scripts/export-diagrams.sh). The style
 rules are in [diagrams/STYLE.md](diagrams/STYLE.md), the reasoning behind the design in the
 [architecture decision records](adr/README.md), and the prose overview in [architecture.md](architecture.md).
 
-Elements drawn dashed and marked "(planned)" are not built yet; the [roadmap](roadmap.md) lists them.
+Elements drawn with a dashed outline and a "planned" tag are not built yet; the [roadmap](roadmap.md) lists them.
 
 Contents: [Overview](#overview) · [C4 model](#c4-model) · [Deployment](#deployment) · [Use cases](#use-cases) ·
 [Domain model](#domain-model) · [Flows](#flows) · [States](#states)
@@ -15,19 +16,19 @@ Contents: [Overview](#overview) · [C4 model](#c4-model) · [Deployment](#deploy
 
 Apps and tools talk to one local server on `127.0.0.1:11435`. The server queues their requests, loads models into
 engine processes when they fit, gives the memory back when it is idle, and answers in the shape each client expects.
-Pitwall's own window and tray manage it. The only outbound traffic is downloads the user asked for.
+Pitwall's own window, tray and `pitwall` command line manage it. The only outbound traffic is downloads the user
+asked for. The picture follows the reader's light or dark setting.
 
-![Pitwall at a glance](diagrams/svg/pitwall-overview.svg)
-
-Source: [pitwall-overview.drawio](diagrams/pitwall-overview.drawio)
+![Pitwall at a glance](diagrams/pitwall-overview.svg)
 
 ## C4 model
 
 ### Level 1 — system context
 
 Who uses Pitwall and which outside systems it touches. The suite apps, third-party tools and the user's own scripts
-call the APIs; the user manages Pitwall in its window. Pitwall reaches out only to Hugging Face (models) and GitHub
-(engine releases), and only when told to ([ADR 0001](adr/0001-local-only.md)).
+call the APIs; the user manages Pitwall in its window or with the command line. Pitwall reaches out only to Hugging
+Face (models and revision checks) and GitHub (engine releases), and only when told to
+([ADR 0001](adr/0001-local-only.md)). Sharing on the LAN is planned.
 
 ![C4 system context](diagrams/svg/c4-1-context.svg)
 
@@ -35,11 +36,11 @@ Source: [c4-1-context.drawio](diagrams/c4-1-context.drawio)
 
 ### Level 2 — containers
 
-The runnable units and the processes they run in: the Tauri app with its Angular UI and tray, the windowless
-`pitwall-server` that the OS service manager keeps running, and the `llama-server` child processes (one per loaded
-model) that the server starts and owns. The server uses `pitwall-core` for every decision and `pitwall-loopback` to
-reach engines. See [ADR 0002](adr/0002-core-crate-ports-adapters.md) and
-[ADR 0004](adr/0004-engine-abstraction-and-process-model.md).
+The runnable units and the processes they run in: the Tauri app with its Angular UI, tray and Rust shell, the
+`pitwall` command line, the windowless `pitwall-server` that the OS service manager keeps running, and the
+`llama-server` child processes (one per loaded model) that the server starts and owns. The server uses
+`pitwall-core` for every decision and `pitwall-loopback` to reach engines. See
+[ADR 0002](adr/0002-core-crate-ports-adapters.md) and [ADR 0004](adr/0004-engine-abstraction-and-process-model.md).
 
 ![C4 containers](diagrams/svg/c4-2-containers.svg)
 
@@ -47,32 +48,59 @@ Source: [c4-2-containers.drawio](diagrams/c4-2-containers.drawio)
 
 ### Level 3 — core components
 
-Inside `pitwall-core`: wire formats for the three API families, the scheduler, the memory policy, model selection,
-fit, GGUF and Hugging Face parsing, the runtime catalog, privacy rules, keys and limits, settings and the
-management DTOs. No component does I/O.
+`pitwall-core` has no I/O. It is shown in four parts so each stays readable.
 
-![C4 core components](diagrams/svg/c4-3-components-core.svg)
+Wire formats: the three API families, the neutral request, the llama protocol and the (not yet wired) response cache.
 
-Source: [c4-3-components-core.drawio](diagrams/c4-3-components-core.drawio)
+![C4 core wire formats](diagrams/svg/c4-3-core-wire.svg)
+
+Source: [c4-3-core-wire.drawio](diagrams/c4-3-core-wire.drawio)
+
+Serving decisions: presets and aliases, capability selection, fit with slot cost, the scheduler, the memory policy and
+pressure.
+
+![C4 core serving decisions](diagrams/svg/c4-3-core-serving.svg)
+
+Source: [c4-3-core-serving.drawio](diagrams/c4-3-core-serving.drawio)
+
+Models and engines: Hugging Face parsing, update notices, GGUF, fit, packs, the pinned runtime catalog with
+capabilities per build, hardware parsing, and the planned engine kinds.
+
+![C4 core models and engines](diagrams/svg/c4-3-core-models.svg)
+
+Source: [c4-3-core-models.drawio](diagrams/c4-3-core-models.drawio)
+
+Security and state: privacy rules, keys and limits, usage history, settings, metrics and events, the management DTOs.
+
+![C4 core security and state](diagrams/svg/c4-3-core-state.svg)
+
+Source: [c4-3-core-state.drawio](diagrams/c4-3-core-state.drawio)
 
 ### Level 3 — server components
 
-Inside `pitwall-server`: the HTTP edge (`http`, `mgmt`), the request pipeline and shared state (`app`), serving
-(`serving`), engines (`engines`, `pack_engine`), the library, egress, auth, and the thin OS layer (`process`, `paths`,
-`system`, `service`).
+`pitwall-server` in two parts: the request path (gate, pipeline, auth, serving), then library, engines, egress and the
+thin OS layer.
 
-![C4 server components](diagrams/svg/c4-3-components-server.svg)
+![C4 server request path](diagrams/svg/c4-3-server-requests.svg)
 
-Source: [c4-3-components-server.drawio](diagrams/c4-3-components-server.drawio)
+Source: [c4-3-server-requests.drawio](diagrams/c4-3-server-requests.drawio)
+
+![C4 server engines and outbound](diagrams/svg/c4-3-server-edges.svg)
+
+Source: [c4-3-server-edges.drawio](diagrams/c4-3-server-edges.drawio)
 
 ### Level 3 — UI components
 
-Inside the Angular app: the feature screens, their SignalStores, and the `BACKEND` token that selects the Tauri
+Inside the Angular app: the feature screens, then their SignalStores and the `BACKEND` token that selects the Tauri
 backend or the mock.
 
-![C4 UI components](diagrams/svg/c4-3-components-ui.svg)
+![C4 UI screens](diagrams/svg/c4-3-ui-features.svg)
 
-Source: [c4-3-components-ui.drawio](diagrams/c4-3-components-ui.drawio)
+Source: [c4-3-ui-features.drawio](diagrams/c4-3-ui-features.drawio)
+
+![C4 UI state and backend](diagrams/svg/c4-3-ui-state.svg)
+
+Source: [c4-3-ui-state.drawio](diagrams/c4-3-ui-state.drawio)
 
 ## Deployment
 
@@ -82,37 +110,66 @@ macOS launch agent registered through `SMAppService`, a Linux systemd user servi
 The data folder differs per OS (`PITWALL_HOME` overrides it). See the per-OS guides:
 [Windows](windows.md), [macOS](macos.md), [Linux](linux.md).
 
-![Deployment](diagrams/svg/uml-deployment.svg)
+![Deployment on Windows](diagrams/svg/uml-deployment-windows.svg)
 
-Source: [uml-deployment.drawio](diagrams/uml-deployment.drawio)
+Source: [uml-deployment-windows.drawio](diagrams/uml-deployment-windows.drawio)
+
+![Deployment on macOS](diagrams/svg/uml-deployment-macos.svg)
+
+Source: [uml-deployment-macos.drawio](diagrams/uml-deployment-macos.drawio)
+
+![Deployment on Linux](diagrams/svg/uml-deployment-linux.svg)
+
+Source: [uml-deployment-linux.drawio](diagrams/uml-deployment-linux.drawio)
 
 ## Use cases
 
-What the people and programs around Pitwall do with it.
+What the people and programs around Pitwall do with it, in three parts.
 
-![Use cases](diagrams/svg/uml-use-cases.svg)
+![Use cases: models and engines](diagrams/svg/uml-use-cases-library.svg)
 
-Source: [uml-use-cases.drawio](diagrams/uml-use-cases.drawio)
+Source: [uml-use-cases-library.drawio](diagrams/uml-use-cases-library.drawio)
+
+![Use cases: running Pitwall](diagrams/svg/uml-use-cases-operate.svg)
+
+Source: [uml-use-cases-operate.drawio](diagrams/uml-use-cases-operate.drawio)
+
+![Use cases: apps and tools](diagrams/svg/uml-use-cases-clients.svg)
+
+Source: [uml-use-cases-clients.drawio](diagrams/uml-use-cases-clients.drawio)
 
 ## Domain model
 
-The main types: settings and the memory policy, hot models, jobs and priorities, the `Engine` trait with its
-implementations, the library, apps, keys and permissions, packs, and the neutral chat request every API maps to.
+The main types in three parts: serving (aliases, hot models, scheduler, policy), the library and engines (the `Engine`
+trait, update notices, build pins), and apps, keys, limits and usage history.
 
-![Domain classes](diagrams/svg/uml-class-domain.svg)
+![Domain classes: serving](diagrams/svg/uml-class-serving.svg)
 
-Source: [uml-class-domain.drawio](diagrams/uml-class-domain.drawio)
+Source: [uml-class-serving.drawio](diagrams/uml-class-serving.drawio)
+
+![Domain classes: library and engines](diagrams/svg/uml-class-library.svg)
+
+Source: [uml-class-library.drawio](diagrams/uml-class-library.drawio)
+
+![Domain classes: apps, keys and usage](diagrams/svg/uml-class-access.svg)
+
+Source: [uml-class-access.drawio](diagrams/uml-class-access.drawio)
 
 ## Flows
 
 ### Chat request, including a cold start
 
-From the gate (Host, Origin, key) through parsing, model resolution, authorization, the queue, loading the model
-when it is not hot, generation over loopback and the answer in the caller's format with provenance headers.
+In two parts. First the gate (Host, Origin, key), parsing, authorisation, model resolution through aliases and presets,
+and the queue; then loading the model when it is not hot, generation over loopback, the answer in the caller's format
+with provenance headers, and the usage record.
 
-![Chat request sequence](diagrams/svg/uml-seq-chat-request.svg)
+![Chat request: admit and queue](diagrams/svg/uml-seq-chat-admit.svg)
 
-Source: [uml-seq-chat-request.drawio](diagrams/uml-seq-chat-request.drawio)
+Source: [uml-seq-chat-admit.drawio](diagrams/uml-seq-chat-admit.drawio)
+
+![Chat request: load and answer](diagrams/svg/uml-seq-chat-serve.svg)
+
+Source: [uml-seq-chat-serve.drawio](diagrams/uml-seq-chat-serve.drawio)
 
 ### Pairing an app
 
@@ -132,14 +189,30 @@ the GGUF check and the move into the library.
 
 Source: [uml-seq-model-download.drawio](diagrams/uml-seq-model-download.drawio)
 
+### Model update notices
+
+A scheduled check, only when offline mode allows it, compares installed models with Hugging Face and raises a notice.
+It never downloads by itself.
+
+![Model update check sequence](diagrams/svg/uml-seq-update-check.svg)
+
+Source: [uml-seq-update-check.drawio](diagrams/uml-seq-update-check.drawio)
+
 ### Installing an engine
 
-Download and verify each asset, unpack defensively into a staging folder, self-test, swap in or discard, and the
-roll-back rules.
+Download and verify each asset, unpack defensively into a staging folder, self-test, swap in or discard.
 
 ![Engine install sequence](diagrams/svg/uml-seq-engine-install.svg)
 
 Source: [uml-seq-engine-install.drawio](diagrams/uml-seq-engine-install.drawio)
+
+### Pinning and rolling back an engine
+
+Pin a build for every model or one, with features gated by what the build supports, and select the previous build.
+
+![Engine pin sequence](diagrams/svg/uml-seq-engine-pin.svg)
+
+Source: [uml-seq-engine-pin.drawio](diagrams/uml-seq-engine-pin.drawio)
 
 ### Idle release
 
@@ -149,6 +222,14 @@ See [ADR 0006](adr/0006-memory-policy.md).
 ![Idle release sequence](diagrams/svg/uml-seq-idle-release.svg)
 
 Source: [uml-seq-idle-release.drawio](diagrams/uml-seq-idle-release.drawio)
+
+### The command line
+
+`pitwall` reads the discovery file and the admin key, then uses the local management and standard APIs.
+
+![CLI sequence](diagrams/svg/uml-seq-cli.svg)
+
+Source: [uml-seq-cli.drawio](diagrams/uml-seq-cli.drawio)
 
 ## States
 

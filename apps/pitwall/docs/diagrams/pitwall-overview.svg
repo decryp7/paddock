@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1328 1136" width="1328" height="1136" role="img" aria-labelledby="t d">
+  <title id="t">Pitwall architecture overview</title>
+  <desc id="d">Apps and AI tools call one local Pitwall server on 127.0.0.1 through the OpenAI, Anthropic and Ollama APIs. The server queues requests, loads a model into a llama.cpp engine process when it fits, releases it when idle, keeps per-app keys, limits and usage, and manages engines and the model library. The window, tray and command line manage it. Only downloads the user asked for leave the machine, from Hugging Face and GitHub releases. A pure Rust core holds all the rules. Sharing on the LAN is planned.</desc>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker></defs>
+  <style>
+    :root{--acc-s:#6D3FD6;--acc-f:#F0ECFB;--ui-s:#0072B2;--ui-f:#E6F1F7;--core-s:#007A5E;--core-f:#E6F2EF;--pro-s:#565E6B;--pro-f:#F0F2F5;--ext-s:#6B7380;--ext-f:#F4F5F7;--grp-s:#C4C7CD;--grp-f:#F8F9FA;--bg:#FFFFFF;--ink:#14171C;--mut:#565E6B;--line:#565E6B;}
+    @media (prefers-color-scheme: dark){:root{--acc-s:#A58BFA;--acc-f:#2C2A3F;--ui-s:#56B4E9;--ui-f:#1F303C;--core-s:#2EC4A0;--core-f:#193330;--pro-s:#A0A7B2;--pro-f:#1B1E23;--ext-s:#7F8794;--ext-f:#17191E;--grp-s:#353A42;--grp-f:#121418;--bg:#15171B;--ink:#ECEEF1;--mut:#A0A7B2;--line:#A0A7B2;}}
+    text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;fill:var(--ink)}
+    .title{font-size:24px;font-weight:600}.sub{font-size:14px;fill:var(--mut)}.desc{font-size:12px;fill:var(--mut)}
+    .h{font-size:14px;font-weight:600}.t{font-size:12px}.m{font-size:12px;fill:var(--mut)}.gl{font-size:12px;font-weight:600;fill:var(--mut)}.foot{font-size:11px;fill:var(--mut);text-anchor:end}
+    .g{fill:var(--grp-f);stroke:var(--grp-s);stroke-width:1}
+    .n{stroke-width:1.5}
+    .acc{fill:var(--acc-f);stroke:var(--acc-s)}.ui{fill:var(--ui-f);stroke:var(--ui-s)}.core{fill:var(--core-f);stroke:var(--core-s)}.pro{fill:var(--pro-f);stroke:var(--pro-s)}
+    .ext{fill:var(--ext-f);stroke:var(--ext-s);stroke-dasharray:6 4}
+    .pl{fill:var(--bg);stroke-dasharray:6 4}.exts{stroke:var(--ext-s)}.accs{stroke:var(--acc-s)}
+    .tg{fill:var(--bg);stroke:var(--ext-s);stroke-width:1}.tgt{font-size:11px;font-weight:600;fill:var(--ext-s);text-anchor:middle}
+    .e{stroke:var(--line);stroke-width:1.5;fill:none}.ed{stroke-dasharray:6 4}.ah{fill:var(--line)}
+  </style>
+<text x="48" y="64" class="title">Pitwall</text>
+<text x="48" y="94" class="sub">A local-only LLM server and manager: run language models on your own computer for the suite and any AI tool</text>
+<text x="48" y="118" class="desc">Serve, manage memory, keep keys and usage, show everything · Windows, macOS and Linux · nothing leaves 127.0.0.1</text>
+<rect x="48" y="160" width="304" height="704" rx="10" class="g"/>
+<text x="64" y="188" class="gl">Outside Pitwall</text>
+<rect x="472" y="160" width="416" height="704" rx="10" class="g"/>
+<text x="488" y="188" class="gl">Pitwall server: serves and manages models</text>
+<rect x="1008" y="160" width="272" height="704" rx="10" class="g"/>
+<text x="1024" y="188" class="gl">Pitwall app and CLI: see and control</text>
+<rect x="496" y="208" width="368" height="128" rx="6" class="n acc"/>
+<text x="512" y="236" class="h">One gate</text>
+<text x="512" y="258" class="t">OpenAI, Anthropic and Ollama APIs plus /x/v1 on</text>
+<text x="512" y="274" class="t">127.0.0.1:11435. Every call passes Host, Origin and key</text>
+<text x="512" y="290" class="t">checks; the window uses the admin key.</text>
+<rect x="496" y="352" width="368" height="104" rx="6" class="n acc"/>
+<text x="512" y="380" class="h">Queue and serving</text>
+<text x="512" y="402" class="t">Aliases and presets pick the model; priorities and</text>
+<text x="512" y="418" class="t">caps queue it; it loads on first use with its parallel</text>
+<text x="512" y="434" class="t">slots and is released when idle or under pressure.</text>
+<rect x="496" y="472" width="368" height="96" rx="6" class="n acc"/>
+<text x="512" y="500" class="h">Model library</text>
+<text x="512" y="522" class="t">Search, fit check, resumable verified downloads, and</text>
+<text x="512" y="538" class="t">update notices that only ever check.</text>
+<rect x="496" y="584" width="368" height="80" rx="6" class="n acc"/>
+<text x="512" y="612" class="h">Engines</text>
+<text x="512" y="634" class="t">llama.cpp builds: self-test, pin, roll back; features</text>
+<text x="512" y="650" class="t">gated by the build.</text>
+<rect x="496" y="680" width="368" height="80" rx="6" class="n acc"/>
+<text x="512" y="708" class="h">Keys, limits and usage</text>
+<text x="512" y="730" class="t">Per-app keys and limits; tokens, requests and</text>
+<text x="512" y="746" class="t">memory over time.</text>
+<rect x="496" y="776" width="368" height="72" rx="6" class="n pro"/>
+<text x="512" y="804" class="h">Engine processes</text>
+<text x="512" y="826" class="t">llama-server, one child per loaded model.</text>
+<rect x="72" y="208" width="256" height="80" rx="6" class="n pro"/>
+<text x="88" y="236" class="h">Apps and AI tools</text>
+<text x="88" y="258" class="t">Suite apps, editors, SDK scripts.</text>
+<rect x="72" y="304" width="256" height="88" rx="6" class="n pl exts"/>
+<text x="88" y="332" class="h">Other computers</text>
+<text x="88" y="354" class="t">Shared use over TLS with a pinned</text>
+<text x="88" y="370" class="t">certificate.</text>
+<rect x="261" y="312" width="59" height="18" rx="9" class="tg"/>
+<text x="290.5" y="325" class="tgt">planned</text>
+<rect x="72" y="432" width="256" height="112" rx="6" class="n ext"/>
+<text x="88" y="460" class="h">Download hosts</text>
+<text x="88" y="482" class="t">Hugging Face for models and update</text>
+<text x="88" y="498" class="t">checks, GitHub releases for engine</text>
+<text x="88" y="514" class="t">builds. Only what you ask for.</text>
+<rect x="72" y="576" width="256" height="88" rx="6" class="n pro"/>
+<text x="88" y="604" class="h">OS service manager</text>
+<text x="88" y="626" class="t">Starts the server at login or boot</text>
+<text x="88" y="642" class="t">and restarts it.</text>
+<rect x="1032" y="208" width="224" height="88" rx="6" class="n ui"/>
+<text x="1048" y="236" class="h">Window</text>
+<text x="1048" y="258" class="t">Dashboard, models, engines,</text>
+<text x="1048" y="274" class="t">apps, usage, settings.</text>
+<rect x="1032" y="312" width="224" height="96" rx="6" class="n acc"/>
+<text x="1048" y="340" class="h">Rust shell and tray</text>
+<text x="1048" y="362" class="t">Validates every request; keeps</text>
+<text x="1048" y="378" class="t">the admin key in the OS store.</text>
+<rect x="1032" y="424" width="224" height="88" rx="6" class="n acc"/>
+<text x="1048" y="452" class="h">pitwall CLI</text>
+<text x="1048" y="474" class="t">Status, load, pull, keys, chat.</text>
+<rect x="1032" y="528" width="224" height="88" rx="6" class="n pro"/>
+<text x="1048" y="556" class="h">Close it, crash it</text>
+<text x="1048" y="578" class="t">The server goes on serving;</text>
+<text x="1048" y="594" class="t">quitting never stops it.</text>
+<path d="M328 240 L496 240" class="e" marker-end="url(#a)"/>
+<text x="400" y="230" class="m">ask</text>
+<path d="M328 320 L496 320" class="e ed" marker-end="url(#a)"/>
+<text x="400" y="310" class="m">ask</text>
+<path d="M496 500 L328 500" class="e" marker-end="url(#a)"/>
+<text x="378" y="490" class="m">downloads</text>
+<path d="M328 624 L496 624" class="e" marker-end="url(#a)"/>
+<text x="382" y="614" class="m">restarts</text>
+<path d="M864 250 L1032 250" class="e" marker-end="url(#a)"/>
+<text x="919" y="240" class="m">live feed</text>
+<path d="M1032 330 L864 330" class="e" marker-end="url(#a)"/>
+<text x="919" y="320" class="m">manages</text>
+<path d="M1032 440 L864 440" class="e" marker-end="url(#a)"/>
+<text x="932" y="430" class="m">asks</text>
+<rect x="48" y="904" width="1232" height="88" rx="6" class="n core"/>
+<text x="64" y="932" class="h">pitwall-core: pure Rust, no I/O, no clock</text>
+<text x="64" y="956" class="t">API translation, scheduler, memory policy, fit check, model choice, presets, keys, limits, usage, privacy allow-list, settings.</text>
+<text x="64" y="976" class="t">Time and readings come in as values. The server and the app both use it.</text>
+<rect x="48" y="1028" width="1000" height="40" rx="14" class="g"/>
+<rect x="68" y="1040" width="28" height="16" rx="4" class="n ext"/>
+<text x="104" y="1052" class="m">Outside</text>
+<rect x="192" y="1040" width="28" height="16" rx="4" class="n acc"/>
+<text x="228" y="1052" class="m">Pitwall</text>
+<rect x="314" y="1040" width="28" height="16" rx="4" class="n ui"/>
+<text x="350" y="1052" class="m">Window</text>
+<rect x="438" y="1040" width="28" height="16" rx="4" class="n pro"/>
+<text x="474" y="1052" class="m">Process · OS</text>
+<rect x="596" y="1040" width="28" height="16" rx="4" class="n core"/>
+<text x="632" y="1052" class="m">Pure core</text>
+<rect x="733" y="1040" width="28" height="16" rx="4" class="n pl exts"/>
+<text x="769" y="1052" class="m">Planned (tagged)</text>
+<text x="1280" y="1052" class="foot">Pitwall · updated 2026-10-22</text>
+<text x="48" y="1112" class="desc">The window and CLI reach the server only on 127.0.0.1: management calls with the admin key, standard APIs with an app key.</text>
+</svg>

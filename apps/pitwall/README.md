@@ -40,7 +40,7 @@ design, not measurements from a real machine.
 
 ## At a glance
 
-![Pitwall at a glance: apps and tools call one local server on 127.0.0.1; the server queues requests, loads models into llama.cpp engine processes when they fit, releases them when idle, and answers in OpenAI, Anthropic or Ollama form; the app and tray manage it; only user-requested downloads leave the machine](docs/diagrams/svg/pitwall-overview.svg)
+![Pitwall at a glance: apps and tools call one local server on 127.0.0.1; the server queues requests, loads models into llama.cpp engine processes when they fit, releases them when idle, and answers in OpenAI, Anthropic or Ollama form; the app and tray manage it; only user-requested downloads leave the machine](docs/diagrams/pitwall-overview.svg)
 
 A Rust core decides everything (what fits, what to release, what runs next, which model to use, which URL may be
 fetched); a windowless Rust server carries the decisions out, keeps serving when the window is closed, and runs each
