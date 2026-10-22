@@ -21,7 +21,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP | Feature | Status (2026-10-22) |
 | --- | --- | --- |
 | WP-01 | Privileged helper | planned (core types only) |
-| WP-02 | CPU taming screen and profiles | engine built, UI planned |
+| WP-02 | CPU taming screen and profiles | built: rules table, profiles, in-effect list with release, protected list, activity with undo |
 | WP-03 | Health score and startup manager screen | engine built, UI planned |
 | WP-04 | Cleanup with quarantine and undo | policy built, rest planned |
 | WP-05 | Tuning catalogue | planned |
@@ -32,7 +32,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-10 | Watched folders with keep-for times | planned |
 | WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
 | WP-12 | Performance counters browser | planned |
-| WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS, traffic rates, process-details tab and rules on new listeners open |
+| WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Windows/Linux say why not), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
 | WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | planned |
 | WP-14 | Backup health checks | planned |
 | WP-15 | Declarative TOML packs | planned |
@@ -45,10 +45,10 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-23 | Throttling detector | planned |
 | WP-24 | Disk and battery life forecasts | planned |
 | WP-25 | "Is this normal?" learned baselines | planned |
-| WP-26 | Alarms view and custom alerts (ADR 0013) | state machine, store and protocol built; Alarms UI, custom alert rules and notifications planned |
+| WP-26 | Alarms view and custom alerts (ADR 0013) | built: Alarms page (active, history, rules), custom alert rules evaluated by the agent, desktop notifications (tauri-plugin-notification), quiet hours |
 | WP-27 | `dyno` CLI (ADR 0014) | planned |
-| WP-28 | Flight recorder | built in the agent (ring, capture, alarm capture); timeline UI planned |
-| WP-29 | Diagnostics bundle | built in core/agent (redaction, preview, zip); UI planned |
+| WP-28 | Flight recorder | built: ring, capture, alarm capture and the timeline page |
+| WP-29 | Diagnostics bundle | built: redaction (IPv4 and IPv6), preview, zip, a redacted sockets file, the page and the OS save dialog |
 | WP-30 | Suite tie-ins (Spotter, Debrief, Pitcrew, Pitwall) | planned |
 | WP-31 | Session recording to CSV/Parquet with a built-in viewer | planned |
 | WP-33 | Right-click "search this file's hash on VirusTotal" (opens the browser only; nothing is uploaded) | planned |
