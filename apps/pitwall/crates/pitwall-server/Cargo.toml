@@ -9,8 +9,36 @@ rust-version.workspace = true
 authors = ["decryp7"]
 publish = false
 
+[lib]
+name = "pitwall_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pitwall-server"
+path = "src/main.rs"
+
 [dependencies]
 pitwall-core.workspace = true
+pitwall-loopback = { path = "../pitwall-loopback" }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+bytes = "1"
+flate2 = "1"
+futures-util = "0.3"
+getrandom.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sysinfo = { version = "0.37", default-features = false, features = ["system", "disk"] }
+tar = "0.4"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs", "io-util", "sync", "signal"] }
+toml.workspace = true
+zip = { version = "5", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs", "io-util", "sync", "signal"] }
 
 [lints]
 workspace = true

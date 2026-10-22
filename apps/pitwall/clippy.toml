@@ -1,5 +1,5 @@
 # Privacy (ADR 0001): the only outbound HTTP client is `pitwall_server::egress`, which downloads engines and models
-# the user asked for. Everything else (engine traffic, plugins) talks to 127.0.0.1 through `pitwall_server::loopback`.
+# the user asked for. Everything else (engine traffic) talks to 127.0.0.1 through `pitwall_server::loopback`.
 # `egress.rs` allows these lints with a comment; nothing else may.
 disallowed-methods = [
     { path = "reqwest::Client::new", reason = "outbound HTTP is egress::Egress only (ADR 0001)" },
