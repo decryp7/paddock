@@ -50,7 +50,6 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-29 | Diagnostics bundle | model in progress |
 | WP-30 | Suite tie-ins (Spotter, Debrief, Pitcrew, Pitwall) | planned |
 | WP-31 | Session recording to CSV/Parquet with a built-in viewer | planned |
-| WP-32 | Prometheus `/metrics` endpoint on the local API (loopback, authenticated like the app; ADR 0014) | planned |
 | WP-33 | Right-click "search this file's hash on VirusTotal" (opens the browser only; nothing is uploaded) | planned |
 | WP-34 | Startup manager filter: hide OS and signed entries | planned |
 | WP-35 | Network change events (Wi-Fi joins, VPN up/down, IP changes) on the timeline | planned |
@@ -376,13 +375,11 @@ Each is small and independent; all are core logic plus an adapter plus a card or
 - **Depends on.** WP-06, WP-26, WP-28, WP-13 (inventory). **Touches.** `dyno-core` redaction (shared with WP-09), agent export,
   UI dialog.
 
-## WP-31 to WP-36 (from competitive research)
+## WP-31 and WP-33 to WP-36 (from competitive research)
 
 - **WP-31 Session recording.** Record chosen metrics to CSV or Parquet (start/stop, bounded size), with a built-in viewer
   (chart + table, open an old file). Touches: agent recorder/export, UI viewer page. Acceptance: a 10-minute session round
   trips and charts; file size is bounded; Parquet opens in Debrief.
-- **WP-32 Prometheus endpoint.** `/metrics` on the optional local API (WP-16): 127.0.0.1 by default, token-authenticated,
-  text exposition format, stable metric names. Acceptance: `promtool check metrics` passes; off by default.
 - **WP-33 VirusTotal hash search.** Context menu on a process or file: compute the SHA-256 locally (once, cached), open the
   browser at the VirusTotal file page for that hash. Nothing is uploaded and the hash is shown before opening.
 - **WP-34 Startup filter.** Hide OS-owned and signed entries in the startup manager (a toggle, remembered), counts shown.
@@ -405,6 +402,8 @@ or other shared OS services must poll rarely or use change notifications.
 
 ## Later (after v1)
 <a id="after-v1"></a>
+
+- **Prometheus `/metrics` endpoint** on the local API (loopback, token-authenticated, text exposition format, off by default). Moved here by the user's decision: Dyno is a local tool, so it is not built now.
 
 Not part of v1; anything new goes here.
 
