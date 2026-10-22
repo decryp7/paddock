@@ -17,6 +17,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 - [API keys, permissions and limits](#api-keys-permissions-and-limits)
 - [Using Pitwall from your tools](#using-pitwall-from-your-tools)
 - [Choosing a model by capability, priority and provenance](#choosing-a-model-by-capability-priority-and-provenance)
+- [Model presets and aliases](#model-presets-and-aliases)
 - [Memory presets and idle release](#memory-presets-and-idle-release)
 - [Offline mode](#offline-mode)
 - [Packs: add an engine or a model list](#packs-add-an-engine-or-a-model-list)
@@ -288,9 +289,41 @@ level every 30 seconds so it never starves. An app cannot go above its permissio
 | `X-Pitwall-Model` | The model that answered. |
 | `X-Pitwall-Engine` | The engine that served it: `llama.cpp`, or the id of the engine pack. |
 | `X-Pitwall-Chosen-By` | `explicit` (named), `capabilities` (`auto:`) or `default`. |
+| `X-Pitwall-Alias` | Present when the `model` field named a preset: the preset's name (`X-Pitwall-Model` is the model behind it). |
 | `X-Pitwall-Cold-Start-Ms` | Present when the model had to be loaded first. |
 
 With no `model`, Pitwall uses the default model from Settings, else a loaded one, else the first chat model installed.
+
+## Model presets and aliases
+
+A preset gives an app a stable name and lets you decide what serves it. In **Models > Presets** press **New preset**:
+
+| Field | Meaning |
+|---|---|
+| Name apps send as the model | e.g. `debrief-explain`. Lowercase letters, digits and `-_.`, up to 48. It cannot be the id of an installed model, `auto` or `default`. |
+| Serves from | An installed model id, or a capability selection such as `auto:chat,fast` (the same words as above); with a selection Pitwall picks the best installed model for each request. |
+| Context, Temperature, Top-p, Max tokens | Defaults used when the request does not set them. Empty means the request (or the model) decides. |
+| System prompt | Added in front of the conversation only when the request has no system message of its own. |
+| Engine | llama.cpp, or an installed engine pack. |
+
+While you type, the editor asks the engine what the draft would serve ("Would serve qwen3-8b-instruct-q4_k_m") and shows
+anything that stops it being saved, in words. The list shows where each preset stands: *Ready*, *Model removed* (its model
+was deleted; edit the preset), *No model matches* (nothing installed has the capabilities) or *Shadowed by a model* (an
+installed model now has the same name, and requests for that name go to the model).
+
+Apps use the name like a model id, in any of the three APIs; it is also listed in `GET /v1/models` and `GET /api/tags`:
+
+```sh
+curl -s $PW/v1/chat/completions -H "Authorization: Bearer $PITWALL_KEY" -H 'Content-Type: application/json' \
+  -d '{"model":"debrief-explain","messages":[{"role":"user","content":"What does this error mean?"}]}' -i | grep -i '^x-pitwall'
+# x-pitwall-alias: debrief-explain
+# x-pitwall-model: qwen3-8b-instruct-q4_k_m
+```
+
+Values the app sends (temperature, top-p, max tokens, its own system message) always win over the preset's. Context and
+engine apply when the model is loaded for the request; a model that is already loaded keeps its context and engine until it
+is released. In **Requests**, a request made through a preset shows "via <name>" and, in the details, the preset asked for and
+the model it resolved to. Presets are stored in `presets.json` in the data folder; a damaged file is restored from its backup.
 
 ## Memory presets and idle release
 
@@ -429,6 +462,7 @@ recommended, and models that will not fit this machine are left out. Up to 500 m
 |---|---|
 | `settings.toml` (+ backup) | Settings; edit in the app |
 | `apps.json` (+ backup) | Apps and the hashes of their keys |
+| `presets.json` (+ backup) | Model presets and aliases |
 | `admin.key` | The secret Pitwall's own window uses; owner-only. Do not share it |
 | `discovery.json` | Written while the server runs: pid, port, base URL |
 | `models/<owner>/<repo>/` | Downloaded models |
@@ -448,6 +482,7 @@ The messages below are what Pitwall actually says.
 | 403 "requests from web pages on other sites are refused" | A web page tried to call Pitwall. By design. |
 | 404 "no models are installed. Open Models in Pitwall, search Hugging Face and download one." | Nothing to serve yet. |
 | 404 "there is no model named ... Installed: ..." | Use an id from `GET /v1/models`. |
+| 404 "the preset ... points to the model ..., which is no longer installed" (code `preset_target_unavailable`) | The preset's model was deleted. Edit the preset in Models > Presets. |
 | 404 "no installed model offers ...; download one in Pitwall > Models" | No installed model has the capabilities in `auto:...`. |
 | 400 "the model ... cannot read images. Choose a vision model (one downloaded with its mmproj file)." | Get the model's projector file too. |
 | 400 "... is not a capability (chat, vision, tools, json, embeddings, rerank), a context like 8k, or fast/quality/small" | A typo in `auto:...`. |

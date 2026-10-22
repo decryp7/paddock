@@ -139,6 +139,13 @@ Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR
   Capabilities `chat`, `vision`, `tools`, `json`, `embeddings`, `rerank`; a context such as `8k`; and a preference
   `fast`, `quality`, `small` or `balanced` (a loaded model first). The chosen model is reported in `X-Pitwall-Model` and
   `X-Pitwall-Chosen-By`. Works. "Fast" will use measured speeds once benchmark results are kept (see [Benchmarks](#benchmarks)).
+- **Model presets and aliases** ([ADR 0014](adr/0014-model-presets-and-aliases.md)): the user gives an app a stable name such as
+  `debrief-explain` and decides what serves it: an installed model or a capability selection (`auto:chat,fast`), with optional
+  context, temperature, top-p, max tokens, a system prompt and an engine. The alias is listed in `/v1/models` and
+  `/api/tags` and works as the `model` field in the OpenAI, Anthropic and Ollama APIs. Values in the request win over the
+  preset's; the system prompt is added only when the request has none; context and engine apply when the model is loaded.
+  Answers carry `X-Pitwall-Alias`; a removed target model answers 404 `preset_target_unavailable` with the preset's name. A
+  real model's name always wins over a preset of the same name. Works.
 - **Models and jobs**: `GET /x/v1/models` (capabilities, maximum context, loaded), `GET /x/v1/jobs` (the queue),
   `DELETE /x/v1/jobs/{id}` (cancel; an app can cancel only its own). Works.
 - **Provenance on every answer**: `X-Pitwall-Model`, `X-Pitwall-Engine`, `X-Pitwall-Chosen-By` and, when the model had to be

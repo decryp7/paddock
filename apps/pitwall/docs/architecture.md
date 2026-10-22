@@ -137,9 +137,12 @@ real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.m
    request is not from a browser.
 2. **Parse once, at the edge.** `api::openai`, `api::anthropic` or `api::ollama` turn the body into the neutral
    `ChatRequest`. A malformed body is answered in that family's error shape.
-3. **Resolve the model** (`Serving::resolve`). A named model, `default`, or `auto:vision,8k,fast`, which the core's
-   `select::choose` evaluates against the installed models. The reply says how it was chosen (`explicit`,
-   `capabilities`, `default`).
+3. **Resolve the model** (`Serving::resolve`). A named model, a preset (alias, `pitwall_core::presets`, ADR 0014; a real
+   model's name wins over an alias), `default`, or `auto:vision,8k,fast`, which the core's `select::choose` evaluates
+   against the installed models; a preset with a capability target uses the same selection. The reply says how it was
+   chosen (`explicit`, `capabilities`, `default`) and, for a preset, `X-Pitwall-Alias`. `presets::apply` then fills the
+   request's missing sampling values and, when it has no system message, the preset's system prompt; the preset's context and
+   engine go to the load (`Serving::ensure_for`).
 4. **Authorize** (`AppPermissions::authorize`, the per-minute rate window, the daily token budget). Denials are 403
    or 429 with a message that says what to change.
 5. **Queue** (`Serving::acquire`). The job enters the scheduler with its priority (the `X-Pitwall-Priority` header,
@@ -236,6 +239,7 @@ Everything is in one per-user data folder (override with `PITWALL_HOME`): `%APPD
 | `partial/` | Engine archives being downloaded | |
 | `packs/` | The user's engine and model packs | At most 64 files of 256 KB |
 | `metrics.json` | Time series | Versioned, bounded retention (default 30 days) |
+| `presets.json` | Model presets and aliases (`pitwall_core::presets`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; one damaged entry is skipped, at most 64 presets |
 | `usage.json` | Per-app usage over time (`pitwall_core::usage`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; hourly buckets 7 days, daily buckets 90 days, at most 256 apps per bucket (the rest count as `other`), saved every 30 s |
 | `logs/` | Service log | Never prompts or answers by default |
 
