@@ -200,7 +200,7 @@ fn history_comes_back_in_the_shape_the_app_expects() {
 fn unbuilt_features_say_so_and_unknown_things_are_not_found() {
     let h = Harness::start();
     let peer = h.client();
-    let e = ask(&peer, Request::Tuning).unwrap_err();
+    let e = ask(&peer, Request::WeeklyReport).unwrap_err();
     assert!(e.contains("not built yet"), "{e}");
     assert!(matches!(ask(&peer, Request::Lockers { path: "relative/path".into() }), Err(m) if m.contains("full path")));
     assert!(ask(

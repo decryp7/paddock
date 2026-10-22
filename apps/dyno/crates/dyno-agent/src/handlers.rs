@@ -283,7 +283,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::Quarantine
         | Request::RestoreQuarantine { .. } => Err(not_built("Cleanup")),
         Request::DiskUsage { .. } => Err(not_built("The disk space map")),
-        Request::Tuning | Request::ApplyTuning { .. } | Request::RevertTuning { .. } => Err(not_built("Tuning")),
+        Request::Tuning => crate::tuning::list(shared).map(Reply::Tuning),
+        Request::ApplyTuning { id } => crate::tuning::apply(shared, &id).map(Reply::Activity),
+        Request::RevertTuning { id, force } => crate::tuning::revert(shared, &id, force).map(Reply::Activity),
         Request::WeeklyReport => Err(not_built("The weekly report")),
     }
 }
@@ -499,7 +501,8 @@ fn undo(shared: &Arc<Shared>, id: &str) -> Result<ActivityEntry, AgentError> {
                 .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That startup item no longer exists."))?;
             startup.set_state(e, *previous)?;
         }
-        UndoRecord::None | UndoRecord::Tuning { .. } | UndoRecord::Quarantine { .. } => return Err(bad("That cannot be undone here yet.")),
+        UndoRecord::Tuning { .. } => crate::tuning::undo_record(shared, &record, false)?,
+        UndoRecord::None | UndoRecord::Quarantine { .. } => return Err(bad("That cannot be undone here yet.")),
     }
     let core = lock(&shared.core);
     core.store.mark_undone(id).map_err(internal)?;
@@ -647,7 +650,7 @@ fn anomalies(shared: &Shared) -> Vec<dyno_core::anomaly::Anomaly> {
     out
 }
 
-fn facts(shared: &Shared) -> SystemFacts {
+pub(crate) fn facts(shared: &Shared) -> SystemFacts {
     {
         let core = lock(&shared.core);
         if let Some((at, f)) = &core.facts {
@@ -663,6 +666,7 @@ fn facts(shared: &Shared) -> SystemFacts {
 
 fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError> {
     let facts = facts(shared);
+    let tuning = crate::tuning::plans(shared);
     let startup = lock(&shared.ports.startup).list().unwrap_or_default();
     let anomalies = anomalies(shared);
     let core = lock(&shared.core);
@@ -690,7 +694,7 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
         startup: &startup,
         anomalies: &anomalies,
         crashes_7d: 0,
-        tuning: &[],
+        tuning: &tuning,
     }))
 }
 

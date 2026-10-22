@@ -172,6 +172,8 @@ pub enum Request {
     RevertTuning {
         /// Its id.
         id: String,
+        /// Put the previous setting back even though something else changed it since Dyno applied it.
+        force: bool,
     },
     /// Startup entries.
     StartupEntries,
