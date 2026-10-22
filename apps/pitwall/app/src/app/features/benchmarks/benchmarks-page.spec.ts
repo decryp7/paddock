@@ -35,7 +35,7 @@ describe('BenchmarksPage', () => {
     const option = chart.options.at(-1)!.option as any;
     expect(option.series[0].data).toHaveLength(5);
     expect(option.yAxis[0].data.at(-1)).toContain('Qwen2.5 Coder 1.5B');
-    expect(el.querySelector('pw-echart')!.getAttribute('style')).toContain('264px');
+    expect(el.querySelector('pw-echart')!.getAttribute('style')).toContain('282px');
   });
 
   it('shows empty states when nothing was measured and models say never run', async () => {
@@ -70,13 +70,32 @@ describe('BenchmarksPage', () => {
     run.click();
     fixture.detectChanges();
     expect(run.disabled).toBe(true);
-    expect(run.textContent).toContain('Running');
+    // While it runs the icon stays visible with a spinner; "Run all" waits too.
+    expect(run.classList.contains('on')).toBe(true);
+    expect(run.querySelector('.spin')).not.toBeNull();
+    expect(button(el, 'Run all')!.disabled).toBe(true);
     await wait(60);
     await settle(fixture);
     expect(run.disabled).toBe(false);
-    expect(run.textContent).toContain('Run');
+    expect(run.classList.contains('on')).toBe(false);
     expect(el.querySelectorAll('tbody tr')).toHaveLength(6);
     expect(el.querySelector('tbody tr')!.textContent).toContain('Qwen3 8B Instruct');
+  });
+
+  it('has one primary Run all, calm per-model icons, units in the headers and no repeated build chips', async () => {
+    const { fixture, el } = await render(BenchmarksPage, mock({ latencyMs: 1 }));
+    await wait(30);
+    await settle(fixture);
+    expect(Array.from(el.querySelectorAll('thead th')).map((h) => h.textContent!.trim())).toEqual(['Model', 'Build', 'Generation tok/s', 'Prompt tok/s', 'TTFT ms', 'When']);
+    expect(el.querySelector('tbody .tag')).toBeNull();
+    expect(el.querySelectorAll('.page-head .btn.primary').length).toBe(1);
+    const runs = Array.from(el.querySelectorAll('li button.run'));
+    expect(runs.length).toBeGreaterThan(1);
+    expect(runs.every((b) => b.textContent!.trim() === '')).toBe(true);
+    button(el, 'Run all')!.click();
+    await wait(80);
+    await settle(fixture);
+    expect(el.querySelectorAll('tbody tr').length).toBeGreaterThan(5);
   });
 
   it('retries loading from the error state', async () => {

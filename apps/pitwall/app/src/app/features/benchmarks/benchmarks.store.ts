@@ -50,6 +50,16 @@ export const BenchmarksStore = signalStore(
       return modelId in store.running();
     },
 
+    /** Whether any run is in flight (Run all waits for it). */
+    anyRunning(): boolean {
+      return Object.keys(store.running()).length > 0;
+    },
+
+    /** Runs every chat model one after the other (each run loads its model, so never in parallel); a run in flight is skipped. */
+    async runAll(): Promise<void> {
+      for (const m of store.runnable()) await this.run(m.id);
+    },
+
     async run(modelId: string): Promise<void> {
       if (modelId in store.running()) return;
       patchState(store, { running: { ...store.running(), [modelId]: true } });

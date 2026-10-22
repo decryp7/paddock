@@ -22,6 +22,9 @@ import { BenchmarksStore } from './benchmarks.store';
           <h1>Benchmarks</h1>
           <p class="sub">Measured on this machine with a 4k-token prompt. Each run loads the model if needed.</p>
         </div>
+        <div class="actions">
+          <button type="button" class="btn primary" [disabled]="store.runnable().length === 0 || store.anyRunning()" (click)="store.runAll()"><mat-icon svgIcon="pw:play" aria-hidden="true" />Run all</button>
+        </div>
       </header>
 
       <div class="grid">
@@ -47,11 +50,11 @@ import { BenchmarksStore } from './benchmarks.store';
                 @if (last) {
                   <span class="score num" [matTooltip]="'Generation on ' + last.build"><b>{{ rateText(last.genTps) }}</b> tok/s</span>
                 }
-                <button type="button" class="btn sm" [attr.aria-label]="'Run benchmark for ' + m.name" [disabled]="store.isRunning(m.id)" (click)="store.run(m.id)">
+                <button type="button" class="btn ghost icon sm run" [class.on]="store.isRunning(m.id)" [attr.aria-label]="'Run benchmark for ' + m.name" [matTooltip]="store.isRunning(m.id) ? 'Running' : 'Run'" [disabled]="store.isRunning(m.id)" (click)="store.run(m.id)">
                   @if (store.isRunning(m.id)) {
-                    <span class="spin" aria-hidden="true"></span>Running
+                    <span class="spin" aria-hidden="true"></span>
                   } @else {
-                    <mat-icon svgIcon="pw:play" aria-hidden="true" />Run
+                    <mat-icon svgIcon="pw:play" aria-hidden="true" />
                   }
                 </button>
               </li>
@@ -78,10 +81,12 @@ import { BenchmarksStore } from './benchmarks.store';
               <tr>
                 <th scope="col">Model</th>
                 <th scope="col">Build</th>
-                <th scope="col" class="right">Generation</th>
-                <th scope="col" class="right">Prompt</th>
-                <th scope="col" class="right">TTFT</th>
-                <th scope="col" class="right">Context</th>
+                <th scope="col" class="right">Generation tok/s</th>
+                <th scope="col" class="right">Prompt tok/s</th>
+                <th scope="col" class="right">TTFT ms</th>
+                @if (contextVaries()) {
+                  <th scope="col" class="right">Context</th>
+                }
                 <th scope="col" class="right">When</th>
               </tr>
             </thead>
@@ -89,12 +94,14 @@ import { BenchmarksStore } from './benchmarks.store';
               @for (r of store.sorted(); track $index) {
                 <tr>
                   <td class="strong">{{ store.names().get(r.modelId) ?? r.modelId }}</td>
-                  <td><span class="tag">{{ r.build }}</span></td>
-                  <td class="right num"><b>{{ rateText(r.genTps) }}</b> <span class="faint">tok/s</span></td>
-                  <td class="right num">{{ intText(r.promptTps) }} <span class="faint">tok/s</span></td>
-                  <td class="right num">{{ intText(r.ttftMs) }} <span class="faint">ms</span></td>
-                  <td class="right num">{{ intText(r.contextTokens) }}</td>
-                  <td class="right faint">{{ day(r.at, true) }}</td>
+                  <td class="build" [matTooltip]="r.build">{{ r.build }}</td>
+                  <td class="right num"><b>{{ rateText(r.genTps) }}</b></td>
+                  <td class="right num">{{ intText(r.promptTps) }}</td>
+                  <td class="right num">{{ intText(r.ttftMs) }}</td>
+                  @if (contextVaries()) {
+                    <td class="right num">{{ intText(r.contextTokens) }}</td>
+                  }
+                  <td class="right when">{{ day(r.at, true) }}</td>
                 </tr>
               }
             </tbody>
@@ -143,12 +150,12 @@ import { BenchmarksStore } from './benchmarks.store';
       text-overflow: ellipsis;
     }
     .meta {
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
     .score {
       font-size: var(--fs-sm);
-      color: var(--text-3);
+      color: var(--text-2);
       white-space: nowrap;
       b {
         font-size: var(--fs-md);
@@ -156,8 +163,22 @@ import { BenchmarksStore } from './benchmarks.store';
         color: var(--text);
       }
     }
-    .btn.sm {
-      min-width: 76px;
+    /* Run is a quiet icon on hover or focus (while it runs it stays, with a spinner); "Run all" is the page's one primary. */
+    .run {
+      opacity: 0;
+      &.on {
+        opacity: 1;
+      }
+    }
+    li:hover .run,
+    li:focus-within .run,
+    .run:focus-visible {
+      opacity: 1;
+    }
+    @media (hover: none) {
+      .run {
+        opacity: 1;
+      }
     }
     .spin {
       width: 11px;
@@ -189,8 +210,10 @@ import { BenchmarksStore } from './benchmarks.store';
     .table b {
       font-weight: var(--fw-semibold);
     }
-    .table td > .faint {
-      margin-left: 3px;
+    .build,
+    .when {
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
     @media (max-width: 1100px) {
       .grid {
@@ -205,9 +228,11 @@ export class BenchmarksPage implements OnInit {
   protected readonly rateText = rate;
   protected readonly intText = int;
   protected readonly day = date;
+  /** The context column only exists when runs differ in it: every run uses the same 4k prompt, so it is noise. */
+  protected readonly contextVaries = computed(() => new Set(this.store.results().map((r) => r.contextTokens)).size > 1);
   protected readonly rows = computed(() => latestPerRun(this.store.results(), (id) => this.store.names().get(id) ?? id));
   protected readonly option = computed(() => benchmarkChart(this.rows(), this.theme.tokens()));
-  protected readonly chartHeight = computed(() => `${Math.max(180, 64 + this.rows().length * 40)}px`);
+  protected readonly chartHeight = computed(() => `${Math.max(200, 82 + this.rows().length * 40)}px`);
 
   ngOnInit(): void {
     void this.store.load();

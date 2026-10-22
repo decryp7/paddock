@@ -81,12 +81,12 @@ export function benchmarkChart(rows: BenchRow[], t: ThemeTokens): EChartsCoreOpt
       },
     },
     title: [
-      { text: 'Generation · tok/s', left: LABEL_W, top: 0, textStyle: { fontSize: 11, fontWeight: 500, color: t.text2 } },
-      { text: 'Time to first token · ms', left: '58%', top: 0, textStyle: { fontSize: 11, fontWeight: 500, color: t.text2 } },
+      { text: 'Generation, tok/s', subtext: 'higher is better', left: LABEL_W, top: 0, itemGap: 2, textStyle: { fontSize: 11, fontWeight: 500, color: t.text2 }, subtextStyle: { fontSize: 11, color: t.text3 } },
+      { text: 'Time to first token, ms', subtext: 'lower is better', left: '58%', top: 0, itemGap: 2, textStyle: { fontSize: 11, fontWeight: 500, color: t.text2 }, subtextStyle: { fontSize: 11, color: t.text3 } },
     ],
     grid: [
-      { left: LABEL_W, right: '48%', top: 26, bottom: 22 },
-      { left: '58%', right: 40, top: 26, bottom: 22 },
+      { left: LABEL_W, right: '48%', top: 44, bottom: 22 },
+      { left: '58%', right: 40, top: 44, bottom: 22 },
     ],
     xAxis: [value(0), value(1)],
     yAxis: [category(0, true), category(1, false)],
