@@ -123,7 +123,7 @@ All in [roadmap.md](roadmap.md): Issues with statistics, new and unusual process
 keep-for times, benchmarks on click, a performance-counter browser, the tuning catalogue, extras (what changed, why won't it
 sleep, boot analysis, network and energy per app, inventory report, GPU per process, large and duplicate file finder,
 maintenance windows), backup health checks, declarative packs, a local web API, "Explain this" via Pitwall, a multi-PC LAN view
-after v1.
+later.
 
 ## Platforms
 

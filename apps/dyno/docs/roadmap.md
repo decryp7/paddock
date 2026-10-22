@@ -10,10 +10,10 @@ Decisions already taken for these packages (2026-10-22): three-tier extensibilit
 SQLite ([0008](adr/0008-storage-sqlite-and-retention.md)), observe-only by default with a helper installed on first admin
 use ([0006](adr/0006-privileged-helper-and-observe-only.md)), Linux a first-class platform next to Windows and macOS.
 
-## Scope: v1 (frozen) and After v1
+## Scope: v1 (planned) and Later
 
-**v1 is frozen**: it is every work package in the "v1" table below, nothing more and nothing less. There is no cut-down
-release; v1 ships when all of them are done. New ideas go to [After v1](#after-v1), never into v1.
+**v1 is planned, not frozen**: it is every work package in the "v1" table below, and the list may still grow by the user's
+decision. There is no cut-down release; v1 ships when all of them are done. Other new ideas go to [Later](#after-v1).
 
 Status words are honest: **built** (code and tests committed), **in progress** (another agent is working on it; not all of it
 is committed, re-check `git log`), **planned** (nothing in the code).
@@ -377,7 +377,8 @@ Each is small and independent; all are core logic plus an adapter plus a card or
   user's click or opt-in.
 - **Acceptance.** Each integration declares what it reads; none writes; each degrades to nothing when the other app is absent.
 
-## After v1
+## Later (after v1)
+<a id="after-v1"></a>
 
 Not part of v1; anything new goes here.
 
