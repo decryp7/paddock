@@ -251,6 +251,10 @@ pub struct NetworkSnapshot {
     pub unknown_owners: u32,
     /// Why the table may be incomplete, when the OS refused part of the read.
     pub note: Option<String>,
+    /// Bytes per second per program, where the OS gives them cheaply (macOS); empty otherwise.
+    pub traffic: Vec<crate::network_traffic::TrafficRow>,
+    /// Why `traffic` is empty (one plain sentence), or `None` when it is available.
+    pub traffic_note: Option<String>,
 }
 
 /// Builds the view: names owners from `processes`, applies `query`, sorts (listeners by port, connections by program) and
@@ -340,6 +344,8 @@ pub fn build(at: Timestamp, rows: &[SocketRow], processes: &[ProcessSample], que
         truncated: u32::try_from(truncated).unwrap_or(u32::MAX),
         unknown_owners: unknown,
         note: None,
+        traffic: Vec::new(),
+        traffic_note: None,
     }
 }
 

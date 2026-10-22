@@ -64,6 +64,16 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
             core.recorder.snapshot(CaptureReason::Manual, t),
         )
     };
+    let network = shared
+        .network
+        .snapshot(
+            shared,
+            dyno_core::network::NetworkQuery {
+                show_loopback: true,
+                ..Default::default()
+            },
+        )
+        .ok();
     let mut add = |path: &str, what: &str, text: String| b.add(path, what, &text).map_err(|e| e.to_string());
     add("README.txt", "What this is", README.into())?;
     add(
@@ -75,6 +85,13 @@ pub fn collect(shared: &Shared) -> Result<DiagnosticsBundle, String> {
     add("alarms/open.json", "Alarms", json(&alarms))?;
     add("alarms/stats.json", "Alarm statistics", json(&stats))?;
     add("alarms/history.json", "Recent alarm changes", json(&events))?;
+    if let Some(n) = network {
+        add(
+            "network/sockets.json",
+            "Listening ports and connections (addresses redacted)",
+            json(&n),
+        )?;
+    }
     add("activity.json", "What Dyno and you changed recently", json(&activity))?;
     add("alerts.json", "Recent alerts", json(&alerts))?;
     if let Some(r) = recorder {

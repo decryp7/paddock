@@ -162,6 +162,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         }
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
         Request::Network { query } => shared.network.snapshot(shared, query).map(|s| Reply::Network(Box::new(s))),
+        Request::ResolveHosts { addresses } => shared.network.resolve(&addresses).map(Reply::HostNames),
         Request::LookupIp { ip, template } => {
             let settings = match template {
                 Some(t) => dyno_core::ip_lookup::IpLookupSettings {

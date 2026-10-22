@@ -42,6 +42,20 @@ pub trait NetworkSockets: Send + Sync {
     fn sockets(&self) -> Result<Vec<crate::network::SocketRow>, PlatformError>;
 }
 
+/// Reverse DNS through the OS resolver (so the user's resolver and hosts file apply). Blocking: the agent calls it off
+/// the request thread with a deadline. Observe-only, and only for addresses the user asked about.
+pub trait ReverseDns: Send + Sync {
+    /// The name of `ip`, `Ok(None)` when it has none, an error when the resolver failed.
+    fn lookup(&self, ip: std::net::IpAddr) -> Result<Option<String>, PlatformError>;
+}
+
+/// Cumulative network bytes per process, where the OS makes that cheap (macOS `nettop`). Other systems answer
+/// `PlatformError::Unsupported` with the reason.
+pub trait ProcessTraffic: Send + Sync {
+    /// One read of every process's counters.
+    fn counters(&self) -> Result<Vec<crate::network_traffic::TrafficCounter>, PlatformError>;
+}
+
 /// System-wide sensors. Called once per tick from the sampling thread.
 pub trait SystemSensors: Send {
     /// Measures everything at `now`. Rates (CPU, disk, network) cover the time since the previous call.

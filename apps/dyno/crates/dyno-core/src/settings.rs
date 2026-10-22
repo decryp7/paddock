@@ -167,6 +167,8 @@ pub struct Settings {
     pub flight_recorder: bool,
     /// "Look up this IP": the https template the browser is sent to (Dyno never fetches).
     pub ip_lookup: crate::ip_lookup::IpLookupSettings,
+    /// Alarms for new exposed listeners and new remote hosts (both off by default).
+    pub network_alerts: crate::network_alerts::NetworkAlerts,
 }
 
 impl Default for Settings {
@@ -186,6 +188,7 @@ impl Default for Settings {
             alarms: Default::default(),
             flight_recorder: true,
             ip_lookup: Default::default(),
+            network_alerts: Default::default(),
         }
     }
 }

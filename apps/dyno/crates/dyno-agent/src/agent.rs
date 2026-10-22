@@ -306,7 +306,11 @@ impl Shared {
             subs: Mutex::new(Vec::new()),
             reveal,
             bench,
-            network: crate::network::NetCentre::new(Box::new(dyno_platform::network::OsSockets)),
+            network: crate::network::NetCentre::new(
+                Box::new(dyno_platform::network::OsSockets),
+                Arc::new(dyno_platform::network::OsReverseDns),
+                Box::new(dyno_platform::network::OsTraffic),
+            ),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

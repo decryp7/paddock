@@ -1,19 +1,22 @@
 import { NgTemplateOutlet } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { ListOrReason, ProcessDetails } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { formatAffinity, formatBytes, formatCount, formatPercent, formatRelative } from '../../shared/format';
+import { formatAffinity, formatBytes, formatRate, formatCount, formatPercent, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { PRIORITY_LABEL, signatureText } from '../../shared/labels';
 import { LiveStore } from '../../state/live.store';
+import { NetworkStore, type ProcessNetwork } from '../../state/network.store';
 import { ProcessesStore } from '../../state/processes.store';
+import { toCommandError } from '../../core/command-error';
 
 type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
 
 /** The side panel of one process: facts, parent chain and the lists the OS may or may not let Dyno read (with the reason when not). */
 @Component({
   selector: 'dy-process-details',
-  imports: [Icon, NgTemplateOutlet],
+  imports: [Icon, NgTemplateOutlet, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <aside class="panel" aria-label="Process details">
@@ -41,7 +44,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
           }
           <div class="tabs" role="tablist" aria-label="Details">
             @for (t of tabs; track t.id) {
-              <button type="button" role="tab" [attr.aria-selected]="tab() === t.id" (click)="tab.set(t.id)">{{ t.label }}</button>
+              <button type="button" role="tab" [attr.aria-selected]="tab() === t.id" (click)="pickTab(t.id)">{{ t.label }}</button>
             }
           </div>
           <div class="content" role="tabpanel">
@@ -88,18 +91,36 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                 <ng-container *ngTemplateOutlet="list; context: { l: x.openFiles, empty: 'No open files.' }" />
               }
               @case ('connections') {
-                @if (conns(x.connections); as c) {
-                  @if (c.reason) {
-                    <p class="na">{{ c.reason }}</p>
-                  } @else if (c.items.length === 0) {
-                    <p class="faint">No network connections.</p>
-                  } @else {
+                @if (netError(); as e) {
+                  <p class="na">{{ e }}</p>
+                } @else if (net(); as n) {
+                  @if (n.traffic; as t) {
+                    <p class="traffic num">↓ {{ rate(t.rxBps) }} · ↑ {{ rate(t.txBps) }}</p>
+                  } @else if (n.note) {
+                    <p class="faint">{{ n.note }}</p>
+                  }
+                  @if (n.listeners.length === 0 && n.connections.length === 0) {
+                    <p class="faint">Nothing is listening or connected.</p>
+                  }
+                  @if (n.listeners.length) {
+                    <h3>Listening</h3>
                     <ul class="plain dy-selectable">
-                      @for (n of c.items; track $index) {
-                        <li class="mono"><b>{{ n.protocol }}</b> {{ n.local }} → {{ n.remote }} <span class="faint">{{ n.state }}</span></li>
+                      @for (l of n.listeners; track $index) {
+                        <li class="mono"><b>{{ l.proto }}</b> {{ l.local }}:{{ l.port }} <span class="faint">{{ l.exposure === 'allInterfaces' ? 'exposed' : l.exposure === 'loopback' ? 'this PC only' : 'one interface' }}</span></li>
                       }
                     </ul>
                   }
+                  @if (n.connections.length) {
+                    <h3>Connections</h3>
+                    <ul class="plain dy-selectable">
+                      @for (c of n.connections; track $index) {
+                        <li class="mono"><b>{{ c.proto }}</b> {{ c.remote }}:{{ c.remotePort }} <span class="faint">{{ c.stateLabel }}</span></li>
+                      }
+                    </ul>
+                  }
+                  <a class="btn link" routerLink="/network">Open the Network page</a>
+                } @else {
+                  <p class="faint">Reading the network…</p>
                 }
               }
               @case ('modules') {
@@ -157,6 +178,8 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
     .err .text { flex: 1; display: grid; }
     .err .text span { color: var(--text-2); font-size: var(--fs-sm); }
     .more { margin-top: var(--sp-2); }
+    h3 { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-sm); color: var(--text-3); font-weight: var(--fw-medium); }
+    .traffic { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
     .skeletons { display: grid; gap: var(--sp-3); padding: var(--sp-4); }
   `,
 })
@@ -165,6 +188,10 @@ export class ProcessDetailsPanel {
   private readonly live = inject(LiveStore);
   protected readonly tab = signal<Tab>('overview');
   protected readonly cmdOpen = signal(false);
+  private readonly network = inject(NetworkStore);
+  protected readonly net = signal<ProcessNetwork | null>(null);
+  protected readonly netError = signal<string | null>(null);
+  protected readonly rate = formatRate;
   protected readonly tabs: { id: Tab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'parents', label: 'Parents' },
@@ -188,8 +215,22 @@ export class ProcessDetailsPanel {
   protected strings(l: ListOrReason<string>) {
     return 'unavailable' in l ? { reason: l.unavailable, items: [] as string[], truncated: false } : { reason: null, items: l.items.items, truncated: l.items.truncated };
   }
-  protected conns(l: ListOrReason<import('../../core/api.types').Connection>) {
-    return 'unavailable' in l ? { reason: l.unavailable, items: [] } : { reason: null, items: l.items.items };
+
+  protected pickTab(id: Tab): void {
+    this.tab.set(id);
+    if (id === 'connections') void this.loadNetwork();
+  }
+
+  private async loadNetwork(): Promise<void> {
+    const pid = this.d()?.process.pid;
+    if (pid === undefined) return;
+    this.net.set(null);
+    this.netError.set(null);
+    try {
+      this.net.set(await this.network.forProcess(pid));
+    } catch (e) {
+      this.netError.set(toCommandError(e).message);
+    }
   }
 
   protected copyCommand(line: string[]): void {

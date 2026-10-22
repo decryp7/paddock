@@ -4,8 +4,11 @@
 //! says so; Dyno never asks for root for this.
 
 use dyno_core::network::{Proto, SocketRow, SocketState};
-use dyno_core::ports::{NetworkSockets, PlatformError};
+use dyno_core::network_traffic::TrafficCounter;
+use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
 use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState};
+use std::net::IpAddr;
+use std::time::Duration;
 
 /// The real sockets of this machine.
 #[derive(Debug, Default, Clone, Copy)]
@@ -63,6 +66,47 @@ impl NetworkSockets for OsSockets {
     }
 }
 
+/// Reverse DNS through the OS resolver (`getnameinfo`): the user's resolver, search domains and hosts file apply.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct OsReverseDns;
+
+impl ReverseDns for OsReverseDns {
+    fn lookup(&self, ip: IpAddr) -> Result<Option<String>, PlatformError> {
+        match dns_lookup::lookup_addr(&ip) {
+            // The resolver answers the address itself when there is no name.
+            Ok(name) if name == ip.to_string() => Ok(None),
+            Ok(name) => Ok(dyno_core::network_names::clean_name(&name)),
+            Err(e) => Err(PlatformError::Failed(format!("The resolver could not look up {ip} ({e})."))),
+        }
+    }
+}
+
+/// How long `nettop` may take for one read (it takes about five seconds even on an idle Mac).
+const NETTOP_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Per-process traffic counters. On macOS this reads `nettop -P -L 1` (cumulative bytes per process, no elevation
+/// needed); Windows and Linux have no equally cheap per-process source, so they say so instead of guessing.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct OsTraffic;
+
+impl ProcessTraffic for OsTraffic {
+    #[cfg(target_os = "macos")]
+    fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
+        let mut cmd = crate::process::command("/usr/bin/nettop");
+        cmd.args(["-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out"]);
+        let text = crate::process::output_text(cmd, NETTOP_TIMEOUT)?;
+        Ok(dyno_core::network_traffic::parse_nettop(&text))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
+        let _ = NETTOP_TIMEOUT;
+        Err(PlatformError::Unsupported(
+            "Traffic per program is only available on macOS for now; Windows and Linux need the helper (planned).".into(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +159,26 @@ mod tests {
             TcpState::Unknown,
         ] {
             let _ = state(s);
+        }
+    }
+
+    #[test]
+    fn the_resolver_answers_for_localhost_without_failing() {
+        // Whatever the machine's hosts file says, a lookup of the loopback address must not error out or hang.
+        let r = OsReverseDns.lookup(IpAddr::from([127, 0, 0, 1]));
+        assert!(r.is_ok(), "{r:?}");
+    }
+
+    #[test]
+    fn traffic_reads_this_machine_on_macos_and_says_why_elsewhere() {
+        let r = OsTraffic.counters();
+        if cfg!(target_os = "macos") {
+            // nettop is slow on a loaded machine; a timeout is an honest answer, an empty list is not.
+            if let Ok(c) = r {
+                assert!(!c.is_empty());
+            }
+        } else {
+            assert!(matches!(r, Err(PlatformError::Unsupported(m)) if m.contains("macOS")));
         }
     }
 }

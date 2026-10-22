@@ -17,6 +17,7 @@ plist = "1"
 netstat2 = "0.11"
 starship-battery = "0.12"
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk", "network", "component", "user"] }
+dns-lookup = "4.0.2"
 
 [target.'cfg(windows)'.dependencies]
 wmi = { version = "0.18", default-features = false }

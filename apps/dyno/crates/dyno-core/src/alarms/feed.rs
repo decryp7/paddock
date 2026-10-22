@@ -23,6 +23,8 @@ pub enum Source {
     Taming,
     /// A cleanup that ran or found something.
     Cleanup,
+    /// A network event: a new exposed listener or a new remote host.
+    Network,
     /// Anything else (plugins).
     Custom,
 }
@@ -35,6 +37,7 @@ impl Source {
             Source::Threshold => "threshold",
             Source::Taming => "taming",
             Source::Cleanup => "cleanup",
+            Source::Network => "network",
             Source::Custom => "custom",
         }
     }

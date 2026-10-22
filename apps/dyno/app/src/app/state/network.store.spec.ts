@@ -61,4 +61,41 @@ describe('NetworkStore', () => {
     await store.lookup('8.8.8.8');
     expect(mock.opened).toEqual(['https://ipinfo.io/8.8.8.8']);
   });
+
+  it('looks up host names only after the toggle is turned on, only for public peers, and asks once per address', async () => {
+    const { store, mock } = setup();
+    const spy = vi.spyOn(mock, 'resolveHosts');
+    await store.load();
+    expect(spy).not.toHaveBeenCalled();
+    await store.setResolveNames(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const asked = spy.mock.calls[0]![0];
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked).not.toContain('10.0.0.8');
+    expect(store.names()['142.250.74.46']).toBe('ams15s48-in-f14.1e100.net');
+    expect(store.names()['151.101.129.91']).toBeTruthy();
+    await store.load();
+    expect(spy).toHaveBeenCalledTimes(1);
+    await store.resolveOne('142.250.74.46');
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed name lookup is quiet and leaves the table alone', async () => {
+    const { store, mock } = setup();
+    vi.spyOn(mock, 'resolveHosts').mockRejectedValue(new Error('down'));
+    await store.load();
+    await store.setResolveNames(true);
+    expect(store.names()).toEqual({});
+    expect(store.snapshot()).not.toBeNull();
+  });
+
+  it('reports what one program has open, with its traffic, without touching the page filters', async () => {
+    const { store } = setup();
+    const before = store.query();
+    const n = await store.forProcess(905);
+    expect(n.connections.length).toBe(3);
+    expect(n.traffic?.name).toBe('Google Chrome');
+    expect((await store.forProcess(4120)).listeners.length).toBeGreaterThan(0);
+    expect(store.query()).toEqual(before);
+  });
 });

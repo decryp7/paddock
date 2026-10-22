@@ -242,6 +242,37 @@ fn replace_ipv4(text: &str) -> (String, u32) {
     (out, count)
 }
 
+/// Replaces every IPv6 address (a run of hex digits, colons and dots that parses as one) with `<ip>`. Times
+/// (`12:30:45`) and MAC addresses do not parse as IPv6 and are left alone.
+fn replace_ipv6(text: &str) -> (String, u32) {
+    let is_part = |c: char| c.is_ascii_hexdigit() || c == ':' || c == '.';
+    let mut out = String::with_capacity(text.len());
+    let (mut count, mut rest) = (0, text);
+    while !rest.is_empty() {
+        let start = rest.find(is_part).unwrap_or(rest.len());
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        if rest.is_empty() {
+            break;
+        }
+        let end = rest.find(|c: char| !is_part(c)).unwrap_or(rest.len());
+        let run = &rest[..end];
+        // A trailing colon or dot belongs to the sentence, not the address.
+        let body = run.trim_end_matches([':', '.']);
+        let tail = &run[body.len()..];
+        let word_before = out.chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_');
+        if !word_before && body.matches(':').count() >= 2 && body.parse::<std::net::Ipv6Addr>().is_ok() {
+            out.push_str("<ip>");
+            count += 1;
+        } else {
+            out.push_str(body);
+        }
+        out.push_str(tail);
+        rest = &rest[end..];
+    }
+    (out, count)
+}
+
 impl Redactor {
     /// A redactor for this machine: the user names, home folders and machine names to remove. Empty and one-letter
     /// entries are ignored.
@@ -289,6 +320,9 @@ impl Redactor {
         s = t;
         c.emails += n;
         let (t, n) = replace_ipv4(&s);
+        s = t;
+        c.ip_addresses += n;
+        let (t, n) = replace_ipv6(&s);
         s = t;
         c.ip_addresses += n;
         (s, c)
@@ -679,5 +713,19 @@ mod tests {
     #[test]
     fn entry_names() {
         assert!(valid_entry_name("a/b-c_d.json") && !valid_entry_name("a\\b") && !valid_entry_name("./a") && !valid_entry_name("a/ b"));
+    }
+
+    #[test]
+    fn ipv6_addresses_are_redacted_but_times_and_mac_addresses_are_not() {
+        let (t, n) =
+            replace_ipv6("peer 2a00:1450:4001:82b::200e and [::1]:443, fe80::1ff:fe23:4567:890a. at 12:30:45 mac aa:bb:cc:dd:ee:ff");
+        assert_eq!(n, 3);
+        assert_eq!(t, "peer <ip> and [<ip>]:443, <ip>. at 12:30:45 mac aa:bb:cc:dd:ee:ff");
+        let (t, n) = replace_ipv6("nothing here: 1:2");
+        assert_eq!((t.as_str(), n), ("nothing here: 1:2", 0));
+        let r = Redactor::new(&[], &[], &[]);
+        let (t, c) = r.apply("a 10.1.2.3 b 2001:db8::5");
+        assert_eq!(t, "a <ip> b <ip>");
+        assert_eq!(c.ip_addresses, 2);
     }
 }

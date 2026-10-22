@@ -306,6 +306,12 @@ pub enum Request {
         /// The later run.
         after: String,
     },
+    /// Reverse DNS names for up to 64 addresses, through the OS resolver (answers `HostNames`; cached by the agent).
+    /// Sent only when the user asks for names, never in the background. Appended.
+    ResolveHosts {
+        /// Literal IP addresses.
+        addresses: Vec<String>,
+    },
 }
 
 /// Dyno's own cost.
@@ -543,6 +549,8 @@ pub enum Reply {
     Benchmarks(Box<crate::bench::BenchOverview>),
     /// Two runs compared. Appended.
     BenchComparison(Box<crate::bench::Comparison>),
+    /// Host names for the addresses asked about. Appended.
+    HostNames(Vec<crate::network_names::HostName>),
 }
 
 impl Reply {
@@ -587,6 +595,7 @@ impl Reply {
             Reply::Network(x) => v(x),
             Reply::Benchmarks(x) => v(x),
             Reply::BenchComparison(x) => v(x),
+            Reply::HostNames(x) => v(x),
         }
     }
 }
@@ -777,6 +786,7 @@ mod tests {
             Reply::AlarmChanges(vec![]),
             Reply::Benchmarks(Box::default()),
             Reply::Network(Box::default()),
+            Reply::HostNames(vec![]),
             Reply::Url("https://example.com/".into()),
             Reply::RecorderSnapshots(vec![]),
             Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {

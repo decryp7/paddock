@@ -1,9 +1,10 @@
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal, viewChild } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
+import { Router, RouterLink } from '@angular/router';
 import type { ConnectionRow, ListenerRow, NetProto } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatRelative } from '../../shared/format';
+import { formatRate, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { NetworkStore } from '../../state/network.store';
@@ -51,7 +52,7 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf],
+  imports: [AsyncState, Icon, RouterLink, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -94,6 +95,7 @@ function readCollapsed(): Set<string> {
           }
         </div>
         @if (tab() === 'connections') {
+          <button type="button" class="tog" [attr.aria-pressed]="store.resolveNames()" title="Look up host names through your DNS resolver. Off by default: each address is sent to it." (click)="store.setResolveNames(!store.resolveNames())"><dy-icon name="check" /> Host names</button>
           <button type="button" class="tog" [attr.aria-pressed]="showLocal()" (click)="showLocal.set(!showLocal())"><dy-icon name="check" /> Local address</button>
         }
       </div>
@@ -112,6 +114,7 @@ function readCollapsed(): Set<string> {
                 @if (tab() === 'connections') {
                   @if (group() !== 'process') { <span role="columnheader">Program</span> }
                   <span role="columnheader">Remote</span>
+                  @if (store.resolveNames()) { <span role="columnheader">Host name</span> }
                   <span role="columnheader">Service</span>
                   <span role="columnheader">Protocol</span>
                   <span role="columnheader">State</span>
@@ -127,13 +130,14 @@ function readCollapsed(): Set<string> {
                 <span role="columnheader" class="visually-hidden">Actions</span>
               </div>
               <cdk-virtual-scroll-viewport [itemSize]="rowHeight" class="viewport" [style.height.px]="viewportHeight()">
-                <div *cdkVirtualFor="let r of rows(); trackBy: rowKey; let i = index" class="row" role="row" [class.group-row]="r.kind === 'group'" [class.selected]="selectedKey() === r.key" [attr.aria-rowindex]="i + 1" [attr.aria-expanded]="r.kind === 'group' ? r.open : null" tabindex="-1" (click)="pick(r)" (keyup.space)="pick(r)" (dblclick)="activate(r)">
+                <div *cdkVirtualFor="let r of rows(); trackBy: rowKey; let i = index" class="row" role="row" [class.group-row]="r.kind === 'group'" [class.selected]="selectedKey() === r.key" [attr.aria-rowindex]="i + 1" [attr.aria-expanded]="r.kind === 'group' ? r.open : null" tabindex="-1" [cdkContextMenuTriggerFor]="r.kind === 'item' ? rowMenu : null" [cdkContextMenuTriggerData]="{ row: r }" (contextmenu)="pick(r)" (keydown.shift.f10)="pick(r)" (click)="pick(r)" (keyup.space)="pick(r)" (dblclick)="activate(r)">
                   @if (r.kind === 'group') {
                     <span class="gname" role="gridcell">
                       <button type="button" class="chev" [attr.aria-label]="(r.open ? 'Collapse ' : 'Expand ') + r.title" (click)="toggle(r.key, $event)"><dy-icon [name]="r.open ? 'chevron-down' : 'chevron-right'" /></button>
                       @if (group() === 'process') { <span class="av" aria-hidden="true">{{ ini(r.title) }}</span> }
                       <strong class="truncate">{{ r.title }}</strong>
                       <span class="meta">{{ r.count }} {{ tab() === 'connections' ? (r.count === 1 ? 'connection' : 'connections') : (r.count === 1 ? 'port' : 'ports') }}@if (tab() === 'connections' && group() === 'process') { · {{ r.hosts }} {{ r.hosts === 1 ? 'host' : 'hosts' }} }@if (r.exposed) { · <span class="exp">{{ r.exposed }} exposed</span> }</span>
+                      @if (tab() === 'connections' && group() === 'process' && trafficOf(r.title); as tr) { <span class="traffic num" title="Bytes per second over the last few seconds">↓ {{ rate(tr.rxBps) }} · ↑ {{ rate(tr.txBps) }}</span> }
                     </span>
                   } @else if (tab() === 'connections') {
                     @let c = conn(r);
@@ -141,6 +145,9 @@ function readCollapsed(): Set<string> {
                       <span class="cell prog" role="gridcell"><span class="av" aria-hidden="true">{{ ini(name(c.owner)) }}</span><span class="truncate" [title]="reason(c.owner) ?? ''">{{ name(c.owner) }}</span></span>
                     }
                     <span class="cell remote" role="gridcell" [class.indent]="group() === 'process'"><span class="truncate" [title]="c.remote">{{ short(c.remote) }}</span><span class="addr">:{{ c.remotePort }}</span></span>
+                    @if (store.resolveNames()) {
+                      <span class="cell muted" role="gridcell"><span class="truncate" [title]="hostName(c) ?? ''">{{ hostName(c) ?? (c.lookupOk ? '—' : 'Private address') }}</span></span>
+                    }
                     <span class="cell" role="gridcell">{{ service(c.remotePort) }}</span>
                     <span class="cell muted" role="gridcell">{{ protoText(c.proto, c.ipv6) }}</span>
                     <span class="cell" role="gridcell"><span class="dot" [attr.data-tone]="state(c).tone" aria-hidden="true"></span>{{ state(c).text }}</span>
@@ -196,7 +203,10 @@ function readCollapsed(): Set<string> {
                     <button type="button" class="btn sm" (click)="copyText(connectionLine(c3))"><dy-icon name="copy" /> Copy</button>
                   </div>
                   @if (blocked(c3); as why) { <p class="hint">{{ why }}</p> }
-                  <p class="hint">Reverse DNS names are not resolved yet.</p>
+                  <div class="dacts">
+                    <button type="button" class="btn sm" [disabled]="!c3.lookupOk" (click)="store.resolveOne(c3.remote)"><dy-icon name="globe" /> Resolve name</button>
+                  </div>
+                  @if (hostName(c3); as hn) { <p class="hint sel">Host name: {{ hn }}</p> }
                 } @else {
                   @let l3 = asListener(sel);
                   <p class="hint">{{ badge(l3).hint }}</p>
@@ -208,6 +218,22 @@ function readCollapsed(): Set<string> {
         }
       </dy-async>
     </div>
+    <ng-template #rowMenu let-row="row">
+      <div class="menu" cdkMenu aria-label="Row actions">
+        @if (row.kind === 'item') {
+          @if (isConn(row.item)) {
+            <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!blocked(asConn(row.item))" (cdkMenuItemTriggered)="lookup(asConn(row.item))"><dy-icon name="external" /> Look up IP</button>
+            <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!asConn(row.item).lookupOk" (cdkMenuItemTriggered)="store.resolveOne(asConn(row.item).remote)"><dy-icon name="globe" /> Resolve host name</button>
+            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copyText(asConn(row.item).remote)"><dy-icon name="copy" /> Copy address</button>
+            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.setQuery({ search: asConn(row.item).remote })"><dy-icon name="filter" /> Filter to this host</button>
+          } @else {
+            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copyText(listenerLine(asListener(row.item)))"><dy-icon name="copy" /> Copy listener</button>
+          }
+          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copyRow(row)"><dy-icon name="copy" /> Copy as text</button>
+          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="showProcess()"><dy-icon name="processes" /> Show process</button>
+        }
+      </div>
+    </ng-template>
   `,
   styles: `
     :host { display: block; }
@@ -223,6 +249,7 @@ function readCollapsed(): Set<string> {
     .tog dy-icon { --icon-size: 13px; display: none; }
     .tog[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
     .tog[aria-pressed='true'] dy-icon { display: inline-block; }
+    .traffic { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .reach { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
     .reach dy-icon { --icon-size: 13px; }
     .reach[data-tone='warn'] { color: var(--warn); }
@@ -283,6 +310,11 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly selectedKey = signal<string | null>(null);
   /** The machine's own address as the connections see it (constant, so it is shown once here rather than on every row). */
   protected readonly thisPc = computed(() => this.connections().find((c) => c.local !== '127.0.0.1' && c.local !== '::1' && !c.local.startsWith('fe80'))?.local ?? null);
+  private readonly router = inject(Router);
+  protected readonly trafficByName = computed(() => new Map((this.store.snapshot()?.traffic ?? []).map((t) => [t.name, t])));
+  protected readonly trafficOf = (title: string) => this.trafficByName().get(title) ?? null;
+  protected readonly rate = formatRate;
+  protected readonly hostName = (c: ConnectionRow): string | null => this.store.names()[c.remote] ?? null;
   protected readonly noteDismissed = signal(false);
   protected readonly short = (a: string) => middleEllipsis(a);
   protected readonly rowHeight = ROW_H;
@@ -301,7 +333,7 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly cols = computed(() => {
     const prog = this.group() !== 'process' ? 'minmax(130px, 1.2fr) ' : '';
     return this.tab() === 'connections'
-      ? `${prog}minmax(160px, 2fr) minmax(90px, 1fr) 80px 110px ${this.showLocal() ? 'minmax(150px, 1.2fr) ' : ''}80px 84px`
+      ? `${prog}minmax(160px, 2fr) ${this.store.resolveNames() ? 'minmax(140px, 2fr) ' : ''}minmax(90px, 1fr) 80px 110px ${this.showLocal() ? 'minmax(150px, 1.2fr) ' : ''}80px 84px`
       : `${prog}minmax(240px, 2fr) minmax(220px, 2fr) 80px 90px 84px`;
   });
   protected readonly selectedItem = computed(() => {
@@ -420,6 +452,10 @@ export class NetworkPage implements OnInit, OnDestroy {
     e.preventDefault();
   }
 
+  protected showProcess(): void {
+    void this.router.navigateByUrl('/processes');
+  }
+
   protected lookup(c: ConnectionRow, e?: Event): void {
     e?.stopPropagation();
     void this.store.lookup(c.remote);
@@ -455,6 +491,7 @@ export class NetworkPage implements OnInit, OnDestroy {
       return [
         ...owner,
         ['Remote', endpoint(x.remote, x.remotePort)],
+        ...(this.hostName(x) ? ([['Host name', this.hostName(x) as string]] as [string, string][]) : []),
         ['Service', portService(x.remotePort)],
         ['Local', endpoint(x.local, x.localPort)],
         ['Protocol', protoText(x.proto, x.ipv6)],
