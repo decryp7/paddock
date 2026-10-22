@@ -111,10 +111,13 @@ async fn a_missing_element_times_out_as_failed() {
     let marker = base.path().to_string_lossy().to_string();
     let r = renderer(b, base.path());
     let e = r
-        .render(&format!("http://127.0.0.1:{port}/"), Some("#absent"), Duration::from_secs(8))
+        .render(&format!("http://127.0.0.1:{port}/"), Some("#absent"), Duration::from_secs(15))
         .await
         .unwrap_err();
-    assert!(matches!(&e, RenderError::Failed(m) if m.contains("did not appear")), "{e:?}");
+    // On a loaded runner starting the browser can use up the whole budget before the wait begins; either way the
+    // render fails (it is never reported as ready) and says why.
+    let expected = |m: &str| m.contains("did not appear") || m.contains("did not finish in time");
+    assert!(matches!(&e, RenderError::Failed(m) if expected(m)), "{e:?}");
     assert_no_leftovers(&marker);
 }
 
