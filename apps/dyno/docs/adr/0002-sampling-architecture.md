@@ -24,7 +24,10 @@ a budget of about 1 % of one machine's CPU. The UI is a webview; it must never p
 4. **Own overhead is measured, not assumed.** Every tick the agent reads its own CPU time and resident memory
    (`ProcessSource` for its own pid) and publishes `Overhead { agent_cpu, agent_memory, intervals }` inside every
    `LiveUpdate`. The UI shows "Dyno: 0.4 % CPU · 38 MB" permanently. The measurement on release builds is a CI
-   artefact (`dyno-agent --bench`), recorded in docs/roadmap.md next to the load average at the time.
+   artefact (`dyno-agent bench`), recorded in docs/roadmap.md next to the load average at the time. Dyno reports its
+   CPU as a **share of one core** (like a process list does), not of the whole machine: 2 % of one core on a 14-core
+   machine is about 0.14 % of the machine. The budget of "about 1 %" is therefore stated against the whole machine
+   (≤ 1 % of all cores' capacity), and the UI labels which of the two it shows.
 5. **Pushed, not polled.** The app connects over `dyno-ipc` (private local endpoint, per-launch token), sends
    `Subscribe { detail }` and receives `Push(LiveUpdate)` frames; `detail: Processes` adds the full process list and is
    requested only while the task manager is open. Calls (history, details, actions) are request/reply with timeouts.
