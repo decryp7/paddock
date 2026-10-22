@@ -245,7 +245,20 @@ pub fn runnable_server(dir: &std::path::Path) -> String {
     std::fs::create_dir_all(&bin).unwrap();
     let name = if cfg!(windows) { "pitwall-server.exe" } else { "pitwall-server" };
     let target = bin.join(name);
-    std::fs::copy(env!("CARGO_BIN_EXE_pitwall-server"), &target).unwrap();
+    // Plain read and write, not `fs::copy`: on some CI container mounts `copy_file_range` reports success after
+    // copying nothing, which leaves an empty file that cannot be executed (`Exec format error`).
+    let bytes = std::fs::read(env!("CARGO_BIN_EXE_pitwall-server")).unwrap();
+    assert!(
+        bytes.starts_with(&[0x7f, b'E', b'L', b'F']) || bytes.starts_with(b"MZ") || bytes.len() > 1_000_000,
+        "built server is {} bytes",
+        bytes.len()
+    );
+    std::fs::write(&target, &bytes).unwrap();
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().len(),
+        bytes.len() as u64,
+        "the copy of the server is incomplete"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
