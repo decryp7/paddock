@@ -20,11 +20,6 @@ export const PLANNED = {
     icon: 'cleanup',
     text: 'Previews, then removes temp files, caches, crash dumps and developer leftovers to the Recycle Bin or Trash, with a disk space map. Nothing is deleted before you have seen the list.',
   },
-  health: {
-    title: 'Health & tuning',
-    icon: 'health',
-    text: 'A health score with reasons, a startup manager showing what slows your login, and reversible tuning suggestions that change something only when you click.',
-  },
   reports: {
     title: 'Reports & alerts',
     icon: 'reports',

@@ -24,7 +24,7 @@ describe('NAV', () => {
   it('has unique paths, starts at the dashboard and marks the unbuilt screens', () => {
     expect(new Set(NAV.map((n) => n.path)).size).toBe(NAV.length);
     expect(NAV[0]!.path).toBe('/');
-    expect(NAV.filter((n) => n.planned).map((n) => n.label)).toEqual(['Why slow', 'CPU taming', 'Cleanup', 'Health & tuning', 'Reports & alerts']);
+    expect(NAV.filter((n) => n.planned).map((n) => n.label)).toEqual(['Why slow', 'CPU taming', 'Cleanup', 'Reports & alerts']);
   });
 });
 

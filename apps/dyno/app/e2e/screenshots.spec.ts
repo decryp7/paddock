@@ -170,7 +170,15 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why slow' })).toBeVisible()) },
   { name: 'rules', path: '/#/rules', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'CPU taming' })).toBeVisible()) },
   { name: 'cleanup', path: '/#/cleanup', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Cleanup' })).toBeVisible()) },
-  { name: 'health', path: '/#/health', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Health & tuning' })).toBeVisible()) },
+  {
+    name: 'health',
+    path: '/#/health',
+    size: { width: 1440, height: 1500 },
+    ready: async (page) => {
+      await expect(page.getByRole('heading', { name: 'Health & tuning' })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Startup manager' }).getByRole('table')).toBeVisible();
+    },
+  },
   { name: 'reports', path: '/#/reports', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Reports & alerts' })).toBeVisible()) },
   { name: 'settings', path: '/#/settings', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()) },
   {

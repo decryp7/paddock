@@ -2,7 +2,6 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { provideIcons } from '../../shared/icons';
 import { CleanupPage } from '../cleanup/cleanup-page';
-import { HealthPage } from '../health/health-page';
 import { ReportsPage } from '../reports/reports-page';
 import { RulesPage } from '../rules/rules-page';
 import { WhySlowPage } from '../why-slow/why-slow-page';
@@ -36,7 +35,6 @@ describe('Planned', () => {
     ['why-slow', WhySlowPage, 'Why slow'],
     ['rules', RulesPage, 'CPU taming'],
     ['cleanup', CleanupPage, 'Cleanup'],
-    ['health', HealthPage, 'Health & tuning'],
     ['reports', ReportsPage, 'Reports & alerts'],
   ] as const)('the %s route page shows its planned title', (_n, page, title) => {
     const el = render(page);

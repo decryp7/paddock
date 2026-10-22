@@ -20,7 +20,7 @@ export const NAV: NavItem[] = [
   { path: '/why-slow', planned: true, label: 'Why slow', icon: 'why', keywords: 'diagnosis slow cause anomalies' },
   { path: '/rules', planned: true, label: 'CPU taming', icon: 'rules', keywords: 'rules profiles throttle cap protected' },
   { path: '/cleanup', planned: true, label: 'Cleanup', icon: 'cleanup', keywords: 'clean disk space temp cache quarantine treemap' },
-  { path: '/health', planned: true, label: 'Health & tuning', icon: 'health', keywords: 'score tuning startup apps' },
+  { path: '/health', label: 'Health & tuning', icon: 'health', keywords: 'score tuning startup apps' },
   { path: '/reports', planned: true, label: 'Reports & alerts', icon: 'reports', keywords: 'weekly report alerts history' },
   { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences' },
 ];
