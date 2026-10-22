@@ -13,6 +13,7 @@ use crate::health::RunnerStatus;
 use crate::history::{HistoryEvent, HistorySummary};
 use crate::hold::HoldReason;
 use crate::housekeeping::{CleanupPlan, CleanupPolicy, CleanupReport, DiskScan};
+use crate::hygiene::{CacheEntry, CacheLimits, EngineReport, PrunePreview, PruneResult, PruneSelection};
 use crate::jobs::CurrentJob;
 use crate::logs::LogLine;
 use crate::metrics::{MachineSample, UsagePoint};
@@ -33,7 +34,8 @@ use std::io::{Read, Write};
 
 /// The protocol version this build speaks. 2: push events, maintenance, settings, registration, history, disk.
 /// 3: the runner's configuration file (get, preview, save) and the processes a runner started.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// 4: holds, update deadlines and loops in the snapshot; container engine hygiene and the Actions cache folder.
+pub const PROTOCOL_VERSION: u32 = 4;
 /// Largest frame either side sends or accepts.
 pub const MAX_FRAME: usize = 1024 * 1024;
 /// Longest secret (registration token) accepted.
@@ -273,6 +275,37 @@ pub enum Request {
         /// How much to add.
         extra: KeepFor,
     },
+    /// The container engine's disk use and the act cache folders (a query; ADR 0016).
+    EngineReport,
+    /// What pruning the container engine would remove (a dry run; a query).
+    EnginePrunePreview {
+        /// What to prune.
+        selection: PruneSelection,
+    },
+    /// Prunes the container engine. Refused while a job runs.
+    EnginePrune {
+        /// What to prune.
+        selection: PruneSelection,
+    },
+    /// The runner's Actions cache folder: its size, entries and limit (a query).
+    CacheReport {
+        /// The runner.
+        runner: RunnerName,
+    },
+    /// What trimming the runner's cache to `limits` would delete (a dry run; a query).
+    CachePreview {
+        /// The runner.
+        runner: RunnerName,
+        /// The limits.
+        limits: CacheLimits,
+    },
+    /// Trims the runner's cache to `limits`. Refused while a job runs.
+    CacheClean {
+        /// The runner.
+        runner: RunnerName,
+        /// The limits.
+        limits: CacheLimits,
+    },
 }
 
 impl Request {
@@ -293,6 +326,10 @@ impl Request {
                 | Request::GetRunnerConfig { .. }
                 | Request::PreviewRunnerConfig { .. }
                 | Request::Processes { .. }
+                | Request::EngineReport
+                | Request::EnginePrunePreview { .. }
+                | Request::CacheReport { .. }
+                | Request::CachePreview { .. }
         )
     }
 }
@@ -484,6 +521,46 @@ pub struct ProcessList {
     pub taken_at: Timestamp,
 }
 
+/// A runner's Actions cache folder (the runner's own cache server stores its data there).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheInfo {
+    /// The runner's `cache.enabled` (`None`: not set in its configuration, so the runner's default, on).
+    pub enabled: Option<bool>,
+    /// The folder.
+    pub dir: String,
+    /// The folder is the runner's default (`$HOME/.cache/actcache`), not one set in its configuration.
+    pub default_dir: bool,
+    /// The folder exists.
+    pub exists: bool,
+    /// Its size (a lower bound when `truncated`).
+    pub bytes: u64,
+    /// Entries directly inside it.
+    pub entries: u32,
+    /// The biggest entries, biggest first (at most 50).
+    pub top: Vec<CacheEntry>,
+    /// The runner's own `cache.size_limit`, in MB (`None`: not set).
+    pub size_limit_mb: Option<u64>,
+    /// The cache is bigger than its limit.
+    pub over_limit: bool,
+    /// Free space on its disk.
+    pub free_bytes: Option<u64>,
+    /// Measuring stopped at a limit.
+    pub truncated: bool,
+    /// Why Pitcrew cannot clean it (a folder that is too broad), with a next step.
+    pub problem: Option<String>,
+}
+
+/// The entries a cache trim deletes (or would).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachePlan {
+    /// The entries and why.
+    pub entries: Vec<(CacheEntry, crate::hygiene::CacheReason)>,
+    /// Their total size.
+    pub bytes: u64,
+}
+
 /// A response from the service.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -589,6 +666,38 @@ pub enum Response {
     Processes {
         /// The list.
         list: ProcessList,
+    },
+    /// The container engine's use and the act cache folders.
+    EngineReport {
+        /// The report.
+        report: EngineReport,
+    },
+    /// What a container engine prune would remove.
+    EnginePreview {
+        /// The preview.
+        preview: PrunePreview,
+    },
+    /// A container engine prune ran.
+    EnginePruned {
+        /// How it went.
+        result: PruneResult,
+    },
+    /// The runner's Actions cache folder.
+    CacheReport {
+        /// The folder.
+        cache: CacheInfo,
+    },
+    /// What trimming the cache would delete.
+    CachePreview {
+        /// The entries that would go, with the reason.
+        plan: CachePlan,
+    },
+    /// The cache was trimmed.
+    CacheCleaned {
+        /// The result.
+        plan: CachePlan,
+        /// Entries that could not be deleted, with the reason.
+        failures: Vec<(String, String)>,
     },
     /// A pushed event (only on a subscribed connection).
     Event {

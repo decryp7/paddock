@@ -74,7 +74,9 @@ fn timeout_for(r: &Request) -> Duration {
     match r {
         // Registration may download the runner first.
         Request::Register { .. } => Duration::from_secs(15 * 60),
-        Request::Disk { .. } | Request::CleanDisk { .. } => Duration::from_secs(10 * 60),
+        Request::Disk { .. } | Request::CleanDisk { .. } | Request::EnginePrune { .. } | Request::CacheClean { .. } => {
+            Duration::from_secs(10 * 60)
+        }
         _ => Duration::from_secs(120),
     }
 }

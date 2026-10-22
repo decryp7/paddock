@@ -15,6 +15,8 @@ pub mod health;
 pub mod hold;
 pub mod history;
 pub mod housekeeping;
+pub mod hygiene;
+pub mod insights;
 pub mod jobs;
 pub mod layout;
 pub mod logline;

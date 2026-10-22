@@ -7,6 +7,7 @@ pub mod cleanup;
 pub mod cli;
 pub mod error;
 pub mod host;
+pub mod hygiene;
 pub mod ipc;
 pub mod launch;
 pub mod launcher;

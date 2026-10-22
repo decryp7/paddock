@@ -1131,3 +1131,67 @@ fn an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
     assert!(l.cause.contains("no space left"), "{}", l.cause);
     h.finish();
 }
+
+#[test]
+fn the_actions_cache_of_a_runner_is_reported_previewed_and_trimmed() {
+    use pitcrew_core::hygiene::CacheLimits;
+    let mut h = Harness::new("cacher", "mode=idle\n", true);
+    let cache = h.root.join("cachedir");
+    std::fs::create_dir_all(cache.join("e1")).unwrap();
+    std::fs::write(cache.join("e1/blob"), vec![0u8; 3 * 1024 * 1024]).unwrap();
+    std::fs::write(cache.join("e2.bin"), vec![0u8; 3 * 1024 * 1024]).unwrap();
+    std::fs::write(
+        h.runner_dir.join("config.yaml"),
+        format!(
+            "log:\n  level: info\ncache:\n  enabled: true\n  dir: '{}'\n  size_limit: 4MiB\n",
+            cache.display()
+        ),
+    )
+    .unwrap();
+    let Response::CacheReport { cache: info } = h.ask(Request::CacheReport { runner: h.name.clone() }) else {
+        panic!()
+    };
+    assert!(
+        info.exists && !info.default_dir && info.entries == 2 && info.bytes == 6 * 1024 * 1024,
+        "{info:?}"
+    );
+    assert_eq!(info.size_limit_mb, Some(4));
+    assert!(info.over_limit);
+    let limits = CacheLimits {
+        max_mb: 4,
+        max_age_days: 0,
+    };
+    let Response::CachePreview { plan } = h.ask(Request::CachePreview {
+        runner: h.name.clone(),
+        limits,
+    }) else {
+        panic!()
+    };
+    assert_eq!(plan.entries.len(), 1);
+    assert!(
+        cache.join("e2.bin").exists() && cache.join("e1").exists(),
+        "a preview deletes nothing"
+    );
+    let Response::CacheCleaned { plan, failures } = h.ask(Request::CacheClean {
+        runner: h.name.clone(),
+        limits,
+    }) else {
+        panic!()
+    };
+    assert!(failures.is_empty() && plan.bytes == 3 * 1024 * 1024);
+    assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1);
+    // Bad limits and unknown runners are refused.
+    let bad = h.ask(Request::CacheClean {
+        runner: h.name.clone(),
+        limits: CacheLimits {
+            max_mb: 0,
+            max_age_days: 0,
+        },
+    });
+    assert!(matches!(bad, Response::Error(ref e) if e.code == ErrorCode::BadRequest), "{bad:?}");
+    let other = h.ask(Request::CacheReport {
+        runner: RunnerName::parse("nobody").unwrap(),
+    });
+    assert!(matches!(other, Response::Error(ref e) if e.code == ErrorCode::UnknownRunner));
+    h.finish();
+}

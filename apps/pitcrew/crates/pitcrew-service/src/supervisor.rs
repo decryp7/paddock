@@ -55,6 +55,7 @@ use std::time::Duration;
 
 mod config_requests;
 mod holds;
+mod ops;
 mod processes;
 
 /// The service's version, reported in the hello.
@@ -1479,6 +1480,14 @@ impl Supervisor {
                     folder,
                     usage,
                 }
+            }
+            Request::EngineReport
+            | Request::EnginePrunePreview { .. }
+            | Request::EnginePrune { .. }
+            | Request::CacheReport { .. }
+            | Request::CachePreview { .. }
+            | Request::CacheClean { .. } => {
+                return self.ops_request(req, reply, now);
             }
             Request::Disk { runner } => {
                 let Some(r) = self.runners.get(&runner) else {
