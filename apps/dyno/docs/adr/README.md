@@ -16,6 +16,9 @@ so the numbering is fixed.
 | [0009](0009-native-feel.md) | The window behaves like a desktop application (Debrief ADR 0028) |
 | [0010](0010-platforms-and-services.md) | Per-user agent on every OS: launch agent, systemd user unit, Windows Run entry |
 | [0011](0011-design-system.md) | Design tokens, system fonts, two themes, a colour-vision-checked palette |
+| [0012](0012-widgets-and-tray-items.md) | Widgets and tray items are versioned data (editable dashboard, several menu-bar items) |
+| [0013](0013-alarms-lifecycle.md) | Alarms: an ISA-18.2 style lifecycle in a pure state machine |
+| [0014](0014-local-api-cli-and-integrations.md) | One versioned, local-only, authenticated protocol for the CLI, the API and integrations |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.

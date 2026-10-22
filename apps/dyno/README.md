@@ -142,7 +142,7 @@ dependencies and the files it touches, plus the known gaps in the foundation.
 | [docs/testing-manual.md](docs/testing-manual.md) | Manual tests that need a real desktop |
 | [docs/plugins.md](docs/plugins.md) | Writing an out-of-process plugin |
 | [docs/suite-lessons.md](docs/suite-lessons.md) | Pitfalls the sister apps already hit |
-| [docs/adr/](docs/adr/README.md) | Architecture decision records 0001 to 0011 |
+| [docs/adr/](docs/adr/README.md) | Architecture decision records 0001 to 0014 |
 
 ## Building from source
 
