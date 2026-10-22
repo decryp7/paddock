@@ -62,12 +62,12 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
       // one line unless it is very long; the lifelines break around the text
       const lines = tw(label, 12) > 520 ? wrap(label, 12, 520) : [label];
       const lw = Math.max(...lines.map((l) => tw(l, 12))) + 8, lh = lines.length * 16;
-      const ly = y + lh + 6;
+      const ly = y + lh + 9;
       const lx = Math.min(xa, xb) + 8;
       d.text(d.id(), [lx, y, lw, lh], lines.join(' '), {});
       gaps.push([lx - 4, lx + lw + 4, y, y + lh]);
       d.line([xa, ly], [xb, ly], { dash: reply, arrow: reply ? 'open' : 'block' });
-      y = ly + 18;
+      y = ly + 16;
     },
     self(p, label) {
       const x = px(idx[p]);
