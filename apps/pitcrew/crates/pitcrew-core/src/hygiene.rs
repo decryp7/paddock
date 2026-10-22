@@ -399,7 +399,9 @@ pub fn safe_cache_dir(path: &std::path::Path, home: Option<&std::path::Path>) ->
     if !path.is_absolute() {
         return Err("the cache folder must be an absolute path".into());
     }
-    if path.components().count() < 3 || home.is_some_and(|h| h == path) {
+    // At least two real folder names below the root or drive (a prefix and a root do not count).
+    let named = path.components().filter(|c| matches!(c, std::path::Component::Normal(_))).count();
+    if named < 2 || home.is_some_and(|h| h == path) {
         return Err("the cache folder is too broad to clean; choose a folder of its own".into());
     }
     Ok(())
