@@ -60,7 +60,7 @@
             <select id="installed" class="input" [value]="s.installed ?? ''" (change)="onInstalled($event)">
               <option value="">I don't know</option>
               @for (r of d.history; track r.version) {
-                <option [value]="r.version">{{ r.version }}</option>
+                <option [value]="r.version" [selected]="r.version === s.installed">{{ r.version }}</option>
               }
             </select>
             <span class="help">Spotter then tells you only about releases newer than this one, if the watch is set that way.</span>
