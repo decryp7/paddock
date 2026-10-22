@@ -599,7 +599,9 @@ mod tests {
                 .len(),
             20
         );
-        let many = (0..MAX_FOLDER_MATCHES + 10).map(|i| Candidate::named(&format!("1.{i}"), "l")).collect();
+        let many = (0..MAX_FOLDER_MATCHES + 10)
+            .map(|i| Candidate::named(&format!("1.{i}"), "l"))
+            .collect();
         let s = select(many, &VersionScheme::Semver, &ReleaseFilter::default(), usize::MAX);
         assert_eq!(s.releases.len(), MAX_FOLDER_MATCHES);
     }
@@ -660,9 +662,23 @@ mod tests {
         assert_eq!(pro.pick("", "ISO").unwrap().kind, "iso");
         assert_eq!(pro.pick("arm64", "").unwrap().kind, "exe", "falls back to the primary");
         assert_eq!(pro.with_artifact("", ".iso").location, "/drops/Acme-PRO-R3.10.00T32.iso");
-        assert_eq!(pro.with_artifact_named("Acme-PRO-R3.10.00T32.iso").unwrap().name, "Acme-PRO-R3.10.00T32.iso");
+        assert_eq!(
+            pro.with_artifact_named("Acme-PRO-R3.10.00T32.iso").unwrap().name,
+            "Acme-PRO-R3.10.00T32.iso"
+        );
         assert!(pro.with_artifact_named("../../etc/passwd").is_none());
-        assert_eq!(select(vec![file("app-1.0.0.zip", Some(1))], &VersionScheme::Semver, &ReleaseFilter::default(), 1).releases[0].with_artifact("x", "y").name, "app-1.0.0.zip");
+        assert_eq!(
+            select(
+                vec![file("app-1.0.0.zip", Some(1))],
+                &VersionScheme::Semver,
+                &ReleaseFilter::default(),
+                1
+            )
+            .releases[0]
+                .with_artifact("x", "y")
+                .name,
+            "app-1.0.0.zip"
+        );
         // Pre-releases, per-product limits and restricting to products.
         let with = ReleaseFilter {
             include_prereleases: true,

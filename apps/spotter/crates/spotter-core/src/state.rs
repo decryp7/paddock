@@ -483,7 +483,11 @@ mod tests {
         assert!(s.on_success(vec![rel("1.1.0")], &p, cx(4)).notify.is_empty());
         s.reset_acknowledgement();
         assert!(
-            s.on_success(vec![rel("1.1.0")], &p, cx(5)).notify.is_empty().then_some(()).is_none(),
+            s.on_success(vec![rel("1.1.0")], &p, cx(5))
+                .notify
+                .is_empty()
+                .then_some(())
+                .is_none(),
             "after a reset the latest is new again"
         );
     }

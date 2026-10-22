@@ -832,6 +832,9 @@ mod tests {
         assert!(db.events(10, None).is_err());
         assert!(db.load_journal().is_err());
         assert!(db.cached_validators(&id("a"), "f").is_err());
-        assert!(db.take_digest().unwrap().is_empty(), "an unreadable queued item is dropped, not fatal");
+        assert!(
+            db.take_digest().unwrap().is_empty(),
+            "an unreadable queued item is dropped, not fatal"
+        );
     }
 }

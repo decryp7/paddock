@@ -170,7 +170,12 @@ mod tests {
     #[test]
     fn actions_check_their_settings() {
         assert!(Action::open_location().check().is_ok());
-        assert!(Action::OpenLocation { variant: "x64".into(), extension: "iso".into() }.check().is_ok());
+        assert!(Action::OpenLocation {
+            variant: "x64".into(),
+            extension: "iso".into()
+        }
+        .check()
+        .is_ok());
         assert!(Action::download(" ", true).check().is_err());
         assert!(Action::download("D:\\x", false).check().is_ok());
         let run = |p: &str, args: Vec<String>| Action::RunCommand { program: p.into(), args }.check();
@@ -183,10 +188,7 @@ mod tests {
         assert!(run("/x", vec!["a\0b".into()]).is_err());
         assert!(run("/x", vec!["a".repeat(5000)]).is_err());
         let toml_text = "kind = \"download\"\nfolder = \"/d\"";
-        assert_eq!(
-            toml::from_str::<Action>(toml_text).unwrap(),
-            Action::download("/d", true)
-        );
+        assert_eq!(toml::from_str::<Action>(toml_text).unwrap(), Action::download("/d", true));
     }
 
     #[test]
