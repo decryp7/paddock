@@ -128,7 +128,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
       # The Linux adapters against this container's real /proc and /sys (the run above already includes them; this
       # names them in the log). scripts/linux-verify.sh also runs them as uid 1000 on a developer machine, where
@@ -173,7 +173,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests (macOS)
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
       # The agent's own CLI on the real machine: one measurement, read-only.
       - name: Agent measures once (macOS)

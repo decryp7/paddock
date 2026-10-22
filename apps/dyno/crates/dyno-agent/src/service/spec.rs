@@ -12,7 +12,8 @@ fn xml(s: &str) -> String {
 /// The launch agent plist: started at login in the user's GUI session, restarted when it exits, throttled so a crash
 /// loop cannot spin.
 pub fn launch_agent_plist(exe: &Path, log_dir: &Path) -> String {
-    let log = log_dir.join("agent.log");
+    // A launchd path is always POSIX, whatever host builds the text (tests run on every OS).
+    let log = format!("{}/agent.log", log_dir.to_string_lossy().trim_end_matches('/'));
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
@@ -29,7 +30,7 @@ pub fn launch_agent_plist(exe: &Path, log_dir: &Path) -> String {
 </dict>\n</plist>\n",
         label = super::LABEL,
         exe = xml(&exe.to_string_lossy()),
-        log = xml(&log.to_string_lossy())
+        log = xml(&log)
     )
 }
 

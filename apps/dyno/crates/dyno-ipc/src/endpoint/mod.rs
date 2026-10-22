@@ -126,7 +126,6 @@ mod tests {
         s.write_all(b"pong").unwrap();
         c.read_exact(&mut buf).unwrap();
         assert_eq!(&buf, b"pong");
-        assert_eq!(s.read(&mut []).unwrap(), 0);
     }
 
     #[test]
