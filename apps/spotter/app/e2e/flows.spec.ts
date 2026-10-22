@@ -5,8 +5,9 @@ test.describe('Spotter against the mock backend', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
     await expect(page.getByRole('heading', { name: "What's new" })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Lumen CLI', exact: true })).toBeVisible();
-    // Status always has words.
+    await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+    await expect(page.locator('sp-whats-new li', { hasText: 'Lumen CLI' }).first()).toBeVisible();
+    // A failing watch has a status word; a healthy one only a dot.
     await expect(page.getByText('Unreachable').first()).toBeVisible();
   });
 
@@ -27,7 +28,7 @@ test.describe('Spotter against the mock backend', () => {
 
   test('a wizard that is not ready says what is missing', async ({ page }) => {
     await page.goto('/#/watches/new');
-    await page.getByRole('tab', { name: 'Source kinds' }).click();
+    await page.getByRole('button', { name: 'Source kinds', exact: true }).click();
     await page.getByRole('button', { name: /GitHub/ }).click();
     await expect(page.getByText('Still needed: Repository')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Next' })).toBeDisabled();
@@ -35,21 +36,30 @@ test.describe('Spotter against the mock backend', () => {
 
   test('pauses, resumes and checks a watch', async ({ page }) => {
     await page.goto('/#/watches');
-    await page.getByRole('button', { name: 'Pause Lumen CLI' }).click();
-    await expect(page.getByRole('button', { name: 'Resume Lumen CLI' })).toBeVisible();
-    await page.getByRole('button', { name: 'Resume Lumen CLI' }).click();
-    await expect(page.getByRole('button', { name: 'Pause Lumen CLI' })).toBeVisible();
-    await page.getByRole('button', { name: 'Check Lumen CLI now' }).click();
+    const row = page.locator('tbody tr', { hasText: 'Lumen CLI' });
+    await row.hover();
+    await row.getByRole('button', { name: 'More actions for Lumen CLI' }).click();
+    await page.getByRole('menuitem', { name: 'Pause' }).click();
+    await expect(row.getByText('Paused').first()).toBeVisible();
+    await row.getByRole('button', { name: 'More actions for Lumen CLI' }).click();
+    await page.getByRole('menuitem', { name: 'Resume' }).click();
+    await expect(row.getByText('Paused')).toHaveCount(0);
+    await row.hover();
+    await row.getByRole('button', { name: 'Check Lumen CLI now' }).click();
     await expect(page.getByText('Check started')).toBeVisible();
   });
 
   test('acknowledges a release', async ({ page }) => {
     await page.goto('/#/watches');
-    await expect(page.getByRole('button', { name: /as seen$/ }).first()).toBeVisible();
-    const before = await page.getByRole('button', { name: /as seen$/ }).count();
+    const dots = page.locator('tbody .unseen-dot:not(.off)');
+    await expect(dots.first()).toBeVisible();
+    const before = await dots.count();
     expect(before).toBeGreaterThan(0);
-    await page.getByRole('button', { name: /as seen$/ }).first().click();
-    await expect(page.getByRole('button', { name: /as seen$/ })).toHaveCount(before - 1);
+    const row = page.locator('tbody tr').filter({ has: page.locator('.unseen-dot:not(.off)') }).first();
+    await row.hover();
+    await row.getByRole('button', { name: /^More actions for/ }).click();
+    await page.getByRole('menuitem', { name: 'Mark as seen' }).click();
+    await expect(dots).toHaveCount(before - 1);
   });
 
   test('a settings change applies at once and is still there after navigating', async ({ page }) => {
@@ -65,9 +75,34 @@ test.describe('Spotter against the mock backend', () => {
 
   test('the tray popup lists unseen releases', async ({ page }) => {
     await page.goto('/#/tray');
-    await expect(page.getByText(/\d+ unseen/)).toBeVisible();
+    await expect(page.getByText(/\d+ new/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Spotter' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Mark .* as seen/ }).first()).toBeVisible();
+  });
+
+  test('a release opens a side panel that Esc closes', async ({ page }) => {
+    await page.goto('/#/watches/w-2');
+    const row = page.locator('tbody tr').nth(1);
+    await row.click();
+    const panel = page.getByRole('complementary', { name: 'Release details' });
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText('SHA-256')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+  });
+
+  test('a watch with products lists them in a table', async ({ page }) => {
+    await page.goto('/?mock=products#/watches/w-9');
+    await expect(page.getByRole('heading', { name: 'Products' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: /Acme Installer Pro/ }).first()).toBeVisible();
+  });
+
+  test('the watches table does not wrap or clip at 1100 px', async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await page.goto('/#/watches');
+    const cells = page.locator('tbody tr:first-child td.nowrap');
+    for (const h of await cells.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height))) expect(h).toBeLessThanOrEqual(60);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 
   test('a failing backend shows an inline error with Retry', async ({ page }) => {

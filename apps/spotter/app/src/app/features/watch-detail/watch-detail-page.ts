@@ -29,6 +29,7 @@ function choice(a: { variant?: string; extension?: string }): string {
   imports: [MatIcon, RouterLink, SuEmptyState, Panel, Avatar, StatusDot, Version, MenuButton, AgoPipe, AgoShortPipe],
   providers: [WatchDetailStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '(document:keydown.escape)': 'onEscape()' },
   templateUrl: './watch-detail-page.html',
   styleUrl: './watch-detail-page.scss',
 })
@@ -96,6 +97,11 @@ export class WatchDetailPage {
 
   protected isSelected(r: Release): boolean {
     return this.selected() === r;
+  }
+
+  /** Esc closes the release panel wherever the focus is (an open menu keeps its own Esc). */
+  protected onEscape(): void {
+    if (this.selected() && !document.querySelector('.cdk-overlay-container .menu')) this.closePanel();
   }
 
   protected closePanel(): void {

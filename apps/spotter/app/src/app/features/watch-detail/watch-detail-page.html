@@ -215,7 +215,7 @@
         </div>
 
         @if (selected(); as r) {
-          <aside class="panel" aria-label="Release details" (keydown.escape)="closePanel()">
+          <aside class="panel" aria-label="Release details">
             <header>
               <h2><sp-ver [value]="r.version" /></h2>
               <button type="button" class="btn ghost icon sm" (click)="closePanel()" aria-label="Close details" title="Close (Esc)"><mat-icon svgIcon="sp:x" aria-hidden="true" /></button>
