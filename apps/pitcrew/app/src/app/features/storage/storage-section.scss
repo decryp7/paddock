@@ -1,0 +1,149 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+
+.section {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+
+  h2 {
+    margin-right: auto;
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+  }
+}
+
+.small {
+  font-size: var(--text-sm);
+}
+
+p {
+  margin: 0;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
+.card-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.card-body.flush {
+  padding: 0;
+}
+
+.hero {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.folders {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border);
+
+    &:first-child {
+      border-top: 0;
+    }
+  }
+}
+
+.folder-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.path {
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.form {
+  gap: var(--space-4);
+}
+
+.kinds {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.kind {
+  align-items: flex-start;
+}
+
+.narrow {
+  max-width: 260px;
+}
+
+.btn-row {
+  flex-wrap: wrap;
+}
+
+.plan {
+  display: grid;
+  gap: var(--space-2);
+  overflow-x: auto;
+}
+
+.examples {
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+
+.total {
+  font-size: var(--text-md);
+}
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-4);
+}
+
+.fact {
+  display: grid;
+  gap: 2px;
+}
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
