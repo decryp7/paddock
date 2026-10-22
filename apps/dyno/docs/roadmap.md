@@ -1,0 +1,275 @@
+# Dyno roadmap
+
+What is built is in [features.md](features.md); this page is everything that is not. Work packages (WP) are written so an
+agent or contributor can pick one up: scope, acceptance criteria, dependencies and the files it touches. Shared integration
+points (`lib.rs`, `protocol.rs`, `ports.rs`, the workspace `Cargo.toml`, `api.types.ts`) are changed by the integrating
+agent only (AGENTS.md "Working in parallel"). Every package ships tests, and every robustness behaviour has a test that
+triggers the failure.
+
+Decisions already taken for these packages (2026-10-22): three-tier extensibility ([ADR 0007](adr/0007-extensibility-three-tiers.md)),
+SQLite ([0008](adr/0008-storage-sqlite-and-retention.md)), observe-only by default with a helper installed on first admin
+use ([0006](adr/0006-privileged-helper-and-observe-only.md)), Linux a first-class platform next to Windows and macOS.
+
+## Order
+
+1. **Foundation gaps** (below): small, unblock the rest.
+2. **WP-01 helper**, **WP-02 CPU taming UI**, **WP-03 health and startup UI**, **WP-04 cleanup**, **WP-05 tuning**: the
+   screens that are placeholders today, in dependency order.
+3. **WP-06 Issues with statistics**, **WP-07 unusual processes**, **WP-08 alerts and the weekly report**.
+4. **WP-09 right-click search**, **WP-10 watched folders**, **WP-11 benchmarks**, **WP-12 performance counters**,
+   **WP-13 extras**, **WP-14 backup health**, **WP-15 declarative packs**.
+5. **WP-16 local web API**, **WP-17 Explain via Pitwall**; **WP-18 multi-PC LAN view** after v1.
+
+No cut-down release: v1 is when this list is done.
+
+## Known gaps in the foundation
+
+What the code does today, read from the code on 2026-10-22. Each is a small task for whoever owns the file.
+
+| # | Gap | Where | Fix |
+| --- | --- | --- | --- |
+| G1 | The cleanup category `Os` enum has `Windows`, `Macos`, `Any` but no `Linux`, so Linux has no categories or roots | `crates/dyno-core/src/cleanup/catalog.rs`, `crates/dyno-agent/src/cleanup/roots.rs` | Add `Os::Linux`, XDG roots (`~/.cache`, `~/.local/share/Trash`, `~/.cargo`, …), catalogue entries and tests |
+| G2 | `StartupLocation` has Windows and macOS variants only; the Linux startup adapter (XDG autostart, systemd user units) has nowhere to put its entries | `crates/dyno-core/src/startup.rs`, `crates/dyno-platform/src/linux/startup.rs` | Add `XdgAutostart`, `SystemdUserUnit` (and `needs_admin` for system units), map them, keep the wire contract in step |
+| G3 | On Linux the shared Unix `SetPriority` calls `setpriority` on the main thread only (Linux priorities are per thread); efficiency mode and affinity already walk the threads | `crates/dyno-platform/src/unix_control.rs`, `linux/os_control.rs` | Walk the process's threads for `SetPriority` on Linux (best effort for threads that exit); test with a multi-thread dummy |
+| G4 | The history `crashes` list is always empty and the health report gets `crashes_7d: 0`, so the crashes chart and the "crashing apps" health reason have no data | `crates/dyno-agent/src/handlers.rs` (`history`, `health`) | Filled by WP-06 (Issues) |
+| G5 | Plugins are wired minimally: the agent starts the host on first `Request::Plugins` and lists plugins; sensor, cleanup-proposal and rule-action contributions are not connected to the sampler, the scanner or the engine | `crates/dyno-agent/src/handlers.rs`, `sampler.rs`, `crates/dyno-plugin-host` | Connect contributions through guarded adapters (ADR 0007), trim the host to sensors, cleanup proposals and rule actions |
+| G6 | The helper is not built: `crates/dyno-helper/src/main.rs` is `fn main() {}`; only `HelperAction` and its validation exist | `crates/dyno-helper` | WP-01 |
+| G7 | Cleanup (`CleanupCategories`, `ScanCleanup`, `RunCleanup`, `Quarantine`, `RestoreQuarantine`), `DiskUsage`, tuning (`Tuning`, `ApplyTuning`, `RevertTuning`) and `WeeklyReport` answer `Unsupported: "<x> is not built yet."` | `crates/dyno-agent/src/handlers.rs` | WP-04, WP-05, WP-08 |
+| G8 | Windows wires sensors (PDH), process control and user activity only. Process details use `NoDetails`; file locks (Restart Manager), startup entries and facts are the in-memory fakes | `crates/dyno-platform/src/windows/mod.rs` | Windows details probe (command line, modules, connections, signature), Restart Manager locks, registry / Startup folder / scheduled-task startup, facts (disk health, updates, power plan); verify on the Windows CI runner |
+| G9 | The doc comments on `Overhead::agent_cpu` and `Load::own_cpu` say "percent of the machine", but the sampler multiplies by the core count: the value is a share of one core (ADR 0002 section 4) | `crates/dyno-core/src/protocol.rs`, `sampling.rs` | Fix the comments (and the UI label) or change the unit; keep the budget comparison consistent |
+| G10 | The Why slow, CPU taming, Cleanup, Health and Reports screens are placeholders in the UI (marked "Soon" in the sidebar) although the engine answers `WhySlow`, `Rules`, `SaveRules`, `SetProfile`, `PauseRules`, `Health`, `StartupEntries`, `SetStartupState`, `Alerts`, `Anomalies` | `app/src/app/features/*`, `app/src/app/core/api.types.ts`, the mock | WP-02, WP-03, WP-08 |
+| G11 | The login-shell `PATH` resolver (ADR 0010 item 9) does not exist; nothing starts user tools yet | `crates/dyno-platform/src/process.rs` | Needed by WP-14 and WP-15; bounded, timed out, cached, with a validated per-item override |
+| G12 | On Windows nothing restarts a crashed agent until the app or the next logon does | `crates/dyno-agent/src/service` | Optional: a Task Scheduler "restart on failure" entry |
+| G13 | Dyno's overhead was measured once, under a high load average, on one machine; there is no CI artifact (`dyno-agent bench`) per OS | `docs/architecture.md`, `.gitea/workflows/build.yml` | Run `bench` on release builds on a quiet runner per OS, record load next to the numbers, fail on a regression |
+| G14 | The tuning plan input to the health report is empty (`tuning: &[]`) | `crates/dyno-agent/src/handlers.rs` | WP-05 |
+| G15 | CI could not be run when it was written: the workflow, `scripts/check-bundle.sh`, `scripts/check-capabilities.mjs` and `scripts/ci-prune.sh` are validated as YAML and with shell syntax checks and unit tests only | `.gitea/workflows/build.yml`, `scripts/` | Run on the three runners and fix what the first runs show |
+
+## Dyno's own overhead
+
+Measured with `dyno-agent bench 25 none|summary|processes` on the 14-core M4 Mac mini, **while the load average was about
+55 to 85**: about 2.0 % (idle, nobody watching), 2.7 % (a summary subscriber) and 3.2 % (a processes subscriber) of **one**
+core, and about 24 MB resident (0.15 to 0.25 % of the whole machine). Because the machine was busy, treat these as upper
+bounds. The target is at most about 1 % of the machine. See [architecture.md](architecture.md#dynos-own-overhead) and G13.
+
+## WP-01 Privileged helper
+
+- **Scope.** The `dyno-helper` executable and the agent-side installer from ADR 0006: a closed set of `HelperAction`s
+  (`SetPowerScheme`, `SetVisualEffects`, `SetBackgroundAppsDisabled`, `SetIndexingExcluded`, `SetDefenderExcluded`,
+  `SetLowPowerMode`, `SetMachineStartupEnabled`), each validated in the core and again in the helper, previewed, approved with the
+  OS prompt (UAC `runas`, macOS authorisation / `SMAppService` daemon approval, Linux `pkexec`), recorded with its inverse; an
+  uninstall action; the helper exits when idle; private endpoint with token and peer-pid check over `dyno-ipc`.
+- **Acceptance.** Declining the prompt leaves Dyno fully working; a forged or out-of-set frame is refused and logged; every
+  action has a test with a fake backend that applies and reverts it; path arguments are canonicalised and system roots
+  refused; the first-admin-action flow matches the sequence diagram; nothing runs elevated except the helper.
+- **Depends on.** Nothing; WP-03, WP-05 and parts of WP-04 consume it.
+- **Touches.** `crates/dyno-helper/**`, `crates/dyno-core/src/helper.rs`, `crates/dyno-agent/src/handlers.rs` (a helper client
+  module, new file), `crates/dyno-ipc` (peer checks), installer config (`app/src-tauri/windows`, `macos`), docs/adr (a new ADR
+  for the install flow if it deviates).
+
+## WP-02 CPU taming screen and profiles
+
+- **Scope.** The CPU taming UI: rules list with enable switches (all shipped disabled), the escalation ladder editor, profiles
+  (Normal, Gaming, Meeting, On battery, Building code) with a switcher in the shell (`profile-switcher.ts` exists), the
+  protected list with the reason a process is protected, a pause switch, the live "actions in effect" list with release, and
+  the Activity list with undo. Starter rules and profile membership as data in the core.
+- **Acceptance.** Nothing acts until a rule is enabled; enabling shows what it will do; a rule never touches the foreground
+  app or a protected process; every step shows in Activity with an undo; screens match the mock and the real agent; Playwright
+  flows cover enable, release and undo.
+- **Depends on.** G10; G3 for Linux parity.
+- **Touches.** `app/src/app/features/rules/**`, `state/rules.store.ts`, `core/api.types.ts`, `core/mock/**`,
+  `crates/dyno-core/src/rules/model.rs` (starter rules), docs/screenshots (`rules-*.png`).
+
+## WP-03 Health score and startup manager screen
+
+- **Scope.** The Health & tuning page: the health score with its reasons and fixes (previews before anything changes), the
+  startup manager (list with impact, enable or disable per entry through `StartupItems`, undo; machine-wide entries through the
+  helper), and the dashboard hero already built.
+- **Acceptance.** Disabling a user startup entry is undoable; machine-wide entries show "needs administrator rights" until the
+  helper exists; impact is measured, not guessed; the page works with no data (a fresh install).
+- **Depends on.** G2 (Linux), G8 (Windows), WP-01 for machine-wide entries.
+- **Touches.** `app/src/app/features/health/**`, `state/health.store.ts`, `crates/dyno-core/src/health.rs`, `startup.rs`,
+  `crates/dyno-platform/src/{windows,macos,linux}/startup.rs`, `docs/screenshots/health-*.png`.
+
+## WP-04 Cleanup with quarantine and undo
+
+- **Scope.** Scanning, previewing and deleting per ADR 0005: the catalogue (system temp, caches, crash dumps, logs, browsers,
+  developer build output and package caches, Downloads, Docker, Xcode and Android SDK), the scanner and deleter in the agent
+  (re-check before each delete, never links, never personal folders unless the category's root), Recycle Bin / Trash and a 7-day
+  quarantine with restore, the disk-space map (`DiskUsage`), scheduled cleanups of the categories the user enabled, in-use files
+  reported with the program holding them.
+- **Acceptance.** A scan deletes nothing; a run deletes only items of a scan younger than an hour that the user selected; a
+  symlink, a `..` path and a path outside the root are refused (tests for each); a locked file is skipped with the locker's name;
+  undo restores from quarantine; the preview lists every item and its size; Linux has categories (G1).
+- **Depends on.** G1; WP-15 for pack-defined categories.
+- **Touches.** `crates/dyno-core/src/cleanup/**`, `crates/dyno-agent/src/cleanup/**` (scanner, deleter, quarantine), handlers,
+  `app/src/app/features/cleanup/**`, mock, `docs/screenshots/cleanup-*.png`.
+
+## WP-05 Tuning catalogue
+
+- **Scope.** A catalogue of reversible suggestions that change something only on a click: power plan or mode, sleep and
+  hibernation timers, startup trimming, storage (TRIM, indexing exclusions for developer folders), developer tweaks (antivirus
+  exclusions for build folders, with an explicit warning), visual effects, network, battery charge limit where the OS exposes it.
+  Each is `check` (current value), `apply` and `undo` data, run through the helper when it needs rights. **Excluded by decision:**
+  registry cleaners, RAM boosters, debloat scripts.
+- **Acceptance.** Every suggestion previews its exact change and its inverse; applying records an `UndoRecord::Tuning`; a change
+  made outside Dyno since is detected before undo; nothing in the catalogue runs a string as a command.
+- **Depends on.** WP-01; WP-15 for pack data.
+- **Touches.** `crates/dyno-core/src/tuning.rs`, new `tuning/catalog.rs`, handlers (`Tuning`, `ApplyTuning`, `RevertTuning`),
+  `app/src/app/features/health/**`, docs.
+
+## WP-06 Issues with statistics
+
+- **Scope.** A curated list of OS problem events collected by the agent: application crashes and hangs, bad shutdowns, hardware
+  warnings (disk, memory, thermal), failing services, memory exhaustion, update and driver failures. Per OS sources (Windows
+  Event Log and reliability records, macOS diagnostic reports and the unified log, `journalctl`/`coredumpctl` on Linux), normalised
+  into one `Issue` type, stored in SQLite (ADR 0008 reserves the table), with a **daily stability score**, per-app and per-kind
+  **leaderboards**, trends, and **Open in Debrief** (export the window to Debrief). Fills the crashes chart and health reason (G4).
+- **Acceptance.** Sources are read with timeouts and without file contents in logs; an unreadable source is an
+  "unavailable: reason" entry, never an error for the page; the score is a pure function with tests; an issue links to the
+  evidence (event text is shown, never `[innerHTML]`).
+- **Depends on.** G4, WP-15 optional for source packs; Debrief export format.
+- **Touches.** new `crates/dyno-core/src/issues.rs`, `crates/dyno-platform/src/{windows,macos,linux}/issues.rs`, `store.rs` (migration),
+  handlers, `app/src/app/features/issues/**` (new page), nav, mock, screenshots.
+
+## WP-07 New and unusual processes
+
+- **Scope.** A transparency tool, not an antivirus. A baseline of programs seen on this machine (ADR 0008 reserves the table) and
+  flags: first seen, unsigned or unknown publisher, running from an unusual location (temp, downloads, user-writable system
+  paths), name masquerading as a system process, odd behaviour (sudden network, many children), new persistence (a new startup
+  entry or scheduled task). Each flag explains itself and offers "protect", "ignore" or "search the web" (WP-09).
+- **Acceptance.** No verdicts ("malware"): wording is "unusual because …"; a pure scoring function with tests for each flag;
+  a fresh install learns a baseline silently for a configurable period instead of flagging everything; flags never trigger an
+  action by themselves.
+- **Depends on.** G8 (Windows details and signatures), WP-06 for the shared page.
+- **Touches.** new `crates/dyno-core/src/unusual.rs`, `store.rs`, handlers, `app/src/app/features/issues/**` or `processes/**`.
+
+## WP-08 Alerts and the weekly report
+
+- **Scope.** The Reports page: alert history (low disk, overheating, crash loops, rule actions), notification delivery (OS
+  notifications, quiet hours), and the weekly report (`WeeklyReport`: health trend, top consumers, disk forecast, issues, what
+  changed). Exportable.
+- **Acceptance.** Alerts are rate limited and deduplicated; the report is a pure function over stored data with tests; "nothing
+  to report" is a valid report.
+- **Depends on.** WP-06 for issues; G10.
+- **Touches.** `crates/dyno-core/src/{alerts,report}.rs`, handlers, `app/src/app/features/reports/**`, `state/alerts.store.ts`.
+
+## WP-09 Right-click search
+
+- **Scope.** Right-click a process, file or event and "Search the web": builds a **redacted** query (user name, host name, home
+  paths, serials removed), shows it **editable**, and sends nothing until the user clicks Search; opens the default browser.
+- **Acceptance.** Redaction is a pure core function with tests (paths, user names, GUIDs, IPs); nothing is sent without the click;
+  the editable text is what is used.
+- **Depends on.** Native-feel context menu (ADR 0009).
+- **Touches.** new `crates/dyno-core/src/redact.rs`, `app/src/app/shared/copy-menu.ts` (menu entries), shell command to open the
+  browser (declared in `app/src-tauri/src/commands.rs` by the integrating agent).
+
+## WP-10 Watched folders with keep-for times
+
+- **Scope.** The user watches folders and sets a keep-for time (from 10 minutes to 10 days); file-change notifications (FSEvents,
+  inotify, `ReadDirectoryChangesW`) plus a periodic sweep remove expired files to the Trash or quarantine, with a dry run,
+  templates (Downloads installers, screenshots, build output) and an activity entry with undo per sweep.
+- **Acceptance.** Admission through the same policy as cleanup (ADR 0005): never links, never outside the watched root, never a
+  personal folder unless the user chose it; a dry run shows exactly what would go; notifications are debounced and a missed
+  event is caught by the sweep.
+- **Depends on.** WP-04 (policy, quarantine, Trash).
+- **Touches.** new `crates/dyno-core/src/watch.rs`, `crates/dyno-agent/src/watch/**`, settings (versioned migration), UI page.
+
+## WP-11 Benchmarks on click
+
+- **Scope.** CPU, memory and disk (on a capped temporary file) benchmarks, optional GPU, started only by a click, run **out of
+  process** (a plugin or a spawned helper binary), stored with before/after comparison around a tuning change.
+- **Acceptance.** Never starts on its own; a disk benchmark writes only a capped file in a temp folder it created and removes
+  it; a stuck benchmark is killed after a timeout; results carry the machine load at the time.
+- **Depends on.** G5 (plugin wiring) or a small spawned binary.
+- **Touches.** `plugins/dyno-plugin-bench` (new), `crates/dyno-plugin-api` (a benchmark contribution), UI page.
+
+## WP-12 Performance counters browser
+
+- **Scope.** Browse and chart raw counters: Windows PDH (`PdhEnumObjects`), macOS and Linux equivalents (`sysctl`, `/proc`,
+  `/sys`, `iostat`-like sources), search, pin to the dashboard.
+- **Acceptance.** Counters are read through a port with timeouts; a counter that disappears is shown unavailable with the reason;
+  a pinned counter survives restart.
+- **Depends on.** G8 for Windows.
+- **Touches.** `crates/dyno-core/src/ports.rs` (a counters port, integrating agent), `crates/dyno-platform/**`, UI page.
+
+## WP-13 Extras
+
+Each is small and independent; all are core logic plus an adapter plus a card or page.
+
+| Extra | Scope | Notes |
+| --- | --- | --- |
+| What changed | A timeline of installs, updates, new startup items and setting changes around a time | Reuses snapshots and the timeline events table |
+| Why won't it sleep / what woke it | `pmset -g assertions` and wake reasons (macOS), `powercfg /requests` and `/lastwake` (Windows), `systemd-inhibit --list` (Linux) | Read only |
+| Boot analysis | Boot duration and what slowed it (`boots` table exists) | Per OS sources |
+| Network and energy per app | Per-app bytes (`nettop`, ETW or counters, `/proc`) and energy impact where the OS exposes it | Adds fields to app minutes |
+| Inventory report | Hardware and software inventory export | Local file only |
+| GPU per process | Per-process GPU use where the OS tells | Linux needs vendor interfaces |
+| Large and duplicate file finder | Scan a chosen folder for big or duplicate files, never delete without the cleanup policy | Reuses WP-04 admission |
+| Maintenance windows | Times when Dyno's heavier work (scans, cleanups) may run | Setting plus scheduler |
+
+## WP-14 Backup health checks
+
+- **Scope.** Check that backups ran and succeeded: Time Machine (`tmutil`), Windows Backup and File History, restic, Borg and
+  Duplicati (via their logs or CLIs, declared as tier-2 detector packs). Dyno never runs or manages backups.
+- **Acceptance.** Tools are run with timeouts and the user's login-shell `PATH` (G11); "no backup tool found" is a normal state;
+  a stale backup raises an alert with a plain sentence.
+- **Depends on.** G11, WP-15, WP-08.
+- **Touches.** `crates/dyno-core/src/backup.rs` (new), pack detectors, adapter command runners, UI card.
+
+## WP-15 Declarative TOML packs
+
+- **Scope.** Tier 2 of ADR 0007: cleanup packs (developer caches, browsers, Docker, Xcode and Android SDK, game launchers), tuning
+  packs (check, apply, undo data), process rule packs (taming rules, known helpers) and backup detectors. A pack is parsed once
+  at the edge (`deny_unknown_fields`, size and count limits, path templates expanded by the core), validated, and every path still
+  passes the cleanup policy; invalid packs are skipped with a message naming the file and line; a format version gates loading.
+  Packs ship in the app and may be dropped into the user's `packs/` folder.
+- **Acceptance.** A pack cannot widen what Dyno may delete or change (test with a hostile pack); a corrupt pack never stops the
+  app; the default profile file documents every key (the schema is its own documentation, like Debrief's).
+- **Depends on.** WP-04.
+- **Touches.** new `crates/dyno-core/src/packs/**`, `crates/dyno-agent` (loader), a `packs/` data folder, docs/plugins.md.
+
+## WP-16 Optional local web API
+
+- **Scope.** Off by default (`Settings::web_api`): a loopback-only HTTP API for read-only status and metrics, protected by a key
+  kept in the OS credential store; never exposed beyond loopback unless the user opts in explicitly.
+- **Acceptance.** Binds `127.0.0.1` only by default; a request without the key gets 401; rate limited; no action endpoints in v1;
+  documented.
+- **Touches.** new `crates/dyno-agent/src/web/**`, settings, docs.
+
+## WP-17 Explain this via Pitwall
+
+- **Scope.** "Explain this" on a diagnosis, an issue or an unusual process sends a **redacted** summary (WP-09's redaction) to the
+  user's local Pitwall server, only on click, and shows the answer inline.
+- **Acceptance.** Local only; nothing is sent without the click; the request text is shown first; a missing Pitwall is a clear
+  message.
+- **Depends on.** WP-09, WP-06, WP-07; Pitwall's API.
+- **Touches.** shell command, `app/src/app/core/backend.ts`, UI.
+
+## WP-18 Multi-PC LAN view (after v1)
+
+- **Scope.** See several of your own PCs on one dashboard over the LAN, opt-in, authenticated, read-only.
+- **Acceptance.** Needs its own ADR (discovery, authentication, transport security) before any code.
+- **Depends on.** WP-16.
+
+## Screenshot checklist
+
+The UI agent produces `docs/screenshots/<screen>-<dark|light>.png` (`npm run screenshots` in `app/`, against the mock). Each
+feature needs its images; a row is done when both exist and show the built screen, not a placeholder.
+
+| Feature | Screenshot | State |
+| --- | --- | --- |
+| Dashboard (live tiles, diagnosis, health) | `dashboard-dark.png`, `dashboard-light.png`, `dashboard-full-*.png` | built |
+| Processes (grouped tree, details, undo) | `processes-*.png` | built |
+| Settings | `settings-*.png` | built |
+| Tray dropdown | `tray-*.png` | built |
+| Why slow | `why-slow-*.png` | placeholder; real screen with WP-02/WP-06 |
+| CPU taming | `rules-*.png` | placeholder; real screen with WP-02 |
+| Cleanup | `cleanup-*.png` | placeholder; real screen with WP-04 |
+| Health and tuning | `health-*.png` | placeholder; real screen with WP-03 and WP-05 |
+| Reports and alerts | `reports-*.png` | placeholder; real screen with WP-08 |
+| Issues with statistics | `issues-*.png` | not started (WP-06) |
+| Unusual processes | `unusual-*.png` | not started (WP-07) |
+| Watched folders | `watched-folders-*.png` | not started (WP-10) |
+| Benchmarks | `benchmarks-*.png` | not started (WP-11) |
+| Performance counters | `counters-*.png` | not started (WP-12) |
+| Backup health | `backup-*.png` | not started (WP-14) |
