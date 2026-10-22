@@ -153,9 +153,11 @@ once benchmarks are stored; until then speed is estimated from file size.
 
 A tick every five seconds asks `memory::plan_release` what to give back. In order of precedence: a model that is
 serving or loading is never released; under pressure (available RAM below a percentage of total, or the OS
-signals it) the least recently used idle, unpinned models are unloaded until the threshold is met; a model idle for
+signals it; the server currently measures only the percentage) the least recently used idle, unpinned models are
+unloaded until the threshold is met; a model idle for
 its idle time is unloaded; when nothing has been used for the deep-idle time every unpinned model goes; while a
-foreground full-screen app is detected idle times shrink to a quarter (at least 30 s). The presets (Low memory,
+foreground full-screen app is detected idle times shrink to a quarter (at least 30 s; the rule is in the core, but the
+server does not detect foreground apps yet, so it never fires). The presets (Low memory,
 Balanced, Performance) are sets of these values; `custom` is the user's own. The next request after a release
 simply reloads the model (a cold start).
 
@@ -268,6 +270,7 @@ Said plainly, so nothing in this document is read as a promise:
   embedding and reranker engine adapters (embeddings work through llama.cpp with an embedding model).
 - Stored benchmarks: `run_benchmark` measures one model (time to first token, prompt and generation speed) and returns
   the result, but results are not persisted (`benchmarks` returns an empty list) and do not yet feed selection.
+- OS memory-pressure signals and foreground-app detection (the policy takes them as inputs; the server passes false).
 - Releasing the context only (the policy plans `ReleaseContext`, the server currently carries out only unloads).
 - Restarting a crashed engine with backoff (`pitwall_core::backoff` exists; today a dead engine is dropped and the model
   is reloaded by the next request).

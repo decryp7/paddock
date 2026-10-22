@@ -57,6 +57,7 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | Token counting and truncation helpers (`/x/v1/tokens/...`) | Implemented as estimates (no tokenizer call yet); **partial** |
 | Response cache and prompt-prefix policy | Policy in the core (`cache.rs`); **not wired** into the server |
 | Stored benchmarks feeding "fast" selection | One-off benchmark run works; results are not stored; **partial** |
+| OS memory-pressure signals and foreground-app yielding | Rules in the core; the server does not read the signals yet |
 | Releasing a model's context before its weights | Planned in the policy; the server only unloads |
 | Engine restart with backoff | Policy in the core; the server reloads on the next request instead; **partial** |
 | `X-Pitwall-Engine` naming pack engines | Always reports `llama.cpp` today |
