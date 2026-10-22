@@ -1,7 +1,7 @@
 # Dyno design
 
-The design diagrams, one page. The sources are draw.io files in [`../diagrams/`](../diagrams); the SVGs here are exported
-by `scripts/export-diagrams.sh` and follow [`diagrams/STYLE.md`](../diagrams/STYLE.md). Dashed boxes and ellipses are
+The design diagrams, one page. The sources are generated from [`docs/diagrams/src`](diagrams/src) into draw.io files in
+[`../diagrams/`](../diagrams) and exported to SVG there; they follow [`diagrams/STYLE.md`](../diagrams/STYLE.md). Dashed boxes and ellipses are
 planned (not built). The text companion is [architecture.md](architecture.md).
 
 ## Overview
@@ -10,6 +10,8 @@ Dyno is a per-user **agent** that measures the machine and keeps its history, an
 that shows it, a pure Rust **core** that holds every decision, OS **adapters** behind the core's ports, and (planned) a
 privileged **helper** installed on the first admin action. The user changes nothing by accident: rules ship disabled,
 and every action is logged with an undo (ADR 0006).
+
+![Dyno at a glance](../diagrams/dyno-overview.svg)
 
 ## C4 model
 
@@ -38,25 +40,41 @@ Pure modules over values; time is a parameter. `dyno-platform` implements the po
 
 ![dyno-agent components](../diagrams/svg/c4-3-components-agent.svg)
 
-A sampling thread, an ipc server with a thread per connection, request handlers, the SQLite store with its rollups, the
-service registration and the CLI.
+A sampling thread feeding history, alarms and the flight recorder, an ipc server with a thread per connection, request
+handlers and the SQLite store with its rollups.
+
+### Level 3 — agent support modules
+
+![dyno-agent support modules](../diagrams/svg/c4-3-components-agent-support.svg)
+
+The CLI, the service registration, the shared state, the plugin host and the benchmark runner that starts `dyno-bench`.
 
 ## Deployment
 
-![Deployment](../diagrams/svg/uml-deployment.svg)
+![Deployment on macOS](../diagrams/svg/uml-deployment-macos.svg)
+
+![Deployment on Windows](../diagrams/svg/uml-deployment-windows.svg)
+
+![Deployment on Linux](../diagrams/svg/uml-deployment-linux.svg)
 
 Per OS: the app bundle, the OS's way of starting the agent at login (launchd through `SMAppService`, a systemd user
 unit, a per-user `Run` entry on Windows), the agent process, the data folder, and the planned helper started on demand.
 
 ## Use cases
 
-![Use cases](../diagrams/svg/uml-use-cases.svg)
+![Use cases: see and understand](../diagrams/svg/uml-use-cases-observe.svg)
+
+![Use cases: change and tune](../diagrams/svg/uml-use-cases-act.svg)
 
 Everything that changes the machine needs an enabled rule or an explicit click. Dashed use cases are planned.
 
 ## Domain model
 
-![Domain model](../diagrams/svg/uml-class-domain.svg)
+![Domain model: measurements](../diagrams/svg/uml-class-domain.svg)
+
+![Domain model: rules and actions](../diagrams/svg/uml-class-rules.svg)
+
+![Domain model: diagnosis and changes](../diagrams/svg/uml-class-insight.svg)
 
 The core's main types. `Reading<T>` makes a missing sensor explicit; `ProcessRef` (pid plus start time) is the only way to
 name a process in an action; `ActivityEntry` carries an `UndoRecord`.

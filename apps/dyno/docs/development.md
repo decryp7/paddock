@@ -105,10 +105,11 @@ could not be run when the workflow was written; see roadmap G15.
 
 ## Architecture documents and diagrams
 
-`diagrams/*.drawio` are the sources; `scripts/export-diagrams.sh [name…]` exports them to `diagrams/svg/` with the draw.io
-desktop CLI (`/Applications/draw.io.app` on macOS; export one at a time on a busy machine). Follow
-[`diagrams/STYLE.md`](../diagrams/STYLE.md); look at the exported picture before committing. Update the footer date when a
-diagram changes.
+The diagrams are generated, not hand-drawn: `docs/diagrams/src/*.mjs` build `diagrams/*.drawio` from the Paddock diagram kit
+(`paddock/diagrams/tools`, a sibling checkout) and `docs/diagrams/src/build.sh [name…]` regenerates everything and exports it
+to `diagrams/svg/` (theme-aware SVG) with the draw.io desktop CLI; `dyno-overview.svg` is a hand-written SVG from
+`overview.mjs`. Change the script, not the picture. Follow [`diagrams/STYLE.md`](../diagrams/STYLE.md), look at the exported
+picture in both themes before committing and update the date in `common.mjs` when a diagram changes.
 
 ## Where to add things
 

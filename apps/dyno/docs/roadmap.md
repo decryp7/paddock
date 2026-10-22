@@ -30,8 +30,9 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-08 | Alerts and the weekly report | engine partly built, rest planned (superseded in part by WP-26) |
 | WP-09 | Right-click search | planned |
 | WP-10 | Watched folders with keep-for times | planned |
-| WP-11 | Benchmarks on click | planned |
+| WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
 | WP-12 | Performance counters browser | planned |
+| WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS, traffic rates, process-details tab and rules on new listeners open |
 | WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | planned |
 | WP-14 | Backup health checks | planned |
 | WP-15 | Declarative TOML packs | planned |
@@ -212,12 +213,24 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
 
 ## WP-11 Benchmarks on click
 
-- **Scope.** CPU, memory and disk (on a capped temporary file) benchmarks, optional GPU, started only by a click, run **out of
-  process** (a plugin or a spawned helper binary), stored with before/after comparison around a tuning change.
-- **Acceptance.** Never starts on its own; a disk benchmark writes only a capped file in a temp folder it created and removes
-  it; a stuck benchmark is killed after a timeout; results carry the machine load at the time.
-- **Depends on.** G5 (plugin wiring) or a small spawned binary.
-- **Touches.** `plugins/dyno-plugin-bench` (new), `crates/dyno-plugin-api` (a benchmark contribution), UI page.
+- **Status.** Built (ADR 0015). `crates/dyno-bench` (kernels and the child process), `dyno_core::bench` (types, plan validation,
+  comparison, bounded history), `dyno-agent/src/bench.rs` (one run at a time, per-kind timeout, scratch folder removed by the
+  agent), requests `benchmarks`, `startBenchmark`, `cancelBenchmark`, `deleteBenchmark`, `compareBenchmarks`; UI page
+  `/benchmarks`; screenshots `benchmarks-*.png`.
+- **Open.** GPU compute (reported unavailable), a benchmark offered from the tuning confirmation dialog, cancelling a kind
+  that is already running (cancel acts between kinds; the timeout bounds each).
+
+## WP-37 Network: open ports and connections per process
+
+- **Status.** Built, observe-only (ADR 0015). `dyno_core::network` (view, filters, exposure, tracker), `NetworkSockets` port
+  implemented with `netstat2` in `dyno-platform/src/network.rs`, `dyno-agent/src/network.rs` (cached read, background look
+  every 30 s, activity entries for new exposed listeners and new remote hosts), request `network`; UI page `/network`.
+  **Look up IP** (`dyno_core::ip_lookup`, request `lookupIp`, Settings ▸ Network ▸ IP lookup) opens the user's https
+  template in the browser; private, loopback, link-local and CGNAT addresses are refused. No country database is bundled.
+- **Open.** Reverse DNS through the OS resolver (on demand, switchable); per-connection or per-process traffic rates;
+  the tab in process details; resolving other users' sockets through the helper; rules that alert on a new non-loopback
+  listener; redacting remote IPs in diagnostics bundles unless the user opts in; ASN column (the ASN lookup template is
+  stored but no ASN is known yet).
 
 ## WP-12 Performance counters browser
 
@@ -430,7 +443,8 @@ feature needs its images; a row is done when both exist and show the built scree
 | Issues with statistics | `issues-*.png` | not started (WP-06) |
 | Unusual processes | `unusual-*.png` | not started (WP-07) |
 | Watched folders | `watched-folders-*.png` | not started (WP-10) |
-| Benchmarks | `benchmarks-*.png` | not started (WP-11) |
+| Benchmarks | `benchmarks-*.png`, `benchmarks-running-*.png`, `benchmarks-compare-*.png` | built |
+| Network | `network-*.png`, `network-connections-*.png` | built |
 | Performance counters | `counters-*.png` | not started (WP-12) |
 | Backup health | `backup-*.png` | not started (WP-14) |
 | Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-*.png` | in progress (WP-19) |
