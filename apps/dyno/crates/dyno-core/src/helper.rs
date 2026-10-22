@@ -200,6 +200,32 @@ impl HelperAction {
         self.needs_admin() || (host == TuningHost::Macos && matches!(self, HelperAction::SetSleepMinutes { .. }))
     }
 
+    /// The setting this action sets, as (name, value after applying). A read of the same setting after the action ran
+    /// gives the same pair; comparing a later read with it tells whether something else changed the setting since.
+    pub fn setting(&self) -> (String, String) {
+        let on = |b: &bool| if *b { "on" } else { "off" }.to_string();
+        let per_path = |paths: &[String], excluded: bool| vec![if excluded { "excluded" } else { "included" }; paths.len()].join(",");
+        match self {
+            HelperAction::SetPowerScheme(g) => ("powerScheme".into(), g.to_lowercase()),
+            HelperAction::SetVisualEffects(v) => ("visualEffects".into(), v.to_string()),
+            HelperAction::SetBackgroundAppsDisabled(b) => ("backgroundApps".into(), if *b { "1" } else { "0" }.into()),
+            HelperAction::SetIndexingExcluded { paths, excluded } => (format!("indexing:{}", paths.join("|")), per_path(paths, *excluded)),
+            HelperAction::SetDefenderExcluded { paths, excluded } => (format!("defender:{}", paths.join("|")), per_path(paths, *excluded)),
+            HelperAction::SetLowPowerMode(b) => ("lowPowerMode".into(), on(b)),
+            HelperAction::SetPowerProfile(p) => ("powerProfile".into(), p.tool_name().into()),
+            HelperAction::SetSleepMinutes { source, minutes } => (
+                match source {
+                    SleepSource::Ac => "sleep:ac".into(),
+                    SleepSource::Battery => "sleep:battery".into(),
+                },
+                minutes.to_string(),
+            ),
+            HelperAction::SetHibernate(b) => ("hibernate".into(), on(b)),
+            HelperAction::SetChargeLimit(p) => ("chargeLimit".into(), p.to_string()),
+            HelperAction::SetMachineStartupEnabled { name, enabled, .. } => (format!("startup:{name}"), on(enabled)),
+        }
+    }
+
     /// What it changes, in words, one line per change.
     pub fn preview(&self) -> Vec<String> {
         match self {
@@ -330,6 +356,53 @@ mod tests {
         assert!(s("a\\b").validate().is_err());
         assert!(s(" ").validate().is_err());
         assert!(HelperAction::SetLowPowerMode(true).validate().is_ok());
+    }
+
+    #[test]
+    fn settings_name_what_an_action_leaves_behind() {
+        assert_eq!(
+            HelperAction::SetPowerScheme("ABC".into()).setting(),
+            ("powerScheme".into(), "abc".into())
+        );
+        let idx = HelperAction::SetIndexingExcluded {
+            paths: vec!["/a".into(), "/b".into()],
+            excluded: true,
+        };
+        assert_eq!(idx.setting(), ("indexing:/a|/b".into(), "excluded,excluded".into()));
+        assert_eq!(HelperAction::SetHibernate(true).setting().1, "on");
+        assert_eq!(HelperAction::SetBackgroundAppsDisabled(true).setting().1, "1");
+        assert_eq!(HelperAction::SetChargeLimit(80).setting(), ("chargeLimit".into(), "80".into()));
+        assert_eq!(HelperAction::SetPowerProfile(PowerProfile::Balanced).setting().1, "balanced");
+        assert_eq!(HelperAction::SetVisualEffects(2).setting().1, "2");
+        assert_eq!(HelperAction::SetLowPowerMode(false).setting().1, "off");
+        assert_eq!(
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Battery,
+                minutes: 9
+            }
+            .setting(),
+            ("sleep:battery".into(), "9".into())
+        );
+        let d = HelperAction::SetDefenderExcluded {
+            paths: vec!["/a".into()],
+            excluded: false,
+        };
+        assert_eq!(d.setting().1, "included");
+        let m = HelperAction::SetMachineStartupEnabled {
+            location: MachineStartup::RunKey,
+            name: "x".into(),
+            enabled: true,
+        };
+        assert_eq!(m.setting(), ("startup:x".into(), "on".into()));
+        assert_eq!(
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Ac,
+                minutes: 0
+            }
+            .setting()
+            .0,
+            "sleep:ac"
+        );
     }
 
     #[test]
