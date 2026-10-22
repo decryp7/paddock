@@ -24,3 +24,11 @@ export function errorSentence(e: CommandError): string {
   return e.message;
 }
 
+
+/** A path shortened in the middle to at most `max` characters (keeps the root and the last segments); short paths are returned as they are. */
+export function middleEllipsis(path: string, max = 56): string {
+  if (max < 8 || path.length <= max) return path;
+  const keepEnd = Math.ceil((max - 1) * 0.6);
+  const keepStart = max - 1 - keepEnd;
+  return `${path.slice(0, keepStart)}…${path.slice(path.length - keepEnd)}`;
+}

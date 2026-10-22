@@ -43,10 +43,44 @@ describe('StoragePage', () => {
       expect(text(images)).toContain('18.4 GB');
       expect(text(images)).toContain('34 in total, 6 active');
       expect(text(images)).toContain('12.1 GB');
-      expect(text(images)).toContain('can be reclaimed');
+      expect(text(images)).toContain('12.1 GB reclaimable');
+      expect(images.querySelectorAll('.stack').length).toBe(1);
+      expect(text(images.querySelector('.legend'))).toBe('In useReclaimable');
       expect(el.querySelectorAll('.usage-card').length).toBe(4);
       expect(text(el)).toContain('Cache server (default)');
-      expect(el.querySelector('.folders .mono')!.textContent).toContain('act');
+      expect(el.querySelector('table.folders .mono')!.textContent).toContain('act');
+      expect([...el.querySelectorAll('table.folders thead th')].slice(0, 3).map((h) => text(h))).toEqual(['Folder', 'Size', 'Entries']);
+    });
+
+    it('has a subtitle, a refresh icon button and one primary that focuses the prune section', async () => {
+      const { f, el } = await mount();
+      expect(text(el.querySelector('.subtitle'))).toContain('reclaim');
+      expect(btn(el, 'refresh').getAttribute('aria-label')).toBe('Refresh');
+      expect(el.querySelectorAll('.btn.primary').length).toBe(1);
+      const scroll = vi.fn();
+      (document.getElementById('prune-title') as HTMLElement).scrollIntoView = scroll;
+      await click(f, btn(el, 'clean-up'));
+      expect(scroll).toHaveBeenCalled();
+      expect(document.activeElement?.id).toBe('prune-title');
+    });
+
+    it('refreshes the report from the toolbar', async () => {
+      const { f, el } = await mount();
+      const spy = vi.spyOn(mock, 'engineReport');
+      await click(f, btn(el, 'refresh'));
+      expect(spy).toHaveBeenCalled();
+    });
+
+    it('copies a folder path and shortens long paths in the middle with the full path as tooltip', async () => {
+      const write = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: write }, configurable: true });
+      const { f, el } = await mount();
+      const row = el.querySelector('table.folders tbody tr')!;
+      const path = row.querySelector('.path')!;
+      expect(path.getAttribute('title')).toBeTruthy();
+      await click(f, row.querySelector('button[aria-label^="Copy path"]'));
+      expect(write).toHaveBeenCalledWith(path.getAttribute('title'));
+      expect(row.querySelector('button[aria-label^="More actions"]')).not.toBeNull();
     });
 
     it('shows the problem and a next step, with no prune controls, when there is no engine', async () => {

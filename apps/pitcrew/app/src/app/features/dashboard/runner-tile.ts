@@ -51,7 +51,6 @@ export class RunnerTile {
     const u = this.runner().usage;
     return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes), processes: `${u.processes} ${u.processes === 1 ? 'process' : 'processes'}` } : null;
   });
-  protected readonly nextCleanup = computed(() => formatRelative(this.runner().nextCleanupAt, this.now()));
   protected readonly nextStart = computed(() => formatRelative(this.runner().nextStartAt, this.now()));
   protected readonly lastJobAgo = computed(() => {
     const j = this.lastJob();

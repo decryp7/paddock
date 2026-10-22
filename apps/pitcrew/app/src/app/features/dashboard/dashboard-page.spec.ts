@@ -89,6 +89,14 @@ describe('DashboardPage', () => {
     expect(el.querySelectorAll('.track')).toHaveLength(4);
   });
 
+  it('keeps the period control in the History header, and only the primary in the page header', async () => {
+    configure();
+    const { el } = await mount();
+    expect(el.querySelector('header.page-header [role="radiogroup"]')).toBeNull();
+    expect(el.querySelectorAll('header.page-header button')).toHaveLength(1);
+    expect(el.querySelector('#history-title')?.parentElement?.querySelector('[role="radiogroup"]')).not.toBeNull();
+  });
+
   it('opens the register wizard', async () => {
     configure();
     const { el } = await mount();

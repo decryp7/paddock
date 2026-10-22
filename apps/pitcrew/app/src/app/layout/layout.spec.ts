@@ -115,12 +115,14 @@ describe('Sidebar', () => {
     f.nativeElement.remove();
   });
 
-  it('opens the register wizard', async () => {
-    configure({}, [{ provide: RegisterLauncher, useValue: { open: vi.fn() } }]);
+  it('has no register button (the page headers carry it) and explains the service line in a tooltip', async () => {
+    configure();
     const f = TestBed.createComponent(Sidebar);
     await settle(f, 1);
-    byText<HTMLButtonElement>(f.nativeElement, 'button', 'Register runner')!.click();
-    expect(TestBed.inject(RegisterLauncher).open).toHaveBeenCalled();
+    const el: HTMLElement = f.nativeElement;
+    expect(el.querySelector('button')).toBeNull();
+    expect(text(el)).not.toContain('Register runner');
+    expect(el.querySelector('.service')?.getAttribute('title')).toBe(text(el.querySelector('.service')));
   });
 });
 

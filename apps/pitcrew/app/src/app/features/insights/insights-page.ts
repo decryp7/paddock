@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
 import type { RepoInsight } from '../../core/api.types';
@@ -34,17 +34,21 @@ export class InsightsPage implements OnInit {
 
   protected readonly advice = computed(() => (this.data()?.advice ?? []).map((a) => ({ ...a, ...adviceLook(a.kind) })));
 
+  /** Hero tiles. The engine returns no overall success figure and rates are not computed here, so queue times lead. */
   protected readonly kpis = computed(() => {
     const d = this.data();
     if (!d) return [];
     return [
-      { label: 'Jobs', value: formatCount(d.jobs) },
-      { label: 'With known outcome', value: formatCount(d.jobsWithOutcome) },
       { label: 'Average queue time', value: formatDuration(d.queue.avgMs) },
       { label: '95th percentile queue time', value: formatDuration(d.queue.p95Ms) },
-      { label: 'Longest wait', value: formatDuration(d.queue.maxMs) },
+      { label: 'Jobs measured', value: formatCount(d.jobs) },
     ];
   });
+  protected readonly footer = computed(() => {
+    const d = this.data();
+    return d ? `${plural(d.jobs, 'job')} in total, ${formatCount(d.jobsWithOutcome)} with a known outcome` : '';
+  });
+  private readonly open = signal<ReadonlySet<number>>(new Set());
 
   protected readonly repos = computed(() =>
     (this.data()?.repos ?? []).map((r) => ({
@@ -87,6 +91,16 @@ export class InsightsPage implements OnInit {
       width: Math.min(100, Math.max(0, r.busyPermille / 10)),
     })),
   );
+
+  protected isOpen(i: number): boolean {
+    return this.open().has(i);
+  }
+
+  protected toggle(i: number): void {
+    const next = new Set(this.open());
+    if (!next.delete(i)) next.add(i);
+    this.open.set(next);
+  }
 
   ngOnInit(): void {
     void this.store.load();

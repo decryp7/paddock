@@ -5,11 +5,6 @@
       <p class="subtitle">{{ status.status() ? summary() : status.offline() ? 'Not connected to the Pitcrew service' : 'Connecting to the Pitcrew service…' }}</p>
     </div>
     <div class="btn-row">
-      <div class="segmented" role="radiogroup" aria-label="History range">
-        @for (r of ranges; track r.key) {
-          <button type="button" role="radio" [attr.aria-checked]="store.range() === r.key" (click)="store.setRange(r.key)">{{ r.label }}</button>
-        }
-      </div>
       <button type="button" class="btn primary" (click)="register.open()">
         <mat-icon svgIcon="pc:plus" aria-hidden="true" />Register runner
       </button>
@@ -52,15 +47,22 @@
     <section aria-labelledby="history-title" class="block">
       <div class="block-head">
         <h2 id="history-title" class="section-label">History</h2>
-        <label class="focus">
-          <span class="visually-hidden">Show history for</span>
-          <select class="select sm" [value]="store.focus() ?? ''" (change)="setFocus($any($event.target).value)">
-            <option value="">All runners</option>
-            @for (n of names(); track n) {
-              <option [value]="n">{{ n }}</option>
+        <div class="btn-row">
+          <div class="segmented" role="radiogroup" aria-label="History range">
+            @for (r of ranges; track r.key) {
+              <button type="button" role="radio" [attr.aria-checked]="store.range() === r.key" (click)="store.setRange(r.key)">{{ r.label }}</button>
             }
-          </select>
-        </label>
+          </div>
+          <label class="focus">
+            <span class="visually-hidden">Show history for</span>
+            <select class="select sm" [value]="store.focus() ?? ''" (change)="setFocus($any($event.target).value)">
+              <option value="">All runners</option>
+              @for (n of names(); track n) {
+                <option [value]="n">{{ n }}</option>
+              }
+            </select>
+          </label>
+        </div>
       </div>
 
       <div class="grid">

@@ -48,7 +48,11 @@
       </div>
     } @else if (r.problem) {
       <div class="problem">
-        <p>{{ r.problem }}</p>
+        <div class="problem-line">
+          <mat-icon svgIcon="pc:alert" class="tone-danger" aria-hidden="true" />
+          <p>{{ r.problem }}</p>
+          <a class="view-logs" [routerLink]="['/logs']" [queryParams]="{ runner: r.name }">View logs</a>
+        </div>
         @if (r.nextStartAt) {
           <span class="faint">Next start {{ nextStart() }}</span>
         }
@@ -74,16 +78,17 @@
       </div>
     }
     @if (hold(); as h) {
-      <div class="hold badge outline" [attr.title]="h.detail"><mat-icon svgIcon="pc:pause-circle" aria-hidden="true" />{{ h.text }}</div>
+      <div class="hold row" [attr.title]="h.detail"><mat-icon svgIcon="pc:pause-circle" aria-hidden="true" />{{ h.text }}</div>
     }
     @if (r.updateLoop; as l) {
-      <div class="loop callout warning" role="status">
+      <div class="loop row tone-warning" role="status">
         <mat-icon svgIcon="pc:alert" aria-hidden="true" />
-        <div class="callout-body"><strong>Updating to {{ l.target }} keeps failing</strong><span class="small">{{ l.cause }}</span></div>
+        <span>Updating to {{ l.target }} keeps failing ·</span>
+        <a routerLink="/updates">View</a>
       </div>
     }
     @if (r.leftovers > 0) {
-      <a class="badge warning leftover-chip" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'processes' }"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />{{ r.leftovers }} leftover {{ r.leftovers === 1 ? 'process' : 'processes' }}</a>
+      <a class="leftover-chip row tone-warning" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'processes' }"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />{{ r.leftovers }} leftover {{ r.leftovers === 1 ? 'process' : 'processes' }}</a>
     }
     @if (phase(); as ph) {
       <div class="phase">
@@ -93,43 +98,31 @@
     }
   </div>
 
-  <dl class="stats">
-    <div>
-      <dt>Version</dt>
-      <dd>
-        <span class="num">{{ r.currentVersion ?? '—' }}</span>
-        @if (r.updateTarget && r.updatePhase.phase === 'idle') {
-          <span class="badge update upd">{{ r.updateTarget }} available</span>
-        }
-        @if (deadline(); as d) {
-          <span class="badge small" [class.warning]="d.warn" [class.outline]="!d.warn">{{ d.text }}</span>
-        }
-      </dd>
-    </div>
-    <div>
-      <dt>Up for</dt>
-      <dd>
-        <span class="num">{{ uptime() }}</span>
-        @if (r.restarts24h > 0) {
-          <span class="faint small">{{ r.restarts24h }} {{ r.restarts24h === 1 ? 'restart' : 'restarts' }} / 24 h</span>
-        }
-      </dd>
-    </div>
-    <div>
-      <dt>Disk</dt>
-      @if (disk(); as d) {
-        <dd class="disk">
-          <span class="num" [class.tone-danger]="d.low">{{ d.used }}{{ d.low ? ' · low' : '' }}</span>
-          <span class="meter" [class.danger]="d.low" aria-hidden="true"><span [style.width.%]="d.share * 100"></span></span>
-          @if (r.nextCleanupAt) {
-            <span class="faint small">Cleanup {{ nextCleanup() }}</span>
-          }
-        </dd>
-      } @else {
-        <dd class="faint">—</dd>
-      }
-    </div>
-  </dl>
+  <p class="meta">
+    <span class="num ver">{{ r.currentVersion ?? '—' }}</span>
+    @if (r.updateTarget && r.updatePhase.phase === 'idle') {
+      <span class="badge update upd num" [attr.title]="r.updateTarget + ' available'" [attr.aria-label]="r.updateTarget + ' available'">{{ r.updateTarget }}</span>
+    }
+    @if (r.runningSince !== null) {
+      <span class="sep" aria-hidden="true">·</span><span class="num uptime">up {{ uptime() }}</span>
+    }
+    @if (r.restarts24h > 0) {
+      <span class="sep" aria-hidden="true">·</span><span class="num restarts">{{ r.restarts24h }} {{ r.restarts24h === 1 ? 'restart' : 'restarts' }} / 24 h</span>
+    }
+    @if (disk(); as d) {
+      <span class="sep" aria-hidden="true">·</span>
+      <span class="num disk" [class.tone-danger]="d.low">{{ d.used }}{{ d.low ? ' low' : '' }}</span>
+    }
+    @if (deadline(); as d) {
+      <span class="sep" aria-hidden="true">·</span>
+      <span class="deadline" [class.tone-warning]="d.warn"><span class="dot" aria-hidden="true"></span>{{ d.text }}</span>
+    }
+  </p>
+  @if (disk(); as d) {
+    @if (d.low) {
+      <span class="meter danger" aria-hidden="true"><span [style.width.%]="d.share * 100"></span></span>
+    }
+  }
 
   <footer class="actions">
     @if (paused()) {
@@ -145,8 +138,5 @@
         <mat-icon svgIcon="pc:refresh" aria-hidden="true" [class.spin]="busy() === 'restart'" />Restart
       </button>
     }
-    <a class="btn sm ghost logs" [routerLink]="['/logs']" [queryParams]="{ runner: r.name }">
-      <mat-icon svgIcon="pc:logs" aria-hidden="true" />Logs
-    </a>
   </footer>
 </article>

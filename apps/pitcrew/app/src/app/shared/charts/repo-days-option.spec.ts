@@ -3,7 +3,7 @@ import { repoDaysOption } from './repo-days-option';
 
 describe('repoDaysOption', () => {
   it('stacks succeeded under failed jobs per day without axes', () => {
-    const t = { success: '#0a0', danger: '#a00' } as ChartTokens;
+    const t = { muted: '#888', danger: '#a00' } as ChartTokens;
     const o = repoDaysOption(
       [
         { start: 1, success: 4, failure: 1 },
@@ -15,7 +15,7 @@ describe('repoDaysOption', () => {
       [4, 0],
       [1, 3],
     ]);
-    expect(o.series.map((s) => s.itemStyle.color)).toEqual(['#0a0', '#a00']);
+    expect(o.series.map((s) => s.itemStyle.color)).toEqual(['#888', '#a00']);
     expect(o.xAxis.show).toBe(false);
   });
 });

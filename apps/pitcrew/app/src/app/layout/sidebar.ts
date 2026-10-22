@@ -3,7 +3,6 @@ import { MatIcon } from '@angular/material/icon';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { BrandLogo } from '../shared/ui/brand-logo';
 import { StatusStore } from '../state/status.store';
-import { RegisterLauncher } from './register-launcher';
 
 interface NavItem {
   path: string;
@@ -59,11 +58,7 @@ const NAV: NavItem[] = [
       }
     </nav>
     <div class="spacer"></div>
-    <button type="button" class="btn register" (click)="register.open()">
-      <mat-icon svgIcon="pc:plus" aria-hidden="true" />
-      Register runner
-    </button>
-    <div class="service" [class]="serviceTone()">
+    <div class="service" [class]="serviceTone()" [attr.title]="serviceText()">
       <span class="dot" aria-hidden="true"></span>
       <span class="truncate">{{ serviceText() }}</span>
     </div>
@@ -158,10 +153,6 @@ const NAV: NavItem[] = [
     .spacer {
       flex: 1;
     }
-    .register {
-      width: 100%;
-      margin-bottom: var(--space-2);
-    }
     .service {
       display: flex;
       align-items: center;
@@ -183,7 +174,6 @@ const NAV: NavItem[] = [
 })
 export class Sidebar {
   protected readonly nav = NAV;
-  protected readonly register = inject(RegisterLauncher);
   private readonly store = inject(StatusStore);
   private readonly links = viewChildren<ElementRef<HTMLAnchorElement>>('link');
 

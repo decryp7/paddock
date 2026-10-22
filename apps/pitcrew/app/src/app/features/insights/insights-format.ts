@@ -1,13 +1,16 @@
 import { plural } from '../../shared/format';
 import type { AdviceKind } from '../../core/api.types';
 
-/** The change between two per-mille success rates in words ("up 4 points"); null when either half has no data. */
-export function trendText(earlier: number | null, later: number | null): { text: string; direction: 'up' | 'down' | 'flat' } | null {
+/** The change between two per-mille success rates; null when either half has no data or the rate did not change. */
+export function trendText(
+  earlier: number | null,
+  later: number | null,
+): { text: string; points: string; direction: 'up' | 'down' } | null {
   if (earlier === null || later === null) return null;
-  const points = Math.round((later - earlier) / 10);
-  if (points === 0) return { text: 'no change', direction: 'flat' };
-  const n = Math.abs(points);
-  return { text: `${points > 0 ? 'up' : 'down'} ${plural(n, 'point')}`, direction: points > 0 ? 'up' : 'down' };
+  const delta = Math.round((later - earlier) / 10);
+  if (delta === 0) return null;
+  const n = Math.abs(delta);
+  return { text: `${delta > 0 ? 'up' : 'down'} ${plural(n, 'point')}`, points: plural(n, 'point'), direction: delta > 0 ? 'up' : 'down' };
 }
 
 /** How an advice card looks: its icon, and whether it is a real warning. */

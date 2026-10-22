@@ -28,8 +28,13 @@ describe('InsightsPage', () => {
     expect(text(el.querySelector('.subtitle'))).toBe('How your workflows run on your runners');
     expect([...el.querySelectorAll('.segmented button')].map((b) => text(b))).toEqual(['7 days', '14 days', '30 days', '90 days']);
     for (const h of ['Advice', 'Success rate per repository', 'Slowest jobs', 'Flaky jobs', 'Runner load']) expect(text(el)).toContain(h);
-    expect(el.querySelectorAll('.kpi').length).toBe(5);
-    expect(el.querySelectorAll('.kpi .hero').length).toBe(5);
+    expect([...el.querySelectorAll('.kpi')].map((k) => text(k.querySelector('.faint')))).toEqual([
+      'Average queue time',
+      '95th percentile queue time',
+      'Jobs measured',
+    ]);
+    expect(el.querySelectorAll('.kpi .hero').length).toBe(3);
+    expect(text(el.querySelector('[data-testid="repos-foot"]'))).toMatch(/jobs in total, [\d,]+ with a known outcome/);
     expect(el.querySelector('thead th')?.textContent).not.toMatch(/^[A-Z ]+$/);
   });
 
@@ -37,19 +42,32 @@ describe('InsightsPage', () => {
     const { el } = await mount();
     const rows = el.querySelectorAll('#repos-title ~ * tbody tr, section[aria-labelledby="repos-title"] tbody tr');
     expect(rows.length).toBeGreaterThan(0);
-    expect(text(rows[0])).toMatch(/(up|down) \d+ points?|no change|—/);
+    for (const r of rows) expect(text(r)).not.toMatch(/no change|—/);
+    expect(text(el.querySelector('section[aria-labelledby="repos-title"] tbody'))).toMatch(/[↑↓] \d+ points?|$/);
     expect(el.querySelectorAll('section[aria-labelledby="repos-title"] pc-chart').length).toBe(rows.length);
   });
 
-  it('renders advice cards, a warning border only for real warnings', async () => {
-    const { el } = await mount();
-    const cards = el.querySelectorAll('.advice-card');
-    expect(cards.length).toBe(2);
-    expect(cards[0]?.classList.contains('warning')).toBe(true);
-    expect(text(cards[0])).toContain('Jobs wait for a runner');
+  it('renders advice as list rows with one line and a Show link that expands the text', async () => {
+    const { f, el } = await mount();
+    const rows = el.querySelectorAll('.advice-row');
+    expect(rows.length).toBe(2);
+    expect(rows[0]?.classList.contains('warning')).toBe(true);
+    expect(text(rows[0])).toContain('Jobs wait for a runner');
+    expect(el.querySelector('.advice-card')).toBeNull();
+    const detail = rows[0]!.querySelector('.advice-detail')!;
+    expect(detail.getAttribute('title')).toBeTruthy();
+    const show = rows[0]!.querySelector('button.show') as HTMLButtonElement;
+    expect(text(show)).toBe('Show');
+    await click(f, show);
+    const open = el.querySelectorAll('.advice-row')[0]!;
+    expect(open.querySelector('.advice-full')).not.toBeNull();
+    expect(open.querySelector('.advice-detail')).toBeNull();
+    expect(text(open.querySelector('button.show'))).toBe('Hide');
+    await click(f, open.querySelector('button.show'));
+    expect(el.querySelectorAll('.advice-row')[0]!.querySelector('.advice-full')).toBeNull();
   });
 
-  it('shows spare capacity without a warning border', async () => {
+  it('shows spare capacity without a warning tone', async () => {
     const { el } = await mount((m) => {
       const real = m.insights.bind(m);
       m.insights = async (d) => {
@@ -57,9 +75,26 @@ describe('InsightsPage', () => {
         return { ...r, insights: { ...r.insights, advice: [{ kind: 'spareCapacity', title: 'Room to spare', detail: 'Runners are idle.' }] } };
       };
     });
-    const card = el.querySelector('.advice-card');
+    const card = el.querySelector('.advice-row');
     expect(card?.classList.contains('warning')).toBe(false);
     expect(text(card)).toContain('Room to spare');
+  });
+
+  it('shows an arrow and the points only for a repository whose rate changed', async () => {
+    const { el } = await mount((m) => {
+      const real = m.insights.bind(m);
+      m.insights = async (d) => {
+        const r = await real(d);
+        const [a, b, ...rest] = r.insights.repos;
+        return {
+          ...r,
+          insights: { ...r.insights, repos: [{ ...a!, earlierPermille: 900, laterPermille: 800 }, { ...b!, earlierPermille: 800, laterPermille: 800 }, ...rest] },
+        };
+      };
+    });
+    const rows = el.querySelectorAll('section[aria-labelledby="repos-title"] tbody tr');
+    expect(text(rows[0])).toContain('↓ 10 points');
+    expect(text(rows[1])).not.toMatch(/[↑↓]/);
   });
 
   it('says so when there is nothing to act on', async () => {

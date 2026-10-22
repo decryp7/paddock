@@ -63,9 +63,39 @@ describe('RunnerTile', () => {
     expect(text(el.querySelector('.problem'))).toContain('Exited 5 times in 10 minutes');
     expect(text(el.querySelector('.problem'))).toContain('Next start in 22 min');
     expect(el.querySelector('.tile.attention')).not.toBeNull();
-    expect(text(el.querySelector('.disk'))).toContain('· low');
-    expect(text(el)).toContain('7 restarts / 24 h');
-    expect(text(el)).toContain('5.3.0 available');
+    expect(text(el.querySelector('.disk'))).toMatch(/ low$/);
+    expect(el.querySelector('.meta .meter')).toBeNull();
+    expect(el.querySelector('.tile > .meter.danger')).not.toBeNull();
+    expect(text(el.querySelector('.meta'))).toContain('7 restarts / 24 h');
+    expect(el.querySelector('.badge.update')?.getAttribute('title')).toBe('5.3.0 available');
+  });
+
+  it('shows ONE failing message: the crash reason with a danger icon and a View logs link, without an inner box', async () => {
+    const { el } = await mount('docker-lab');
+    const problem = el.querySelector('.problem')!;
+    expect(problem.querySelectorAll('p')).toHaveLength(1);
+    expect(problem.querySelector('mat-icon.tone-danger')).not.toBeNull();
+    expect(problem.querySelector('a.view-logs')?.getAttribute('href')).toBe('/logs?runner=docker-lab');
+    expect(text(problem.querySelector('a.view-logs'))).toBe('View logs');
+    expect(el.querySelector('.callout')).toBeNull();
+  });
+
+  it('puts version, uptime and disk on one unlabelled meta line, tints disk only when low, shows no meter otherwise', async () => {
+    const { el } = await mount('build-win');
+    const meta = el.querySelector('p.meta')!;
+    expect(el.querySelector('dl')).toBeNull();
+    expect(meta.textContent).not.toMatch(/Version|Up for|Disk/);
+    expect(text(meta)).toBe('5.2.0·up 3d 4h·38.4 GB');
+    expect(el.querySelector('.disk.tone-danger')).toBeNull();
+    expect(el.querySelector('.meter')).toBeNull();
+    expect(text(meta)).not.toContain('available');
+  });
+
+  it('shows an update as one arrow token next to the version, not a second badge', async () => {
+    const { el } = await mount('ui-tests');
+    expect(el.querySelectorAll('.meta .badge')).toHaveLength(1);
+    expect(text(el.querySelector('.badge.update'))).toBe('5.3.0');
+    expect(text(el)).not.toContain('available');
   });
 
   it('shows that a paused runner takes no jobs and offers Resume', async () => {
@@ -102,7 +132,8 @@ describe('RunnerTile', () => {
     runners = runners.map((r) => (r.name === 'ui-tests' ? { ...r, status: 'stopped' as const, disk: null, runningSince: null } : r));
     const { el } = await mount('ui-tests');
     expect(text(el.querySelector('.quiet'))).toBe('Not running.');
-    expect(text(el.querySelector('dl'))).toContain('—');
+    expect(el.querySelector('.meta .disk')).toBeNull();
+    expect(el.querySelector('.meta .uptime')).toBeNull();
   });
 
   it('offers one contextual action: Update now, else Restart, else Resume', async () => {
@@ -134,21 +165,28 @@ describe('RunnerTile', () => {
     );
     const { el } = await mount('ui-tests');
     expect(text(el.querySelector('.hold'))).toBe('Paused by Pitcrew: a pause window is open · 1h 30m left');
-    expect(text(el.querySelector('.upd')?.parentElement)).toContain('Update overdue by 10 days');
-    expect(text(el.querySelector('.loop'))).toContain('Updating to 5.3.0 keeps failing');
+    expect(text(el.querySelector('.deadline'))).toBe('Update overdue by 10 days');
+    expect(el.querySelector('.deadline.tone-warning')).not.toBeNull();
+    expect(text(el.querySelector('.loop'))).toBe('Updating to 5.3.0 keeps failing ·View');
+    expect(el.querySelector('.loop a')?.getAttribute('href')).toBe('/updates');
+    expect(el.querySelector('.loop .callout')).toBeNull();
+    expect(el.querySelector('.hold.badge')).toBeNull();
     runners = runners.map((r) =>
       r.name === 'ui-tests' ? { ...r, hold: { reasons: ['lowDisk' as const], paused: false, minutesLeft: null }, updateLoop: null, deadline: { behindSince: NOW, dueAt: NOW, daysLeft: 4, state: 'soon' as const } } : r,
     );
     const again = (await mount('ui-tests')).el;
     expect(text(again.querySelector('.hold'))).toBe('Pausing after this job: the disk is nearly full');
-    expect(text(again)).toContain('Update due in 4 days');
+    expect(text(again.querySelector('.deadline'))).toBe('Update due in 4 days');
+    expect(again.querySelector('.deadline.tone-warning')).not.toBeNull();
     expect(again.querySelector('.loop')).toBeNull();
   });
 
-  it('links to the runner and its logs', async () => {
+  it('links to the runner; the footer holds only the one contextual action, no Logs link', async () => {
     const { el } = await mount('ui-tests');
     expect(el.querySelector('a.name')?.getAttribute('href')).toBe('/runners/ui-tests');
-    expect(el.querySelector('a.logs')?.getAttribute('href')).toBe('/logs?runner=ui-tests');
+    const footer = el.querySelector('footer.actions')!;
+    expect(footer.querySelectorAll('button, a')).toHaveLength(1);
+    expect(text(footer)).not.toContain('Logs');
   });
 });
 

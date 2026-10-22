@@ -40,21 +40,29 @@
           <pc-empty-state icon="activity" title="No jobs in this period" text="Insights appear once your runners have finished jobs in the selected range." />
         </section>
       } @else {
-        <section class="card" aria-labelledby="advice-title">
-          <header class="card-header"><h2 id="advice-title">Advice</h2></header>
-          <div class="card-body advice">
+        <section aria-labelledby="advice-title">
+          <h2 id="advice-title" class="section-title">Advice</h2>
+          <ul class="advice">
             @for (a of advice(); track $index) {
-              <article class="advice-card" [class.warning]="a.warning">
+              <li class="advice-row" [class.warning]="a.warning">
                 <mat-icon [svgIcon]="'pc:' + a.icon" aria-hidden="true" />
-                <div>
-                  <strong>{{ a.title }}</strong>
-                  <p class="muted">{{ a.detail }}</p>
+                <div class="advice-text">
+                  <div class="advice-line">
+                    <strong>{{ a.title }}</strong>
+                    @if (!isOpen($index)) {
+                      <span class="muted advice-detail truncate" [title]="a.detail">{{ a.detail }}</span>
+                    }
+                    <button type="button" class="link show" [attr.aria-expanded]="isOpen($index)" (click)="toggle($index)">{{ isOpen($index) ? 'Hide' : 'Show' }}</button>
+                  </div>
+                  @if (isOpen($index)) {
+                    <p class="muted advice-full">{{ a.detail }}</p>
+                  }
                 </div>
-              </article>
+              </li>
             } @empty {
-              <p class="muted">Nothing to act on in this period</p>
+              <li class="muted">Nothing to act on in this period</li>
             }
-          </div>
+          </ul>
         </section>
 
         <section class="kpis" aria-label="Summary">
@@ -75,7 +83,7 @@
                   <th scope="col">Repository</th>
                   <th scope="col" class="num">Jobs</th>
                   <th scope="col" class="num">Success rate</th>
-                  <th scope="col">Per day</th>
+                  <th scope="col">Failures per day</th>
                   <th scope="col">Trend</th>
                   <th scope="col" class="num">Average queue</th>
                 </tr>
@@ -89,9 +97,7 @@
                     <td class="spark"><pc-chart [option]="r.option" [label]="r.label" [height]="32" /></td>
                     <td>
                       @if (r.trend; as t) {
-                        <span [class.tone-danger]="t.direction === 'down'" [class.tone-success]="t.direction === 'up'">{{ t.text }}</span>
-                      } @else {
-                        <span class="faint">—</span>
+                        <span class="nowrap" [class.tone-danger]="t.direction === 'down'" [attr.aria-label]="t.text"><span aria-hidden="true">{{ t.direction === 'down' ? '↓' : '↑' }} {{ t.points }}</span></span>
                       }
                     </td>
                     <td class="num">{{ r.queue }}</td>
@@ -100,6 +106,7 @@
               </tbody>
             </table>
           </div>
+          <footer class="table-foot muted" data-testid="repos-foot">{{ footer() }}</footer>
         </section>
 
         <section class="card" aria-labelledby="slow-title">

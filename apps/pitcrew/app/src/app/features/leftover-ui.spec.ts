@@ -36,12 +36,12 @@ describe('leftover processes in the UI', () => {
     const f = TestBed.createComponent(RunnersPage);
     await settle(f, 6);
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelectorAll('.leftover-chip')).toHaveLength(1);
-    expect(text(el.querySelector('.leftover-chip'))).toBe('3 leftover processes');
+    expect(el.querySelectorAll('a.leftover')).toHaveLength(1);
+    expect(el.querySelector('a.leftover')?.getAttribute('aria-label')).toBe('3 leftover processes');
     await mock.stopProcess('build-win', 12408, null, false);
     await mock.stopProcess('build-win', 13370, null, false);
     await settle(f, 6);
-    expect(text(el.querySelector('.leftover-chip'))).toBe('1 leftover process');
+    expect(el.querySelector('a.leftover')?.getAttribute('aria-label')).toBe('1 leftover process');
   });
 
   it('the runner page has Processes and Configuration tabs and opens them', async () => {
@@ -50,8 +50,8 @@ describe('leftover processes in the UI', () => {
     f.componentRef.setInput('name', 'build-win');
     await settle(f, 6);
     const el = f.nativeElement as HTMLElement;
-    expect(Array.from(el.querySelectorAll('[role="tab"]')).map((t) => text(t))).toEqual(['Overview', 'Updates', 'Processes', 'Configuration', 'Disk & cleanup']);
-    expect(text(el.querySelector('.leftover-chip'))).toBe('3 leftover processes');
+    expect(Array.from(el.querySelectorAll('[role="tab"]')).map((t) => text(t))).toEqual(['Overview', 'Updates', 'Processes3', 'Configuration', 'Disk & cleanup']);
+    expect(text(el.querySelector('.leftover-link'))).toBe('3 leftover processes');
     f.componentRef.setInput('tab', 'processes');
     await settle(f, 6);
     expect(el.querySelector('pc-processes-panel')).not.toBeNull();
@@ -64,10 +64,11 @@ describe('leftover processes in the UI', () => {
     const f = TestBed.createComponent(ActivityPage);
     await settle(f, 8);
     const el = f.nativeElement as HTMLElement;
-    expect(text(el.querySelector('thead'))).toContain('Peak CPU');
-    expect(text(el.querySelector('thead'))).toContain('Peak memory');
-    expect(text(el.querySelector('thead'))).toContain('Left running');
-    const rows = Array.from(el.querySelectorAll('tbody tr'));
+    const jobs = el.querySelector('#recent-title')!.closest('section,article')!;
+    expect(text(jobs.querySelector('thead'))).toContain('Peak CPU');
+    expect(text(jobs.querySelector('thead'))).toContain('Peak memory');
+    expect(text(jobs.querySelector('thead'))).toContain('Left running');
+    const rows = Array.from(jobs.querySelectorAll('tbody tr'));
     expect(rows.some((r) => /left running/.test(text(r)))).toBe(true);
     expect(rows.some((r) => !/left running/.test(text(r)))).toBe(true);
     expect(rows[0]!.querySelectorAll("td")[6]!.textContent).toMatch(/%/);

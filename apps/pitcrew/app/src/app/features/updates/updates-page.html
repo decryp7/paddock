@@ -2,97 +2,166 @@
   <header class="page-header">
     <div>
       <h1>Updates</h1>
-      <p class="subtitle">
-        @if (inProgress() > 0) {
-          {{ inProgress() }} in progress ·
-        }
-        {{ available() === 0 ? 'All runners are up to date' : available() + (available() === 1 ? ' update' : ' updates') + ' available' }}
-      </p>
+      <p class="subtitle">{{ subtitle() }}</p>
     </div>
+    @if (updatable().length > 0) {
+      <button type="button" class="btn primary" (click)="updateAll()">
+        <mat-icon svgIcon="pc:download" aria-hidden="true" />{{ updateAllLabel() }}
+      </button>
+    }
   </header>
 
-  <section aria-labelledby="runners-title" class="block">
-    <h2 id="runners-title" class="section-label">Runners</h2>
-    @if (status.status() && status.runners().length === 0) {
-      <section class="card"><pc-empty-state icon="updates" title="No runners" text="Register a runner to manage its updates here." /></section>
-    }
-    <div class="list">
-      @for (r of status.runners(); track r.name) {
-        <article class="card runner" [attr.aria-labelledby]="'u-' + r.name">
-          <div class="main">
-            <div class="who">
-              <a class="name" [id]="'u-' + r.name" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'updates' }">{{ r.name }}</a>
-              <span class="faint small">{{ mode(r) }}</span>
-            </div>
-            <dl class="versions">
-              <div><dt>Installed</dt><dd class="num">{{ r.currentVersion ?? '—' }}</dd></div>
-              <div><dt>Latest</dt><dd class="num">{{ r.latestVersion ?? '—' }}</dd></div>
-              <div>
-                <dt>Target</dt>
-                <dd>
+  @if (status.status() && status.runners().length === 0) {
+    <section class="card"><pc-empty-state icon="updates" title="No runners" text="Register a runner to manage its updates here." /></section>
+  } @else if (status.runners().length > 0) {
+    <div class="layout" [class.with-panel]="detail()">
+      <section class="card table-card" aria-label="Runner updates">
+        <table class="table updates">
+          <thead>
+            <tr>
+              <th scope="col" class="name">Runner</th>
+              <th scope="col">Installed</th>
+              <th scope="col">Latest</th>
+              <th scope="col" class="state">Status</th>
+              <th scope="col">Checked</th>
+              <th scope="col" class="act"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of rows(); track r.name) {
+              @let s = state(r);
+              <tr [attr.data-runner]="r.name" tabindex="0" [class.selected]="selected() === r.name" [attr.aria-current]="selected() === r.name ? 'true' : null"
+                  (click)="onRowClick($event, r.name)" (keydown.enter)="onRowKey($event, r.name)">
+                <th scope="row" class="name">
+                  <span class="runner-name truncate" [title]="r.name">{{ r.name }}</span>
+                  <span class="faint small truncate">{{ mode(r) }}</span>
+                </th>
+                <td class="ver">{{ r.currentVersion ?? '—' }}</td>
+                <td class="ver">
                   @if (r.updateTarget) {
-                    <span class="badge update num">{{ r.updateTarget }}</span>
-                  } @else if (!r.managedBinary) {
-                    <span class="faint small">your own binary</span>
+                    <span class="newer" title="Newer than installed"><mat-icon svgIcon="pc:chevron-up" aria-label="Newer than installed" />{{ r.updateTarget }}</span>
                   } @else {
-                    <span class="faint small">up to date</span>
+                    {{ r.latestVersion ?? '—' }}
                   }
-                </dd>
-              </div>
-              <div>
-                <dt>Checked</dt>
-                <dd class="small muted">{{ r.checkedAt ? ago(r.checkedAt) : 'never' }}</dd>
-              </div>
-            </dl>
-            <div class="btn-row actions">
-              @if (r.managedBinary) {
-                @if (r.updatePhase.phase === 'idle') {
-                  <button type="button" class="btn sm primary" (click)="status.act(r.name, 'applyUpdate')" [disabled]="!r.updateTarget || busy(r)">
-                    <mat-icon svgIcon="pc:download" aria-hidden="true" />Update now
-                  </button>
-                  @if (r.updateTarget) {
-                    <button type="button" class="btn sm" (click)="status.skipVersion(r.name, r.updateTarget)" [disabled]="busy(r)">Skip</button>
-                    <button type="button" class="btn sm" (click)="status.pinVersion(r.name, r.currentVersion)" [disabled]="busy(r) || !r.currentVersion">
-                      <mat-icon svgIcon="pc:pin" aria-hidden="true" />Pin {{ r.currentVersion }}
-                    </button>
-                  }
-                } @else {
-                  <button type="button" class="btn sm" (click)="status.act(r.name, 'cancelUpdate')" [disabled]="busy(r) || !cancellable(r)">
-                    <mat-icon svgIcon="pc:x" aria-hidden="true" />Cancel
-                  </button>
-                }
-                <button type="button" class="btn sm ghost icon" (click)="status.act(r.name, 'checkUpdate')" [disabled]="busy(r)" [attr.aria-label]="'Check ' + r.name + ' for updates'">
-                  <mat-icon svgIcon="pc:refresh" aria-hidden="true" [class.spin]="status.inFlight()[r.name] === 'checkUpdate'" />
-                </button>
-              }
+                </td>
+                <td class="state" [title]="s.tip ?? ''">
+                  <span class="status"><span class="dot {{ s.tone }}" aria-hidden="true"></span><span class="status-text">{{ s.text }}</span></span>
+                </td>
+                <td class="when small muted">{{ r.checkedAt ? ago(r.checkedAt) : 'never' }}</td>
+                <td class="act">
+                  <span class="row-actions">
+                    @if (canUpdate(r)) {
+                      <button type="button" class="btn sm update-btn" (click)="update(r)" [attr.aria-label]="'Update ' + r.name + ' to ' + r.updateTarget">Update</button>
+                    }
+                    @if (r.managedBinary) {
+                      <button type="button" class="btn sm ghost icon more" [cdkMenuTriggerFor]="menu" [attr.aria-label]="'Actions for ' + r.name">
+                        <mat-icon svgIcon="pc:more" aria-hidden="true" />
+                      </button>
+                    }
+                  </span>
+                  <ng-template #menu>
+                    <div class="pc-menu" cdkMenu>
+                      @if (r.updateTarget && r.updatePhase.phase === 'idle') {
+                        <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="skip(r)">
+                          <mat-icon svgIcon="pc:skip" aria-hidden="true" />Skip this version
+                        </button>
+                      }
+                      @if (r.updatePolicy.pinned) {
+                        <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="pinOrFollow(r)">
+                          <mat-icon svgIcon="pc:follow" aria-hidden="true" />Follow latest
+                        </button>
+                      } @else if (r.currentVersion) {
+                        <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="pinOrFollow(r)">
+                          <mat-icon svgIcon="pc:pin" aria-hidden="true" />Pin {{ r.currentVersion }}
+                        </button>
+                      }
+                      <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="check(r)">
+                        <mat-icon svgIcon="pc:refresh" aria-hidden="true" />Check now
+                      </button>
+                      @if (cancellable(r)) {
+                        <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="cancel(r)">
+                          <mat-icon svgIcon="pc:x" aria-hidden="true" />Cancel update
+                        </button>
+                      }
+                      <div class="pc-menu-separator" role="separator"></div>
+                      <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="history(r)">
+                        <mat-icon svgIcon="pc:clock" aria-hidden="true" />View history
+                      </button>
+                    </div>
+                  </ng-template>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </section>
+
+      @if (detail(); as r) {
+        @let s = state(r);
+        <aside #panel class="panel card" tabindex="-1" role="complementary" [attr.aria-label]="'Update details for ' + r.name">
+          <header class="panel-head">
+            <div class="truncate">
+              <h2 class="truncate">{{ r.name }}</h2>
+              <span class="status small"><span class="dot {{ s.tone }}" aria-hidden="true"></span>{{ s.text }}</span>
             </div>
-          </div>
+            <button type="button" class="btn sm ghost icon" aria-label="Close details" (click)="close()"><mat-icon svgIcon="pc:x" aria-hidden="true" /></button>
+          </header>
+
+          <dl class="kv">
+            <dt>Installed</dt><dd class="ver">{{ r.currentVersion ?? '—' }}</dd>
+            <dt>Latest</dt><dd class="ver">{{ r.latestVersion ?? '—' }}</dd>
+            <dt>Checked</dt><dd class="small">{{ r.checkedAt ? ago(r.checkedAt) : 'never' }}</dd>
+            <dt>Policy</dt><dd class="small">{{ mode(r) }}</dd>
+          </dl>
+
           @if (r.updatePhase.phase !== 'idle') {
-            <pc-update-progress class="progress" [phase]="r.updatePhase" [now]="clock.now()" />
-          }
-          @if (deadline(r); as d) {
-            <div class="last">
-              <span class="badge" [class.warning]="d.warn" [class.outline]="!d.warn">{{ d.text }}</span>
-              <span class="muted truncate">A newer release has been available since {{ when(r.deadline!.behindSince) }}. Neither Gitea nor Forgejo enforces a deadline; this is your own reminder.</span>
-            </div>
+            <pc-update-progress [phase]="r.updatePhase" [now]="clock.now()" />
           }
           @if (r.updateLoop; as l) {
-            <div class="loop callout warning" role="status">
-              <mat-icon svgIcon="pc:alert" aria-hidden="true" />
-              <div class="callout-body"><strong>Updating to {{ l.target }} keeps failing</strong><span>{{ l.cause }}</span></div>
-            </div>
+            <section class="block-sec" aria-label="Update loop">
+              <h3>Updating to {{ l.target }} keeps failing</h3>
+              <p class="small">{{ l.cause }}</p>
+              <p class="faint small">{{ plural(l.attempts, 'attempt') }} so far.</p>
+            </section>
+          }
+          @if (deadlineNote(r); as note) {
+            <section class="block-sec" aria-label="Deadline">
+              <h3>{{ deadline(r)?.text }}</h3>
+              <p class="small muted">{{ note }}</p>
+            </section>
           }
           @if (look(r); as l) {
-            <div class="last">
-              <span class="badge" [class]="l.tone">{{ l.label }}</span>
-              <span class="muted truncate" [title]="l.detail">{{ l.detail }}</span>
-              <span class="faint when">{{ when(r.lastUpdate!.finishedAt) }}</span>
+            <section class="block-sec" aria-label="Last update">
+              <h3>Last update: {{ l.label.toLowerCase() }}</h3>
+              <p class="small muted">{{ l.detail }}</p>
+              <p class="faint small">{{ when(r.lastUpdate!.finishedAt) }}</p>
+              @if (failure(r); as f) {
+                <button type="button" class="btn sm" (click)="copy(f)"><mat-icon svgIcon="pc:copy" aria-hidden="true" />{{ copied() ? 'Copied' : 'Copy failure text' }}</button>
+              }
+            </section>
+          }
+
+          @if (r.managedBinary) {
+            <div class="btn-row">
+              @if (canUpdate(r)) {
+                <button type="button" class="btn sm" (click)="update(r)">Update to {{ r.updateTarget }}</button>
+              }
+              @if (r.updateTarget && r.updatePhase.phase === 'idle') {
+                <button type="button" class="btn sm" [disabled]="busy(r)" (click)="skip(r)">Skip this version</button>
+              }
+              @if (r.updatePolicy.pinned) {
+                <button type="button" class="btn sm" [disabled]="busy(r)" (click)="pinOrFollow(r)">Follow latest</button>
+              } @else if (r.currentVersion) {
+                <button type="button" class="btn sm" [disabled]="busy(r)" (click)="pinOrFollow(r)">Pin {{ r.currentVersion }}</button>
+              }
+              <button type="button" class="btn sm" [disabled]="busy(r)" (click)="check(r)">Check now</button>
+              <a class="btn sm ghost" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'updates' }">View history</a>
             </div>
           }
-        </article>
+        </aside>
       }
     </div>
-  </section>
+  }
 
   <div class="two">
     <section class="card" aria-labelledby="sched-title">

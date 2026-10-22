@@ -9,20 +9,14 @@
     <header class="page-header head">
       <div class="title">
         <h1>{{ r.name }}</h1>
-        <pc-status-badge [status]="r.status" />
-        <span class="faint">{{ r.kind }} {{ r.currentVersion ?? '' }}</span>
+        <pc-runner-status [status]="r.status" />
+        <span class="faint kind">{{ r.kind }}{{ r.currentVersion ? ' ' + r.currentVersion : '' }}</span>
         @if (r.leftovers > 0) {
-          <a class="badge warning leftover-chip" routerLink="." [queryParams]="{ tab: 'processes' }"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />{{ r.leftovers }} leftover {{ r.leftovers === 1 ? 'process' : 'processes' }}</a>
+          <a class="leftover-link" routerLink="." [queryParams]="{ tab: 'processes' }">{{ leftoverText() }}</a>
         }
       </div>
       <div class="btn-row">
-        @if (r.status === 'paused' || r.status === 'draining') {
-          <button type="button" class="btn" (click)="status.act(r.name, 'resume')"><mat-icon svgIcon="pc:play" aria-hidden="true" />Resume</button>
-        } @else {
-          <button type="button" class="btn" (click)="status.act(r.name, 'drain')" [disabled]="r.status === 'stopped'"><mat-icon svgIcon="pc:pause-circle" aria-hidden="true" />Drain</button>
-        }
         <button type="button" class="btn" (click)="status.act(r.name, 'restart')" [disabled]="r.status === 'notRegistered'"><mat-icon svgIcon="pc:refresh" aria-hidden="true" />Restart</button>
-        <a class="btn" routerLink="/logs" [queryParams]="{ runner: r.name }"><mat-icon svgIcon="pc:logs" aria-hidden="true" />Logs</a>
         <pc-runner-actions [runner]="r" [allowRemove]="true" />
       </div>
     </header>
@@ -39,7 +33,7 @@
           (click)="select(t.key)"
           (keydown)="onTabKey($event, i)"
         >
-          <mat-icon [svgIcon]="'pc:' + t.icon" aria-hidden="true" />{{ t.label }}
+          {{ t.label }}@if (tabCounts()[t.key]; as n) {<span class="count" [attr.aria-label]="n + ' pending'">{{ n }}</span>}
         </button>
       }
     </div>
@@ -111,7 +105,7 @@
               </div>
             </section>
 
-            <section class="card" aria-labelledby="where-title">
+            <section class="card where" aria-labelledby="where-title">
               <header class="card-header"><h3 id="where-title">Where it runs</h3></header>
               <div class="card-body">
                 <dl class="kv">
@@ -136,21 +130,27 @@
               </header>
               <div class="card-body use">
                 @if (usageNow(); as u) {
-                  <dl class="kv">
-                    <dt>CPU now</dt>
-                    <dd class="num">{{ u.cpu }} <span class="faint">of the machine, peak {{ u.peakCpu }}</span></dd>
-                    <dt>Memory now</dt>
-                    <dd class="num">{{ u.mem }}</dd>
-                    <dt>Processes</dt>
-                    <dd class="num">{{ u.processes }}</dd>
-                  </dl>
+                  <div class="hero">
+                    <p class="big num">{{ u.cpu }}</p>
+                    <p class="cap faint">CPU now, peak {{ u.peakCpu }}</p>
+                  </div>
+                  <div class="hero">
+                    <p class="big num">{{ u.mem }}</p>
+                    <p class="cap faint">Memory now</p>
+                  </div>
+                  <div class="hero">
+                    <p class="big num">{{ u.processes }}</p>
+                    <p class="cap faint">Processes</p>
+                  </div>
                 } @else {
-                  <p class="muted">Not running, so nothing is used.</p>
+                  <p class="muted span-all">Not running, so nothing is used.</p>
                 }
-                @if (usagePeak(); as p) {
-                  <div class="trends">
-                    <div><span class="faint small">CPU, peak {{ p.cpu }}</span><pc-sparkline style="color: var(--chart-4)" [values]="usageCpu()" [max]="1000" [width]="320" [height]="72" /></div>
-                    <div><span class="faint small">Memory, peak {{ p.mem }}</span><pc-sparkline style="color: var(--chart-1)" [values]="usageMem()" [width]="320" [height]="72" /></div>
+                @if (usagePeak()) {
+                  <div class="chart cpu">
+                    <pc-usage-chart style="color: var(--chart-4)" [values]="usageCpu()" [max]="1000" [peak]="cpuPeak()" [peakLabel]="cpuPeakLabel()" topLabel="100%" />
+                  </div>
+                  <div class="chart mem">
+                    <pc-usage-chart style="color: var(--chart-1)" [values]="usageMem()" [max]="memPeak() ?? 1" [peak]="memPeak()" [peakLabel]="memPeakLabel()" [topLabel]="memTop()" />
                   </div>
                 }
               </div>
@@ -191,6 +191,7 @@
         }
         @case ('updates') {
           <pc-runner-update-panel [runner]="r" />
+          <p class="xlink"><a routerLink="/updates">View all runners’ updates</a></p>
         }
         @case ('processes') {
           <pc-processes-panel [runner]="r.name" />
@@ -200,6 +201,7 @@
         }
         @case ('disk') {
           <pc-disk-panel [runner]="r.name" />
+          <p class="xlink"><a routerLink="/storage">See Storage</a></p>
         }
       }
     </div>

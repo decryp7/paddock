@@ -25,9 +25,32 @@
   gap: var(--space-3);
 }
 
-.tabs button mat-icon {
-  width: 15px;
-  height: 15px;
+.kind {
+  font-variant-numeric: tabular-nums;
+}
+
+.leftover-link {
+  color: var(--warning);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.count {
+  margin-left: 6px;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--neutral-soft);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+
+.xlink {
+  margin: 0;
+  font-size: var(--text-sm);
 }
 
 .panel {
@@ -39,6 +62,11 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-4);
+  align-items: start;
+}
+
+.where .kv {
+  grid-template-columns: 120px minmax(0, 1fr);
 }
 
 .span-2 {
@@ -78,22 +106,38 @@
 
 .use {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: var(--space-5);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-5);
   align-items: start;
 }
-.trends {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-4);
+.hero p {
+  margin: 0;
 }
-.trends pc-sparkline {
-  height: 40px;
-  margin-top: var(--space-1);
+.hero .big {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.cap {
+  font-size: var(--text-sm);
+}
+.chart.cpu {
+  grid-column: 1;
+}
+.chart.mem {
+  grid-column: 2;
+}
+.span-all {
+  grid-column: 1 / -1;
 }
 @media (max-width: 760px) {
-  .use,
-  .trends {
+  .use {
     grid-template-columns: 1fr;
+  }
+  .chart.cpu,
+  .chart.mem {
+    grid-column: auto;
   }
 }

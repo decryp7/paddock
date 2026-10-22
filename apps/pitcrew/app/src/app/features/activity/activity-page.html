@@ -26,31 +26,40 @@
     <section class="card"><pc-empty-state icon="activity" title="No history yet" text="Activity appears once a runner is registered and running." /></section>
   } @else {
     <pc-load-state what="Activity" [hasValue]="state().hasValue" [error]="state().error" [skeleton]="[110, 160, 220]" (retry)="store.retry()">
-      <div class="cards">
-        @for (c of cards(); track c.name) {
-          <section class="card stat" [attr.aria-label]="c.name">
-            <header>
-              <a class="name" [routerLink]="['/runners', c.name]">{{ c.name }}</a>
-            </header>
-            <dl>
-              <div><dt>Jobs</dt><dd class="num">{{ c.jobs }}</dd></div>
-              <div><dt>Uptime</dt><dd class="num">{{ c.uptime }}</dd></div>
-              <div><dt>Restarts</dt><dd class="num">{{ c.restarts }}</dd></div>
-              <div><dt>Avg job</dt><dd class="num">{{ c.avgJob }}</dd></div>
-            </dl>
-            <div class="sparks">
-              <div>
-                <span class="faint">Jobs per day</span>
-                <pc-sparkline [values]="c.jobsPerDay" [height]="28" />
-              </div>
-              <div>
-                <span class="faint">Uptime per day</span>
-                <pc-sparkline class="up" [values]="c.uptimePerDay" [max]="1000" [height]="28" />
-              </div>
-            </div>
-          </section>
-        }
-      </div>
+      <section class="card" aria-labelledby="runners-title">
+        <header class="card-header"><h2 id="runners-title">Runners</h2></header>
+        <div class="card-body flush">
+          <table class="table runners">
+            <thead>
+              <tr>
+                @for (c of columns; track c.key) {
+                  <th scope="col" [class.num]="c.numeric" [attr.aria-sort]="ariaSort(c.key)">
+                    <button type="button" class="sort" (click)="sortBy(c.key)">
+                      {{ c.label }}
+                      <span class="arrow" aria-hidden="true">{{ ariaSort(c.key) === 'ascending' ? '↑' : ariaSort(c.key) === 'descending' ? '↓' : '' }}</span>
+                    </button>
+                  </th>
+                }
+                <th scope="col" class="num">Jobs trend (7 days)</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (r of runnerRows(); track r.name) {
+                <tr>
+                  <td class="name"><a [routerLink]="['/runners', r.name]" [matTooltip]="r.name">{{ r.name }}</a></td>
+                  <td class="num">{{ r.jobsText }}</td>
+                  <td class="num" [class.low]="r.lowUptime">{{ r.uptime }}</td>
+                  <td class="num">{{ r.restartsText }}</td>
+                  <td class="num">{{ r.avgJob }}</td>
+                  <td class="num"><pc-trend-bars [values]="r.trend" /></td>
+                </tr>
+              } @empty {
+                <tr><td colspan="6" class="faint">No runners to show.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section class="card" aria-labelledby="tl-title">
         <header class="card-header"><h2 id="tl-title">Timeline</h2></header>
@@ -71,10 +80,10 @@
           <div class="card-body">
             @for (u of updates(); track u.name + u.at) {
               <div class="update">
-                <span class="badge" [class]="u.look.tone">{{ u.look.label }}</span>
-                <div class="text">
+                <span class="dot" [class]="u.tone" aria-hidden="true"></span>
+                <div class="text" [matTooltip]="u.name + ': ' + u.text">
                   <strong>{{ u.name }}</strong>
-                  <span class="muted">{{ u.look.detail }}</span>
+                  <span class="muted">{{ u.text }}</span>
                 </div>
                 <span class="faint when">{{ when(u.at) }}</span>
               </div>
@@ -112,7 +121,7 @@
                   <td class="muted">{{ row.name }}</td>
                   <td>
                     @if (outcome(row.job.outcome); as o) {
-                      <span class="badge" [class]="o.tone">{{ o.label }}</span>
+                      <span class="result"><span class="dot" [class]="o.tone" aria-hidden="true"></span>{{ o.label }}</span>
                     } @else {
                       <span class="faint">—</span>
                     }
@@ -123,11 +132,11 @@
                   <td class="num muted">{{ row.job.peakMemBytes > 0 ? bytes(row.job.peakMemBytes) : '' }}</td>
                   <td>
                     @if (row.job.leftovers > 0) {
-                      <a class="badge warning" [routerLink]="['/runners', row.name]" [queryParams]="{ tab: 'processes' }">{{ row.job.leftovers }} left running</a>
+                      <a class="result" [routerLink]="['/runners', row.name]" [queryParams]="{ tab: 'processes' }"><span class="dot warning" aria-hidden="true"></span>{{ row.job.leftovers }} left running</a>
                     }
                   </td>
                   <td class="num muted">{{ ago(row.job.finishedAt) }}</td>
-                  <td><pc-debrief-button [runner]="row.name" [label]="'run-' + (row.job.info.runNumber ?? row.job.startedAt)" [startedAt]="row.job.startedAt" [finishedAt]="row.job.finishedAt" /></td>
+                  <td class="row-action"><pc-debrief-button text="" [runner]="row.name" [label]="'run-' + (row.job.info.runNumber ?? row.job.startedAt)" [startedAt]="row.job.startedAt" [finishedAt]="row.job.finishedAt" /></td>
                 </tr>
               } @empty {
                 <tr><td colspan="11" class="faint">No jobs in this range.</td></tr>

@@ -8,29 +8,29 @@ import { formatBytes, formatDateTime, formatDuration, formatElapsed, formatPermi
 import { loggedOffLabel, pendingLabel, sessionLabel } from '../../shared/labels';
 import { RunnerActions } from '../../shared/runner-actions';
 import { EmptyState } from '../../shared/ui/empty-state';
-import { Sparkline } from '../../shared/ui/sparkline';
-import { StatusBadge } from '../../shared/ui/status-badge';
 import { SettingsStore } from '../../state/settings.store';
 import { StatusStore } from '../../state/status.store';
 import { ConfigPanel } from './config-panel';
 import { DiskPanel } from './disk-panel';
 import { ProcessesPanel } from './processes-panel';
+import { RunnerStatusText } from './runner-status';
 import { RunnerUpdatePanel } from './runner-update-panel';
+import { UsageChart } from './usage-chart';
 
 export type DetailTab = 'overview' | 'updates' | 'processes' | 'config' | 'disk';
 
-const TABS: { key: DetailTab; label: string; icon: string }[] = [
-  { key: 'overview', label: 'Overview', icon: 'runner' },
-  { key: 'updates', label: 'Updates', icon: 'updates' },
-  { key: 'processes', label: 'Processes', icon: 'cpu' },
-  { key: 'config', label: 'Configuration', icon: 'file-text' },
-  { key: 'disk', label: 'Disk & cleanup', icon: 'disk' },
+const TABS: { key: DetailTab; label: string }[] = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'updates', label: 'Updates' },
+  { key: 'processes', label: 'Processes' },
+  { key: 'config', label: 'Configuration' },
+  { key: 'disk', label: 'Disk & cleanup' },
 ];
 
 /** One runner: overview, updates and disk, with its actions. */
 @Component({
   selector: 'pc-runner-detail-page',
-  imports: [MatIcon, RouterLink, StatusBadge, RunnerActions, EmptyState, DiskPanel, RunnerUpdatePanel, Sparkline, ProcessesPanel, ConfigPanel],
+  imports: [MatIcon, RouterLink, RunnerStatusText, RunnerActions, EmptyState, DiskPanel, RunnerUpdatePanel, UsageChart, ProcessesPanel, ConfigPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './runner-detail-page.html',
   styleUrl: './runner-detail-page.scss',
@@ -54,6 +54,24 @@ export class RunnerDetailPage {
   protected readonly details = signal<RunDetails | null>(null);
   /** The runner's CPU and memory over the last 24 hours (with its processes). */
   protected readonly usage = signal<UsagePoint[]>([]);
+  /** Counts shown on a tab only when non-zero: the pending update and the leftover processes. */
+  protected readonly tabCounts = computed<Partial<Record<DetailTab, number>>>(() => {
+    const r = this.runner();
+    return r ? { updates: r.updateTarget ? 1 : 0, processes: r.leftovers } : {};
+  });
+  protected readonly leftoverText = computed(() => {
+    const n = this.runner()?.leftovers ?? 0;
+    return `${n} leftover ${n === 1 ? 'process' : 'processes'}`;
+  });
+  /** The CPU chart is fixed to 0-100 % of the machine (1000 permille). */
+  protected readonly cpuPeak = computed(() => {
+    const u = this.usage();
+    return u.length ? Math.max(...u.map((p) => p.cpuPeakPermille)) : null;
+  });
+  protected readonly memPeak = computed(() => {
+    const u = this.usage();
+    return u.length ? Math.max(...u.map((p) => p.memPeakBytes)) : null;
+  });
   protected readonly usageNow = computed(() => {
     const u = this.runner()?.usage;
     return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes), processes: u.processes, peakCpu: formatPermille(u.cpuPeakPermille) } : null;
@@ -64,6 +82,11 @@ export class RunnerDetailPage {
     const u = this.usage();
     return u.length ? { cpu: formatPermille(Math.max(...u.map((p) => p.cpuPeakPermille))), mem: formatBytes(Math.max(...u.map((p) => p.memPeakBytes))) } : null;
   });
+
+  protected readonly cpuPeakLabel = computed(() => `peak ${this.usagePeak()?.cpu ?? '—'}`);
+  protected readonly memPeakLabel = computed(() => `peak ${this.usagePeak()?.mem ?? '—'}`);
+  /** The memory chart's scale tops out at its own peak, so the label says so. */
+  protected readonly memTop = computed(() => this.usagePeak()?.mem ?? '');
 
   protected readonly session = computed(() => {
     const r = this.runner();
