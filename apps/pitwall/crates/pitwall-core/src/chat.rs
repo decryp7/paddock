@@ -347,6 +347,8 @@ pub struct Timings {
     pub prompt_tps: f64,
     /// Generated tokens per second.
     pub gen_tps: f64,
+    /// Prompt tokens the engine reused from its prompt cache instead of processing again.
+    pub cached_tokens: u32,
 }
 
 /// What an engine streams.

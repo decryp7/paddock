@@ -184,6 +184,95 @@ impl Default for PrivacySettings {
     }
 }
 
+/// Where a cache keeps its entries (ADR 0019).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CacheStorage {
+    /// In memory only: gone when Pitwall stops.
+    Memory,
+    /// In `cache.sqlite` in Pitwall's data folder, on this computer.
+    Disk,
+}
+
+/// Caching (ADR 0019). The prompt-prefix cache (llama-server's) is always on; these settings size and steer it, and
+/// configure the response cache (apps opt in) and the embeddings cache (on by default).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CacheSettings {
+    /// Send requests of one conversation to the same llama-server slot so its prompt cache hits.
+    pub prefix_affinity: bool,
+    /// Host-memory prompt cache per model in MiB (`--cache-ram`); `None` sizes it from this machine's memory.
+    pub prompt_cache_mib: Option<u32>,
+    /// Cache embeddings (deterministic, so safe).
+    pub embeddings: bool,
+    /// Where embeddings are kept.
+    pub embeddings_storage: CacheStorage,
+    /// Largest embeddings cache (MiB).
+    pub embeddings_max_mib: u32,
+    /// How long an embedding is kept after it was last used (seconds; 0: never, only the size cap removes it).
+    pub embeddings_ttl_secs: u64,
+    /// Where cached answers are kept (once an app or preset opts in).
+    pub responses_storage: CacheStorage,
+    /// Largest response cache (MiB).
+    pub responses_max_mib: u32,
+    /// How long an answer is kept after it was stored (seconds; 0: never, only the size cap removes it).
+    pub responses_ttl_secs: u64,
+    /// Days a saved prompt prefix (keep-warm file) is kept unused.
+    pub keep_warm_days: u32,
+}
+
+impl Default for CacheSettings {
+    fn default() -> Self {
+        CacheSettings {
+            prefix_affinity: true,
+            prompt_cache_mib: None,
+            embeddings: true,
+            embeddings_storage: CacheStorage::Disk,
+            embeddings_max_mib: 512,
+            embeddings_ttl_secs: 90 * 24 * 3600,
+            responses_storage: CacheStorage::Disk,
+            responses_max_mib: 256,
+            responses_ttl_secs: 7 * 24 * 3600,
+            keep_warm_days: 30,
+        }
+    }
+}
+
+impl CacheSettings {
+    /// The cache's expiry rules: answers expire a fixed time after they were stored, embeddings a time after their last
+    /// use (sliding).
+    pub fn expiry(&self, kind: crate::cache::Kind) -> crate::cache::Expiry {
+        let (secs, sliding) = match kind {
+            crate::cache::Kind::Response => (self.responses_ttl_secs, false),
+            crate::cache::Kind::Embedding => (self.embeddings_ttl_secs, true),
+        };
+        crate::cache::Expiry {
+            ttl: (secs > 0).then(|| secs.saturating_mul(1000)),
+            sliding,
+        }
+    }
+
+    /// Bounds of a cache.
+    pub fn limits(&self, kind: crate::cache::Kind) -> crate::cache::Limits {
+        let mib = match kind {
+            crate::cache::Kind::Response => self.responses_max_mib,
+            crate::cache::Kind::Embedding => self.embeddings_max_mib,
+        };
+        crate::cache::Limits {
+            max_bytes: u64::from(mib) * MIB,
+            expiry: self.expiry(kind),
+        }
+    }
+
+    /// Where `kind` is kept.
+    pub fn storage(&self, kind: crate::cache::Kind) -> CacheStorage {
+        match kind {
+            crate::cache::Kind::Response => self.responses_storage,
+            crate::cache::Kind::Embedding => self.embeddings_storage,
+        }
+    }
+}
+
 /// Per-model preferences.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -269,6 +358,8 @@ pub struct Settings {
     pub models: ModelSettings,
     /// Engines.
     pub engines: EngineSettings,
+    /// Caching.
+    pub cache: CacheSettings,
 }
 
 impl Default for Settings {
@@ -282,6 +373,7 @@ impl Default for Settings {
             privacy: PrivacySettings::default(),
             models: ModelSettings::default(),
             engines: EngineSettings::default(),
+            cache: CacheSettings::default(),
         }
     }
 }
@@ -300,6 +392,8 @@ pub struct UiSettings {
     pub network: NetworkSettings,
     /// Privacy.
     pub privacy: PrivacySettings,
+    /// Caching.
+    pub cache: CacheSettings,
 }
 
 impl Settings {
@@ -311,6 +405,7 @@ impl Settings {
             memory: self.memory.clone(),
             network: self.network.clone(),
             privacy: self.privacy.clone(),
+            cache: self.cache.clone(),
         }
     }
 
@@ -322,6 +417,7 @@ impl Settings {
             memory: ui.memory,
             network: ui.network,
             privacy: ui.privacy,
+            cache: ui.cache,
             ..self.clone()
         };
         s.validate()?;
@@ -368,6 +464,16 @@ impl Settings {
             return Err("Network ▸ LAN port must differ from Server ▸ Port".into());
         }
         range("Privacy ▸ Keep metrics (days)", self.privacy.metrics_retention_days, 1, 365)?;
+        range("Caching ▸ Prompt cache (MiB)", self.cache.prompt_cache_mib.unwrap_or(0), 0, 64 * 1024)?;
+        range("Caching ▸ Embeddings cache (MiB)", self.cache.embeddings_max_mib, 1, 64 * 1024)?;
+        if self.cache.embeddings_ttl_secs != 0 {
+            range("Caching ▸ Embeddings kept (s)", self.cache.embeddings_ttl_secs, 60, 3650 * 24 * 3600)?;
+        }
+        range("Caching ▸ Answers cache (MiB)", self.cache.responses_max_mib, 1, 64 * 1024)?;
+        if self.cache.responses_ttl_secs != 0 {
+            range("Caching ▸ Answers kept (s)", self.cache.responses_ttl_secs, 60, 3650 * 24 * 3600)?;
+        }
+        range("Caching ▸ Keep-warm files kept (days)", self.cache.keep_warm_days, 1, 365)?;
         range("Models ▸ Default context", self.models.default_context, 512, 1 << 20)?;
         Ok(())
     }

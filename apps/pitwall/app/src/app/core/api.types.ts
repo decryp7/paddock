@@ -282,6 +282,14 @@ export interface UsageCounters {
   errors: number;
   /** The largest footprint of the model that served the app's requests (RAM plus video memory, bytes). */
   peakMemoryBytes: number;
+  /** Requests answered from the response or embeddings cache. */
+  cacheHits: number;
+  /** Cache-eligible requests that were not found in the cache. */
+  cacheMisses: number;
+  /** Prompt tokens the engine reused from its prompt cache. */
+  prefixTokens: number;
+  /** Tokens cache hits saved the model from processing and generating. */
+  savedTokens: number;
 }
 
 export interface AppLimits {
@@ -339,6 +347,8 @@ export interface AppPermissions {
   maxPriority: Priority;
   tools: boolean;
   extendedApis: boolean;
+  /** Identical deterministic requests may be answered from the response cache (off until turned on; ADR 0019). */
+  cacheResponses: boolean;
   limits: AppLimits;
 }
 
@@ -671,6 +681,10 @@ export interface RequestRecord {
   error: string | null;
   /** Content was kept (Settings ▸ Privacy ▸ keep request content). */
   hasContent: boolean;
+  /** What the response cache did; `null` when the request was not eligible for it. */
+  cache: CacheOutcome | null;
+  /** Prompt tokens the engine reused from its prompt cache (the prefix of an earlier request). */
+  cachedTokens: number;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -690,6 +704,10 @@ export interface ModelPreset {
   systemPrompt: string | null;
   /** `llama.cpp` or an engine pack's id. */
   engine: string | null;
+  /** Answer identical deterministic requests from the response cache (ADR 0019). */
+  cacheResponses: boolean;
+  /** Keep the system prompt's prefix warm: saved when the model unloads, restored on load. */
+  keepWarm: boolean;
 }
 
 /** What the editor sends: the same fields, parsed and validated by the engine. */
@@ -807,7 +825,63 @@ export interface Settings {
   memory: MemorySettings;
   network: NetworkSettings;
   privacy: PrivacySettings;
+  cache: CacheSettings;
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Caching (ADR 0019)
+
+export type CacheStorage = 'memory' | 'disk';
+export type CacheOutcome = 'hit' | 'miss' | 'bypass';
+
+export interface CacheSettings {
+  /** Send a conversation's requests to the same llama-server slot so its prompt cache hits. */
+  prefixAffinity: boolean;
+  /** Host-memory prompt cache per model in MiB; `null` sizes it from this machine's memory. */
+  promptCacheMib: number | null;
+  /** Cache embeddings (on by default; they are deterministic). */
+  embeddings: boolean;
+  embeddingsStorage: CacheStorage;
+  embeddingsMaxMib: number;
+  /** Seconds since last use (sliding); 0: never. Default 90 days. */
+  embeddingsTtlSecs: number;
+  responsesStorage: CacheStorage;
+  responsesMaxMib: number;
+  /** Seconds since stored; 0: never. Default 7 days. */
+  responsesTtlSecs: number;
+  /** Days a saved prompt prefix (keep warm) is kept unused. Default 30. */
+  keepWarmDays: number;
+}
+
+export interface CacheKindInfo {
+  storage: CacheStorage;
+  entries: number;
+  bytes: number;
+  maxBytes: number;
+  hits: number;
+  oldestAt: number | null;
+  /** `null`: never. */
+  expiresAfterSecs: number | null;
+  /** Counted from the last use instead of from when stored. */
+  sliding: boolean;
+  /** Why the disk cache is not in use (it then behaves as memory only). */
+  diskError: string | null;
+}
+
+export interface CacheInfo {
+  responses: CacheKindInfo;
+  embeddings: CacheKindInfo;
+  keepWarmFiles: number;
+  keepWarmBytes: number;
+  nextSweepAt: number;
+}
+
+export type CacheClearScope =
+  | { kind: 'all' }
+  | { kind: 'responses' }
+  | { kind: 'embeddings' }
+  | { kind: 'app'; appId: string }
+  | { kind: 'model'; modelId: string };
 
 export interface AppUpdateStatus {
   available: boolean;

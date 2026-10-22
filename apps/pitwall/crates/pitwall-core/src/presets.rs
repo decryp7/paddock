@@ -254,6 +254,12 @@ pub struct ModelPreset {
     /// The engine that serves it (`llama.cpp` or an engine pack's id).
     #[serde(default)]
     pub engine: Option<String>,
+    /// Answer identical deterministic requests from the response cache (ADR 0019).
+    #[serde(default)]
+    pub cache_responses: bool,
+    /// Keep the prompt prefix (the system prompt) warm: saved to disk when the model unloads and restored on load.
+    #[serde(default)]
+    pub keep_warm: bool,
 }
 
 fn invalid(field: &'static str, message: impl Into<String>) -> PresetError {
@@ -532,6 +538,8 @@ mod tests {
             max_tokens: None,
             system_prompt: None,
             engine: None,
+            cache_responses: false,
+            keep_warm: false,
         }
     }
 

@@ -12,6 +12,7 @@
 //!   wire contract), [`tasks`] (versioned task prompts), [`tokens`], [`cache`].
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod affinity;
 pub mod api;
 pub mod backoff;
 pub mod benchmarks;

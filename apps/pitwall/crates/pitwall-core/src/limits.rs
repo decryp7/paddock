@@ -64,6 +64,9 @@ pub struct AppPermissions {
     pub tools: bool,
     /// It may use `/x/…`.
     pub extended_apis: bool,
+    /// Its identical deterministic requests may be answered from the response cache (ADR 0019; off until the user
+    /// turns it on for the app).
+    pub cache_responses: bool,
     /// Its budgets.
     pub limits: AppLimits,
 }
@@ -75,6 +78,7 @@ impl Default for AppPermissions {
             max_priority: Priority::Interactive,
             tools: false,
             extended_apis: true,
+            cache_responses: false,
             limits: AppLimits::default(),
         }
     }
@@ -395,6 +399,7 @@ mod tests {
             max_priority: Priority::Background,
             tools: false,
             extended_apis: false,
+            cache_responses: false,
             limits: AppLimits::default(),
         };
         assert_eq!(

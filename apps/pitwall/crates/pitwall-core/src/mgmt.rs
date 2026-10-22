@@ -977,6 +977,12 @@ pub struct RequestRecord {
     pub error: Option<String>,
     /// Content kept.
     pub has_content: bool,
+    /// What the response cache did (`None`: the request was not eligible or the cache is not used for it).
+    #[serde(default)]
+    pub cache: Option<crate::cache::Outcome>,
+    /// Prompt tokens llama-server reused from its prompt cache (the prefix of an earlier request).
+    #[serde(default)]
+    pub cached_tokens: u32,
 }
 
 /// Request content (`RequestContent`).
@@ -1091,6 +1097,12 @@ pub struct PresetDraft {
     /// Engine override.
     #[serde(default)]
     pub engine: Option<String>,
+    /// Use the response cache.
+    #[serde(default)]
+    pub cache_responses: bool,
+    /// Keep the prompt prefix warm.
+    #[serde(default)]
+    pub keep_warm: bool,
 }
 
 impl PresetDraft {
@@ -1106,6 +1118,8 @@ impl PresetDraft {
             max_tokens: self.max_tokens,
             system_prompt: self.system_prompt,
             engine: self.engine,
+            cache_responses: self.cache_responses,
+            keep_warm: self.keep_warm,
         }
         .checked()
     }

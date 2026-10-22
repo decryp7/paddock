@@ -85,8 +85,9 @@ pub fn args(l: &Launch) -> Vec<String> {
     a
 }
 
-/// The `/v1/chat/completions` body for a request. Always streamed, with usage, and with prompt caching.
-pub fn chat_body(req: &ChatRequest, alias: &str) -> Value {
+/// The `/v1/chat/completions` body for a request. Always streamed, with usage, and with prompt caching. `slot` asks for
+/// a specific llama-server slot (`id_slot`), so a conversation's prompt cache is found again (slot affinity, ADR 0019).
+pub fn chat_body(req: &ChatRequest, alias: &str, slot: Option<u32>) -> Value {
     let messages: Vec<Value> = req
         .messages
         .iter()
@@ -134,6 +135,9 @@ pub fn chat_body(req: &ChatRequest, alias: &str) -> Value {
     o.insert("stream".into(), true.into());
     o.insert("stream_options".into(), json!({"include_usage": true}));
     o.insert("cache_prompt".into(), true.into());
+    if let Some(n) = slot {
+        o.insert("id_slot".into(), n.into());
+    }
     if !req.tools.is_empty() {
         o.insert(
             "tools".into(),
@@ -255,6 +259,7 @@ impl Stream {
             self.timings = Some(Timings {
                 prompt_tps: f("prompt_per_second"),
                 gen_tps: f("predicted_per_second"),
+                cached_tokens: t.get("cache_n").and_then(Value::as_u64).unwrap_or(0).min(u64::from(u32::MAX)) as u32,
             });
         }
         Ok(out)
@@ -451,7 +456,7 @@ mod tests {
             format: OutputFormat::JsonSchema(json!({"type": "object"})),
             ..Default::default()
         };
-        let b = chat_body(&req, "alias");
+        let b = chat_body(&req, "alias", None);
         assert_eq!(b["model"], "alias");
         assert_eq!(b["stream"], true);
         assert_eq!(
@@ -477,14 +482,14 @@ mod tests {
                 tool_choice: c,
                 ..req.clone()
             };
-            assert_eq!(chat_body(&r, "a")["tool_choice"], want);
+            assert_eq!(chat_body(&r, "a", None)["tool_choice"], want);
         }
         let plain = ChatRequest {
             messages: vec![Message::text(Role::User, "hi")],
             format: OutputFormat::JsonObject,
             ..Default::default()
         };
-        let b = chat_body(&plain, "a");
+        let b = chat_body(&plain, "a", None);
         assert_eq!(b["messages"][0]["content"], "hi");
         assert_eq!(b["response_format"]["type"], "json_object");
         assert!(b.get("tools").is_none() && b.get("max_tokens").is_none());
@@ -492,7 +497,7 @@ mod tests {
             format: OutputFormat::Text,
             ..plain
         };
-        assert!(chat_body(&text, "a").get("response_format").is_none());
+        assert!(chat_body(&text, "a", None).get("response_format").is_none());
     }
 
     #[test]
@@ -521,12 +526,22 @@ mod tests {
                 },
                 timings: Some(Timings {
                     prompt_tps: 100.5,
-                    gen_tps: 30.0
+                    gen_tps: 30.0,
+                    cached_tokens: 0
                 })
             }]
         );
         assert!(s.chunk("[DONE]").unwrap().is_empty());
         assert!(s.finish().is_none());
+        let mut s = Stream::new();
+        s.chunk(r#"{"choices":[],"timings":{"prompt_per_second":1.0,"predicted_per_second":2.0,"cache_n":123}}"#).unwrap();
+        assert!(matches!(s.finish(), Some(ChatEvent::Done { timings: Some(Timings { cached_tokens: 123, .. }), .. })));
+        let req = ChatRequest {
+            messages: vec![crate::chat::Message::text(Role::User, "x")],
+            ..Default::default()
+        };
+        assert_eq!(chat_body(&req, "a", Some(3))["id_slot"], 3);
+        assert!(chat_body(&req, "a", None).get("id_slot").is_none());
         let mut s = Stream::new();
         s.chunk(r#"{"choices":[{"delta":{"content":""},"finish_reason":"length"}]}"#)
             .unwrap();

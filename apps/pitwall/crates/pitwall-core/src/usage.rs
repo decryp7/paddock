@@ -30,9 +30,23 @@ pub struct Counters {
     pub errors: u64,
     /// The largest model footprint attributed to the app (bytes).
     pub peak_memory_bytes: u64,
+    /// Requests answered from the response or embeddings cache.
+    pub cache_hits: u64,
+    /// Cache-eligible requests that were not found in the cache.
+    pub cache_misses: u64,
+    /// Prompt tokens llama-server reused from its prompt cache (the prefix of an earlier request).
+    pub prefix_tokens: u64,
+    /// Tokens a cache hit saved the model from processing and generating.
+    pub saved_tokens: u64,
 }
 
 impl Counters {
+    /// The share of cache-eligible requests that hit, in 0..=1 (`None` before any).
+    pub fn hit_rate(&self) -> Option<f64> {
+        let n = self.cache_hits.saturating_add(self.cache_misses);
+        (n > 0).then(|| self.cache_hits as f64 / n as f64)
+    }
+
     /// Tokens both ways.
     pub fn tokens(&self) -> u64 {
         self.prompt_tokens.saturating_add(self.completion_tokens)
@@ -46,11 +60,15 @@ impl Counters {
         self.busy_ms = self.busy_ms.saturating_add(o.busy_ms);
         self.errors = self.errors.saturating_add(o.errors);
         self.peak_memory_bytes = self.peak_memory_bytes.max(o.peak_memory_bytes);
+        self.cache_hits = self.cache_hits.saturating_add(o.cache_hits);
+        self.cache_misses = self.cache_misses.saturating_add(o.cache_misses);
+        self.prefix_tokens = self.prefix_tokens.saturating_add(o.prefix_tokens);
+        self.saved_tokens = self.saved_tokens.saturating_add(o.saved_tokens);
     }
 }
 
 /// One finished request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct UsageEvent<'a> {
     /// When it ended.
     pub at: Millis,
@@ -66,6 +84,14 @@ pub struct UsageEvent<'a> {
     pub failed: bool,
     /// The footprint of the model that served it (bytes; 0 when unknown).
     pub memory_bytes: u64,
+    /// Answered from a cache.
+    pub cache_hit: bool,
+    /// Eligible for a cache and not found there.
+    pub cache_miss: bool,
+    /// Prompt tokens the engine reused from its prompt cache.
+    pub prefix_tokens: u64,
+    /// Tokens a cache hit saved.
+    pub saved_tokens: u64,
 }
 
 /// A usage range (`UsageRange` in `api.types.ts`): hourly buckets up to a week, daily buckets for 30 days.
@@ -174,6 +200,10 @@ fn add(buckets: &mut Buckets, start: Millis, app: &str, e: &UsageEvent) {
     c.busy_ms = c.busy_ms.saturating_add(e.busy_ms);
     c.errors = c.errors.saturating_add(u64::from(e.failed));
     c.peak_memory_bytes = c.peak_memory_bytes.max(e.memory_bytes);
+    c.cache_hits = c.cache_hits.saturating_add(u64::from(e.cache_hit));
+    c.cache_misses = c.cache_misses.saturating_add(u64::from(e.cache_miss));
+    c.prefix_tokens = c.prefix_tokens.saturating_add(e.prefix_tokens);
+    c.saved_tokens = c.saved_tokens.saturating_add(e.saved_tokens);
 }
 
 impl Usage {
@@ -317,6 +347,7 @@ mod tests {
             busy_ms: 10,
             failed,
             memory_bytes: mem,
+            ..Default::default()
         }
     }
 
