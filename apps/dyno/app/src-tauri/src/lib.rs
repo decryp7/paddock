@@ -9,7 +9,7 @@ pub mod link;
 pub mod logging;
 pub mod login;
 pub mod native_feel;
-pub mod placement;
+pub mod popover;
 pub mod shell;
 pub mod tray;
 pub mod tray_model;
@@ -36,6 +36,8 @@ pub fn run() {
             commands::app_info,
             commands::tray_open_main,
             commands::tray_quit,
+            commands::popover_resize,
+            commands::popover_close,
         ])
         .on_window_event(|win, event| match event {
             tauri::WindowEvent::Destroyed => {
@@ -43,7 +45,9 @@ pub fn run() {
                     link.drop_window(win.label());
                 }
             }
-            tauri::WindowEvent::Focused(false) if win.label() == tray::DROPDOWN => tray::dropdown_blurred(win.app_handle()),
+            tauri::WindowEvent::Focused(false) if popover::is_popover_label(win.label()) => {
+                tray::popover_blurred(win.app_handle(), win.label())
+            }
             _ => {}
         })
         .setup(move |app| {
@@ -59,7 +63,9 @@ pub fn run() {
             let link = AgentLink::new(dirs, env!("CARGO_PKG_VERSION"), shell.clone(), Box::new(launcher));
             app.manage(shell.clone());
             app.manage(link.clone());
-            if let Err(e) = tray::create(app.handle()) {
+            popover::init(app.handle());
+            let items = shell::initial_items(&dyno_core::settings::Settings::default().tray);
+            if let Err(e) = tray::sync_items(app.handle(), &items) {
                 // Linux without a status-notifier host or libayatana-appindicator: the window is then the only way in,
                 // so closing it must exit (see `window::keeps_running`).
                 if cfg!(target_os = "linux") {

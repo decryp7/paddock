@@ -1,36 +1,49 @@
-//! The tray icon (Windows notification area, macOS menu bar, Linux appindicator) and its dropdown. The icon is drawn
-//! from the live numbers (`tray_model`), the tooltip carries them in words, a left click opens a small frameless
-//! window with the `#/tray` route (it hides when it loses focus), and the menu has Open, Pause rules and Quit.
+//! The tray / menu-bar items (Windows notification area, macOS menu bar, Linux appindicator): one tray icon per item
+//! (`tray_model` says what each draws), each with the same menu (Open, Pause rules, Quit) and a left click that opens
+//! a popover (`popover.rs`): the shared `#/tray` page, or the item's own `#/popover/<id>` page.
 //! Before the first update, and while the agent is away, the static template icons from `icons/tray` stand in.
 
 use crate::link::AgentLink;
 use crate::logging;
-use crate::placement::{click_closes, dropdown_position, Rect};
-use crate::tray_model::Frame;
+use crate::popover::{self, Rect, Style};
+use crate::tray_model::{Frame, ItemSpec, Opens};
 use crate::window;
 use dyno_core::protocol::Request;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, PhysicalPosition, Wry};
+use tauri::{AppHandle, Manager, Wry};
 
-/// The tray's id.
-pub const TRAY_ID: &str = "dyno";
-/// The dropdown window's label (in `capabilities/default.json`).
+/// The main popover's window label (in `capabilities/default.json`).
 pub const DROPDOWN: &str = "tray";
-/// Dropdown size in logical pixels.
-pub const DROPDOWN_SIZE: (f64, f64) = (360.0, 520.0);
 const OPEN: &str = "open";
 const PAUSE: &str = "pause";
 const QUIT: &str = "quit";
 
-/// Menu items kept to change their text, and when the dropdown last closed itself.
+/// The tray id of an item.
+pub fn tray_id(item: &str) -> String {
+    format!("dyno-{item}")
+}
+
+/// The popover window label and page route an item opens.
+pub fn popover_target(spec: &ItemSpec) -> (String, String) {
+    match spec.opens {
+        Opens::Main => (DROPDOWN.to_string(), "index.html#/tray".to_string()),
+        Opens::Own => (format!("popover-{}", spec.id), format!("index.html#/popover/{}", spec.id)),
+    }
+}
+
+/// Menu items kept to change their text, and which items currently show a drawn picture.
+#[derive(Default)]
 pub struct TrayState {
-    pause: MenuItem<Wry>,
-    closed_at: Mutex<Option<Instant>>,
-    painted: Mutex<bool>,
+    pause: Mutex<HashMap<String, MenuItem<Wry>>>,
+    painted: Mutex<HashMap<String, bool>>,
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The static icon: the macOS template image, or the light/dark variant for the taskbar.
@@ -83,11 +96,19 @@ fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<(Menu<Wry>, MenuItem<Wry>)>
     Ok((menu, pause))
 }
 
-/// Creates the tray icon and manages its state.
-pub fn create(app: &AppHandle<Wry>) -> tauri::Result<()> {
+fn style() -> Style {
+    Style {
+        os: crate::dto::os_name(),
+        vibrancy: window::vibrancy(),
+    }
+}
+
+/// Creates the tray icon of one item.
+fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
     let (menu, pause) = build_menu(app)?;
     let icon = Image::from_bytes(static_icon_bytes(dark_taskbar()))?;
-    TrayIconBuilder::with_id(TRAY_ID)
+    let (label, route) = popover_target(spec);
+    TrayIconBuilder::with_id(tray_id(&spec.id))
         .tooltip("Dyno")
         .icon(icon)
         .icon_as_template(cfg!(target_os = "macos"))
@@ -99,7 +120,7 @@ pub fn create(app: &AppHandle<Wry>) -> tauri::Result<()> {
             QUIT => quit(app),
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
+        .on_tray_icon_event(move |tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
@@ -107,55 +128,72 @@ pub fn create(app: &AppHandle<Wry>) -> tauri::Result<()> {
                 ..
             } = event
             {
-                let scale = 1.0;
-                let p = rect.position.to_physical::<f64>(scale);
-                let s = rect.size.to_physical::<f64>(scale);
-                toggle_dropdown(
-                    tray.app_handle(),
-                    Rect {
-                        x: p.x,
-                        y: p.y,
-                        w: s.width,
-                        h: s.height,
-                    },
-                );
+                let p = rect.position.to_physical::<f64>(1.0);
+                let s = rect.size.to_physical::<f64>(1.0);
+                let anchor = Rect {
+                    x: p.x,
+                    y: p.y,
+                    w: s.width,
+                    h: s.height,
+                };
+                if let Err(e) = popover::toggle(tray.app_handle(), &label, &route, anchor, style()) {
+                    logging::info(&format!("could not open the popover: {e}"));
+                }
             }
         })
         .build(app)?;
-    app.manage(TrayState {
-        pause,
-        closed_at: Mutex::new(None),
-        painted: Mutex::new(false),
-    });
+    lock(&app.state::<TrayState>().pause).insert(spec.id.clone(), pause);
     Ok(())
 }
 
-/// Draws a frame: the pixels, the tooltip, and the Pause item's text.
-pub fn paint(app: &AppHandle<Wry>, frame: &Frame, paused: bool) {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
+/// Makes the set of tray icons match `specs`: creates the missing, removes the stale. Returns the first error.
+pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()> {
+    if app.try_state::<TrayState>().is_none() {
+        app.manage(TrayState::default());
+    }
+    let state = app.state::<TrayState>();
+    let wanted: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
+    let stale: Vec<String> = lock(&state.pause).keys().filter(|id| !wanted.contains(id)).cloned().collect();
+    for id in stale {
+        let _ = app.remove_tray_by_id(&tray_id(&id));
+        lock(&state.pause).remove(&id);
+        lock(&state.painted).remove(&id);
+    }
+    for spec in specs {
+        if app.tray_by_id(&tray_id(&spec.id)).is_none() {
+            create_item(app, spec)?;
+        }
+    }
+    Ok(())
+}
+
+/// Draws a frame on an item: the pixels, the tooltip, and the Pause item's text.
+pub fn paint(app: &AppHandle<Wry>, item: &str, frame: &Frame, paused: bool) {
+    let Some(tray) = app.tray_by_id(&tray_id(item)) else { return };
     let icon = Image::new_owned(frame.icon.rgba.clone(), frame.icon.size, frame.icon.size);
     // The drawn icon has its own colours: never a template image.
     let _ = tray.set_icon(Some(icon));
     let _ = tray.set_icon_as_template(false);
     let _ = tray.set_tooltip(Some(frame.tooltip.clone()));
     if let Some(state) = app.try_state::<TrayState>() {
-        let _ = state.pause.set_text(pause_text(paused));
-        *state.painted.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        if let Some(p) = lock(&state.pause).get(item) {
+            let _ = p.set_text(pause_text(paused));
+        }
+        lock(&state.painted).insert(item.to_string(), true);
     }
 }
 
-/// While the agent is away the static icon is back (a frozen bar would look like a measurement).
+/// While the agent is away the static icons are back (a frozen bar would look like a measurement).
 pub fn show_disconnected(app: &AppHandle<Wry>) {
     let Some(state) = app.try_state::<TrayState>() else { return };
-    let was_painted = std::mem::replace(&mut *state.painted.lock().unwrap_or_else(|e| e.into_inner()), false);
-    if !was_painted {
-        return;
-    }
-    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
-    if let Ok(icon) = Image::from_bytes(static_icon_bytes(dark_taskbar())) {
-        let _ = tray.set_icon(Some(icon));
-        let _ = tray.set_icon_as_template(cfg!(target_os = "macos"));
-        let _ = tray.set_tooltip(Some("Dyno — the agent is not running"));
+    let painted: Vec<String> = lock(&state.painted).drain().filter(|(_, p)| *p).map(|(id, _)| id).collect();
+    for id in painted {
+        let Some(tray) = app.tray_by_id(&tray_id(&id)) else { continue };
+        if let Ok(icon) = Image::from_bytes(static_icon_bytes(dark_taskbar())) {
+            let _ = tray.set_icon(Some(icon));
+            let _ = tray.set_icon_as_template(cfg!(target_os = "macos"));
+            let _ = tray.set_tooltip(Some("Dyno — the agent is not running"));
+        }
     }
 }
 
@@ -180,79 +218,16 @@ pub fn quit(app: &AppHandle<Wry>) {
     });
 }
 
-/// Opens the dropdown under the icon, or closes it when it is open.
-pub fn toggle_dropdown(app: &AppHandle<Wry>, icon: Rect) {
-    if let Some(w) = app.get_webview_window(DROPDOWN) {
-        let _ = w.destroy();
-        return;
-    }
-    let since = app
-        .try_state::<TrayState>()
-        .and_then(|s| s.closed_at.lock().unwrap_or_else(|e| e.into_inner()).map(|t| t.elapsed()));
-    if click_closes(since) {
-        return;
-    }
-    if let Err(e) = open_dropdown(app, icon) {
-        logging::info(&format!("could not open the tray dropdown: {e}"));
-    }
-}
-
-fn open_dropdown(app: &AppHandle<Wry>, icon: Rect) -> tauri::Result<()> {
-    let monitor = app
-        .monitor_from_point(icon.x + icon.w / 2.0, icon.y + icon.h / 2.0)
-        .ok()
-        .flatten()
-        .or_else(|| app.primary_monitor().ok().flatten());
-    let (scale, bounds) = match &monitor {
-        Some(m) => (
-            m.scale_factor(),
-            Rect {
-                x: f64::from(m.position().x),
-                y: f64::from(m.position().y),
-                w: f64::from(m.size().width),
-                h: f64::from(m.size().height),
-            },
-        ),
-        None => (
-            1.0,
-            Rect {
-                x: 0.0,
-                y: 0.0,
-                w: 1920.0,
-                h: 1080.0,
-            },
-        ),
-    };
-    let (x, y) = dropdown_position(icon, (DROPDOWN_SIZE.0 * scale, DROPDOWN_SIZE.1 * scale), bounds);
-    let w = tauri::WebviewWindowBuilder::new(app, DROPDOWN, tauri::WebviewUrl::App("index.html#/tray".into()))
-        .title("Dyno")
-        .inner_size(DROPDOWN_SIZE.0, DROPDOWN_SIZE.1)
-        .resizable(false)
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .shadow(true)
-        .initialization_script(window::init_script(crate::dto::os_name(), "none"))
-        .build()?;
-    w.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))?;
-    crate::native_feel::apply(&w);
-    let _ = w.set_focus();
-    Ok(())
-}
-
-/// The dropdown lost focus: it closes, and the tray remembers when (see `placement::click_closes`).
-pub fn dropdown_blurred(app: &AppHandle<Wry>) {
-    if let Some(state) = app.try_state::<TrayState>() {
-        *state.closed_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-    }
-    if let Some(w) = app.get_webview_window(DROPDOWN) {
-        let _ = w.destroy();
-    }
+/// A popover lost focus: it closes (with its fade).
+pub fn popover_blurred(app: &AppHandle<Wry>, label: &str) {
+    popover::close(app, label);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tray_model::Glyph;
+    use dyno_core::settings::TrayMetric;
 
     #[test]
     fn the_static_icons_are_png_files() {
@@ -268,9 +243,25 @@ mod tests {
     }
 
     #[test]
-    fn the_dropdown_window_may_use_the_ipc_commands() {
+    fn items_open_the_shared_or_their_own_popover() {
+        let mut spec = ItemSpec {
+            id: "cpu-1".into(),
+            metrics: vec![TrayMetric::Cpu],
+            glyph: Glyph::Ring,
+            opens: Opens::Main,
+        };
+        assert_eq!(popover_target(&spec), ("tray".into(), "index.html#/tray".into()));
+        spec.opens = Opens::Own;
+        let (label, route) = popover_target(&spec);
+        assert_eq!((label.as_str(), route.as_str()), ("popover-cpu-1", "index.html#/popover/cpu-1"));
+        assert!(popover::is_popover_label(&label));
+        assert_eq!(tray_id("cpu-1"), "dyno-cpu-1");
+    }
+
+    #[test]
+    fn popover_windows_may_use_the_ipc_commands() {
         let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         let windows: Vec<&str> = caps["windows"].as_array().unwrap().iter().filter_map(|w| w.as_str()).collect();
-        assert!(windows.contains(&DROPDOWN) && windows.contains(&window::MAIN));
+        assert!(windows.contains(&DROPDOWN) && windows.contains(&"popover-*") && windows.contains(&window::MAIN));
     }
 }

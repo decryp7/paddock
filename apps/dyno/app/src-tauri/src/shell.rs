@@ -5,7 +5,7 @@ use crate::dto::AgentStatus;
 use crate::link::{AgentLink, Sink};
 use crate::logging;
 use crate::login::{self, AppAutostart};
-use crate::tray_model::{Throttle, TrayModel};
+use crate::tray_model::{items_from_settings, parse_items, Throttle, TrayItems};
 use dyno_core::activity::ActivityEntry;
 use dyno_core::alerts::Alert;
 use dyno_core::protocol::{LiveUpdate, Reply, Request};
@@ -27,15 +27,25 @@ pub mod events {
     pub const AGENT: &str = "dyno://agent";
 }
 
-/// The icon is redrawn at most this often.
-const TRAY_INTERVAL: Duration = Duration::from_secs(1);
+/// The icons are redrawn at most this often (and only when their picture changed).
+const TRAY_INTERVAL: Duration = Duration::from_millis(500);
 /// One line in the log per this many live updates (the log shows that data flows, without filling up).
 const LOG_EVERY: u64 = 60;
+
+/// The tray items: the user's settings, or the comma-separated `DYNO_TRAY_ITEMS` (development and measurements).
+pub fn initial_items(tray: &dyno_core::settings::Tray) -> Vec<crate::tray_model::ItemSpec> {
+    let from_env = std::env::var("DYNO_TRAY_ITEMS").map(|t| parse_items(&t)).unwrap_or_default();
+    if from_env.is_empty() {
+        items_from_settings(tray)
+    } else {
+        from_env
+    }
+}
 
 /// The shell's state shared by the link, the commands and the tray.
 pub struct Shell {
     app: AppHandle<Wry>,
-    tray: Mutex<TrayModel>,
+    tray: Mutex<TrayItems>,
     throttle: Mutex<Throttle>,
     /// Updates received since the shell started.
     updates: AtomicU64,
@@ -52,13 +62,23 @@ impl Shell {
         let size = if cfg!(target_os = "macos") { 44 } else { 32 };
         Arc::new(Shell {
             app,
-            tray: Mutex::new(TrayModel::new(Settings::default().tray, size)),
+            tray: Mutex::new(TrayItems::new(initial_items(&Settings::default().tray), size)),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
             paused: Mutex::new(false),
             status: Mutex::new(None),
         })
+    }
+
+    /// The tray items changed (settings, or the development override): the icons follow.
+    pub fn set_items(&self, specs: Vec<crate::tray_model::ItemSpec>) {
+        let changed = self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_specs(specs.clone());
+        if changed {
+            if let Err(e) = crate::tray::sync_items(&self.app, &specs) {
+                logging::info(&format!("could not update the tray items: {e}"));
+            }
+        }
     }
 
     /// How many live updates arrived (for the log and tests).
@@ -75,10 +95,7 @@ impl Shell {
     /// `launchAtLogin` registers or removes the login items. The first sight only records the value: Dyno never
     /// registers itself unasked.
     pub fn settings_changed(&self, settings: &Settings, link: &AgentLink) -> Result<(), String> {
-        self.tray
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .set_settings(settings.tray.clone());
+        self.set_items(initial_items(&settings.tray));
         let previous = *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner());
         let wanted = settings.launch_at_login;
         match previous {
@@ -133,12 +150,14 @@ impl Sink for Shell {
         }
         *self.paused.lock().unwrap_or_else(|e| e.into_inner()) = update.rules_paused;
         if self.throttle.lock().unwrap_or_else(|e| e.into_inner()).allow(Instant::now()) {
-            let frame = self
+            let frames = self
                 .tray
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .frame(&update, crate::tray::dark_taskbar());
-            crate::tray::paint(&self.app, &frame, update.rules_paused);
+                .frames(&update, crate::tray::dark_taskbar());
+            for (id, frame) in frames {
+                crate::tray::paint(&self.app, &id, &frame, update.rules_paused);
+            }
         }
         // With no window open nothing listens: skip serialising a (large) update for nobody.
         if !self.app.webview_windows().is_empty() {

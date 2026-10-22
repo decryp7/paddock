@@ -38,7 +38,7 @@ tauri-plugin-updater = { version = "2.14", default-features = false, features = 
 # The taskbar's light/dark setting (tray icon) and the Windows build number (Mica), read only.
 winreg = "0.56"
 webview2-com = "0.39"
-windows = { version = "0.62", features = ["Win32_Foundation"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Registering the bundled launch agent with SMAppService (macOS 13+).

@@ -67,7 +67,24 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, CommandError> {
 #[tauri::command]
 pub async fn tray_open_main(app: AppHandle) -> Result<(), CommandError> {
     window::show_main(&app);
-    tray::dropdown_blurred(&app);
+    tray::popover_blurred(&app, tray::DROPDOWN);
+    Ok(())
+}
+
+/// The popover page reports the height of its content (logical pixels); the window follows, within limits. Returns the
+/// height that was applied.
+#[tauri::command]
+pub async fn popover_resize(webview: Webview, app: AppHandle, height: f64) -> Result<f64, CommandError> {
+    crate::popover::resize(&app, webview.label(), height).map_err(CommandError::bad)
+}
+
+/// Escape in a popover page (or its own close button).
+#[tauri::command]
+pub async fn popover_close(webview: Webview, app: AppHandle) -> Result<(), CommandError> {
+    if !crate::popover::is_popover_label(webview.label()) {
+        return Err(CommandError::bad("Only a popover can be closed this way."));
+    }
+    crate::popover::close(&app, webview.label());
     Ok(())
 }
 
