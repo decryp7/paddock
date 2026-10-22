@@ -260,6 +260,7 @@ export class PerfMeter {
     }
     .legend {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: var(--sp-3);
       font-size: var(--fs-xs);
@@ -312,16 +313,16 @@ export class PerfMeter {
     @media (max-width: 1200px) {
       .c3,
       .c4,
-      .c5,
+      .c5 {
+        grid-column: span 6;
+      }
+      /* The wide ones (memory history, apps table) and the last live card take the full row rather than leave a hole. */
       .c7,
-      .c8 {
-        grid-column: span 6;
-      }
-      .c12 {
+      .c8,
+      .c12,
+      .events,
+      .now > :last-child {
         grid-column: span 12;
-      }
-      .events {
-        grid-column: span 6;
       }
     }
   `,

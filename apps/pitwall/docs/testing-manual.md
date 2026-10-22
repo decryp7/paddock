@@ -43,7 +43,7 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 16 | Settings > Memory > Low memory preset (release after 2 minutes). Make one request, then wait 2.5 minutes. | The Dashboard countdown reaches zero; the event feed says "Released <model> (Idle)"; `GET /api/ps` is empty. |
 | 17 | Send another request. | It answers (a cold start): `x-pitwall-cold-start-ms` is present again. |
 | 18 | Pin the model (Keep loaded), wait past the idle time. | It stays loaded. Unpin. |
-| 19 | Start a long generation (`max_tokens` 2000), and meanwhile press Release memory now. | The busy model is **not** released; it is after the answer ends. |
+| 19 | Start a long generation (`max_tokens` 2000), and meanwhile open the dashboard "..." menu and choose Release memory. | The busy model is **not** released; it is after the answer ends. |
 | 20 | Pause serving, send a request. | 503 "Pitwall has paused serving. Resume it in Pitwall's window or tray menu." Resume; requests work. |
 | 21 | Send 6 simultaneous requests with `X-Pitwall-Priority: batch` and one interactive. | The interactive one starts first; all complete; `GET /x/v1/jobs` shows the queue while they run. `DELETE /x/v1/jobs/<id>` for a queued one cancels it. |
 | 22 | Load a model that does not fit (a large model on a small machine). | The verdict says Won't fit before download; if forced, the request fails with `insufficient_memory`, the machine does not start swapping. |
@@ -84,7 +84,7 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 32 | Deny a second request; let a third expire for 5 minutes. | `denied`. |
 | 33 | `curl -s $PW/v1/models -H 'Host: example.com' -H "Authorization: Bearer $PITWALL_KEY"` and with `-H 'Origin: https://example.com'`. | 403 "this request's Host header is not a local address..." and 403 "requests from web pages on other sites are refused". |
 | 34 | From another computer on the LAN, connect to `http://<this computer's address>:11435`. | Connection refused: the server listens on loopback only. |
-| 35 | Revoke the key in Apps & keys, repeat a request. | 401. |
+| 35 | Revoke the key in Apps & keys (the key row's "..." menu), repeat a request. | 401. |
 | 36 | Check `admin.key` permissions (`ls -l`, or `icacls` on Windows). | Readable only by the owner. |
 | 37 | Search the logs (`logs/`) for a word from one of your prompts. | Not found. |
 

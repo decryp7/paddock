@@ -70,6 +70,7 @@ export function limitsText(l: AppLimits): string {
     :host {
       display: block;
       margin: 0 calc(-1 * var(--sp-4)) calc(-1 * var(--sp-2));
+      overflow-x: auto;
     }
     .table th:first-child,
     .table td:first-child {

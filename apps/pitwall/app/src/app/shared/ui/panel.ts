@@ -69,8 +69,9 @@ import { Skeleton } from './skeleton';
     header {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       justify-content: space-between;
-      gap: var(--sp-3);
+      gap: var(--sp-1) var(--sp-3);
       min-height: 24px;
       margin-bottom: var(--sp-3);
     }
@@ -105,7 +106,8 @@ import { Skeleton } from './skeleton';
       display: flex;
       align-items: center;
       gap: var(--sp-1);
-      flex: none;
+      flex: 0 1 auto;
+      min-width: 0;
     }
     .error {
       display: flex;

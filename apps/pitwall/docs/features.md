@@ -238,7 +238,7 @@ The how-to with complete examples is in the [user guide](user-guide.md#packs-add
 
 The home screen. Live tiles for memory (RAM and video memory, with the pressure state), models in memory with their idle
 countdown, tokens per second, the queue and per-app usage; history charts with events (loads, releases, failures, pairings)
-marked on the timeline; an events feed; pending pairing requests; quick actions (pause serving, release memory now). The
+marked on the timeline; an events feed; pending pairing requests; pause serving and release memory now in the header's "..." menu. The
 server pushes updates over a live feed, so nothing is polled. Metrics are kept locally, bounded (30 days by default). Works.
 
 ## Models page
