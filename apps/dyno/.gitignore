@@ -1,5 +1,6 @@
 # Rust
-target/
+/target/
+/app/src-tauri/target/
 debug/
 **/*.rs.bk
 *.pdb
@@ -20,7 +21,7 @@ app/src-tauri/gen/schemas/
 
 # Logs and local runtime data (never commit history databases, snapshots, quarantine or keys)
 *.log
-logs/
+/logs/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
@@ -38,4 +39,4 @@ logs/
 ._*
 
 # Private build folders (coverage, agents)
-target-*/
+/target-*/
