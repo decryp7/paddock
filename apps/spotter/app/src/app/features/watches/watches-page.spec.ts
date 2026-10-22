@@ -1,6 +1,5 @@
 import { TestBed } from '@angular/core/testing';
 import { WatchesPage } from './watches-page';
-import { BACKEND } from '../../core/backend';
 import { WatchesStore } from '../../state/watches.store';
 import { appProviders, byText, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 
@@ -81,7 +80,6 @@ describe('WatchesPage', () => {
     const { f } = await make(makeMock({ scenario: 'broken' }));
     expect(text(f.nativeElement)).toContain('Could not load the watch list');
     expect(text(f.nativeElement)).toContain('The engine is not answering');
-    expect(TestBed.inject(BACKEND)).toBeDefined();
     (byText(f.nativeElement, 'button', /retry/i) as HTMLButtonElement).click();
     await settle(f);
     expect(text(f.nativeElement)).toContain('Could not load the watch list');

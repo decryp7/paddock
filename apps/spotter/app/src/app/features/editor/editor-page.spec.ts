@@ -173,7 +173,6 @@ describe('EditorPage: adding a watch', () => {
     const { f, backend } = await make();
     await startGithub(f);
     await goNext(f, 2);
-    await check(f, q(f, '#mode ~ * input, label.check input'), true).catch(() => undefined);
 
     // Channels
     await click(f, button(f, 'Add a place to send to'));

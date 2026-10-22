@@ -1,7 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { Component } from '@angular/core';
-import { BACKEND } from '../core/backend';
 import { ClockService } from '../core/clock.service';
 import { ToastStore } from '../state/toast.store';
 import { WatchesStore } from '../state/watches.store';
