@@ -198,3 +198,9 @@ Pitwall runs native engines on untrusted model files and answers requests from o
   `.serena/memories/` (keep them current when the layout changes).
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper
   models. Keep architecture and review on the main model.
+
+## Lessons from the suite
+
+Read [docs/suite-lessons.md](docs/suite-lessons.md) before changing build, bundle, window, service, test or CI code:
+it lists the pitfalls Debrief and Pitcrew already hit (CSP and inline styles, macOS signing and drag regions,
+launchd/systemd PATH, Remote Desktop sessions, conhost, Linux threads, test hygiene, release-build budgets).
