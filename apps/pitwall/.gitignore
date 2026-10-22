@@ -34,3 +34,6 @@ logs/
 .serena/project.local.yml
 .DS_Store
 ._*
+
+# Diagram PNG exports are for local review (see docs/diagrams/src/README.md)
+docs/diagrams/png/
