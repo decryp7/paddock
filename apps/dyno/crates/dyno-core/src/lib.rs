@@ -1,7 +1,7 @@
 //! Dyno's pure core: the metrics and process model, grouping, diagnosis, anomaly detection, the rules engine,
 //! cleanup policy, health and tuning, history downsampling and the agent protocol. No I/O and no clock: the agent
 //! passes measurements and time in as values (ADR 0001).
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::field_reassign_with_default))]
 
 pub mod activity;
 pub mod alerts;

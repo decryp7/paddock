@@ -15,11 +15,17 @@ pub mod parse;
 pub mod process;
 pub mod processes;
 pub mod sensors;
+#[cfg(unix)]
+#[allow(unsafe_code)]
+pub mod unix_control;
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub mod macos;
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+pub mod linux;
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub mod other;
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -62,7 +68,11 @@ pub fn platform_with(state_file: PathBuf) -> Platform {
     {
         macos::platform(state_file)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::platform(state_file)
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         other::platform(state_file)
     }
@@ -98,7 +108,11 @@ pub fn reveal(path: &Path) -> Result<(), PlatformError> {
     {
         macos::reveal(&path)
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::reveal(&path)
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         other::reveal(&path)
     }

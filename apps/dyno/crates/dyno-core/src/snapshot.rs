@@ -102,7 +102,7 @@ fn summary(p: &ProcessSample) -> ProcessSummary {
 
 /// Builds a snapshot (keeping at most [`MAX_PROCESSES`], the biggest by memory).
 pub fn take(id: String, at: Timestamp, label: &str, memory_used: u64, cpu: f32, mut processes: Vec<ProcessSample>) -> Snapshot {
-    processes.sort_by(|a, b| b.memory.cmp(&a.memory));
+    processes.sort_by_key(|p| std::cmp::Reverse(p.memory));
     processes.truncate(MAX_PROCESSES);
     let label: String = label.trim().chars().take(100).collect();
     Snapshot {
@@ -122,8 +122,18 @@ pub fn take(id: String, at: Timestamp, label: &str, memory_used: u64, cpu: f32, 
 pub fn diff(a: &Snapshot, b: &Snapshot) -> SnapshotDiff {
     let before: HashMap<ProcessRef, &ProcessSample> = a.processes.iter().map(|p| (p.reference(), p)).collect();
     let after: HashMap<ProcessRef, &ProcessSample> = b.processes.iter().map(|p| (p.reference(), p)).collect();
-    let mut added: Vec<ProcessSummary> = b.processes.iter().filter(|p| !before.contains_key(&p.reference())).map(summary).collect();
-    let mut removed: Vec<ProcessSummary> = a.processes.iter().filter(|p| !after.contains_key(&p.reference())).map(summary).collect();
+    let mut added: Vec<ProcessSummary> = b
+        .processes
+        .iter()
+        .filter(|p| !before.contains_key(&p.reference()))
+        .map(summary)
+        .collect();
+    let mut removed: Vec<ProcessSummary> = a
+        .processes
+        .iter()
+        .filter(|p| !after.contains_key(&p.reference()))
+        .map(summary)
+        .collect();
     let mut changed: Vec<ProcessChange> = b
         .processes
         .iter()
@@ -142,8 +152,8 @@ pub fn diff(a: &Snapshot, b: &Snapshot) -> SnapshotDiff {
             })
         })
         .collect();
-    added.sort_by(|x, y| y.memory.cmp(&x.memory));
-    removed.sort_by(|x, y| y.memory.cmp(&x.memory));
+    added.sort_by_key(|x| std::cmp::Reverse(x.memory));
+    removed.sort_by_key(|x| std::cmp::Reverse(x.memory));
     changed.sort_by_key(|c| std::cmp::Reverse(c.memory_after.abs_diff(c.memory_before)));
     SnapshotDiff {
         before: a.info.clone(),
@@ -169,7 +179,12 @@ mod tests {
             " morning ",
             8 << 30,
             10.0,
-            vec![proc(1, None, "keep.exe", 1.0, 100), proc(2, None, "gone.exe", 0.0, 50), proc(3, None, "grow.exe", 1.0, 100), proc(4, None, "busy.exe", 0.0, 10)],
+            vec![
+                proc(1, None, "keep.exe", 1.0, 100),
+                proc(2, None, "gone.exe", 0.0, 50),
+                proc(3, None, "grow.exe", 1.0, 100),
+                proc(4, None, "busy.exe", 0.0, 10),
+            ],
         );
         let b = take(
             "b".into(),
@@ -177,14 +192,22 @@ mod tests {
             "",
             9 << 30,
             25.0,
-            vec![proc(1, None, "keep.exe", 1.0, 105), proc(3, None, "grow.exe", 1.0, 400), proc(4, None, "busy.exe", 30.0, 10), proc(5, None, "new.exe", 0.0, 70)],
+            vec![
+                proc(1, None, "keep.exe", 1.0, 105),
+                proc(3, None, "grow.exe", 1.0, 400),
+                proc(4, None, "busy.exe", 30.0, 10),
+                proc(5, None, "new.exe", 0.0, 70),
+            ],
         );
         assert_eq!(a.info.label, "morning");
         assert_eq!(b.info.label, "Snapshot");
         let d = diff(&a, &b);
         assert_eq!(d.added.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["new.exe"]);
         assert_eq!(d.removed.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["gone.exe"]);
-        assert_eq!(d.changed.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["grow.exe", "busy.exe"]);
+        assert_eq!(
+            d.changed.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["grow.exe", "busy.exe"]
+        );
         assert_eq!(d.memory_used_delta, 1 << 30);
         assert_eq!(d.cpu_delta, 15.0);
     }
@@ -197,7 +220,9 @@ mod tests {
         let b = take("b".into(), Timestamp(1), "y", 0, 0.0, vec![reused]);
         let d = diff(&a, &b);
         assert_eq!((d.added.len(), d.removed.len()), (1, 1));
-        let many: Vec<_> = (0..(MAX_PROCESSES as u32 + 10)).map(|i| proc(i, None, "p", 0.0, u64::from(i))).collect();
+        let many: Vec<_> = (0..(MAX_PROCESSES as u32 + 10))
+            .map(|i| proc(i, None, "p", 0.0, u64::from(i)))
+            .collect();
         let s = take("c".into(), Timestamp(0), "z", 0, 0.0, many);
         assert_eq!(s.info.process_count, MAX_PROCESSES);
         assert_eq!(s.processes[0].pid, MAX_PROCESSES as u32 + 9, "the biggest are kept");

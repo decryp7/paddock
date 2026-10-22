@@ -40,7 +40,11 @@ impl LaunchAgent {
             }
         }
         parts.extend(self.program_arguments.iter().cloned());
-        parts.iter().map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.clone() }).collect::<Vec<_>>().join(" ")
+        parts
+            .iter()
+            .map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a.clone() })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Whether launchd starts it at login (RunAtLoad, or KeepAlive true / with conditions).
@@ -63,6 +67,29 @@ pub fn parse_launch_agent(bytes: &[u8]) -> Option<LaunchAgent> {
         return None;
     }
     plist::from_bytes::<LaunchAgent>(bytes).ok().filter(|a| !a.label.is_empty())
+}
+
+/// `launchctl print-disabled gui/<uid>` → (label, disabled) pairs, from lines like `"com.example.x" => disabled`.
+pub fn parse_print_disabled(text: &str) -> Vec<(String, bool)> {
+    text.lines()
+        .filter_map(|l| {
+            let (label, state) = l.trim().split_once("=>")?;
+            let label = label.trim().trim_matches('"');
+            let disabled = match state.trim().trim_end_matches(';') {
+                "disabled" | "true" => true,
+                "enabled" | "false" => false,
+                _ => return None,
+            };
+            (!label.is_empty()).then(|| (label.to_string(), disabled))
+        })
+        .collect()
+}
+
+/// `diskutil info` output → the SMART status line (`Verified`, `Failing`, `Not Supported`).
+pub fn parse_smart_status(text: &str) -> Option<String> {
+    text.lines()
+        .find_map(|l| l.trim().strip_prefix("SMART Status:").map(|v| v.trim().to_string()))
+        .filter(|v| !v.is_empty())
 }
 
 #[cfg(test)]
@@ -113,5 +140,18 @@ mod tests {
         assert!(parse_launch_agent(b"<plist><array/></plist>").is_none());
         assert!(parse_launch_agent(&xml("<key>Label</key><string></string>")).is_none());
         assert!(parse_launch_agent(&vec![b' '; MAX_PLIST_BYTES + 1]).is_none());
+    }
+
+    #[test]
+    fn reads_print_disabled_and_smart() {
+        let out = parse_print_disabled("disabled services = {\n\t\"com.a.b\" => enabled\n\t\"com.c.d\" => disabled\n\tjunk\n}");
+        assert_eq!(out, vec![("com.a.b".to_string(), false), ("com.c.d".to_string(), true)]);
+        assert!(parse_print_disabled("").is_empty());
+        assert_eq!(
+            parse_smart_status("  Solid State:  Yes\n   SMART Status:   Verified\n").as_deref(),
+            Some("Verified")
+        );
+        assert_eq!(parse_smart_status("SMART Status:"), None);
+        assert_eq!(parse_smart_status("nothing"), None);
     }
 }

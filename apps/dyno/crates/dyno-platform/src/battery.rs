@@ -52,10 +52,9 @@ fn facts_of(b: &Battery) -> BatteryFacts {
     }
 }
 
-/// Reads the first battery; refreshes at most every `every` calls (batteries change slowly).
+/// Reads the first battery; refreshes at most every `every` calls (batteries change slowly). The OS handles
+/// (`starship-battery` is not `Send` on macOS) live only inside one read, so the reader can move between threads.
 pub struct BatteryReader {
-    manager: Option<Manager>,
-    battery: Option<Battery>,
     calls: u64,
     every: u64,
     last: Reading<BatterySample>,
@@ -65,8 +64,6 @@ impl BatteryReader {
     /// A reader that refreshes on every `every`-th call (at least 1).
     pub fn new(every: u64) -> Self {
         BatteryReader {
-            manager: Manager::new().ok(),
-            battery: None,
             calls: 0,
             every: every.max(1),
             last: Reading::unavailable(NO_BATTERY),
@@ -77,24 +74,20 @@ impl BatteryReader {
     pub fn read(&mut self) -> Reading<BatterySample> {
         let due = self.calls.is_multiple_of(self.every);
         self.calls = self.calls.wrapping_add(1);
-        if !due {
-            return self.last.clone();
+        if due {
+            self.last = read_first();
         }
-        let Some(manager) = &self.manager else {
-            return self.last.clone();
-        };
-        let refreshed = match self.battery.as_mut() {
-            Some(b) => manager.refresh(b).is_ok(),
-            None => false,
-        };
-        if !refreshed {
-            self.battery = manager.batteries().ok().and_then(|mut it| it.find_map(Result::ok));
-        }
-        self.last = match &self.battery {
-            Some(b) => Reading::Available(to_sample(&facts_of(b))),
-            None => Reading::unavailable(NO_BATTERY),
-        };
         self.last.clone()
+    }
+}
+
+fn read_first() -> Reading<BatterySample> {
+    let battery = Manager::new()
+        .ok()
+        .and_then(|m| m.batteries().ok().and_then(|mut it| it.find_map(Result::ok)));
+    match battery {
+        Some(b) => Reading::Available(to_sample(&facts_of(&b))),
+        None => Reading::unavailable(NO_BATTERY),
     }
 }
 

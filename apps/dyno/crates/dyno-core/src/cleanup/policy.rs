@@ -179,6 +179,7 @@ pub fn is_inside(path: &str, root: &str) -> bool {
 }
 
 /// Checks a candidate against the category's resolved roots and the safety rules, and turns it into a preview item.
+#[allow(clippy::too_many_arguments)]
 pub fn admit(id: String, c: Candidate, roots: &[String], home: &str, risk: CleanupRisk, min_age_days: u32, now: Timestamp, default_reason: &str) -> Result<CleanupItem, String> {
     if c.link {
         return Err(format!("{} is a link; Dyno never follows or deletes links.", c.path));
@@ -275,7 +276,7 @@ pub fn stale_toolchains(installed: &[String], default: Option<&str>, overrides: 
 /// Bounds a size tree for the UI: at most `per_level` children per node (the rest folded into "Other") and `depth`
 /// levels.
 pub fn prune(mut node: SizeNode, per_level: usize, depth: usize) -> SizeNode {
-    node.children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    node.children.sort_by_key(|c| std::cmp::Reverse(c.bytes));
     if depth == 0 {
         node.children.clear();
         return node;

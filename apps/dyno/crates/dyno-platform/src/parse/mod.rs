@@ -10,3 +10,4 @@ pub mod powercfg;
 pub mod startup_approved;
 pub mod time;
 pub mod win_facts;
+pub mod ioreg;
