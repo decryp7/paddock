@@ -91,6 +91,9 @@
               "lcov",
               "json-summary"
             ],
+            "coverageInclude": [
+              "src/**/*.ts"
+            ],
             "coverageExclude": [
               "src/**/*.spec.ts",
               "src/main.ts",
