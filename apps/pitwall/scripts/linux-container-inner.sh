@@ -7,9 +7,19 @@ tar --exclude=./target --exclude=./app/node_modules --exclude=./app/dist --exclu
 cd /work
 
 echo "== pitwall-core and pitwall-server tests"
-cargo test -p pitwall-core -p pitwall-server 2>&1 | grep -E "^test result|FAILED|failed|panicked|error(\[|:)" || true
-cargo test -p pitwall-core -p pitwall-server --quiet >/tmp/test.log 2>&1 || { tail -40 /tmp/test.log; echo "TESTS FAILED"; exit 1; }
-echo "tests passed"
+failed=0
+cargo test --no-fail-fast -p pitwall-core -p pitwall-server >/tmp/test.log 2>&1 || failed=1
+grep -E "^test result|FAILED|panicked" /tmp/test.log || true
+if [ "$failed" = 1 ]; then
+  echo "SOME TESTS FAILED (continuing with the service checks)"
+  # Control run: does the failure also happen without the service hook in main.rs?
+  sed -i '/pitwall_server::service::dispatch/,+2d' crates/pitwall-server/src/main.rs
+  if cargo test -p pitwall-server --test e2e >/tmp/control.log 2>&1; then echo "control (no service hook): e2e passes"; else echo "control (no service hook): e2e still fails"; grep -E "FAILED|panicked" /tmp/control.log || true; fi
+  cp /src/crates/pitwall-server/src/main.rs crates/pitwall-server/src/main.rs
+  cargo build -p pitwall-server >/dev/null 2>&1
+else
+  echo "tests passed"
+fi
 
 echo "== systemd user unit"
 bin=$CARGO_TARGET_DIR/debug/pitwall-server
