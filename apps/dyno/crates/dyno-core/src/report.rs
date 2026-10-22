@@ -499,7 +499,7 @@ pub fn validate_destination(path: &str, format: ReportFormat) -> Result<std::pat
     if !p.is_absolute() {
         return Err("Give the full path of the file to save.".into());
     }
-    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if crate::cleanup::has_dot_segment(p) {
         return Err("The save path may not contain \"..\".".into());
     }
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();

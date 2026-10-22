@@ -173,6 +173,17 @@ fn norm(p: &str) -> String {
     s
 }
 
+/// Whether `path` has a `.` or `..` segment. `Path::components` reads `..` as a parent step only on ordinary paths: in a Windows
+/// verbatim path (`\\?\C:\..`) it is a plain name, so this checks the names too and refuses both forms.
+pub fn has_dot_segment(path: &std::path::Path) -> bool {
+    use std::path::Component;
+    path.components().any(|c| match c {
+        Component::ParentDir | Component::CurDir => true,
+        Component::Normal(n) => n == ".." || n == ".",
+        _ => false,
+    })
+}
+
 /// Whether `path` lies strictly inside `root`.
 pub fn is_inside(path: &str, root: &str) -> bool {
     let (p, r) = (norm(path), norm(root));
@@ -314,6 +325,13 @@ pub fn prune(mut node: SizeNode, per_level: usize, depth: usize) -> SizeNode {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dot_segments_are_found_in_any_spelling() {
+        use std::path::Path;
+        assert!(has_dot_segment(Path::new("/a/../b")));
+        assert!(!has_dot_segment(Path::new("/a/b..c/.hidden/..x")));
+    }
+
     use super::*;
 
     fn cand(path: &str, days_old: i64) -> Candidate {

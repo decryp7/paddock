@@ -17,7 +17,13 @@ pub fn backdate(path: &Path, days: u64) {
     let t = SystemTime::now() - Duration::from_secs(days * 86_400);
     #[cfg(unix)]
     let f = std::fs::File::open(path);
-    #[cfg(not(unix))]
+    // Windows opens a folder only with backup semantics, and setting times needs the attribute-write right.
+    #[cfg(windows)]
+    let f = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::File::options().access_mode(0x100).custom_flags(0x0200_0000).open(path)
+    };
+    #[cfg(not(any(unix, windows)))]
     let f = std::fs::File::options().write(true).open(path);
     if let Ok(f) = f {
         let _ = f.set_modified(t);

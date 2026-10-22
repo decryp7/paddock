@@ -718,7 +718,8 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
     let points = s.points(Tier::QuarterHour, from, to).map_err(internal)?;
     let top_apps = top_consumers(&s.app_minutes(from, to).map_err(internal)?, 5);
     let score = live_score.or(s.score_at(to).map_err(internal)?);
-    let in_week = |at: Timestamp| at >= from && at < to;
+    // (from, to]: a change made in the very millisecond the report is built still counts, and adjacent weeks never share one.
+    let in_week = |at: Timestamp| at > from && at <= to;
     let activity: Vec<ActivityEntry> = s
         .activity(1_000)
         .map_err(internal)?

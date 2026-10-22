@@ -5,7 +5,7 @@
 use super::walk::{measure, Budget};
 use dyno_core::cleanup::{admit, Candidate, CategorySpec, CleanupItem};
 use dyno_core::time::Timestamp;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// The most entries measured when re-checking one item.
 const RECHECK_BUDGET: usize = 200_000;
@@ -22,7 +22,7 @@ fn canonical_string(p: &Path) -> String {
 /// `roots` are the category's folders as resolved now; `home` is the user's home.
 pub fn recheck(item: &CleanupItem, spec: &CategorySpec, roots: &[PathBuf], home: &Path, now: Timestamp) -> Result<PathBuf, String> {
     let path = Path::new(&item.path);
-    if !path.is_absolute() || path.components().any(|c| matches!(c, Component::ParentDir)) {
+    if !path.is_absolute() || dyno_core::cleanup::has_dot_segment(path) {
         return Err(format!("{} is not a plain full path.", item.path));
     }
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {

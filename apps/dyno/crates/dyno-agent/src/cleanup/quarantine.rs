@@ -7,7 +7,7 @@ use dyno_core::activity::quarantine_expiry;
 use dyno_core::cleanup::{FailedItem, QuarantineEntry};
 use dyno_core::time::Timestamp;
 use serde::{Deserialize, Serialize};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// The manifest format.
 const VERSION: u32 = 1;
@@ -196,7 +196,7 @@ impl Quarantine {
             return Err("The quarantine record is damaged.".into());
         }
         let dest = Path::new(&held.original);
-        if !dest.is_absolute() || dest.components().any(|c| matches!(c, Component::ParentDir)) {
+        if !dest.is_absolute() || dyno_core::cleanup::has_dot_segment(dest) {
             return Err("The original location is not a plain full path.".into());
         }
         let source = data.join(&held.stored);
@@ -340,6 +340,11 @@ mod tests {
         assert_eq!(q.list().len(), 1, "still held");
     }
 
+    /// The path as it appears inside the manifest's JSON (backslashes doubled on Windows).
+    fn json_escaped(p: &Path) -> String {
+        p.to_string_lossy().replace('\\', "\\\\")
+    }
+
     #[test]
     fn a_tampered_manifest_cannot_restore_outside_or_read_elsewhere() {
         let (t, q, src) = fixture();
@@ -350,11 +355,7 @@ mod tests {
         let manifest = t.path().join("quarantine/q-3/manifest.json");
         let text = std::fs::read_to_string(&manifest).unwrap();
         let dotdot = src.join("..").join("escaped.txt");
-        std::fs::write(
-            &manifest,
-            text.replace(&src.join("a.txt").to_string_lossy().into_owned(), &dotdot.to_string_lossy()),
-        )
-        .unwrap();
+        std::fs::write(&manifest, text.replace(&json_escaped(&src.join("a.txt")), &json_escaped(&dotdot))).unwrap();
         let r = q.restore("q-3").unwrap();
         assert!(r.failed[0].reason.contains("plain full path"), "{:?}", r.failed);
         assert!(!t.path().join("escaped.txt").exists());

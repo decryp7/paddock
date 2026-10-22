@@ -3,7 +3,7 @@
 
 use super::walk::Budget;
 use dyno_core::cleanup::{prune, SizeNode};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// Levels of children returned.
 pub const DEPTH: usize = 3;
@@ -17,7 +17,7 @@ pub const MAX_SECS: u64 = 5;
 /// Why a path cannot be mapped.
 pub fn check(path: &str) -> Result<PathBuf, String> {
     let p = Path::new(path);
-    if !p.is_absolute() || p.components().any(|c| matches!(c, Component::ParentDir)) {
+    if !p.is_absolute() || dyno_core::cleanup::has_dot_segment(p) {
         return Err("Give the full path of a folder.".into());
     }
     let real = std::fs::canonicalize(p).map_err(|_| "That folder does not exist or cannot be read.".to_string())?;
