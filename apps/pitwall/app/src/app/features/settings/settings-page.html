@@ -233,7 +233,7 @@
                 <span class="name">{{ platformLabel(sv.platform) }}</span>
                 <p class="hint">{{ sv.message ?? (sv.installed ? 'Pitwall\'s server starts by itself and keeps running when this window is closed.' : 'Pitwall\'s server only runs while this app is open.') }}</p>
               </div>
-              <span class="pill dot" data-testid="service-pill" [attr.data-tone]="sv.installed ? (sv.running ? 'ok' : 'warn') : 'muted'">{{ sv.installed ? (sv.running ? 'Running' : 'Installed, not running') : 'Not installed' }}</span>
+              <span class="status" data-testid="service-pill" [attr.data-tone]="sv.installed ? (sv.running ? 'ok' : 'warn') : 'muted'">{{ sv.installed ? (sv.running ? 'Running' : 'Installed, not running') : 'Not installed' }}</span>
             </div>
             <div class="row">
               <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint">{{ serviceHint(sv.platform) }}</p></div>
@@ -266,7 +266,7 @@
                   }
                 </p>
               </div>
-              <span class="pill dot" [attr.data-tone]="service.update() ? 'info' : u.available ? (service.upToDate() ? 'ok' : 'muted') : 'muted'">{{
+              <span class="status" [attr.data-tone]="service.update() ? 'info' : u.available ? (service.upToDate() ? 'ok' : 'muted') : 'muted'">{{
                 service.update() ? 'Update available' : u.available ? (service.upToDate() ? 'Up to date' : 'Not checked') : 'Not configured'
               }}</span>
             </div>

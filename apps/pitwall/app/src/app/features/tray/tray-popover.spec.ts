@@ -44,7 +44,7 @@ describe('TrayPopover', () => {
     const port = live.server()!.port;
     expect(text(el.querySelector('.state')!)).toBe('Servingon:' + port);
     expect(el.querySelector('.state')!.getAttribute('data-state')).toBe('serving');
-    expect(text(el.querySelector('.mem .row')!)).toMatch(/^RAM\d+\.\dGB\/32GB(Normal|Elevated|Critical)$/);
+    expect(text(el.querySelector('.mem .row')!)).toMatch(/^RAM\d+\.\dGB\/32GB(Elevated|Critical)?$/);
     expect(text(el.querySelectorAll('.mem .row')[1]!)).toMatch(/^VRAM[\d.]+GB\/12GB\d+%busy$/);
     const stats = Array.from(el.querySelectorAll('.stats div')).map(text);
     expect(stats).toEqual(['58.4tok/s', '2running', '3waiting']);
@@ -93,7 +93,9 @@ describe('TrayPopover', () => {
     const { fixture, el, btn } = await mount({ backend, patch: (o) => ({ ...o, server: { ...o.server, serving: 'paused' } }) });
     expect(text(el.querySelector('.state')!)).toMatch(/^Pausedon:\d+$/);
     expect(text(el.querySelector('.stats div')!)).toBe('0.0tok/s');
-    expect(el.querySelector('button.primary')!.textContent).toContain('Resume');
+    // Open Pitwall is the only filled button, paused or not; Resume sits beside Release as an equal secondary.
+    expect(Array.from(el.querySelectorAll('button.primary')).map((b) => b.textContent!.trim())).toEqual(['Open Pitwall']);
+    expect(btn('Resume').classList.contains('primary')).toBe(false);
     expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent!.includes('Pause serving'))).toBe(false);
     btn('Resume').click();
     await settle(fixture);

@@ -35,7 +35,7 @@ describe('PlaygroundPage', () => {
     expect(button(el, 'Send').disabled).toBe(true);
     expect(button(el, 'Clear').disabled).toBe(true);
     expect(el.querySelectorAll('.pane')).toHaveLength(1);
-    expect(el.querySelector('.pane-head .pill')).not.toBeNull();
+    expect(el.querySelector('.pane-head .status')).not.toBeNull();
     expect(el.textContent).toContain('Hot');
   });
 

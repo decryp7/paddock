@@ -36,7 +36,7 @@ test.describe('native feel', () => {
     expect(await selected()).toBe('');
     await page.goto('/?mock-fast&mock-static#/requests');
     await page.getByRole('row').nth(1).click();
-    const id = page.locator('pw-request-detail .eyebrow').first();
+    const id = page.locator('pw-request-detail pw-fact', { hasText: 'Request id' }).locator('.value');
     await id.dblclick({ position: { x: 8, y: 6 } });
     await expect.poll(selected).not.toBe('');
   });
@@ -55,7 +55,7 @@ test.describe('native feel', () => {
   test("right-clicking selected text opens Pitwall's Copy menu; right-clicking elsewhere with a selection does not", async ({ page }) => {
     await page.goto('/?mock-fast&mock-static#/requests');
     await page.getByRole('row').nth(1).click();
-    const id = page.locator('pw-request-detail .eyebrow').first();
+    const id = page.locator('pw-request-detail pw-fact', { hasText: 'Request id' }).locator('.value');
     await id.dblclick({ position: { x: 8, y: 6 } });
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().trim() ?? '')).not.toBe('');
     await watch(page, ['contextmenu']);

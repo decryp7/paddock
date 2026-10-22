@@ -17,8 +17,8 @@ import { UpdatesStore } from '../updates/updates.store';
     <div class="tray">
       <header>
         <mat-icon class="logo" svgIcon="pw:logo" aria-hidden="true" />
+        <h1>Pitwall</h1>
         <div class="title">
-          <h1>Pitwall</h1>
           @if (live.server(); as s) {
             <span class="state" [attr.data-state]="s.serving"><span class="dot" aria-hidden="true"></span>{{ s.serving === 'paused' ? 'Paused' : 'Serving' }} on :{{ s.port }}</span>
           } @else if (live.error()) {
@@ -53,7 +53,11 @@ import { UpdatesStore } from '../updates/updates.store';
           <div class="row">
             <span class="k">RAM</span>
             <span class="v num">{{ size(m.ramTotal - m.ramAvailable) }} <span class="faint">/ {{ size(m.ramTotal, 0) }}</span></span>
-            <span class="pill dot" [attr.data-tone]="pressure()?.tone">{{ pressure()?.label }}</span>
+            @if (pressure(); as p) {
+              @if (p.tone !== 'ok') {
+                <span class="status" [attr.data-tone]="p.tone">{{ p.label }}</span>
+              }
+            }
           </div>
           <div class="meter" [attr.data-tone]="tone(ramPct())"><span [style.width.%]="ramPct()"></span></div>
           @if (vram(); as g) {
@@ -80,7 +84,7 @@ import { UpdatesStore } from '../updates/updates.store';
 
       <footer>
         @if (live.paused()) {
-          <button type="button" class="btn primary" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume</button>
+          <button type="button" class="btn" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume</button>
         } @else {
           <button type="button" class="btn" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)"><mat-icon svgIcon="pw:pause" aria-hidden="true" />Pause serving</button>
         }
@@ -135,39 +139,43 @@ import { UpdatesStore } from '../updates/updates.store';
       gap: 10px;
     }
     .logo {
-      width: 30px;
-      height: 30px;
+      width: 24px;
+      height: 24px;
       flex: none;
+    }
+    h1 {
+      font-size: var(--fs-lg);
     }
     .title {
       flex: 1;
       display: flex;
-      flex-direction: column;
-      line-height: 1.25;
+      justify-content: flex-start;
+      min-width: 0;
     }
-    h1 {
-      font-size: var(--fs-md);
-    }
+    /* The state is one pill with an 8 px dot, like the window's sidebar. */
     .state {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
+      height: 22px;
+      padding: 0 8px;
       font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-weight: var(--fw-medium);
+      color: var(--text-2);
+      background: var(--bg-active);
+      border-radius: var(--r-full);
+      white-space: nowrap;
       .dot {
-        width: 6px;
-        height: 6px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
         background: var(--text-3);
       }
       &[data-state='serving'] .dot {
         background: var(--ok);
       }
-      &[data-state='paused'] {
-        color: var(--warn);
-        .dot {
-          background: var(--warn);
-        }
+      &[data-state='paused'] .dot {
+        background: var(--warn);
       }
       &[data-state='down'] .dot {
         background: var(--bad);
@@ -215,12 +223,14 @@ import { UpdatesStore } from '../updates/updates.store';
         align-items: center;
       }
       b {
-        font-size: var(--fs-lg);
+        font-size: var(--fs-xl);
         font-weight: var(--fw-semibold);
+        font-variant-numeric: tabular-nums;
+        line-height: 1.2;
       }
       span {
         font-size: var(--fs-xs);
-        color: var(--text-3);
+        color: var(--text-2);
       }
     }
     .models {
@@ -232,7 +242,7 @@ import { UpdatesStore } from '../updates/updates.store';
         margin-bottom: var(--sp-1);
         font-size: var(--fs-xs);
         font-weight: var(--fw-medium);
-        color: var(--text-3);
+        color: var(--text-2);
       }
     }
     footer {

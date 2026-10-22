@@ -30,7 +30,7 @@
                 }
               </select>
               @if (model(pane.modelId); as m) {
-                <span class="pill dot" [attr.data-tone]="m.loaded ? 'ok' : 'muted'" [matTooltip]="m.loaded ? 'Loaded: answers start at once' : 'Not loaded: the first answer includes a cold start'">{{ m.loaded ? 'Hot' : 'Cold' }}</span>
+                <span class="status" [attr.data-tone]="m.loaded ? 'ok' : 'muted'" [matTooltip]="m.loaded ? 'Loaded: answers start at once' : 'Not loaded: the first answer includes a cold start'">{{ m.loaded ? 'Hot' : 'Cold' }}</span>
                 <span class="faint meta">{{ size(m.sizeBytes) }}{{ m.paramsB ? ' · ' + m.paramsB + 'B' : '' }}</span>
               }
             </header>

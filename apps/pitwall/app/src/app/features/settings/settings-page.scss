@@ -196,6 +196,7 @@
   }
 }
 
+/* A note is a callout: one status bar on the surface, the icon in the status colour, never a filled block. */
 .note {
   display: flex;
   gap: var(--sp-2);
@@ -203,21 +204,23 @@
   padding: var(--sp-3);
   font-size: var(--fs-sm);
   line-height: 1.45;
-  border-radius: var(--r-md);
+  background: var(--bg-sunken);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--r-sm);
   mat-icon {
     flex: none;
     margin-top: 1px;
   }
   &.warn {
-    background: var(--warn-soft);
+    border-left-color: var(--warn);
     mat-icon {
       color: var(--warn);
     }
   }
   &.info {
-    background: var(--accent-soft);
+    border-left-color: var(--info);
     mat-icon {
-      color: var(--accent);
+      color: var(--info);
     }
   }
 }

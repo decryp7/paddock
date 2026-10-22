@@ -409,6 +409,12 @@ summary {
     &:hover:not(:disabled) {
       background: var(--accent-hover);
     }
+    /* A disabled primary reads as disabled without losing its label: neutral fill, text still above 3:1. */
+    &:disabled {
+      --btn-bg: var(--bg-active);
+      --btn-fg: var(--text-2);
+      opacity: 1;
+    }
   }
   &.danger {
     --btn-fg: var(--bad);

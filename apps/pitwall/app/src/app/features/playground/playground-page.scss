@@ -88,7 +88,8 @@
   flex-direction: column;
   align-items: center;
   gap: var(--sp-1);
-  max-width: 460px;
+  width: 100%;
+  max-width: 480px;
   text-align: center;
   > mat-icon {
     width: 22px;
@@ -102,18 +103,22 @@
   }
 }
 
+/* The starter prompts: three 36 px buttons in a centred 480 px column; hover or focus draws the accent border. */
 .sugg {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  width: 100%;
-  margin-top: var(--sp-4);
+  width: min(480px, 100%);
+  margin: var(--sp-4) auto 0;
 }
 
 .chip {
-  padding: var(--sp-2) var(--sp-3);
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--sp-3);
   font: inherit;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   color: var(--text-2);
   text-align: left;
   background: var(--bg-sunken);
@@ -122,10 +127,13 @@
   cursor: default;
   transition:
     background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease);
-  &:hover {
+  &:hover,
+  &:focus-visible {
     color: var(--text);
     background: var(--bg-hover);
+    border-color: var(--accent);
   }
 }
 
