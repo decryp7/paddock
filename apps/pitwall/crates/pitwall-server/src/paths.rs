@@ -78,6 +78,10 @@ impl Dirs {
     pub fn presets(&self) -> PathBuf {
         self.root.join("presets.json")
     }
+    /// Model update notices and their dismissals (ADR 0017).
+    pub fn model_updates(&self) -> PathBuf {
+        self.root.join("model-updates.json")
+    }
     /// Metrics history.
     pub fn metrics(&self) -> PathBuf {
         self.root.join("metrics.json")

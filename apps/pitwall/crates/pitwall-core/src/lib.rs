@@ -46,6 +46,8 @@ pub mod supervise;
 pub mod tasks;
 pub mod time;
 pub mod tokens;
+pub mod update_state;
+pub mod updates;
 pub mod usage;
 
 #[cfg(test)]

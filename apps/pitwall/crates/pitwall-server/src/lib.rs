@@ -19,6 +19,7 @@ pub mod process;
 pub mod service;
 pub mod serving;
 pub mod system;
+pub mod updates;
 
 /// Lock a mutex, recovering from poisoning.
 pub(crate) use app::lock as app_lock;

@@ -9,7 +9,7 @@ use crate::server_client::ServerClient;
 use pitwall_core::config::UiSettings;
 use pitwall_core::limits::AppPermissions;
 use pitwall_core::memory::Preset;
-use pitwall_core::mgmt::{CommandError, ErrorCode, HistoryRange, PlaygroundRequest, PresetDraft, UsageRange};
+use pitwall_core::mgmt::{CommandError, ErrorCode, HistoryRange, PlaygroundRequest, PresetDraft, UpdateSchedule, UsageRange};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -77,6 +77,7 @@ impl Validate for Option<u32> {}
 impl Validate for Preset {}
 impl Validate for HistoryRange {}
 impl Validate for UsageRange {}
+impl Validate for UpdateSchedule {}
 impl Validate for UiSettings {}
 
 impl Validate for AppPermissions {
@@ -160,6 +161,21 @@ rpc!(
 rpc!(
     /// One app in detail: usage, limits and its latest requests.
     app_detail => "app_detail", app_id: String = "appId");
+rpc!(
+    /// The state of the model update checks (schedule, last check, next check, offline).
+    update_check_status => "update_check_status");
+rpc!(
+    /// The model updates on offer (newer revisions, better quantisations), not dismissed.
+    update_notices => "update_notices");
+rpc!(
+    /// Asks Hugging Face now (repository ids of downloaded models only; refused in offline mode).
+    check_updates_now => "check_updates_now");
+rpc!(
+    /// Turns the scheduled update check on or off and sets how often it runs.
+    set_update_check => "set_update_check", enabled: bool = "enabled", schedule: UpdateSchedule = "schedule");
+rpc!(
+    /// Hides an update notice until the offer changes, or snoozes it for some days.
+    dismiss_update => "dismiss_update", id: String = "id", snooze_days: Option<u32> = "snoozeDays");
 rpc!(
     /// Model presets and aliases with where each stands now.
     presets => "presets");

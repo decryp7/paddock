@@ -1,5 +1,6 @@
 //! Local only (ADR 0001). Pitwall's only outbound traffic is downloading engines and models the user asked for, from
-//! the hosts listed here, over HTTPS; offline mode stops even that. Requests to the API never cause outbound traffic:
+//! the hosts listed here, over HTTPS, and the check-only model update queries the user turned on (ADR 0017: the file
+//! lists of repositories already downloaded from); offline mode stops even that. Requests to the API never cause outbound traffic:
 //! images must be inline, tools run locally, and the request path has no HTTP client (enforced in the server).
 //!
 //! This module decides which URLs a download may touch (every redirect hop is checked again) and which `Host` and

@@ -479,6 +479,36 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let id = model(a, "modelId")?;
             run_benchmark(st, id).await
         }
+        "update_check_status" => ok(st.update_status()),
+        "update_notices" => ok(st.update_notices()),
+        "check_updates_now" => ok(st.run_update_check().await.result),
+        "set_update_check" => {
+            let enabled: bool = arg(a, "enabled")?;
+            let schedule: mgmt::UpdateSchedule = arg(a, "schedule")?;
+            let mut s = st.cfg();
+            s.models.update_check = mgmt::UpdateCheckSettings { enabled, schedule };
+            st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
+            // Turning it on starts the first check now instead of at the next look at the schedule.
+            if enabled {
+                let me = st.clone();
+                tokio::spawn(async move {
+                    let _ = me.scheduled_update_tick().await;
+                });
+            }
+            ok(st.update_status())
+        }
+        "dismiss_update" => {
+            let id: String = arg(a, "id")?;
+            let days: Option<u32> = arg(a, "snoozeDays")?;
+            st.updates.dismiss(&id, days, now).map_err(|e| {
+                let code = match e {
+                    pitwall_core::update_state::DismissError::NotFound(_) => mgmt::ErrorCode::NotFound,
+                    pitwall_core::update_state::DismissError::BadSnooze(_) => mgmt::ErrorCode::BadRequest,
+                };
+                err(code, e.to_string())
+            })?;
+            ok(st.update_notices())
+        }
         "presets" => ok(preset_entries(st)),
         "create_preset" => {
             let draft: mgmt::PresetDraft = arg(a, "preset")?;
@@ -567,12 +597,14 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
     let mut first: Option<Download> = None;
     for v in want {
         let st2 = st.clone();
+        let (repo_name, file_name) = (repo.to_string(), v.file.clone());
         let id = st
             .library
             .download(repo, v, move |d| {
                 st2.push(&LiveUpdate::Download { download: d.clone() });
                 if matches!(d.state, DownloadState::Done) {
                     st2.event(EventKind::Download, Severity::Info, format!("Downloaded {}", d.name));
+                    st2.updates.downloaded(&repo_name, &file_name);
                 }
             })
             .map_err(offline_or)?;

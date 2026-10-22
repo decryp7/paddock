@@ -6,6 +6,7 @@ use crate::ids::ModelId;
 use crate::memory::{Policy, Preset};
 use crate::slots::Slots;
 use crate::time::SECOND;
+use crate::update_state::UpdateCheckSettings;
 use crate::{GIB, MIB};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -212,6 +213,9 @@ pub struct ModelSettings {
     /// Parallel slots a model loads with unless its preferences say otherwise (each slot has `default_context`
     /// tokens of its own, see `slots`).
     pub default_slots: Slots,
+    /// Checking Hugging Face for newer revisions and better quantisations of the models you downloaded (off until
+    /// you turn it on; weekly or daily once on). It only ever tells you; downloads stay your decision.
+    pub update_check: UpdateCheckSettings,
     /// Per-model preferences.
     pub prefs: BTreeMap<ModelId, ModelPrefs>,
 }
@@ -222,6 +226,7 @@ impl Default for ModelSettings {
             default_model: None,
             default_context: 8192,
             default_slots: Slots::DEFAULT,
+            update_check: UpdateCheckSettings::default(),
             prefs: BTreeMap::new(),
         }
     }
@@ -635,6 +640,30 @@ mod tests {
         }
         .validate()
         .is_ok());
+    }
+
+    #[test]
+    fn update_checks_are_off_until_enabled_and_survive_a_restart() {
+        use crate::update_state::UpdateSchedule;
+        let mut s = Settings::default();
+        assert!(
+            !s.models.update_check.enabled,
+            "nothing is asked of Hugging Face before the user opts in"
+        );
+        assert_eq!(s.models.update_check.schedule, UpdateSchedule::Weekly);
+        s.models.update_check.enabled = true;
+        s.models.update_check.schedule = UpdateSchedule::Daily;
+        let (back, how) = load(Some(&s.to_toml()), None);
+        assert_eq!((back.models.update_check, how), (s.models.update_check, Loaded::File));
+        // Only part of it set: the rest keeps its default.
+        let (s, how) = load(Some("[models.updateCheck]\nenabled = true\n"), None);
+        assert_eq!(
+            (s.models.update_check.enabled, s.models.update_check.schedule, how),
+            (true, UpdateSchedule::Weekly, Loaded::File)
+        );
+        // A schedule that is not one: the file is invalid, the backup (here: defaults) is used.
+        let (s, how) = load(Some("[models.updateCheck]\nschedule = \"hourly\"\n"), None);
+        assert!(!s.models.update_check.enabled && how != Loaded::File);
     }
 
     #[test]

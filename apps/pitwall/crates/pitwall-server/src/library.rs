@@ -10,6 +10,7 @@ use pitwall_core::ids::ModelId;
 use pitwall_core::mgmt::{Download, DownloadKind, DownloadState, HfRepo, LocalModel, QuantVariant};
 use pitwall_core::privacy::DownloadUrl;
 use pitwall_core::slots::{self, Slots};
+use pitwall_core::updates::{self, Installed, Provenance};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -127,6 +128,12 @@ fn repo_of(root: &Path, p: &Path) -> String {
     }
 }
 
+/// Where the provenance of a model file is recorded (next to it, see `pitwall_core::updates`).
+pub fn sidecar_path(model: &Path) -> PathBuf {
+    let name = model.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    model.with_file_name(updates::sidecar_name(&name))
+}
+
 /// Size facts for the fit check from a scanned file.
 pub fn size_of(f: &LocalFile) -> ModelSize {
     let proj = f.projector.as_ref().and_then(|p| std::fs::metadata(p).ok()).map_or(0, |m| m.len());
@@ -167,6 +174,35 @@ impl Library {
         scan(&self.dirs.models())
     }
 
+    /// The downloaded models that came from a Hugging Face repository, with what was recorded when they were
+    /// downloaded (models from before that carry no record and are compared by size). Reads files; call it off the
+    /// async threads.
+    pub fn installed(&self) -> Vec<Installed> {
+        let root = self.dirs.models();
+        self.local()
+            .iter()
+            .filter_map(|f| {
+                let rel = f.path.strip_prefix(root.join(&f.repo)).ok()?;
+                let file = rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let sidecar = std::fs::read_to_string(sidecar_path(&f.path))
+                    .ok()
+                    .filter(|t| t.len() <= updates::MAX_PROVENANCE_BYTES);
+                Installed::from_disk(
+                    &f.id.to_string(),
+                    &f.repo,
+                    &file,
+                    f.info.quant.as_deref(),
+                    f.size,
+                    sidecar.as_deref(),
+                )
+            })
+            .collect()
+    }
+
     /// Delete a model (all parts and its folder when empty).
     pub fn delete(&self, id: &ModelId) -> std::io::Result<()> {
         let all = self.local();
@@ -187,6 +223,7 @@ impl Library {
                 std::fs::remove_file(e.path())?;
             }
         }
+        let _ = std::fs::remove_file(sidecar_path(&f.path));
         let _ = std::fs::remove_dir(&dir);
         Ok(())
     }
@@ -296,6 +333,7 @@ impl Library {
         let this = self.clone();
         let on_change = Arc::new(on_change);
         let (id2, repo, shas, total) = (id.clone(), repo.to_string(), variant.sha256.clone(), variant.size);
+        let first_file = variant.file.clone();
         tokio::spawn(async move {
             let notify = |lib: &Library| {
                 if let Some(s) = lib
@@ -310,6 +348,17 @@ impl Library {
             };
             this.update(&id2, |d| d.state = DownloadState::Downloading);
             notify(&this);
+            // The repository's commit now, for the provenance record (best effort: a download never waits on it).
+            let revision = match hf::info_url(&repo_id) {
+                Ok(u) => this
+                    .egress
+                    .get_json(&u, 1 << 20)
+                    .await
+                    .ok()
+                    .and_then(|v| updates::parse_revision(&v)),
+                Err(_) => None,
+            };
+            let mut digests: Vec<Option<String>> = vec![];
             let mut base = 0u64;
             let started = std::time::Instant::now();
             let mut result: Result<(), DownloadError> = Ok(());
@@ -317,6 +366,7 @@ impl Library {
                 let dest = this.dirs.models().join(&repo).join(rel);
                 let part = dest.with_extension("gguf.part");
                 if dest.is_file() && std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0) > 0 && shas.get(i).is_none() {
+                    digests.push(None);
                     continue;
                 }
                 let sha = shas.get(i).map(String::as_str);
@@ -346,7 +396,8 @@ impl Library {
                     })
                     .await;
                 match r {
-                    Ok(_) => {
+                    Ok(digest) => {
+                        digests.push(Some(digest));
                         this.update(&id2, |d| d.state = DownloadState::Verifying);
                         if let Err(e) = verify_gguf(&part) {
                             let _ = std::fs::remove_file(&part);
@@ -365,6 +416,10 @@ impl Library {
                     }
                 }
             }
+            if result.is_ok() {
+                let parts: Vec<&str> = urls.iter().map(|(_, rel)| rel.as_str()).collect();
+                record_provenance(&this.dirs.models(), &repo, &first_file, &parts, digests, revision);
+            }
             this.update(&id2, |d| match &result {
                 Ok(()) => {
                     d.state = DownloadState::Done;
@@ -380,6 +435,24 @@ impl Library {
         });
         Ok(id)
     }
+}
+
+/// Writes the provenance record next to a finished download: the repository, the file, the total size of its parts on
+/// disk, the SHA-256 of every part (only when every one is known) and the repository commit. Best effort: without
+/// the record the model is compared by size at the next update check.
+fn record_provenance(models: &Path, repo: &str, first: &str, parts: &[&str], digests: Vec<Option<String>>, revision: Option<String>) {
+    let size: u64 = parts
+        .iter()
+        .filter_map(|rel| std::fs::metadata(models.join(repo).join(rel)).ok())
+        .map(|m| m.len())
+        .sum();
+    let sha256 = if digests.iter().all(Option::is_some) {
+        digests.into_iter().flatten().collect()
+    } else {
+        vec![]
+    };
+    let record = Provenance::new(repo, first, size, sha256, revision, now_ms());
+    let _ = std::fs::write(sidecar_path(&models.join(repo).join(first)), record.to_json());
 }
 
 /// A downloaded model must parse as GGUF before it enters the library.
@@ -453,6 +526,35 @@ mod tests {
         assert!(scan(d.path()).is_empty());
         assert_eq!(repo_of(d.path(), &d.path().join("o/r/a.gguf")), "o/r");
         assert_eq!(repo_of(d.path(), &d.path().join("a.gguf")), "");
+    }
+
+    #[test]
+    fn a_finished_download_records_where_it_came_from() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("o/r");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("m-00001-of-00002.gguf"), [0u8; 10]).unwrap();
+        std::fs::write(dir.join("m-00002-of-00002.gguf"), [0u8; 5]).unwrap();
+        let sha = "a".repeat(64);
+        let parts = ["m-00001-of-00002.gguf", "m-00002-of-00002.gguf"];
+        record_provenance(
+            d.path(),
+            "o/r",
+            parts[0],
+            &parts,
+            vec![Some(sha.clone()), Some(sha.clone())],
+            Some("1".repeat(40)),
+        );
+        let p = Provenance::parse(&std::fs::read_to_string(sidecar_path(&dir.join(parts[0]))).unwrap()).unwrap();
+        assert_eq!(
+            (p.size, p.sha256.len(), p.file.as_str(), p.revision.is_some()),
+            (15, 2, parts[0], true)
+        );
+        // A part whose digest is unknown (resumed earlier): no hashes recorded rather than a partial list.
+        record_provenance(d.path(), "o/r", parts[0], &parts, vec![Some(sha), None], None);
+        let p = Provenance::parse(&std::fs::read_to_string(sidecar_path(&dir.join(parts[0]))).unwrap()).unwrap();
+        assert!(p.sha256.is_empty() && p.revision.is_none());
+        assert_eq!(sidecar_path(Path::new("/x/m.gguf")), Path::new("/x/m.gguf.origin.json"));
     }
 
     #[test]

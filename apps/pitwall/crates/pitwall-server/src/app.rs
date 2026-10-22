@@ -92,6 +92,10 @@ pub struct AppState {
     pub new_secrets: Mutex<std::collections::HashMap<String, String>>,
     /// The port actually bound.
     pub port: std::sync::atomic::AtomicU16,
+    /// Model update notices and the checker (ADR 0017).
+    pub updates: crate::updates::Updates,
+    /// Where the checker asks (Hugging Face; tests swap it).
+    pub update_source: RwLock<Arc<dyn crate::updates::RepoSource>>,
 }
 
 impl AppState {
@@ -164,6 +168,9 @@ impl AppState {
             let (p, b) = paths::read_with_backup(&dirs.presets(), pitwall_core::presets::MAX_BYTES);
             pitwall_core::presets::load(p.as_deref(), b.as_deref())
         };
+        let (updates, updates_damaged) = crate::updates::Updates::open(&dirs);
+        let update_source: RwLock<Arc<dyn crate::updates::RepoSource>> =
+            RwLock::new(Arc::new(crate::updates::HfSource::new(egress.clone())));
         let (live, _) = broadcast::channel(256);
         let st = Arc::new(AppState {
             dirs,
@@ -194,6 +201,8 @@ impl AppState {
             benchmarks: Mutex::new(stored_benchmarks),
             new_secrets: Mutex::new(Default::default()),
             port: std::sync::atomic::AtomicU16::new(0),
+            updates,
+            update_source,
         });
         st.serving.set_speeds(pitwall_core::benchmarks::speeds(&lock(&st.benchmarks)));
         if stored_presets.damaged || stored_presets.skipped > 0 {
@@ -204,6 +213,13 @@ impl AppState {
                     "The presets file was damaged: {} preset(s) were left out. Check Models > Presets.",
                     stored_presets.skipped
                 ),
+            );
+        }
+        if updates_damaged {
+            st.event(
+                EventKind::RequestFailed,
+                Severity::Warn,
+                "The model update notices file was damaged and started empty; the next check rebuilds it.".into(),
             );
         }
         st.serving.set_presets(stored_presets.presets);
@@ -292,6 +308,7 @@ impl AppState {
     /// Start the background tasks: release loop, live feed, metrics sampling.
     pub fn spawn_tasks(self: &Arc<Self>) {
         self.serving.spawn_tick_loop();
+        self.start_update_schedule();
         let me = self.clone();
         tokio::spawn(async move {
             let mut n = 0u64;

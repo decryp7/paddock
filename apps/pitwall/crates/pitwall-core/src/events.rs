@@ -38,6 +38,8 @@ pub enum EventKind {
     RequestFailed,
     /// An app has used 80% of one of its limits.
     LimitWarning,
+    /// A newer revision or a better quantisation of a downloaded model is available.
+    ModelUpdate,
 }
 
 /// How bad.

@@ -13,6 +13,8 @@ pub use crate::metrics::{HistoryPoint, KeyedSeries, Range as HistoryRange};
 pub use crate::presets::ModelPreset;
 pub use crate::scheduler::{Depth, JobKind, Priority};
 pub use crate::select::Capability;
+pub use crate::update_state::{UpdateCheckSettings, UpdateSchedule};
+pub use crate::updates::{UpdateKind, UpdateNotice};
 pub use crate::usage::{AppUsageSeries, Counters as UsageCounters, UsageRange, UsageSeries};
 
 use crate::time::Millis;
@@ -1230,9 +1232,112 @@ pub enum LiveUpdate {
     },
 }
 
+/// How a model update check ended (`UpdateCheckOutcome`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateCheckOutcome {
+    /// Hugging Face was asked and the notices are up to date.
+    Checked,
+    /// Offline mode is on: nothing was asked.
+    Offline,
+    /// Another check ran moments ago.
+    RateLimited,
+    /// A check is running already.
+    Busy,
+    /// No installed model came from a Hugging Face repository.
+    NothingToCheck,
+    /// Hugging Face could not be asked (see the message).
+    Failed,
+}
+
+/// The result of "Check now" (`UpdateCheckResult`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckResult {
+    /// How it ended.
+    pub outcome: UpdateCheckOutcome,
+    /// One sentence for the user.
+    pub message: String,
+    /// Repositories that were asked.
+    pub repos_checked: u32,
+    /// Notices shown now (not dismissed).
+    pub notices: u32,
+    /// Seconds until a new check is allowed (rate limit).
+    pub retry_in_secs: Option<u64>,
+}
+
+/// The state of the model update checks (`UpdateCheckStatus`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckStatus {
+    /// The schedule setting.
+    pub settings: UpdateCheckSettings,
+    /// When a check last completed (Unix ms).
+    pub last_checked_at: Option<Millis>,
+    /// When one was last started (Unix ms).
+    pub last_attempt_at: Option<Millis>,
+    /// How the last attempt went.
+    pub last_message: Option<String>,
+    /// When the next scheduled check is due (`None`: the schedule is off or offline mode is on).
+    pub next_check_at: Option<Millis>,
+    /// Offline mode is on (no check can run).
+    pub offline: bool,
+    /// A check is running.
+    pub running: bool,
+    /// Notices shown now.
+    pub notices: u32,
+    /// The only host a check talks to.
+    pub host: String,
+    /// Most repositories one check asks about.
+    pub max_repos: u32,
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn update_check_dtos_use_the_documented_wire_names() {
+        use super::*;
+        let r = UpdateCheckResult {
+            outcome: UpdateCheckOutcome::RateLimited,
+            message: "m".into(),
+            repos_checked: 2,
+            notices: 1,
+            retry_in_secs: Some(40),
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"outcome": "rateLimited", "message": "m", "reposChecked": 2, "notices": 1, "retryInSecs": 40})
+        );
+        assert_eq!(serde_json::from_value::<UpdateCheckResult>(v).unwrap(), r);
+        for (o, w) in [
+            (UpdateCheckOutcome::Checked, "checked"),
+            (UpdateCheckOutcome::Offline, "offline"),
+            (UpdateCheckOutcome::Busy, "busy"),
+            (UpdateCheckOutcome::NothingToCheck, "nothingToCheck"),
+            (UpdateCheckOutcome::Failed, "failed"),
+        ] {
+            assert_eq!(serde_json::to_value(o).unwrap(), w);
+        }
+        let s = UpdateCheckStatus {
+            settings: UpdateCheckSettings::default(),
+            last_checked_at: None,
+            last_attempt_at: Some(5),
+            last_message: None,
+            next_check_at: None,
+            offline: false,
+            running: false,
+            notices: 0,
+            host: "huggingface.co".into(),
+            max_repos: 40,
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["settings"], serde_json::json!({"enabled": false, "schedule": "weekly"}));
+        assert_eq!((v["lastAttemptAt"].as_u64(), v["maxRepos"].as_u64()), (Some(5), Some(40)));
+    }
+
     use super::*;
+
     use serde_json::json;
 
     #[test]
@@ -1282,6 +1387,7 @@ mod tests {
         assert_eq!(serde_json::to_value(LimitKind::TokensPerMonth).unwrap(), "tokensPerMonth");
         assert_eq!(serde_json::to_value(LimitState::Warning).unwrap(), "warning");
         assert_eq!(serde_json::to_value(EventKind::LimitWarning).unwrap(), "limitWarning");
+        assert_eq!(serde_json::to_value(EventKind::ModelUpdate).unwrap(), "modelUpdate");
         let l: AppLimits = serde_json::from_str(r#"{"requestsPerDay":5,"tokensPerMonth":9,"maxMemoryPercent":40}"#).unwrap();
         assert_eq!(
             (l.requests_per_day, l.tokens_per_month, l.max_memory_percent),
