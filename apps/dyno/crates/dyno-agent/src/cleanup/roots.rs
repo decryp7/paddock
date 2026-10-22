@@ -60,7 +60,10 @@ pub fn resolve(root: Root, env: &Env) -> Vec<PathBuf> {
     match root {
         Root::UserTemp => vec![env.temp.clone()],
         Root::SystemTemp => both(env.windir.iter().map(|w| w.join("Temp")).collect(), vec![]),
-        Root::UpdateDownloads => both(env.windir.iter().map(|w| w.join("SoftwareDistribution").join("Download")).collect(), vec![]),
+        Root::UpdateDownloads => both(
+            env.windir.iter().map(|w| w.join("SoftwareDistribution").join("Download")).collect(),
+            vec![],
+        ),
         Root::CrashDumps => both(vec![lad.join("CrashDumps")], vec![lib.join("Logs").join("DiagnosticReports")]),
         Root::ErrorReports => both(
             vec![
@@ -93,11 +96,18 @@ pub fn resolve(root: Root, env: &Env) -> Vec<PathBuf> {
         Root::SafariCache => both(vec![], vec![caches.join("com.apple.Safari")]),
         Root::Downloads => vec![h.join("Downloads")],
         Root::Projects => vec![h.clone()],
-        Root::CargoCache => vec![env.cargo().join("registry").join("cache"), env.cargo().join("registry").join("src"), env.cargo().join("git").join("checkouts")],
+        Root::CargoCache => vec![
+            env.cargo().join("registry").join("cache"),
+            env.cargo().join("registry").join("src"),
+            env.cargo().join("git").join("checkouts"),
+        ],
         Root::NpmCache => both(vec![lad.join("npm-cache").join("_cacache")], vec![h.join(".npm").join("_cacache")]),
         Root::NugetCache => both(
             vec![lad.join("NuGet").join("v3-cache"), h.join(".nuget").join("packages")],
-            vec![h.join(".local").join("share").join("NuGet").join("v3-cache"), h.join(".nuget").join("packages")],
+            vec![
+                h.join(".local").join("share").join("NuGet").join("v3-cache"),
+                h.join(".nuget").join("packages"),
+            ],
         ),
         Root::PipCache => both(vec![lad.join("pip").join("Cache")], vec![caches.join("pip")]),
         Root::RustToolchains => vec![env.rustup().join("toolchains")],
@@ -170,9 +180,15 @@ mod tests {
         }
         assert_eq!(resolve(Root::SystemTemp, &win()), vec![PathBuf::from("C:/Windows/Temp")]);
         assert_eq!(resolve(Root::RustToolchains, &win()), vec![PathBuf::from("D:/rustup/toolchains")]);
-        assert_eq!(resolve(Root::CargoCache, &mac())[0], PathBuf::from("/Users/me/.cargo/registry/cache"));
+        assert_eq!(
+            resolve(Root::CargoCache, &mac())[0],
+            PathBuf::from("/Users/me/.cargo/registry/cache")
+        );
         assert!(resolve(Root::ChromeCache, &win())[0].to_string_lossy().contains("User Data"));
-        assert_eq!(resolve(Root::SafariCache, &mac()), vec![PathBuf::from("/Users/me/Library/Caches/com.apple.Safari")]);
+        assert_eq!(
+            resolve(Root::SafariCache, &mac()),
+            vec![PathBuf::from("/Users/me/Library/Caches/com.apple.Safari")]
+        );
         let cur = Env::current();
         assert!(cur.os.is_some());
     }

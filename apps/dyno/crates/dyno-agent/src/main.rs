@@ -1,2 +1,4 @@
-//! The `dyno-agent` binary (work in progress: the IPC loop is wired once dyno-ipc's child link is integrated).
-fn main() {}
+//! The `dyno-agent` program.
+fn main() {
+    std::process::exit(dyno_agent::cli::main(std::env::args().skip(1).collect()));
+}

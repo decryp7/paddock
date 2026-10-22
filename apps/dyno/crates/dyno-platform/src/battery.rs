@@ -86,8 +86,9 @@ fn read_first() -> Reading<BatterySample> {
         .ok()
         .and_then(|m| m.batteries().ok().and_then(|mut it| it.find_map(Result::ok)));
     match battery {
-        Some(b) => Reading::Available(to_sample(&facts_of(&b))),
-        None => Reading::unavailable(NO_BATTERY),
+        // A desktop Mac exposes an `AppleSmartBattery` entry with zero capacity: that is no battery.
+        Some(b) if b.energy_full().value > 0.0 => Reading::Available(to_sample(&facts_of(&b))),
+        _ => Reading::unavailable(NO_BATTERY),
     }
 }
 

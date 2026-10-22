@@ -1,4 +1,4 @@
-//! The history database (SQLite, ADR 0002): points per tier, per-app minutes, disk free space, timeline events,
+//! The history database (SQLite, ADR 0008): points per tier, per-app minutes, disk free space, timeline events,
 //! the activity log, alerts, snapshots, boots, app starts and crashes, and health scores.
 //!
 //! The database is a cache of the past, never the only copy of anything the user made: a damaged file is moved
@@ -30,7 +30,8 @@ pub enum StoreError {
     Json(#[from] serde_json::Error),
 }
 
-type Result<T> = std::result::Result<T, StoreError>;
+/// The store's result type.
+pub type Result<T> = std::result::Result<T, StoreError>;
 
 /// The open database.
 pub struct Store {
@@ -62,6 +63,7 @@ fn tier_id(t: Tier) -> i64 {
         Tier::Raw => 0,
         Tier::Minute => 1,
         Tier::QuarterHour => 2,
+        Tier::Hour => 3,
     }
 }
 
@@ -135,10 +137,15 @@ impl Store {
     fn try_open(path: &Path) -> Result<Store> {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA_SQL)?;
-        let version: Option<String> = conn.query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| r.get(0)).optional()?;
+        let version: Option<String> = conn
+            .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| r.get(0))
+            .optional()?;
         match version.and_then(|v| v.parse::<i64>().ok()) {
             None => {
-                conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', ?1)", [SCHEMA.to_string()])?;
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', ?1)",
+                    [SCHEMA.to_string()],
+                )?;
             }
             Some(v) if v > SCHEMA => {
                 return Err(StoreError::Sql(rusqlite::Error::InvalidParameterName(format!(
@@ -152,14 +159,18 @@ impl Store {
 
     /// Stores a point.
     pub fn put_point(&self, tier: Tier, p: &HistoryPoint) -> Result<()> {
-        self.conn
-            .execute("INSERT OR REPLACE INTO points (tier, at, data) VALUES (?1, ?2, ?3)", params![tier_id(tier), p.at.millis(), json(p)?])?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO points (tier, at, data) VALUES (?1, ?2, ?3)",
+            params![tier_id(tier), p.at.millis(), json(p)?],
+        )?;
         Ok(())
     }
 
     /// Points of a tier in `[from, to)`, oldest first.
     pub fn points(&self, tier: Tier, from: Timestamp, to: Timestamp) -> Result<Vec<HistoryPoint>> {
-        let mut st = self.conn.prepare_cached("SELECT data FROM points WHERE tier = ?1 AND at >= ?2 AND at < ?3 ORDER BY at")?;
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT data FROM points WHERE tier = ?1 AND at >= ?2 AND at < ?3 ORDER BY at")?;
         let rows = st.query_map(params![tier_id(tier), from.millis(), to.millis()], |r| r.get::<_, String>(0))?;
         Ok(rows.filter_map(|r| r.ok()).filter_map(|s| parse(&s)).collect())
     }
@@ -179,7 +190,9 @@ impl Store {
 
     /// Per-app minutes in `[from, to)`.
     pub fn app_minutes(&self, from: Timestamp, to: Timestamp) -> Result<Vec<AppMinute>> {
-        let mut st = self.conn.prepare_cached("SELECT at, app, cpu, memory FROM app_minutes WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT at, app, cpu, memory FROM app_minutes WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
         let rows = st.query_map(params![from.millis(), to.millis()], |r| {
             Ok(AppMinute {
                 at: Timestamp(r.get(0)?),
@@ -202,9 +215,16 @@ impl Store {
 
     /// Free-space readings per disk in `[from, to)`: (disk, total, points).
     pub fn disk_free(&self, from: Timestamp, to: Timestamp) -> Result<Vec<(String, u64, Vec<DiskTrendPoint>)>> {
-        let mut st = self.conn.prepare_cached("SELECT disk, at, total, free FROM disk_free WHERE at >= ?1 AND at < ?2 ORDER BY disk, at")?;
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT disk, at, total, free FROM disk_free WHERE at >= ?1 AND at < ?2 ORDER BY disk, at")?;
         let rows = st.query_map(params![from.millis(), to.millis()], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
         })?;
         let mut out: Vec<(String, u64, Vec<DiskTrendPoint>)> = Vec::new();
         for (disk, at, total, free) in rows.filter_map(|r| r.ok()) {
@@ -225,16 +245,21 @@ impl Store {
 
     /// Stores a timeline event.
     pub fn put_event(&self, e: &TimelineEvent) -> Result<()> {
-        self.conn
-            .execute("INSERT INTO events (at, kind, label) VALUES (?1, ?2, ?3)", params![e.at.millis(), kind_text(e.kind), e.label])?;
+        self.conn.execute(
+            "INSERT INTO events (at, kind, label) VALUES (?1, ?2, ?3)",
+            params![e.at.millis(), kind_text(e.kind), e.label],
+        )?;
         Ok(())
     }
 
     /// Timeline events in `[from, to)` (at most 2 000, the latest).
     pub fn events(&self, from: Timestamp, to: Timestamp) -> Result<Vec<TimelineEvent>> {
-        let mut st =
-            self.conn.prepare_cached("SELECT at, kind, label FROM events WHERE at >= ?1 AND at < ?2 ORDER BY at DESC LIMIT 2000")?;
-        let rows = st.query_map(params![from.millis(), to.millis()], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT at, kind, label FROM events WHERE at >= ?1 AND at < ?2 ORDER BY at DESC LIMIT 2000")?;
+        let rows = st.query_map(params![from.millis(), to.millis()], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?;
         let mut out: Vec<TimelineEvent> = rows
             .filter_map(|r| r.ok())
             .filter_map(|(at, k, label)| {
@@ -262,7 +287,9 @@ impl Store {
     pub fn activity_entry(&self, id: &str) -> Result<Option<(ActivityEntry, UndoRecord, bool)>> {
         let row: Option<(String, String, i64)> = self
             .conn
-            .query_row("SELECT entry, undo, undone FROM activity WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .query_row("SELECT entry, undo, undone FROM activity WHERE id = ?1", [id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
             .optional()?;
         Ok(row.and_then(|(e, u, d)| Some((parse(&e)?, parse(&u).unwrap_or(UndoRecord::None), d != 0))))
     }
@@ -275,8 +302,12 @@ impl Store {
 
     /// The latest entries, newest first, with their undo records and undone flags.
     pub fn activity(&self, limit: u32) -> Result<Vec<(ActivityEntry, UndoRecord, bool)>> {
-        let mut st = self.conn.prepare_cached("SELECT entry, undo, undone FROM activity ORDER BY at DESC, rowid DESC LIMIT ?1")?;
-        let rows = st.query_map([i64::from(limit.min(1_000))], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?;
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT entry, undo, undone FROM activity ORDER BY at DESC, rowid DESC LIMIT ?1")?;
+        let rows = st.query_map([i64::from(limit.min(1_000))], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+        })?;
         Ok(rows
             .filter_map(|r| r.ok())
             .filter_map(|(e, u, d)| Some((parse(&e)?, parse(&u).unwrap_or(UndoRecord::None), d != 0)))
@@ -286,7 +317,11 @@ impl Store {
     /// Activity entries of a kind since `from` (for counts in reports).
     pub fn count_activity(&self, kind: &str, from: Timestamp) -> Result<u32> {
         let pattern = format!("%\"kind\":\"{kind}\"%");
-        let n: i64 = self.conn.query_row("SELECT COUNT(*) FROM activity WHERE at >= ?1 AND entry LIKE ?2", params![from.millis(), pattern], |r| r.get(0))?;
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM activity WHERE at >= ?1 AND entry LIKE ?2",
+            params![from.millis(), pattern],
+            |r| r.get(0),
+        )?;
         Ok(n.max(0) as u32)
     }
 
@@ -302,7 +337,10 @@ impl Store {
 
     /// Stores an alert.
     pub fn put_alert(&self, a: &Alert) -> Result<()> {
-        self.conn.execute("INSERT OR REPLACE INTO alerts (id, at, data) VALUES (?1, ?2, ?3)", params![a.id, a.at.millis(), json(a)?])?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO alerts (id, at, data) VALUES (?1, ?2, ?3)",
+            params![a.id, a.at.millis(), json(a)?],
+        )?;
         Ok(())
     }
 
@@ -315,7 +353,9 @@ impl Store {
 
     /// Alerts since `from`.
     pub fn count_alerts(&self, from: Timestamp) -> Result<u32> {
-        let n: i64 = self.conn.query_row("SELECT COUNT(*) FROM alerts WHERE at >= ?1", [from.millis()], |r| r.get(0))?;
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM alerts WHERE at >= ?1", [from.millis()], |r| r.get(0))?;
         Ok(n.max(0) as u32)
     }
 
@@ -325,8 +365,10 @@ impl Store {
             "INSERT OR REPLACE INTO snapshots (id, at, info, data) VALUES (?1, ?2, ?3, ?4)",
             params![s.info.id, s.info.at.millis(), json(&s.info)?, json(s)?],
         )?;
-        self.conn
-            .execute("DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY at DESC LIMIT 50)", [])?;
+        self.conn.execute(
+            "DELETE FROM snapshots WHERE id NOT IN (SELECT id FROM snapshots ORDER BY at DESC LIMIT 50)",
+            [],
+        )?;
         Ok(())
     }
 
@@ -339,7 +381,10 @@ impl Store {
 
     /// One snapshot.
     pub fn snapshot(&self, id: &str) -> Result<Option<Snapshot>> {
-        let s: Option<String> = self.conn.query_row("SELECT data FROM snapshots WHERE id = ?1", [id], |r| r.get(0)).optional()?;
+        let s: Option<String> = self
+            .conn
+            .query_row("SELECT data FROM snapshots WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?;
         Ok(s.and_then(|s| parse(&s)))
     }
 
@@ -354,13 +399,18 @@ impl Store {
 
     /// Updates a boot's ready time.
     pub fn set_boot_ready(&self, at: Timestamp, ready_secs: f32) -> Result<()> {
-        self.conn.execute("UPDATE boots SET ready_secs = ?2 WHERE at = ?1", params![at.millis(), f64::from(ready_secs)])?;
+        self.conn.execute(
+            "UPDATE boots SET ready_secs = ?2 WHERE at = ?1",
+            params![at.millis(), f64::from(ready_secs)],
+        )?;
         Ok(())
     }
 
     /// Boots in `[from, to)`.
     pub fn boots(&self, from: Timestamp, to: Timestamp) -> Result<Vec<BootRecord>> {
-        let mut st = self.conn.prepare_cached("SELECT at, boot_secs, ready_secs FROM boots WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT at, boot_secs, ready_secs FROM boots WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
         let rows = st.query_map(params![from.millis(), to.millis()], |r| {
             Ok(BootRecord {
                 at: Timestamp(r.get(0)?),
@@ -377,14 +427,21 @@ impl Store {
             AppEvent::Start => "start",
             AppEvent::Crash => "crash",
         };
-        self.conn.execute("INSERT INTO app_events (at, app, kind) VALUES (?1, ?2, ?3)", params![at.millis(), app, k])?;
+        self.conn.execute(
+            "INSERT INTO app_events (at, app, kind) VALUES (?1, ?2, ?3)",
+            params![at.millis(), app, k],
+        )?;
         Ok(())
     }
 
     /// App events in `[from, to)`: (app, when, kind).
     pub fn app_events(&self, from: Timestamp, to: Timestamp) -> Result<Vec<(String, Timestamp, AppEvent)>> {
-        let mut st = self.conn.prepare_cached("SELECT app, at, kind FROM app_events WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
-        let rows = st.query_map(params![from.millis(), to.millis()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?)))?;
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT app, at, kind FROM app_events WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
+        let rows = st.query_map(params![from.millis(), to.millis()], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+        })?;
         Ok(rows
             .filter_map(|r| r.ok())
             .map(|(a, at, k)| (a, Timestamp(at), if k == "crash" { AppEvent::Crash } else { AppEvent::Start }))
@@ -393,7 +450,10 @@ impl Store {
 
     /// Records the health score (one per hour is plenty).
     pub fn put_score(&self, at: Timestamp, score: u32) -> Result<()> {
-        self.conn.execute("INSERT OR REPLACE INTO scores (at, score) VALUES (?1, ?2)", params![at.floor_to(3_600_000).millis(), score])?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO scores (at, score) VALUES (?1, ?2)",
+            params![at.floor_to(3_600_000).millis(), score],
+        )?;
         Ok(())
     }
 
@@ -401,27 +461,38 @@ impl Store {
     pub fn score_at(&self, at: Timestamp) -> Result<Option<u32>> {
         Ok(self
             .conn
-            .query_row("SELECT score FROM scores WHERE at <= ?1 ORDER BY at DESC LIMIT 1", [at.millis()], |r| r.get::<_, u32>(0))
+            .query_row(
+                "SELECT score FROM scores WHERE at <= ?1 ORDER BY at DESC LIMIT 1",
+                [at.millis()],
+                |r| r.get::<_, u32>(0),
+            )
             .optional()?)
     }
 
     /// A small value by key.
     pub fn meta(&self, key: &str) -> Result<Option<String>> {
-        Ok(self.conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+            .optional()?)
     }
 
     /// Stores a small value.
     pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
-        self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)", params![key, value])?;
+        self.conn
+            .execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)", params![key, value])?;
         Ok(())
     }
 
     /// Deletes everything older than the retention allows.
     pub fn prune(&self, r: Retention, now: Timestamp) -> Result<()> {
         for t in Tier::ALL {
-            self.conn.execute("DELETE FROM points WHERE tier = ?1 AND at < ?2", params![tier_id(t), r.cutoff(t, now).millis()])?;
+            self.conn.execute(
+                "DELETE FROM points WHERE tier = ?1 AND at < ?2",
+                params![tier_id(t), r.cutoff(t, now).millis()],
+            )?;
         }
-        let long = r.cutoff(Tier::QuarterHour, now).millis();
+        let long = r.cutoff(Tier::Hour, now).millis();
         let minute = r.cutoff(Tier::Minute, now).millis();
         self.conn.execute("DELETE FROM app_minutes WHERE at < ?1", [minute])?;
         for table in ["disk_free", "events", "boots", "app_events", "scores", "alerts"] {
@@ -431,7 +502,8 @@ impl Store {
             "DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY at DESC LIMIT ?1)",
             [dyno_core::activity::MAX_ENTRIES as i64],
         )?;
-        self.conn.execute("DELETE FROM activity WHERE at < ?1", [now.minus(400 * DAY).millis()])?;
+        self.conn
+            .execute("DELETE FROM activity WHERE at < ?1", [now.minus(400 * DAY).millis()])?;
         Ok(())
     }
 }
@@ -531,7 +603,8 @@ mod tests {
         let s = Store::memory().unwrap();
         let undo = UndoRecord::Tuning { id: "powerPlan".into() };
         s.put_activity(&entry("a", 1, ActivityKind::Tuning, None), &undo).unwrap();
-        s.put_activity(&entry("b", 2, ActivityKind::Cleanup, Some(500)), &UndoRecord::None).unwrap();
+        s.put_activity(&entry("b", 2, ActivityKind::Cleanup, Some(500)), &UndoRecord::None)
+            .unwrap();
         let all = s.activity(10).unwrap();
         assert_eq!(all[0].0.id, "b");
         assert_eq!(s.activity_entry("a").unwrap().unwrap().1, undo);

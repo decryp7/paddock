@@ -91,6 +91,10 @@ fn live_check(sys: &mut System, target: ProcessRef) -> Result<libc::pid_t, Platf
     }
     let sp = sysinfo::Pid::from_u32(target.pid);
     sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[sp]), true, ProcessRefreshKind::nothing());
+    // On Linux sysinfo can list threads; a thread id is never a target.
+    if sys.process(sp).is_some_and(|p| p.thread_kind().is_some()) {
+        return Err(gone(target.pid));
+    }
     let started = sys.process(sp).map(|p| started_from_unix_secs(p.start_time()));
     match started {
         Some(s) if same_start(s, target.started) => Ok(pid),

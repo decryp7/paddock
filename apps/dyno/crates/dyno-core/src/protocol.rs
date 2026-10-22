@@ -198,6 +198,8 @@ pub enum Request {
     },
     /// Plugins.
     Plugins,
+    /// Asks the agent to exit (the app does this to restart an agent from an older build). Appended; answers `Ok`.
+    Shutdown,
 }
 
 /// Dyno's own cost.

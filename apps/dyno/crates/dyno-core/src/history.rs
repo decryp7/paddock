@@ -1,8 +1,9 @@
 //! History: what is stored, at which resolution, for how long, and how a range is answered (ADR 0002).
 //!
-//! Three tiers, each a downsampling of the one before: raw points every [`RAW_STEP_MS`] (kept `raw_hours`),
-//! one-minute buckets (kept `minute_days`) and quarter-hour buckets (kept `quarter_hour_days`). A bucket keeps the
-//! average and the maximum, so a short spike stays visible at every zoom level.
+//! Four tiers, each a downsampling of the one before: raw points every [`RAW_STEP_MS`] (kept `raw_hours`),
+//! one-minute buckets (kept `minute_days`), quarter-hour buckets (kept `quarter_hour_days`) and hourly buckets (kept
+//! `hour_days`). A bucket keeps the minimum, the average and the maximum, so a short spike or dip stays visible at
+//! every zoom level.
 
 use crate::metrics::SystemSample;
 use crate::time::{Timestamp, DAY, HOUR, MINUTE, SECOND};
@@ -18,10 +19,16 @@ pub struct HistoryPoint {
     pub cpu: f32,
     /// Highest CPU, percent.
     pub cpu_max: f32,
+    /// Lowest CPU, percent.
+    #[serde(default)]
+    pub cpu_min: f32,
     /// Average memory in use, percent.
     pub memory: f32,
     /// Highest memory in use, percent.
     pub memory_max: f32,
+    /// Lowest memory in use, percent.
+    #[serde(default)]
+    pub memory_min: f32,
     /// Average disk reads, bytes per second.
     pub disk_read_bps: f64,
     /// Average disk writes, bytes per second.
@@ -49,6 +56,8 @@ pub enum Tier {
     Minute,
     /// Every 15 minutes.
     QuarterHour,
+    /// One-hour buckets.
+    Hour,
 }
 
 impl Tier {
@@ -58,11 +67,12 @@ impl Tier {
             Tier::Raw => RAW_STEP_MS,
             Tier::Minute => MINUTE,
             Tier::QuarterHour => 15 * MINUTE,
+            Tier::Hour => HOUR,
         }
     }
 
     /// Every tier, finest first.
-    pub const ALL: [Tier; 3] = [Tier::Raw, Tier::Minute, Tier::QuarterHour];
+    pub const ALL: [Tier; 4] = [Tier::Raw, Tier::Minute, Tier::QuarterHour, Tier::Hour];
 }
 
 /// How long each tier is kept.
@@ -75,14 +85,17 @@ pub struct Retention {
     pub minute_days: u32,
     /// Days of quarter-hour buckets (7–400).
     pub quarter_hour_days: u32,
+    /// Days of hourly buckets kept.
+    pub hour_days: u32,
 }
 
 impl Default for Retention {
     fn default() -> Self {
         Retention {
-            raw_hours: 6,
-            minute_days: 8,
+            raw_hours: 24,
+            minute_days: 14,
             quarter_hour_days: 90,
+            hour_days: 730,
         }
     }
 }
@@ -94,6 +107,7 @@ impl Retention {
             raw_hours: self.raw_hours.clamp(1, 72),
             minute_days: self.minute_days.clamp(1, 30),
             quarter_hour_days: self.quarter_hour_days.clamp(7, 400),
+            hour_days: self.hour_days.clamp(30, 1100),
         }
     }
 
@@ -104,6 +118,7 @@ impl Retention {
             Tier::Raw => i64::from(r.raw_hours) * HOUR,
             Tier::Minute => i64::from(r.minute_days) * DAY,
             Tier::QuarterHour => i64::from(r.quarter_hour_days) * DAY,
+            Tier::Hour => i64::from(r.hour_days) * DAY,
         })
     }
 }
@@ -141,7 +156,7 @@ pub fn window(range: HistoryRange, end: Timestamp) -> Window {
         HistoryRange::Hour => (HOUR, Tier::Raw, RAW_STEP_MS),
         HistoryRange::Day => (DAY, Tier::Minute, 2 * MINUTE),
         HistoryRange::Week => (7 * DAY, Tier::QuarterHour, 15 * MINUTE),
-        HistoryRange::Month => (30 * DAY, Tier::QuarterHour, HOUR),
+        HistoryRange::Month => (30 * DAY, Tier::Hour, HOUR),
     };
     Window {
         from: end.minus(span),
@@ -158,8 +173,10 @@ pub fn point_from(s: &SystemSample) -> HistoryPoint {
         at: s.at,
         cpu: s.cpu.total,
         cpu_max: s.cpu.total,
+        cpu_min: s.cpu.total,
         memory: s.memory_percent(),
         memory_max: s.memory_percent(),
+        memory_min: s.memory_percent(),
         disk_read_bps: s.disk_io.read_bps,
         disk_write_bps: s.disk_io.write_bps,
         net_rx_bps: rx,
@@ -193,8 +210,10 @@ struct Acc {
     n: u32,
     cpu: f64,
     cpu_max: f32,
+    cpu_min: f32,
     mem: f64,
     mem_max: f32,
+    mem_min: f32,
     read: f64,
     write: f64,
     rx: f64,
@@ -208,6 +227,8 @@ impl Acc {
     fn add(&mut self, at: Timestamp, p: &HistoryPoint) {
         self.at = at;
         self.n += 1;
+        self.cpu_min = if self.n == 1 { p.cpu_min } else { self.cpu_min.min(p.cpu_min) };
+        self.mem_min = if self.n == 1 { p.memory_min } else { self.mem_min.min(p.memory_min) };
         self.cpu += f64::from(p.cpu);
         self.cpu_max = self.cpu_max.max(p.cpu_max);
         self.mem += f64::from(p.memory);
@@ -231,8 +252,10 @@ impl Acc {
             at: self.at,
             cpu: (self.cpu / n) as f32,
             cpu_max: self.cpu_max,
+            cpu_min: self.cpu_min,
             memory: (self.mem / n) as f32,
             memory_max: self.mem_max,
+            memory_min: self.mem_min,
             disk_read_bps: self.read / n,
             disk_write_bps: self.write / n,
             net_rx_bps: self.rx / n,
@@ -308,8 +331,10 @@ mod tests {
             at: Timestamp(at),
             cpu,
             cpu_max: cpu,
+            cpu_min: cpu,
             memory: 50.0,
             memory_max: 50.0,
+            memory_min: 50.0,
             ..Default::default()
         }
     }
@@ -323,7 +348,7 @@ mod tests {
             assert!((600..=800).contains(&points), "{r:?}: {points}");
             assert!(w.resolution_ms >= w.tier.step_ms());
         }
-        assert_eq!(Tier::ALL.map(Tier::step_ms), [5_000, 60_000, 900_000]);
+        assert_eq!(Tier::ALL.map(Tier::step_ms), [5_000, 60_000, 900_000, 3_600_000]);
     }
 
     #[test]
@@ -332,14 +357,16 @@ mod tests {
             raw_hours: 0,
             minute_days: 99,
             quarter_hour_days: 1,
+            hour_days: 5,
         }
         .clamped();
-        assert_eq!((r.raw_hours, r.minute_days, r.quarter_hour_days), (1, 30, 7));
+        assert_eq!((r.raw_hours, r.minute_days, r.quarter_hour_days, r.hour_days), (1, 30, 7, 30));
         let d = Retention::default();
         let now = Timestamp(1000 * DAY);
-        assert_eq!(d.cutoff(Tier::Raw, now), now.minus(6 * HOUR));
-        assert_eq!(d.cutoff(Tier::Minute, now), now.minus(8 * DAY));
+        assert_eq!(d.cutoff(Tier::Raw, now), now.minus(24 * HOUR));
+        assert_eq!(d.cutoff(Tier::Minute, now), now.minus(14 * DAY));
         assert_eq!(d.cutoff(Tier::QuarterHour, now), now.minus(90 * DAY));
+        assert_eq!(d.cutoff(Tier::Hour, now), now.minus(730 * DAY));
     }
 
     #[test]
@@ -349,6 +376,7 @@ mod tests {
         assert_eq!(d.len(), 2);
         assert!((d[0].cpu - 40.0).abs() < 1e-4);
         assert_eq!(d[0].cpu_max, 90.0);
+        assert_eq!(d[0].cpu_min, 10.0);
         assert_eq!(d[0].at, Timestamp(0));
         assert_eq!(d[1].at, Timestamp(60_000));
         assert_eq!(d[0].gpu, None);

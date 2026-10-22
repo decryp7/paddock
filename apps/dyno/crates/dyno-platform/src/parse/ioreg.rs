@@ -35,8 +35,9 @@ fn model(text: &str) -> Option<String> {
 /// `None` when no accelerator reports a utilisation.
 pub fn parse_gpu(text: &str) -> Option<GpuStats> {
     let mut best: Option<GpuStats> = None;
-    // One block per accelerator starts at its `+-o` / `{` header; split on the statistics key instead.
-    for block in text.split("\"IOClass\"").skip(1) {
+    // One block per accelerator, each starting at its `+-o Name <class …>` header.
+    let blocks: Vec<&str> = if text.contains("+-o ") { text.split("+-o ").skip(1).collect() } else { vec![text] };
+    for block in blocks {
         let Some(stats_at) = block.find("\"PerformanceStatistics\"") else {
             continue;
         };
@@ -87,7 +88,7 @@ mod tests {
     #[test]
     fn picks_the_busiest_of_two_and_reads_vram() {
         let text = format!(
-            "{APPLE}\n{{\n \"IOClass\" = \"AMDRadeonX6000_AMDRadeonAccelerator\"\n \"model\" = <\"AMD Radeon Pro 5500M\">\n \
+            "{APPLE}\n+-o AMDRadeonX6000_AMDRadeonAccelerator  <class X>\n{{\n \"IOClass\" = \"AMDRadeonX6000_AMDRadeonAccelerator\"\n \"model\" = <\"AMD Radeon Pro 5500M\">\n \
 \"PerformanceStatistics\" = {{\"vramFreeBytes\"=3000,\"vramUsedBytes\"=1000,\"Device Utilization %\"=70}}\n}}"
         );
         let g = parse_gpu(&text).unwrap();
