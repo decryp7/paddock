@@ -131,7 +131,8 @@ fn apply_is_logged_with_its_undo_and_the_activity_undo_reverts_it() {
     let l = h.list();
     let s = l.iter().find(|s| s.id == "sleepOnBattery").unwrap();
     assert!(s.applied && !s.changed_outside);
-    let e2 = h.apply("sleepOnBattery").unwrap_err(); assert!(e2.contains("already applied"), "{e2}");
+    let e2 = h.apply("sleepOnBattery").unwrap_err();
+    assert!(e2.contains("already applied"), "{e2}");
 
     let Reply::Activity(undone) = ask(&h.peer, Request::Undo { activity_id: e.id.clone() }).unwrap() else {
         panic!("undo")

@@ -295,7 +295,14 @@ impl Shared {
             t,
         );
         for n in cleanup_notes {
-            core.log(t, ActivityKind::System, "A cleanup pack was ignored".into(), n, UndoRecord::None, None);
+            core.log(
+                t,
+                ActivityKind::System,
+                "A cleanup pack was ignored".into(),
+                n,
+                UndoRecord::None,
+                None,
+            );
         }
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let Platform {

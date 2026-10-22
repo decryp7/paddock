@@ -8,8 +8,8 @@ mod control_tests;
 pub mod handle;
 pub mod net;
 pub mod pdh;
-pub mod traffic;
 pub mod topology;
+pub mod traffic;
 
 use crate::processes::{NoDetails, SysinfoProcesses};
 use crate::sensors::SysinfoSensors;
