@@ -139,7 +139,7 @@ pub fn detect_loop<'a>(outcomes: impl IntoIterator<Item = (Timestamp, &'a Update
             UpdateOutcome::RolledBack { reason, .. } => Some(format!("{reason:?}")),
             _ => None,
         })
-        .last();
+        .next_back();
     let n = |c: usize| u32::try_from(c).unwrap_or(u32::MAX);
     if failing >= FAILING_ATTEMPTS {
         let why = last_reason.map_or(String::new(), |r| format!(" Last reason: {r}."));

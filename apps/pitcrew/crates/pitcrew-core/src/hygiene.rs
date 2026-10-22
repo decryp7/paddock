@@ -202,7 +202,7 @@ pub fn parse_size(text: &str) -> Option<u64> {
         _ => return None,
     };
     let bytes = value * mult;
-    (bytes.is_finite() && (0.0..9e18).contains(&bytes)).then(|| bytes as u64)
+    (bytes.is_finite() && (0.0..9e18).contains(&bytes)).then_some(bytes as u64)
 }
 
 /// Parses `docker system df --format '{{.Type}}\t{{.TotalCount}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}'`. A

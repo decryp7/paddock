@@ -247,12 +247,14 @@ mod tests {
     #[test]
     fn keep_longer_records_persist_and_damage_is_tolerated() {
         let mut s = ServiceState::default();
-        let mut r = RunnerState::default();
-        r.keeps = vec![KeepRecord {
-            pid: 4,
-            started_ms: 9,
-            extra_ms: 3_600_000,
-        }];
+        let r = RunnerState {
+            keeps: vec![KeepRecord {
+                pid: 4,
+                started_ms: 9,
+                extra_ms: 3_600_000,
+            }],
+            ..RunnerState::default()
+        };
         s.runners.insert("a".into(), r);
         let back = load(Some(&to_json(&s).unwrap()), None);
         assert_eq!(back.state.runners["a"].keeps, s.runners["a"].keeps);

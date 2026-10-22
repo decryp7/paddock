@@ -429,7 +429,7 @@ mod tests {
         let file = d.join(format!("docker{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&file, "x").unwrap();
         let path = std::env::join_paths([d.clone()]).unwrap().to_string_lossy().into_owned();
-        assert_eq!(find_engine(Some(&path)).map(|(k, p)| (k, p)), Some((EngineKind::Docker, file)));
+        assert_eq!(find_engine(Some(&path)), Some((EngineKind::Docker, file)));
         let empty = temp("find-none");
         assert!(find_engine(Some(&empty.display().to_string())).is_none());
         let _ = std::fs::remove_dir_all(d);
