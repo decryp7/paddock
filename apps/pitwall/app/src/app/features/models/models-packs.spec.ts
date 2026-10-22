@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { pickOption } from '../../../testing/render';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import type { PitwallBackend } from '../../core/backend';
@@ -149,18 +150,16 @@ describe('Models page: recommendations and engines', () => {
   it('offers a per-model engine select only once a pack engine is installed', async () => {
     const backend = new MockBackend();
     let r = await render(backend);
-    expect(r.el.querySelector('select[id^="engine-"]')).toBeNull();
+    expect(r.el.querySelector('[id^="engine-"]')).toBeNull();
     TestBed.resetTestingModule();
     await backend.installBuild('ik-llama-cpu');
     for (let i = 0; i < 400; i++) backend.tick();
     r = await render(backend);
-    r.el.querySelector<HTMLElement>('pw-library-tab tbody tr')!.click();
+    r.el.querySelector<HTMLElement>('#row-gemma-3-12b-it-q4_k_m')!.click();
     await r.settle();
-    const select = r.el.querySelector<HTMLSelectElement>('select[id^="engine-"]')!;
+    const select = r.el.querySelector<HTMLButtonElement>('pw-select button[id^="engine-"]')!;
     expect(select).not.toBeNull();
-    select.value = 'ik-llama-cpu';
-    select.dispatchEvent(new Event('change'));
-    await r.settle();
+    await pickOption(select, 'ik_llama.cpp (pack)', r.settle);
     const id = select.id.replace('engine-', '');
     expect((await backend.localModels()).find((m) => m.id === id)?.engine).toBe('ik-llama-cpu');
   });

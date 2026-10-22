@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { pickOption } from '../../../testing/render';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import type { Download, Fit } from '../../core/api.types';
@@ -177,16 +178,11 @@ describe('ModelsPage', () => {
     const id = 'llama-3.2-3b-instruct-q5_k_m';
     const idleOf = async () => (await backend.localModels()).find((m) => m.id === id)?.idleSecs;
     await open('Llama 3.2 3B Instruct');
-    const choose = async (value: string) => {
-      const select = el.querySelector(`#idle-llama-3\\.2-3b-instruct-q5_k_m`) as HTMLSelectElement;
-      select.value = value;
-      select.dispatchEvent(new Event('change'));
-      await settle();
-    };
-    await choose('600');
+    const choose = (label: string) => pickOption(el.querySelector(`#idle-llama-3\\.2-3b-instruct-q5_k_m`) as HTMLButtonElement, label, settle);
+    await choose('After 10 min');
     expect(await idleOf()).toBe(600);
-    expect((el.querySelector(`#idle-llama-3\\.2-3b-instruct-q5_k_m`) as HTMLSelectElement).selectedOptions[0]!.textContent).toContain('After 10 min');
-    await choose('');
+    expect((el.querySelector(`#idle-llama-3\\.2-3b-instruct-q5_k_m`) as HTMLButtonElement).textContent).toContain('After 10 min');
+    await choose('Global setting');
     expect(await idleOf()).toBeNull();
 
     await menu('BGE reranker v2 m3', 'Delete…');

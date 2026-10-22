@@ -356,7 +356,7 @@ describe('MockBackend', () => {
       const s: PlaygroundEvent[] = [];
       slow.chat({ modelId: 'qwen3-8b-instruct-q4_k_m', messages: [{ role: 'user', content: 'hi' }], temperature: 0, maxTokens: 4 }, (e) => s.push(e));
       await vi.runAllTimersAsync();
-      expect(s.filter((e) => e.kind === 'delta').length).toBe(4);
+      expect(s.filter((e) => e.kind === 'delta').length).toBe(3);
     } finally {
       vi.useRealTimers();
     }

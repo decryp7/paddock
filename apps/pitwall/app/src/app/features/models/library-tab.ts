@@ -317,6 +317,8 @@ export function contextText(tokens: number | null): string {
     .scroll {
       container-type: inline-size;
       overflow-x: auto;
+      /* The last row's selected or hover background must not square off the panel's rounded corners. */
+      border-radius: 0 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px);
     }
     /* A narrow list (the detail panel is open, or a small window) drops the columns the panel repeats. */
     @container (max-width: 640px) {

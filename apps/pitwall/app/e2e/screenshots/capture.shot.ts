@@ -15,6 +15,8 @@ interface Screen {
   query?: string;
   /** A virtual list that must end on a whole row: the viewport shrinks by the partial row at its bottom. */
   snapList?: string;
+  /** Capture only this element (full height, whatever the window shows) instead of the page. */
+  element?: string;
   /** Waits for the screen and drives it into the state to show. */
   prepare?: (page: Page) => Promise<void>;
 }
@@ -34,7 +36,8 @@ const SCREENS: Screen[] = [
       const panel = p.getByRole('complementary', { name: 'Qwen3 8B Instruct' });
       await expect(panel).toBeVisible();
       // Pin it to the CUDA build, as a user holding one model on a known-good engine would.
-      await panel.getByLabel('Engine build for Qwen3 8B Instruct').selectOption({ index: 1 });
+      await panel.getByRole('button', { name: /^Engine build for Qwen3 8B Instruct/ }).click();
+      await p.getByRole('option', { name: /^Pin to CUDA 13/ }).click();
       await expect(panel.locator('.pinned-build')).toBeVisible();
     },
   },
@@ -95,6 +98,16 @@ const SCREENS: Screen[] = [
       await expect(p.locator('pw-app-usage pw-echart canvas').first()).toBeVisible();
     },
   },
+  {
+    name: 'apps-cache',
+    path: '/apps',
+    prepare: async (p) => {
+      await p.getByRole('button', { name: /Debrief\s+1\.3k requests/ }).click();
+      await expect(p.getByRole('heading', { name: 'Debrief', level: 2 })).toBeVisible();
+      await expect(p.getByRole('switch', { name: 'Cache answers' })).toBeChecked();
+      await p.getByRole('switch', { name: 'Cache answers' }).scrollIntoViewIfNeeded();
+    },
+  },
   { name: 'requests', path: '/requests', snapList: 'cdk-virtual-scroll-viewport', prepare: (p) => expect(p.getByRole('row').nth(1)).toBeVisible() },
   {
     name: 'requests-detail',
@@ -113,7 +126,35 @@ const SCREENS: Screen[] = [
       await expect(p.getByText(/keeps models hot only while they are useful/).first()).toBeVisible();
     },
   },
+  {
+    name: 'models-preset-cache',
+    path: '/models',
+    prepare: async (p) => {
+      await openModels(p, /Presets/);
+      await p.getByRole('row', { name: /debrief-explain/ }).getByRole('button', { name: 'Edit debrief-explain' }).click();
+      await expect(p.getByRole('switch', { name: 'Cache answers' })).toBeChecked();
+      await p.getByRole('switch', { name: 'Cache answers' }).scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: 'requests-cache',
+    path: '/requests',
+    snapList: 'cdk-virtual-scroll-viewport',
+    prepare: async (p) => {
+      await p.getByRole('row').filter({ has: p.locator('.cached') }).first().click();
+      await expect(p.locator('pw-request-detail')).toContainText('Cache hit');
+    },
+  },
   { name: 'benchmarks', path: '/benchmarks', prepare: (p) => expect(p.locator('h1')).toBeVisible() },
+  {
+    name: 'settings-cache',
+    path: '/settings',
+    element: '#set-cache',
+    prepare: async (p) => {
+      await p.locator('.subnav').getByRole('button', { name: 'Caching' }).click();
+      await expect(p.locator('#set-cache .cache-stats').first()).toBeVisible();
+    },
+  },
   {
     name: 'settings',
     path: '/settings',
@@ -165,6 +206,15 @@ for (const theme of ['dark', 'light'] as const) {
       for (const close of await page.locator('pw-toast-host button[aria-label="Dismiss"]').all()) await close.click();
       await page.mouse.move(WIDTH - 2, 2);
       await page.waitForTimeout(600);
+      if (s.element) {
+        // The page scrolls inside <main>: make the window tall enough to show the whole element, then shoot it.
+        const box = await page.locator(s.element).boundingBox();
+        await page.setViewportSize({ width: WIDTH, height: Math.ceil((box?.height ?? HEIGHT) + 160) });
+        await page.waitForTimeout(300);
+        await page.locator(s.element).scrollIntoViewIfNeeded();
+        await page.locator(s.element).screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
+        return;
+      }
       await fitHeight(page);
       if (s.snapList) {
         const rest = await page.evaluate((sel) => {

@@ -206,4 +206,50 @@ describe('RequestsPage', () => {
     const empty = await render(new MockBackend({ empty: true }));
     expect(empty.el.textContent).toContain('No requests yet');
   });
+
+describe('request caching', () => {
+  const pick = (store: RequestsStore, outcome: 'hit' | 'miss' | 'bypass' | null) => store.records().find((x) => x.cache === outcome && x.status === 200)!;
+
+  it('shows a cache hit chip with the X-Pitwall-Cache header in the detail', async () => {
+    const { fixture, el, store } = await render();
+    store.select(pick(store, 'hit').id);
+    await settle(fixture);
+    const drawer = el.querySelector('pw-request-detail') as HTMLElement;
+    const chip = drawer.querySelector('.cache .status')!;
+    expect(chip.textContent).toBe('Cache hit');
+    expect(chip.getAttribute('data-tone')).toBe('ok');
+    expect(drawer.querySelector('.cache')!.textContent).toContain('X-Pitwall-Cache');
+    expect(drawer.querySelector('.cache')!.textContent).toContain('says hit');
+  });
+
+  it('words a miss and a bypass, and shows nothing for a request that was not eligible', async () => {
+    const { fixture, el, store } = await render();
+    store.select(pick(store, 'miss').id);
+    await settle(fixture);
+    expect(el.querySelector('pw-request-detail .cache')!.textContent).toContain('Cache miss');
+    store.select(pick(store, 'bypass').id);
+    await settle(fixture);
+    expect(el.querySelector('pw-request-detail .cache')!.textContent).toContain('Cache bypassed');
+    store.select(pick(store, null).id);
+    await settle(fixture);
+    expect(el.querySelector('pw-request-detail .cache')).toBeNull();
+  });
+
+  it('shows the prompt tokens reused only when there were some', async () => {
+    const { fixture, el, store } = await render();
+    store.select(store.records().find((x) => x.cachedTokens > 0)!.id);
+    await settle(fixture);
+    const route = () => (el.querySelector('pw-request-detail') as HTMLElement).querySelector('[aria-labelledby="pw-req-route"]')!.textContent!;
+    expect(route()).toContain('Prompt tokens reused');
+    store.select(store.records().find((x) => x.cachedTokens === 0)!.id);
+    await settle(fixture);
+    expect(route()).not.toContain('Prompt tokens reused');
+  });
+
+  it('marks cache hits in the list', async () => {
+    const { el, store } = await render();
+    expect(store.records().some((r) => r.cache === 'hit' && r.status < 400)).toBe(true);
+    expect(el.querySelector('.cached')?.textContent).toContain('cached');
+  });
+});
 });

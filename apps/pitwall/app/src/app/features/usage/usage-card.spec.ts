@@ -54,4 +54,15 @@ describe('UsageCard', () => {
     await settle(fixture);
     expect(el.querySelector('pw-echart')).not.toBeNull();
   });
+
+  it('adds the cache tiles over the range and a hit rate to the apps that have one', async () => {
+    const { el } = await mount();
+    const tiles = el.querySelector('pw-cache-tiles')!;
+    expect(tiles.textContent).toContain('Cache hit rate');
+    expect(tiles.textContent).toContain('Tokens saved');
+    expect(tiles.querySelector('.value')!.textContent).toMatch(/^\d+ %$/);
+    const items = Array.from(el.querySelectorAll('.totals li'));
+    expect(items[0]!.textContent).toContain('% cached');
+    expect(items.some((li) => !li.textContent!.includes('cached'))).toBe(true);
+  });
 });

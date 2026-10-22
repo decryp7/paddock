@@ -202,7 +202,7 @@ describe('PresetsTab', () => {
     const options = Array.from(el.querySelectorAll('#pw-preset-targets option')).map((o) => o.getAttribute('value'));
     expect(options).toContain('qwen3-8b-instruct-q4_k_m');
     expect(options).toContain('auto:chat,fast');
-    expect(Array.from(el.querySelectorAll('#pw-preset-engine option')).map((o) => o.textContent!.trim())[0]).toBe('llama.cpp');
+    expect(el.querySelector('#pw-preset-engine')!.textContent).toContain('llama.cpp');
   });
 
   it('keeps the chosen engine in the draft', async () => {
@@ -227,4 +227,47 @@ describe('PresetsTab', () => {
     expect(yes.el.querySelectorAll('tbody tr').length).toBe(3);
     expect(yes.el.textContent).not.toContain('legacy-explain');
   });
+
+describe('PresetsTab caching', () => {
+  it('badges presets that cache answers or keep the prompt warm', async () => {
+    const { el } = await render();
+    const rows = Array.from(el.querySelectorAll('tbody tr'));
+    const explain = rows.find((r) => r.textContent!.includes('debrief-explain'))!;
+    expect(Array.from(explain.querySelectorAll('.badge')).map((b) => b.textContent)).toEqual(['cache', 'warm']);
+    const triage = rows.find((r) => r.textContent!.includes('pitcrew-triage'))!;
+    expect(Array.from(triage.querySelectorAll('.badge')).map((b) => b.textContent)).toEqual(['warm']);
+    expect(rows.find((r) => r.textContent!.includes('legacy-explain'))!.querySelector('.badge')).toBeNull();
+  });
+
+  it('edits both toggles and saves them with the preset', async () => {
+    const backend = new MockBackend();
+    const { el, settle, button, type } = await render(backend);
+    button('New preset').click();
+    await settle();
+    type('#pw-preset-alias', 'cached-one');
+    type('#pw-preset-target', 'qwen3-8b-instruct-q4_k_m');
+    await settle();
+    const toggle = (id: string) => el.querySelector<HTMLButtonElement>(`button[aria-labelledby="${id}"]`)!;
+    expect(toggle('pw-preset-cache-l').getAttribute('aria-checked')).toBe('false');
+    expect(el.textContent).toContain('cleared when the model, engine or preset changes');
+    toggle('pw-preset-cache-l').click();
+    toggle('pw-preset-warm-l').click();
+    await settle();
+    expect(toggle('pw-preset-cache-l').getAttribute('aria-checked')).toBe('true');
+    await new Promise((r) => setTimeout(r, PREVIEW_DELAY_MS + 20));
+    await settle();
+    button('Create preset').click();
+    await settle();
+    const saved = (await backend.presets()).find((e) => e.preset.alias === 'cached-one')!.preset;
+    expect(saved).toMatchObject({ cacheResponses: true, keepWarm: true });
+  });
+
+  it('picks the engine in the themed select', async () => {
+    const { el, settle } = await render();
+    Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim().startsWith('New preset'))!.click();
+    await settle();
+    expect(el.querySelector('select')).toBeNull();
+    expect(el.querySelector('pw-select button')!.textContent).toContain('llama.cpp');
+  });
+});
 });

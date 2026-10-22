@@ -19,7 +19,7 @@ export interface SelectOption {
       class="trigger"
       cdkOverlayOrigin
       #origin="cdkOverlayOrigin"
-      [id]="inputId()"
+      [attr.id]="inputId()"
       [disabled]="disabled()"
       [attr.aria-label]="label() ? label() + ': ' + current() : null"
       aria-haspopup="listbox"
@@ -29,7 +29,7 @@ export interface SelectOption {
       <span class="txt">{{ current() }}</span><mat-icon svgIcon="pw:chevron-down" aria-hidden="true" />
     </button>
     <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="origin" [cdkConnectedOverlayOpen]="open()" [cdkConnectedOverlayMinWidth]="minWidth()" [cdkConnectedOverlayPush]="true" [cdkConnectedOverlayViewportMargin]="12" (overlayOutsideClick)="open.set(false)" (detach)="open.set(false)">
-      <ul class="pw-select-list" cdkListbox [attr.aria-label]="label()" [cdkListboxValue]="[value()]" (cdkListboxValueChange)="pick($event)" (keydown.escape)="open.set(false)">
+      <ul class="pw-select-list" [tabindex]="0" cdkListbox [attr.aria-label]="label()" [cdkListboxValue]="[value()]" (cdkListboxValueChange)="pick($event)" (click)="open.set(false)" (keydown.escape)="open.set(false)">
         @for (o of options(); track o.value) {
           <li class="opt" [cdkOption]="o.value" cdkOptionTypeaheadLabel="{{ o.label }}"><mat-icon svgIcon="pw:check" aria-hidden="true" class="tick" />{{ o.label }}</li>
         }

@@ -19,7 +19,7 @@ describe('parseNumber', () => {
 describe('preset form', () => {
   it('round-trips a preset through the form text', () => {
     const f = formOf(PRESET);
-    expect(f).toEqual({ alias: 'debrief-explain', target: 'auto:chat,fast', context: '8192', temperature: '0.3', topP: '0.9', maxTokens: '800', systemPrompt: 'Be brief.', engine: 'llama.cpp' });
+    expect(f).toEqual({ alias: 'debrief-explain', target: 'auto:chat,fast', context: '8192', temperature: '0.3', topP: '0.9', maxTokens: '800', systemPrompt: 'Be brief.', engine: 'llama.cpp', cacheResponses: false, keepWarm: false });
     const { draft, invalid } = parseForm(f);
     expect(draft).toEqual(PRESET);
     expect(invalid.size).toBe(0);
@@ -27,7 +27,7 @@ describe('preset form', () => {
 
   it('an empty form is an empty draft; blanks are none', () => {
     const { draft, invalid } = parseForm({ ...EMPTY_FORM, alias: ' x ', target: ' m ', systemPrompt: '  \n' });
-    expect(draft).toEqual({ alias: 'x', target: 'm', context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null });
+    expect(draft).toEqual({ alias: 'x', target: 'm', context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null, cacheResponses: false, keepWarm: false });
     expect(invalid.size).toBe(0);
     expect(formOf({ ...PRESET, context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null })).toEqual({ ...EMPTY_FORM, alias: PRESET.alias, target: PRESET.target });
   });

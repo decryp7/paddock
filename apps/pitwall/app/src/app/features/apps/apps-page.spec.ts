@@ -156,4 +156,61 @@ describe('AppsPage', () => {
     const { el } = await render(new MockBackend({ empty: true }));
     expect(el.textContent).toContain('No apps yet');
   });
+
+  describe('caching', () => {
+    it('shows the cache figures of the selected app and whether its answers are cached', async () => {
+      const { el } = await render();
+      const panel = Array.from(el.querySelectorAll('pw-panel')).find((p) => p.textContent!.includes('Cached answers'))!;
+      expect(panel.textContent).toContain('on for this app');
+      const figures = Array.from(panel.querySelectorAll('.cache-stats div')).map((d) => d.textContent!.trim());
+      expect(figures).toEqual(['Cache hits212', 'Misses388', 'Hit rate35 %', 'Prompt tokens reused1.2M']);
+    });
+
+    it('shows a dash for the hit rate and says how to turn caching on for an app that has none', async () => {
+      const { el, fixture } = await render();
+      (el.querySelectorAll('.apps .app')[1] as HTMLButtonElement).click();
+      await settle(fixture);
+      const panel = Array.from(el.querySelectorAll('pw-panel')).find((p) => p.textContent!.includes('Cached answers'))!;
+      expect(panel.textContent).toContain('off for this app');
+      expect(panel.textContent).toContain('Turn on Cache answers under Permissions');
+      expect(panel.querySelectorAll('.cache-stats dd')[2]!.textContent).toBe('—');
+    });
+
+    it('saves the Cache answers toggle with the permissions', async () => {
+      const backend = new MockBackend();
+      const { el, fixture, button } = await render(backend);
+      (el.querySelectorAll('.apps .app')[1] as HTMLButtonElement).click();
+      await settle(fixture);
+      const toggle = el.querySelector<HTMLButtonElement>('button[aria-label="Cache answers"]')!;
+      expect(toggle.getAttribute('aria-checked')).toBe('false');
+      toggle.click();
+      await settle(fixture);
+      button(el, 'Save')!.click();
+      await settle(fixture);
+      expect((await backend.apps()).find((a) => a.id === 'pitcrew')!.permissions.cacheResponses).toBe(true);
+    });
+
+    it("clears one app's cached answers after confirming", async () => {
+      const backend = new MockBackend();
+      const spy = vi.spyOn(backend, 'clearCache');
+      const { el, fixture, button } = await render(backend);
+      button(el, "Clear this app's cached answers")!.click();
+      await settle(fixture);
+      expect(overlay().querySelector('pw-confirm-dialog')!.textContent).toContain("Clear Debrief's cached answers?");
+      button(overlay(), 'Clear cached answers')!.click();
+      await settle(fixture);
+      expect(spy).toHaveBeenCalledWith({ kind: 'app', appId: 'debrief' });
+    });
+
+    it('keeps the answers when the confirmation is cancelled', async () => {
+      const backend = new MockBackend();
+      const spy = vi.spyOn(backend, 'clearCache');
+      const { el, fixture, button } = await render(backend);
+      button(el, "Clear this app's cached answers")!.click();
+      await settle(fixture);
+      button(overlay(), 'Cancel')!.click();
+      await settle(fixture);
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
 });

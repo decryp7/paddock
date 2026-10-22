@@ -146,7 +146,7 @@
             <mat-icon svgIcon="pw:shield" aria-hidden="true" />
             <span>
               <b>Prompt reuse</b> is automatic: the engine keeps the start of a conversation so the next message does not reprocess it.
-              <b>Saved answers</b> are opt-in for each app and each preset, and only for deterministic requests (temperature 0 or a fixed seed, no tools).
+              <b>Cached answers</b> are opt-in for each app and each preset, and only for deterministic requests (temperature 0 or a fixed seed, no tools).
               <b>Embeddings</b> are cached by default because the same text always gives the same vector.
             </span>
           </div>
@@ -228,7 +228,7 @@
             </div>
           }
           <div class="row actions">
-            <div class="lbl"><span class="name">Clear all caches</span><p class="hint">Saved answers, embeddings and kept-warm prompts. Apps work as before, just slower at first.</p></div>
+            <div class="lbl"><span class="name">Clear all caches</span><p class="hint">Cached answers, embeddings and kept-warm prompts. Apps work as before, just slower at first.</p></div>
             <button type="button" class="btn" [disabled]="store.clearing()" (click)="clear({ kind: 'all' }, 'all caches')">Clear all caches</button>
           </div>
 

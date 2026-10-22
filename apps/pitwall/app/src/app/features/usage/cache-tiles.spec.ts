@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing';
+import { Component, signal } from '@angular/core';
 import type { UsageCounters } from '../../core/api.types';
 import { render, settle } from '../../../testing/render';
 import { CacheTiles } from './cache-tiles';
@@ -31,10 +31,15 @@ describe('cache figures', () => {
   });
 });
 
+@Component({ selector: 'pw-host', imports: [CacheTiles], template: `<pw-cache-tiles [totals]="totals()" />` })
+class Host {
+  totals = signal(counters());
+}
+
 describe('CacheTiles', () => {
   async function mount(totals: UsageCounters) {
-    const r = await render(CacheTiles);
-    r.fixture.componentRef.setInput('totals', totals);
+    const r = await render(Host);
+    r.fixture.componentInstance.totals.set(totals);
     await settle(r.fixture);
     return r.el;
   }
@@ -47,7 +52,7 @@ describe('CacheTiles', () => {
     expect(tiles[0]!.textContent).toContain('30 hits, 70 misses');
     expect(tiles[1]!.textContent).toContain('Tokens saved');
     expect(tiles[1]!.querySelector('.value')!.textContent).toBe('15k');
-    expect(tiles[1]!.textContent).toContain('12k prompt reused, 3k from cache hits');
+    expect(tiles[1]!.textContent).toContain('12k prompt reused, 3.0k from cache hits');
   });
 
   it('shows dashes and a plain sentence when nothing was cached yet', async () => {
@@ -56,6 +61,5 @@ describe('CacheTiles', () => {
     expect(values).toEqual(['—', '—']);
     expect(el.textContent).toContain('No cache-eligible requests yet');
     expect(el.textContent).toContain('Nothing reused yet');
-    TestBed.resetTestingModule();
   });
 });

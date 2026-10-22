@@ -61,3 +61,13 @@ export function button(el: HTMLElement, text: string): HTMLButtonElement {
   if (!b) throw new Error(`no button "${text}"`);
   return b;
 }
+
+/** Opens a `pw-select` from its trigger and clicks the option with this label (the list lives in the overlay). */
+export async function pickOption(trigger: HTMLElement, label: string, settleAfter: () => Promise<void>): Promise<void> {
+  trigger.click();
+  await settleAfter();
+  const option = Array.from(document.querySelectorAll<HTMLElement>('.pw-select-list .opt')).find((o) => o.textContent!.trim() === label);
+  if (!option) throw new Error(`no option "${label}" in: ${Array.from(document.querySelectorAll('.pw-select-list .opt')).map((o) => o.textContent!.trim()).join(' | ')}`);
+  option.click();
+  await settleAfter();
+}

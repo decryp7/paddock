@@ -71,7 +71,7 @@ export class SettingsPage implements OnInit {
   protected readonly sizeOf = bytes;
   protected readonly cacheKinds: { id: 'embeddings' | 'responses'; title: string; noun: string; about: string; ttlHint: string }[] = [
     { id: 'embeddings', title: 'Embeddings', noun: 'cached embedding', about: 'Vectors for text your apps embed. The same text and model always give the same vector.', ttlHint: 'Counted since the entry was last used, so what you keep using stays.' },
-    { id: 'responses', title: 'Saved answers', noun: 'saved answer', about: 'Answers to deterministic requests from apps and presets that opted in (Apps & keys, Models ▸ Presets).', ttlHint: 'Counted from when the answer was stored, so old answers do not outlive a model update for long.' },
+    { id: 'responses', title: 'Cached answers', noun: 'saved answer', about: 'Answers to deterministic requests from apps and presets that opted in (Apps & keys, Models ▸ Presets).', ttlHint: 'Counted from when the answer was stored, so old answers do not outlive a model update for long.' },
   ];
   protected readonly presets = PRESETS;
   protected readonly presetLabel = PRESET_LABEL;

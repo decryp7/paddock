@@ -311,4 +311,137 @@ describe('SettingsPage', () => {
       expect(panel(el).textContent).toContain('Retry');
     });
   });
+
+  describe('caching', () => {
+    const overlay = () => document.querySelector('.cdk-overlay-container') as HTMLElement;
+    afterEach(() => overlay()?.replaceChildren());
+
+    async function confirmWith(fixture: Parameters<typeof settle>[0], label: string) {
+      await settle(fixture);
+      const dlg = overlay().querySelector('pw-confirm-dialog') as HTMLElement;
+      expect(dlg).not.toBeNull();
+      button(dlg, label).click();
+      await settle(fixture);
+    }
+
+    it('explains the three layers and the privacy rule in plain words', async () => {
+      const { el } = await setup();
+      const card = el.querySelector('#set-cache')!;
+      expect(card.textContent).toContain('Prompt reuse');
+      expect(card.textContent).toContain('opt-in for each app and each preset');
+      expect(card.textContent).toContain('temperature 0 or a fixed seed');
+      expect(card.textContent).toContain('cache.sqlite');
+      expect(card.textContent).toContain('never sent anywhere');
+      expect(card.textContent).toContain('Memory only');
+    });
+
+    it('shows the stats of each cache, the shared next clean-up and no disk error', async () => {
+      const { el } = await setup();
+      const stats = Array.from(el.querySelectorAll('#set-cache .cache-stats'));
+      expect(stats.length).toBe(2);
+      expect(stats[0]!.textContent).toContain('Entries');
+      expect(stats[0]!.textContent).toContain('90 days since last use');
+      expect(stats[1]!.textContent).toContain('7 days after it is stored');
+      expect(stats[1]!.textContent).toMatch(/Oldest entry\s*5 d ago|Oldest entry\s*\d+ d/);
+      expect(el.querySelector('[data-testid="next-sweep"]')!.textContent!.length).toBeGreaterThan(3);
+      expect(el.querySelector('#set-cache [role="alert"]')).toBeNull();
+    });
+
+    it('shows a disk error inline and keeps the page working', async () => {
+      const backend = new MockBackend();
+      const real = backend.cacheInfo.bind(backend);
+      vi.spyOn(backend, 'cacheInfo').mockImplementation(async () => {
+        const i = await real();
+        return { ...i, responses: { ...i.responses, diskError: 'cache.sqlite is locked by another program', oldestAt: null, entries: 0 } };
+      });
+      const { el } = await setup(backend);
+      const alert = el.querySelector('#set-cache [role="alert"]')!;
+      expect(alert.textContent).toContain('memory only for now: cache.sqlite is locked');
+      expect(el.querySelectorAll('#set-cache .cache-stats')[1]!.textContent).toContain('none');
+    });
+
+    it('shows an inline error with retry when the figures cannot be read', async () => {
+      const { el, fixture } = await setup(new MockBackend({ failing: ['cacheInfo'] }));
+      expect(el.querySelector('#set-cache [role="alert"]')!.textContent).toContain('Could not read the cache figures');
+      expect(el.querySelectorAll('#set-cache .cache-stats').length).toBe(0);
+      button(el.querySelector('#set-cache') as HTMLElement, 'Retry').click();
+      await settle(fixture);
+    });
+
+    it('maps the expiry choices to seconds in the draft', async () => {
+      const { fixture, el, backend } = await setup();
+      const trigger = el.querySelector<HTMLButtonElement>('#set-cache pw-select button[aria-label="Cached answers expiry: 7 days after it is stored"]')!;
+      trigger.click();
+      await settle(fixture);
+      const options = Array.from(overlay().querySelectorAll<HTMLElement>('.pw-select-list .opt')).map((o) => o.textContent!.trim());
+      expect(options).toEqual(['1 hour after it is stored', '1 day after it is stored', '7 days after it is stored', '30 days after it is stored', '90 days after it is stored', 'Never (size cap only)']);
+      overlay().querySelectorAll<HTMLElement>('.pw-select-list .opt')[0]!.click();
+      await settle(fixture);
+      button(el, 'Save changes').click();
+      await settle(fixture);
+      expect((await backend.settings()).cache.responsesTtlSecs).toBe(3600);
+
+      el.querySelector<HTMLButtonElement>('#set-cache pw-select button[aria-label^="Embeddings expiry"]')!.click();
+      await settle(fixture);
+      overlay().querySelectorAll<HTMLElement>('.pw-select-list .opt')[5]!.click();
+      await settle(fixture);
+      button(el, 'Save changes').click();
+      await settle(fixture);
+      expect((await backend.settings()).cache.embeddingsTtlSecs).toBe(0);
+    });
+
+    it('edits storage, size, embeddings, prompt cache and keep-warm days, saved with the rest', async () => {
+      const { fixture, el, backend } = await setup();
+      const radio = (group: string, text: string) => Array.from(el.querySelectorAll<HTMLButtonElement>(`[aria-labelledby="${group}"] button`)).find((b) => b.textContent!.trim() === text)!;
+      radio('lbl-responses-storage', 'Memory only').click();
+      radio('lbl-embeddings-storage', 'Memory only').click();
+      radio('lbl-prompt-cache', 'Set size').click();
+      await settle(fixture);
+      await change(fixture, el, 'cache-responses-max', '128');
+      await change(fixture, el, 'cache-embeddings-max', '64');
+      await change(fixture, el, 'cache-keep-warm', '14');
+      el.querySelector<HTMLInputElement>('input[aria-label="Prompt cache size in MiB"]')!.value = '2048';
+      el.querySelector<HTMLInputElement>('input[aria-label="Prompt cache size in MiB"]')!.dispatchEvent(new Event('change'));
+      switchOf(el, 'lbl-affinity').click();
+      switchOf(el, 'lbl-emb-on').click();
+      await settle(fixture);
+      button(el, 'Save changes').click();
+      await settle(fixture);
+      expect((await backend.settings()).cache).toMatchObject({
+        responsesStorage: 'memory',
+        embeddingsStorage: 'memory',
+        responsesMaxMib: 128,
+        embeddingsMaxMib: 64,
+        keepWarmDays: 14,
+        promptCacheMib: 2048,
+        prefixAffinity: false,
+        embeddings: false,
+      });
+      radio('lbl-prompt-cache', 'Automatic').click();
+      await settle(fixture);
+      expect(el.querySelector('input[aria-label="Prompt cache size in MiB"]')).toBeNull();
+    });
+
+    it('clears one cache after confirming and refreshes its figures', async () => {
+      const { fixture, el, toasts } = await setup();
+      const clear = Array.from(el.querySelectorAll<HTMLButtonElement>('#set-cache button')).filter((b) => b.textContent!.trim() === 'Clear now');
+      expect(clear.length).toBe(2);
+      clear[1]!.click();
+      await confirmWith(fixture, 'Clear now');
+      expect(toasts.toasts().at(-1)?.message).toContain('Removed 184 cached entries');
+      expect(el.querySelectorAll('#set-cache .cache-stats')[1]!.textContent).toContain('none');
+    });
+
+    it('does nothing when the confirmation is cancelled, and clears everything on request', async () => {
+      const { fixture, el, toasts } = await setup();
+      button(el, 'Clear all caches').click();
+      await settle(fixture);
+      button(overlay(), 'Cancel').click();
+      await settle(fixture);
+      expect(toasts.toasts().length).toBe(0);
+      button(el.querySelector('#set-cache') as HTMLElement, 'Clear all caches').click();
+      await confirmWith(fixture, 'Clear now');
+      expect(toasts.toasts().at(-1)?.message).toContain('Removed 3596 cached entries');
+    });
+  });
 });

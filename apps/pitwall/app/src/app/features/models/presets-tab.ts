@@ -263,7 +263,7 @@ export function statusDetail(s: PresetStatus): string {
         font-weight: var(--fw-medium);
         color: var(--text-2);
       }
-      &.engine .select {
+      &.engine pw-select {
         max-width: 280px;
       }
     }
