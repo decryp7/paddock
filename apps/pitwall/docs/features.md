@@ -160,6 +160,14 @@ Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR
   weights + slots x context x KV bytes per token (from the GGUF header, or a documented estimate). Models > Slots shows what each
   step adds and a fit table (longest context at 1, 2, 4, 8 slots; the most slots at a context; fits, tight, won't fit);
   requests beyond the slots wait in the queue; a change applies on the next load and never interrupts a busy model. Works.
+- **Model update notices** ([ADR 0017](adr/0017-model-update-notices.md)): off until you turn it on in Settings > Model updates (weekly or
+  daily; Check now always works). A check asks `huggingface.co` for the file lists of the repositories you downloaded from, and
+  nothing else, through the one egress client; offline mode makes no request at all. It finds a newer revision of a file you have
+  (by the SHA-256 recorded at download, or by size for older downloads), a better quantisation of the same model that fits this
+  machine, or an imatrix build. Notices appear as a banner on Models, a note on the library row, a line on the Dashboard and an
+  entry in the tray; Dismiss hides an offer until it changes, Remind me in a week snoozes it. Get it asks for confirmation with
+  the host and size and then runs the normal download; nothing is ever fetched automatically. Works (tests use a fake
+  Hugging Face).
 - **Models and jobs**: `GET /x/v1/models` (capabilities the serving engine build can provide, `unavailable` with the reason and the build needed, maximum context, loaded), `GET /x/v1/jobs` (the queue),
   `DELETE /x/v1/jobs/{id}` (cancel; an app can cancel only its own). Works.
 - **Provenance on every answer**: `X-Pitwall-Model`, `X-Pitwall-Engine`, `X-Pitwall-Chosen-By` and, when the model had to be

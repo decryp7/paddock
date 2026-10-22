@@ -13,8 +13,9 @@ This is the user's explicit requirement and overrides every other consideration 
   "phone home" update pings beyond the opt-in app updater. No prompt, response, file name, model name or usage number
   is ever sent anywhere.
 - **The only outbound traffic** is downloading engines and models **the user asked for**, from the hosts in
-  `pitwall_core::privacy::DOWNLOAD_HOSTS`, over HTTPS, shown in the UI with their host. **Offline mode** turns even
-  that off.
+  `pitwall_core::privacy::DOWNLOAD_HOSTS`, over HTTPS, shown in the UI with their host, plus, only once the user turned it
+  on, the check-only model update queries (repository ids of models already downloaded, ADR 0017). **Offline mode** turns
+  even that off.
 - **The request path has no HTTP client.** Only `pitwall_server::egress` may build one (clippy's
   `disallowed-methods` enforces it; `egress.rs` is the single allowed place). Engines are reached only through
   `pitwall_server::loopback`, whose address type cannot hold anything but 127.0.0.1. The test

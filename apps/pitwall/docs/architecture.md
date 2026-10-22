@@ -137,6 +137,7 @@ real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.m
 | No plugins | [ADR 0010](adr/0010-no-plugin-system.md) |
 | Declarative engine and model packs | [ADR 0011](adr/0011-declarative-packs.md) |
 | Parallel slots per model, KV memory per slot, the fit solver | [ADR 0016](adr/0016-parallel-slots.md) |
+| Model update notices: ask Hugging Face for repository ids you downloaded, never fetch | [ADR 0017](adr/0017-model-update-notices.md) |
 
 ## Behaviour in text
 
@@ -199,6 +200,17 @@ A model's memory is its weights plus one KV cache per parallel slot (ADR 0016, `
 slot, so the engine is started with `--ctx-size = context x slots` and `--parallel = slots`; the load plan, the loaded footprint and
 the fit verdicts use that total, and `slots::solve` answers "how much context or concurrency fits" for the Slots panel. The scheduler's
 per-model concurrency is the model's slot count (the count it was loaded with while loaded), so requests beyond the slots queue.
+
+### Model update notices
+
+![Model update check sequence](diagrams/svg/uml-seq-update-check.svg)
+
+`pitwall_core::updates` holds the rules (provenance sidecar, newer revision, better quantisation, imatrix build) and
+`pitwall_core::update_state` the schedule, the notices and the dismissals; both are pure. `pitwall_server::updates` carries a
+check out: it scans the library (off the async threads), asks a `RepoSource` (`HfSource` over `egress`; the tests use a fake) for
+each repository's file list and commit, at most 40 per check, and stores the result in `model-updates.json`. Offline mode answers
+before the scan; nothing in the checker can start a download. A background loop looks at the schedule every five minutes, a minute
+after start; the setting `models.updateCheck` is off until the user enables it.
 
 ### Engine install and update
 
@@ -265,6 +277,8 @@ Everything is in one per-user data folder (override with `PITWALL_HOME`): `%APPD
 | `metrics.json` | Time series | Versioned, bounded retention (default 30 days) |
 | `engine-pins.json` | Engine build pins and rollback history (`pitwall_core::runtimes::pins`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then no pins; one damaged entry is skipped, at most 256 model pins, 8 remembered builds |
 | `presets.json` | Model presets and aliases (`pitwall_core::presets`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; one damaged entry is skipped, at most 64 presets |
+| `model-updates.json` | Model update notices, dismissals and when the checks ran (`pitwall_core::update_state`) | Versioned, atomic write with `.bak`, 1 MB cap, at most 200 notices and 500 dismissals, damage falls back to the backup, then empty |
+| `models/<repo>/<file>.gguf.origin.json` | Where a downloaded model came from: repository, file, size, SHA-256 per part, repository commit | Written when a download finishes; ignored when damaged or when it no longer matches the file |
 | `usage.json` | Per-app usage over time (`pitwall_core::usage`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; hourly buckets 7 days, daily buckets 90 days, at most 256 apps per bucket (the rest count as `other`), saved every 30 s |
 | `logs/` | Service log | Never prompts or answers by default |
 

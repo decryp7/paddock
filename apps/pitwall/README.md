@@ -76,6 +76,8 @@ Every feature, with its status, is in [docs/features.md](docs/features.md).
   selection) and defaults serve it; it works as the `model` in the OpenAI, Anthropic and Ollama APIs.
 - **Parallel slots per model.** Choose how many requests a model serves at once; the UI shows the memory each slot adds and how
   much context or concurrency fits.
+- **Model update notices.** Off until you turn it on: Pitwall asks Hugging Face, for the repositories you downloaded from only, whether
+  a file changed or a better quantisation fits, and tells you. It never downloads by itself.
 - **Memory management.** Presets (Low memory, Balanced, Performance), idle and deep-idle release, pressure release,
   pinned models, a countdown on the dashboard.
 - **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits (with usage over time per app), an offline mode.

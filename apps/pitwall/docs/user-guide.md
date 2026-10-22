@@ -20,6 +20,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 - [Choosing a model by capability, priority and provenance](#choosing-a-model-by-capability-priority-and-provenance)
 - [Model presets and aliases](#model-presets-and-aliases)
 - [Parallel slots per model](#parallel-slots-per-model)
+- [Model update notices](#model-update-notices)
 - [Memory presets and idle release](#memory-presets-and-idle-release)
 - [Offline mode](#offline-mode)
 - [Packs: add an engine or a model list](#packs-add-an-engine-or-a-model-list)
@@ -416,6 +417,27 @@ The context you set is the context of one slot: with 4 slots of 8,192 tokens Pit
 (`--ctx-size`, which the engine splits evenly) and `--parallel 4`. If the model file does not describe its layout the memory per
 slot is an estimate, and the panel says so. Requests beyond a model's slots wait in the queue. In **Discover**, each variant
 also says how many requests at once the machine could run.
+
+## Model update notices
+
+Hugging Face files change: a model is re-uploaded with a fix, or a better quantisation appears. Pitwall can tell you, and
+only tell you. It is **off until you turn it on**: Settings > **Model updates** > *Check for model updates*, then *Every week* or
+*Every day*. The first check runs as soon as you turn it on; **Check now** works at any time (once a minute).
+
+- **What is sent.** Only the repository ids (like `owner/name`) of models you already downloaded, to `huggingface.co`, in the
+  address of the same file-list request Discover makes. No prompts, usage, file contents or identifiers. A check asks about at most
+  40 repositories. **Offline mode** (Settings > Network) stops it completely; Check now then says so.
+- **What it finds.** *Newer revision*: the file you have changed on Hugging Face (compared by the SHA-256 recorded when you
+  downloaded it; for older downloads, by size). *Better quantisation*: the same model in the next higher-quality quantisation
+  (up to Q8_0) that fits this machine with room to spare. *Imatrix build*: the same quantisation as an importance-matrix build.
+- **Where you see it.** A banner at the top of **Models**, a note ("Update available: newer revision") on the model's row, a line
+  on the **Dashboard**, and an entry in the tray window.
+- **What you can do.** **Get it** shows the file, its size and the host (`huggingface.co`) and asks you to confirm before the
+  normal download starts; a newer revision replaces your copy only after it is downloaded and verified. **Remind me in a week**
+  hides the notice for that long. The **x** hides it until Hugging Face offers something different. Nothing is ever downloaded
+  without that confirmation.
+- **Files.** Notices and dismissals are in `model-updates.json`; each downloaded model has a small `<file>.origin.json` next to it
+  recording where it came from. A damaged file is restored from its backup or starts empty (the next check rebuilds it).
 
 ## Memory presets and idle release
 

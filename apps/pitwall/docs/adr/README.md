@@ -20,4 +20,5 @@ Numbered, with status, context, decision and consequences. ADRs are not renumber
 | [0014](0014-model-presets-and-aliases.md) | Model presets and aliases | accepted (number provisional) |
 | [0015](0015-command-line-tool.md) | The `pitwall` command-line tool | accepted (number provisional) |
 | [0016](0016-parallel-slots.md) | Parallel slots per model and what they cost | accepted (number provisional) |
+| [0017](0017-model-update-notices.md) | Model update notices: ask, never fetch | accepted (number provisional) |
 | [0018](0018-engine-pins-and-capability-gating.md) | Engine version pins, rollback and capability gating | accepted (number provisional) |
