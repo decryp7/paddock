@@ -30,6 +30,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--background"]),
         ))
+        .plugin(tauri_plugin_opener::init())
         .plugin(updater::plugin())
         .invoke_handler(tauri::generate_handler![
             commands::dyno,

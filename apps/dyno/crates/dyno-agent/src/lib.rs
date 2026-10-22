@@ -12,6 +12,7 @@ pub mod discovery;
 pub mod files;
 pub mod handlers;
 pub mod inventory;
+pub mod network;
 pub mod paths;
 pub mod recorder;
 pub mod rollup;
@@ -51,6 +52,23 @@ impl Running {
                 .map_err(|e| format!("could not start the sampler: {e}"))?,
         );
         inventory::warm(&shared);
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-network".into())
+                .spawn(move || {
+                    // Slow and cheap: only so that a new listener is noticed (and logged) when nobody has the page open.
+                    while !s.stopped() {
+                        s.network.tick(&s);
+                        let mut waited = std::time::Duration::ZERO;
+                        while waited < network::BACKGROUND_EVERY && !s.stopped() {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            waited += std::time::Duration::from_millis(500);
+                        }
+                    }
+                })
+                .map_err(|e| format!("could not start the network watcher: {e}"))?,
+        );
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()

@@ -35,6 +35,13 @@ pub enum PlatformError {
     Failed(String),
 }
 
+/// The machine's sockets: listening ports and connections with their owning process (observe-only).
+pub trait NetworkSockets: Send + Sync {
+    /// Every socket the OS shows to this user. A socket whose owner the OS will not name has `pid: None`; a refused read
+    /// is an error with what would help.
+    fn sockets(&self) -> Result<Vec<crate::network::SocketRow>, PlatformError>;
+}
+
 /// System-wide sensors. Called once per tick from the sampling thread.
 pub trait SystemSensors: Send {
     /// Measures everything at `now`. Rates (CPU, disk, network) cover the time since the previous call.

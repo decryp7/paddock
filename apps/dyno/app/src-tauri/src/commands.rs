@@ -45,16 +45,45 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
 /// The one command of the engine contract: `invoke('dyno', { request })`.
 #[tauri::command]
 pub async fn dyno(
+    app: AppHandle,
     webview: Webview,
     link: State<'_, Arc<AgentLink>>,
     shell: State<'_, Arc<Shell>>,
     request: Value,
 ) -> Result<Value, CommandError> {
     let request = parse_request(request)?;
+    let opens_browser = matches!(request, Request::LookupIp { .. });
     let (link, shell, label) = (link.inner().clone(), shell.inner().clone(), webview.label().to_string());
-    tauri::async_runtime::spawn_blocking(move || handle(&link, &shell, &label, request))
+    let value = tauri::async_runtime::spawn_blocking(move || handle(&link, &shell, &label, request))
         .await
-        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))??;
+    if opens_browser {
+        // "Look up IP": the agent built the URL from the validated template; the default browser opens it, Dyno never fetches it.
+        let url = value
+            .as_str()
+            .ok_or_else(|| CommandError::internal("The agent did not return a web address."))?;
+        open_in_browser(&app, url)?;
+        return Ok(Value::Null);
+    }
+    Ok(value)
+}
+
+/// The only schemes the shell hands to the OS to open: https (checked again here, whatever the agent built).
+pub fn https_only(url: &str) -> bool {
+    url.starts_with("https://") && !url.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
+fn open_in_browser(app: &AppHandle, url: &str) -> Result<(), CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+    if !https_only(url) {
+        return Err(CommandError::bad("Only https addresses are opened."));
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| {
+        CommandError::new(
+            crate::dto::ErrorCode::Unsupported,
+            format!("Dyno could not open the browser ({e}). Copy the address instead."),
+        )
+    })
 }
 
 /// `appInfo()`.
@@ -115,6 +144,22 @@ mod tests {
             parse_request(json!({"activity": {"limit": 5}})).unwrap(),
             Request::Activity { limit: 5 }
         ));
+    }
+
+    #[test]
+    fn only_clean_https_addresses_are_opened() {
+        assert!(https_only("https://ipinfo.io/8.8.8.8"));
+        for bad in [
+            "http://x/",
+            "file:///etc/passwd",
+            "javascript:1",
+            "https://x/ y",
+            "https://x/\n",
+            "ftp://x",
+            "",
+        ] {
+            assert!(!https_only(bad), "{bad:?}");
+        }
     }
 
     #[test]

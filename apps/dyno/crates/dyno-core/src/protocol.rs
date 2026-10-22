@@ -264,6 +264,19 @@ pub enum Request {
         /// The destination.
         path: String,
     },
+    /// Open ports and connections per process, filtered (observe-only). Appended.
+    Network {
+        /// What to show.
+        query: crate::network::NetworkQuery,
+    },
+    /// The URL "Look up IP" opens for an address, built from the saved template (or `template` when testing one that is
+    /// not saved yet). The shell opens it in the default browser; Dyno never fetches it. Appended.
+    LookupIp {
+        /// The address as the page shows it.
+        ip: String,
+        /// A template to test instead of the saved one.
+        template: Option<String>,
+    },
     /// The benchmark runs and the one in progress. Appended.
     Benchmarks,
     /// Starts a benchmark run (answers the overview; refused with `Busy` while one runs). Never automatic. Appended.
@@ -522,6 +535,10 @@ pub enum Reply {
     DiagnosticsPreview(Box<crate::diagnostics::BundlePreview>),
     /// The bundle was written. Appended.
     DiagnosticsSaved(crate::diagnostics::SavedDiagnostics),
+    /// A web address for the shell to open in the browser (https only). Appended.
+    Url(String),
+    /// Open ports and connections. Appended.
+    Network(Box<crate::network::NetworkSnapshot>),
     /// The benchmark overview. Appended.
     Benchmarks(Box<crate::bench::BenchOverview>),
     /// Two runs compared. Appended.
@@ -566,6 +583,8 @@ impl Reply {
             Reply::RecorderSnapshot(x) => v(x),
             Reply::DiagnosticsPreview(x) => v(x),
             Reply::DiagnosticsSaved(x) => v(x),
+            Reply::Url(x) => v(x),
+            Reply::Network(x) => v(x),
             Reply::Benchmarks(x) => v(x),
             Reply::BenchComparison(x) => v(x),
         }
@@ -757,6 +776,8 @@ mod tests {
             Reply::AlarmStats(Box::default()),
             Reply::AlarmChanges(vec![]),
             Reply::Benchmarks(Box::default()),
+            Reply::Network(Box::default()),
+            Reply::Url("https://example.com/".into()),
             Reply::RecorderSnapshots(vec![]),
             Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {
                 path: "/x.zip".into(),

@@ -13,6 +13,8 @@ dyno-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 plist = "1"
+# Sockets with their owning process on every OS (MIT/Apache-2.0): GetExtendedTcpTable, libproc, /proc/net.
+netstat2 = "0.11"
 starship-battery = "0.12"
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk", "network", "component", "user"] }
 

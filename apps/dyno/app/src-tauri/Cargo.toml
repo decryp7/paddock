@@ -29,6 +29,7 @@ thiserror.workspace = true
 # elsewhere. It must sit here, not under a target table: tauri-build checks only this list against the config.
 tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 # >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version). No "zip": updater artifacts are the
 # installers themselves. The platform verifier trusts the OS certificate store (TLS-inspecting proxies).

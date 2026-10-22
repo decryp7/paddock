@@ -161,6 +161,17 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             Ok(Reply::Settings(Box::new(s)))
         }
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
+        Request::Network { query } => shared.network.snapshot(shared, query).map(|s| Reply::Network(Box::new(s))),
+        Request::LookupIp { ip, template } => {
+            let settings = match template {
+                Some(t) => dyno_core::ip_lookup::IpLookupSettings {
+                    ip_template: t,
+                    asn_template: String::new(),
+                },
+                None => lock(&shared.core).settings.ip_lookup.clone(),
+            };
+            settings.url(&ip).map(Reply::Url).map_err(|e| bad(e.to_string()))
+        }
         Request::Benchmarks => Ok(Reply::Benchmarks(Box::new(shared.bench.overview()))),
         Request::StartBenchmark {
             kinds,

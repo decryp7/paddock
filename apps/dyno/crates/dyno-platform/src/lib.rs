@@ -12,6 +12,7 @@ pub mod control_state;
 pub mod dev_folders;
 pub mod fake;
 pub mod inventory;
+pub mod network;
 pub mod parse;
 pub mod process;
 pub mod processes;

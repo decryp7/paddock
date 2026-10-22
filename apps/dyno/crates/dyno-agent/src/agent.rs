@@ -197,6 +197,8 @@ pub struct Shared {
     pub plugins: dyno_plugin_host::PluginHost,
     /// Opens the file manager.
     pub reveal: Reveal,
+    /// Open ports and connections (observe-only).
+    pub network: crate::network::NetCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
     /// Logical cores (for validating affinity and normalising overhead).
@@ -304,6 +306,7 @@ impl Shared {
             subs: Mutex::new(Vec::new()),
             reveal,
             bench,
+            network: crate::network::NetCentre::new(Box::new(dyno_platform::network::OsSockets)),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

@@ -165,6 +165,8 @@ pub struct Settings {
     pub alarms: crate::alarms::AlarmConfig,
     /// Keep the last ten minutes at one-second resolution for captures (backs off when Dyno's CPU budget is at risk).
     pub flight_recorder: bool,
+    /// "Look up this IP": the https template the browser is sent to (Dyno never fetches).
+    pub ip_lookup: crate::ip_lookup::IpLookupSettings,
 }
 
 impl Default for Settings {
@@ -183,6 +185,7 @@ impl Default for Settings {
             tray_items: Default::default(),
             alarms: Default::default(),
             flight_recorder: true,
+            ip_lookup: Default::default(),
         }
     }
 }
@@ -211,6 +214,7 @@ impl Settings {
         self.dashboard = self.dashboard.normalised();
         self.tray_items = self.tray_items.normalised();
         self.alarms = self.alarms.clamped();
+        self.ip_lookup = self.ip_lookup.normalised();
         self
     }
 }
