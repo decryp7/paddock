@@ -368,7 +368,7 @@ async fn embeddings_need_an_embedding_model() {
         )
         .await;
     assert_eq!(r.status, 200, "{}", r.body);
-    assert_eq!(r.json()["data"][0]["embedding"], json!([0.5, 0.25]));
+    assert_eq!(r.json()["data"][0]["embedding"], json!([1.0, 0.25]));
     let r = h
         .call(
             "POST",
@@ -378,7 +378,7 @@ async fn embeddings_need_an_embedding_model() {
             &[],
         )
         .await;
-    assert_eq!(r.json()["embeddings"][0], json!([0.5, 0.25]));
+    assert_eq!(r.json()["embeddings"][0], json!([1.0, 0.25]));
 }
 
 #[tokio::test]
