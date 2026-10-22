@@ -2,7 +2,12 @@
 //! everywhere; the OS modules only feed them bytes and text.
 
 pub mod gpu;
+pub mod desktop_entry;
 pub mod launchd;
+pub mod linux_hw;
+pub mod linux_net;
+pub mod linux_proc;
+pub mod linux_tools;
 pub mod lnk;
 pub mod lsof;
 pub mod mac_tools;

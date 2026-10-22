@@ -146,7 +146,8 @@ impl ProcessSource for SysinfoProcesses {
             .with_tasks();
         self.sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, kind);
         let p = self.sys.process(pid).ok_or_else(|| gone(target.pid))?;
-        if !same_start(started_from_unix_secs(p.start_time()), target.started) {
+        // sysinfo lists Linux threads as processes; a thread id is never a target.
+        if p.thread_kind().is_some() || !same_start(started_from_unix_secs(p.start_time()), target.started) {
             return Err(gone(target.pid));
         }
         let mut sample = self.sample_of(p, 0.0);
