@@ -28,6 +28,8 @@ thiserror = "2.0"
 time = { version = "0.3", features = ["parsing", "formatting", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util", "net"] }
 toml = "1"
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Dependencies are optimised even in debug builds; workspace crates stay at opt-level 0 for fast rebuilds.
 [profile.dev.package."*"]

@@ -1,0 +1,29 @@
+# The pinned Chromium builds Spotter may download (ADR 0002): one entry per platform with the archive URL and its
+# SHA-256. `install` refuses anything that does not match the checksum.
+#
+# NOT CONFIGURED YET. The entries below are placeholders: pinning needs the real archive URLs (for example Chrome for
+# Testing zips) and hashes computed from the downloaded files, which cannot be fetched offline. Until they are filled
+# in, `install` returns "the pinned Chromium build is not configured yet". An entry counts as configured when `url`
+# is https and `sha256` is 64 hex digits. Keys: <windows|macos|linux>-<x86_64|aarch64>.
+
+version = "UNCONFIGURED"
+
+[[platform]]
+key = "windows-x86_64"
+url = "PLACEHOLDER"
+sha256 = "PLACEHOLDER"
+
+[[platform]]
+key = "macos-aarch64"
+url = "PLACEHOLDER"
+sha256 = "PLACEHOLDER"
+
+[[platform]]
+key = "macos-x86_64"
+url = "PLACEHOLDER"
+sha256 = "PLACEHOLDER"
+
+[[platform]]
+key = "linux-x86_64"
+url = "PLACEHOLDER"
+sha256 = "PLACEHOLDER"

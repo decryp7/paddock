@@ -1,6 +1,6 @@
 [package]
 name = "spotter-render"
-description = "Spotter render (see AGENTS.md)"
+description = "Spotter renderer: a self-contained Chromium driver (CDP) behind the PageRenderer port"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,20 @@ authors = ["decryp7"]
 publish = false
 
 [dependencies]
-spotter-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+toml.workspace = true
+sysinfo.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+tungstenite.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
 
 [lints]
 workspace = true
