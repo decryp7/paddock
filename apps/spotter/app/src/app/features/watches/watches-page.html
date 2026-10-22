@@ -78,7 +78,7 @@
                   <td class="nowrap muted" [attr.title]="w.lastCheckMs ? (w.lastCheckMs | ago) : null">{{ w.lastCheckMs | agoShort }}</td>
                   <td class="nowrap muted">{{ w.paused ? 'Paused' : (w.nextCheckMs ? (w.nextCheckMs | untilShort) : '—') }}</td>
                   <td>
-                    <div class="hover-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+                    <div class="hover-actions" role="presentation" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
                       <button type="button" class="btn ghost icon sm reveal" (click)="store.checkNow(w.id)" [disabled]="w.checking" [attr.aria-label]="'Check ' + w.name + ' now'" title="Check now">
                         <mat-icon svgIcon="sp:refresh" aria-hidden="true" [class.spin]="w.checking" />
                       </button>

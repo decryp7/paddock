@@ -40,6 +40,17 @@ PW_PORT=4370 npx playwright test --workers=1   # browser flows (Spotter uses por
 Use `CARGO_BUILD_JOBS=2` and a private `CARGO_TARGET_DIR` on a shared machine. Full instructions, quality gates and
 load rules are in [docs/development.md](docs/development.md); releases in [docs/releasing.md](docs/releasing.md).
 
+## Screenshots
+
+1440x900 at 2x, dark and light (`SCREENSHOTS=1 npx playwright test --project=screenshots` in `app/`, against the mock backend with invented data).
+
+| Dashboard | Watches |
+| --- | --- |
+| ![Dashboard](docs/screenshots/dashboard-dark.png) | ![Watches](docs/screenshots/watches-dark.png) |
+| ![Dashboard, light](docs/screenshots/dashboard-light.png) | ![Watches, light](docs/screenshots/watches-light.png) |
+
+Also in `docs/screenshots`: release cadence, watch detail (with the release panel and a multi-product watch), the add-watch wizard, settings, the tray popup and the empty states.
+
 ## Diagrams
 
 Drawn with the Paddock diagram kit (see [docs/diagrams/STYLE.md](docs/diagrams/STYLE.md)); the `.drawio` sources and generators

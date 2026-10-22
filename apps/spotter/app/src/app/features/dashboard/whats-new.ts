@@ -49,7 +49,7 @@ import { WatchesStore } from '../../state/watches.store';
                   <span class="to"><sp-ver [value]="item.release.version" /></span>
                 </span>
                 <time class="when">{{ item.releasedAtMs | agoShort }}</time>
-                <div class="hover-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+                <div class="hover-actions" role="presentation" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
                   <button type="button" class="btn ghost icon sm reveal" (click)="store.openRelease(item.watchId, item.release.version, { product: item.release.product })" [attr.aria-label]="'Open ' + item.release.version + ' of ' + item.watchName" title="Open">
                     <mat-icon svgIcon="sp:external" aria-hidden="true" />
                   </button>

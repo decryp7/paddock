@@ -64,7 +64,7 @@ export class WatchesPage {
   }
 
   protected ariaSort(by: WatchSort): string | null {
-    return this.store.sort() === by ? 'ascending' : null;
+    return this.store.sort() === by ? (by === 'name' ? 'ascending' : 'descending') : null;
   }
 
   protected onQuery(e: Event): void {

@@ -104,7 +104,7 @@
                         <td class="nowrap muted">{{ p.latest?.firstSeenMs | agoShort }}</td>
                         <td class="num">{{ p.latest?.artifacts?.length ?? 0 }}</td>
                         <td>
-                          <div class="hover-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+                          <div class="hover-actions" role="presentation" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
                             @if (p.unseen) {
                               <button type="button" class="btn ghost icon sm reveal" (click)="watches.acknowledgeProduct(s.id, p.id)" [attr.aria-label]="'Mark ' + p.name + ' as seen'" title="Mark as seen"><mat-icon svgIcon="sp:check" aria-hidden="true" /></button>
                             }
@@ -149,7 +149,7 @@
                         <td class="nowrap muted" [attr.title]="dateTime(r.firstSeenMs)">{{ r.firstSeenMs | agoShort }}</td>
                         <td class="num">{{ mib(r.size) }}</td>
                         <td>
-                          <div class="hover-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+                          <div class="hover-actions" role="presentation" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
                             <button type="button" class="btn ghost icon sm reveal" (click)="watches.openRelease(s.id, r.version, { product: r.product })" [attr.aria-label]="'Open ' + r.version" title="Open"><mat-icon svgIcon="sp:external" aria-hidden="true" /></button>
                             <button type="button" class="btn ghost icon sm reveal" (click)="watches.download(s.id, r.version, { product: r.product })" [attr.aria-label]="'Download ' + r.version" title="Download"><mat-icon svgIcon="sp:download" aria-hidden="true" /></button>
                             <sp-menu-button [label]="'More actions for ' + r.version" [entries]="releaseEntries(r)" (picked)="onRelease($event, r)" />

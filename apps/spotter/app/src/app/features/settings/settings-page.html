@@ -35,8 +35,8 @@
           </div>
           <div class="seg-tabs" role="group" aria-label="Pause notifications">
             <button type="button" [attr.aria-pressed]="!pausedFor()" (click)="store.pauseNotifications(null)">On</button>
-            <button type="button" [attr.aria-pressed]="!!pausedFor()" (click)="store.pauseNotifications(60)">Pause 1 hour</button>
-            <button type="button" aria-pressed="false" (click)="store.pauseNotifications(24 * 60)">Pause 1 day</button>
+            <button type="button" (click)="store.pauseNotifications(60)">Pause 1 hour</button>
+            <button type="button" (click)="store.pauseNotifications(24 * 60)">Pause 1 day</button>
           </div>
         </div>
         <div class="row">
