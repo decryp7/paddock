@@ -51,6 +51,8 @@ pub struct HotModel {
     pub loaded_at: u64,
     active: AtomicUsize,
     last_used: AtomicU64,
+    /// The context (KV cache and prompt cache) was cleared while idle; reset by the next request.
+    context_released: std::sync::atomic::AtomicBool,
     /// Vision input works.
     pub vision: bool,
     /// How long the load took.
@@ -75,7 +77,7 @@ impl HotModel {
             loading: false,
             last_used: self.last_used.load(Ordering::SeqCst),
             idle_override,
-            context_released: false,
+            context_released: self.context_released.load(Ordering::SeqCst),
         }
     }
 }
@@ -86,6 +88,7 @@ pub struct Busy(Arc<HotModel>);
 impl Busy {
     fn new(m: Arc<HotModel>) -> Busy {
         m.active.fetch_add(1, Ordering::SeqCst);
+        m.context_released.store(false, Ordering::SeqCst);
         m.touch();
         Busy(m)
     }
@@ -530,6 +533,7 @@ impl Serving {
             loaded_at: now_ms(),
             active: AtomicUsize::new(0),
             last_used: AtomicU64::new(now_ms()),
+            context_released: std::sync::atomic::AtomicBool::new(false),
             vision,
             engine: (engine.id(), engine.kind()),
             cold_start_ms: started.elapsed().as_millis() as u64,
@@ -617,11 +621,38 @@ impl Serving {
             self.inner.last_activity.load(Ordering::SeqCst),
         );
         for a in &actions {
-            if let Action::Unload(m, why) = a {
-                self.unload(m, *why);
+            match a {
+                Action::Unload(m, why) => {
+                    self.unload(m, *why);
+                }
+                Action::ReleaseContext(m, why) => self.release_context(m, *why),
             }
         }
         actions
+    }
+
+    /// Clears an idle model's context before its weights are released: the engine's slots are erased (KV cache and
+    /// cached prompts) in the background. A model that became busy meanwhile is left alone.
+    fn release_context(&self, id: &ModelId, why: ReleaseReason) {
+        let Some(h) = lock(&self.inner.hot).get(id).cloned() else { return };
+        if h.active.load(Ordering::SeqCst) > 0 || h.context_released.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let slots = self.settings().server.max_concurrent.clamp(1, 4);
+        let me = self.clone();
+        tokio::spawn(async move {
+            for slot in 0..slots {
+                if h.active.load(Ordering::SeqCst) > 0 {
+                    return;
+                }
+                let path = format!("/slots/{slot}?action=erase");
+                if let Err(e) = h.running.client.send("POST", &path, None, Duration::from_secs(5)).await {
+                    me.event(EventKind::ContextReleased, Severity::Warn, format!("Could not clear the context of {}: {e}", h.id));
+                    return;
+                }
+            }
+            me.event(EventKind::ContextReleased, Severity::Info, format!("Cleared the context of {} ({why:?}); its weights stay loaded.", h.id));
+        });
     }
 
     /// Restarts a crashed model in the background; a failed attempt is another crash (backoff, then the loop guard).

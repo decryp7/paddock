@@ -645,3 +645,32 @@ async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retr
     assert!(h.st.serving.issues().is_empty());
     h.st.serving.release_all();
 }
+
+#[tokio::test]
+async fn an_idle_models_context_is_cleared_before_its_weights_are_released() {
+    let h = harness(false).await;
+    let key = h.make_key("Context Test").await;
+    assert_eq!(h.rpc("apply_preset", json!({"preset": "lowMemory"})).await.status, 200);
+    assert_eq!(h.rpc("set_model_idle", json!({"id": "tiny-q4_k_m", "idleSecs": 2})).await.status, 200);
+    let ask = || h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]);
+    assert_eq!(ask().await.status, 200);
+    h.st.serving.tick();
+    assert_eq!(h.erases.load(Ordering::SeqCst), 0, "not idle long enough");
+
+    // Half the idle time has passed: the context goes, the weights stay.
+    tokio::time::sleep(std::time::Duration::from_millis(1300)).await;
+    h.st.serving.tick();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let erased = h.erases.load(Ordering::SeqCst);
+    assert!(erased >= 1, "the engine's slots were erased");
+    assert_eq!(h.st.serving.loaded().len(), 1, "still loaded");
+    h.st.serving.tick();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(h.erases.load(Ordering::SeqCst), erased, "only once per idle period");
+
+    // The next request makes it eligible again; past the idle time the weights go too.
+    assert_eq!(ask().await.status, 200);
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    h.st.serving.tick();
+    assert!(h.st.serving.loaded().is_empty(), "unloaded after the full idle time");
+}

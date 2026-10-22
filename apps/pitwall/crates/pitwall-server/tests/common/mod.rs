@@ -27,6 +27,8 @@ impl Drop for AbortOnDrop {
 /// A fake llama-server: /health, /props, streamed chat completions, embeddings.
 pub struct FakeEngine {
     pub starts: Arc<AtomicUsize>,
+    /// `POST /slots/{n}?action=erase` calls received (the context release).
+    pub erases: Arc<AtomicUsize>,
     pub fail: bool,
 }
 
@@ -45,7 +47,18 @@ impl Engine for FakeEngine {
             if self.fail {
                 return Err(EngineError::Start("the fake engine refuses to start".into()));
             }
+            let erases = self.erases.clone();
             let app = Router::new()
+                .route(
+                    "/slots/{slot}",
+                    post(move || {
+                        let erases = erases.clone();
+                        async move {
+                            erases.fetch_add(1, Ordering::SeqCst);
+                            axum::Json(json!({"id_slot": 0, "n_erased": 1}))
+                        }
+                    }),
+                )
                 .route("/health", get(|| async { axum::Json(json!({"status": "ok"})) }))
                 .route(
                     "/props",
@@ -89,6 +102,7 @@ pub struct Harness {
     pub client: Client,
     pub admin: String,
     pub starts: Arc<AtomicUsize>,
+    pub erases: Arc<AtomicUsize>,
     pub dir: tempfile::TempDir,
 }
 
@@ -118,8 +132,10 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
         std::fs::write(m.join("tiny-Q4_K_M.gguf"), gguf("llama")).unwrap();
     }
     let starts = Arc::new(AtomicUsize::new(0));
+    let erases = Arc::new(AtomicUsize::new(0));
     let engine: Arc<dyn Engine> = Arc::new(FakeEngine {
         starts: starts.clone(),
+        erases: erases.clone(),
         fail,
     });
     let st = AppState::open(dirs.clone(), Some(engine)).await;
@@ -136,6 +152,7 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
         client: Client::new(LoopbackPort::new(port).unwrap(), None),
         admin,
         starts,
+        erases,
         dir,
     }
 }
