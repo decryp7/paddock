@@ -178,7 +178,11 @@ jobs:
 
       # The agent's own CLI on the real machine: one measurement, read-only.
       - name: Agent measures once (macOS)
-        run: cargo run -q -p dyno-agent -- once | head -c 400
+        run: |
+          out="${TMPDIR:-/tmp}/dyno-once-ci.json"
+          cargo run -q -p dyno-agent -- once > "$out"
+          head -c 400 "$out"
+          rm -f "$out"
 
       - name: Clean up test leftovers
         if: always()
