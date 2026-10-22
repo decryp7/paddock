@@ -120,7 +120,9 @@ impl PackEngine {
             ("port", l.port.to_string()),
             ("model", l.model.clone()),
             ("mmproj", l.mmproj.clone().unwrap_or_default()),
-            ("context", l.context.to_string()),
+            // `Launch::context` is the total of all slots; a pack's `{context}` is what one request may use.
+            ("context", (l.context / l.parallel.max(1)).to_string()),
+            ("slots", l.parallel.max(1).to_string()),
             ("alias", l.alias.clone()),
             ("threads", l.threads.max(1).to_string()),
             ("engine_dir", engine_dir.to_string()),
@@ -218,7 +220,7 @@ impl Engine for PackEngine {
                 client,
                 port: l.port,
                 props: pitwall_core::llama::Props {
-                    n_ctx: Some(l.context),
+                    n_ctx: Some(l.context / l.parallel.max(1)),
                     vision: Some(self.pack.caps.vision && l.mmproj.is_some()),
                     ..Default::default()
                 },
@@ -272,6 +274,18 @@ mod tests {
         let (cmd, args) = e.command_line(&launch(), "bin", "/eng").unwrap();
         assert_eq!(cmd, "/eng/bin");
         assert_eq!(args, ["--host", "127.0.0.1", "--port", "5555", "-m", "/m/x.gguf", "-c", "2048"]);
+    }
+
+    #[test]
+    fn a_packs_context_is_per_slot() {
+        let (_d, e) = engine("");
+        let four = Launch {
+            context: 8192,
+            parallel: 4,
+            ..launch()
+        };
+        let (_, args) = e.command_line(&four, "bin", "/eng").unwrap();
+        assert_eq!(args.last().map(String::as_str), Some("2048"), "the total of 8192 over 4 slots");
     }
 
     #[tokio::test]

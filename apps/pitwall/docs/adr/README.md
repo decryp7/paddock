@@ -19,3 +19,4 @@ Numbered, with status, context, decision and consequences. ADRs are not renumber
 | [0013](0013-usage-over-time.md) | Per-app usage over time, and limits that explain themselves | accepted (number provisional) |
 | [0014](0014-model-presets-and-aliases.md) | Model presets and aliases | accepted (number provisional) |
 | [0015](0015-command-line-tool.md) | The `pitwall` command-line tool | accepted (number provisional) |
+| [0016](0016-parallel-slots.md) | Parallel slots per model and what they cost | accepted (number provisional) |

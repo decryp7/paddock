@@ -136,6 +136,7 @@ real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.m
 | How apps find, pair with and use Pitwall | [ADR 0009](adr/0009-app-integration-contract.md) |
 | No plugins | [ADR 0010](adr/0010-no-plugin-system.md) |
 | Declarative engine and model packs | [ADR 0011](adr/0011-declarative-packs.md) |
+| Parallel slots per model, KV memory per slot, the fit solver | [ADR 0016](adr/0016-parallel-slots.md) |
 
 ## Behaviour in text
 
@@ -193,6 +194,11 @@ Balanced, Performance) are sets of these values; `custom` is the user's own. The
 simply reloads the model (a cold start).
 
 ![Hot model states](diagrams/svg/uml-state-hot-model.svg)
+
+A model's memory is its weights plus one KV cache per parallel slot (ADR 0016, `pitwall_core::slots`). The configured context is per
+slot, so the engine is started with `--ctx-size = context x slots` and `--parallel = slots`; the load plan, the loaded footprint and
+the fit verdicts use that total, and `slots::solve` answers "how much context or concurrency fits" for the Slots panel. The scheduler's
+per-model concurrency is the model's slot count (the count it was loaded with while loaded), so requests beyond the slots queue.
 
 ### Engine install and update
 

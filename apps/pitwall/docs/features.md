@@ -147,6 +147,11 @@ Versioned by `API_VERSION` (1); changes within a version are additive only ([ADR
   preset's; the system prompt is added only when the request has none; context and engine apply when the model is loaded.
   Answers carry `X-Pitwall-Alias`; a removed target model answers 404 `preset_target_unavailable` with the preset's name. A
   real model's name always wins over a preset of the same name. Works.
+- **Parallel slots per model** ([ADR 0016](adr/0016-parallel-slots.md)): 1 to 16 requests served at once on one loaded model
+  (default 2, `models.default_slots`). The configured context is per slot and each slot keeps its own KV cache, so the memory is
+  weights + slots x context x KV bytes per token (from the GGUF header, or a documented estimate). Models > Slots shows what each
+  step adds and a fit table (longest context at 1, 2, 4, 8 slots; the most slots at a context; fits, tight, won't fit);
+  requests beyond the slots wait in the queue; a change applies on the next load and never interrupts a busy model. Works.
 - **Models and jobs**: `GET /x/v1/models` (capabilities, maximum context, loaded), `GET /x/v1/jobs` (the queue),
   `DELETE /x/v1/jobs/{id}` (cancel; an app can cancel only its own). Works.
 - **Provenance on every answer**: `X-Pitwall-Model`, `X-Pitwall-Engine`, `X-Pitwall-Chosen-By` and, when the model had to be

@@ -19,6 +19,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 - [The `pitwall` command-line tool](#the-pitwall-command-line-tool)
 - [Choosing a model by capability, priority and provenance](#choosing-a-model-by-capability-priority-and-provenance)
 - [Model presets and aliases](#model-presets-and-aliases)
+- [Parallel slots per model](#parallel-slots-per-model)
 - [Memory presets and idle release](#memory-presets-and-idle-release)
 - [Offline mode](#offline-mode)
 - [Packs: add an engine or a model list](#packs-add-an-engine-or-a-model-list)
@@ -379,6 +380,23 @@ engine apply when the model is loaded for the request; a model that is already l
 is released. In **Requests**, a request made through a preset shows "via <name>" and, in the details, the preset asked for and
 the model it resolved to. Presets are stored in `presets.json` in the data folder; a damaged file is restored from its backup.
 
+## Parallel slots per model
+
+A model can serve several requests at once. Each running request uses a *slot*, and every slot keeps its own context in memory,
+so more slots mean more memory. In **Models > Library**, the **Slots** button of a model opens a panel:
+
+- Pick 1, 2, 4 or 8 slots, or drag the slider (1 to 16). Under each choice the panel says what it adds ("adds ~3.1 GB").
+- Drag **Context per slot** to see how much each slot can hold. The table answers, in words, how much memory the model needs at
+  each slot count, the longest context each slot can have, and whether it fits, is tight or will not fit on this machine, and
+  which is the most slots that fit at the chosen context.
+- **Save** stores the choice. It applies the next time the model loads; a model that is loaded keeps its count until then, and
+  requests it is serving are never interrupted. **Use the default** returns to `models.default_slots` (2).
+
+The context you set is the context of one slot: with 4 slots of 8,192 tokens Pitwall starts the engine with a 32,768 token cache
+(`--ctx-size`, which the engine splits evenly) and `--parallel 4`. If the model file does not describe its layout the memory per
+slot is an estimate, and the panel says so. Requests beyond a model's slots wait in the queue. In **Discover**, each variant
+also says how many requests at once the machine could run.
+
 ## Memory presets and idle release
 
 Pitwall loads a model when the first request needs it and gives the memory back when it is not needed
@@ -443,7 +461,7 @@ tools = false
 [launch]
 # The command may be a bare name found on PATH or an absolute path. {host} is always 127.0.0.1.
 command = "my-server"
-# {host}, {port} and {model} are required. Others: {mmproj} {context} {alias} {threads} {engine_dir} {binary}.
+# {host}, {port} and {model} are required. Others: {mmproj} {context} (per slot) {slots} {alias} {threads} {engine_dir} {binary}.
 args = ["--host", "{host}", "--port", "{port}", "--model", "{model}", "--ctx-size", "{context}"]
 # api_key_env = "MY_SERVER_API_KEY"   # optional UPPER_CASE variable; Pitwall sets a private key in it
 start_timeout_secs = 120             # 5-1800, default 300
