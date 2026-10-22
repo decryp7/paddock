@@ -16,6 +16,7 @@ pub mod action;
 pub mod checksum;
 pub mod config;
 pub mod dashboard;
+pub mod extract;
 pub mod filter;
 pub mod import;
 pub mod journal;
