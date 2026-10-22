@@ -227,7 +227,8 @@ fn shutdown_removes_the_discovery_file_and_a_second_agent_is_not_needed() {
     let mut h = Harness::start();
     let peer = h.client();
     assert!(h.dirs.discovery().exists());
-    ask(&peer, Request::Shutdown).unwrap();
+    // The agent may close the connection as it stops, before or after the reply arrives: both are a clean shutdown.
+    let _ = ask(&peer, Request::Shutdown);
     let running = h.running.take().unwrap();
     for _ in 0..50 {
         if running.stopped() {
