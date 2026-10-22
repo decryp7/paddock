@@ -290,32 +290,17 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
     }
 }
 
-/// A copy of the freshly built `pitwall-server` inside `dir` (a temp folder), for tests that launch it as a real child process.
+/// The freshly built `pitwall-server`, for tests that launch it as a real child process.
 ///
-/// The copy keeps a build folder that forbids execution out of the picture. Building the Tauri shell (`pitwall-app`)
-/// before these tests overwrites `target/debug/pitwall-server` with an empty placeholder sidecar (`Permission denied`,
-/// then `Exec format error`); the assertion below names that cause. Returns the copy's path.
-pub fn runnable_server(dir: &std::path::Path) -> String {
-    let bin = dir.join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let name = if cfg!(windows) { "pitwall-server.exe" } else { "pitwall-server" };
-    let target = bin.join(name);
-    let bytes = std::fs::read(env!("CARGO_BIN_EXE_pitwall-server")).unwrap();
+/// Building the Tauri shell (`pitwall-app`) before these tests overwrites `target/debug/pitwall-server` with an empty
+/// placeholder sidecar (`Permission denied`, then `Exec format error`); the assertion names that cause. Copying the
+/// binary elsewhere does not help and is slow on Windows (virus scanners), so the built file is used in place.
+pub fn runnable_server(_dir: &std::path::Path) -> String {
+    let exe = env!("CARGO_BIN_EXE_pitwall-server");
+    let len = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
     assert!(
-        bytes.starts_with(&[0x7f, b'E', b'L', b'F']) || bytes.starts_with(b"MZ") || bytes.len() > 1_000_000,
-        "target/debug/pitwall-server is {} bytes: the Tauri shell was built first and replaced it with its placeholder sidecar; run these tests before building pitwall-app",
-        bytes.len()
+        len > 100_000,
+        "{exe} is {len} bytes: the Tauri shell was built first and replaced it with its placeholder sidecar; run these tests before building pitwall-app"
     );
-    std::fs::write(&target, &bytes).unwrap();
-    assert_eq!(
-        std::fs::metadata(&target).unwrap().len(),
-        bytes.len() as u64,
-        "the copy of the server is incomplete"
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    target.to_string_lossy().into_owned()
+    exe.to_string()
 }

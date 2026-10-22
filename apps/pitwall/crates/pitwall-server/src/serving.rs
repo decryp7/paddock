@@ -688,11 +688,20 @@ impl Serving {
                 }
             }
         }
-        let port = self.free_port().await;
-        let launch = self.launch_for(&f, context, slots, port);
         self.event(EventKind::EngineStarted, Severity::Info, format!("Loading {id}"));
         let engine = self.engine_for(o.engine.as_deref().or(prefs.engine.as_deref()))?;
-        let running = engine.start(&launch).await.map_err(|e| {
+        // The port is probed and released before the engine binds it, so another program can take it in between:
+        // an "address in use" failure gets a fresh port (a few times) instead of failing the request.
+        let mut attempt = 0;
+        let started_engine = loop {
+            let port = self.free_port().await;
+            let launch = self.launch_for(&f, context, slots, port);
+            match engine.start(&launch).await {
+                Err(e) if attempt < 3 && port_taken(&e) => attempt += 1,
+                other => break other,
+            }
+        };
+        let running = started_engine.map_err(|e| {
             self.event(EventKind::EngineFailed, Severity::Error, format!("{id}: {e}"));
             if lock(&self.inner.supervisor).crashed(id, now_ms(), auto_restart) == Outcome::GaveUp {
                 self.event(
@@ -1070,5 +1079,30 @@ pub fn caps_of(s: &Settings) -> Caps {
         max_running: s.server.max_concurrent.max(1) as usize,
         per_model: s.models.default_slots.count(),
         ..Caps::default()
+    }
+}
+
+/// Whether a failed start was the engine's port being taken by someone else in the meantime.
+fn port_taken(e: &EngineError) -> bool {
+    let EngineError::Start(m) = e else { return false };
+    let m = m.to_lowercase();
+    m.contains("address already in use") || m.contains("address in use") || m.contains("only one usage of each socket address")
+}
+
+#[cfg(test)]
+mod port_tests {
+    use super::*;
+
+    #[test]
+    fn a_taken_port_is_recognised_on_every_platform() {
+        for m in [
+            "x: Address already in use (os error 98)",
+            "x: Address already in use (os error 48)",
+            "Only one usage of each socket address (protocol/network address/port) is normally permitted. (os error 10048)",
+        ] {
+            assert!(port_taken(&EngineError::Start(m.into())), "{m}");
+        }
+        assert!(!port_taken(&EngineError::Start("exited during start".into())));
+        assert!(!port_taken(&EngineError::NotInstalled));
     }
 }
