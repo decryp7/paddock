@@ -62,6 +62,7 @@ pub struct Scan {
 enum Stop {
     Io(std::io::Error),
     TooMany,
+    TooManyMatches,
     TooSlow,
 }
 
@@ -196,6 +197,7 @@ fn scan_now(req: &ScanRequest) -> Result<Scan, Stop> {
         stats,
         snapshot: Snapshot {
             schema: SNAPSHOT_SCHEMA,
+            fingerprint: String::new(),
             dirs,
             entries: snapshot_entries,
             // Files still settling mean the next look must list again, or they would never be found.
@@ -295,6 +297,9 @@ fn walk(req: &ScanRequest, root: &Path, started: Instant) -> Result<Walked, Stop
                         item.metadata()
                     };
                     if let Ok(md) = md {
+                        if matched.len() >= spotter_core::limits::MAX_FOLDER_MATCHES {
+                            return Err(Stop::TooManyMatches);
+                        }
                         matched.push((entry_of(&item.path(), name, &rel, &md), None));
                     }
                 }
@@ -384,6 +389,10 @@ fn explain_stop(path: &str, stop: Stop, max_entries: u32, timeout_secs: u32) -> 
         Stop::Io(e) => explain(path, e),
         Stop::TooMany => SourceError::InvalidConfig(format!(
             "Too many files: {path} holds more than {max_entries} entries. Narrow the folder or the folder levels, or raise \"Most entries per check\" under More options."
+        )),
+        Stop::TooManyMatches => SourceError::InvalidConfig(format!(
+            "Too many matches: more than {} files in {path} match. Narrow the name pattern, the file types or the folder levels.",
+            spotter_core::limits::MAX_FOLDER_MATCHES
         )),
         Stop::TooSlow => SourceError::Unreachable(format!(
             "Listing {path} took longer than {timeout_secs} seconds. The share is slow or very large: narrow the folder or the folder levels. Spotter will try again."

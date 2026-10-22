@@ -18,6 +18,7 @@ pub mod fetch;
 pub mod guard;
 pub mod notifier;
 pub mod pipeline;
+pub mod preview;
 pub mod scheduler;
 pub mod secrets;
 pub mod view;

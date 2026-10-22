@@ -370,15 +370,12 @@ pub(crate) mod tests {
         s.name = " ".into();
         s.source = SourceConfig::new("folder", &[]);
         s.versions = "custom".into();
-        s.actions = vec![Action::Download {
-            folder: "".into(),
-            verify: true,
-        }];
+        s.actions = vec![Action::download("", true)];
         let problems = Watch::parse(&s).unwrap_err();
         assert_eq!(problems.len(), 5, "{problems:?}");
         let mut long = spec("x");
         long.name = "n".repeat(MAX_NAME_CHARS + 1);
-        long.actions = vec![Action::OpenLocation; MAX_ACTIONS + 1];
+        long.actions = vec![Action::open_location(); MAX_ACTIONS + 1];
         assert_eq!(Watch::parse(&long).unwrap_err().len(), 2);
     }
 

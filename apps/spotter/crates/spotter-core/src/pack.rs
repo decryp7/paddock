@@ -48,8 +48,12 @@ pub struct SchemeDef {
     pub id: String,
     /// Display name.
     pub name: String,
-    /// The pattern, as for the `custom` scheme (named groups `major`, `minor`, `patch`, `build`, `pre`).
+    /// The pattern, as for the `custom` scheme (named groups `id`, `major`, `minor`, `patch`, `build`, `channel`,
+    /// `variant`, `pre`, and any other name for display fields).
     pub pattern: String,
+    /// A name it reads, shown in the wizard's helper.
+    #[serde(default)]
+    pub example: String,
 }
 
 /// A parsed pack.
@@ -222,16 +226,31 @@ fn list(t: &toml::Table, key: &str) -> Vec<toml::Value> {
 }
 
 /// The shipped packs.
-const BUILTIN: [&str; 4] = [
+const BUILTIN: [&str; 5] = [
     include_str!("../packs/languages.toml"),
     include_str!("../packs/tools.toml"),
     include_str!("../packs/selfhosted.toml"),
     include_str!("../packs/registries.toml"),
+    include_str!("../packs/vendor-schemes.toml"),
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_shipped_scheme_reads_its_own_example() {
+        let pack = Pack::builtin();
+        let shipped: Vec<_> = pack.schemes.iter().filter(|s| !s.example.is_empty()).collect();
+        assert!(shipped.len() >= 6, "{}", shipped.len());
+        for s in shipped {
+            let scheme = VersionScheme::custom(&s.pattern).unwrap();
+            let x = scheme.extract_full(&s.example).unwrap_or_else(|e| panic!("{}: {e:?}", s.id));
+            assert!(!x.version.parts.is_empty(), "{}", s.id);
+        }
+        let letters = VersionScheme::custom(&pack.schemes.iter().find(|s| s.id == "letters-build").unwrap().pattern).unwrap();
+        assert_eq!(letters.extract("Setup-R1.04.00T12.exe").unwrap().text, "R1.04.00T12");
+    }
 
     #[test]
     fn the_shipped_packs_are_clean_and_big_enough() {

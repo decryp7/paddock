@@ -13,10 +13,13 @@ use spotter_core::limits::MAX_HISTORY;
 use spotter_core::notify::{digest_due, DigestMode};
 use spotter_core::release::{select, Release};
 use spotter_core::schedule::next_delay_secs;
+use spotter_core::source::folder::Snapshot;
 use spotter_core::source::SourceError;
+use spotter_core::state::MAX_PRODUCT_HISTORY;
 use spotter_core::state::{CheckContext, Effects, WatchState, WatchStatus};
 use spotter_core::time::Timestamp;
 use spotter_core::watch::{Watch, WatchId, WatchSpec};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Semaphore;
@@ -48,6 +51,21 @@ struct DigestItem {
 fn fingerprint(spec: &WatchSpec) -> String {
     let text = format!("{:?}|{}|{}", spec.source, spec.allow_local, spec.version_filter.prefix);
     Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What a notification is about: the watch, and for a product its name (`Acme Installer · PRO`).
+pub(crate) fn subject_of(watch: &Watch, release: &Release) -> String {
+    match release.product() {
+        None => watch.name.clone(),
+        Some(id) => {
+            let shown = watch.tracking.products.display_name(id);
+            if shown.starts_with(&watch.name) {
+                shown.to_string()
+            } else {
+                format!("{} · {shown}", watch.name)
+            }
+        }
+    }
 }
 
 struct Running {
@@ -157,13 +175,29 @@ impl Engine {
         };
         let page_key = format!("page:{id}");
         let baseline: Option<PageBaseline> = self.inner.db.kv_get(&page_key)?.and_then(|t| serde_json::from_str(&t).ok());
+        let folder_key = format!("folder:{id}");
+        let snapshot_fp = crate::pipeline::snapshot_fingerprint(&watch);
+        let snapshot: Option<Snapshot> = self
+            .inner
+            .db
+            .kv_get(&folder_key)?
+            .and_then(|t| Snapshot::parse(&t))
+            .filter(|s| s.fingerprint == snapshot_fp);
         let started = Instant::now();
         let gathered = self
             .inner
             .checker
-            .gather(&watch, &secrets, validators, baseline.as_ref(), now)
+            .gather(&watch, &secrets, validators, baseline.as_ref(), snapshot.as_ref(), now)
             .await;
         let took_ms = started.elapsed().as_millis() as u64;
+        if let Ok(Gathered::Fresh {
+            folder: Some((snap, _)), ..
+        }) = &gathered
+        {
+            let mut snap = snap.clone();
+            snap.fingerprint = snapshot_fp;
+            self.inner.db.kv_set(&folder_key, &snap.render())?;
+        }
         if let Ok(Gathered::Fresh { validators, baseline, .. }) = &gathered {
             self.inner.db.store_validators(id, &fp, validators)?;
             if let Some(b) = baseline {
@@ -206,6 +240,9 @@ impl Engine {
         gathered: std::result::Result<Gathered, SourceError>,
         cx: CheckContext,
     ) -> (Effects, bool, Option<SourceError>) {
+        if watch.scheme.has_id() {
+            return self.apply_products(watch, state, gathered, cx);
+        }
         let releases: Vec<Release> = match gathered {
             Err(e) => return (state.on_failure(&e, cx), false, Some(e)),
             Ok(Gathered::Unchanged) => state.history.iter().map(|k| k.release.clone()).collect(),
@@ -218,6 +255,36 @@ impl Engine {
         let history = state.history.clone();
         let soaked = filter::soak(releases, &watch.version_filter, &history, first_check, &mut state.soaking, cx.now);
         (state.on_success(soaked.ready, &watch.notify, cx), true, None)
+    }
+
+    /// A watch whose pattern has an `id` group: each product is selected, soaked and compared on its own.
+    fn apply_products(
+        &self,
+        watch: &Watch,
+        state: &mut WatchState,
+        gathered: std::result::Result<Gathered, SourceError>,
+        cx: CheckContext,
+    ) -> (Effects, bool, Option<SourceError>) {
+        let by_product: BTreeMap<String, Vec<Release>> = match gathered {
+            Err(e) => return (state.on_failure(&e, cx), false, Some(e)),
+            Ok(Gathered::Unchanged) => state
+                .products
+                .iter()
+                .map(|(id, p)| (id.clone(), p.history.iter().map(|k| k.release.clone()).collect()))
+                .collect(),
+            Ok(Gathered::Fresh { candidates, .. }) => {
+                let selected = select(candidates, &watch.scheme, &watch.filter, MAX_PRODUCT_HISTORY).releases;
+                let mut by: BTreeMap<String, Vec<Release>> = BTreeMap::new();
+                for r in watch.version_filter.apply_prefix(selected) {
+                    if let Some(p) = r.detail.product.clone() {
+                        by.entry(p).or_default().push(r);
+                    }
+                }
+                by
+            }
+        };
+        let fx = state.on_success_products(by_product, &watch.notify, &watch.tracking.products, &watch.version_filter, cx);
+        (fx, true, None)
     }
 
     fn apply_invalid(&self, spec: &WatchSpec, id: &WatchId, message: String, now: Timestamp) -> Result<CheckReport> {
@@ -288,13 +355,24 @@ impl Engine {
             };
             self.dispatch(n, watch.allow_local, now).await?;
         }
-        if let Some(release) = &fx.notify {
+        for release in &fx.notify {
+            let label = subject_of(watch, release);
             if digest == DigestMode::Off {
+                let new_product = release.product().is_some_and(|p| fx.new_products.iter().any(|n| n == p));
                 let n = Notification {
                     kind: NotificationKind::NewRelease,
                     watch_id: Some(watch.id.to_string()),
-                    title: format!("{} {}", watch.name, release.version.text),
-                    body: format!("A new release of {} is out: {}.", watch.name, release.name),
+                    title: format!("{label} {}", release.version.text),
+                    body: format!(
+                        "{} {}: {}.",
+                        if new_product {
+                            "A new product appeared"
+                        } else {
+                            "A new release is out"
+                        },
+                        label,
+                        release.name
+                    ),
                     release: Some(release.clone()),
                     channels: watch.channels.clone(),
                 };
@@ -302,7 +380,7 @@ impl Engine {
             } else {
                 let item = DigestItem {
                     watch_id: watch.id.to_string(),
-                    watch_name: watch.name.clone(),
+                    watch_name: label,
                     version: release.version.text.clone(),
                     name: release.name.clone(),
                     location: release.location.clone(),
@@ -312,11 +390,11 @@ impl Engine {
                 }
             }
         }
-        if let Some(release) = fx.run_actions {
-            if !watch.actions.is_empty() {
+        if !watch.actions.is_empty() {
+            for release in fx.run_actions {
                 self.inner.svc.notifier.run_actions(&ActionRequest {
                     watch_id: watch.id.to_string(),
-                    watch_name: watch.name.clone(),
+                    watch_name: subject_of(watch, &release),
                     release,
                     actions: watch.actions.clone(),
                 });

@@ -9,7 +9,7 @@ use crate::fetch::{FetchConfig, PoliteFetcher};
 use crate::notifier::{Notifier, NullNotifier};
 use crate::pipeline::Checker;
 use crate::secrets::SecretStore;
-use crate::view::{DashboardView, EventView, ReleaseView, SourcePreview, WatchDetail, WatchSummary, WhatsNewView};
+use crate::view::{DashboardView, EventView, ProductView, ReleaseView, SourcePreview, WatchDetail, WatchSummary, WhatsNewView};
 use spotter_core::config::ConfigDoc;
 use spotter_core::dashboard::{self, Range, WatchInput};
 use spotter_core::import::{self, ImportFormat, Imported};
@@ -268,6 +268,7 @@ impl Engine {
             history: state.history.iter().map(ReleaseView::from).collect(),
             checks: state.checks.iter().cloned().collect(),
             secrets_set,
+            products: product_views(&spec, &state),
             spec,
         })
     }
@@ -299,6 +300,7 @@ impl Engine {
             next_check_ms: state.next_check.map(|t| t.0),
             failures: state.failures,
             interval_secs: spotter_core::schedule::clamp_interval(spec.interval_secs),
+            product_count: state.products.len() as u32,
             status: state.status,
         }
     }
@@ -354,7 +356,7 @@ impl Engine {
         typed.extend(secrets.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k.clone(), v.clone())));
         let started = Instant::now();
         let now = self.now();
-        let gathered = self.inner.checker.gather(&watch, &typed, None, None, now).await;
+        let gathered = self.preview_candidates(&watch, &typed, now).await;
         let took_ms = started.elapsed().as_millis() as u64;
         match gathered {
             Err(e) => SourcePreview {
@@ -362,12 +364,8 @@ impl Engine {
                 took_ms,
                 ..SourcePreview::default()
             },
-            Ok(crate::pipeline::Gathered::Unchanged) => SourcePreview {
-                took_ms,
-                ..SourcePreview::default()
-            },
-            Ok(crate::pipeline::Gathered::Fresh { candidates, .. }) => {
-                let sel = spotter_core::release::select(candidates, &watch.scheme, &watch.filter, 20);
+            Ok((candidates, scan)) => {
+                let sel = spotter_core::release::select(candidates.clone(), &watch.scheme, &watch.filter, 20);
                 let releases = watch.version_filter.apply_prefix(sel.releases);
                 SourcePreview {
                     problems: Vec::new(),
@@ -385,9 +383,64 @@ impl Engine {
                     prereleases_skipped: sel.prereleases_skipped,
                     names_skipped: sel.names_skipped,
                     took_ms,
+                    extraction: Some(crate::preview::extraction(&watch, candidates, scan)),
                 }
             }
         }
+    }
+
+    /// The candidates for the wizard: a folder is scanned in preview mode (no settle wait, a sample of the names it
+    /// left out); anything else is read like a check.
+    async fn preview_candidates(
+        &self,
+        watch: &Watch,
+        secrets: &Secrets,
+        now: Timestamp,
+    ) -> std::result::Result<(Vec<spotter_core::release::Candidate>, Option<crate::preview::ScanFacts>), spotter_core::source::SourceError>
+    {
+        use spotter_core::source::Plan;
+        match watch.source.plan(secrets) {
+            Plan::Folder(f) => {
+                let scan = spotter_sources::folder::scan(spotter_sources::folder::ScanRequest {
+                    source: f,
+                    readable: crate::pipeline::readable_for(watch),
+                    previous: None,
+                    sample_ignored: 200,
+                    settle: false,
+                })
+                .await?;
+                let facts = crate::preview::ScanFacts {
+                    stats: scan.stats,
+                    ignored: scan.ignored,
+                    created_reported: scan.created_reported,
+                };
+                Ok((scan.candidates, Some(facts)))
+            }
+            _ => match self.inner.checker.gather(watch, secrets, None, None, None, now).await? {
+                crate::pipeline::Gathered::Unchanged => Ok((Vec::new(), None)),
+                crate::pipeline::Gathered::Fresh { candidates, .. } => Ok((candidates, None)),
+            },
+        }
+    }
+
+    /// Writes a regular expression from an example name and the parts the user selected (the wizard's helper).
+    pub fn suggest_pattern(&self, example: &str, selections: &[spotter_core::extract::Selection]) -> Result<String> {
+        crate::preview::suggest_pattern(example, selections).map_err(|m| EngineError::Invalid(vec![m]))
+    }
+
+    /// Tries a version scheme on one name (the wizard's Test field); nothing is read from any source.
+    pub fn test_pattern(&self, versions: &str, pattern: Option<&str>, missing_older: bool, text: &str) -> crate::preview::PatternTest {
+        let resolved = self.inner.pack.resolve(&WatchSpec {
+            versions: versions.into(),
+            version_pattern: pattern.map(str::to_string),
+            ..blank_spec()
+        });
+        crate::preview::test_pattern(&resolved.versions, resolved.version_pattern.as_deref(), missing_older, text)
+    }
+
+    /// The patterns the wizard offers to start from (built-in and the user's packs).
+    pub fn version_schemes(&self) -> Vec<spotter_core::pack::SchemeDef> {
+        self.inner.pack.schemes.clone()
     }
 
     // ---- watch commands ----
@@ -508,6 +561,11 @@ impl Engine {
     pub fn acknowledge(&self, id: &str, version: Option<&str>) -> Result<()> {
         let v = version.map(|t| self.version_in(id, t)).transpose()?;
         self.change_state(id, |s| s.acknowledge(v))
+    }
+
+    /// Marks the latest release of one product as seen.
+    pub fn acknowledge_product(&self, id: &str, product: &str) -> Result<()> {
+        self.change_state(id, |s| s.acknowledge_product(product))
     }
 
     /// Forgets the acknowledgement: the latest release counts as new again.
@@ -723,4 +781,41 @@ fn load_user_packs(dir: &std::path::Path, pack: &mut Pack) -> Vec<String> {
         }
     }
     warnings
+}
+
+fn blank_spec() -> WatchSpec {
+    WatchSpec {
+        id: String::new(),
+        name: String::new(),
+        source: SourceConfig::new("", &[]),
+        versions: String::new(),
+        version_pattern: None,
+        include_prereleases: false,
+        name_filter: String::new(),
+        interval_secs: 300,
+        notify: Default::default(),
+        actions: Vec::new(),
+        channels: Vec::new(),
+        version_filter: Default::default(),
+        allow_local: false,
+        paused: false,
+        tracking: Default::default(),
+    }
+}
+
+/// The products of a watch as the detail page shows them.
+fn product_views(spec: &WatchSpec, state: &WatchState) -> Vec<ProductView> {
+    let settings = &spec.tracking.products;
+    state
+        .products
+        .iter()
+        .map(|(id, p)| ProductView {
+            id: id.clone(),
+            name: settings.display_name(id).to_string(),
+            muted: settings.is_muted(id),
+            latest: p.latest.as_ref().map(ReleaseView::from),
+            unseen: p.has_unseen(),
+            history: p.history.iter().map(ReleaseView::from).collect(),
+        })
+        .collect()
 }

@@ -3,7 +3,7 @@
 
 use crate::checksum::Sha256Digest;
 use crate::extract::{Extracted, Ignored};
-use crate::limits::MAX_CANDIDATES;
+use crate::limits::MAX_FOLDER_MATCHES;
 use crate::pattern::NamePattern;
 use crate::time::Timestamp;
 use crate::version::{Version, VersionScheme};
@@ -378,10 +378,10 @@ fn artifact_of(r: &Read, checksums: &BTreeMap<String, ChecksumFile>) -> Artifact
 
 /// Reads each candidate with `scheme`, applies `filter`, joins the files of one product and version into one release
 /// (several artifacts) and returns at most `limit` per product, newest first according to `filter.latest_by`. Looks
-/// at no more than [`MAX_CANDIDATES`] candidates. Checksum files next to another candidate are attached to it.
+/// at no more than [`MAX_FOLDER_MATCHES`] candidates. Checksum files next to another candidate are attached to it.
 pub fn select(candidates: Vec<Candidate>, scheme: &VersionScheme, filter: &ReleaseFilter, limit: usize) -> Selection {
     let mut out = Selection::default();
-    let candidates: Vec<Candidate> = candidates.into_iter().take(MAX_CANDIDATES).collect();
+    let candidates: Vec<Candidate> = candidates.into_iter().take(MAX_FOLDER_MATCHES).collect();
     let (files, checksums) = split_checksums(candidates);
     let mut groups: BTreeMap<(Option<String>, String), Vec<Read>> = BTreeMap::new();
     for c in files {
@@ -503,9 +503,9 @@ pub struct PreviewRow {
 }
 
 /// Reads every candidate for the wizard's preview: one row each, in the order given (bounded by
-/// [`MAX_CANDIDATES`]). Pure and cheap, so the wizard can ask on every keystroke.
+/// [`MAX_FOLDER_MATCHES`]). Pure and cheap, so the wizard can ask on every keystroke.
 pub fn preview_rows(candidates: Vec<Candidate>, scheme: &VersionScheme, filter: &ReleaseFilter) -> Vec<PreviewRow> {
-    let candidates: Vec<Candidate> = candidates.into_iter().take(MAX_CANDIDATES).collect();
+    let candidates: Vec<Candidate> = candidates.into_iter().take(MAX_FOLDER_MATCHES).collect();
     let (files, _) = split_checksums(candidates.clone());
     let attached: std::collections::BTreeSet<&str> = candidates
         .iter()
@@ -587,9 +587,9 @@ mod tests {
                 .len(),
             20
         );
-        let many = (0..MAX_CANDIDATES + 10).map(|i| Candidate::named(&format!("1.{i}"), "l")).collect();
+        let many = (0..MAX_FOLDER_MATCHES + 10).map(|i| Candidate::named(&format!("1.{i}"), "l")).collect();
         let s = select(many, &VersionScheme::Semver, &ReleaseFilter::default(), usize::MAX);
-        assert_eq!(s.releases.len(), MAX_CANDIDATES);
+        assert_eq!(s.releases.len(), MAX_FOLDER_MATCHES);
     }
 
     fn file(name: &str, mtime: Option<i64>) -> Candidate {

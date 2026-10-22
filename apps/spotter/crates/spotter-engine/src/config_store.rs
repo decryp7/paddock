@@ -124,6 +124,7 @@ mod tests {
             version_filter: Default::default(),
             allow_local: false,
             paused: false,
+            tracking: Default::default(),
         });
         d
     }

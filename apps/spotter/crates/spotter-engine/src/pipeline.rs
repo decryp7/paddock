@@ -3,13 +3,14 @@
 use crate::fetch::{FetchOptions, Fetched, PoliteFetcher, Validators};
 use serde::{Deserialize, Serialize};
 use spotter_core::limits::MAX_CANDIDATES;
-use spotter_core::release::Candidate;
+use spotter_core::release::{Candidate, LatestBy};
 use spotter_core::render::{PageRenderer, RenderError};
+use spotter_core::source::folder::{ScanStats, Snapshot};
 use spotter_core::source::web_page::{change_summary, PageMode, WebPageSource};
-use spotter_core::source::{Plan, ReleaseSource, Secrets, Source, SourceError};
+use spotter_core::source::{Plan, Secrets, Source, SourceError};
 use spotter_core::time::Timestamp;
 use spotter_core::watch::Watch;
-use spotter_sources::checker::FolderChecker;
+use spotter_sources::folder::{Readable, ScanRequest};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,6 +38,8 @@ pub enum Gathered {
         validators: Validators,
         /// The page baseline for change watching, new or updated.
         baseline: Option<PageBaseline>,
+        /// What a folder scan remembers for the next check, and how the scan went.
+        folder: Option<(Snapshot, ScanStats)>,
     },
 }
 
@@ -66,6 +69,7 @@ impl Checker {
         secrets: &Secrets,
         conditional: Option<Validators>,
         baseline: Option<&PageBaseline>,
+        folder: Option<&Snapshot>,
         now: Timestamp,
     ) -> Result<Gathered, SourceError> {
         let page = match &watch.source {
@@ -74,12 +78,19 @@ impl Checker {
         };
         let (body, validators) = match watch.source.plan(secrets) {
             Plan::Folder(f) => {
-                let mut candidates = FolderChecker(f).list(MAX_CANDIDATES).await?;
-                candidates.truncate(MAX_CANDIDATES);
+                let scan = spotter_sources::folder::scan(ScanRequest {
+                    source: f,
+                    readable: readable_for(watch),
+                    previous: folder.cloned(),
+                    sample_ignored: 0,
+                    settle: true,
+                })
+                .await?;
                 return Ok(Gathered::Fresh {
-                    candidates,
+                    candidates: scan.candidates,
                     validators: Validators::default(),
                     baseline: None,
+                    folder: Some((scan.snapshot, scan.stats)),
                 });
             }
             Plan::Http { request, parser } => {
@@ -123,8 +134,26 @@ impl Checker {
             candidates: candidates.into_iter().take(MAX_CANDIDATES).collect(),
             validators,
             baseline,
+            folder: None,
         })
     }
+}
+
+/// A pure check of whether the watch's scheme can read a name, so names that could never become a release are
+/// dropped before their size and times are asked for. Only when names must hold a version (the default "latest by"),
+/// or when the pattern itself says what to read.
+pub fn readable_for(watch: &Watch) -> Option<Readable> {
+    let scheme = watch.scheme.clone();
+    (watch.filter.latest_by == LatestBy::Version || scheme.custom_regex().is_some())
+        .then(|| Arc::new(move |text: &str| scheme.extract_full(text).is_ok()) as Readable)
+}
+
+/// Identifies the settings a folder snapshot is valid for.
+pub fn snapshot_fingerprint(watch: &Watch) -> String {
+    format!(
+        "{:?}|{}|{:?}|{:?}",
+        watch.spec.source, watch.spec.versions, watch.spec.version_pattern, watch.filter.latest_by
+    )
 }
 
 /// The candidate of a page watched for changes: dated by when its current (noise-filtered) content first appeared.

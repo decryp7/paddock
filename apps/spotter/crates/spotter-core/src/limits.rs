@@ -4,6 +4,8 @@
 pub const MAX_HISTORY: usize = 200;
 /// Candidates looked at in one check (directory entries, feed items, tags); the rest are ignored.
 pub const MAX_CANDIDATES: usize = 5000;
+/// Matches one folder scan keeps (a pattern that matches more is too broad; the watch says so).
+pub const MAX_FOLDER_MATCHES: usize = 50_000;
 /// Largest HTTP response body read (8 MiB).
 pub const MAX_BODY_BYTES: usize = 8 << 20;
 /// Largest checksum file read (64 KiB).

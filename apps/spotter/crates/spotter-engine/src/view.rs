@@ -1,7 +1,46 @@
 //! The engine's answers as plain structs (the shell maps them to its camelCase DTOs).
+use spotter_core::extract::GroupSpan;
 use spotter_core::journal::{Event, EventKind};
+use spotter_core::release::Artifact;
+use spotter_core::source::folder::ScanStats;
 use spotter_core::state::{CheckRecord, KnownRelease, WatchStatus};
 use spotter_core::watch::WatchSpec;
+
+/// One file of a release.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArtifactView {
+    /// File name.
+    pub name: String,
+    /// Where it is.
+    pub location: String,
+    /// Extension (`iso`).
+    pub kind: String,
+    /// Variant (`x64`).
+    pub variant: String,
+    /// Size in bytes.
+    pub size: Option<u64>,
+    /// Last change.
+    pub modified_ms: Option<i64>,
+    /// Creation time, where reported.
+    pub created_ms: Option<i64>,
+    /// The checksum file next to it, by name.
+    pub checksum_file: Option<String>,
+}
+
+impl From<&Artifact> for ArtifactView {
+    fn from(a: &Artifact) -> ArtifactView {
+        ArtifactView {
+            name: a.name.clone(),
+            location: a.location.clone(),
+            kind: a.kind.clone(),
+            variant: a.variant.clone(),
+            size: a.size,
+            modified_ms: a.modified.map(|t| t.0),
+            created_ms: a.created.map(|t| t.0),
+            checksum_file: a.checksum_file.as_ref().map(|c| c.name.clone()),
+        }
+    }
+}
 
 /// One release.
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +61,16 @@ pub struct ReleaseView {
     pub size: Option<u64>,
     /// SHA-256 in hex.
     pub sha256: Option<String>,
+    /// The product (`id` group).
+    pub product: Option<String>,
+    /// The channel label (`beta`).
+    pub channel: String,
+    /// Other named groups of the pattern, for display.
+    pub fields: Vec<(String, String)>,
+    /// Every file of the release, the primary one first.
+    pub artifacts: Vec<ArtifactView>,
+    /// The same file name came back with new contents.
+    pub updated_in_place: bool,
 }
 
 impl From<&KnownRelease> for ReleaseView {
@@ -35,6 +84,11 @@ impl From<&KnownRelease> for ReleaseView {
             first_seen_ms: k.first_seen.0,
             size: k.release.size,
             sha256: k.release.sha256.map(|d| d.to_hex()),
+            product: k.release.detail.product.clone(),
+            channel: k.release.detail.channel.clone(),
+            fields: k.release.detail.fields.iter().map(|(a, b)| (a.clone(), b.clone())).collect(),
+            artifacts: k.release.detail.artifacts.iter().map(ArtifactView::from).collect(),
+            updated_in_place: k.release.detail.updated_in_place,
         }
     }
 }
@@ -76,6 +130,25 @@ pub struct WatchSummary {
     pub failures: u32,
     /// Seconds between checks.
     pub interval_secs: u32,
+    /// How many products the watch tracks (0 for a watch of one thing).
+    pub product_count: u32,
+}
+
+/// One product of a watch whose pattern has an `id` group.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProductView {
+    /// The id as read from the names.
+    pub id: String,
+    /// The name to show (renamed or the id).
+    pub name: String,
+    /// Notifications are off for it.
+    pub muted: bool,
+    /// Its newest release.
+    pub latest: Option<ReleaseView>,
+    /// Newer than what the user has seen.
+    pub unseen: bool,
+    /// Its releases, newest first.
+    pub history: Vec<ReleaseView>,
 }
 
 /// The watch detail page.
@@ -91,6 +164,8 @@ pub struct WatchDetail {
     pub checks: Vec<CheckRecord>,
     /// Keys of secret fields that have a value in the credential store.
     pub secrets_set: Vec<String>,
+    /// The products, for a watch whose pattern has an `id` group.
+    pub products: Vec<ProductView>,
 }
 
 /// The live "test this source" result.
@@ -110,6 +185,90 @@ pub struct SourcePreview {
     pub names_skipped: usize,
     /// How long the check took.
     pub took_ms: u64,
+    /// What the pattern read from the names, product by product (the add-watch wizard's table).
+    pub extraction: Option<ExtractionPreview>,
+}
+
+/// Most name rows a preview carries.
+pub const MAX_PREVIEW_ROWS: usize = 300;
+
+/// What was read from one name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReadView {
+    /// The product.
+    pub id: Option<String>,
+    /// The version as written.
+    pub version: String,
+    /// The channel label.
+    pub channel: String,
+    /// The variant.
+    pub variant: String,
+    /// A pre-release.
+    pub prerelease: bool,
+    /// Other named groups.
+    pub fields: Vec<(String, String)>,
+    /// Where each group matched in the name (UTF-16 offsets).
+    pub spans: Vec<GroupSpan>,
+}
+
+/// One row of the wizard's name table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NameRow {
+    /// The text the pattern was run on (name, folder name or relative path).
+    pub text: String,
+    /// The file name.
+    pub file_name: String,
+    /// Size.
+    pub size: Option<u64>,
+    /// Last change.
+    pub modified_ms: Option<i64>,
+    /// What was read; `None` when the name was ignored.
+    pub read: Option<ReadView>,
+    /// Why it was ignored.
+    pub ignored: Option<String>,
+}
+
+/// One version of a product in the preview, with its files.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VersionPreview {
+    /// The version as written.
+    pub version: String,
+    /// The one that would be "latest" for its product.
+    pub latest: bool,
+    /// A pre-release.
+    pub prerelease: bool,
+    /// Its files.
+    pub artifacts: Vec<ArtifactView>,
+}
+
+/// A product in the preview.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProductPreview {
+    /// The id; `None` for a watch of one thing.
+    pub id: Option<String>,
+    /// Versions in the chosen order, newest first.
+    pub versions: Vec<VersionPreview>,
+}
+
+/// The wizard's view of a source: names and what was read from them.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ExtractionPreview {
+    /// Rows: matches first, then a sample of the ignored names. At most [`MAX_PREVIEW_ROWS`].
+    pub rows: Vec<NameRow>,
+    /// Products, with versions and files.
+    pub products: Vec<ProductPreview>,
+    /// How the folder scan went (folders only).
+    pub scan: Option<ScanStats>,
+    /// Names that matched everything before the version pattern was applied but were left out (folders only).
+    pub ignored_count: u64,
+    /// The pattern has an `id` group.
+    pub has_id: bool,
+    /// The source reports creation times (needed for "latest by created").
+    pub created_available: bool,
+    /// How the latest is decided, in words (the tooltip).
+    pub order_note: String,
+    /// Things to know about the chosen settings.
+    pub warnings: Vec<String>,
 }
 
 /// A recent release for the "What's new" hero.

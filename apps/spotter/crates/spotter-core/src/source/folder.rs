@@ -322,6 +322,8 @@ impl SnapEntry {
 pub struct Snapshot {
     /// Snapshot format.
     pub schema: u32,
+    /// Identifies the settings it was made under; a snapshot made under other settings is not trusted.
+    pub fingerprint: String,
     /// Folders walked (relative, `""` for the top) with their modified times (milliseconds); `None` when the share
     /// did not report one.
     pub dirs: BTreeMap<String, Option<i64>>,
@@ -515,6 +517,7 @@ mod tests {
     fn snap(dirs: &[(&str, Option<i64>)], since_full: u32) -> Snapshot {
         Snapshot {
             schema: SNAPSHOT_SCHEMA,
+            fingerprint: String::new(),
             dirs: dirs.iter().map(|(d, t)| (d.to_string(), *t)).collect(),
             entries: vec![SnapEntry {
                 name: "a.zip".into(),

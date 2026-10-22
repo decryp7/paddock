@@ -222,8 +222,10 @@ impl Db {
             tx.execute(&format!("DELETE FROM {table} = ?1"), params![id.as_str()])
                 .map_err(internal)?;
         }
-        tx.execute("DELETE FROM kv WHERE key = ?1", params![format!("page:{}", id.as_str())])
-            .map_err(internal)?;
+        for prefix in ["page", "folder"] {
+            tx.execute("DELETE FROM kv WHERE key = ?1", params![format!("{prefix}:{}", id.as_str())])
+                .map_err(internal)?;
+        }
         tx.commit().map_err(internal)
     }
 
@@ -669,6 +671,7 @@ mod tests {
         db.record_event(&event(2, "b")).unwrap();
         db.kv_set("page:a", "x").unwrap();
         db.kv_set("page:b", "y").unwrap();
+        db.kv_set("folder:a", "snapshot").unwrap();
         db.delete_watch(&a).unwrap();
         assert!(db.load_states().unwrap().0.is_empty());
         assert_eq!(db.load_journal().unwrap().events.len(), 1);
@@ -676,6 +679,7 @@ mod tests {
             (db.kv_get("page:a").unwrap(), db.kv_get("page:b").unwrap().as_deref()),
             (None, Some("y"))
         );
+        assert_eq!(db.kv_get("folder:a").unwrap(), None, "the folder snapshot goes with the watch");
     }
 
     #[test]
