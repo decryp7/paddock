@@ -23,6 +23,7 @@
     "@angular/material": "^22.2.3",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "~22.2.0",
+    "@decryp7/paddock-ui": "^0.1.0",
     "@ngrx/signals": "^22.0.1",
     "@tauri-apps/api": "^2.12.4",
     "echarts": "^6.1.0",

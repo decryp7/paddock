@@ -1,0 +1,13 @@
+/* Spotter's global styles. Tokens, base styles and the splash come from @decryp7/paddock-ui (paddock.css, loaded by
+   angular.json); this file adds the shared building blocks every screen uses. Components keep only their own layout. */
+
+@use '@angular/cdk' as cdk;
+@use 'styles/controls';
+@use 'styles/layout';
+
+@include cdk.overlay();
+@include cdk.a11y-visually-hidden();
+
+.sp-backdrop {
+  background: var(--pd-scrim);
+}

@@ -15,3 +15,19 @@ Updated at the end of each round. Items are listed with their state.
   relies on the Windows CI runner.
 - The CDP driver is still inside `spotter-render` (modules `cdp`, `launch`, `page`, `process`, `discover`, `ready`,
   `challenge`, `install`, `manifest`); extraction to the shared paddock repo is pending.
+
+## UI
+
+Done: shell (splash, sidebar, banner, toasts, native feel, theme via paddock), Tauri and mock backends, stores (watches,
+dashboard, settings, toasts, editor, detail), pages (dashboard, watches, detail, wizard, settings, tray), 18 Playwright
+flows (Chromium and WebKit, port 4370), `ng build` and `ng lint` clean.
+
+Left:
+- Unit tests: specs exist for core services, format/labels/chart-options and copied utilities (59 tests); still missing for
+  mock-backend, watches/dashboard/settings/editor stores, draft-utils, panel/ago/confirm/clipboard/chart, and every page
+  component. Overall Angular coverage is therefore below the 80% target until these land (run `ng test --coverage`).
+- `npm audit --omit=dev --audit-level=high` not run yet; run a second `ng test` under another TZ.
+- Screenshots in docs/screenshots are from the first pass; no design critique iteration yet (mock data shows "newer than
+  installed" on almost every watch).
+- Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command" needs an engine field.
+- Check scripts/check-index.mjs against dist/app/browser/index.html.

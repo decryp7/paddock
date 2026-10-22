@@ -1,0 +1,213 @@
+<div class="page">
+  <header class="page-head">
+    <div>
+      <a class="back" routerLink="/watches"><mat-icon svgIcon="sp:arrow-left" aria-hidden="true" />All watches</a>
+      <h1>{{ store.editing() ? 'Edit watch' : 'Add a watch' }}</h1>
+    </div>
+  </header>
+
+  <ol class="steps" aria-label="Steps">
+    @for (s of steps; track s.id; let i = $index) {
+      <li>
+        <button type="button" class="step" [class.on]="store.step() === s.id" [class.done]="i < reachable()" [attr.aria-current]="store.step() === s.id ? 'step' : null" [disabled]="i > reachable()" (click)="go(s.id, i)">
+          <span class="n">{{ i + 1 }}</span>{{ s.label }}
+        </button>
+      </li>
+    }
+  </ol>
+
+  <sp-panel [state]="formState()" label="the watch" (retry)="store.loadWatch(id() ?? '')">
+    @switch (store.step()) {
+      @case ('source') {
+        <sp-source-step />
+      }
+
+      @case ('configure') {
+        @if (store.kind(); as kind) {
+          <div class="cols">
+            <section class="stack" aria-labelledby="cfg-h">
+              <h2 id="cfg-h">{{ kind.label }}</h2>
+              <p class="help">{{ kind.description }}</p>
+              <sp-field-form
+                [kind]="kind"
+                [values]="draft().source.values"
+                [secretsSet]="store.secretsSet()"
+                (valueChange)="onField($event)"
+                (secretChange)="store.setSecret($event.key, $event.value)"
+                (secretClear)="store.clearSecret($event)"
+              />
+              @if (store.missing().length) {
+                <p class="help" role="status">Still needed: {{ store.missing()[0]?.label }}@if (store.missing().length > 1) { and {{ store.missing().length - 1 }} more }.</p>
+              }
+            </section>
+            <sp-preview-panel [state]="store.preview()" [ready]="store.missing().length === 0" (rerun)="store.runPreview()" />
+          </div>
+        } @else {
+          <p class="help" role="status">Loading the source…</p>
+        }
+      }
+
+      @case ('versions') {
+        <div class="cols">
+          <section class="stack" aria-labelledby="ver-h">
+            <h2 id="ver-h">Versions and filters</h2>
+            <div class="field">
+              <label for="scheme">How versions are written</label>
+              <select id="scheme" class="input" [value]="draft().versions" (change)="setScheme($event)">
+                @for (s of schemes; track s.value) {
+                  <option [value]="s.value">{{ s.label }} ({{ s.help }})</option>
+                }
+              </select>
+            </div>
+            @if (draft().versions === 'custom') {
+              <div class="field">
+                <label for="pattern">Pattern</label>
+                <input id="pattern" class="input" [value]="draft().versionPattern ?? ''" (input)="store.update(d => ({ ...d, versionPattern: value($event) }))" placeholder="^v(?P&lt;major&gt;\d+)\.(?P&lt;minor&gt;\d+)" />
+                <span class="help">A regular expression with named groups <code>major</code>, <code>minor</code>, <code>patch</code> (and optionally <code>build</code>). Spotter rejects patterns that are too long or too complex.</span>
+              </div>
+            }
+            <label class="check"><input type="checkbox" [checked]="draft().includePrereleases" (change)="store.update(d => ({ ...d, includePrereleases: checked($event) }))" /><span>Include pre-releases (alpha, beta, release candidates)</span></label>
+            <div class="field">
+              <label for="prefix">Only versions starting with</label>
+              <input id="prefix" class="input" [value]="draft().filter.prefix" (input)="store.update(d => ({ ...d, filter: { ...d.filter, prefix: value($event) } }))" placeholder="For example 2." />
+            </div>
+            <div class="field">
+              <label for="names">Only names matching</label>
+              <input id="names" class="input" [value]="draft().nameFilter" (input)="store.update(d => ({ ...d, nameFilter: value($event) }))" placeholder="*-setup.exe" />
+              <span class="help">A glob on the release or file name. Empty means all.</span>
+            </div>
+            <div class="field">
+              <label for="soak">Wait before announcing (hours)</label>
+              <input id="soak" class="input narrow" type="number" min="0" [value]="draft().filter.soakHours" (input)="store.update(d => ({ ...d, filter: { ...d.filter, soakHours: +value($event) || 0 } }))" />
+              <span class="help">Soak time: a release must exist this long before it is announced. 0 announces at once.</span>
+            </div>
+          </section>
+          <sp-preview-panel [state]="store.preview()" [ready]="store.missing().length === 0" (rerun)="store.runPreview()" />
+        </div>
+      }
+
+      @case ('notify') {
+        <div class="stack wide">
+          <section class="stack" aria-labelledby="sch-h">
+            <h2 id="sch-h">Schedule</h2>
+            <div class="field">
+              <label for="interval">Check</label>
+              <select id="interval" class="input narrow" [value]="draft().intervalSecs" (change)="setInterval(+value($event))">
+                @for (p of intervalOptions(); track p.secs) {
+                  <option [value]="p.secs">{{ p.label }}</option>
+                }
+              </select>
+            </div>
+            <div class="field">
+              <label for="minutes">Or every (minutes)</label>
+              <input id="minutes" class="input narrow" type="number" min="1" [value]="draft().intervalSecs / 60" (change)="setInterval(+value($event) * 60)" />
+            </div>
+          </section>
+
+          <section class="stack" aria-labelledby="not-h">
+            <h2 id="not-h">Notifications</h2>
+            <div class="field">
+              <label for="mode">Tell me about</label>
+              <select id="mode" class="input narrow" [value]="draft().notify.mode" (change)="setMode($event)">
+                <option value="every-new">Every new release</option>
+                <option value="newer-than-installed">Only releases newer than what I have installed</option>
+                <option value="off">Nothing (just keep the history)</option>
+              </select>
+            </div>
+            <label class="check"><input type="checkbox" [checked]="draft().notify.nag" (change)="store.update(d => ({ ...d, notify: { ...d.notify, nag: checked($event) } }))" /><span>Keep reminding me until I mark it seen</span></label>
+            <label class="check"><input type="checkbox" [checked]="!!draft().notify.quietHours" (change)="setQuiet(checked($event))" /><span>Quiet hours for this watch</span></label>
+            @if (draft().notify.quietHours; as q) {
+              <div class="inline">
+                <div class="field"><label for="qs">From</label><input id="qs" class="input" type="time" [value]="q.start" (change)="setQuietTime('start', value($event))" /></div>
+                <div class="field"><label for="qe">Until</label><input id="qe" class="input" type="time" [value]="q.end" (change)="setQuietTime('end', value($event))" /></div>
+              </div>
+            }
+            <h3>Also send to</h3>
+            @for (c of draft().channels; track $index; let i = $index) {
+              <div class="inline">
+                <select class="input narrow" [value]="c.kind" (change)="setChannel(i, { kind: $any(value($event)) })" [attr.aria-label]="'Channel ' + (i + 1) + ' kind'">
+                  <option value="ntfy">ntfy</option>
+                  <option value="webhook">Webhook</option>
+                  <option value="email">Email</option>
+                </select>
+                <input class="input" [value]="c.target" (input)="setChannel(i, { target: value($event) })" placeholder="Address or URL" [attr.aria-label]="'Channel ' + (i + 1) + ' address'" />
+                <button type="button" class="btn ghost icon" (click)="removeChannel(i)" [attr.aria-label]="'Remove channel ' + (i + 1)"><mat-icon svgIcon="sp:x" aria-hidden="true" /></button>
+              </div>
+            }
+            <div><button type="button" class="btn sm" (click)="addChannel()"><mat-icon svgIcon="sp:plus" aria-hidden="true" />Add a place to send to</button></div>
+          </section>
+
+          <section class="stack" aria-labelledby="act-h">
+            <h2 id="act-h">When a new release appears</h2>
+            <label class="check"><input type="checkbox" [checked]="!!openLocation()" (change)="setAction('open-location', checked($event))" /><span>Offer to open its location</span></label>
+            <label class="check"><input type="checkbox" [checked]="!!download()" (change)="setAction('download', checked($event))" /><span>Download it and verify its checksum</span></label>
+            @if (download(); as dl) {
+              <div class="indent field">
+                <label for="dl-folder">Download to</label>
+                <div class="inline">
+                  <input id="dl-folder" class="input" [value]="dl.folder" (input)="patchAction({ kind: 'download', folder: value($event), verify: dl.verify })" placeholder="The downloads folder from Settings" />
+                  <button type="button" class="btn" (click)="browseFolder()">Browse…</button>
+                </div>
+                <label class="check"><input type="checkbox" [checked]="dl.verify" (change)="patchAction({ kind: 'download', folder: dl.folder, verify: checked($event) })" /><span>Verify the checksum when the source publishes one</span></label>
+              </div>
+            }
+            <label class="check"><input type="checkbox" [checked]="!!command()" (change)="setAction('run-command', checked($event))" /><span>Run a program (advanced)</span></label>
+            @if (command(); as cmd) {
+              <div class="indent field">
+                <p class="warn" role="note">This runs the program you choose on this computer each time a release appears. It does not go through a shell, so pipes and wildcards do not work.</p>
+                <label for="cmd-prog">Program</label>
+                <div class="inline">
+                  <input id="cmd-prog" class="input" [value]="cmd.program" (input)="patchAction({ kind: 'run-command', program: value($event), args: cmd.args })" />
+                  <button type="button" class="btn" (click)="browseProgram()">Browse…</button>
+                </div>
+                <label for="cmd-args">Arguments, one per line</label>
+                <textarea id="cmd-args" class="input" rows="3" [value]="cmd.args.join('\n')" (input)="patchAction({ kind: 'run-command', program: cmd.program, args: args(value($event)) })"></textarea>
+                <span class="help">Placeholders: {{ '{path}' }} {{ '{version}' }} {{ '{name}' }} {{ '{location}' }}</span>
+              </div>
+            }
+          </section>
+        </div>
+      }
+
+      @case ('review') {
+        <div class="stack wide">
+          <section class="stack" aria-labelledby="rev-h">
+            <h2 id="rev-h">Review</h2>
+            <div class="field">
+              <label for="name">Name</label>
+              <input id="name" class="input" [value]="draft().name" (input)="store.update(d => ({ ...d, name: value($event) }))" />
+            </div>
+            <dl class="surface kv">
+              <dt>Source</dt><dd>{{ store.kind()?.label }}: {{ draft().source.values['url'] ?? draft().source.values['repo'] ?? draft().source.values['path'] ?? draft().source.values['image'] ?? draft().source.values['package'] ?? draft().source.values['project'] ?? draft().source.values['crate'] ?? '' }}</dd>
+              <dt>Checks</dt><dd>{{ interval(draft().intervalSecs) }}</dd>
+              <dt>Versions</dt><dd>{{ draft().versions }}{{ draft().includePrereleases ? ', with pre-releases' : '' }}</dd>
+              <dt>Notify</dt><dd>{{ draft().notify.mode }}{{ draft().notify.nag ? ', keeps reminding' : '' }}</dd>
+              <dt>Actions</dt><dd>{{ draft().actions.length }} configured, {{ draft().channels.length }} extra channel{{ draft().channels.length === 1 ? '' : 's' }}</dd>
+            </dl>
+            <label class="check"><input type="checkbox" [checked]="draft().paused" (change)="store.update(d => ({ ...d, paused: checked($event) }))" /><span>Start paused</span></label>
+            @if (store.problems().length) {
+              <ul class="problems" role="alert">
+                @for (p of store.problems(); track p) {
+                  <li>{{ p }}</li>
+                }
+              </ul>
+            }
+          </section>
+        </div>
+      }
+    }
+  </sp-panel>
+
+  <footer class="nav">
+    <a class="btn ghost" routerLink="/watches">Cancel</a>
+    <span class="spacer"></span>
+    @if (store.stepIndex() > (store.editing() ? 1 : 0)) {
+      <button type="button" class="btn" (click)="store.back()">Back</button>
+    }
+    @if (store.step() === 'review') {
+      <button type="button" class="btn primary" (click)="save()" [disabled]="store.saving() || !draft().name.trim()">{{ store.saving() ? 'Saving…' : store.editing() ? 'Save changes' : 'Add watch' }}</button>
+    } @else if (store.step() !== 'source') {
+      <button type="button" class="btn primary" (click)="store.next()" [disabled]="!canNext()">Next</button>
+    }
+  </footer>
+</div>

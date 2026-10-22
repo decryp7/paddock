@@ -84,6 +84,14 @@ export interface SpotterBackend {
 
   /** Subscribes to pushed state; returns the unsubscribe function. */
   onState(handler: (push: StatePush) => void): Promise<() => void>;
+
+  // Tray popup (added by the UI; the popup is the window that loads `#/tray`)
+  /** Shows and focuses the main window, then asks it to show `route` (`/watches/<id>`; null keeps the current page). */
+  showMainWindow(route: string | null): Promise<void>;
+  /** Hides the tray popup. */
+  hideTray(): Promise<void>;
+  /** The main window is asked to show a route (Tauri event `spotter://navigate`, payload: the route string). */
+  onNavigate(handler: (route: string) => void): Promise<() => void>;
 }
 
 export const BACKEND = new InjectionToken<SpotterBackend>('SpotterBackend');

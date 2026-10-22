@@ -1,0 +1,101 @@
+<div class="page">
+  <header class="page-head">
+    <div>
+      <h1>Dashboard</h1>
+      <p class="sub">
+        @if (watches.watches().length) {
+          {{ watches.watches().length }} {{ watches.watches().length === 1 ? 'watch' : 'watches' }}
+          @if (nextCheck(); as next) {
+            · next check {{ next | ago }}
+          }
+        } @else {
+          Spotter tells you the moment a new release appears.
+        }
+      </p>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" (click)="watches.checkNow(null)" [disabled]="watches.checking() || !watches.watches().length">
+        <mat-icon svgIcon="sp:refresh" aria-hidden="true" [class.spin]="watches.checking()" />
+        Check all now
+      </button>
+      <button type="button" class="btn" [cdkMenuTriggerFor]="pauseMenu" aria-label="Pause notifications">
+        <mat-icon [svgIcon]="paused() ? 'sp:bell-off' : 'sp:bell'" aria-hidden="true" />
+        {{ paused() ? 'Notifications paused' : 'Pause notifications' }}
+      </button>
+      <ng-template #pauseMenu>
+        <div class="menu" cdkMenu>
+          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="pause(60)">For 1 hour</button>
+          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="pauseUntilTomorrow()">Until tomorrow</button>
+          @if (paused()) {
+            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="pause(null)">Resume now</button>
+          }
+        </div>
+      </ng-template>
+      <a class="btn primary" routerLink="/watches/new">
+        <mat-icon svgIcon="sp:plus" aria-hidden="true" />
+        Add watch
+      </a>
+    </div>
+  </header>
+
+  @if (watches.loaded() && !watches.watches().length && !watches.error()) {
+    <pd-empty-state heading="Nothing to watch yet" description="Add a folder, a feed, a GitHub repository or a web page and Spotter will tell you the moment a new release appears.">
+      <a slot="action" class="btn primary" routerLink="/watches/new">Add your first watch</a>
+    </pd-empty-state>
+  } @else {
+    <sp-panel [state]="store.dashboard()" label="the dashboard" (retry)="store.loadDashboard()">
+      <section class="section" aria-labelledby="new-h">
+        <div class="section-head"><h2 id="new-h">What's new</h2></div>
+        <sp-whats-new [items]="dashboard()?.whatsNew ?? []" />
+      </section>
+
+      <section class="section" aria-labelledby="watch-h">
+        <div class="section-head"><h2 id="watch-h">Your watches</h2><a routerLink="/watches">See all</a></div>
+        <div class="tiles">
+          @for (w of watches.watches(); track w.id) {
+            @let n = numbersOf(w.id);
+            <pd-card [heading]="w.name" [interactive]="true" (activated)="goto(w.id)">
+              <sp-kind-icon slot="icon" [kind]="w.sourceKind" />
+              <sp-watch-status slot="status" [watch]="w" />
+              <span class="ver tile-ver">{{ w.latest?.version ?? 'No release yet' }}</span>
+              @if (n) {
+                <pd-sparkline slot="sparkline" [values]="n.sparkline" [label]="'Releases per week for ' + w.name + ', last 12 weeks'" />
+              }
+              <span slot="caption">
+                @if (w.unseen) { <strong>New</strong> · }
+                checked {{ w.lastCheckMs | ago }}
+                @if (n) { · every {{ span(n.averageIntervalMs) }} on average }
+              </span>
+            </pd-card>
+          }
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="chart-h">
+        <div class="section-head">
+          <h2 id="chart-h">Releases over time</h2>
+          <pd-segmented-control label="Time range" [options]="ranges" [value]="store.range()" (valueChange)="setRange($event)" />
+        </div>
+        <div class="surface chart">
+          @if (series().length) {
+            <sp-chart [option]="chartOption()" [label]="chartLabel()" />
+          } @else {
+            <p class="muted">No releases in this range.</p>
+          }
+        </div>
+      </section>
+    </sp-panel>
+
+    <section class="section" aria-labelledby="events-h">
+      <div class="section-head">
+        <h2 id="events-h">Activity</h2>
+        <button type="button" class="btn ghost sm" (click)="openDownloads()"><mat-icon svgIcon="sp:folder" aria-hidden="true" />Open downloads folder</button>
+      </div>
+      <sp-events-feed />
+    </section>
+
+    @if (dashboard()) {
+      <footer class="foot" [attr.title]="'How long the engine took to compute this page'">{{ computed() }}</footer>
+    }
+  }
+</div>

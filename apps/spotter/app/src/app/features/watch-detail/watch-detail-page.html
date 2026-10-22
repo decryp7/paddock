@@ -1,0 +1,173 @@
+<div class="page">
+  <a class="back" routerLink="/watches"><mat-icon svgIcon="sp:arrow-left" aria-hidden="true" />All watches</a>
+
+  <sp-panel [state]="store.detail()" label="this watch" (retry)="store.reload()">
+    @let d = detail();
+    @let s = summary();
+    @if (d && s) {
+      <section class="hero surface" aria-labelledby="hero-h">
+        <div class="hero-main">
+          <div class="who">
+            <sp-kind-icon [kind]="s.sourceKind" />
+            <div class="truncate">
+              <h1 id="hero-h">{{ s.name }}</h1>
+              <p class="src truncate" [attr.title]="s.sourceDescription">{{ s.sourceLabel }} · {{ s.sourceDescription }}</p>
+            </div>
+            <sp-watch-status [watch]="s" />
+          </div>
+          <div class="version">
+            <span class="big ver">{{ s.latest?.version ?? 'No release yet' }}</span>
+            @if (s.unseen) {
+              <span class="chip accent">New</span>
+            }
+            @if (s.newerThanInstalled) {
+              <span class="chip info">Newer than installed {{ s.installed }}</span>
+            } @else if (s.installed) {
+              <span class="chip success">Installed {{ s.installed }}</span>
+            }
+          </div>
+          @if (s.latest) {
+            <p class="meta">
+              Found {{ s.latest.firstSeenMs | ago }}
+              @if (s.latest.publishedAtMs) { · published {{ dateTime(s.latest.publishedAtMs) }} }
+              · checked {{ s.lastCheckMs | ago }}
+              @if (!s.paused) { · next {{ s.nextCheckMs | ago }} }
+            </p>
+          }
+          @if (s.status.message) {
+            <p class="problem" role="note">{{ s.status.message }}</p>
+          }
+        </div>
+
+        <div class="actions">
+          @if (s.unseen) {
+            <button type="button" class="btn primary" (click)="watches.acknowledge(s.id, null)"><mat-icon svgIcon="sp:check" aria-hidden="true" />Mark as seen</button>
+          } @else if (s.acknowledged) {
+            <button type="button" class="btn" (click)="watches.acknowledge(s.id, null)" disabled><mat-icon svgIcon="sp:check" aria-hidden="true" />Seen</button>
+          }
+          <button type="button" class="btn" (click)="installedPicker.set(!installedPicker())" [attr.aria-expanded]="installedPicker()">
+            <mat-icon svgIcon="sp:package" aria-hidden="true" />I have installed…
+          </button>
+          <button type="button" class="btn" (click)="watches.checkNow(s.id)" [disabled]="s.checking"><mat-icon svgIcon="sp:refresh" aria-hidden="true" [class.spin]="s.checking" />Check now</button>
+          <button type="button" class="btn" (click)="watches.setPaused(s.id, !s.paused)"><mat-icon [svgIcon]="s.paused ? 'sp:play' : 'sp:pause'" aria-hidden="true" />{{ s.paused ? 'Resume' : 'Pause' }}</button>
+          <a class="btn" [routerLink]="['/watches', s.id, 'edit']"><mat-icon svgIcon="sp:edit" aria-hidden="true" />Edit</a>
+          <button type="button" class="btn danger" (click)="remove()"><mat-icon svgIcon="sp:trash" aria-hidden="true" />Delete</button>
+        </div>
+
+        @if (installedPicker()) {
+          <div class="installed field">
+            <label for="installed">Which version do you have?</label>
+            <select id="installed" class="input" [value]="s.installed ?? ''" (change)="onInstalled($event)">
+              <option value="">I don't know</option>
+              @for (r of d.history; track r.version) {
+                <option [value]="r.version">{{ r.version }}</option>
+              }
+            </select>
+            <span class="help">Spotter then tells you only about releases newer than this one, if the watch is set that way.</span>
+          </div>
+        }
+      </section>
+
+      <section class="section" aria-labelledby="hist-h">
+        <div class="section-head"><h2 id="hist-h">Releases</h2><span class="help">{{ d.history.length }} found</span></div>
+        @if (d.history.length) {
+          <div class="surface table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Version</th>
+                  <th scope="col">Name</th>
+                  <th scope="col">Published</th>
+                  <th scope="col">First seen</th>
+                  <th scope="col">Size</th>
+                  <th scope="col">SHA-256</th>
+                  <th scope="col"><span class="pd-visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of d.history; track r.version) {
+                  <tr>
+                    <td>
+                      <span class="ver">{{ r.version }}</span>
+                      @if (r.prerelease) { <span class="chip">Pre-release</span> }
+                      @if (isInstalled(r)) { <span class="chip success">Installed</span> }
+                    </td>
+                    <td class="truncate name">{{ r.name }}</td>
+                    <td>{{ dateTime(r.publishedAtMs) }}</td>
+                    <td>{{ r.firstSeenMs | ago }}</td>
+                    <td>{{ bytes(r.size) }}</td>
+                    <td class="mono">{{ hash(r.sha256) }}</td>
+                    <td>
+                      <div class="row-actions">
+                        <button type="button" class="btn ghost icon sm" (click)="watches.openRelease(s.id, r.version)" [attr.aria-label]="'Open ' + r.version"><mat-icon svgIcon="sp:external" aria-hidden="true" /></button>
+                        <button type="button" class="btn ghost icon sm" (click)="watches.download(s.id, r.version)" [attr.aria-label]="'Download ' + r.version"><mat-icon svgIcon="sp:download" aria-hidden="true" /></button>
+                        <button type="button" class="btn ghost icon sm" (click)="copy(r.location, 'Location')" [attr.aria-label]="'Copy the location of ' + r.version"><mat-icon svgIcon="sp:copy" aria-hidden="true" /></button>
+                        @if (r.sha256) {
+                          <button type="button" class="btn ghost icon sm" (click)="copy(r.sha256, 'Checksum')" [attr.aria-label]="'Copy the checksum of ' + r.version"><mat-icon svgIcon="sp:lock" aria-hidden="true" /></button>
+                        }
+                        <button type="button" class="btn ghost icon sm" (click)="watches.acknowledge(s.id, r.version)" [attr.aria-label]="'Mark ' + r.version + ' as seen'"><mat-icon svgIcon="sp:check" aria-hidden="true" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <pd-empty-state heading="No releases found yet" description="Nothing matched on the last check. Use Test this source in the editor to see what the source returns." />
+        }
+      </section>
+
+      <div class="two">
+        <section class="section" aria-labelledby="checks-h">
+          <h2 id="checks-h">Recent checks</h2>
+          @if (checks().length) {
+            <ul class="surface plain">
+              @for (c of checks(); track c.atMs) {
+                <li>
+                  <span class="when">{{ c.atMs | ago }}</span>
+                  @if (c.error) {
+                    <span class="bad">Failed: {{ c.error }}</span>
+                  } @else {
+                    <span>Found {{ c.found }}</span>
+                  }
+                  <span class="help">{{ duration(c.tookMs) }}</span>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="help">Not checked yet.</p>
+          }
+        </section>
+
+        <section class="section" aria-labelledby="set-h">
+          <h2 id="set-h">Settings</h2>
+          <dl class="surface kv">
+            <dt>Checks</dt><dd>{{ interval(d.spec.intervalSecs) }}</dd>
+            <dt>Versions</dt><dd>{{ scheme() }}{{ d.spec.includePrereleases ? ', including pre-releases' : '' }}</dd>
+            @if (d.spec.filter.prefix || d.spec.nameFilter || d.spec.filter.soakHours) {
+              <dt>Filters</dt>
+              <dd>
+                @if (d.spec.filter.prefix) { Version starts with {{ d.spec.filter.prefix }}. }
+                @if (d.spec.nameFilter) { Names match {{ d.spec.nameFilter }}. }
+                @if (d.spec.filter.soakHours) { Announced after {{ d.spec.filter.soakHours }} h. }
+              </dd>
+            }
+            <dt>Notify</dt><dd>{{ notifyText(d.spec.notify.mode) }}{{ d.spec.notify.nag ? ', and keep reminding' : '' }}</dd>
+            <dt>Actions</dt>
+            <dd>
+              @for (a of d.spec.actions; track $index) { <div>{{ actionText(a) }}</div> } @empty { None }
+            </dd>
+            @if (d.spec.channels.length) {
+              <dt>Also notify</dt>
+              <dd>@for (c of d.spec.channels; track $index) { <div>{{ c.kind }}: {{ c.target }}</div> }</dd>
+            }
+            @if (d.secretsSet.length) {
+              <dt>Secrets</dt><dd>{{ d.secretsSet.length }} stored in the credential store</dd>
+            }
+          </dl>
+        </section>
+      </div>
+    }
+  </sp-panel>
+</div>

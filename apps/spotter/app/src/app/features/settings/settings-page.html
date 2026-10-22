@@ -1,0 +1,162 @@
+<div class="page narrow">
+  <header class="page-head"><h1>Settings</h1></header>
+
+  <sp-panel [state]="store.settings()" label="the settings" (retry)="store.loadAll()">
+    @let c = s();
+    @if (c) {
+      @if (store.problems().length) {
+        <ul class="problems" role="alert">@for (p of store.problems(); track p) { <li>{{ p }}</li> }</ul>
+      }
+
+      <section class="group surface" aria-labelledby="app-h">
+        <h2 id="app-h">Appearance</h2>
+        <div class="row">
+          <div><div class="l">Theme</div><div class="help">System follows your computer's light or dark setting.</div></div>
+          <pd-segmented-control label="Theme" [options]="themes" [value]="c.theme" (valueChange)="setTheme($event)" />
+        </div>
+        <div class="row">
+          <div><label class="l" for="autostart">Launch at login</label><div class="help">Start Spotter in the tray when you sign in.</div></div>
+          <input id="autostart" type="checkbox" class="toggle" role="switch" [checked]="store.autostart() === true" [disabled]="store.autostart() === null" (change)="store.setAutostart(checked($event))" />
+        </div>
+      </section>
+
+      <section class="group surface" aria-labelledby="not-h">
+        <h2 id="not-h">Notifications</h2>
+        <div class="row">
+          <div><label class="l" for="notif">Show notifications</label><div class="help">A system notification when a watch finds a new release.</div></div>
+          <input id="notif" type="checkbox" class="toggle" role="switch" [checked]="c.notifications" (change)="set({ notifications: checked($event) })" />
+        </div>
+        <div class="row">
+          <div>
+            <div class="l">Pause</div>
+            <div class="help">
+              @if (pausedFor(); as left) { Paused for another {{ left }}. } @else { Notifications are on. }
+            </div>
+          </div>
+          <div class="inline">
+            <button type="button" class="btn sm" (click)="store.pauseNotifications(60)">1 hour</button>
+            <button type="button" class="btn sm" (click)="store.pauseNotifications(24 * 60)">1 day</button>
+            @if (pausedFor()) { <button type="button" class="btn sm primary" (click)="store.pauseNotifications(null)">Resume</button> }
+          </div>
+        </div>
+        <div class="row">
+          <div><label class="l" for="digest">Digest</label><div class="help">Collect releases into one notification instead of announcing each at once.</div></div>
+          <select id="digest" class="input fit" [value]="c.digest" (change)="set({ digest: $any(value($event)) })">
+            <option value="off">Announce at once</option>
+            <option value="daily">Daily digest</option>
+            <option value="weekly">Weekly digest</option>
+          </select>
+        </div>
+        <div class="row">
+          <div><label class="l" for="quiet">Quiet hours</label><div class="help">No notifications in this window. Watches can add their own.</div></div>
+          <input id="quiet" type="checkbox" class="toggle" role="switch" [checked]="!!c.quietHours" (change)="setQuiet(checked($event))" />
+        </div>
+        @if (c.quietHours; as q) {
+          <div class="row">
+            <div class="l">From and until</div>
+            <div class="inline">
+              <input class="input fit" type="time" aria-label="Quiet hours start" [value]="q.start" (change)="setQuietTime('start', value($event))" />
+              <input class="input fit" type="time" aria-label="Quiet hours end" [value]="q.end" (change)="setQuietTime('end', value($event))" />
+            </div>
+          </div>
+        }
+      </section>
+
+      <section class="group surface" aria-labelledby="chk-h">
+        <h2 id="chk-h">Checks and downloads</h2>
+        <div class="row">
+          <div><label class="l" for="interval">Default check interval</label><div class="help">New watches start with this; each watch can change it.</div></div>
+          <select id="interval" class="input fit" [value]="c.defaultIntervalSecs" (change)="set({ defaultIntervalSecs: +value($event) })">
+            @for (i of intervals; track i.secs) { <option [value]="i.secs">{{ i.label }}</option> }
+          </select>
+        </div>
+        <div class="row">
+          <div>
+            <div class="l">Downloads folder</div>
+            <div class="help mono pd-selectable">{{ c.downloadsFolder ?? store.info().value?.downloadsDir ?? 'The default downloads folder' }}</div>
+          </div>
+          <div class="inline">
+            <button type="button" class="btn sm" (click)="store.chooseDownloads()"><mat-icon svgIcon="sp:folder" aria-hidden="true" />Choose…</button>
+            <button type="button" class="btn sm" (click)="store.open('downloads')">Open</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="group surface" aria-labelledby="ren-h">
+        <h2 id="ren-h">Web pages that need JavaScript</h2>
+        <sp-panel [state]="store.renderer()" label="the browser status" (retry)="store.loadAll()">
+          @let r = store.renderer().value;
+          @if (r) {
+            <div class="row">
+              <div>
+                <pd-status-pill [status]="rendererTone()" [label]="rendererWord()" />
+                <div class="help detail pd-selectable">{{ r.detail }}</div>
+              </div>
+              @if (r.canDownload) {
+                <button type="button" class="btn sm" (click)="store.installRenderer()" [disabled]="store.rendererBusy()">{{ store.rendererBusy() ? 'Downloading…' : 'Download Chromium' }}</button>
+              }
+            </div>
+            <div class="row">
+              <div><label class="l" for="osweb">Use the system web view when no Chromium is found</label><div class="help">Works for simple pages only, and is labelled as such on the watch.</div></div>
+              <input id="osweb" type="checkbox" class="toggle" role="switch" [checked]="c.allowOsWebview" (change)="set({ allowOsWebview: checked($event) })" />
+            </div>
+          }
+        </sp-panel>
+      </section>
+
+      <section class="group surface" aria-labelledby="upd-h">
+        <h2 id="upd-h">Spotter updates</h2>
+        <div class="row">
+          <div>
+            <div class="l">Version {{ store.info().value?.version ?? store.update().value?.currentVersion ?? '' }}</div>
+            @if (store.update().value; as u) {
+              @if (!u.available) { <div class="help">{{ u.reason ?? 'Updates are not available in this build.' }}</div> }
+            }
+            @if (store.updateCheck(); as chk) {
+              <div class="help" role="status">
+                @if (chk.updateAvailable) { Version {{ chk.version }} is available. {{ chk.notes }} } @else { You have the latest version. }
+              </div>
+            }
+          </div>
+          <div class="inline">
+            <button type="button" class="btn sm" (click)="store.checkUpdate()" [disabled]="store.updateBusy() || store.update().value?.available === false">Check for updates</button>
+            @if (store.updateCheck()?.updateAvailable) { <button type="button" class="btn sm primary" (click)="store.installUpdate()" [disabled]="store.updateBusy()">Install</button> }
+          </div>
+        </div>
+        <div class="row">
+          <div><label class="l" for="auto-upd">Check automatically</label><div class="help">Spotter asks once a day. Nothing else is sent.</div></div>
+          <input id="auto-upd" type="checkbox" class="toggle" role="switch" [checked]="c.checkAppUpdates" (change)="set({ checkAppUpdates: checked($event) })" />
+        </div>
+      </section>
+
+      <section class="group surface" aria-labelledby="data-h">
+        <h2 id="data-h">Data</h2>
+        @if (store.info().value; as info) {
+          <div class="row">
+            <div><div class="l">Configuration</div><div class="help mono pd-selectable">{{ info.configPath }}</div></div>
+            <button type="button" class="btn sm" (click)="store.open('config')">Open folder</button>
+          </div>
+          <div class="row">
+            <div><div class="l">Logs</div><div class="help mono pd-selectable">{{ info.logsDir }}</div></div>
+            <button type="button" class="btn sm" (click)="store.open('logs')">Open folder</button>
+          </div>
+          @if (info.migratedFromLegacy) {
+            <p class="note" role="status">Your watches were brought over from Release Monitor.</p>
+          }
+          @if (info.warnings.length) {
+            <div class="note warn" role="alert">
+              <strong>Problems found while loading</strong>
+              <ul>@for (w of info.warnings; track w) { <li>{{ w }}</li> }</ul>
+            </div>
+          }
+        }
+      </section>
+
+      <section class="group surface" aria-labelledby="about-h">
+        <h2 id="about-h">About</h2>
+        <p>Spotter watches for new releases anywhere and tells you the moment one appears. Everything stays on this computer: no account, no cloud, no telemetry.</p>
+        <p class="help">Licensed under MIT or Apache-2.0.</p>
+      </section>
+    }
+  </sp-panel>
+</div>
