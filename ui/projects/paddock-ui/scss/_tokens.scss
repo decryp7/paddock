@@ -1,0 +1,315 @@
+@use 'sass:map';
+// paddock-ui design tokens. The only place that names a raw colour, size or duration.
+// Guide: the Paddock design guide (sections 2-9). Every text/background pair and the chart palette are measured by
+// test/tokens (WCAG contrast, colour-vision-deficiency separation); change a value here, run `npm run test:tokens`.
+//
+// Selecting things on <html>:
+//   data-theme="dark|light"          (absent: follow prefers-color-scheme, dark when unknown)
+//   data-accent="debrief|pitcrew|pitwall|dyno|spotter"   (absent: debrief)
+//   data-density="comfortable|standard|compact"          (absent: standard)
+//   data-contrast="more"             (absent: follow prefers-contrast)
+
+// ---------- Scheme-independent ----------
+:root {
+  --pd-font-sans: -apple-system, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI', 'Cantarell', 'Noto Sans', system-ui,
+    sans-serif;
+  --pd-font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, 'JetBrains Mono', monospace;
+
+  // Type scale: size / line-height. Weights used: 400, 500, 600.
+  --pd-text-caption: 11px;
+  --pd-lh-caption: 16px;
+  --pd-text-label: 12px;
+  --pd-lh-label: 16px;
+  --pd-text-body: 13px;
+  --pd-lh-body: 20px;
+  --pd-text-body-lg: 14px;
+  --pd-lh-body-lg: 20px;
+  --pd-text-subtitle: 15px;
+  --pd-lh-subtitle: 22px;
+  --pd-text-title: 18px;
+  --pd-lh-title: 26px;
+  --pd-text-display: 28px;
+  --pd-lh-display: 32px;
+  --pd-text-hero: 40px;
+  --pd-lh-hero: 44px;
+  --pd-weight-regular: 400;
+  --pd-weight-medium: 500;
+  --pd-weight-semibold: 600;
+  --pd-numeric: tabular-nums;
+
+  // 4 px grid.
+  --pd-space-0: 2px;
+  --pd-space-1: 4px;
+  --pd-space-2: 8px;
+  --pd-space-3: 12px;
+  --pd-space-4: 16px;
+  --pd-space-6: 24px;
+  --pd-space-8: 32px;
+  --pd-space-12: 48px;
+
+  // Radii.
+  --pd-radius-tag: 4px;
+  --pd-radius-control: 6px;
+  --pd-radius-input: 6px;
+  --pd-radius-card: 10px;
+  --pd-radius-popover: 10px;
+  --pd-radius-dialog: 14px;
+  --pd-radius-pill: 999px;
+
+  // Motion: 100 / 180 / 260 ms; exit is 70% of enter.
+  --pd-duration-micro: 100ms;
+  --pd-duration: 180ms;
+  --pd-duration-large: 260ms;
+  --pd-ease-enter: cubic-bezier(0.2, 0, 0, 1);
+  --pd-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --pd-ease-move: cubic-bezier(0.3, 0, 0.2, 1);
+
+  // Layers.
+  --pd-z-sticky: 10;
+  --pd-z-sidebar: 20;
+  --pd-z-banner: 30;
+  --pd-z-overlay: 1000;
+  --pd-z-toast: 1100;
+
+  // Layout.
+  --pd-sidebar-width: 216px;
+  --pd-sidebar-collapsed: 56px;
+  --pd-toolbar-height: 44px;
+  --pd-statusbar-height: 24px;
+  --pd-tray-width: 360px;
+  --pd-tray-max-height: 520px;
+  --pd-content-max: 1440px;
+  --pd-form-max: 880px;
+  --pd-chart-lane: 14px;
+
+  // Density: Standard is the default.
+  --pd-row-height: 32px;
+  --pd-card-padding: 16px;
+  --pd-card-gap: 16px;
+  --pd-control-height: 28px;
+  --pd-button-height: 32px;
+  --pd-hit-min: 24px;
+}
+
+:root[data-density='comfortable'] {
+  --pd-row-height: 36px;
+  --pd-card-padding: 20px;
+  --pd-card-gap: 16px;
+  --pd-control-height: 32px;
+  --pd-button-height: 32px;
+}
+
+:root[data-density='compact'] {
+  --pd-row-height: 24px;
+  --pd-card-padding: 12px;
+  --pd-card-gap: 12px;
+  --pd-control-height: 24px;
+  --pd-button-height: 28px;
+}
+
+// ---------- Dark / light ----------
+@mixin dark {
+  color-scheme: dark;
+  --pd-bg: #0e0f12;
+  --pd-surface-1: #15171b;
+  --pd-surface-2: #1b1e23;
+  --pd-surface-3: #22262c;
+  --pd-hairline: rgb(255 255 255 / 0.08);
+  --pd-border-strong: rgb(255 255 255 / 0.16);
+  // Boundary of inputs and checkable controls: at least 3:1 against surface-1 (WCAG 1.4.11).
+  --pd-border-control: #838b98;
+  --pd-text: #eceef1;
+  --pd-text-muted: #a0a7b2;
+  --pd-text-subtle: #8b93a0;
+  --pd-hover: rgb(255 255 255 / 0.05);
+  --pd-pressed: rgb(255 255 255 / 0.09);
+  --pd-scrim: rgb(0 0 0 / 0.55);
+  --pd-on-accent: #ffffff;
+  --pd-on-danger: #ffffff;
+  --pd-danger-fill: #c42b2b;
+
+  --pd-success: #3dd68c;
+  --pd-warning: #f2b84b;
+  --pd-danger: #ff6b6b;
+  --pd-info: #7db2e8;
+  --pd-neutral: #a0a7b2;
+  --pd-success-tint: rgb(61 214 140 / 0.14);
+  --pd-warning-tint: rgb(242 184 75 / 0.14);
+  --pd-danger-tint: rgb(255 107 107 / 0.14);
+  --pd-info-tint: rgb(125 178 232 / 0.14);
+  --pd-neutral-tint: #1b1e23;
+
+  --pd-chart-1: #60aeeb;
+  --pd-chart-2: #f3aa25;
+  --pd-chart-3: #3dd39d;
+  --pd-chart-4: #d68cc2;
+  --pd-chart-5: #f07d3a;
+  --pd-chart-6: #8fa3ff;
+  --pd-chart-7: #e8dc5a;
+  --pd-chart-8: #a2acb1;
+  --pd-diverging-neg: var(--pd-chart-1);
+  --pd-diverging-mid: #22262c;
+  --pd-diverging-pos: var(--pd-chart-2);
+  --pd-chart-neutral-bar: #5e6775;
+  --pd-chart-grid: rgb(255 255 255 / 0.08);
+
+  --pd-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+  --pd-shadow-2: 0 8px 24px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --pd-shadow-3: 0 16px 48px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --pd-skeleton: #1b1e23;
+  --pd-skeleton-shine: #262a31;
+}
+
+@mixin light {
+  color-scheme: light;
+  --pd-bg: #f4f5f7;
+  --pd-surface-1: #ffffff;
+  --pd-surface-2: #f0f2f5;
+  --pd-surface-3: #ffffff;
+  --pd-hairline: rgb(15 20 30 / 0.1);
+  --pd-border-strong: rgb(15 20 30 / 0.22);
+  --pd-border-control: #6b7380;
+  --pd-text: #14171c;
+  --pd-text-muted: #4f5764;
+  --pd-text-subtle: #5f6775;
+  --pd-hover: rgb(15 20 30 / 0.05);
+  --pd-pressed: rgb(15 20 30 / 0.09);
+  --pd-scrim: rgb(15 20 30 / 0.32);
+  --pd-on-accent: #ffffff;
+  --pd-on-danger: #ffffff;
+  --pd-danger-fill: #c42b2b;
+
+  --pd-success: #187a46;
+  --pd-warning: #8f5f00;
+  --pd-danger: #c42b2b;
+  --pd-info: #1f5fa8;
+  --pd-neutral: #4f5764;
+  --pd-success-tint: #e3f5eb;
+  --pd-warning-tint: #fbf0d6;
+  --pd-danger-tint: #fce6e6;
+  --pd-info-tint: #e4eef9;
+  --pd-neutral-tint: #f0f2f5;
+
+  --pd-chart-1: #0c6dbe;
+  --pd-chart-2: #c47600;
+  --pd-chart-3: #087d51;
+  --pd-chart-4: #b04c95;
+  --pd-chart-5: #be3108;
+  --pd-chart-6: #494fdb;
+  --pd-chart-7: #816a1d;
+  --pd-chart-8: #6f737d;
+  --pd-diverging-neg: var(--pd-chart-1);
+  --pd-diverging-mid: #f0f2f5;
+  --pd-diverging-pos: var(--pd-chart-2);
+  --pd-chart-neutral-bar: #868f9d;
+  --pd-chart-grid: rgb(15 20 30 / 0.1);
+
+  --pd-shadow-1: 0 1px 2px rgb(15 20 30 / 0.06), 0 1px 1px rgb(15 20 30 / 0.04);
+  --pd-shadow-2: 0 8px 24px rgb(15 20 30 / 0.14), 0 1px 2px rgb(15 20 30 / 0.06);
+  --pd-shadow-3: 0 16px 48px rgb(15 20 30 / 0.2), 0 1px 2px rgb(15 20 30 / 0.06);
+  --pd-skeleton: #e8ebef;
+  --pd-skeleton-shine: #f6f7f9;
+}
+
+@mixin high-contrast {
+  --pd-hairline: var(--pd-border-strong);
+  --pd-border-strong: var(--pd-border-control);
+  --pd-surface-3: var(--pd-surface-1);
+}
+
+:root {
+  @include dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    @include light;
+  }
+}
+
+:root[data-theme='light'] {
+  @include light;
+}
+
+:root[data-theme='dark'] {
+  @include dark;
+}
+
+@media (prefers-contrast: more) {
+  :root:not([data-contrast='off']) {
+    @include high-contrast;
+  }
+}
+
+:root[data-contrast='more'] {
+  @include high-contrast;
+}
+
+// ---------- Accents ----------
+// accent = text, links, focus ring, selection icon (>= 4.5:1 on the surfaces); fill = button background with white text.
+$accents: (
+  'debrief': (dark: #5b9bff, light: #1d5fd1, fill: #2f6fe0),
+  'pitcrew': (dark: #ff7a45, light: #bf3a0c, fill: #d2420f),
+  'pitwall': (dark: #a58bfa, light: #6d3fd6, fill: #7546e0),
+  'dyno': (dark: #f063a8, light: #b01e6e, fill: #c2287c),
+  'spotter': (dark: #2cc4b0, light: #0b7a6e, fill: #0e8577),
+);
+
+@mixin accent-vars($text, $fill) {
+  --pd-accent: #{$text};
+  --pd-accent-fill: #{$fill};
+  --pd-accent-fill-hover: color-mix(in srgb, #{$fill} 88%, #000);
+  --pd-accent-tint: color-mix(in srgb, #{$text} 14%, transparent);
+  --pd-accent-ring: color-mix(in srgb, #{$text} 35%, transparent);
+}
+
+// Default accent: Debrief.
+:root {
+  @include accent-vars(map.get(map.get($accents, 'debrief'), dark), map.get(map.get($accents, 'debrief'), fill));
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    @include accent-vars(map.get(map.get($accents, 'debrief'), light), map.get(map.get($accents, 'debrief'), fill));
+  }
+}
+
+:root[data-theme='light'] {
+  @include accent-vars(map.get(map.get($accents, 'debrief'), light), map.get(map.get($accents, 'debrief'), fill));
+}
+
+:root[data-theme='dark'] {
+  @include accent-vars(map.get(map.get($accents, 'debrief'), dark), map.get(map.get($accents, 'debrief'), fill));
+}
+
+@each $name, $a in $accents {
+  :root[data-accent='#{$name}'] {
+    @include accent-vars(map.get($a, dark), map.get($a, fill));
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme='dark'])[data-accent='#{$name}'] {
+      @include accent-vars(map.get($a, light), map.get($a, fill));
+    }
+  }
+
+  :root[data-theme='light'][data-accent='#{$name}'] {
+    @include accent-vars(map.get($a, light), map.get($a, fill));
+  }
+
+  :root[data-theme='dark'][data-accent='#{$name}'] {
+    @include accent-vars(map.get($a, dark), map.get($a, fill));
+  }
+}
+
+// ---------- Derived (computed from the tokens above) ----------
+:root {
+  // Sequential ramp for heatmaps: surface-2 to the accent in six steps (OKLCH mixing).
+  --pd-seq-1: var(--pd-surface-2);
+  --pd-seq-2: color-mix(in oklch, var(--pd-surface-2), var(--pd-accent) 20%);
+  --pd-seq-3: color-mix(in oklch, var(--pd-surface-2), var(--pd-accent) 40%);
+  --pd-seq-4: color-mix(in oklch, var(--pd-surface-2), var(--pd-accent) 60%);
+  --pd-seq-5: color-mix(in oklch, var(--pd-surface-2), var(--pd-accent) 80%);
+  --pd-seq-6: var(--pd-accent);
+  --pd-focus-ring: var(--pd-accent);
+}

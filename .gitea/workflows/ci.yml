@@ -1,4 +1,4 @@
-# Checks the shared UI package on every push and pull request; a v* tag also builds suite-ui-<version>.tgz and attaches it
+# Checks the shared UI package on every push and pull request; a v* tag also builds paddock-ui-<version>.tgz and attaches it
 # to a Gitea release (needs the repository secret RELEASE_TOKEN: an access token with write:repository scope).
 # Rust jobs are added with the first crate in crates/.
 
@@ -65,7 +65,7 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
-      - name: Pack and attach suite-ui-<version>.tgz to the release
+      - name: Pack and attach paddock-ui-<version>.tgz to the release
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: node scripts/release.mjs --publish

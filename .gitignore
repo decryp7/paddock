@@ -6,6 +6,6 @@
 /ui/coverage/
 /ui/test-results/
 # Generated from scss/ by `npm run build:css`.
-/ui/projects/suite-ui/css/
+/ui/projects/paddock-ui/css/
 /crates/target/
 .DS_Store

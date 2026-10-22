@@ -1,4 +1,4 @@
-import { type SuiteChartTokens, sequentialRamp, withAlpha } from './tokens';
+import { type PaddockChartTokens, sequentialRamp, withAlpha } from './tokens';
 
 /** Gradient definition ECharts accepts without importing its classes (top 28% alpha to 0 at the baseline). */
 export interface AreaGradient {
@@ -34,7 +34,7 @@ export type EventShape = (typeof EVENT_SHAPES)[number];
  * without connecting gaps, bars from zero with a 4 px top radius, an interactive top-left legend, surface-3
  * crosshair tooltips, 300 ms draw animation on first draw only.
  */
-export function createEchartsTheme(t: SuiteChartTokens): Record<string, unknown> {
+export function createEchartsTheme(t: PaddockChartTokens): Record<string, unknown> {
   const axisLabel = { color: t.textSubtle, fontSize: 11, fontFamily: t.fontFamily };
   const baseline = { show: true, lineStyle: { color: t.borderStrong, width: 1 } };
   const grid = { show: true, lineStyle: { color: t.hairline, width: 1, type: [2, 4] } };
@@ -127,7 +127,7 @@ export interface EventLaneOptions {
  * Merge into the chart option: `grid`, `xAxis`, `yAxis` and `series` are arrays; append them to the chart's own.
  * `gridIndex` is the index the lane grid will have in the merged option.
  */
-export function eventLaneFragment(events: readonly ChartEvent[], t: SuiteChartTokens, gridIndex: number, opts: EventLaneOptions) {
+export function eventLaneFragment(events: readonly ChartEvent[], t: PaddockChartTokens, gridIndex: number, opts: EventLaneOptions) {
   const lane = opts.laneHeight ?? 14;
   const bottom = opts.bottom ?? 8;
   return {
@@ -154,16 +154,16 @@ export interface EchartsRegistry {
   registerTheme(name: string, theme: object): void;
 }
 
-/** Theme names registered by {@link registerSuiteTheme}. */
-export const SUITE_THEME_LIGHT = 'suite-light';
-export const SUITE_THEME_DARK = 'suite-dark';
+/** Theme names registered by {@link registerPaddockTheme}. */
+export const PADDOCK_THEME_LIGHT = 'paddock-light';
+export const PADDOCK_THEME_DARK = 'paddock-dark';
 
 /**
- * Registers the suite theme for the tokens' scheme and returns the name to pass to `echarts.init(el, name)`.
+ * Registers the paddock theme for the tokens' scheme and returns the name to pass to `echarts.init(el, name)`.
  * Call again on a scheme or accent change (tokens re-read) and `setTheme`/re-init the chart; data need not reload.
  */
-export function registerSuiteTheme(echarts: EchartsRegistry, tokens: SuiteChartTokens): string {
-  const name = tokens.scheme === 'light' ? SUITE_THEME_LIGHT : SUITE_THEME_DARK;
+export function registerPaddockTheme(echarts: EchartsRegistry, tokens: PaddockChartTokens): string {
+  const name = tokens.scheme === 'light' ? PADDOCK_THEME_LIGHT : PADDOCK_THEME_DARK;
   echarts.registerTheme(name, createEchartsTheme(tokens));
   return name;
 }

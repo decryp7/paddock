@@ -10,23 +10,23 @@ export { SuTrayPopover, type SuTrayPlatform } from './lib/tray-popover';
 export {
   parseCssColor,
   mixColors,
-  readSuiteTokens,
+  readPaddockTokens,
   sequentialRamp,
   withAlpha,
-  type SuiteChartTokens,
+  type PaddockChartTokens,
 } from './lib/echarts/tokens';
 export {
   EVENT_SHAPES,
-  SUITE_THEME_DARK,
-  SUITE_THEME_LIGHT,
+  PADDOCK_THEME_DARK,
+  PADDOCK_THEME_LIGHT,
   areaGradient,
   createEchartsTheme,
   eventLaneFragment,
-  registerSuiteTheme,
+  registerPaddockTheme,
   type AreaGradient,
   type ChartEvent,
   type EchartsRegistry,
   type EventLaneOptions,
   type EventShape,
 } from './lib/echarts/theme';
-export { SU_THEMES, SU_ACCENTS, SU_DENSITIES, applySuiteAppearance, type SuAccent, type SuDensity, type SuTheme } from './lib/appearance';
+export { SU_THEMES, SU_ACCENTS, SU_DENSITIES, applyPaddockAppearance, type SuAccent, type SuDensity, type SuTheme } from './lib/appearance';

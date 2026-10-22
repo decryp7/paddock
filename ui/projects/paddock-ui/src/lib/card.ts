@@ -9,11 +9,11 @@ let nextId = 0;
  * Slots: `[slot=icon]`, `[slot=status]`, default (hero), `[slot=sparkline]`, `[slot=caption]`.
  */
 @Component({
-  selector: 'su-card',
+  selector: 'pd-card',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
-    '[class.su-card--interactive]': 'interactive()',
-    '[class.su-card--flat]': 'flat()',
+    '[class.pd-card--interactive]': 'interactive()',
+    '[class.pd-card--flat]': 'flat()',
     '[attr.role]': 'interactive() ? "button" : "group"',
     '[attr.tabindex]': 'interactive() ? 0 : null',
     '[attr.aria-labelledby]': 'interactive() ? null : titleId',
@@ -42,29 +42,29 @@ let nextId = 0;
       position: relative;
       display: flex;
       flex-direction: column;
-      gap: var(--su-space-2);
+      gap: var(--pd-space-2);
       min-width: 0;
-      padding: var(--su-card-padding);
-      background: var(--su-surface-1);
-      border: 1px solid var(--su-hairline);
-      border-radius: var(--su-radius-card);
-      color: var(--su-text);
+      padding: var(--pd-card-padding);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      color: var(--pd-text);
     }
     /* Inside another bordered surface (tray popover, dialog): a background step instead of a nested border. */
-    :host(.su-card--flat) { background: var(--su-surface-2); border-color: transparent; }
-    :host(.su-card--interactive) { cursor: pointer; transition: background var(--su-duration-micro) var(--su-ease-enter); }
-    :host(.su-card--interactive:hover) { background: var(--su-surface-2); }
-    :host(.su-card--interactive:active) { background: var(--su-pressed); }
-    .head { display: flex; align-items: center; gap: var(--su-space-2); min-height: 20px; }
-    .icon { display: inline-flex; color: var(--su-text-muted); }
+    :host(.pd-card--flat) { background: var(--pd-surface-2); border-color: transparent; }
+    :host(.pd-card--interactive) { cursor: pointer; transition: background var(--pd-duration-micro) var(--pd-ease-enter); }
+    :host(.pd-card--interactive:hover) { background: var(--pd-surface-2); }
+    :host(.pd-card--interactive:active) { background: var(--pd-pressed); }
+    .head { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 20px; }
+    .icon { display: inline-flex; color: var(--pd-text-muted); }
     .icon:empty { display: none; }
-    .title { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--su-text-body); line-height: var(--su-lh-body); font-weight: var(--su-weight-semibold); }
+    .title { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--pd-text-body); line-height: var(--pd-lh-body); font-weight: var(--pd-weight-semibold); }
     .status { display: inline-flex; align-items: center; }
     .spark:empty, .caption:empty { display: none; }
-    .caption { font-size: var(--su-text-label); line-height: var(--su-lh-label); color: var(--su-text-muted); font-variant-numeric: tabular-nums; }
-    .chevron { position: absolute; right: var(--su-space-3); bottom: var(--su-space-3); color: var(--su-text-muted); opacity: 0; transition: opacity var(--su-duration-micro) var(--su-ease-enter); }
-    :host(.su-card--interactive:hover) .chevron, :host(.su-card--interactive:focus-visible) .chevron { opacity: 1; }
-    :host(:focus-visible) { border-radius: var(--su-radius-card); }
+    .caption { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    .chevron { position: absolute; right: var(--pd-space-3); bottom: var(--pd-space-3); color: var(--pd-text-muted); opacity: 0; transition: opacity var(--pd-duration-micro) var(--pd-ease-enter); }
+    :host(.pd-card--interactive:hover) .chevron, :host(.pd-card--interactive:focus-visible) .chevron { opacity: 1; }
+    :host(:focus-visible) { border-radius: var(--pd-radius-card); }
   `,
 })
 export class SuCard {
@@ -74,7 +74,7 @@ export class SuCard {
   /** Borderless, surface-2 fill: use inside a surface that already has a border (no nested bordered cards). */
   readonly flat = input<boolean>(false);
   readonly activated = output<void>();
-  protected readonly titleId = `su-card-title-${nextId++}`;
+  protected readonly titleId = `pd-card-title-${nextId++}`;
 
   protected activate(event?: Event): void {
     if (!this.interactive()) return;

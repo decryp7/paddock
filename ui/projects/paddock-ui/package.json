@@ -1,11 +1,11 @@
 {
-  "name": "@decryp7/suite-ui",
+  "name": "@decryp7/paddock-ui",
   "version": "0.1.0",
-  "description": "The shared design system of the app suite: tokens, components and chart theme.",
+  "description": "The shared design system of the Paddock app family: tokens, components and chart theme.",
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://dev.decryptology.net/decryp7/suite-kit.git",
+    "url": "https://dev.decryptology.net/decryp7/paddock-kit.git",
     "directory": "ui"
   },
   "keywords": [

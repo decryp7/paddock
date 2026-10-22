@@ -1,6 +1,6 @@
-# Suite lessons
+# Paddock lessons
 
-Lessons from Debrief and Pitcrew (2026-10-22). Apply in every app from the start. Source: the suite brief.
+Lessons from Debrief and Pitcrew (2026-10-22). Apply in every app from the start. Source: the Paddock brief.
 
 Build and bundle
 - Anchor ignore rules (`/logs/`, not `logs/`): an unanchored rule silently kept `app/src/app/features/logs/` out of git.

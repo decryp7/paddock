@@ -16,15 +16,15 @@ import {
   SuSparkline,
   SuStatusPill,
   SuTrayPopover,
-  applySuiteAppearance,
+  applyPaddockAppearance,
   areaGradient,
   eventLaneFragment,
-  readSuiteTokens,
-  registerSuiteTheme,
+  readPaddockTokens,
+  registerPaddockTheme,
   type SuAccent,
   type SuDensity,
   type SuTheme,
-} from '@decryp7/suite-ui';
+} from '@decryp7/paddock-ui';
 
 echarts.use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, CanvasRenderer]);
 
@@ -44,86 +44,86 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
   template: `
     <main class="gal-page">
       <header class="gal-bar">
-        <h1>suite-ui gallery</h1>
-        <su-segmented-control label="Theme" [options]="themes" [(value)]="theme" />
-        <su-segmented-control label="Accent" [options]="accents" [(value)]="accent" />
-        <su-segmented-control label="Density" [options]="densities" [(value)]="density" />
+        <h1>paddock-ui gallery</h1>
+        <pd-segmented-control label="Theme" [options]="themes" [(value)]="theme" />
+        <pd-segmented-control label="Accent" [options]="accents" [(value)]="accent" />
+        <pd-segmented-control label="Density" [options]="densities" [(value)]="density" />
       </header>
 
       <section class="gal-section" data-testid="card" aria-labelledby="h-card">
         <h2 id="h-card">Card / tile</h2>
         <div class="gal-grid">
-          <su-card heading="CPU">
+          <pd-card heading="CPU">
             <svg slot="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
-            <su-status-pill slot="status" status="success" label="Normal" />
-            <su-metric value="45" unit="%" [delta]="3" deltaUnit=" pts" deltaLabel="vs last hour" goodDirection="down" />
-            <su-sparkline slot="sparkline" label="CPU, last hour" [values]="cpu" [area]="true" [min]="0" [max]="100" />
+            <pd-status-pill slot="status" status="success" label="Normal" />
+            <pd-metric value="45" unit="%" [delta]="3" deltaUnit=" pts" deltaLabel="vs last hour" goodDirection="down" />
+            <pd-sparkline slot="sparkline" label="CPU, last hour" [values]="cpu" [area]="true" [min]="0" [max]="100" />
             <span slot="caption">peak 61% at 14:20</span>
-          </su-card>
-          <su-card heading="Memory">
-            <su-status-pill slot="status" status="warning" label="High" />
-            <su-metric [value]="17.1" unit="GB" [decimals]="1" />
-            <su-sparkline slot="sparkline" label="Memory, last hour" [values]="mem" [min]="0" [max]="100" />
+          </pd-card>
+          <pd-card heading="Memory">
+            <pd-status-pill slot="status" status="warning" label="High" />
+            <pd-metric [value]="17.1" unit="GB" [decimals]="1" />
+            <pd-sparkline slot="sparkline" label="Memory, last hour" [values]="mem" [min]="0" [max]="100" />
             <span slot="caption">72% of 24 GB</span>
-          </su-card>
-          <su-card heading="Network" [interactive]="true" (activated)="clicks.set(clicks() + 1)">
-            <su-metric [value]="5.02" unit="MB/s" [decimals]="2" />
-            <su-sparkline slot="sparkline" label="Down, last hour" [values]="net" />
+          </pd-card>
+          <pd-card heading="Network" [interactive]="true" (activated)="clicks.set(clicks() + 1)">
+            <pd-metric [value]="5.02" unit="MB/s" [decimals]="2" />
+            <pd-sparkline slot="sparkline" label="Down, last hour" [values]="net" />
             <span slot="caption">Up 0.4 MB/s · activated {{ clicks() }}×</span>
-          </su-card>
-          <su-card heading="Runners">
-            <su-status-pill slot="status" status="danger" label="1 failing" />
-            <su-metric [value]="12408" size="display" />
+          </pd-card>
+          <pd-card heading="Runners">
+            <pd-status-pill slot="status" status="danger" label="1 failing" />
+            <pd-metric [value]="12408" size="display" />
             <span slot="caption">jobs this week</span>
-          </su-card>
+          </pd-card>
         </div>
       </section>
 
       <section class="gal-section" data-testid="status-pill" aria-labelledby="h-pill">
         <h2 id="h-pill">Status pill</h2>
         <div class="gal-row">
-          <su-status-pill status="success" label="Healthy" />
-          <su-status-pill status="warning" label="Needs attention" />
-          <su-status-pill status="danger" label="Failing" />
-          <su-status-pill status="info" label="Update available" />
-          <su-status-pill status="neutral" label="Paused" />
+          <pd-status-pill status="success" label="Healthy" />
+          <pd-status-pill status="warning" label="Needs attention" />
+          <pd-status-pill status="danger" label="Failing" />
+          <pd-status-pill status="info" label="Update available" />
+          <pd-status-pill status="neutral" label="Paused" />
         </div>
       </section>
 
       <section class="gal-section" data-testid="metric" aria-labelledby="h-metric">
         <h2 id="h-metric">Metric</h2>
         <div class="gal-row">
-          <su-metric [value]="74" unit="/100" />
-          <su-metric [value]="1234567" />
-          <su-metric [value]="3.2" unit="%" size="title" [delta]="-1.4" deltaUnit="%" deltaLabel="vs last week" goodDirection="down" />
-          <su-metric [value]="86" unit="%" size="title" [delta]="12" deltaUnit="%" goodDirection="down" />
-          <su-metric [value]="18.4" unit="ms" size="body" [decimals]="1" [delta]="0" />
-          <su-metric [value]="null" />
+          <pd-metric [value]="74" unit="/100" />
+          <pd-metric [value]="1234567" />
+          <pd-metric [value]="3.2" unit="%" size="title" [delta]="-1.4" deltaUnit="%" deltaLabel="vs last week" goodDirection="down" />
+          <pd-metric [value]="86" unit="%" size="title" [delta]="12" deltaUnit="%" goodDirection="down" />
+          <pd-metric [value]="18.4" unit="ms" size="body" [decimals]="1" [delta]="0" />
+          <pd-metric [value]="null" />
         </div>
       </section>
 
       <section class="gal-section" data-testid="sparkline" aria-labelledby="h-spark">
         <h2 id="h-spark">Sparkline</h2>
         <div class="gal-row">
-          <div class="gal-box gal-skel-card"><su-sparkline label="CPU" [values]="cpu" [area]="true" /></div>
-          <div class="gal-box gal-skel-card"><su-sparkline label="Memory" [values]="mem" [height]="24" /></div>
-          <div class="gal-box gal-skel-card"><su-sparkline label="Gap" [values]="gap" /></div>
+          <div class="gal-box gal-skel-card"><pd-sparkline label="CPU" [values]="cpu" [area]="true" /></div>
+          <div class="gal-box gal-skel-card"><pd-sparkline label="Memory" [values]="mem" [height]="24" /></div>
+          <div class="gal-box gal-skel-card"><pd-sparkline label="Gap" [values]="gap" /></div>
         </div>
       </section>
 
       <section class="gal-section" data-testid="empty-state" aria-labelledby="h-empty">
         <h2 id="h-empty">Empty state</h2>
         <div class="gal-box">
-          <su-empty-state heading="No runners yet" description="Register a runner and its jobs appear here with a live timer.">
+          <pd-empty-state heading="No runners yet" description="Register a runner and its jobs appear here with a live timer.">
             <button slot="action" type="button" class="gal-btn gal-btn--primary">Register runner</button>
-          </su-empty-state>
+          </pd-empty-state>
         </div>
       </section>
 
       <section class="gal-section" data-testid="error-state" aria-labelledby="h-error">
         <h2 id="h-error">Error state</h2>
         <div class="gal-box">
-          <su-error-state heading="Can't reach the Gitea server" cause="Check the URL in Settings, then retry." secondaryLabel="Open logs" (retry)="retries.set(retries() + 1)" />
+          <pd-error-state heading="Can't reach the Gitea server" cause="Check the URL in Settings, then retry." secondaryLabel="Open logs" (retry)="retries.set(retries() + 1)" />
           <p class="gal-num gal-row">Retried {{ retries() }}×</p>
         </div>
       </section>
@@ -132,20 +132,20 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         <h2 id="h-skel">Skeleton</h2>
         <div class="gal-row">
           <div class="gal-box gal-skel-card">
-            <su-skeleton width="40%" />
-            <su-skeleton shape="block" height="28" width="60%" />
-            <su-skeleton shape="block" height="32" />
-            <su-skeleton width="80%" />
+            <pd-skeleton width="40%" />
+            <pd-skeleton shape="block" height="28" width="60%" />
+            <pd-skeleton shape="block" height="32" />
+            <pd-skeleton width="80%" />
           </div>
-          <su-skeleton shape="circle" width="40" height="40" />
+          <pd-skeleton shape="circle" width="40" height="40" />
         </div>
       </section>
 
       <section class="gal-section" data-testid="segmented-control" aria-labelledby="h-seg">
         <h2 id="h-seg">Segmented control</h2>
         <div class="gal-row">
-          <su-segmented-control label="Time range" [options]="ranges" [(value)]="range" />
-          <su-segmented-control label="Level" [options]="levels" [(value)]="level" />
+          <pd-segmented-control label="Time range" [options]="ranges" [(value)]="range" />
+          <pd-segmented-control label="Level" [options]="levels" [(value)]="level" />
           <span class="gal-num">Selected: {{ range() }} / {{ level() }}</span>
         </div>
       </section>
@@ -153,14 +153,14 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
       <section class="gal-section" data-testid="tray-popover" aria-labelledby="h-tray">
         <h2 id="h-tray">Tray popover</h2>
         <div class="gal-tray-stage">
-          <su-tray-popover label="Dyno" platform="macos">
+          <pd-tray-popover label="Dyno" platform="macos">
             <div slot="header" class="gal-inline">
               <strong>Dyno</strong>
-              <su-status-pill status="success" label="Good" />
+              <pd-status-pill status="success" label="Good" />
             </div>
             <div class="gal-tray-tiles">
-              <su-card heading="CPU" [flat]="true"><su-metric [value]="45" unit="%" size="title" /><su-sparkline slot="sparkline" label="CPU" [values]="cpu" [height]="24" /></su-card>
-              <su-card heading="Memory" [flat]="true"><su-metric [value]="72" unit="%" size="title" /><su-sparkline slot="sparkline" label="Memory" [values]="mem" [height]="24" /></su-card>
+              <pd-card heading="CPU" [flat]="true"><pd-metric [value]="45" unit="%" size="title" /><pd-sparkline slot="sparkline" label="CPU" [values]="cpu" [height]="24" /></pd-card>
+              <pd-card heading="Memory" [flat]="true"><pd-metric [value]="72" unit="%" size="title" /><pd-sparkline slot="sparkline" label="Memory" [values]="mem" [height]="24" /></pd-card>
             </div>
             <ul class="gal-list">
               <li><span class="grow">rustc</span><span class="gal-num">42%</span></li>
@@ -171,7 +171,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
               <button type="button" class="gal-btn gal-btn--primary">Open Dyno</button>
               <button type="button" class="gal-btn gal-btn--icon" aria-label="Pause monitoring">II</button>
             </div>
-          </su-tray-popover>
+          </pd-tray-popover>
         </div>
       </section>
 
@@ -221,7 +221,7 @@ export class Gallery {
 
   constructor() {
     effect(() => {
-      applySuiteAppearance(document.documentElement, {
+      applyPaddockAppearance(document.documentElement, {
         theme: this.theme() as SuTheme,
         accent: this.accent() as SuAccent,
         density: this.density() as SuDensity,
@@ -234,8 +234,8 @@ export class Gallery {
 
   private draw(): void {
     const el = this.chartEl().nativeElement;
-    const tokens = readSuiteTokens();
-    const name = registerSuiteTheme(echarts, tokens);
+    const tokens = readPaddockTokens();
+    const name = registerPaddockTheme(echarts, tokens);
     this.chart?.dispose();
     const chart = echarts.init(el, name, { renderer: 'canvas' });
     this.chart = chart;

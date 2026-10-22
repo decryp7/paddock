@@ -35,7 +35,7 @@ export function sparklineGeometry(values: readonly number[], width: number, heig
 
 /** Tiny inline-SVG trend: 1.5 px line, optional area at 14% alpha, 4 px end dot. 24-32 px high, no axes. */
 @Component({
-  selector: 'su-sparkline',
+  selector: 'pd-sparkline',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" [attr.height]="height()" preserveAspectRatio="none" role="img" [attr.aria-label]="summary()">
@@ -49,7 +49,7 @@ export function sparklineGeometry(values: readonly number[], width: number, heig
     }
   `,
   styles: `
-    :host { position: relative; display: block; width: 100%; color: var(--su-accent); }
+    :host { position: relative; display: block; width: 100%; color: var(--pd-accent); }
     svg { display: block; width: 100%; overflow: visible; }
     .line { stroke: currentColor; }
     .area { fill: currentColor; opacity: 0.14; }

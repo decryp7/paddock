@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/ng-packagr/ng-package.schema.json",
-  "dest": "../../dist/suite-ui",
+  "dest": "../../dist/paddock-ui",
   "assets": [
     { "input": "scss", "glob": "_*.scss", "output": "scss" },
     { "input": "scss", "glob": "entry-*.scss", "output": "scss" },

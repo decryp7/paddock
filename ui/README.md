@@ -1,7 +1,7 @@
-# @decryp7/suite-ui
+# @decryp7/paddock-ui
 
-The shared design system of the app suite (Debrief, Pitcrew, Pitwall, Dyno, Spotter): design tokens, base styles,
-Angular components and an ECharts theme. Part of [suite-kit](../README.md); versioned with the repo.
+The shared design system of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter): design tokens, base styles,
+Angular components and an ECharts theme. Part of [paddock-kit](../README.md); versioned with the repo.
 
 ![Gallery, dark](docs/screenshots/gallery-dark-debrief.png)
 
@@ -11,7 +11,7 @@ Each release attaches a built tarball to its Gitea release. Apps depend on that 
 
 ```json
 "dependencies": {
-  "@decryp7/suite-ui": "https://dev.decryptology.net/decryp7/suite-kit/releases/download/v0.1.0/suite-ui-0.1.0.tgz"
+  "@decryp7/paddock-ui": "https://dev.decryptology.net/decryp7/paddock-kit/releases/download/v0.1.0/paddock-ui-0.1.0.tgz"
 }
 ```
 
@@ -26,7 +26,7 @@ To upgrade, change the version in the URL and run `npm install`.
 `angular.json` (the app's styles; tokens and base styles are plain CSS, SCSS sources ship too):
 
 ```json
-"styles": ["node_modules/@decryp7/suite-ui/css/suite.css", "src/styles.scss"]
+"styles": ["node_modules/@decryp7/paddock-ui/css/paddock.css", "src/styles.scss"]
 ```
 
 (`css/tokens.css` alone gives only the tokens; `scss/_tokens.scss` and `scss/_base.scss` can be `@use`d by path.)
@@ -34,48 +34,48 @@ To upgrade, change the version in the URL and run `npm install`.
 Select the look on `<html>`; nothing else is app-specific:
 
 ```ts
-import { applySuiteAppearance } from '@decryp7/suite-ui';
-applySuiteAppearance(document.documentElement, { theme: 'system', accent: 'pitcrew', density: 'standard' });
+import { applyPaddockAppearance } from '@decryp7/paddock-ui';
+applyPaddockAppearance(document.documentElement, { theme: 'system', accent: 'pitcrew', density: 'standard' });
 // <html data-theme="dark|light" data-accent="debrief|pitcrew|pitwall|dyno|spotter" data-density="comfortable|standard|compact">
 ```
 
 No `data-theme` follows the OS (`prefers-color-scheme`); `data-contrast="more"` (or the OS setting) maps hairlines to strong
-borders and removes translucency. Components are standalone with `su-` selectors:
+borders and removes translucency. Components are standalone with `pd-` selectors:
 
 ```ts
-import { SuCard, SuMetric, SuSparkline, SuStatusPill } from '@decryp7/suite-ui';
+import { SuCard, SuMetric, SuSparkline, SuStatusPill } from '@decryp7/paddock-ui';
 ```
 ```html
-<su-card heading="CPU">
-  <su-status-pill slot="status" status="success" label="Normal" />
-  <su-metric [value]="45" unit="%" [delta]="3" deltaUnit=" pts" deltaLabel="vs last hour" goodDirection="down" />
-  <su-sparkline slot="sparkline" label="CPU, last hour" [values]="cpu" [area]="true" />
+<pd-card heading="CPU">
+  <pd-status-pill slot="status" status="success" label="Normal" />
+  <pd-metric [value]="45" unit="%" [delta]="3" deltaUnit=" pts" deltaLabel="vs last hour" goodDirection="down" />
+  <pd-sparkline slot="sparkline" label="CPU, last hour" [values]="cpu" [area]="true" />
   <span slot="caption">peak 61% at 14:20</span>
-</su-card>
+</pd-card>
 ```
 
 | Component | Selector | Notes |
 |---|---|---|
-| Card / tile | `su-card` | slots `icon`, `status`, hero (default), `sparkline`, `caption`; `interactive` makes it a button; `flat` inside bordered surfaces |
-| Status pill | `su-status-pill` | icon shape per status + the word + tint; never colour alone |
-| Metric | `su-metric` | tabular, unit as muted sibling, delta with arrow, sign and spoken text; colour only when `goodDirection` is set |
-| Sparkline | `su-sparkline` | inline SVG, 1.5 px, 4 px end dot, gaps break the line, shared `min`/`max` for rows |
-| Empty / error state | `su-empty-state`, `su-error-state` | error has Retry (`busy` disables it) and an optional secondary action |
-| Skeleton | `su-skeleton` | text, block, circle; shimmer 1.6 s, static under reduced motion |
-| Segmented control | `su-segmented-control` | radio group, arrows/Home/End, `[(value)]` |
-| Tray popover | `su-tray-popover` | 360 px, fitted height, header / content / footer slots, per-platform radius, Escape emits `dismissed` |
+| Card / tile | `pd-card` | slots `icon`, `status`, hero (default), `sparkline`, `caption`; `interactive` makes it a button; `flat` inside bordered surfaces |
+| Status pill | `pd-status-pill` | icon shape per status + the word + tint; never colour alone |
+| Metric | `pd-metric` | tabular, unit as muted sibling, delta with arrow, sign and spoken text; colour only when `goodDirection` is set |
+| Sparkline | `pd-sparkline` | inline SVG, 1.5 px, 4 px end dot, gaps break the line, shared `min`/`max` for rows |
+| Empty / error state | `pd-empty-state`, `pd-error-state` | error has Retry (`busy` disables it) and an optional secondary action |
+| Skeleton | `pd-skeleton` | text, block, circle; shimmer 1.6 s, static under reduced motion |
+| Segmented control | `pd-segmented-control` | radio group, arrows/Home/End, `[(value)]` |
+| Tray popover | `pd-tray-popover` | 360 px, fitted height, header / content / footer slots, per-platform radius, Escape emits `dismissed` |
 
-Add `class="su-tray"` to `<html>` in the tray window for a transparent page. A plain splash (`.su-splash`) styled from
-`suite.css` goes in `index.html` (see the gallery's).
+Add `class="pd-tray"` to `<html>` in the tray window for a transparent page. A plain splash (`.pd-splash`) styled from
+`paddock.css` goes in `index.html` (see the gallery's).
 
 ### ECharts
 
 ```ts
 import * as echarts from 'echarts';
-import { areaGradient, eventLaneFragment, readSuiteTokens, registerSuiteTheme } from '@decryp7/suite-ui';
+import { areaGradient, eventLaneFragment, readPaddockTokens, registerPaddockTheme } from '@decryp7/paddock-ui';
 
-const tokens = readSuiteTokens();              // re-read after a theme/accent change
-const chart = echarts.init(el, registerSuiteTheme(echarts, tokens));
+const tokens = readPaddockTokens();              // re-read after a theme/accent change
+const chart = echarts.init(el, registerPaddockTheme(echarts, tokens));
 ```
 
 The theme: system font, 11 px axis labels, no axis lines except the baseline, hairline dashed horizontal gridlines,
@@ -87,10 +87,10 @@ returns a 14 px lane grid with shape-coded markers to merge under the plot (see 
 
 ## Tokens
 
-All values live in `projects/suite-ui/scss/_tokens.scss` and compile to `css/tokens.css`: neutral roles (bg, surface-1..3,
+All values live in `projects/paddock-ui/scss/_tokens.scss` and compile to `css/tokens.css`: neutral roles (bg, surface-1..3,
 hairline, border-strong, border-control, text, muted, subtle), status (success, warning, danger, info, neutral, each with a
-tint), the five accents (`--su-accent` for text/links/focus, `--su-accent-fill` for buttons with white text), the 8-colour
-chart palette `--su-chart-1..8`, the diverging scale, the sequential ramp `--su-seq-1..6`, spacing (2 to 48), radii
+tint), the five accents (`--pd-accent` for text/links/focus, `--pd-accent-fill` for buttons with white text), the 8-colour
+chart palette `--pd-chart-1..8`, the diverging scale, the sequential ramp `--pd-seq-1..6`, spacing (2 to 48), radii
 (6/10/14), type scale with tabular numerals, elevation, motion (100/180/260 ms), layout and the three densities.
 
 ## Tests and gates
@@ -101,8 +101,8 @@ npm ci
 npm run test:tokens      # WCAG contrast of every pair + colour-vision separation of the palette (131 tests)
 npm test                 # component and helper specs (Vitest via ng test), 100% lines
 npx playwright test      # gallery: axe (both themes), keyboard, native feel, CSP; SCREENSHOTS=1 rewrites docs/screenshots
-npm run build            # ng-packagr build to dist/suite-ui
-npm run release          # build and pack dist/suite-ui-<version>.tgz
+npm run build            # ng-packagr build to dist/paddock-ui
+npm run release          # build and pack dist/paddock-ui-<version>.tgz
 ```
 
 ### What the token test checks
@@ -111,7 +111,7 @@ npm run release          # build and pack dist/suite-ui-<version>.tgz
 - Status text AA on every surface and on its own tint; neutral too.
 - Accent text AA on every surface for all five accents in both themes; white on every accent fill AA; the accent as focus
   ring 3:1 (WCAG 2.4.11); the accent fill 3:1 against surface-1.
-- Input and control boundaries (`--su-border-control`) 3:1 (WCAG 1.4.11); chart marks 3:1 on surface-1 and surface-2.
+- Input and control boundaries (`--pd-border-control`) 3:1 (WCAG 1.4.11); chart marks 3:1 on surface-1 and surface-2.
 - Chart palette under protanopia, deuteranopia and tritanopia (Machado 2009, severity 1.0, CIE76 Lab distance): adjacent
   series dE >= 20; the first five (recommended) series pairwise >= 14; normal-vision pairs >= 20; the diverging ends
   >= 30 under every deficiency; success vs danger >= 10 (icon and word carry the meaning).
@@ -155,21 +155,21 @@ plus `gallery-*.png` overviews and `density/`.
 
 Apps adopt the package one by one in their design passes; nothing here edits them.
 
-- **Pitcrew** (reference implementation): `styles/_tokens.scss` maps almost one to one: `--surface` to `--su-surface-1`,
-  `--text-2` to `--su-text-muted`, `--border` to `--su-hairline`, `--accent` to `--su-accent`, `--accent-bg` to
-  `--su-accent-fill`, `--chart-1..4` to `--su-chart-1..8`. Pitcrew's accent changes from #c2410c/#ff8a4c to the guide's
-  #bf3a0c/#ff7a45 (fill #d2420f). Drop `pc-load-state`/`pc-empty-state` for `su-skeleton`/`su-empty-state`/`su-error-state`.
-  Keep `_controls` and `_surfaces` until their parts have `su-` equivalents.
-- **Debrief**: keep ADR 0018's mechanism (tokens + traits) but make `calm` read the suite tokens (system font, cobalt accent);
-  use `su-status-pill` for finding severity, `su-segmented-control` for the level filter, `su-sparkline` in the Errors tile.
+- **Pitcrew** (reference implementation): `styles/_tokens.scss` maps almost one to one: `--surface` to `--pd-surface-1`,
+  `--text-2` to `--pd-text-muted`, `--border` to `--pd-hairline`, `--accent` to `--pd-accent`, `--accent-bg` to
+  `--pd-accent-fill`, `--chart-1..4` to `--pd-chart-1..8`. Pitcrew's accent changes from #c2410c/#ff8a4c to the guide's
+  #bf3a0c/#ff7a45 (fill #d2420f). Drop `pc-load-state`/`pc-empty-state` for `pd-skeleton`/`pd-empty-state`/`pd-error-state`.
+  Keep `_controls` and `_surfaces` until their parts have `pd-` equivalents.
+- **Debrief**: keep ADR 0018's mechanism (tokens + traits) but make `calm` read the paddock tokens (system font, cobalt accent);
+  use `pd-status-pill` for finding severity, `pd-segmented-control` for the level filter, `pd-sparkline` in the Errors tile.
   Debrief's event-level colours stay the status set plus shape; the Events chart takes the theme and `eventLaneFragment`.
-- **Dyno**: tray window gets `html.su-tray` and `su-tray-popover` (the transparent page, fitted height and per-platform
-  radius it already has); tiles become `su-card` with `su-metric` + `su-sparkline`; sparklines neutral unless a threshold is
+- **Dyno**: tray window gets `html.pd-tray` and `pd-tray-popover` (the transparent page, fitted height and per-platform
+  radius it already has); tiles become `pd-card` with `pd-metric` + `pd-sparkline`; sparklines neutral unless a threshold is
   crossed; the history chart uses the theme and the event lane instead of dashed verticals.
-- **Pitwall**: models table and tray adopt `su-tray-popover`, `su-status-pill` (neutral for "Not installed"), `su-metric` for
+- **Pitwall**: models table and tray adopt `pd-tray-popover`, `pd-status-pill` (neutral for "Not installed"), `pd-metric` for
   the four hero tiles; the violet fill is now #7546E0; VRAM/RAM bars use the neutral track.
-- **Spotter** (no UI yet): start from `suite.css`, `data-accent="spotter"`, `su-empty-state` for the first-run page,
-  `su-status-pill` (shape-coded severity) in the feed, `su-tray-popover` for the tray.
+- **Spotter** (no UI yet): start from `paddock.css`, `data-accent="spotter"`, `pd-empty-state` for the first-run page,
+  `pd-status-pill` (shape-coded severity) in the feed, `pd-tray-popover` for the tray.
 
 All apps: remove copied `_tokens`/`_base` rules as components move over; keep the CSP rule (`inlineCritical: false`, no
 inline style attributes: the components only bind styles through Angular's CSSOM bindings, and the gallery test checks

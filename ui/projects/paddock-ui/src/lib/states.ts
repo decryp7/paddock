@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 
 /** Empty state: icon, what is missing (title), why or what happens next, and one next-step action in `[slot=action]`. */
 @Component({
-  selector: 'su-empty-state',
+  selector: 'pd-empty-state',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'status' },
   template: `
@@ -20,11 +20,11 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
     <div class="action"><ng-content select="[slot=action]" /></div>
   `,
   styles: `
-    :host { display: flex; flex-direction: column; align-items: center; gap: var(--su-space-2); padding: var(--su-space-8) var(--su-space-4); text-align: center; }
-    .icon { display: inline-flex; color: var(--su-text-muted); }
-    .title { margin: 0; font-size: var(--su-text-subtitle); line-height: var(--su-lh-subtitle); font-weight: var(--su-weight-semibold); }
-    .description { margin: 0; max-width: 48ch; color: var(--su-text-muted); font-size: var(--su-text-body); line-height: var(--su-lh-body); }
-    .action { margin-top: var(--su-space-2); }
+    :host { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-8) var(--pd-space-4); text-align: center; }
+    .icon { display: inline-flex; color: var(--pd-text-muted); }
+    .title { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
+    .description { margin: 0; max-width: 48ch; color: var(--pd-text-muted); font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
+    .action { margin-top: var(--pd-space-2); }
     .action:empty { display: none; }
   `,
 })
@@ -40,7 +40,7 @@ export class SuEmptyState {
  * optional secondary action (e.g. "Open logs").
  */
 @Component({
-  selector: 'su-error-state',
+  selector: 'pd-error-state',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'alert' },
   template: `
@@ -61,16 +61,16 @@ export class SuEmptyState {
     </div>
   `,
   styles: `
-    :host { display: flex; flex-direction: column; align-items: center; gap: var(--su-space-2); padding: var(--su-space-8) var(--su-space-4); text-align: center; }
-    .icon { display: inline-flex; color: var(--su-danger); }
-    .title { margin: 0; font-size: var(--su-text-subtitle); line-height: var(--su-lh-subtitle); font-weight: var(--su-weight-semibold); }
-    .cause { margin: 0; max-width: 48ch; color: var(--su-text-muted); }
-    .actions { display: flex; gap: var(--su-space-2); margin-top: var(--su-space-2); }
-    button { min-height: var(--su-button-height); padding: 0 var(--su-space-3); border-radius: var(--su-radius-control); font-weight: var(--su-weight-medium); border: 1px solid var(--su-border-control); background: var(--su-surface-2); color: var(--su-text); }
-    button:hover:not(:disabled) { background: var(--su-surface-3); }
+    :host { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-8) var(--pd-space-4); text-align: center; }
+    .icon { display: inline-flex; color: var(--pd-danger); }
+    .title { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
+    .cause { margin: 0; max-width: 48ch; color: var(--pd-text-muted); }
+    .actions { display: flex; gap: var(--pd-space-2); margin-top: var(--pd-space-2); }
+    button { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); font-weight: var(--pd-weight-medium); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); }
+    button:hover:not(:disabled) { background: var(--pd-surface-3); }
     button:disabled { opacity: 0.5; }
-    .retry { background: var(--su-accent-fill); border-color: transparent; color: var(--su-on-accent); }
-    .retry:hover:not(:disabled) { background: var(--su-accent-fill-hover); }
+    .retry { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
+    .retry:hover:not(:disabled) { background: var(--pd-accent-fill-hover); }
   `,
 })
 export class SuErrorState {

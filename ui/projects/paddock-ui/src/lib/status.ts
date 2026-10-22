@@ -1,4 +1,4 @@
-/** Suite-wide status roles. Status is never colour alone: every role has its own icon shape and the caller supplies a word. */
+/** Paddock-wide status roles. Status is never colour alone: every role has its own icon shape and the caller supplies a word. */
 export type SuStatus = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
 
 export const SU_STATUSES: readonly SuStatus[] = ['success', 'warning', 'danger', 'info', 'neutral'];

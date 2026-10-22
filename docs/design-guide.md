@@ -1,4 +1,4 @@
-# Suite design guide (Debrief, Pitcrew, Pitwall, Dyno, Spotter)
+# Paddock design guide (Debrief, Pitcrew, Pitwall, Dyno, Spotter)
 
 Status: proposal 2026-10-22, written by the design lead. Tokens are starting values: validate contrast and CVD in the
 app's own token tests before freezing. Research note: web fetch worked for WCAG, Microsoft materials and the Linear
@@ -6,10 +6,10 @@ redesign; Apple HIG pages are JS-rendered and returned no text, so Apple, GNOME,
 product-reference points come from established knowledge (marked "[k]" in Sources), not fresh fetches.
 
 
-> **suite-kit 0.1.0 changes to the proposal values** (measured by `ui/test/tokens`, see `ui/README.md`): the neutral-text, status,
+> **paddock-kit 0.1.0 changes to the proposal values** (measured by `ui/test/tokens`, see `ui/README.md`): the neutral-text, status,
 > chart-palette and Pitwall-fill values below are the validated ones; the original proposals failed WCAG or colour-vision checks.
 > A `border-control` token was added because the proposed input border (border-strong) is far below 3:1 (WCAG 1.4.11).
-> `suite-ui` is the source of truth; if this table and `ui/projects/suite-ui/scss/_tokens.scss` disagree, the SCSS wins.
+> `paddock-ui` is the source of truth; if this table and `ui/projects/paddock-ui/scss/_tokens.scss` disagree, the SCSS wins.
 
 ## 1. Principles
 
@@ -74,7 +74,7 @@ the same screenshot matrix). Hexes are starting values.
 | text-muted | #A0A7B2 (7.4:1 on surface-1) | #4F5764 (6.5:1 on surface-2, 7.3:1 on white) |
 | text-subtle (non-essential only) | #8B93A0 (4.9:1 on surface-3) | #5F6775 (5.2:1 on bg) |
 
-### Status (suite-wide, same hue in every app)
+### Status (paddock-wide, same hue in every app)
 | Role | Dark (text/fill) | Light | Tint bg (dark / light) |
 |---|---|---|---|
 | success | #3DD68C | #187A46 | rgba(61,214,140,.14) / #E3F5EB |
@@ -140,7 +140,7 @@ palette validator and a Machado CVD simulation before freezing; adjacent pairs d
   conventions: our controls 6 px sit well beside them. Tray flyout 360 wide, anchored above the taskbar, closes on
   light-dismiss; fall back to solid surface-3 when transparency is off (Windows 10).
 - **Linux (GNOME-first, also KDE)**: solid surfaces, no compositor effects assumed; follow libadwaita: header bar
-  (we use our toolbar) with 12 px card radius is acceptable, but keep suite 10. Honour dark/light preference and
+  (we use our toolbar) with 12 px card radius is acceptable, but keep paddock 10. Honour dark/light preference and
   accent from `prefers-color-scheme`/portal where available. Tray via StatusNotifier; provide a window fallback because
   GNOME hides tray icons by default.
 - All three: if the effect is unavailable, the solid fallback token is identical to the designed solid colour (no
@@ -150,7 +150,7 @@ palette validator and a Machado CVD simulation before freezing; adjacent pairs d
 
 - 1 px hairline; dividers inside cards are hairline not full-contrast; table rows separated by hairline OR zebra, not
   both. Inputs use border-strong, 1 px, focus = accent border + 2 px accent ring at 35% alpha.
-- Icons: the suite's own SVG set, 16 px default (20 for nav, 14 inline with 12 px text), 1.5 px stroke, round caps and
+- Icons: Paddock's own SVG set, 16 px default (20 for nav, 14 inline with 12 px text), 1.5 px stroke, round caps and
   joins, 24 px design grid scaled, `currentColor` only, optical alignment to cap height. Same metaphor = same icon across
   apps (settings, logs, update, runner, model, process). Filled variant only for the active nav item. Every icon-only
   button has `aria-label` and tooltip (500 ms delay). App icon: rounded square 22% radius with a single-hue gradient
@@ -158,7 +158,7 @@ palette validator and a Machado CVD simulation before freezing; adjacent pairs d
 
 ## 7. Charts (ECharts)
 
-- Theme object generated from tokens (one function, shared in `suite-ui`): font = system, 11 px axis labels
+- Theme object generated from tokens (one function, shared in `paddock-ui`): font = system, 11 px axis labels
   tabular, axis text text-subtle, **no axis lines** except baseline, grid lines hairline dashed 2-4, only horizontal.
 - **Sparkline**: 24-32 px high, no axes, 1.5 px line, accent or series colour, end-point dot 4 px with value
   label, area optional at 10-14% alpha. Same y-scale across sparklines in one row when comparing, otherwise state
@@ -229,7 +229,7 @@ units and thousands separators; relative time under 24 h with absolute on hover;
 start with the benefit, not the lack. Pitwall may be slightly technical, Dyno slightly warmer, Debrief terse, Pitcrew
 operational, Spotter concise.
 
-## 11. Native-feel rules (Debrief ADR 0028 for the whole suite)
+## 11. Native-feel rules (Debrief ADR 0028 for the whole Paddock family)
 
 App shell is `user-select: none`, default cursor on non-links, no browser context menu/keys/zoom/drag, selectable
 content opts in (`.selectable`: logs, values, errors); OS-native window controls and title bar behaviour; platform
@@ -269,7 +269,7 @@ Layout
 Colour
 7. Tokens only; text >= 4.5:1 (check muted/subtle text and disabled), UI parts >= 3:1; light theme has its own tuned tints (not inverted dark).
 8. Status = icon + word + colour; accent never used as status.
-9. Charts use the suite palette in stable order; no red/green pairs.
+9. Charts use the Paddock palette in stable order; no red/green pairs.
 Charts
 10. Titles name metric, unit, window; legends interactive; direct labels for <=3 series; axes tabular 11 px; gridlines hairline.
 11. Empty, loading, error states present for every chart.

@@ -1,16 +1,16 @@
-import { SU_ACCENTS, SU_DENSITIES, SU_THEMES, applySuiteAppearance } from './appearance';
+import { SU_ACCENTS, SU_DENSITIES, SU_THEMES, applyPaddockAppearance } from './appearance';
 import {
   EVENT_SHAPES,
-  SUITE_THEME_DARK,
-  SUITE_THEME_LIGHT,
+  PADDOCK_THEME_DARK,
+  PADDOCK_THEME_LIGHT,
   areaGradient,
   createEchartsTheme,
   eventLaneFragment,
-  registerSuiteTheme,
+  registerPaddockTheme,
 } from './echarts/theme';
-import { type SuiteChartTokens, mixColors, parseCssColor, readSuiteTokens, sequentialRamp, withAlpha } from './echarts/tokens';
+import { type PaddockChartTokens, mixColors, parseCssColor, readPaddockTokens, sequentialRamp, withAlpha } from './echarts/tokens';
 
-const tokens = (scheme: 'dark' | 'light' = 'dark'): SuiteChartTokens => ({
+const tokens = (scheme: 'dark' | 'light' = 'dark'): PaddockChartTokens => ({
   scheme,
   fontFamily: 'system-ui',
   text: '#eceef1',
@@ -62,16 +62,16 @@ describe('colour helpers', () => {
   });
 });
 
-describe('readSuiteTokens', () => {
+describe('readPaddockTokens', () => {
   afterEach(() => {
     document.documentElement.removeAttribute('style');
   });
   it('reads custom properties from the element, with a font fallback and the 8-colour palette', () => {
     const el = document.documentElement;
-    el.style.setProperty('--su-text', '#111111');
-    el.style.setProperty('--su-chart-3', '#00ff00');
+    el.style.setProperty('--pd-text', '#111111');
+    el.style.setProperty('--pd-chart-3', '#00ff00');
     el.style.colorScheme = 'light';
-    const t = readSuiteTokens(el);
+    const t = readPaddockTokens(el);
     expect(t.text).toBe('#111111');
     expect(t.palette).toHaveLength(8);
     expect(t.palette[2]).toBe('#00ff00');
@@ -80,16 +80,16 @@ describe('readSuiteTokens', () => {
   it('defaults to dark and recognises light', () => {
     const el = document.createElement('div');
     document.body.appendChild(el);
-    expect(readSuiteTokens(el).scheme).toBe('dark');
+    expect(readPaddockTokens(el).scheme).toBe('dark');
     el.style.colorScheme = 'light';
-    expect(readSuiteTokens(el).scheme).toBe('light');
+    expect(readPaddockTokens(el).scheme).toBe('light');
     el.remove();
   });
 });
 
 describe('createEchartsTheme', () => {
   const theme = createEchartsTheme(tokens()) as Record<string, any>;
-  it('uses the suite palette in stable order and a transparent background', () => {
+  it('uses the Paddock palette in stable order and a transparent background', () => {
     expect(theme['color']).toEqual(tokens().palette);
     expect(theme['backgroundColor']).toBe('transparent');
     expect(theme['darkMode']).toBe(true);
@@ -161,35 +161,35 @@ describe('eventLaneFragment', () => {
   });
 });
 
-describe('registerSuiteTheme', () => {
+describe('registerPaddockTheme', () => {
   it('registers under the scheme name and returns it', () => {
     const calls: [string, object][] = [];
     const registry = { registerTheme: (n: string, t: object) => void calls.push([n, t]) };
-    expect(registerSuiteTheme(registry, tokens('dark'))).toBe(SUITE_THEME_DARK);
-    expect(registerSuiteTheme(registry, tokens('light'))).toBe(SUITE_THEME_LIGHT);
-    expect(calls.map((c) => c[0])).toEqual(['suite-dark', 'suite-light']);
+    expect(registerPaddockTheme(registry, tokens('dark'))).toBe(PADDOCK_THEME_DARK);
+    expect(registerPaddockTheme(registry, tokens('light'))).toBe(PADDOCK_THEME_LIGHT);
+    expect(calls.map((c) => c[0])).toEqual(['paddock-dark', 'paddock-light']);
   });
 });
 
-describe('applySuiteAppearance', () => {
+describe('applyPaddockAppearance', () => {
   it('sets theme, accent and density attributes', () => {
     const el = document.createElement('html');
-    applySuiteAppearance(el, { theme: 'light', accent: 'dyno', density: 'compact' });
+    applyPaddockAppearance(el, { theme: 'light', accent: 'dyno', density: 'compact' });
     expect(el.getAttribute('data-theme')).toBe('light');
     expect(el.getAttribute('data-accent')).toBe('dyno');
     expect(el.getAttribute('data-density')).toBe('compact');
   });
   it('system removes data-theme so the OS decides', () => {
     const el = document.createElement('html');
-    applySuiteAppearance(el, { theme: 'dark' });
-    applySuiteAppearance(el, { theme: 'system' });
+    applyPaddockAppearance(el, { theme: 'dark' });
+    applyPaddockAppearance(el, { theme: 'system' });
     expect(el.hasAttribute('data-theme')).toBe(false);
   });
   it('leaves untouched what is not passed and ignores unknown values', () => {
     const el = document.createElement('html');
     el.setAttribute('data-accent', 'pitcrew');
-    applySuiteAppearance(el, {});
-    applySuiteAppearance(el, { theme: 'neon' as never, accent: 'nope' as never, density: 'huge' as never });
+    applyPaddockAppearance(el, {});
+    applyPaddockAppearance(el, { theme: 'neon' as never, accent: 'nope' as never, density: 'huge' as never });
     expect(el.getAttribute('data-accent')).toBe('pitcrew');
     expect(el.hasAttribute('data-theme')).toBe(false);
     expect(el.hasAttribute('data-density')).toBe(false);

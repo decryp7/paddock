@@ -4,11 +4,11 @@ export type SuSkeletonShape = 'text' | 'block' | 'circle';
 
 /** Placeholder with the final geometry (no layout shift). Shimmer is 1.6 s and static under reduced motion. */
 @Component({
-  selector: 'su-skeleton',
+  selector: 'pd-skeleton',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     'aria-hidden': 'true',
-    '[class]': '"su-skeleton su-skeleton--" + shape()',
+    '[class]': '"pd-skeleton pd-skeleton--" + shape()',
     '[style.width]': 'cssWidth()',
     '[style.height]': 'cssHeight()',
   },
@@ -16,15 +16,15 @@ export type SuSkeletonShape = 'text' | 'block' | 'circle';
   styles: `
     :host {
       display: block;
-      background: linear-gradient(90deg, var(--su-skeleton) 0%, var(--su-skeleton-shine) 50%, var(--su-skeleton) 100%);
+      background: linear-gradient(90deg, var(--pd-skeleton) 0%, var(--pd-skeleton-shine) 50%, var(--pd-skeleton) 100%);
       background-size: 200% 100%;
-      animation: su-shimmer 1.6s linear infinite;
-      border-radius: var(--su-radius-tag);
+      animation: pd-shimmer 1.6s linear infinite;
+      border-radius: var(--pd-radius-tag);
     }
-    :host(.su-skeleton--block) { border-radius: var(--su-radius-card); }
-    :host(.su-skeleton--circle) { border-radius: 50%; }
-    @keyframes su-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-    @media (prefers-reduced-motion: reduce) { :host { animation: none; background: var(--su-skeleton); } }
+    :host(.pd-skeleton--block) { border-radius: var(--pd-radius-card); }
+    :host(.pd-skeleton--circle) { border-radius: 50%; }
+    @keyframes pd-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+    @media (prefers-reduced-motion: reduce) { :host { animation: none; background: var(--pd-skeleton); } }
   `,
 })
 export class SuSkeleton {

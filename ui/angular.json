@@ -4,28 +4,28 @@
   "cli": { "packageManager": "npm", "analytics": false },
   "newProjectRoot": "projects",
   "projects": {
-    "suite-ui": {
+    "paddock-ui": {
       "projectType": "library",
-      "root": "projects/suite-ui",
-      "sourceRoot": "projects/suite-ui/src",
+      "root": "projects/paddock-ui",
+      "sourceRoot": "projects/paddock-ui/src",
       "prefix": "su",
       "architect": {
         "build": {
           "builder": "@angular/build:ng-packagr",
           "configurations": {
-            "production": { "tsConfig": "projects/suite-ui/tsconfig.lib.prod.json" },
-            "development": { "tsConfig": "projects/suite-ui/tsconfig.lib.json" }
+            "production": { "tsConfig": "projects/paddock-ui/tsconfig.lib.prod.json" },
+            "development": { "tsConfig": "projects/paddock-ui/tsconfig.lib.json" }
           },
           "defaultConfiguration": "production"
         },
         "test": {
           "builder": "@angular/build:unit-test",
           "options": {
-            "tsConfig": "projects/suite-ui/tsconfig.spec.json",
+            "tsConfig": "projects/paddock-ui/tsconfig.spec.json",
             "runner": "vitest",
             "coverageReporters": ["text-summary", "text", "lcov"],
             "coverageExclude": ["**/*.spec.ts", "**/test-setup.ts", "**/public-api.ts"],
-            "setupFiles": ["projects/suite-ui/src/test-setup.ts"]
+            "setupFiles": ["projects/paddock-ui/src/test-setup.ts"]
           }
         }
       }
@@ -41,7 +41,7 @@
           "options": {
             "browser": "projects/gallery/src/main.ts",
             "tsConfig": "projects/gallery/tsconfig.app.json",
-            "styles": ["projects/suite-ui/css/suite.css", "projects/gallery/src/styles.css"]
+            "styles": ["projects/paddock-ui/css/paddock.css", "projects/gallery/src/styles.css"]
           },
           "configurations": {
             "production": {

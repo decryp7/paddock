@@ -21,7 +21,7 @@ describe('SuStatusPill', () => {
     f.componentRef.setInput('label', 'Word');
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.className).toContain(`su-pill--${status}`);
+    expect(el.className).toContain(`pd-pill--${status}`);
     expect(text(el)).toBe('Word');
     expect(el.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
     expect(el.querySelector('path')?.getAttribute('d')).toBeTruthy();
@@ -42,7 +42,7 @@ describe('SuStatusPill', () => {
     const f = TestBed.createComponent(SuStatusPill);
     f.componentRef.setInput('label', 'Paused');
     f.detectChanges();
-    expect((f.nativeElement as HTMLElement).className).toContain('su-pill--neutral');
+    expect((f.nativeElement as HTMLElement).className).toContain('pd-pill--neutral');
   });
 });
 
@@ -77,7 +77,7 @@ describe('SuMetric', () => {
     const el = make({ value: 17.1, unit: 'GB', decimals: 1, locale: 'en-US' });
     expect(el.querySelector('.value')?.textContent).toBe('17.1');
     expect(el.querySelector('.unit')?.textContent).toBe('GB');
-    expect(el.className).toContain('su-metric--display');
+    expect(el.className).toContain('pd-metric--display');
     expect(el.querySelector('.delta')).toBeNull();
   });
 
@@ -92,19 +92,19 @@ describe('SuMetric', () => {
     expect(delta.className).toContain('delta--good');
     expect(text(delta)).toContain('+1.5%');
     expect(text(delta)).toContain('vs last week');
-    expect(el.querySelector('.su-visually-hidden')?.textContent).toBe('Up 1.5% vs last week');
+    expect(el.querySelector('.pd-visually-hidden')?.textContent).toBe('Up 1.5% vs last week');
   });
 
   it('renders a negative delta with a minus sign and a bad tone when down is not good', () => {
     const el = make({ value: 3, delta: -2, goodDirection: 'up', locale: 'en-US' });
     expect(el.querySelector('.delta')?.className).toContain('delta--bad');
     expect(text(el.querySelector('.delta') as Element)).toContain('−2');
-    expect(el.querySelector('.su-visually-hidden')?.textContent).toBe('Down 2');
+    expect(el.querySelector('.pd-visually-hidden')?.textContent).toBe('Down 2');
   });
 
   it('renders no change without a sign', () => {
     const el = make({ value: 3, delta: 0, locale: 'en-US' });
-    expect(el.querySelector('.su-visually-hidden')?.textContent).toBe('No change');
+    expect(el.querySelector('.pd-visually-hidden')?.textContent).toBe('No change');
     expect(el.querySelector('.delta')?.className).toContain('delta--neutral');
   });
 });
@@ -165,11 +165,11 @@ describe('SuSparkline', () => {
 @Component({
   imports: [SuCard],
   template: `
-    <su-card heading="CPU" [interactive]="interactive()" [flat]="flat()" (activated)="count.set(count() + 1)">
+    <pd-card heading="CPU" [interactive]="interactive()" [flat]="flat()" (activated)="count.set(count() + 1)">
       <span class="hero">45</span>
       <span slot="caption">peak 61%</span>
       <span slot="status">ok</span>
-    </su-card>
+    </pd-card>
   `,
 })
 class CardHost {
@@ -182,7 +182,7 @@ describe('SuCard', () => {
   function make(): { f: ReturnType<typeof TestBed.createComponent<CardHost>>; card: HTMLElement } {
     const f = TestBed.createComponent(CardHost);
     f.detectChanges();
-    return { f, card: (f.nativeElement as HTMLElement).querySelector('su-card') as HTMLElement };
+    return { f, card: (f.nativeElement as HTMLElement).querySelector('pd-card') as HTMLElement };
   }
 
   it('is a labelled group with title, hero, caption and status slots', () => {
@@ -222,7 +222,7 @@ describe('SuCard', () => {
     const { f, card } = make();
     f.componentInstance.flat.set(true);
     f.detectChanges();
-    expect(card.classList).toContain('su-card--flat');
+    expect(card.classList).toContain('pd-card--flat');
   });
 
   it('gives every card a unique title id', () => {
@@ -300,7 +300,7 @@ describe('SuSkeleton', () => {
   it('is hidden from assistive tech and has a shape class', () => {
     const el = make({});
     expect(el.getAttribute('aria-hidden')).toBe('true');
-    expect(el.className).toContain('su-skeleton--text');
+    expect(el.className).toContain('pd-skeleton--text');
     expect(el.style.width).toBe('100%');
     expect(el.style.height).toBe('12px');
   });
@@ -412,16 +412,16 @@ describe('SuTrayPopover', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.getAttribute('role')).toBe('dialog');
     expect(el.getAttribute('aria-label')).toBe('Dyno');
-    expect(el.classList).toContain('su-tray--windows');
-    expect(el.classList).toContain('su-tray--translucent');
+    expect(el.classList).toContain('pd-tray--windows');
+    expect(el.classList).toContain('pd-tray--translucent');
     expect(el.querySelector('.header')).not.toBeNull();
     expect(el.querySelector('.content')).not.toBeNull();
     expect(el.querySelector('.footer')).not.toBeNull();
   });
   it('defaults to macOS and solid', () => {
     const el = make({ label: 'x' }).nativeElement as HTMLElement;
-    expect(el.classList).toContain('su-tray--macos');
-    expect(el.classList).not.toContain('su-tray--translucent');
+    expect(el.classList).toContain('pd-tray--macos');
+    expect(el.classList).not.toContain('pd-tray--translucent');
   });
   it('Escape asks to dismiss', () => {
     const f = make({ label: 'x' });

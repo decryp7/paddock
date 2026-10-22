@@ -20,7 +20,7 @@ export function nextEnabled(options: readonly SuSegment[], from: number, dir: 1 
 
 /** 2 to 4 mutually exclusive options (time range, view). A radio group: arrows move and select, Home/End jump. */
 @Component({
-  selector: 'su-segmented-control',
+  selector: 'pd-segmented-control',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'radiogroup', '[attr.aria-label]': 'label()', '(keydown)': 'onKey($event)' },
   template: `
@@ -43,12 +43,12 @@ export function nextEnabled(options: readonly SuSegment[], from: number, dir: 1 
     }
   `,
   styles: `
-    :host { display: inline-flex; gap: 2px; padding: 2px; background: var(--su-surface-2); border: 1px solid var(--su-hairline); border-radius: var(--su-radius-control); }
-    .seg { display: inline-flex; align-items: center; gap: var(--su-space-1); min-height: calc(var(--su-control-height) - 6px); min-width: var(--su-hit-min); padding: 0 var(--su-space-3); border: 0; border-radius: calc(var(--su-radius-control) - 2px); background: transparent; color: var(--su-text-muted); font-size: var(--su-text-body); font-weight: var(--su-weight-medium); transition: background var(--su-duration-micro) var(--su-ease-enter); }
-    .seg:hover:not(:disabled):not(.on) { background: var(--su-hover); color: var(--su-text); }
-    .seg.on { background: var(--su-surface-1); color: var(--su-text); box-shadow: var(--su-shadow-1), 0 0 0 1px var(--su-hairline); }
+    :host { display: inline-flex; gap: 2px; padding: 2px; background: var(--pd-surface-2); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); }
+    .seg { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: calc(var(--pd-control-height) - 6px); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 0; border-radius: calc(var(--pd-radius-control) - 2px); background: transparent; color: var(--pd-text-muted); font-size: var(--pd-text-body); font-weight: var(--pd-weight-medium); transition: background var(--pd-duration-micro) var(--pd-ease-enter); }
+    .seg:hover:not(:disabled):not(.on) { background: var(--pd-hover); color: var(--pd-text); }
+    .seg.on { background: var(--pd-surface-1); color: var(--pd-text); box-shadow: var(--pd-shadow-1), 0 0 0 1px var(--pd-hairline); }
     .seg:disabled { opacity: 0.5; }
-    .count { font-size: var(--su-text-caption); font-variant-numeric: tabular-nums; color: var(--su-text-muted); }
+    .count { font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
   `,
 })
 export class SuSegmentedControl {

@@ -5,12 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## 0.1.0 - 2026-10-22
 
 ### Added
-- `@decryp7/suite-ui`: tokens (neutral roles, status, five accents, 8-colour CVD-checked chart palette, diverging and sequential
+- `@decryp7/paddock-ui`: tokens (neutral roles, status, five accents, 8-colour CVD-checked chart palette, diverging and sequential
   scales, spacing, radii, type scale with tabular numerals, elevation, motion, three densities, dark and light, high contrast),
   base styles with native feel (Debrief ADR 0028), focus rings, thin scrollbars, splash and tray-page helpers.
-- Components: `su-card`, `su-status-pill`, `su-metric`, `su-sparkline`, `su-empty-state`, `su-error-state`, `su-skeleton`,
-  `su-segmented-control`, `su-tray-popover`; `applySuiteAppearance`.
-- ECharts theme from tokens (`readSuiteTokens`, `createEchartsTheme`, `registerSuiteTheme`, `areaGradient`, `eventLaneFragment`,
+- Components: `pd-card`, `pd-status-pill`, `pd-metric`, `pd-sparkline`, `pd-empty-state`, `pd-error-state`, `pd-skeleton`,
+  `pd-segmented-control`, `pd-tray-popover`; `applyPaddockAppearance`.
+- ECharts theme from tokens (`readPaddockTokens`, `createEchartsTheme`, `registerPaddockTheme`, `areaGradient`, `eventLaneFragment`,
   `sequentialRamp`).
 - Token test: WCAG contrast of every pair and colour-vision separation of the chart palette (131 tests).
 - Gallery app with Playwright screenshots (every component, both themes, five accents), axe, keyboard and CSP checks.

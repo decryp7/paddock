@@ -14,13 +14,13 @@
     "target": "ES2022",
     "module": "preserve",
     "moduleResolution": "bundler",
-    "paths": { "@decryp7/suite-ui": ["./projects/suite-ui/src/public-api.ts"] }
+    "paths": { "@decryp7/paddock-ui": ["./projects/paddock-ui/src/public-api.ts"] }
   },
   "angularCompilerOptions": { "strictInjectionParameters": true, "strictInputAccessModifiers": true, "strictTemplates": true },
   "files": [],
   "references": [
-    { "path": "./projects/suite-ui/tsconfig.lib.json" },
-    { "path": "./projects/suite-ui/tsconfig.spec.json" },
+    { "path": "./projects/paddock-ui/tsconfig.lib.json" },
+    { "path": "./projects/paddock-ui/tsconfig.spec.json" },
     { "path": "./projects/gallery/tsconfig.app.json" }
   ]
 }

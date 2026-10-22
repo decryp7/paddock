@@ -1,10 +1,10 @@
-# suite-kit: engineering rules for coding agents and contributors
+# paddock-kit: engineering rules for coding agents and contributors
 
-The shared repo of the app suite (Debrief, Pitcrew, Pitwall, Dyno, Spotter): the Angular UI package `@decryp7/suite-ui`
+The shared repo of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter): the Angular UI package `@decryp7/paddock-ui`
 (`ui/`), shared Rust crates (`crates/`), the design guide and lessons (`docs/`). See README.md.
 
 ## Design principles
-- One reason to change per module. Tokens name raw colours, sizes and durations; components use `var(--su-...)` only.
+- One reason to change per module. Tokens name raw colours, sizes and durations; components use `var(--pd-...)` only.
 - Pure core, thin edges: geometry, formatting, theme building and colour maths are pure functions with their own specs.
 - Make illegal states unrepresentable: statuses, accents, densities are string-literal unions; status is never colour alone.
 - Extend by adding: a new app is a new accent entry plus a migration note; a new component is a new file and an export.
@@ -21,7 +21,7 @@ The shared repo of the app suite (Debrief, Pitcrew, Pitwall, Dyno, Spotter): the
   in what ships; Node scripts are build tooling only.
 
 ## Where logic lives
-- Tokens in `ui/projects/suite-ui/scss/_tokens.scss` are the single source of truth; the design guide documents them and the
+- Tokens in `ui/projects/paddock-ui/scss/_tokens.scss` are the single source of truth; the design guide documents them and the
   token test measures them. Angular components present; domain rules belong to each app's Rust engine.
 
 ## Robustness
@@ -33,9 +33,9 @@ The shared repo of the app suite (Debrief, Pitcrew, Pitwall, Dyno, Spotter): the
   are changed by one agent at a time or by adding a single line. Don't edit the apps from here.
 
 ## Contracts
-- The public API is `ui/projects/suite-ui/src/public-api.ts` and the CSS custom properties `--su-*`, `data-theme`,
+- The public API is `ui/projects/paddock-ui/src/public-api.ts` and the CSS custom properties `--pd-*`, `data-theme`,
   `data-accent`, `data-density`. Any change is a CHANGELOG entry; a breaking change bumps the minor version before 1.0.
-  No backward-compatibility shims before the suite's v1.
+  No backward-compatibility shims before Paddock's v1.
 
 ## Testing and quality gates
 - Every change ships with tests; every bug fix starts with a failing test. Components >= 100% lines.
@@ -51,7 +51,7 @@ The shared repo of the app suite (Debrief, Pitcrew, Pitwall, Dyno, Spotter): the
 ## Dependencies and releases
 - Prefer permissive, well-maintained dependencies; commit `package-lock.json`; CI uses `npm ci`.
 - Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`). No Co-Authored-By or AI attribution.
-- One semver tag per release (`v0.1.0`); CI attaches `suite-ui-<version>.tgz` to the Gitea release. ADRs in `docs/adr/`.
+- One semver tag per release (`v0.1.0`); CI attaches `paddock-ui-<version>.tgz` to the Gitea release. ADRs in `docs/adr/`.
 
 ## Style
 - Match surrounding code. Comments only where intent isn't obvious; doc comments on exported items. Sentence-case copy,

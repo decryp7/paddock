@@ -1,14 +1,14 @@
 {
-  "name": "suite-ui-workspace",
+  "name": "paddock-ui-workspace",
   "version": "0.1.0",
   "private": true,
   "license": "MIT OR Apache-2.0",
-  "description": "The shared design system of the app suite: tokens, components and chart theme.",
+  "description": "The shared design system of the Paddock app family: tokens, components and chart theme.",
   "scripts": {
     "ng": "ng",
     "build:css": "node scripts/build-css.mjs",
-    "build": "npm run build:css && ng build suite-ui",
-    "test": "npm run build:css && ng test suite-ui --watch=false",
+    "build": "npm run build:css && ng build paddock-ui",
+    "test": "npm run build:css && ng test paddock-ui --watch=false",
     "test:tokens": "vitest run --config vitest.tokens.config.ts",
     "gallery": "npm run build:css && ng serve gallery --port 4300",
     "gallery:build": "npm run build:css && ng build gallery",

@@ -10,7 +10,7 @@ export type SuDensity = (typeof SU_DENSITIES)[number];
  * Applies theme, accent and density to the root element. `system` removes `data-theme` so the OS preference
  * decides. Unknown values are ignored (parse, don't validate: callers pass the typed unions).
  */
-export function applySuiteAppearance(
+export function applyPaddockAppearance(
   root: HTMLElement,
   appearance: { theme?: SuTheme; accent?: SuAccent; density?: SuDensity },
 ): void {

@@ -21,9 +21,9 @@ export function formatNumber(value: number, decimals: number | undefined, locale
 
 /** A number as the hero of a card: tabular, the unit a smaller muted sibling, an optional delta with arrow and sign. */
 @Component({
-  selector: 'su-metric',
+  selector: 'pd-metric',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '[class]': '"su-metric su-metric--" + size()' },
+  host: { '[class]': '"pd-metric pd-metric--" + size()' },
   template: `
     <span class="line">
       <span class="value">{{ text() }}</span>
@@ -33,7 +33,7 @@ export function formatNumber(value: number, decimals: number | undefined, locale
     </span>
     @if (hasDelta()) {
       <span [class]="'delta delta--' + tone()">
-        <span class="su-visually-hidden">{{ deltaAria() }}</span>
+        <span class="pd-visually-hidden">{{ deltaAria() }}</span>
         <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" focusable="false">
           <path [attr.d]="arrowPath()" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
@@ -45,19 +45,19 @@ export function formatNumber(value: number, decimals: number | undefined, locale
     }
   `,
   styles: `
-    :host { display: inline-flex; flex-direction: column; gap: var(--su-space-1); font-variant-numeric: tabular-nums; }
-    .line { display: inline-flex; align-items: baseline; gap: var(--su-space-1); }
-    .value { font-weight: var(--su-weight-semibold); color: var(--su-text); }
-    .unit { color: var(--su-text-muted); font-size: var(--su-text-body); font-weight: var(--su-weight-regular); }
-    :host(.su-metric--display) .value { font-size: var(--su-text-display); line-height: var(--su-lh-display); }
-    :host(.su-metric--title) .value { font-size: var(--su-text-title); line-height: var(--su-lh-title); }
-    :host(.su-metric--body) .value { font-size: var(--su-text-body); line-height: var(--su-lh-body); }
-    :host(.su-metric--body) .unit { font-size: var(--su-text-label); }
-    .delta { display: inline-flex; align-items: center; gap: var(--su-space-1); font-size: var(--su-text-label); line-height: var(--su-lh-label); color: var(--su-text-muted); }
-    .delta--good { color: var(--su-success); }
-    .delta--bad { color: var(--su-danger); }
-    .delta-label { color: var(--su-text-muted); }
-    .su-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    :host { display: inline-flex; flex-direction: column; gap: var(--pd-space-1); font-variant-numeric: tabular-nums; }
+    .line { display: inline-flex; align-items: baseline; gap: var(--pd-space-1); }
+    .value { font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
+    .unit { color: var(--pd-text-muted); font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); }
+    :host(.pd-metric--display) .value { font-size: var(--pd-text-display); line-height: var(--pd-lh-display); }
+    :host(.pd-metric--title) .value { font-size: var(--pd-text-title); line-height: var(--pd-lh-title); }
+    :host(.pd-metric--body) .value { font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
+    :host(.pd-metric--body) .unit { font-size: var(--pd-text-label); }
+    .delta { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
+    .delta--good { color: var(--pd-success); }
+    .delta--bad { color: var(--pd-danger); }
+    .delta-label { color: var(--pd-text-muted); }
+    .pd-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `,
 })
 export class SuMetric {

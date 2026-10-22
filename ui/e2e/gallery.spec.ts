@@ -20,7 +20,7 @@ const SECTIONS = [
 
 async function open(page: Page, theme: string, accent: string, density = 'standard'): Promise<void> {
   await page.goto(`/?theme=${theme}&accent=${accent}&density=${density}`);
-  await page.locator('[data-testid="card"] su-card').first().waitFor();
+  await page.locator('[data-testid="card"] pd-card').first().waitFor();
   // Let the chart draw (animation 300 ms) and fonts settle.
   await page.waitForTimeout(600);
 }
@@ -62,7 +62,7 @@ test('native feel: the shell is not selectable, content opts in', async ({ page 
 
 test('accent attribute switches the accent token', async ({ page }) => {
   await open(page, 'dark', 'pitcrew');
-  const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--su-accent').trim());
+  const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--pd-accent').trim());
   expect(accent).toBe('#ff7a45');
 });
 

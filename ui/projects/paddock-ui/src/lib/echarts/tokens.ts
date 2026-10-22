@@ -1,5 +1,5 @@
 /** The resolved token values the chart theme is built from (plain colour strings ECharts can parse). */
-export interface SuiteChartTokens {
+export interface PaddockChartTokens {
   scheme: 'dark' | 'light';
   fontFamily: string;
   text: string;
@@ -34,30 +34,30 @@ function read(style: CSSStyleDeclaration, name: string, fallback = ''): string {
  * reference others are resolved by the browser. Colours defined with color-mix() are not used here: the sequential
  * ramp is computed by {@link sequentialRamp}.
  */
-export function readSuiteTokens(el: Element = document.documentElement): SuiteChartTokens {
+export function readPaddockTokens(el: Element = document.documentElement): PaddockChartTokens {
   const style = getComputedStyle(el);
   const scheme = style.colorScheme.includes('light') && !style.colorScheme.includes('dark') ? 'light' : 'dark';
   return {
     scheme,
-    fontFamily: read(style, '--su-font-sans', 'system-ui, sans-serif'),
-    text: read(style, '--su-text'),
-    textMuted: read(style, '--su-text-muted'),
-    textSubtle: read(style, '--su-text-subtle'),
-    surface1: read(style, '--su-surface-1'),
-    surface2: read(style, '--su-surface-2'),
-    surface3: read(style, '--su-surface-3'),
-    hairline: read(style, '--su-hairline'),
-    borderStrong: read(style, '--su-border-strong'),
-    accent: read(style, '--su-accent'),
-    palette: Array.from({ length: PALETTE_SIZE }, (_, i) => read(style, `--su-chart-${i + 1}`)),
-    divergingNeg: read(style, '--su-diverging-neg'),
-    divergingMid: read(style, '--su-diverging-mid'),
-    divergingPos: read(style, '--su-diverging-pos'),
-    neutralBar: read(style, '--su-chart-neutral-bar'),
-    success: read(style, '--su-success'),
-    warning: read(style, '--su-warning'),
-    danger: read(style, '--su-danger'),
-    info: read(style, '--su-info'),
+    fontFamily: read(style, '--pd-font-sans', 'system-ui, sans-serif'),
+    text: read(style, '--pd-text'),
+    textMuted: read(style, '--pd-text-muted'),
+    textSubtle: read(style, '--pd-text-subtle'),
+    surface1: read(style, '--pd-surface-1'),
+    surface2: read(style, '--pd-surface-2'),
+    surface3: read(style, '--pd-surface-3'),
+    hairline: read(style, '--pd-hairline'),
+    borderStrong: read(style, '--pd-border-strong'),
+    accent: read(style, '--pd-accent'),
+    palette: Array.from({ length: PALETTE_SIZE }, (_, i) => read(style, `--pd-chart-${i + 1}`)),
+    divergingNeg: read(style, '--pd-diverging-neg'),
+    divergingMid: read(style, '--pd-diverging-mid'),
+    divergingPos: read(style, '--pd-diverging-pos'),
+    neutralBar: read(style, '--pd-chart-neutral-bar'),
+    success: read(style, '--pd-success'),
+    warning: read(style, '--pd-warning'),
+    danger: read(style, '--pd-danger'),
+    info: read(style, '--pd-info'),
   };
 }
 
@@ -99,6 +99,6 @@ export function mixColors(from: string, to: string, t: number): string {
 }
 
 /** Six-step sequential ramp for heatmaps: surface-2 to the accent (dark: lightness rises; light: it falls). */
-export function sequentialRamp(tokens: Pick<SuiteChartTokens, 'surface2' | 'accent'>, steps = 6): string[] {
+export function sequentialRamp(tokens: Pick<PaddockChartTokens, 'surface2' | 'accent'>, steps = 6): string[] {
   return Array.from({ length: steps }, (_, i) => mixColors(tokens.surface2, tokens.accent, i / (steps - 1)));
 }

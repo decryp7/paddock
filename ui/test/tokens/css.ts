@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile } from 'sass';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'projects', 'suite-ui');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'projects', 'paddock-ui');
 
 export type Vars = Record<string, string>;
 
