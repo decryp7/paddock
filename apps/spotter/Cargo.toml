@@ -1,0 +1,53 @@
+[workspace]
+members = ["crates/spotter-core", "crates/spotter-plugin-api", "crates/spotter-plugin-host", "crates/spotter-sources", "plugins/spotter-plugin-example", "plugins/template"]
+resolver = "2"
+
+# Shared by every member: `edition.workspace = true` etc.
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88"
+repository = "https://dev.decryptology.net/decryp7/spotter"
+version = "0.2.0"
+
+# Versions of the dependencies that two or more members use, so they stay on one version.
+[workspace.dependencies]
+spotter-core = { path = "crates/spotter-core" }
+spotter-plugin-api = { path = "crates/spotter-plugin-api" }
+spotter-plugin-host = { path = "crates/spotter-plugin-host" }
+spotter-sources = { path = "crates/spotter-sources" }
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+quick-xml = "0.42"
+regex = "1.12"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "system-proxy"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+tempfile = "3"
+thiserror = "2.0"
+time = { version = "0.3", features = ["parsing", "formatting", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util", "net"] }
+toml = "1"
+
+# Dependencies are optimised even in debug builds; workspace crates stay at opt-level 0 for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+debug = "line-tables-only"
+
+# Shipped builds (`cargo build --profile dist`, `tauri build -- --profile dist`).
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

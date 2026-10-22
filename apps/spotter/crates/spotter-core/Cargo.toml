@@ -1,0 +1,24 @@
+[package]
+name = "spotter-core"
+description = "Spotter's pure core: versions, sources and their parsers, filters, schedules, notification policy, watch state, configuration and its migration (ADR 0001)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[dependencies]
+spotter-plugin-api.workspace = true
+quick-xml.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+time.workspace = true
+toml.workspace = true
+url = "2.5"
+
+[lints]
+workspace = true
