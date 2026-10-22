@@ -20,7 +20,7 @@ describe('feedItems', () => {
         a: reply([
           { at: 10, kind: 'stalled', timeouts: 3 },
           { at: 50, kind: 'started' },
-          { at: 60, kind: 'jobFinished', job: { info: { repository: null, job: null, jobId: null, runId: null, runNumber: null, taskId: null, server: null }, startedAt: 1, finishedAt: 2 } },
+          { at: 60, kind: 'jobFinished', job: { info: { repository: null, job: null, jobId: null, runId: null, runNumber: null, taskId: null, server: null }, startedAt: 1, finishedAt: 2, peakCpuPermille: 0, peakMemBytes: 0, leftovers: 0 } },
         ]),
         b: null,
         c: reply([{ at: 30, kind: 'paused' }]),

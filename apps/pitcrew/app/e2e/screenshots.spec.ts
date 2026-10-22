@@ -36,11 +36,45 @@ const SHOTS: Shot[] = [
   { name: 'runner-detail', path: '/runners/build-win' },
   { name: 'runner-updates', path: '/runners/ui-tests?tab=updates' },
   { name: 'runner-disk', path: '/runners/docker-lab?tab=disk' },
+  { name: 'runner-config-form', path: '/runners/docker-lab?tab=config' },
+  {
+    name: 'runner-config-advanced',
+    path: '/runners/ui-tests?tab=config',
+    prepare: async (page) => {
+      await page.getByRole('radio', { name: 'Advanced (YAML)' }).click();
+      const editor = page.getByRole('textbox', { name: 'config.yaml' });
+      const text = await editor.inputValue();
+      await editor.fill(text.replace('  capacity: 1\n', '  capacity: 1\n\t  retries: 3\n'));
+      await page.getByTestId('yaml-status').waitFor();
+      await page.waitForTimeout(600);
+      await page.getByRole('button', { name: /Error on line/ }).hover();
+      await editor.evaluate((e) => e.parentElement?.parentElement?.scrollTo({ top: 0 }));
+    },
+  },
+  {
+    name: 'runner-config-diff',
+    path: '/runners/build-win?tab=config',
+    prepare: async (page) => {
+      await page.getByLabel('Capacity').fill('4');
+      await page.getByLabel('Job timeout').fill('2h');
+      await page.getByRole('button', { name: 'Review changes' }).click();
+      await page.getByRole('dialog').waitFor();
+    },
+  },
+  { name: 'runner-processes', path: '/runners/build-win?tab=processes' },
   { name: 'activity', path: '/activity' },
   { name: 'logs', path: '/logs?runner=build-win' },
   { name: 'updates', path: '/updates' },
   { name: 'settings', path: '/settings' },
   { name: 'settings-defaults', path: '/settings?section=defaults' },
+  {
+    name: 'settings-processes',
+    path: '/settings?section=defaults',
+    prepare: async (page) => {
+      await page.getByRole('heading', { name: 'Leftover processes' }).scrollIntoViewIfNeeded();
+      await page.evaluate(() => document.querySelector('main')?.scrollBy({ top: 200 }));
+    },
+  },
   { name: 'settings-tokens', path: '/settings?section=tokens' },
   {
     name: 'register-wizard',

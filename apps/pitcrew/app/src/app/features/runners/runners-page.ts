@@ -50,6 +50,9 @@ import { StatusStore } from '../../state/status.store';
                     <td>
                       <a class="name" [routerLink]="['/runners', r.name]">{{ r.name }}</a>
                       <div class="sub faint">{{ r.kind }} · {{ r.labels.join(', ') }}</div>
+                      @if (r.leftovers > 0) {
+                        <a class="badge warning small leftover-chip" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'processes' }"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />{{ r.leftovers }} leftover {{ r.leftovers === 1 ? 'process' : 'processes' }}</a>
+                      }
                     </td>
                     <td>
                       <pc-status-badge [status]="r.status" />

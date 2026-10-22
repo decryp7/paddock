@@ -145,4 +145,113 @@ test.describe('native feel (ADR 0008)', () => {
     expect(await page.evaluate(() => (window as unknown as { __alive?: boolean }).__alive)).toBe(true);
     expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
   });
+
+  test('edits the runner configuration, reviews the diff and saves', async ({ page }) => {
+    await page.goto(`${APP}/runners/build-win?tab=config`);
+    await expect(page.getByRole('heading', { name: 'Runner configuration' })).toBeVisible();
+    await expect(page.getByTestId('label-check')).toContainText('Labels verified after restart');
+    await expect(page.getByRole('button', { name: 'Review changes' })).toBeDisabled();
+
+    await page.getByLabel('Capacity').fill('4');
+    const review = page.getByRole('button', { name: 'Review changes' });
+    await expect(review).toBeEnabled();
+    await review.click();
+
+    const dialog = page.getByRole('dialog', { name: 'Review changes' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('capacity: 4')).toBeVisible();
+    await expect(dialog.locator('tr.added').first()).toContainText('+');
+    await expect(dialog.locator('tr.removed').first()).toContainText('−');
+    await expect(dialog).toContainText('The runner restarts after its current job');
+    await dialog.getByRole('button', { name: 'Save and apply' }).click();
+
+    await expect(page.getByTestId('saved-banner')).toContainText('The runner restarts after the current job');
+    await expect(page.getByTestId('restart-pending')).toBeVisible();
+    await expect(page.getByLabel('Capacity')).toHaveValue('4');
+  });
+
+  test('an invalid capacity shows the engine’s message and cannot be saved', async ({ page }) => {
+    await page.goto(`${APP}/runners/ui-tests?tab=config`);
+    await page.getByLabel('Capacity').fill('0');
+    await expect(page.getByText('Capacity must be between 1 and 64')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Review changes' })).toBeDisabled();
+    await page.getByLabel('Capacity').fill('2');
+    await expect(page.getByRole('button', { name: 'Review changes' })).toBeEnabled();
+  });
+
+  test('Advanced mode points at the line of a syntax error', async ({ page }) => {
+    await page.goto(`${APP}/runners/ui-tests?tab=config`);
+    await page.getByRole('radio', { name: 'Advanced (YAML)' }).click();
+    const editor = page.getByRole('textbox', { name: 'config.yaml' });
+    await expect(page.getByTestId('yaml-status')).toHaveText('Valid YAML');
+    const text = await editor.inputValue();
+    await editor.fill(text.replace('  capacity: 1\n', '\tcapacity: 1\n'));
+    await expect(page.getByTestId('yaml-status')).toHaveText('1 error');
+    await expect(page.getByRole('button', { name: /Error on line \d+:/ })).toContainText('tab');
+    await expect(page.getByText('You edited the file directly; save or discard to use the form again.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Review changes' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Discard changes' }).click();
+    await expect(page.getByLabel('Capacity')).toHaveValue('1');
+  });
+
+  test('the diff dialog takes focus and Escape closes it', async ({ page }) => {
+    await page.goto(`${APP}/runners/ui-tests?tab=config`);
+    await page.getByLabel('Capacity').fill('3');
+    await page.getByRole('button', { name: 'Review changes' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Review changes' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator(':focus')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(page.getByLabel('Capacity')).toHaveValue('3');
+  });
+
+  test('lists leftover processes, keeps one longer and stops another after a confirmation', async ({ page }) => {
+    await page.goto(`${APP}/runners/build-win?tab=processes`);
+    await expect(page.getByTestId('process-summary')).toHaveText('8 processes, 3 leftovers');
+    const gradle = page.locator('tr', { hasText: 'java.exe' });
+    await expect(gradle.getByText('Leftover')).toBeVisible();
+    await expect(gradle.getByTestId('fate')).toContainText('stops in 2 h 14 min');
+    const sleep = page.locator('tr', { hasText: 'sleep.exe' });
+    await expect(sleep.getByTestId('fate')).toContainText('stops in 7 min');
+
+    await sleep.getByRole('button', { name: 'Keep sleep.exe longer' }).click();
+    await page.getByRole('menuitem', { name: '+ 1 hour' }).click();
+    await expect(sleep.getByTestId('fate')).toContainText('stops in 1 h 0');
+
+    await sleep.getByRole('button', { name: /^Stop sleep.exe now/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Stop sleep.exe?' });
+    await expect(dialog).toContainText('asked to stop first');
+    await dialog.getByRole('button', { name: 'Stop now' }).click();
+    await expect(page.locator('tr', { hasText: 'sleep.exe' })).toHaveCount(0);
+    await expect(page.getByTestId('process-summary')).toHaveText('7 processes, 2 leftovers');
+  });
+
+  test('the runner process has no plain Stop button, only a confirmed overflow action', async ({ page }) => {
+    await page.goto(`${APP}/runners/ui-tests?tab=processes`);
+    const runner = page.locator('tr', { hasText: 'gitea-runner.exe' });
+    await expect(runner.getByRole('button', { name: /^Stop / })).toHaveCount(0);
+    await runner.getByRole('button', { name: /More actions for/ }).click();
+    await page.getByRole('menuitem', { name: 'Stop the runner process…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Stop the runner process?' });
+    await expect(dialog).toContainText('Pitcrew will restart it');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+  });
+
+  test('the dashboard and runners page link leftovers to the Processes tab', async ({ page }) => {
+    await page.goto(`${APP}/runners`);
+    await page.getByRole('link', { name: '3 leftover processes' }).click();
+    await expect(page.getByTestId('process-summary')).toBeVisible();
+  });
+
+  test('Settings > Defaults edits the leftover process rules', async ({ page }) => {
+    await page.goto(`${APP}/settings?section=defaults`);
+    await expect(page.getByRole('heading', { name: 'Leftover processes' })).toBeVisible();
+    await page.getByRole('button', { name: 'Add rule' }).last().click();
+    await page.getByLabel('Pattern of rule 6').fill('*chrome*');
+    const save = page.locator('pc-process-policy-editor').getByRole('button', { name: 'Save', exact: true });
+    await save.click();
+    await expect(page.getByText('Process defaults saved')).toBeVisible();
+  });
 });

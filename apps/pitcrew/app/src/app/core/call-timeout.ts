@@ -8,9 +8,16 @@ const MEDIUM_TIMEOUT_MS = 60_000;
 
 const LONG = new Set(['clean_disk', 'register_runner', 'install_service', 'uninstall_service', 'install_app_update', 'check_app_update', 'export_diagnostics']);
 const MEDIUM = new Set(['runner_disk', 'add_runner', 'remove_runner', 'save_settings']);
+/** Reading, previewing and process queries are quick; saving a config file may wait for the runner to restart. */
+const QUICK = new Set(['runner_config_get', 'runner_config_preview', 'runner_processes', 'runner_process_keep']);
+const SAVE = new Set(['runner_config_save', 'runner_process_stop']);
+const QUICK_TIMEOUT_MS = 10_000;
+const SAVE_TIMEOUT_MS = 30_000;
 
 /** The time one command gets (pure). */
 export function timeoutFor(cmd: string): number {
+  if (QUICK.has(cmd)) return QUICK_TIMEOUT_MS;
+  if (SAVE.has(cmd)) return SAVE_TIMEOUT_MS;
   return LONG.has(cmd) ? LONG_TIMEOUT_MS : MEDIUM.has(cmd) ? MEDIUM_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
 }
 

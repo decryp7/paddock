@@ -11,6 +11,9 @@
         <h1>{{ r.name }}</h1>
         <pc-status-badge [status]="r.status" />
         <span class="faint">{{ r.kind }} {{ r.currentVersion ?? '' }}</span>
+        @if (r.leftovers > 0) {
+          <a class="badge warning leftover-chip" routerLink="." [queryParams]="{ tab: 'processes' }"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />{{ r.leftovers }} leftover {{ r.leftovers === 1 ? 'process' : 'processes' }}</a>
+        }
       </div>
       <div class="btn-row">
         @if (r.status === 'paused' || r.status === 'draining') {
@@ -188,6 +191,12 @@
         }
         @case ('updates') {
           <pc-runner-update-panel [runner]="r" />
+        }
+        @case ('processes') {
+          <pc-processes-panel [runner]="r.name" />
+        }
+        @case ('config') {
+          <pc-config-panel [runner]="r.name" />
         }
         @case ('disk') {
           <pc-disk-panel [runner]="r.name" />

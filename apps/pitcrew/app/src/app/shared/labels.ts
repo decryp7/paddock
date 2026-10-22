@@ -16,7 +16,7 @@ import type {
   UpdateOutcome,
   UpdatePhase,
 } from '../core/api.types';
-import { formatBytes, plural } from './format';
+import { formatBytes, formatSpan, plural } from './format';
 
 /** Words and icons for the values the backend returns. These only name what the core decided. */
 
@@ -223,6 +223,34 @@ export function eventLook(e: HistoryEvent): Look & { title: string; detail: stri
         title: `${triggerLabel(e.trigger)} cleanup freed ${formatBytes(e.freedBytes)}`,
         detail: `${plural(e.deleted, 'item')} deleted${e.failed > 0 ? `, ${plural(e.failed, 'item')} could not be deleted` : ''}.`,
       };
+    case 'configSaved':
+      return {
+        label: 'Configuration',
+        tone: 'info',
+        icon: 'file-text',
+        title: e.changed.length > 0 ? `Configuration saved (${e.changed.join(', ')})` : 'Configuration saved',
+        detail: e.restart ? 'The runner restarted to use it.' : 'Only comments or layout changed; no restart was needed.',
+      };
+    case 'labelsVerified':
+      return { label: 'Labels verified', tone: 'success', icon: 'check-circle', title: 'Labels verified after the restart', detail: `The runner declared ${e.labels.join(', ')}.` };
+    case 'labelsMismatch':
+      return {
+        label: 'Labels differ',
+        tone: 'warning',
+        icon: 'alert',
+        title: 'The declared labels differ from the file',
+        detail: `The runner declared [${e.declared.join(', ')}] but the file asks for [${e.expected.join(', ')}].`,
+      };
+    case 'processStopped': {
+      const by = e.by === 'user' ? 'by you' : e.rule ? `by cleanup rule ${e.rule}` : 'by the automatic cleanup';
+      return {
+        label: 'Process stopped',
+        tone: 'neutral',
+        icon: 'stop-circle',
+        title: `Stopped ${e.name} (pid ${e.pid}, running ${formatSpan(e.ageMs)})`,
+        detail: `${by[0]!.toUpperCase()}${by.slice(1)}${e.forced ? ' (ended after it ignored the request)' : ''}.`,
+      };
+    }
   }
 }
 
@@ -247,6 +275,7 @@ const KIND_LABEL: Record<NotificationKind, string> = {
   diskLow: 'Disk space is low',
   cleanedUp: 'A cleanup finished',
   cleanupProblems: 'A cleanup could not delete everything',
+  labelMismatch: 'A runner declared other labels than configured',
 };
 
 export const NOTIFICATION_KINDS = Object.keys(KIND_LABEL) as NotificationKind[];

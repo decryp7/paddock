@@ -437,3 +437,183 @@ describe('MockBackend simulation', () => {
     }
   });
 });
+
+describe('MockBackend runner configuration', () => {
+  let mock: MockBackend;
+  afterEach(() => mock.dispose());
+
+  it('reads a commented file with its form view', async () => {
+    mock = make();
+    const c = await mock.runnerConfig('ui-tests');
+    expect(c.path).toContain('config.yaml');
+    expect(c.text).toContain('# Execute how many tasks');
+    expect(c.view.settings.capacity).toBe(1);
+    expect(c.view.containerRunner).toBe(false);
+    expect((await mock.runnerConfig('docker-lab')).view.containerRunner).toBe(true);
+    expect(c.backups).toBeGreaterThan(0);
+    expect(c.restartPending).toBe(false);
+  });
+
+  it('previews without writing and flags bad values', async () => {
+    mock = make();
+    const c = await mock.runnerConfig('ui-tests');
+    const p = await mock.previewRunnerConfig('ui-tests', { mode: 'form', settings: { ...c.view.settings, capacity: 0 } });
+    expect(p.issues[0]).toMatchObject({ severity: 'error', path: 'runner.capacity' });
+    expect((await mock.runnerConfig('ui-tests')).text).toBe(c.text);
+    const raw = await mock.previewRunnerConfig('ui-tests', { mode: 'raw', text: 'runner:\n\tx: 1' });
+    expect(raw.issues[0]!.line).toBe(2);
+  });
+
+  it('saves with a backup and a fresh fingerprint, restarting after the job when it runs', async () => {
+    mock = make();
+    const c = await mock.runnerConfig('build-win');
+    const saved = await mock.saveRunnerConfig('build-win', { mode: 'form', settings: { ...c.view.settings, capacity: 2 } }, c.fingerprint);
+    expect(saved).toMatchObject({ restart: 'afterJob', changedKeys: ['runner.capacity'] });
+    expect(saved.backup).toMatch(/^config\.yaml\.bak-20261022-\d{6}$/);
+    expect(saved.fingerprint).not.toBe(c.fingerprint);
+    const after = await mock.runnerConfig('build-win');
+    expect(after.text).toContain('capacity: 2');
+    expect(after.restartPending).toBe(true);
+    expect((await mock.status()).runners.find((r) => r.name === 'build-win')!.pending).toBe('restart');
+    const events = (await mock.activity('build-win', 7)).events;
+    expect(events[0]).toMatchObject({ kind: 'configSaved', restart: true });
+  });
+
+  it('plans no restart for comments, and the next start for a stopped runner', async () => {
+    mock = make();
+    const c = await mock.runnerConfig('legacy-ci');
+    const comment = await mock.saveRunnerConfig('legacy-ci', { mode: 'raw', text: `# note\n${c.text}` }, c.fingerprint);
+    expect(comment.restart).toBe('notNeeded');
+    const c2 = await mock.runnerConfig('docker-lab');
+    const stopped = await mock.saveRunnerConfig('docker-lab', { mode: 'form', settings: { ...c2.view.settings, capacity: 2 } }, c2.fingerprint);
+    expect(stopped.restart).toBe('notRunning');
+  });
+
+  it('restarts an idle runner at once and records the label check', async () => {
+    mock = make();
+    vi.useFakeTimers();
+    try {
+      const c = await mock.runnerConfig('ui-tests');
+      const saved = await mock.saveRunnerConfig('ui-tests', { mode: 'form', settings: { ...c.view.settings, labels: [...c.view.settings.labels, 'extra:host'] } }, c.fingerprint);
+      expect(saved.restart).toBe('afterJob');
+      await vi.advanceTimersByTimeAsync(2_000);
+      const events = (await mock.activity('ui-tests', 7)).events;
+      expect(events.some((e) => e.kind === 'labelsVerified' && e.labels.includes('extra'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refuses a stale base and a file with errors, and names the runner for unknown ones', async () => {
+    mock = make();
+    const c = await mock.runnerConfig('ui-tests');
+    expect((await rejection(mock.saveRunnerConfig('ui-tests', { mode: 'raw', text: c.text }, 'old'))).code).toBe('busy');
+    const bad = await rejection(mock.saveRunnerConfig('ui-tests', { mode: 'form', settings: { ...c.view.settings, capacity: 99 } }, c.fingerprint));
+    expect(bad.code).toBe('badRequest');
+    expect(bad.message).toContain('runner.capacity');
+    expect((await rejection(mock.runnerConfig('nope'))).code).toBe('unknownRunner');
+  });
+
+  it('has config, label and process events in the history', async () => {
+    mock = make();
+    const kinds = async (n: string) => (await mock.activity(n, 7)).events.map((e) => e.kind);
+    expect(await kinds('build-win')).toEqual(expect.arrayContaining(['configSaved', 'labelsVerified', 'processStopped']));
+    expect(await kinds('docker-lab')).toContain('labelsMismatch');
+    const job = (await mock.activity('build-win', 7)).summary.recentJobs[0]!;
+    expect(job.peakCpuPermille).toBeGreaterThan(0);
+    expect(job.peakMemBytes).toBeGreaterThan(0);
+  });
+});
+
+describe('MockBackend processes', () => {
+  let mock: MockBackend;
+  afterEach(() => mock.dispose());
+
+  it('lists the runner, a job’s children and three leftovers that match the snapshot', async () => {
+    mock = make();
+    const l = await mock.runnerProcesses('build-win');
+    expect(l.idle).toBe(false);
+    expect(l.cleanup).toBe(true);
+    expect(l.keep).toEqual({ amount: 10, unit: 'minutes' });
+    expect(l.entries.find((e) => e.isRunner)?.pid).toBe(l.runnerPid);
+    const left = l.entries.filter((e) => e.leftover);
+    expect(left.map((e) => e.leftover!.fate.kind)).toEqual(['stopsAt', 'stopsAt', 'never']);
+    expect(left[0]!.leftover!.rule).toBe('*GradleDaemon*');
+    expect(l.entries.some((e) => e.command.includes('[redacted]'))).toBe(true);
+    expect(l.entries.some((e) => e.job?.running)).toBe(true);
+    const snap = (await mock.status()).runners.find((r) => r.name === 'build-win')!;
+    expect(snap.leftovers).toBe(left.length);
+  });
+
+  it('has an empty list for a runner that is not running', async () => {
+    mock = make();
+    expect(await mock.runnerProcesses('docker-lab')).toMatchObject({ entries: [], runnerPid: null });
+    expect((await mock.runnerProcesses('ui-tests')).idle).toBe(true);
+  });
+
+  it('shows leftovers as off when automatic cleanup is off', async () => {
+    mock = make();
+    const s = await mock.settings();
+    s.config.defaults.processes.cleanup = false;
+    await mock.saveSettings(s.config);
+    const l = await mock.runnerProcesses('build-win');
+    expect(l.cleanup).toBe(false);
+    expect(l.entries.filter((e) => e.leftover).map((e) => e.leftover!.fate.kind)).toEqual(['off', 'off', 'never']);
+  });
+
+  it('keeps a leftover longer and refuses what cannot be kept', async () => {
+    mock = make();
+    const l = await mock.runnerProcesses('build-win');
+    const e = l.entries.find((x) => x.leftover?.fate.kind === 'stopsAt')!;
+    const at = (e.leftover!.fate as { at: number }).at;
+    await mock.keepProcess('build-win', e.pid, e.startedAt!, { amount: 1, unit: 'hours' });
+    const after = (await mock.runnerProcesses('build-win')).entries.find((x) => x.pid === e.pid)!;
+    expect((after.leftover!.fate as { at: number }).at).toBe(at + 3_600_000);
+    const never = l.entries.find((x) => x.leftover?.fate.kind === 'never')!;
+    expect((await rejection(mock.keepProcess('build-win', never.pid, never.startedAt!, { amount: 1, unit: 'hours' }))).code).toBe('badRequest');
+    expect((await rejection(mock.keepProcess('build-win', 1, 1, { amount: 1, unit: 'hours' }))).code).toBe('badRequest');
+    expect((await rejection(mock.keepProcess('build-win', e.pid, e.startedAt!, { amount: 0, unit: 'hours' }))).message).toContain('at least 1');
+  });
+
+  it('stops a process, drops its row, logs it, and refuses strangers and the runner without consent', async () => {
+    mock = make();
+    const l = await mock.runnerProcesses('build-win');
+    const e = l.entries.find((x) => x.leftover?.rule === '*GradleDaemon*')!;
+    await mock.stopProcess('build-win', e.pid, e.startedAt, false);
+    const after = await mock.runnerProcesses('build-win');
+    expect(after.entries.some((x) => x.pid === e.pid)).toBe(false);
+    expect((await mock.status()).runners.find((r) => r.name === 'build-win')!.leftovers).toBe(2);
+    expect((await mock.activity('build-win', 1)).events[0]).toMatchObject({ kind: 'processStopped', by: 'user', pid: e.pid });
+    const gone = await rejection(mock.stopProcess('build-win', e.pid, e.startedAt, false));
+    expect(gone).toMatchObject({ code: 'badRequest' });
+    expect(gone.message).toContain('not part of this runner’s process tree');
+    expect((await rejection(mock.stopProcess('build-win', l.runnerPid!, null, false))).message).toContain('runner process itself');
+  });
+
+  it('restarts the runner when the user ends its process', async () => {
+    mock = make();
+    const l = await mock.runnerProcesses('ui-tests');
+    await mock.stopProcess('ui-tests', l.runnerPid!, null, true);
+    expect((await mock.status()).runners.find((r) => r.name === 'ui-tests')!.status).toBe('starting');
+  });
+
+  it('validates the process policy on save', async () => {
+    mock = make();
+    const base = (await mock.settings()).config;
+    const bad = (f: (c: typeof base) => void) => {
+      const c = structuredClone(base);
+      f(c);
+      return rejection(mock.saveSettings(c));
+    };
+    expect((await bad((c) => (c.defaults.processes.keep.amount = 0))).message).toContain('at least 1');
+    expect((await bad((c) => (c.defaults.processes.keep = { amount: 31, unit: 'days' }))).message).toContain('30 days');
+    expect((await bad((c) => (c.defaults.processes.stop_timeout_secs = 0))).message).toContain('1 to 300');
+    expect((await bad((c) => c.defaults.processes.rules.push({ pattern: ' ', keep: 'never' }))).message).toContain('needs a pattern');
+    expect((await bad((c) => c.defaults.processes.rules.push({ pattern: 'x', keep: { amount: 0, unit: 'hours' } }))).message).toContain('rule "x"');
+    expect((await bad((c) => (c.runners[0]!.processes = { keep: { amount: 0, unit: 'hours' } }))).message).toContain('build-win: ');
+    const ok = structuredClone(base);
+    ok.runners[0]!.processes = { cleanup: false, rules: [{ pattern: 'x', keep: 'never' }] };
+    await mock.saveSettings(ok);
+    expect((await mock.runnerProcesses('build-win')).cleanup).toBe(false);
+  });
+});

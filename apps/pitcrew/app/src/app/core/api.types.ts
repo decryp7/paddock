@@ -67,6 +67,11 @@ export interface FinishedJob {
   finishedAt: Timestamp;
   /** How the server says it ended; present only with a Gitea read token (`gitea_api::Conclusion`). */
   outcome?: JobConclusion;
+  /** The most the runner and its processes used during the job: CPU per mille of the machine, and memory. */
+  peakCpuPermille: number;
+  peakMemBytes: number;
+  /** Processes the job left running when it ended. */
+  leftovers: number;
 }
 
 /** `gitea_api::Conclusion`. */
@@ -165,6 +170,8 @@ export interface RunnerSnapshot {
   nextCleanupAt: Timestamp | null;
   /** Use now by the runner and its processes; `null` while it is not running. */
   usage: Usage | null;
+  /** How many processes a finished job left behind are still alive. */
+  leftovers: number;
 }
 
 /**
@@ -226,7 +233,8 @@ export type NotificationKind =
   | 'updateAvailable'
   | 'diskLow'
   | 'cleanedUp'
-  | 'cleanupProblems';
+  | 'cleanupProblems'
+  | 'labelMismatch';
 
 export type Severity = 'info' | 'warning' | 'error';
 
@@ -261,7 +269,14 @@ export type HistoryEvent = { at: Timestamp } & (
   | { kind: 'jobFinished'; job: FinishedJob }
   | { kind: 'updateFinished'; outcome: UpdateOutcome }
   | { kind: 'cleanup'; trigger: CleanupTrigger; freedBytes: number; deleted: number; failed: number }
+  | { kind: 'configSaved'; restart: boolean; changed: string[] }
+  | { kind: 'labelsVerified'; labels: string[] }
+  | { kind: 'labelsMismatch'; expected: string[]; declared: string[] }
+  | { kind: 'processStopped'; name: string; pid: number; ageMs: number; rule: string; by: StopReason; forced: boolean }
 );
+
+/** Who stopped a process (`history::StopReason`). */
+export type StopReason = 'cleanup' | 'user';
 
 export interface Span {
   from: Timestamp;
@@ -430,6 +445,7 @@ export interface RunnerConfig {
   update?: UpdatePolicy | null;
   watchdog?: StallRule | null;
   cleanup?: CleanupPolicy | null;
+  processes?: ProcessOverride | null;
 }
 
 /** `pitcrew.toml` (`pitcrew_core::config::Config`, snake_case). */
@@ -442,6 +458,7 @@ export interface Config {
     restart: RestartPolicy;
     logs: { max_bytes: number; keep: number };
     cleanup: CleanupPolicy;
+    processes: ProcessPolicy;
   };
   runners: RunnerConfig[];
 }
@@ -523,4 +540,197 @@ export interface CommandError {
     /** Raised by the UI, not the shell: a call did not answer in time (`call-timeout.ts`). */
     | 'timeout';
   message: string;
+}
+
+// ---- the runner's configuration file (`runner_config`, `runner_settings`, `runner_schema`, `text_diff`) --------------
+
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+
+/**
+ * The form's settings (`runner_settings::RunnerSettings`). `null` / empty means the key is absent and the runner's
+ * own default applies.
+ */
+export interface RunnerSettings {
+  capacity: number | null;
+  labels: string[];
+  timeout: string | null;
+  fetchInterval: string | null;
+  fetchTimeout: string | null;
+  envs: Record<string, string>;
+  cacheEnabled: boolean | null;
+  cacheDir: string | null;
+  cacheSizeLimit: string | null;
+  containerNetwork: string | null;
+  containerPrivileged: boolean | null;
+  containerOptions: string | null;
+  containerValidVolumes: string[];
+  logLevel: LogLevel | null;
+}
+
+/** A change to the configuration file (`runner_config::ConfigEdit`, tag `mode`). */
+export type ConfigEdit = { mode: 'form'; settings: RunnerSettings } | { mode: 'raw'; text: string };
+
+/** One finding about a configuration file (`runner_schema::ConfigIssue`). */
+export interface ConfigIssue {
+  severity: 'error' | 'warning';
+  /** The key it is about, dotted (`runner.capacity`); empty for the file as a whole. */
+  path: string;
+  /** The line in the text the check ran on (1-based), when known. */
+  line: number | null;
+  message: string;
+}
+
+/** What the form shows for a file (`runner_config::ConfigView`). */
+export interface ConfigView {
+  settings: RunnerSettings;
+  /** Keys the file has in a shape the form cannot show (they stay as they are). */
+  unreadable: string[];
+  issues: ConfigIssue[];
+  /** The runner runs container jobs (show the container settings). */
+  containerRunner: boolean;
+}
+
+export type DiffKind = 'same' | 'added' | 'removed';
+
+export interface DiffLine {
+  kind: DiffKind;
+  text: string;
+  /** 1-based number in the old text, for `same` and `removed`. */
+  oldNo: number | null;
+  /** 1-based number in the new text, for `same` and `added`. */
+  newNo: number | null;
+}
+
+export interface DiffHunk {
+  lines: DiffLine[];
+}
+
+/** The difference between two texts (`text_diff::TextDiff`). */
+export interface TextDiff {
+  hunks: DiffHunk[];
+  added: number;
+  removed: number;
+  truncated: boolean;
+}
+
+/** What saving an edit would do (`runner_config::Preview`). Saving is refused while any issue is an error. */
+export interface ConfigPreview {
+  text: string;
+  changed: boolean;
+  restartNeeded: boolean;
+  diff: TextDiff;
+  issues: ConfigIssue[];
+  changedKeys: string[];
+  /** The label names the new file asks the runner to declare (empty: the file sets none). */
+  labels: string[];
+}
+
+/** The `GetRunnerConfig` reply. */
+export interface RunnerConfigReply {
+  path: string;
+  /** Empty when the file does not exist yet. */
+  text: string;
+  /** Fingerprint of the text, to send back with the save. */
+  fingerprint: string;
+  view: ConfigView;
+  backups: number;
+  /** A change is waiting for the runner to restart after its job. */
+  restartPending: boolean;
+}
+
+/** What happens to a runner after its configuration file changed (`protocol::RestartPlan`). */
+export type RestartPlan = 'notNeeded' | 'notRunning' | 'afterJob';
+
+/** The `RunnerConfigSaved` reply. */
+export interface ConfigSaved {
+  /** The backup of the previous file; `null` when there was no file. */
+  backup: string | null;
+  restart: RestartPlan;
+  fingerprint: string;
+  changedKeys: string[];
+}
+
+// ---- leftover processes (`process_policy`, `process_track`) -------------------------------------------------------
+
+export type TimeUnit = 'minutes' | 'hours' | 'days';
+
+/** How long to keep a leftover after its job ended. */
+export interface KeepFor {
+  amount: number;
+  unit: TimeUnit;
+}
+
+/** The word `never` or a time. */
+export type Keep = 'never' | KeepFor;
+
+export interface ProcessRule {
+  /** Matches the name, the path or the command line (`*` any run, `?` one character). */
+  pattern: string;
+  keep: Keep;
+}
+
+/** `process_policy::ProcessPolicy` (config schema: snake_case). */
+export interface ProcessPolicy {
+  cleanup: boolean;
+  keep: KeepFor;
+  stop_timeout_secs: number;
+  rules: ProcessRule[];
+}
+
+/** A runner's own settings, tried before the defaults (`process_policy::ProcessOverride`). */
+export interface ProcessOverride {
+  cleanup?: boolean;
+  keep?: KeepFor;
+  rules?: ProcessRule[];
+}
+
+/** What is going to happen to a leftover (`process_track::Fate`, tag `kind`). */
+export type Fate = { kind: 'stopsAt'; at: Timestamp } | { kind: 'never' } | { kind: 'off' };
+
+/** A process a finished job left behind. */
+export interface Leftover {
+  /** When its job ended. */
+  since: Timestamp;
+  /** The pattern of the rule that applies; `null`: the default keep time. */
+  rule: string | null;
+  fate: Fate;
+}
+
+/** Which job, as the UI shows it. */
+export interface JobRef {
+  repository: string | null;
+  job: string | null;
+  runNumber: number | null;
+  running: boolean;
+}
+
+/** One row of the Processes tab. */
+export interface ProcessEntry {
+  pid: number;
+  ppid: number | null;
+  name: string;
+  /** The command line, with secrets removed and cut. */
+  command: string;
+  /** CPU use, per mille of the whole machine. */
+  cpuPermille: number;
+  memBytes: number;
+  startedAt: Timestamp | null;
+  isRunner: boolean;
+  job: JobRef | null;
+  leftover: Leftover | null;
+}
+
+/** The processes of a runner's tree (`protocol::ProcessList`). */
+export interface ProcessList {
+  runnerPid: number | null;
+  /** No job runs now (leftovers may be stopped). */
+  idle: boolean;
+  /** Automatic cleanup of leftovers is on for this runner. */
+  cleanup: boolean;
+  /** The default time a leftover is kept after its job ended. */
+  keep: KeepFor;
+  /** Leftovers first, then the runner, then by memory. */
+  entries: ProcessEntry[];
+  truncated: boolean;
+  takenAt: Timestamp;
 }

@@ -1,8 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
-import type { CleanupPolicy, Config } from '../../core/api.types';
+import type { CleanupPolicy, Config, ProcessPolicy } from '../../core/api.types';
 import { CleanupPolicyEditor } from '../../shared/policy/cleanup-policy-editor';
+import { ProcessPolicyEditor } from '../../shared/policy/process-policy-editor';
 import { LoadState } from '../../shared/ui/load-state';
 import { SettingsStore } from '../../state/settings.store';
 
@@ -67,7 +68,7 @@ export const GROUPS: DefaultsGroup[] = [
 /** The defaults every runner uses unless it overrides them: watchdog, restarts, update timeouts, logs, cleanup. */
 @Component({
   selector: 'pc-defaults-section',
-  imports: [MatIcon, RouterLink, LoadState, CleanupPolicyEditor],
+  imports: [MatIcon, RouterLink, LoadState, CleanupPolicyEditor, ProcessPolicyEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pc-load-state what="The settings" [hasValue]="!!settings.config()" [error]="settings.settings().error" [skeleton]="[80, 160, 160]" (retry)="settings.load()">
@@ -129,6 +130,15 @@ export const GROUPS: DefaultsGroup[] = [
           </header>
           <div class="card-body">
             <pc-cleanup-policy-editor id="defaults-cleanup" [policy]="d.cleanup" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="saveCleanup($event)" />
+          </div>
+        </section>
+        <section class="card" aria-labelledby="processes-title">
+          <header class="card-header">
+            <h2 id="processes-title">Leftover processes</h2>
+            <span class="meta">runners can override this on their Processes tab</span>
+          </header>
+          <div class="card-body">
+            <pc-process-policy-editor id="defaults-processes" [policy]="d.processes" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="saveProcesses($event)" />
           </div>
         </section>
         <p class="faint small">The update schedule is on the <a routerLink="/updates">Updates</a> page.</p>
@@ -206,7 +216,12 @@ export class DefaultsSection {
   protected save(): void {
     const c = this.settings.config();
     const d = this.draft();
-    if (c && d) void this.settings.save({ ...c, defaults: { ...d, cleanup: c.defaults.cleanup, update: c.defaults.update } }, 'Defaults saved');
+    if (c && d) void this.settings.save({ ...c, defaults: { ...d, cleanup: c.defaults.cleanup, update: c.defaults.update, processes: c.defaults.processes } }, 'Defaults saved');
+  }
+
+  protected saveProcesses(policy: ProcessPolicy): void {
+    const c = this.settings.config();
+    if (c) void this.settings.save({ ...c, defaults: { ...c.defaults, processes: policy } }, 'Process defaults saved');
   }
 
   protected saveCleanup(policy: CleanupPolicy): void {

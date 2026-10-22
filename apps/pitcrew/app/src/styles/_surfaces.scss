@@ -100,6 +100,14 @@
   }
 }
 
+a.badge {
+  text-decoration: none;
+
+  &:hover {
+    filter: brightness(0.96);
+  }
+}
+
 @each $tone in success, info, warning, danger, neutral {
   .tone-#{$tone} {
     color: var(--#{$tone});

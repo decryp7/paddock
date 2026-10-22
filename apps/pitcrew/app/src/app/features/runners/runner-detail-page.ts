@@ -12,21 +12,25 @@ import { Sparkline } from '../../shared/ui/sparkline';
 import { StatusBadge } from '../../shared/ui/status-badge';
 import { SettingsStore } from '../../state/settings.store';
 import { StatusStore } from '../../state/status.store';
+import { ConfigPanel } from './config-panel';
 import { DiskPanel } from './disk-panel';
+import { ProcessesPanel } from './processes-panel';
 import { RunnerUpdatePanel } from './runner-update-panel';
 
-export type DetailTab = 'overview' | 'updates' | 'disk';
+export type DetailTab = 'overview' | 'updates' | 'processes' | 'config' | 'disk';
 
 const TABS: { key: DetailTab; label: string; icon: string }[] = [
   { key: 'overview', label: 'Overview', icon: 'runner' },
   { key: 'updates', label: 'Updates', icon: 'updates' },
+  { key: 'processes', label: 'Processes', icon: 'cpu' },
+  { key: 'config', label: 'Configuration', icon: 'file-text' },
   { key: 'disk', label: 'Disk & cleanup', icon: 'disk' },
 ];
 
 /** One runner: overview, updates and disk, with its actions. */
 @Component({
   selector: 'pc-runner-detail-page',
-  imports: [MatIcon, RouterLink, StatusBadge, RunnerActions, EmptyState, DiskPanel, RunnerUpdatePanel, Sparkline],
+  imports: [MatIcon, RouterLink, StatusBadge, RunnerActions, EmptyState, DiskPanel, RunnerUpdatePanel, Sparkline, ProcessesPanel, ConfigPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './runner-detail-page.html',
   styleUrl: './runner-detail-page.scss',

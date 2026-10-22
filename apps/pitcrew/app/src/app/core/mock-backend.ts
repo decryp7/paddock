@@ -6,16 +6,23 @@ import type {
   CleanupReport,
   CommandError,
   Config,
+  ConfigEdit,
+  ConfigPreview,
+  ConfigSaved,
   ConnectionState,
   DaySummary,
   DiskReply,
+  HistoryEvent,
   JobDay,
+  KeepFor,
   LogLine,
   MetricsReply,
   PitcrewNotification,
+  ProcessList,
   RegisterRequest,
   RunDetails,
   RunnerConfig,
+  RunnerConfigReply,
   RunnerSnapshot,
   ServiceInstall,
   SettingsReply,
@@ -49,6 +56,8 @@ import {
   demoUsage,
   startOfLocalDay,
 } from './mock/mock-data';
+import { fingerprint, labelText, previewOf, sampleConfigText, viewOf } from './mock/mock-runner-config';
+import { demoProcesses, keepMs } from './mock/mock-processes';
 
 /** Which world the mock shows. */
 export type MockScenario = 'demo' | 'empty' | 'unavailable' | 'notInstalled' | 'mismatch';
@@ -93,6 +102,8 @@ export class MockBackend implements PitcrewBackend {
   private readonly history = new Map<string, RawHistory>();
   private readonly logStore = new Map<string, LogLine[]>();
   private readonly tokens = new Set<string>([SERVER]);
+  private readonly configFiles = new Map<string, { text: string; backups: number; restartPending: boolean }>();
+  private readonly processTrees = new Map<string, ProcessList>();
   private readonly listeners = new Set<(event: BackendEvent) => void>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private ticker: ReturnType<typeof setInterval> | null = null;
@@ -338,7 +349,10 @@ export class MockBackend implements PitcrewBackend {
         busy,
         marks: h.marks.filter((m) => m.at >= from),
         updates: h.updates.filter((u) => u.at >= from),
-        recentJobs: jobs.slice(-40).map(({ info, startedAt, finishedAt, outcome }) => ({ info, startedAt, finishedAt, ...(hasApiToken ? { outcome } : {}) })).reverse(),
+        recentJobs: jobs
+          .slice(-40)
+          .map(({ info, startedAt, finishedAt, outcome, peakCpuPermille, peakMemBytes, leftovers }) => ({ info, startedAt, finishedAt, peakCpuPermille, peakMemBytes, leftovers, ...(hasApiToken ? { outcome } : {}) }))
+          .reverse(),
       },
       jobDays,
       jobHours,
@@ -402,6 +416,96 @@ export class MockBackend implements PitcrewBackend {
     };
   }
 
+  // ---- the runner's config.yaml ------------------------------------------------------------------------------------
+
+  async runnerConfig(runner: string): Promise<RunnerConfigReply> {
+    await this.delay();
+    const r = this.find(runner);
+    const f = this.configFile(r);
+    return structuredClone({ path: `${r.dir}\\config.yaml`, text: f.text, fingerprint: fingerprint(f.text), view: viewOf(f.text), backups: f.backups, restartPending: f.restartPending });
+  }
+
+  async previewRunnerConfig(runner: string, edit: ConfigEdit): Promise<ConfigPreview> {
+    await this.delay();
+    return structuredClone(previewOf(this.configFile(this.find(runner)).text, edit));
+  }
+
+  async saveRunnerConfig(runner: string, edit: ConfigEdit, base: string): Promise<ConfigSaved> {
+    await this.delay();
+    const r = this.find(runner);
+    const f = this.configFile(r);
+    if (base !== fingerprint(f.text)) throw fail('busy', 'The file changed on disk after you opened it. Reload it and make your change again.');
+    const preview = previewOf(f.text, edit);
+    const error = preview.issues.find((i) => i.severity === 'error');
+    if (error) throw fail('badRequest', `${error.path ? error.path + ': ' : ''}${error.message}`);
+    const now = this.now();
+    const stamp = isoLocal(now).slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+    const backup = f.text === '' ? null : `config.yaml.bak-${stamp}`;
+    f.text = preview.text;
+    if (backup) f.backups = Math.min(10, f.backups + 1);
+    const running = r.runningSince !== null && r.status !== 'stopped';
+    const restart: ConfigSaved['restart'] = preview.restartNeeded ? (running ? 'afterJob' : 'notRunning') : 'notNeeded';
+    this.historyOf(runner).events.unshift({ at: now, kind: 'configSaved', restart: restart === 'afterJob', changed: preview.changedKeys });
+    if (restart === 'afterJob') {
+      if (r.currentJob) {
+        r.pending = 'restart';
+        f.restartPending = true;
+      } else {
+        r.restarts24h += 1;
+        this.boot(r);
+        if (preview.labels.length > 0) {
+          this.later(1_600, () => this.historyOf(runner).events.unshift({ at: this.now(), kind: 'labelsVerified', labels: preview.labels }));
+        }
+      }
+    }
+    this.pushStatus();
+    return { backup, restart, fingerprint: fingerprint(f.text), changedKeys: preview.changedKeys };
+  }
+
+  // ---- processes ---------------------------------------------------------------------------------------------------
+
+  async runnerProcesses(runner: string): Promise<ProcessList> {
+    await this.delay();
+    const r = this.find(runner);
+    const tree = this.tree(r);
+    const policy = this.processPolicy(runner);
+    const running = r.runningSince !== null && r.usage !== null;
+    const entries = running
+      ? tree.entries.map((e) => (e.leftover && e.leftover.fate.kind === 'stopsAt' && !policy.cleanup ? { ...e, leftover: { ...e.leftover, fate: { kind: 'off' as const } } } : e))
+      : [];
+    return structuredClone({ ...tree, entries, runnerPid: running ? tree.runnerPid : null, idle: r.currentJob === null, cleanup: policy.cleanup, keep: policy.keep, takenAt: this.now() });
+  }
+
+  async stopProcess(runner: string, pid: number, startedAt: number | null, allowRunner: boolean): Promise<void> {
+    await this.delay();
+    const r = this.find(runner);
+    const tree = this.tree(r);
+    const e = tree.entries.find((x) => x.pid === pid && (startedAt === null || x.startedAt === startedAt));
+    if (!e) throw fail('badRequest', 'that process is not part of this runner’s process tree (it may have ended already). Refresh the list.');
+    if (e.isRunner && !allowRunner) throw fail('badRequest', 'that is the runner process itself; stopping it needs your explicit confirmation.');
+    const age = e.startedAt === null ? 0 : Math.max(0, this.now() - e.startedAt);
+    this.historyOf(runner).events.unshift({ at: this.now(), kind: 'processStopped', name: e.name, pid: e.pid, ageMs: age, rule: e.leftover?.rule ?? '', by: 'user', forced: false });
+    if (e.isRunner) {
+      this.processTrees.delete(runner);
+      r.restarts24h += 1;
+      this.boot(r);
+      return;
+    }
+    tree.entries = tree.entries.filter((x) => x !== e);
+    this.syncLeftovers(r);
+    this.pushStatus();
+  }
+
+  async keepProcess(runner: string, pid: number, startedAt: number, extra: KeepFor): Promise<void> {
+    await this.delay();
+    const r = this.find(runner);
+    const e = this.tree(r).entries.find((x) => x.pid === pid && x.startedAt === startedAt);
+    if (!e) throw fail('badRequest', 'that process is not part of this runner’s process tree (it may have ended already). Refresh the list.');
+    if (extra.amount < 1) throw fail('badRequest', 'the keep time must be at least 1');
+    if (!e.leftover || e.leftover.fate.kind !== 'stopsAt') throw fail('badRequest', 'that process is not a leftover waiting to be stopped.');
+    e.leftover.fate = { kind: 'stopsAt', at: e.leftover.fate.at + keepMs(extra) };
+  }
+
   // ---- settings and runners ----------------------------------------------------------------------------------------
 
   async settings(): Promise<SettingsReply> {
@@ -413,6 +517,8 @@ export class MockBackend implements PitcrewBackend {
   async saveSettings(config: Config): Promise<void> {
     await this.delay();
     if (config.defaults.watchdog.threshold < 1) throw fail('badRequest', 'The stall threshold must be at least 1 timed-out poll.');
+    const bad = processProblem(config);
+    if (bad) throw fail('badRequest', bad);
     this.config = structuredClone(config);
     for (const r of this.runners) {
       const c = this.config.runners.find((x) => x.name === r.name);
@@ -549,6 +655,36 @@ export class MockBackend implements PitcrewBackend {
 
   // ---- internals ---------------------------------------------------------------------------------------------------
 
+  private configFile(r: RunnerSnapshot): { text: string; backups: number; restartPending: boolean } {
+    let f = this.configFiles.get(r.name);
+    if (!f) {
+      const container = r.name === 'docker-lab';
+      const labels = r.labels.map((l) => labelText(l, container));
+      f = { text: sampleConfigText(container ? [...labels, labelText('ubuntu-latest', true)] : labels), backups: 3, restartPending: false };
+      this.configFiles.set(r.name, f);
+    }
+    return f;
+  }
+
+  private tree(r: RunnerSnapshot): ProcessList {
+    let t = this.processTrees.get(r.name);
+    if (!t) {
+      t = demoProcesses(r, this.now());
+      this.processTrees.set(r.name, t);
+    }
+    return t;
+  }
+
+  private syncLeftovers(r: RunnerSnapshot): void {
+    r.leftovers = this.tree(r).entries.filter((e) => e.leftover !== null).length;
+  }
+
+  private processPolicy(runner: string): { cleanup: boolean; keep: KeepFor } {
+    const d = this.config.defaults.processes;
+    const o = this.config.runners.find((x) => x.name === runner)?.processes;
+    return { cleanup: o?.cleanup ?? d.cleanup, keep: o?.keep ?? d.keep };
+  }
+
   private connection(): ConnectionState {
     if (this.scenario === 'mismatch') return { state: 'mismatch', message: 'The Pitcrew service is version 0.2.0 and speaks protocol 3; this app speaks protocol 2. Install the same Pitcrew version for both.' };
     if (!this.service.installed) return { state: 'unavailable', message: 'The Pitcrew service is not installed on this computer.' };
@@ -593,9 +729,30 @@ export class MockBackend implements PitcrewBackend {
     if (!h) {
       const profile = PROFILES.find((p) => p.name === name) ?? { ...PROFILES[1]!, name, seed: name.length * 13, updates: [], outages: [] };
       h = generateHistory(profile, this.now());
+      h.events.push(...this.extraEvents(name));
+      h.events.sort((a, b) => b.at - a.at);
       this.history.set(name, h);
     }
     return h;
+  }
+
+  /** The demo's config, label and process events, so the feed and the Configuration tab have something to show. */
+  private extraEvents(name: string): HistoryEvent[] {
+    const now = this.now();
+    const r = this.runners.find((x) => x.name === name);
+    if (!r) return [];
+    if (name === 'docker-lab') {
+      return [
+        { at: now - 5 * HOUR, kind: 'configSaved', restart: true, changed: ['runner.labels'] },
+        { at: now - 5 * HOUR + 42_000, kind: 'labelsMismatch', expected: [...r.labels, 'ubuntu-latest'], declared: [...r.labels] },
+      ];
+    }
+    const events: HistoryEvent[] = [
+      { at: now - 26 * HOUR, kind: 'configSaved', restart: true, changed: ['runner.capacity', 'runner.timeout'] },
+      { at: now - 26 * HOUR + 38_000, kind: 'labelsVerified', labels: [...r.labels] },
+    ];
+    if (name === 'build-win') events.push({ at: now - 3 * HOUR - 4 * MINUTE, kind: 'processStopped', name: 'java.exe', pid: 9842, ageMs: 3 * HOUR + 2 * MINUTE, rule: '*GradleDaemon*', by: 'cleanup', forced: false });
+    return events;
   }
 
   private logsOf(name: string): LogLine[] {
@@ -708,6 +865,29 @@ export class MockBackend implements PitcrewBackend {
   private delay(ms = this.latency): Promise<void> {
     return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
   }
+}
+
+/** The first problem the service would find in the process policies (a convenience mirror of the engine's checks). */
+function processProblem(config: Config): string | null {
+  const check = (keep: KeepFor | undefined, rules: { pattern: string; keep: unknown }[], where: string): string | null => {
+    if (keep && (!Number.isInteger(keep.amount) || keep.amount < 1)) return `${where}the keep time must be at least 1`;
+    if (keep && keepMs(keep) > 30 * 24 * 3_600_000) return `${where}the keep time is at most 30 days`;
+    for (const r of rules) {
+      if (r.pattern.trim() === '') return `${where}a rule needs a pattern`;
+      const k = r.keep;
+      if (k !== 'never' && (k as KeepFor).amount < 1) return `${where}the keep time of rule "${r.pattern}" must be at least 1`;
+    }
+    return null;
+  };
+  const p = config.defaults.processes;
+  if (p.stop_timeout_secs < 1 || p.stop_timeout_secs > 300) return 'the stop timeout is 1 to 300 seconds';
+  const d = check(p.keep, p.rules, '');
+  if (d) return d;
+  for (const r of config.runners) {
+    const e = check(r.processes?.keep, r.processes?.rules ?? [], `${r.name}: `);
+    if (e) return e;
+  }
+  return null;
 }
 
 /** The demo's Forgejo server, which has no read token in the demo (outcomes show as unknown). */

@@ -6,7 +6,13 @@ import type {
   BackendEvent,
   Config,
   CleanupReport,
+  ConfigEdit,
+  ConfigPreview,
+  ConfigSaved,
   DiskReply,
+  KeepFor,
+  ProcessList,
+  RunnerConfigReply,
   LogLine,
   MetricsReply,
   RegisterRequest,
@@ -64,6 +70,19 @@ export interface PitcrewBackend {
   cleanDisk(runner: string): Promise<CleanupReport>;
   /** The current job's details from the Gitea API (`null` without a read token or when the server cannot tell). */
   runDetails(runner: string): Promise<RunDetails | null>;
+
+  // The runner's own config.yaml (ADR 0011): read, preview (writes nothing) and save (backs up, restarts after the job).
+  runnerConfig(runner: string): Promise<RunnerConfigReply>;
+  previewRunnerConfig(runner: string, edit: ConfigEdit): Promise<ConfigPreview>;
+  /** `base` is the fingerprint from `runnerConfig`; the save is refused when the file changed since. */
+  saveRunnerConfig(runner: string, edit: ConfigEdit, base: string): Promise<ConfigSaved>;
+
+  // The runner's process tree and the leftovers of finished jobs (ADR 0012).
+  runnerProcesses(runner: string): Promise<ProcessList>;
+  /** Asks the process to stop, then ends it. `allowRunner` is true only when the user chose the runner process itself. */
+  stopProcess(runner: string, pid: number, startedAt: number | null, allowRunner: boolean): Promise<void>;
+  /** Adds time before the automatic cleanup stops a leftover. */
+  keepProcess(runner: string, pid: number, startedAt: number, extra: KeepFor): Promise<void>;
 
   // Settings and runners.
   settings(): Promise<SettingsReply>;

@@ -108,3 +108,18 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 export function share(part: number, total: number): number {
   return total > 0 ? Math.min(1, Math.max(0, part / total)) : 0;
 }
+
+/**
+ * A span in words for a countdown or an age: `under a minute`, `7 min`, `2 h 14 min`, `3 h`, `1 d 3 h`. Rounds
+ * to the minute (hours with minutes up to a day, then days with hours).
+ */
+export function formatSpan(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return '—';
+  const min = Math.max(0, Math.round(ms / 60_000));
+  if (min < 1) return 'under a minute';
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return min % 60 === 0 ? `${h} h` : `${h} h ${String(min % 60).padStart(2, '0')} min`;
+  const d = Math.floor(h / 24);
+  return h % 24 === 0 ? `${d} d` : `${d} d ${h % 24} h`;
+}

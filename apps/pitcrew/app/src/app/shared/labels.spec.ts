@@ -139,8 +139,8 @@ describe('labels', () => {
       { at, kind: 'stopped' },
       { at, kind: 'paused' },
       { at, kind: 'resumed' },
-      { at, kind: 'jobFinished', job: { info: job, startedAt: 0, finishedAt: 1 } },
-      { at, kind: 'jobFinished', job: { info: { ...job, repository: null, job: null }, startedAt: 0, finishedAt: 1 } },
+      { at, kind: 'jobFinished', job: { info: job, startedAt: 0, finishedAt: 1, peakCpuPermille: 0, peakMemBytes: 0, leftovers: 0 } },
+      { at, kind: 'jobFinished', job: { info: { ...job, repository: null, job: null }, startedAt: 0, finishedAt: 1, peakCpuPermille: 0, peakMemBytes: 0, leftovers: 0 } },
       { at, kind: 'updateFinished', outcome: { result: 'updated', plan } },
       { at, kind: 'cleanup', trigger: 'manual', freedBytes: 2048, deleted: 1, failed: 0 },
       { at, kind: 'cleanup', trigger: 'schedule', freedBytes: 0, deleted: 3, failed: 2 },
@@ -164,15 +164,38 @@ describe('labels', () => {
     expect(events.filter(isFeedEvent)).toHaveLength(events.length - 3);
   });
 
+  it('words the configuration, label and process events', () => {
+    const at = 1;
+    const saved = eventLook({ at, kind: 'configSaved', restart: true, changed: ['runner.capacity', 'runner.timeout'] });
+    expect(saved.title).toBe('Configuration saved (runner.capacity, runner.timeout)');
+    expect(saved.detail).toContain('restarted');
+    const layout = eventLook({ at, kind: 'configSaved', restart: false, changed: [] });
+    expect(layout.title).toBe('Configuration saved');
+    expect(layout.detail).toContain('no restart');
+    const ok = eventLook({ at, kind: 'labelsVerified', labels: ['a', 'b'] });
+    expect(ok).toMatchObject({ tone: 'success', icon: 'check-circle' });
+    expect(ok.detail).toBe('The runner declared a, b.');
+    const bad = eventLook({ at, kind: 'labelsMismatch', expected: ['a', 'b'], declared: ['a'] });
+    expect(bad.tone).toBe('warning');
+    expect(bad.detail).toBe('The runner declared [a] but the file asks for [a, b].');
+    const rule = eventLook({ at, kind: 'processStopped', name: 'java.exe', pid: 7, ageMs: 3 * 3_600_000 + 2 * 60_000, rule: '*GradleDaemon*', by: 'cleanup', forced: false });
+    expect(rule.title).toBe('Stopped java.exe (pid 7, running 3 h 02 min)');
+    expect(rule.detail).toBe('By cleanup rule *GradleDaemon*.');
+    const you = eventLook({ at, kind: 'processStopped', name: 'sleep', pid: 8, ageMs: 60_000, rule: '', by: 'user', forced: true });
+    expect(you.detail).toBe('By you (ended after it ignored the request).');
+    const dflt = eventLook({ at, kind: 'processStopped', name: 'x', pid: 9, ageMs: 0, rule: '', by: 'cleanup', forced: false });
+    expect(dflt.detail).toBe('By the automatic cleanup.');
+  });
+
   it('maps severities and notification kinds', () => {
     expect(severityTone('error')).toBe('danger');
     expect(severityTone('warning')).toBe('warning');
     expect(severityTone('info')).toBe('info');
-    expect(NOTIFICATION_KINDS).toHaveLength(11);
+    expect(NOTIFICATION_KINDS).toHaveLength(12);
     const icons: Record<NotificationKind, string> = {
       updated: 'download', updateAvailable: 'download', updateFailed: 'download', rolledBack: 'undo', diskLow: 'disk',
       cleanedUp: 'broom', cleanupProblems: 'broom', serverUnreachable: 'cloud-off', notRegistered: 'link-off',
-      stalled: 'alert', crashLoop: 'alert',
+      stalled: 'alert', crashLoop: 'alert', labelMismatch: 'alert',
     };
     for (const k of NOTIFICATION_KINDS) {
       expect(notificationKindLabel(k)).not.toBe('');

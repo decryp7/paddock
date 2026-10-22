@@ -13,6 +13,7 @@ import {
   formatTime,
   plural,
   share,
+  formatSpan,
 } from './format';
 
 describe('formatBytes', () => {
@@ -131,5 +132,20 @@ describe('share', () => {
     expect(share(9, 4)).toBe(1);
     expect(share(-1, 4)).toBe(0);
     expect(share(1, 0)).toBe(0);
+  });
+});
+
+describe('formatSpan', () => {
+  it('words a span to the minute', () => {
+    expect(formatSpan(null)).toBe('—');
+    expect(formatSpan(Number.NaN)).toBe('—');
+    expect(formatSpan(10_000)).toBe('under a minute');
+    expect(formatSpan(-5)).toBe('under a minute');
+    expect(formatSpan(7 * 60_000)).toBe('7 min');
+    expect(formatSpan(134 * 60_000)).toBe('2 h 14 min');
+    expect(formatSpan(182 * 60_000)).toBe('3 h 02 min');
+    expect(formatSpan(180 * 60_000)).toBe('3 h');
+    expect(formatSpan(27 * 3_600_000)).toBe('1 d 3 h');
+    expect(formatSpan(48 * 3_600_000)).toBe('2 d');
   });
 });

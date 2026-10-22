@@ -18,6 +18,7 @@ import type {
   UpdateOutcome,
   UpdatePolicy,
 } from '../api.types';
+import { DEFAULT_PROCESS_POLICY } from './mock-processes';
 
 /*
  * Invented demo data for the browser build, UI tests and screenshots. Every name, repository and server here is made
@@ -194,6 +195,12 @@ function jobInfo(p: RunnerProfile, r: () => number, n: number): JobInfo {
   };
 }
 
+/** What a generated job used at most, and what it left running (from a hash, so the main random stream is unchanged). */
+function jobUse(n: number): Pick<FinishedJob, 'peakCpuPermille' | 'peakMemBytes' | 'leftovers'> {
+  const k = hashNoise(n + 7_001);
+  return { peakCpuPermille: Math.round(120 + k * 640), peakMemBytes: Math.round((0.4 + hashNoise(n + 9_007) * 5.5) * GB), leftovers: n % 7 === 3 ? 1 + (n % 3) : 0 };
+}
+
 /** 30 days (or `days`) of plausible history ending at `now`. */
 export function generateHistory(p: RunnerProfile, now: number, days = 30): RawHistory {
   const r = rng(p.seed);
@@ -223,8 +230,9 @@ export function generateHistory(p: RunnerProfile, now: number, days = 30): RawHi
       const x = r();
       const outcome = x < p.failRate ? 'failure' : x < p.failRate + p.cancelRate ? 'cancelled' : 'success';
       const info = jobInfo(p, r, n++);
-      jobs.push({ info, startedAt, finishedAt, outcome, queuedMs: Math.round(4_000 + r() * r() * 150_000) });
-      events.push({ at: finishedAt, kind: 'jobFinished', job: { info, startedAt, finishedAt } });
+      const use = jobUse(n);
+      jobs.push({ info, startedAt, finishedAt, ...use, outcome, queuedMs: Math.round(4_000 + r() * r() * 150_000) });
+      events.push({ at: finishedAt, kind: 'jobFinished', job: { info, startedAt, finishedAt, ...use } });
       cursor = finishedAt;
     }
     // A nightly scheduled cleanup at 03:00.
@@ -400,6 +408,7 @@ export function defaultConfig(runners: RunnerConfig[]): Config {
       },
       logs: { max_bytes: 10 * MB, keep: 5 },
       cleanup: structuredClone(DEFAULT_CLEANUP),
+      processes: structuredClone(DEFAULT_PROCESS_POLICY),
     },
     runners,
   };
@@ -477,6 +486,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
     disk: { folderBytes: 24 * GB, freeBytes: 196 * GB, low: false },
     nextCleanupAt: startOfLocalDay(now) + DAY + 3 * HOUR,
     usage: demoUsage(4, 0.06, 1),
+    leftovers: 0,
   });
   const byName = new Map(configs.map((c) => [c.name, c]));
   const out: RunnerSnapshot[] = [];
@@ -492,6 +502,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
       lastUpdate: { outcome: { result: 'updated', plan: { from: '5.1.1', to: '5.2.0' } }, finishedAt: startOfLocalDay(now) - 4 * DAY + 3 * HOUR + 20 * MINUTE },
       disk: { folderBytes: 38.4 * GB, freeBytes: 196 * GB, low: false },
       usage: demoUsage(310, 4.2, 23),
+      leftovers: 3,
     });
   }
   const ui = byName.get('ui-tests');

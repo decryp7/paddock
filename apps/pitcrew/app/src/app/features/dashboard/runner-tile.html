@@ -73,6 +73,9 @@
         <span class="num">{{ l.cpu }}</span> CPU · <span class="num">{{ l.mem }}</span> · {{ l.processes }}
       </div>
     }
+    @if (r.leftovers > 0) {
+      <a class="badge warning leftover-chip" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'processes' }"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />{{ r.leftovers }} leftover {{ r.leftovers === 1 ? 'process' : 'processes' }}</a>
+    }
     @if (phase(); as ph) {
       <div class="phase">
         <mat-icon svgIcon="pc:download" aria-hidden="true" />

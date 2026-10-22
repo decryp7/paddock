@@ -89,6 +89,10 @@ export const ICONS: Record<string, string> = {
   sparkle: outline(p('M12 3.5 13.8 10.2 20.5 12 13.8 13.8 12 20.5 10.2 13.8 3.5 12 10.2 10.2z')),
   calendar: outline(p('M4 6h16v14H4zM4 10h16M8.5 3.5v4M15.5 3.5v4')),
   package: outline(p('M12 3 4 7v10l8 4 8-4V7zM4 7l8 4 8-4M12 11v10')),
+  'file-text': outline(p('M6 3.5h8.5L19 8v12.5H6zM14 3.5V8h5M9 12.5h7M9 16h7')),
+  code: outline(p('M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.5 5l-3 14')),
+  'chevron-up': outline(p('M6 15l6-6 6 6')),
+  minus: outline(p('M5 12h14')),
   pitcrew: outline(p('M12 3.5a8.5 8.5 0 1 0 8.5 8.5') + p('M12 12l5-5M16 3.5h4.5V8') + c(12, 12, 1.4)),
 };
 

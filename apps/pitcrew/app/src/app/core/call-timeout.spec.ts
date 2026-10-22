@@ -12,6 +12,11 @@ describe('call timeouts', () => {
     expect(timeoutFor('register_runner')).toBe(timeoutFor('clean_disk'));
   });
 
+  it('gives config and process queries 10 s and saves 30 s', () => {
+    for (const q of ['runner_config_get', 'runner_config_preview', 'runner_processes']) expect(timeoutFor(q)).toBe(10_000);
+    for (const q of ['runner_config_save', 'runner_process_stop']) expect(timeoutFor(q)).toBe(30_000);
+  });
+
   it('names the wait in the message and survives the error mapping', () => {
     const e = timeoutError(15_000);
     expect(e.code).toBe('timeout');

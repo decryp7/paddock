@@ -81,7 +81,7 @@ describe('RunnerTile', () => {
   });
 
   it('waits for jobs when idle, mentions the last job, and updates now', async () => {
-    const lastJob: FinishedJob = { info: { repository: 'a/b', job: 'x', jobId: 1, runId: 1, runNumber: 1, taskId: 1, server: null }, startedAt: NOW - 600_000, finishedAt: NOW - 300_000 };
+    const lastJob: FinishedJob = { info: { repository: 'a/b', job: 'x', jobId: 1, runId: 1, runNumber: 1, taskId: 1, server: null }, startedAt: NOW - 600_000, finishedAt: NOW - 300_000, peakCpuPermille: 0, peakMemBytes: 0, leftovers: 0 };
     const { el } = await mount('ui-tests', { lastJob });
     expect(text(el.querySelector('.quiet'))).toContain('Waiting for jobs');
     expect(text(el.querySelector('.quiet'))).toContain('Last job finished 5 min ago');

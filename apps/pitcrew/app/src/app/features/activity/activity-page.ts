@@ -5,7 +5,7 @@ import { ClockService } from '../../core/clock.service';
 import { ThemeService } from '../../core/theme.service';
 import { Chart } from '../../shared/charts/chart';
 import { jobsPerDayOption, sumJobDays } from '../../shared/charts/chart-options';
-import { formatDateTime, formatDuration, formatPermille, formatRelative } from '../../shared/format';
+import { formatBytes, formatDateTime, formatDuration, formatPermille, formatRelative } from '../../shared/format';
 import { outcomeLook } from '../../shared/labels';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { LoadState } from '../../shared/ui/load-state';
@@ -122,6 +122,12 @@ export class ActivityPage {
     }
   }
 
+  protected cpu(p: number): string {
+    return formatPermille(p);
+  }
+  protected bytes(n: number): string {
+    return formatBytes(n);
+  }
   protected took(from: number, to: number): string {
     return formatDuration(to - from);
   }

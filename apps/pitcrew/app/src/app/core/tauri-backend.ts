@@ -7,8 +7,14 @@ import type {
   BackendEvent,
   CleanupReport,
   Config,
+  ConfigEdit,
+  ConfigPreview,
+  ConfigSaved,
   ConnectionState,
   DiskReply,
+  KeepFor,
+  ProcessList,
+  RunnerConfigReply,
   LogLine,
   MetricsReply,
   RegisterRequest,
@@ -164,6 +170,25 @@ export class TauriBackend implements PitcrewBackend {
   }
   runDetails(runner: string): Promise<RunDetails | null> {
     return this.run('run_details', { runner });
+  }
+
+  runnerConfig(runner: string): Promise<RunnerConfigReply> {
+    return this.run('runner_config_get', { runner });
+  }
+  previewRunnerConfig(runner: string, edit: ConfigEdit): Promise<ConfigPreview> {
+    return this.run('runner_config_preview', { runner, edit });
+  }
+  saveRunnerConfig(runner: string, edit: ConfigEdit, base: string): Promise<ConfigSaved> {
+    return this.run('runner_config_save', { runner, edit, base });
+  }
+  runnerProcesses(runner: string): Promise<ProcessList> {
+    return this.run('runner_processes', { runner });
+  }
+  stopProcess(runner: string, pid: number, startedAt: number | null, allowRunner: boolean): Promise<void> {
+    return this.run('runner_process_stop', { runner, pid, startedAt, allowRunner });
+  }
+  keepProcess(runner: string, pid: number, startedAt: number, extra: KeepFor): Promise<void> {
+    return this.run('runner_process_keep', { runner, pid, startedAt, extra });
   }
 
   settings(): Promise<SettingsReply> {

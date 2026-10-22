@@ -97,6 +97,9 @@
                 <th scope="col">Result</th>
                 <th scope="col" class="num">Run</th>
                 <th scope="col" class="num">Duration</th>
+                <th scope="col" class="num">Peak CPU</th>
+                <th scope="col" class="num">Peak memory</th>
+                <th scope="col">Left running</th>
                 <th scope="col" class="num">Finished</th>
               </tr>
             </thead>
@@ -115,10 +118,17 @@
                   </td>
                   <td class="num muted">#{{ row.job.info.runNumber ?? '—' }}</td>
                   <td class="num">{{ took(row.job.startedAt, row.job.finishedAt) }}</td>
+                  <td class="num muted">{{ row.job.peakCpuPermille > 0 ? cpu(row.job.peakCpuPermille) : '' }}</td>
+                  <td class="num muted">{{ row.job.peakMemBytes > 0 ? bytes(row.job.peakMemBytes) : '' }}</td>
+                  <td>
+                    @if (row.job.leftovers > 0) {
+                      <a class="badge warning" [routerLink]="['/runners', row.name]" [queryParams]="{ tab: 'processes' }">{{ row.job.leftovers }} left running</a>
+                    }
+                  </td>
                   <td class="num muted">{{ ago(row.job.finishedAt) }}</td>
                 </tr>
               } @empty {
-                <tr><td colspan="7" class="faint">No jobs in this range.</td></tr>
+                <tr><td colspan="10" class="faint">No jobs in this range.</td></tr>
               }
             </tbody>
           </table>
