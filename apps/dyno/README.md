@@ -22,7 +22,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 ## At a glance
 
-![Dyno at a glance: the owner uses an app (Angular UI in a Tauri shell); the app talks over one local IPC to a per-user agent that samples through OS adapters and keeps SQLite history; a pure Rust core holds every decision; a privileged helper is installed only when an admin action is first approved](diagrams/svg/c4-2-containers.svg)
+![Dyno at a glance: a window and tray in a Tauri shell talk over one local IPC to a per-user agent that samples, serves requests, hosts plugins, applies rules, runs benchmarks in a child process and keeps SQLite history, alarms and a flight recorder; platform adapters for Windows, macOS and Linux, out-of-process plugins and a planned privileged helper sit around it; a pure Rust core holds every decision](diagrams/dyno-overview.svg)
 
 A per-user **agent** measures and keeps the history whether or not the window is open; an unprivileged **app** (window
 and tray) shows it and sends requests over one local IPC; a pure Rust **core** holds every rule (grouping, diagnosis,
