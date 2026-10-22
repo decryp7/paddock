@@ -214,9 +214,6 @@ pub enum EngineKind {
     /// whisper.cpp.
     #[serde(rename = "whisper.cpp")]
     WhisperCpp,
-    /// An engine plugin.
-    #[serde(rename = "plugin")]
-    Plugin,
 }
 
 /// A loaded model (`LoadedModel`).
@@ -881,76 +878,6 @@ pub struct BenchmarkResult {
     pub ttft_ms: u64,
     /// Context.
     pub context_tokens: u32,
-}
-
-/// Plugin kinds (`PluginKind`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PluginKind {
-    /// Engine.
-    Engine,
-    /// Endpoint.
-    Endpoint,
-    /// Tool.
-    Tool,
-    /// Filter.
-    Filter,
-}
-
-/// Plugin states (`PluginState`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PluginState {
-    /// Running.
-    Running,
-    /// Stopped.
-    Stopped,
-    /// Quarantined after repeated failures.
-    Quarantined,
-    /// Failed.
-    Failed,
-}
-
-/// A plugin (`PluginInfo`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginInfo {
-    /// Id.
-    pub id: String,
-    /// Name.
-    pub name: String,
-    /// Version.
-    pub version: String,
-    /// Kinds.
-    pub kinds: Vec<PluginKind>,
-    /// State.
-    pub state: PluginState,
-    /// Enabled.
-    pub enabled: bool,
-    /// Network granted.
-    pub network: bool,
-    /// Failures.
-    pub failures: u32,
-    /// Last error.
-    pub last_error: Option<String>,
-}
-
-/// An MCP server (`McpServerInfo`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerInfo {
-    /// Id.
-    pub id: String,
-    /// Name.
-    pub name: String,
-    /// Command line.
-    pub command: String,
-    /// State.
-    pub state: PluginState,
-    /// Tools.
-    pub tools: Vec<String>,
-    /// Apps allowed.
-    pub allowed_apps: Vec<String>,
 }
 
 /// A pushed update (`LiveUpdate`).

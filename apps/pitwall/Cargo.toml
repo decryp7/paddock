@@ -3,11 +3,6 @@ members = [
   "crates/pitwall-core",
   "crates/pitwall-loopback",
   "crates/pitwall-server",
-  "crates/pitwall-ipc",
-  "crates/pitwall-plugin-api",
-  "crates/pitwall-plugin-host",
-  "plugins/redact-filter",
-  "templates/plugin",
   # "app/src-tauri",
 ]
 resolver = "2"
@@ -23,15 +18,11 @@ version = "0.1.0"
 # Versions of the dependencies that two or more members use, so they stay on one version.
 [workspace.dependencies]
 pitwall-core = { path = "crates/pitwall-core" }
-pitwall-ipc = { path = "crates/pitwall-ipc" }
-pitwall-plugin-api = { path = "crates/pitwall-plugin-api" }
-pitwall-plugin-host = { path = "crates/pitwall-plugin-host" }
 libc = "0.2"
 regex = "1"
 windows = "0.62"
 base64 = "0.22"
 getrandom = "0.3"
-postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 proptest = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -36,8 +36,6 @@ pub enum EventKind {
     PresetChanged,
     /// A request failed.
     RequestFailed,
-    /// A plugin was quarantined.
-    PluginQuarantined,
 }
 
 /// How bad.
