@@ -76,11 +76,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: catthehacker/ubuntu:act-latest
-    env:
-      # The checkout lives on a container volume where hard links come out as empty, non-executable files: cargo's
-      # target/debug/pitwall-server (a hard link to the real binary) was 0 bytes, so the tests that start the server
-      # as a child process failed with "Permission denied" and "Exec format error". Build on the container's own disk.
-      CARGO_TARGET_DIR: /tmp/pitwall-target
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -109,8 +104,10 @@ jobs:
 
       # Includes crates/pitwall-server/tests/privacy.rs (ADR 0001: only egress.rs may use reqwest) and the API
       # contract tests against the fake engine.
+      # The Tauri shell is tested last: tauri-build copies its (empty, placeholder) sidecar over target/debug/pitwall-server,
+      # which the server's end-to-end tests start as a child process, so they must run before the shell is built.
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude pitwall-app
 
       # AGENTS.md: pitwall-core >= 99% lines.
       - name: Core coverage guard (>= 99% lines)
@@ -121,6 +118,10 @@ jobs:
         env:
           TZ: Pacific/Auckland
         run: cargo test -p pitwall-core -p pitwall-server
+
+      - name: Tauri shell tests
+        if: hashFiles('app/src-tauri/Cargo.toml') != ''
+        run: cargo test -p pitwall-app
 
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         if: always() && steps.cargo-cache.outputs.cache-hit != 'true'

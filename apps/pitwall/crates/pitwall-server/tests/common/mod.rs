@@ -262,19 +262,18 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
 
 /// A copy of the freshly built `pitwall-server` inside `dir` (a temp folder), for tests that launch it as a real child process.
 ///
-/// The build folder can sit on a mount that forbids execution (`noexec` workspace volumes in CI containers give
-/// `Permission denied (os error 13)`), whereas the temp folder is meant for running things. Returns the copy's path.
+/// The copy keeps a build folder that forbids execution out of the picture. Building the Tauri shell (`pitwall-app`)
+/// before these tests overwrites `target/debug/pitwall-server` with an empty placeholder sidecar (`Permission denied`,
+/// then `Exec format error`); the assertion below names that cause. Returns the copy's path.
 pub fn runnable_server(dir: &std::path::Path) -> String {
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let name = if cfg!(windows) { "pitwall-server.exe" } else { "pitwall-server" };
     let target = bin.join(name);
-    // Plain read and write, not `fs::copy`: on some CI container mounts `copy_file_range` reports success after
-    // copying nothing, which leaves an empty file that cannot be executed (`Exec format error`).
     let bytes = std::fs::read(env!("CARGO_BIN_EXE_pitwall-server")).unwrap();
     assert!(
         bytes.starts_with(&[0x7f, b'E', b'L', b'F']) || bytes.starts_with(b"MZ") || bytes.len() > 1_000_000,
-        "built server is {} bytes",
+        "target/debug/pitwall-server is {} bytes: the Tauri shell was built first and replaced it with its placeholder sidecar; run these tests before building pitwall-app",
         bytes.len()
     );
     std::fs::write(&target, &bytes).unwrap();
