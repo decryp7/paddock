@@ -54,6 +54,41 @@ export function niceMax(v: number): number {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
 }
 
+/** A picked stretch of the timeline: first and last sample index, both included. */
+export interface SampleRange {
+  from: number;
+  to: number;
+}
+
+/**
+ * The sample range a drag on the overview strip selects. `x0` and `x1` are pixel offsets (either order) inside a strip
+ * `width` px wide that shows `count` samples. A drag shorter than a few samples is a click, not a range (null); the
+ * result is clamped to the samples that exist.
+ */
+export function rangeFromDrag(x0: number, x1: number, width: number, count: number): SampleRange | null {
+  if (!(width > 0) || count < 2) return null;
+  const at = (x: number) => Math.min(count - 1, Math.max(0, Math.round((x / width) * (count - 1))));
+  const a = at(Math.min(x0, x1));
+  const b = at(Math.max(x0, x1));
+  return b - a >= 3 ? { from: a, to: b } : null;
+}
+
+/** Moves the picked moment into the range when it lies outside it (so the line is always in view). */
+export function momentInRange(moment: number, range: SampleRange | null): number {
+  return range ? Math.min(range.to, Math.max(range.from, moment)) : moment;
+}
+
+/** The overview strip's CPU outline as SVG polyline points in a 0..100 by 0..100 box (100 is the top of the strip). */
+export function overviewPoints(samples: readonly RecorderSample[], maxPoints = 120): string {
+  const n = samples.length;
+  if (n < 2) return '';
+  const step = Math.max(1, Math.ceil(n / maxPoints));
+  const pts: string[] = [];
+  for (let i = 0; i < n; i += step) pts.push(`${((i / (n - 1)) * 100).toFixed(2)},${(100 - Math.min(100, Math.max(0, samples[i]!.cpuTotal))).toFixed(1)}`);
+  pts.push(`100,${(100 - Math.min(100, Math.max(0, samples[n - 1]!.cpuTotal))).toFixed(1)}`);
+  return pts.join(' ');
+}
+
 const PANEL_TOP = 6;
 const TITLE_H = 26;
 const PLOT_H = 62;
@@ -88,7 +123,7 @@ export function panelHeadings(at: RecorderSample | undefined): PanelHeading[] {
  * and a per-core CPU heatmap. A transparent full-height bar per panel makes any point in a panel clickable; the picked
  * moment is a vertical line and the panel titles read out its values.
  */
-export function timelineOption(samples: readonly RecorderSample[], moment: number, t: ThemeTokens): EChartsCoreOption {
+export function timelineOption(samples: readonly RecorderSample[], moment: number, t: ThemeTokens, range: SampleRange | null = null): EChartsCoreOption {
   const n = samples.length;
   const cores = samples.reduce((m, s) => Math.max(m, s.cpuCores.length), 0);
   const totalGb = (samples[0]?.memoryTotal ?? 0) / GIB;
@@ -173,6 +208,8 @@ export function timelineOption(samples: readonly RecorderSample[], moment: numbe
     xAxis,
     yAxis,
     axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    // The brush strip sets the range; the axes zoom to it without any gesture of their own.
+    ...(range ? { dataZoom: [{ type: 'inside' as const, xAxisIndex: [0, 1, 2, 3, 4], startValue: range.from, endValue: range.to, disabled: true }] } : {}),
     visualMap: { show: false, min: 0, max: 100, seriesIndex: 10, inRange: { color: [t.surface2, t.accent] } },
     tooltip: {
       trigger: 'axis',

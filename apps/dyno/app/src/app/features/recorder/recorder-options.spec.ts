@@ -1,7 +1,7 @@
 import type { RecorderSample } from '../../core/api.types';
 import { recorderSamples } from '../../core/mock/alarms';
 import { DARK } from '../../shared/tokens';
-import { niceMax, panelHeadings, peakIndex, sampleReadout, timelineOption, timelineSummary } from './recorder-options';
+import { momentInRange, niceMax, overviewPoints, panelHeadings, peakIndex, rangeFromDrag, sampleReadout, timelineOption, timelineSummary } from './recorder-options';
 
 const NOW = 1_700_000_000_000;
 const samples = recorderSamples(NOW, 60);
@@ -51,5 +51,31 @@ describe('recorder options', () => {
 
   it('copes with an empty snapshot', () => {
     expect(() => timelineOption([], 0, DARK)).not.toThrow();
+  });
+
+  it('turns a drag on the strip into a clamped sample range, ignoring clicks', () => {
+    expect(rangeFromDrag(0, 100, 100, 61)).toEqual({ from: 0, to: 60 });
+    expect(rangeFromDrag(75, 25, 100, 61)).toEqual({ from: 15, to: 45 });
+    expect(rangeFromDrag(-50, 400, 100, 61)).toEqual({ from: 0, to: 60 });
+    expect(rangeFromDrag(40, 41, 100, 61)).toBeNull();
+    expect(rangeFromDrag(0, 50, 0, 61)).toBeNull();
+    expect(rangeFromDrag(0, 50, 100, 1)).toBeNull();
+  });
+
+  it('keeps the picked moment inside the range', () => {
+    expect(momentInRange(5, null)).toBe(5);
+    expect(momentInRange(5, { from: 10, to: 20 })).toBe(10);
+    expect(momentInRange(50, { from: 10, to: 20 })).toBe(20);
+    expect(momentInRange(15, { from: 10, to: 20 })).toBe(15);
+  });
+
+  it('draws the overview outline and zooms the axes only when a range is set', () => {
+    expect(overviewPoints([])).toBe('');
+    const pts = overviewPoints(samples).split(' ');
+    expect(pts[0]!.startsWith('0.00,')).toBe(true);
+    expect(pts.at(-1)!.startsWith('100,')).toBe(true);
+    expect((timelineOption(samples, 0, DARK) as { dataZoom?: unknown }).dataZoom).toBeUndefined();
+    const zoomed = timelineOption(samples, 0, DARK, { from: 5, to: 20 }) as { dataZoom: { startValue: number; endValue: number }[] };
+    expect(zoomed.dataZoom[0]).toMatchObject({ startValue: 5, endValue: 20 });
   });
 });
