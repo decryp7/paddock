@@ -92,6 +92,36 @@ pub async fn app_info(app: AppHandle) -> Result<AppInfo, CommandError> {
     Ok(crate::updater::app_info(&app))
 }
 
+/// "Save bundle...": the OS save dialog (so the path is one the person chose, never one the webview supplied), then the
+/// agent writes the redacted zip there. `null` when they cancel.
+#[tauri::command]
+pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let Some(chosen) = app
+            .dialog()
+            .file()
+            .set_title("Save the diagnostics bundle")
+            .set_file_name("dyno-diagnostics.zip")
+            .add_filter("Zip archive", &["zip"])
+            .blocking_save_file()
+        else {
+            return Ok(Value::Null);
+        };
+        let path = chosen
+            .into_path()
+            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
+        let path = path.to_string_lossy().into_owned();
+        let reply = link.call(Request::SaveDiagnostics { path })?;
+        reply
+            .into_json()
+            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
 /// The tray dropdown's "Open Dyno".
 #[tauri::command]
 pub async fn tray_open_main(app: AppHandle) -> Result<(), CommandError> {

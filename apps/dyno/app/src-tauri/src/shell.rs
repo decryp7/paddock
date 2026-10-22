@@ -25,6 +25,8 @@ pub mod events {
     pub const ACTIVITY: &str = "dyno://activity";
     /// `AgentStatus`.
     pub const AGENT: &str = "dyno://agent";
+    /// `AlarmChange`.
+    pub const ALARM: &str = "dyno://alarm";
 }
 
 /// The icons are redrawn at most this often (and only when their picture changed).
@@ -54,6 +56,8 @@ pub struct Shell {
     paused: Mutex<bool>,
     /// The last agent status, replayed to windows that opened after it was pushed.
     status: Mutex<Option<AgentStatus>>,
+    /// `notifications` as last read from the settings (desktop notifications for new alarms).
+    notifications: std::sync::atomic::AtomicBool,
 }
 
 impl Shell {
@@ -68,6 +72,7 @@ impl Shell {
             launch_at_login: Mutex::new(None),
             paused: Mutex::new(false),
             status: Mutex::new(None),
+            notifications: std::sync::atomic::AtomicBool::new(true),
         })
     }
 
@@ -96,6 +101,7 @@ impl Shell {
     /// registers itself unasked.
     pub fn settings_changed(&self, settings: &Settings, link: &AgentLink) -> Result<(), String> {
         self.set_items(initial_items(&settings.tray_items));
+        self.notifications.store(settings.notifications, Ordering::Relaxed);
         let previous = *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner());
         let wanted = settings.launch_at_login;
         match previous {
@@ -171,6 +177,17 @@ impl Sink for Shell {
 
     fn activity(&self, entry: ActivityEntry) {
         self.emit(events::ACTIVITY, entry);
+    }
+
+    fn alarm(&self, change: dyno_core::alarms::AlarmChange) {
+        if change.notify && self.notifications.load(Ordering::Relaxed) {
+            use tauri_plugin_notification::NotificationExt;
+            let a = &change.alarm;
+            if let Err(e) = self.app.notification().builder().title(&a.title).body(&a.detail).show() {
+                logging::info(&format!("could not show a notification: {e}"));
+            }
+        }
+        self.emit(events::ALARM, change);
     }
 
     fn agent(&self, status: AgentStatus) {

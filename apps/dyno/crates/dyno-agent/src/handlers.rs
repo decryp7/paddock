@@ -151,7 +151,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Settings => Ok(Reply::Settings(Box::new(lock(&shared.core).settings.clone()))),
         Request::SaveSettings { settings } => {
             let mut core = lock(&shared.core);
-            core.settings = settings.normalised();
+            core.settings = (*settings).normalised();
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
             core.save_settings(&shared.dirs);

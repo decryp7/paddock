@@ -169,6 +169,10 @@ pub struct Settings {
     pub ip_lookup: crate::ip_lookup::IpLookupSettings,
     /// Alarms for new exposed listeners and new remote hosts (both off by default).
     pub network_alerts: crate::network_alerts::NetworkAlerts,
+    /// The user's own alert rules (none by default).
+    pub custom_alerts: Vec<crate::alarms::custom::CustomAlertRule>,
+    /// Desktop notifications for new alarms (quiet hours and muted rules still apply).
+    pub notifications: bool,
 }
 
 impl Default for Settings {
@@ -189,6 +193,8 @@ impl Default for Settings {
             flight_recorder: true,
             ip_lookup: Default::default(),
             network_alerts: Default::default(),
+            custom_alerts: Vec::new(),
+            notifications: true,
         }
     }
 }
@@ -218,6 +224,7 @@ impl Settings {
         self.tray_items = self.tray_items.normalised();
         self.alarms = self.alarms.clamped();
         self.ip_lookup = self.ip_lookup.normalised();
+        self.custom_alerts = crate::alarms::custom::normalise_rules(self.custom_alerts);
         self
     }
 }

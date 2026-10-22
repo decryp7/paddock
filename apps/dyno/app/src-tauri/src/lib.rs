@@ -31,6 +31,8 @@ pub fn run() {
             Some(vec!["--background"]),
         ))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(updater::plugin())
         .invoke_handler(tauri::generate_handler![
             commands::dyno,
@@ -39,6 +41,7 @@ pub fn run() {
             commands::tray_quit,
             commands::popover_resize,
             commands::popover_close,
+            commands::save_diagnostics,
         ])
         .on_window_event(|win, event| match event {
             tauri::WindowEvent::Destroyed => {

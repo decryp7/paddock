@@ -35,6 +35,8 @@ pub trait Sink: Send + Sync {
     fn alert(&self, alert: Alert);
     /// An activity entry arrived.
     fn activity(&self, entry: ActivityEntry);
+    /// An alarm changed (raised, acknowledged, cleared...).
+    fn alarm(&self, _change: dyno_core::alarms::AlarmChange) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A connection was made: the shell reads what it needs from the agent (settings, for the tray).
@@ -347,6 +349,7 @@ impl AgentLink {
             Message::Live(l) => sink.live(*l),
             Message::Alert(a) => sink.alert(a),
             Message::Activity(a) => sink.activity(a),
+            Message::Alarm(c) => sink.alarm(c),
             _ => {}
         });
         Peer::start(conn, opts).map(Arc::new).map_err(|e| e.to_string())

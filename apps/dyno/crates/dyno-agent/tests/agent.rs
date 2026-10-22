@@ -96,7 +96,7 @@ fn settings_round_trip_and_survive_a_restart() {
     };
     s.launch_at_login = true;
     s.sampling.interval_ms = 700;
-    ask(&peer, Request::SaveSettings { settings: *s }).unwrap();
+    ask(&peer, Request::SaveSettings { settings: s }).unwrap();
     let Reply::Settings(back) = ask(&peer, Request::Settings).unwrap() else {
         panic!("settings")
     };

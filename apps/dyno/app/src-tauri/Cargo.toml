@@ -34,6 +34,8 @@ tauri-plugin-single-instance = "2"
 # >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version). No "zip": updater artifacts are the
 # installers themselves. The platform verifier trusts the OS certificate store (TLS-inspecting proxies).
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
+tauri-plugin-notification = "2.4.0"
+tauri-plugin-dialog = "2.7.3"
 
 [target.'cfg(windows)'.dependencies]
 # The taskbar's light/dark setting (tray icon) and the Windows build number (Mica), read only.

@@ -194,7 +194,7 @@ pub enum Request {
     /// Save settings.
     SaveSettings {
         /// The new settings.
-        settings: Settings,
+        settings: Box<Settings>,
     },
     /// Plugins.
     Plugins,
@@ -745,9 +745,7 @@ mod tests {
             groups: Some(vec![]),
         };
         for m in [
-            Message::Request(Box::new(Request::SaveSettings {
-                settings: Settings::default(),
-            })),
+            Message::Request(Box::new(Request::SaveSettings { settings: Box::default() })),
             Message::Request(Box::new(Request::SaveRules { rules: RuleSet::default() })),
             Message::Live(Box::new(live)),
             Message::Reply(Box::new(Ok(Reply::Settings(Box::default())))),

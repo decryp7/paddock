@@ -4,6 +4,7 @@
 //! ones may bypass). The agent persists the changes the engine reports and pushes them to the app. No I/O, no clock:
 //! time comes in as values (ADR 0001).
 
+pub mod custom;
 pub mod feed;
 pub mod stats;
 

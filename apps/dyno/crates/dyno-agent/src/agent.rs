@@ -88,6 +88,8 @@ pub struct Core {
     pub engine: Engine,
     /// Alert evaluation state.
     pub alerts: Alerts,
+    /// Custom alert rule evaluation state.
+    pub custom: dyno_core::alarms::custom::CustomEvaluator,
     /// The last measurement.
     pub latest: Latest,
     /// Recent system samples, oldest first.
@@ -253,6 +255,7 @@ impl Shared {
             rules,
             engine: Engine::new(),
             alerts: Alerts::new(),
+            custom: dyno_core::alarms::custom::CustomEvaluator::new(),
             latest: Latest::default(),
             recent: VecDeque::new(),
             writer: HistoryWriter::default(),

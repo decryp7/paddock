@@ -206,6 +206,14 @@ impl Sampler {
                 shared.broadcast(&Message::Alert(a));
             }
         }
+        let custom_rules = core.settings.custom_alerts.clone();
+        for o in core.custom.evaluate(t, &custom_rules, sample) {
+            let changes = core.alarms.observe(&core.store, o, t);
+            for c in &changes {
+                let _ = core.recorder.on_alarm(&core.store, c, t);
+            }
+            push_alarm_changes(shared, changes);
+        }
         let ticked = core.alarms.tick(&core.store, t);
         push_alarm_changes(shared, ticked);
         let pressure = sample

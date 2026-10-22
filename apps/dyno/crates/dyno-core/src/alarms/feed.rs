@@ -69,6 +69,12 @@ pub struct Observation {
 }
 
 impl Observation {
+    /// The same observation with the person's own name for the rule in its title.
+    pub fn titled(mut self, name: &str) -> Observation {
+        self.title = format!("{name} is past its limit");
+        self
+    }
+
     /// The rule key, e.g. "threshold:my-gpu-limit".
     pub fn rule(&self) -> String {
         format!("{}:{}", self.source.prefix(), self.name)
