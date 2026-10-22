@@ -91,8 +91,8 @@ The table is generated from `tools/themes.mjs`, which is the source. The kit its
 
 `scripts/export-diagrams.sh [src [out [name...]]]` (defaults `docs/diagrams`) writes `svg/<name>.svg` (transparent,
 `light-dark()` colours, system fonts, no embedded fonts, no PNG fallbacks) and `png/<name>.png` (2x, light, opaque white).
-Reference the SVG from docs; the PNG is for places that cannot render SVG. A hand-drawn overview SVG uses the same tokens in a
-`prefers-color-scheme` style block and lives at one path. SVGs follow the viewer's operating-system theme (draw.io's `color-scheme`).
+Reference the SVG from docs; the PNG is for review and for places that cannot render SVG (it is large: apps git-ignore `png/`). A hand-drawn overview SVG uses the same tokens in a
+`prefers-color-scheme` style block and lives at one path (`tools/overview.mjs` draws one; one SVG serves light and dark READMEs). SVGs follow the viewer's operating-system theme (draw.io's `color-scheme`).
 
 Before committing: view every export (light) and a dark render, at README width. Look for labels touching lines or boxes, text
 cut by a box edge, jogs in lines that should be straight, and anything that reads as unfinished.

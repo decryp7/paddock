@@ -9,6 +9,7 @@ The shared way to draw Debrief, Pitcrew, Pitwall, Dyno and Spotter diagrams. The
 | `templates/` | one starting `.drawio` per kind: `c4-context`, `c4-containers`, `sequence`, `state`, `class`, `deployment`, `flow` |
 | `scripts/export-diagrams.sh` | canonical export to theme-aware SVG and 2x PNG; apps copy it unchanged |
 | `tools/apply-accent.mjs` | turns a template into an app's colours |
+| `tools/overview.mjs` | the hand-drawn, theme-aware overview SVG (Pitcrew's content as the worked example) |
 | `tools/lib.mjs`, `uml.mjs`, `themes.mjs`, `build-kit.mjs` | the generator that builds the templates and the library (`node diagrams/tools/build-kit.mjs`) |
 
 ## Start a new diagram

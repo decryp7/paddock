@@ -186,7 +186,8 @@ export class Diagram {
         this.text(this.id(), [lx + 36, cy - 1, lw, 18], it.label, { color: 'muted' });
       }
     }
-    this.text('footer', [this.w - 48 - 360, y + 11, 360, 18], `${this.t.app} · updated ${this.date}`, { size: 11, color: 'muted', align: 'right' });
+    const right = Math.max(0, ...Object.values(this.rect).map(([x, , w]) => x + w));
+    this.text('footer', [Math.max(right, 400) - 360, y + 11, 360, 18], `${this.t.app} · updated ${this.date}`, { size: 11, color: 'muted', align: 'right' });
     this.h = y + 40 + 48;
     return this.xml();
   }

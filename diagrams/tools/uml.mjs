@@ -51,40 +51,41 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
   const behind = d.cells.length;
   parts.forEach((p, i) => d.node(p.id, x0 + i * (pw + gap), top, pw, headH, p.role || 'accent', { name: p.name, tech: p.tech }));
   let y = top + headH + 32;
-  const xl = x0 - 16, xr = x0 + parts.length * (pw + gap) - gap + 16;
+  const xl0 = x0 - 16, xr0 = x0 + parts.length * (pw + gap) - gap + 16;
+  const xl = xl0, xr = xr0;
   const open = [];
   const gaps = [];
   const S = {
     get y() { return y; },
     msg(a, b, label, { reply = false } = {}) {
       const xa = px(idx[a]), xb = px(idx[b]);
-      const room = Math.max(Math.abs(xb - xa) - 16, 144);
-      const lines = wrap(label, 12, room);
+      // one line unless it is very long; the lifelines break around the text
+      const lines = tw(label, 12) > 520 ? wrap(label, 12, 520) : [label];
       const lw = Math.max(...lines.map((l) => tw(l, 12))) + 8, lh = lines.length * 16;
-      const ly = y + lh + 8;
+      const ly = y + lh + 6;
       const lx = Math.min(xa, xb) + 8;
       d.text(d.id(), [lx, y, lw, lh], lines.join(' '), {});
       gaps.push([lx - 4, lx + lw + 4, y, y + lh]);
       d.line([xa, ly], [xb, ly], { dash: reply, arrow: reply ? 'open' : 'block' });
-      y = ly + 24;
+      y = ly + 18;
     },
     self(p, label) {
       const x = px(idx[p]);
       const room = pw + gap - 44;
       const lines = wrap(label, 12, room);
       const lh = lines.length * 16;
-      const h = Math.max(32, lh + 4);
+      const h = Math.max(28, lh + 4);
       d.line([x, y], [x, y + h], { via: [[x + 24, y], [x + 24, y + h]] });
       const sw = Math.max(...lines.map((l) => tw(l, 12))) + 8;
       d.text(d.id(), [x + 32, y + (h - lh) / 2, sw, lh], lines.join(' '), {});
       gaps.push([x + 28, x + 36 + sw, y + (h - lh) / 2, y + (h + lh) / 2]);
-      y += h + 24;
+      y += h + 16;
     },
     note(p, text, w = 280) {
       const h = d.note(d.id(), Math.round(px(idx[p]) - w / 2), y, w, text);
       y += h + 24;
     },
-    open(kind, cond) { y += 8; open.push({ kind, cond, y0: y }); y += 32; },
+    open(kind, cond) { y += 4; open.push({ kind, cond, y0: y, depth: open.length }); y += 30; },
     else(cond) {
       const o = open[open.length - 1];
       d.line([xl, y - 4], [xr, y - 4], { dash: true, arrow: 'none', width: 1, color: d.t.group.s, rounded: false });
@@ -95,12 +96,14 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
     },
     close() {
       const o = open.pop();
-      const h = y - o.y0;
+      const inset = o.depth * 14;
+      const xl = xl0 + inset, xr = xr0 - inset;
+      const h = y - o.y0 + (o.depth ? 0 : 0);
       d.raw(`<mxCell id="${d.id()}" value="" style="rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1;strokeColor=${ld(d.t.edge)};fillColor=none;" vertex="1" parent="1"><mxGeometry x="${xl}" y="${o.y0}" width="${xr - xl}" height="${h}" as="geometry"/></mxCell>`);
       d.raw(`<mxCell id="${d.id()}" value="${esc(`<span style="font-size:11px;font-weight:600">${o.kind}</span>`)}" style="${d.base(`rounded=1;absoluteArcSize=1;arcSize=6;strokeWidth=1;strokeColor=${ld(d.t.edge)};fillColor=${ld(d.t.process.f)};align=center;verticalAlign=middle;spacing=0;`)}" vertex="1" parent="1"><mxGeometry x="${xl + 8}" y="${o.y0 + 6}" width="40" height="18" as="geometry"/></mxCell>`);
       d.text(d.id(), [xl + 56, o.y0 + 6, xr - xl - 64, 18], o.cond, { color: 'muted' });
       gaps.push([xl + 4, xl + 60 + tw(o.cond, 12) + 8, o.y0 + 4, o.y0 + 26]);
-      y += 16;
+      y += 8;
     },
     done() {
       const n = d.cells.length;
