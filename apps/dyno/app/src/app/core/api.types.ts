@@ -688,6 +688,8 @@ export interface Settings {
   dashboard?: DashboardLayout;
   /** The menu-bar / tray items (at most 4; the engine fills the default when absent). */
   trayItems?: TrayItems;
+  /** "Look up IP" templates (the engine fills the default when absent). */
+  ipLookup?: IpLookupSettings;
 }
 
 export interface PluginInfo {
@@ -1164,6 +1166,64 @@ export interface StartBenchmark {
   group?: string | null;
   phase?: BenchPhase | null;
   diskMib?: number | null;
+}
+
+// -------------------------------------------------------------------------------------------------------- network
+// Mirrors `dyno_core::network` and `dyno_core::ip_lookup`. Observe-only: Dyno lists sockets, it never closes one.
+
+export type NetProto = 'tcp' | 'udp';
+export type SocketState = 'listen' | 'synSent' | 'synReceived' | 'established' | 'finWait' | 'closeWait' | 'closing' | 'lastAck' | 'timeWait' | 'other';
+export type Exposure = 'loopback' | 'allInterfaces' | 'interface';
+
+export type NetOwner = { kind: 'process'; pid: number; name: string; path: string | null } | { kind: 'unknown'; reason: string };
+
+export interface ListenerRow {
+  proto: NetProto;
+  ipv6: boolean;
+  local: string;
+  port: number;
+  exposure: Exposure;
+  owner: NetOwner;
+  firstSeen: Timestamp | null;
+}
+
+export interface ConnectionRow {
+  proto: NetProto;
+  ipv6: boolean;
+  local: string;
+  localPort: number;
+  remote: string;
+  remotePort: number;
+  remoteIsLoopback: boolean;
+  /** Whether "Look up IP" applies (false for private, loopback, link-local and CGNAT peers). */
+  lookupOk: boolean;
+  state: SocketState;
+  stateLabel: string;
+  owner: NetOwner;
+  firstSeen: Timestamp | null;
+}
+
+export interface NetworkQuery {
+  showLoopback: boolean;
+  proto: NetProto | null;
+  state: SocketState | null;
+  exposedOnly: boolean;
+  search: string;
+}
+
+export interface NetworkSnapshot {
+  at: Timestamp;
+  listeners: ListenerRow[];
+  connections: ConnectionRow[];
+  truncated: number;
+  unknownOwners: number;
+  note: string | null;
+}
+
+/** `Settings.ipLookup`: https templates; the browser opens them, Dyno never fetches. */
+export interface IpLookupSettings {
+  ipTemplate: string;
+  asnTemplate: string;
 }
 
 // ===================================================================================================================

@@ -290,3 +290,26 @@ test.describe('widgets', () => {
     await expect(page.getByText('Settings saved')).toBeVisible();
   });
 });
+
+test.describe('network', () => {
+  test('lists listeners with an Exposed badge, hides loopback by default and looks up only public addresses', async ({ page }) => {
+    await page.goto(url('/network'));
+    const listening = page.getByRole('region', { name: 'Listening ports' });
+    await expect(listening.getByText('Exposed').first()).toBeVisible();
+    await expect(listening.getByText('postgres')).toHaveCount(0);
+    await page.getByLabel('Show loopback').check();
+    await expect(listening.getByText('postgres')).toBeVisible();
+    await page.getByRole('button', { name: /^Connections/ }).click();
+    await expect(page.getByRole('button', { name: 'Look up IP 10.0.0.8' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Look up IP 142.250.74.46' })).toBeEnabled();
+  });
+
+  test('settings: choosing a preset fills the address and a bad address is explained', async ({ page }) => {
+    await page.goto(url('/settings'));
+    await page.getByLabel('Lookup site').selectOption('bgp');
+    await expect(page.getByLabel('Lookup address', { exact: true })).toHaveValue('https://bgp.he.net/ip/{ip}');
+    await page.getByLabel('Lookup address', { exact: true }).fill('http://nope/{ip}');
+    await expect(page.getByText('must start with https://')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Test with 8.8.8.8' })).toBeDisabled();
+  });
+});

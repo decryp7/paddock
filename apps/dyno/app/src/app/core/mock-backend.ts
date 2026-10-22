@@ -34,6 +34,8 @@ import type {
   StartupState,
   SystemInventory,
   BenchComparison,
+  NetworkQuery,
+  NetworkSnapshot,
   BenchOverview,
   BenchProgress,
   BenchRun,
@@ -60,6 +62,7 @@ import {
   diskTree,
   healthReasons,
 } from './mock/data';
+import { mockNetwork } from './mock/network';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHistory } from './mock/history';
 import { mockInventory } from './mock/inventory';
@@ -827,6 +830,22 @@ export class MockBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.reply('inventory', () => mockInventory(this.profile.os));
+  }
+
+  network(query: NetworkQuery): Promise<NetworkSnapshot> {
+    return this.reply('network', () => mockNetwork(query, this.now()));
+  }
+
+  /** The URLs the mock "opened", for tests. */
+  readonly opened: string[] = [];
+
+  lookupIp(ip: string, template?: string): Promise<void> {
+    return this.reply('lookupIp', () => {
+      const tpl = template ?? this.settingsValue.ipLookup?.ipTemplate ?? 'https://ipinfo.io/{ip}';
+      if (!tpl.startsWith('https://') || !tpl.includes('{ip}')) throw err('badRequest', 'The lookup address must start with https:// and contain {ip}.');
+      if (/^(10\.|127\.|192\.168\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip) || ip === '::1') throw err('badRequest', 'Private address, nothing to look up.');
+      this.opened.push(tpl.replace('{ip}', ip));
+    });
   }
 
   private benchRuns: BenchRun[] | null = null;

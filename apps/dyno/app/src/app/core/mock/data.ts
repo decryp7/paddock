@@ -494,6 +494,7 @@ export function demoSettings(): Settings {
     cleanup: { schedule: 'weekly', categories: CLEANUP_CATEGORIES.filter((c) => c.scheduled).map((c) => c.id), mode: 'quarantine', devProjectAgeDays: 30 },
     webApi: { enabled: false, port: 7878, lan: false },
     dashboard: layoutFromPreset('overview'),
+    ipLookup: { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' },
     trayItems: defaultTrayItems(),
   };
 }

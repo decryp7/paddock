@@ -50,6 +50,19 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     },
   },
   {
+    name: 'network',
+    path: '/#/network',
+    ready: async (page) => void (await expect(page.getByRole('region', { name: 'Listening ports' })).toBeVisible()),
+  },
+  {
+    name: 'network-connections',
+    path: '/#/network',
+    ready: async (page) => {
+      await page.getByRole('button', { name: /^Connections/ }).click();
+      await expect(page.getByRole('region', { name: 'Google Chrome' })).toBeVisible();
+    },
+  },
+  {
     name: 'benchmarks',
     path: '/#/benchmarks',
     ready: async (page) => void (await expect(page.getByRole('region', { name: 'Latest result' })).toBeVisible()),

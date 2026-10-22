@@ -32,6 +32,8 @@ import type {
   StartupState,
   SystemInventory,
   BenchComparison,
+  NetworkQuery,
+  NetworkSnapshot,
   BenchOverview,
   StartBenchmark,
   Timestamp,
@@ -299,6 +301,14 @@ export class TauriBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.request('inventory');
+  }
+
+  network(query: NetworkQuery): Promise<NetworkSnapshot> {
+    return this.request({ network: { query } });
+  }
+
+  lookupIp(ip: string, template?: string): Promise<void> {
+    return this.request({ lookupIp: { ip, template: template ?? null } });
   }
 
   benchmarks(): Promise<BenchOverview> {

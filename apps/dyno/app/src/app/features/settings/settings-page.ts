@@ -1,11 +1,14 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { Settings, Theme, TrayItem } from '../../core/api.types';
-import { errorHint } from '../../core/command-error';
+import type { IpLookupSettings, Settings, Theme, TrayItem } from '../../core/api.types';
+import { BACKEND } from '../../core/backend';
+import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
+import { Notifier } from '../../shared/notifier';
 import { Switch } from '../../shared/switch';
 import { SettingsStore } from '../../state/settings.store';
+import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
 import { TrayItemsEditor } from './tray-items-editor';
 
 /** Settings: appearance, start-up, sampling and retention, the tray, alert thresholds, the observe-only posture, plugins and About. */
@@ -96,6 +99,39 @@ import { TrayItemsEditor } from './tray-items-editor';
               <dy-tray-items-editor [items]="d.trayItems?.items ?? []" (itemsChange)="setTrayItems($event)" />
             </section>
 
+            <section class="card" aria-label="IP lookup">
+              <h2>Network ▸ IP lookup</h2>
+              <p class="sub">“Look up IP” on the Network page opens this address in your browser with the remote address filled in. Dyno never fetches it, and only the address goes into it. Private and local addresses are never looked up.</p>
+              <div class="row">
+                <div class="lbl"><strong>Lookup site</strong><small>Pick one, or choose Custom and type your own address.</small></div>
+                <select class="select" aria-label="Lookup site" [ngModel]="presetId()" (ngModelChange)="choosePreset($event)">
+                  @for (p of presets; track p.id) {
+                    <option [value]="p.id">{{ p.name }} — {{ p.about }}</option>
+                  }
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Address</strong><small>https, with {{ '{ip}' }} where the address goes.</small></div>
+                <div class="ipt">
+                  <input class="input" type="text" aria-label="Lookup address" maxlength="300" [ngModel]="ipLookup().ipTemplate" (ngModelChange)="setLookup({ ipTemplate: $event })" />
+                  <button type="button" class="btn sm" [disabled]="!!ipProblem()" (click)="testLookup()">Test with 8.8.8.8</button>
+                </div>
+                @if (ipProblem(); as p) {
+                  <small class="problem" role="alert">{{ p }}</small>
+                }
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Network owner address (optional)</strong><small>Used when a network number (AS) is known. Contains {{ '{asn}' }}.</small></div>
+                <div class="ipt">
+                  <input class="input" type="text" aria-label="ASN lookup address" maxlength="300" [ngModel]="ipLookup().asnTemplate" (ngModelChange)="setLookup({ asnTemplate: $event })" />
+                </div>
+                @if (asnProblem(); as p) {
+                  <small class="problem" role="alert">{{ p }}</small>
+                }
+              </div>
+            </section>
+
             <section class="card" aria-label="Alerts">
               <h2>Alerts</h2>
               <div class="row">
@@ -158,6 +194,9 @@ import { TrayItemsEditor } from './tray-items-editor';
     .card > h2 { margin-bottom: var(--sp-2); }
     .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
     .row.off { opacity: 0.55; }
+    .ipt { display: flex; gap: var(--sp-2); flex: 1 1 380px; max-width: 560px; }
+    .ipt .input { flex: 1; min-width: 0; }
+    .problem { color: var(--bad); font-size: var(--fs-sm); }
     .lbl { display: grid; gap: 2px; min-width: 0; }
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
     .num-in { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); white-space: nowrap; }
@@ -179,12 +218,19 @@ import { TrayItemsEditor } from './tray-items-editor';
 })
 export class SettingsPage implements OnInit {
   protected readonly store = inject(SettingsStore);
+  private readonly backend = inject(BACKEND);
+  private readonly notifier = inject(Notifier);
   protected readonly draft = signal<Settings | null>(null);
   protected readonly themes: { id: Theme; label: string; icon: 'monitor' | 'moon' | 'sun' }[] = [
     { id: 'system', label: 'System', icon: 'monitor' },
     { id: 'dark', label: 'Dark', icon: 'moon' },
     { id: 'light', label: 'Light', icon: 'sun' },
   ];
+  protected readonly presets = LOOKUP_PRESETS;
+  protected readonly ipLookup = computed(() => this.draft()?.ipLookup ?? { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' });
+  protected readonly presetId = computed(() => presetIdFor(this.ipLookup().ipTemplate));
+  protected readonly ipProblem = computed(() => templateProblem(this.ipLookup().ipTemplate, 'ip'));
+  protected readonly asnProblem = computed(() => templateProblem(this.ipLookup().asnTemplate, 'asn'));
   protected readonly systemIntervals = [500, 1000, 2000, 5000];
   protected readonly processIntervals = [1000, 2000, 5000, 10000];
   protected readonly hint = computed(() => {
@@ -214,6 +260,17 @@ export class SettingsPage implements OnInit {
     this.draft.update((d) => (d ? { ...d, ...patch } : d));
     // The theme applies at once so the choice is visible; it is stored with Save.
     if (patch.theme) this.store.applyTheme(patch.theme);
+  }
+  protected setLookup(p: Partial<IpLookupSettings>): void {
+    this.draft.update((d) => (d ? { ...d, ipLookup: { ...this.ipLookup(), ...p } } : d));
+  }
+  protected choosePreset(id: string): void {
+    const p = LOOKUP_PRESETS.find((x) => x.id === id);
+    if (p) this.setLookup({ ipTemplate: p.ip, asnTemplate: p.asn });
+  }
+  /** Opens the template as typed with 8.8.8.8 (the engine validates it and says what is wrong). */
+  protected testLookup(): void {
+    void this.backend.lookupIp('8.8.8.8', this.ipLookup().ipTemplate).catch((e: unknown) => this.notifier.show(toCommandError(e).message, 'bad'));
   }
   protected setSampling(p: Partial<Settings['sampling']>): void {
     this.draft.update((d) => (d ? { ...d, sampling: { ...d.sampling, ...p } } : d));

@@ -31,6 +31,8 @@ import type {
   StartupState,
   SystemInventory,
   BenchComparison,
+  NetworkQuery,
+  NetworkSnapshot,
   BenchOverview,
   StartBenchmark,
   Timestamp,
@@ -100,6 +102,11 @@ export interface DynoBackend {
 
   // What is installed (memory modules, CPU, disks) and hints.
   inventory(): Promise<SystemInventory>;
+
+  // Open ports and connections (observe-only), and "Look up IP" (the shell opens the browser; Dyno never fetches).
+  network(query: NetworkQuery): Promise<NetworkSnapshot>;
+  /** Opens the lookup page for a public address in the default browser; `template` tests one that is not saved yet. */
+  lookupIp(ip: string, template?: string): Promise<void>;
 
   // Benchmarks: start only on a click; poll `benchmarks()` while a run is in progress.
   benchmarks(): Promise<BenchOverview>;
