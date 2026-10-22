@@ -13,7 +13,7 @@ use pitwall_server::app::AppState;
 use pitwall_server::engines::{BoxFuture, Engine, EngineError, Running};
 use pitwall_server::paths::Dirs;
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,6 +34,13 @@ pub struct FakeEngine {
     pub bodies: Arc<std::sync::Mutex<Vec<Value>>>,
     /// The context each start asked for.
     pub contexts: Arc<std::sync::Mutex<Vec<u32>>>,
+    /// The `--parallel` each start asked for.
+    pub parallels: Arc<std::sync::Mutex<Vec<u32>>>,
+    /// How long a chat request takes (milliseconds), to hold slots busy.
+    pub delay_ms: Arc<AtomicU64>,
+    /// Chat requests being served right now and the most that were at once.
+    pub live: Arc<AtomicUsize>,
+    pub peak: Arc<AtomicUsize>,
 }
 
 const SSE: &str = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2},\"timings\":{\"prompt_per_second\":100.0,\"predicted_per_second\":50.0}}\n\ndata: [DONE]\n\n";
@@ -49,6 +56,8 @@ impl Engine for FakeEngine {
         Box::pin(async move {
             self.starts.fetch_add(1, Ordering::SeqCst);
             self.contexts.lock().unwrap().push(l.context);
+            self.parallels.lock().unwrap().push(l.parallel);
+            let (delay, live, peak) = (self.delay_ms.clone(), self.live.clone(), self.peak.clone());
             let bodies = self.bodies.clone();
             if self.fail {
                 return Err(EngineError::Start("the fake engine refuses to start".into()));
@@ -78,7 +87,12 @@ impl Engine for FakeEngine {
                     "/v1/chat/completions",
                     post(move |body: axum::body::Bytes| {
                         let bodies = bodies.clone();
+                        let (delay, live, peak) = (delay.clone(), live.clone(), peak.clone());
                         async move {
+                            let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                            peak.fetch_max(now, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(delay.load(Ordering::SeqCst))).await;
+                            live.fetch_sub(1, Ordering::SeqCst);
                             if let Ok(v) = serde_json::from_slice::<Value>(&body) {
                                 bodies.lock().unwrap().push(v);
                             }
@@ -119,6 +133,9 @@ pub struct Harness {
     pub erases: Arc<AtomicUsize>,
     pub bodies: Arc<std::sync::Mutex<Vec<Value>>>,
     pub contexts: Arc<std::sync::Mutex<Vec<u32>>>,
+    pub parallels: Arc<std::sync::Mutex<Vec<u32>>>,
+    pub delay_ms: Arc<AtomicU64>,
+    pub peak: Arc<AtomicUsize>,
     pub dir: tempfile::TempDir,
 }
 
@@ -151,12 +168,19 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
     let erases = Arc::new(AtomicUsize::new(0));
     let bodies = Arc::new(std::sync::Mutex::new(vec![]));
     let contexts = Arc::new(std::sync::Mutex::new(vec![]));
+    let parallels = Arc::new(std::sync::Mutex::new(vec![]));
+    let delay_ms = Arc::new(AtomicU64::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
     let engine: Arc<dyn Engine> = Arc::new(FakeEngine {
         starts: starts.clone(),
         erases: erases.clone(),
         fail,
         bodies: bodies.clone(),
         contexts: contexts.clone(),
+        parallels: parallels.clone(),
+        delay_ms: delay_ms.clone(),
+        live: Arc::new(AtomicUsize::new(0)),
+        peak: peak.clone(),
     });
     let st = AppState::open(dirs.clone(), Some(engine)).await;
     let _ = Hardware::default();
@@ -175,6 +199,9 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
         erases,
         bodies,
         contexts,
+        parallels,
+        delay_ms,
+        peak,
         dir,
     }
 }
@@ -256,6 +283,9 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
         erases: Arc::new(AtomicUsize::new(0)),
         bodies: Arc::new(std::sync::Mutex::new(vec![])),
         contexts: Arc::new(std::sync::Mutex::new(vec![])),
+        parallels: Arc::new(std::sync::Mutex::new(vec![])),
+        delay_ms: Arc::new(AtomicU64::new(0)),
+        peak: Arc::new(AtomicUsize::new(0)),
         dir,
     }
 }

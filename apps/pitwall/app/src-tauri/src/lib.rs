@@ -141,6 +141,8 @@ pub fn run() {
             commands::unload_model,
             commands::pin_model,
             commands::set_model_idle,
+            commands::set_model_slots,
+            commands::model_fit,
             commands::disk_usage,
             commands::engines,
             commands::install_build,

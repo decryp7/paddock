@@ -224,6 +224,12 @@ rpc!(
     /// Sets a model's idle release time.
     set_model_idle => "set_model_idle", id: String = "id", idle_secs: Option<u32> = "idleSecs");
 rpc!(
+    /// Sets a model's parallel slots (`None`: the default); applies on its next load.
+    set_model_slots => "set_model_slots", id: String = "id", slots: Option<u32> = "slots");
+rpc!(
+    /// How much context and concurrency fit for a model.
+    model_fit => "model_fit", id: String = "id", context: Option<u32> = "context", slots: Option<u32> = "slots");
+rpc!(
     /// Disk use of models and engines.
     disk_usage => "disk_usage");
 rpc!(

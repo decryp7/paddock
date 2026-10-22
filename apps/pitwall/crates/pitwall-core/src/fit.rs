@@ -50,7 +50,15 @@ impl ModelSize {
 
     /// Total bytes at a context length.
     pub fn total(&self, context: u32) -> u64 {
-        self.weights + self.projector + self.kv_per_token.saturating_mul(u64::from(context)) + COMPUTE_OVERHEAD
+        self.total_tokens(u64::from(context))
+    }
+
+    /// Total bytes with a KV cache of `tokens` positions (all slots together; saturating).
+    pub fn total_tokens(&self, tokens: u64) -> u64 {
+        self.weights
+            .saturating_add(self.projector)
+            .saturating_add(self.kv_per_token.saturating_mul(tokens))
+            .saturating_add(COMPUTE_OVERHEAD)
     }
 }
 
@@ -83,10 +91,15 @@ pub struct Room {
 
 /// The split of a model's need between GPU and system memory at a context length.
 pub fn need(size: &ModelSize, context: u32, room: &Room) -> (Need, Offload) {
-    let total = size.total(context);
+    need_tokens(size, u64::from(context), room)
+}
+
+/// [`need`] for a KV cache of `tokens` positions in total (the context times the parallel slots, see `slots`).
+pub fn need_tokens(size: &ModelSize, tokens: u64, room: &Room) -> (Need, Offload) {
+    let total = size.total_tokens(tokens);
     match room.vram_free.filter(|v| *v >= MIN_USEFUL_VRAM && !room.unified) {
         Some(v) => {
-            let usable = v - COMPUTE_OVERHEAD;
+            let usable = v.saturating_sub(COMPUTE_OVERHEAD);
             if total <= usable + COMPUTE_OVERHEAD {
                 (
                     Need {
@@ -99,7 +112,7 @@ pub fn need(size: &ModelSize, context: u32, room: &Room) -> (Need, Offload) {
                 let on_gpu = usable.min(total);
                 (
                     Need {
-                        ram: total - on_gpu + HOST_OVERHEAD,
+                        ram: total.saturating_sub(on_gpu).saturating_add(HOST_OVERHEAD),
                         vram: total,
                     },
                     Offload::Partial,
@@ -108,7 +121,7 @@ pub fn need(size: &ModelSize, context: u32, room: &Room) -> (Need, Offload) {
         }
         None => (
             Need {
-                ram: total + HOST_OVERHEAD,
+                ram: total.saturating_add(HOST_OVERHEAD),
                 vram: 0,
             },
             Offload::None,
@@ -150,12 +163,17 @@ pub struct Fit {
     pub message: String,
 }
 
-fn gib(b: u64) -> String {
+pub(crate) fn gib(b: u64) -> String {
     format!("{:.1} GB", b as f64 / GIB as f64)
 }
 
 /// Whether a model fits at a context length.
 pub fn assess(size: Option<&ModelSize>, context: u32, room: &Room) -> Fit {
+    assess_tokens(size, u64::from(context), room)
+}
+
+/// [`assess`] for a KV cache of `tokens` positions in total.
+pub fn assess_tokens(size: Option<&ModelSize>, tokens: u64, room: &Room) -> Fit {
     let have_vram = room.vram_free.unwrap_or(0);
     let Some(size) = size.filter(|s| s.weights > 0) else {
         return Fit {
@@ -168,7 +186,7 @@ pub fn assess(size: Option<&ModelSize>, context: u32, room: &Room) -> Fit {
             message: "The size of this model is not known.".into(),
         };
     };
-    let (n, offload) = need(size, context, room);
+    let (n, offload) = need_tokens(size, tokens, room);
     let now = room.ram_available;
     let releasable = now.saturating_add(room.ram_releasable);
     let where_ = match offload {

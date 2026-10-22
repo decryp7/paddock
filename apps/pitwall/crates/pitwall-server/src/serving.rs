@@ -20,6 +20,7 @@ use pitwall_core::mgmt::{ChosenBy, HotState, LoadedModel, PresetStatus};
 use pitwall_core::presets::{self, ModelPreset, PresetError, Presets};
 use pitwall_core::scheduler::{Cancelled, Caps, JobId, JobKind, JobSpec, Priority, QueueError, Scheduler};
 use pitwall_core::select::{self, Candidate, Requirements};
+use pitwall_core::slots::Slots;
 use pitwall_core::sse;
 use pitwall_core::supervise::{Outcome, Supervisor};
 use std::collections::HashMap;
@@ -46,8 +47,10 @@ pub struct HotModel {
     pub ram: u64,
     /// Estimated VRAM.
     pub vram: u64,
-    /// Context tokens it was loaded with.
+    /// Context tokens per slot it was loaded with.
     pub context: u32,
+    /// Parallel slots it was loaded with (a change in the preferences applies on the next load).
+    pub slots: Slots,
     /// When it was loaded.
     pub loaded_at: u64,
     active: AtomicUsize,
@@ -461,21 +464,26 @@ impl Serving {
         kind: JobKind,
         app_cap: Option<usize>,
     ) -> Result<Permit, ApiError> {
-        let id = lock(&self.inner.sched)
-            .submit(
-                JobSpec {
-                    app,
-                    model: Some(model),
-                    priority,
-                    kind,
-                    app_cap,
-                },
-                now_ms(),
-            )
-            .map_err(|e| match e {
-                QueueError::Full(_) => api(ErrorKind::Overloaded, e.to_string()),
-                QueueError::Paused => api(ErrorKind::Overloaded, e.to_string()),
-            })?;
+        let slots = self.slots_for(&model);
+        let id = {
+            let mut sched = lock(&self.inner.sched);
+            sched.set_model_slots(&model, slots.count());
+            sched
+                .submit(
+                    JobSpec {
+                        app,
+                        model: Some(model),
+                        priority,
+                        kind,
+                        app_cap,
+                    },
+                    now_ms(),
+                )
+                .map_err(|e| match e {
+                    QueueError::Full(_) => api(ErrorKind::Overloaded, e.to_string()),
+                    QueueError::Paused => api(ErrorKind::Overloaded, e.to_string()),
+                })?
+        };
         let permit = Permit { id, serving: self.clone() };
         loop {
             let notified = self.inner.wake.notified();
@@ -499,17 +507,18 @@ impl Serving {
         }
     }
 
-    fn launch_for(&self, f: &LocalFile, context: u32, port: u16) -> Launch {
+    /// The engine launch for `context` tokens per slot in each of `slots` slots (`--ctx-size` is the total).
+    fn launch_for(&self, f: &LocalFile, context: u32, slots: Slots, port: u16) -> Launch {
         let hw = self.hw();
         Launch {
             model: f.path.to_string_lossy().into_owned(),
             mmproj: f.projector.as_ref().map(|p| p.to_string_lossy().into_owned()),
             alias: f.id.to_string(),
             port,
-            context,
+            context: slots.launch_context(context),
             gpu_layers: None,
             threads: 0,
-            parallel: self.settings().server.max_concurrent.clamp(1, 4),
+            parallel: slots.get(),
             kind: if f.info.kind == pitwall_core::gguf::ModelKind::Embedding {
                 ServeKind::Embedding
             } else {
@@ -574,16 +583,18 @@ impl Serving {
             .unwrap_or(s.models.default_context)
             .min(f.info.context_length.unwrap_or(u64::MAX).min(u64::from(u32::MAX)) as u32)
             .max(512);
+        let slots = s.slots_for(id);
         let hw = self.hw();
         let policy = s.memory.policy();
-        // Plan: does it fit, what must go first.
+        // Plan: does it fit, what must go first. The KV cache holds every slot's context.
+        let tokens = u64::from(slots.launch_context(context));
         let (need, _offload) = {
             let hot = lock(&self.inner.hot);
             let room = Room {
                 ram_releasable: hot.values().map(|h| h.ram).sum(),
                 ..system::room(&hw, 0)
             };
-            fit::need(&library::size_of(&f), context, &room)
+            fit::need_tokens(&library::size_of(&f), tokens, &room)
         };
         for _ in 0..40 {
             let (plan, sys) = {
@@ -612,7 +623,7 @@ impl Serving {
             }
         }
         let port = self.free_port().await;
-        let launch = self.launch_for(&f, context, port);
+        let launch = self.launch_for(&f, context, slots, port);
         self.event(EventKind::EngineStarted, Severity::Info, format!("Loading {id}"));
         let engine = self.engine_for(o.engine.as_deref().or(prefs.engine.as_deref()))?;
         let running = engine.start(&launch).await.map_err(|e| {
@@ -637,6 +648,7 @@ impl Serving {
             ram: if rss > 0 { rss.max(need.ram) } else { need.ram },
             vram: need.vram,
             context: running.props.n_ctx.unwrap_or(context),
+            slots,
             running,
             loaded_at: now_ms(),
             active: AtomicUsize::new(0),
@@ -648,6 +660,8 @@ impl Serving {
             capabilities: library::capabilities(&f),
         });
         lock(&self.inner.hot).insert(id.clone(), h.clone());
+        lock(&self.inner.sched).set_model_slots(id, slots.count());
+        self.inner.wake.notify_waiters();
         lock(&self.inner.supervisor).started(id);
         let ms = started.elapsed().as_millis() as u64;
         self.event(
@@ -753,7 +767,7 @@ impl Serving {
         if h.active.load(Ordering::SeqCst) > 0 || h.context_released.swap(true, Ordering::SeqCst) {
             return;
         }
-        let slots = self.settings().server.max_concurrent.clamp(1, 4);
+        let slots = h.slots.get();
         let me = self.clone();
         tokio::spawn(async move {
             for slot in 0..slots {
@@ -831,6 +845,7 @@ impl Serving {
                     ram_bytes: h.ram,
                     vram_bytes: h.vram,
                     context_tokens: h.context,
+                    slots: h.slots.get(),
                     pinned: hot.pinned,
                     active_requests: h.active.load(Ordering::SeqCst) as u32,
                     loaded_at: h.loaded_at,
@@ -841,6 +856,17 @@ impl Serving {
                 }
             })
             .collect()
+    }
+
+    /// The slots a model serves with: the ones it is loaded with, else its preference or the default. A loaded model
+    /// keeps its slots until it is reloaded, so a changed preference never disturbs running work.
+    pub fn slots_for(&self, id: &ModelId) -> Slots {
+        self.loaded_slots(id).unwrap_or_else(|| self.settings().slots_for(id))
+    }
+
+    /// The slots a model is loaded with (`None`: not loaded).
+    pub fn loaded_slots(&self, id: &ModelId) -> Option<Slots> {
+        lock(&self.inner.hot).get(id).map(|h| h.slots)
     }
 
     /// Whether a model is in memory.
@@ -975,7 +1001,7 @@ impl HotModel {
 pub fn caps_of(s: &Settings) -> Caps {
     Caps {
         max_running: s.server.max_concurrent.max(1) as usize,
-        per_model: (s.server.max_concurrent.max(1) as usize).min(4),
+        per_model: s.models.default_slots.count(),
         ..Caps::default()
     }
 }

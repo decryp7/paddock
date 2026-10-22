@@ -4,6 +4,7 @@
 
 use crate::ids::ModelId;
 use crate::memory::{Policy, Preset};
+use crate::slots::Slots;
 use crate::time::SECOND;
 use crate::{GIB, MIB};
 use serde::{Deserialize, Serialize};
@@ -194,6 +195,10 @@ pub struct ModelPrefs {
     pub context: Option<u32>,
     /// The engine pack that serves it (`None`: llama.cpp).
     pub engine: Option<String>,
+    /// Its own number of parallel slots (`None`: [`ModelSettings::default_slots`]). A value that is out of range in
+    /// the file is read as unset. Applies the next time the model loads.
+    #[serde(deserialize_with = "crate::slots::lenient")]
+    pub slots: Option<Slots>,
 }
 
 /// Model settings.
@@ -204,6 +209,9 @@ pub struct ModelSettings {
     pub default_model: Option<ModelId>,
     /// Context length models load with unless a request or the model's preferences say otherwise.
     pub default_context: u32,
+    /// Parallel slots a model loads with unless its preferences say otherwise (each slot has `default_context`
+    /// tokens of its own, see `slots`).
+    pub default_slots: Slots,
     /// Per-model preferences.
     pub prefs: BTreeMap<ModelId, ModelPrefs>,
 }
@@ -213,6 +221,7 @@ impl Default for ModelSettings {
         ModelSettings {
             default_model: None,
             default_context: 8192,
+            default_slots: Slots::DEFAULT,
             prefs: BTreeMap::new(),
         }
     }
@@ -358,6 +367,11 @@ impl Settings {
         range("Privacy ▸ Keep metrics (days)", self.privacy.metrics_retention_days, 1, 365)?;
         range("Models ▸ Default context", self.models.default_context, 512, 1 << 20)?;
         Ok(())
+    }
+
+    /// The slots a model loads with: its own preference or the default.
+    pub fn slots_for(&self, id: &ModelId) -> Slots {
+        self.models.prefs.get(id).and_then(|p| p.slots).unwrap_or(self.models.default_slots)
     }
 
     /// The preferences of a model (defaults when it has none).
@@ -626,6 +640,37 @@ mod tests {
     }
 
     #[test]
+    fn slot_preferences_default_persist_and_tolerate_damage() {
+        let id = ModelId::parse("m").unwrap();
+        let mut s = Settings::default();
+        assert_eq!(s.slots_for(&id), Slots::DEFAULT);
+        s.models.default_slots = Slots::new(3).unwrap();
+        assert_eq!(s.slots_for(&id).get(), 3);
+        s.models.prefs.insert(
+            id.clone(),
+            ModelPrefs {
+                slots: Slots::new(8).ok(),
+                ..ModelPrefs::default()
+            },
+        );
+        assert_eq!(s.slots_for(&id).get(), 8);
+        let (back, how) = load(Some(&s.to_toml()), None);
+        assert_eq!((back.slots_for(&id).get(), how), (8, Loaded::File), "survives a restart");
+        // Damaged values: the preference reads as unset, nothing else is lost.
+        for bad in ["slots = 0", "slots = 99", "slots = \"many\"", "slots = -1"] {
+            let text = format!("[models]\ndefaultContext = 4096\n[models.prefs.m]\npinned = true\n{bad}\n");
+            let (s, how) = load(Some(&text), None);
+            assert_eq!(how, Loaded::File, "{bad}");
+            assert!(s.prefs(&id).pinned && s.prefs(&id).slots.is_none(), "{bad}");
+            assert_eq!((s.models.default_context, s.slots_for(&id)), (4096, Slots::DEFAULT));
+        }
+        // A damaged default falls back through the backup like any other invalid setting.
+        let (s, how) = load(Some("[models]\ndefaultSlots = 99\n"), Some(&Settings::default().to_toml()));
+        assert_eq!(s.models.default_slots, Slots::DEFAULT);
+        assert!(matches!(how, Loaded::Backup(_)));
+    }
+
+    #[test]
     fn presets_ui_merge_and_prefs() {
         let mut s = Settings::default();
         s.memory.notify_on_release = true;
@@ -647,6 +692,7 @@ mod tests {
                 idle_secs: Some(30),
                 context: None,
                 engine: None,
+                slots: None,
             },
         );
         let mut ui = s.ui();

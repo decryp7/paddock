@@ -125,6 +125,12 @@ impl GgufInfo {
         self.expert_count.unwrap_or(0) > 1
     }
 
+    /// Whether [`GgufInfo::kv_bytes_per_token`] comes from the header (layers, heads, head size) rather than the
+    /// typical-model estimate used when the layout is missing.
+    pub fn kv_is_exact(&self) -> bool {
+        matches!((self.block_count, self.embedding_length, self.head_count), (Some(_), Some(_), Some(h)) if h > 0)
+    }
+
     /// Bytes of KV cache per token (f16 keys and values).
     pub fn kv_bytes_per_token(&self) -> u64 {
         match (self.block_count, self.embedding_length, self.head_count, self.head_count_kv) {
@@ -552,6 +558,7 @@ mod tests {
         assert!(e.known_architecture);
         // 2 (k,v) * 36 layers * 8 kv heads * head_dim 80 * 2 bytes
         assert_eq!(i.kv_bytes_per_token(), 2 * 36 * 8 * 80 * 2);
+        assert!(i.kv_is_exact());
     }
 
     #[test]
@@ -561,6 +568,7 @@ mod tests {
         assert!(!i.known_architecture);
         assert!(i.params_b > 0.0);
         assert_eq!(i.kv_bytes_per_token(), 128 * 1024);
+        assert!(!i.kv_is_exact());
         let moe = build("qwen35moe", &[("qwen35moe.expert_count", Kv::U32(128))], 1 << 17);
         assert!(info(&moe).unwrap().is_moe());
     }

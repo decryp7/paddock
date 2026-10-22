@@ -9,6 +9,7 @@ use pitwall_core::hf::{self, RepoId};
 use pitwall_core::ids::ModelId;
 use pitwall_core::mgmt::{Download, DownloadKind, DownloadState, HfRepo, LocalModel, QuantVariant};
 use pitwall_core::privacy::DownloadUrl;
+use pitwall_core::slots::{self, Slots};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -207,14 +208,19 @@ impl Library {
             Err(_) => (None, false),
         };
         let have = self.local();
-        let variant = |v: &hf::Variant| QuantVariant {
-            file: v.file.clone(),
-            quant: v.quant.clone(),
-            size_bytes: v.size,
-            parts: v.parts.len() as u32,
-            sha256: if v.sha256.len() == 1 { v.sha256.first().cloned() } else { None },
-            fit: fit::assess(Some(&ModelSize::from_file(v.size, v.quant.as_deref())), context, room),
-            downloaded: have.iter().any(|h| h.repo == repo && h.path.ends_with(&v.file)),
+        // The fit is for one slot at `context`; `max_slots` says how many parallel requests that context allows.
+        let variant = |v: &hf::Variant| {
+            let size = ModelSize::from_file(v.size, v.quant.as_deref());
+            QuantVariant {
+                file: v.file.clone(),
+                quant: v.quant.clone(),
+                size_bytes: v.size,
+                parts: v.parts.len() as u32,
+                sha256: if v.sha256.len() == 1 { v.sha256.first().cloned() } else { None },
+                fit: fit::assess(Some(&size), context, room),
+                max_slots: slots::max_slots(&size, context, room, false),
+                downloaded: have.iter().any(|h| h.repo == repo && h.path.ends_with(&v.file)),
+            }
         };
         Ok(HfRepo {
             repo: repo.into(),
@@ -384,8 +390,17 @@ fn verify_gguf(p: &Path) -> Result<(), String> {
 }
 
 /// The `LocalModel` DTO for the UI.
-pub fn to_dto(f: &LocalFile, loaded: bool, prefs: &pitwall_core::config::ModelPrefs, context: u32, room: &Room) -> LocalModel {
+pub fn to_dto(
+    f: &LocalFile,
+    loaded_slots: Option<Slots>,
+    prefs: &pitwall_core::config::ModelPrefs,
+    defaults: (u32, Slots),
+    room: &Room,
+) -> LocalModel {
+    let (context, default_slots) = defaults;
     let size = size_of(f);
+    let slots = prefs.slots.unwrap_or(default_slots);
+    let loaded = loaded_slots.is_some();
     LocalModel {
         id: f.id.to_string(),
         repo: f.repo.clone(),
@@ -408,7 +423,10 @@ pub fn to_dto(f: &LocalFile, loaded: bool, prefs: &pitwall_core::config::ModelPr
         pinned: prefs.pinned,
         idle_secs: prefs.idle_secs,
         engine: prefs.engine.clone(),
-        fit: fit::assess(Some(&size), prefs.context.unwrap_or(context), room),
+        slots: slots.get(),
+        slots_custom: prefs.slots.is_some(),
+        loaded_slots: loaded_slots.map(Slots::get),
+        fit: slots::assess_slots(Some(&size), prefs.context.unwrap_or(context), slots, room),
     }
 }
 

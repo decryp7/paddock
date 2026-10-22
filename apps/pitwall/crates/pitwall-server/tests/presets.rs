@@ -191,7 +191,9 @@ async fn context_and_engine_apply_when_the_model_loads() {
         .await;
     assert_eq!(r.status, 200, "{}", r.body);
     assert_eq!(r.header("x-pitwall-engine"), Some("llama.cpp"));
-    assert_eq!(*h.contexts.lock().unwrap(), vec![2048]);
+    // `--ctx-size` is the total: 2048 tokens for each of the default two slots.
+    assert_eq!(*h.contexts.lock().unwrap(), vec![4096]);
+    assert_eq!(*h.parallels.lock().unwrap(), vec![2]);
     // The loaded model keeps its context until it is released.
     h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m")), &[])
         .await;

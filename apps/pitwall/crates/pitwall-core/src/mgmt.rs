@@ -242,8 +242,11 @@ pub struct LoadedModel {
     pub ram_bytes: u64,
     /// Video memory.
     pub vram_bytes: u64,
-    /// Its context.
+    /// Its context per slot.
     pub context_tokens: u32,
+    /// Parallel slots it was loaded with.
+    #[serde(default = "one")]
+    pub slots: u32,
     /// Keep loaded.
     pub pinned: bool,
     /// Running requests.
@@ -751,8 +754,34 @@ pub struct LocalModel {
     /// The engine pack that serves it (`None`: llama.cpp).
     #[serde(default)]
     pub engine: Option<String>,
-    /// Fit now.
+    /// Parallel slots it loads with (its own preference or the default).
+    #[serde(default = "one")]
+    pub slots: u32,
+    /// The slots are the model's own preference (false: the default from the settings).
+    #[serde(default)]
+    pub slots_custom: bool,
+    /// The slots it is loaded with now (`None`: not loaded); a change applies on the next load.
+    #[serde(default)]
+    pub loaded_slots: Option<u32>,
+    /// Fit now, at its context per slot and slots.
     pub fit: Fit,
+}
+
+fn one() -> u32 {
+    1
+}
+
+/// The result of changing a model's slots (`SlotsChange`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotsChange {
+    /// The slots it will load with from now on.
+    pub slots: u32,
+    /// The slots it is loaded with now (`None`: not loaded).
+    pub loaded_slots: Option<u32>,
+    /// It is loaded with a different count: the change applies the next time it loads (a loaded model is never
+    /// unloaded or restarted by this call, least of all while it is busy).
+    pub applies_on_next_load: bool,
 }
 
 /// A quantisation variant (`QuantVariant`).
@@ -771,6 +800,10 @@ pub struct QuantVariant {
     pub sha256: Option<String>,
     /// Fit.
     pub fit: Fit,
+    /// The most parallel slots that fit at the context the fit was checked at (0: not even one; the answer to
+    /// "how many requests at once?").
+    #[serde(default)]
+    pub max_slots: u32,
     /// On disk already.
     pub downloaded: bool,
 }

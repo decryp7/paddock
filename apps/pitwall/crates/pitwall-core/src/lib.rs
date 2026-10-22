@@ -39,6 +39,7 @@ pub mod quant;
 pub mod redact;
 pub mod runtimes;
 pub mod scheduler;
+pub mod slots;
 pub mod select;
 pub mod sse;
 pub mod supervise;

@@ -166,6 +166,8 @@ pub struct Scheduler {
     next: JobId,
     jobs: Vec<Job>,
     paused: bool,
+    /// Slots of the models that have their own (loaded with their own count); others use `caps.per_model`.
+    slots: std::collections::HashMap<ModelId, usize>,
 }
 
 /// Waiting jobs per priority.
@@ -187,7 +189,19 @@ impl Scheduler {
             next: 1,
             jobs: vec![],
             paused: false,
+            slots: std::collections::HashMap::new(),
         }
+    }
+
+    /// Sets how many jobs one model runs at once (its parallel slots); requests beyond that wait in the queue.
+    /// Running jobs are not affected. A count of 0 is read as 1.
+    pub fn set_model_slots(&mut self, model: &ModelId, slots: usize) {
+        self.slots.insert(model.clone(), slots.max(1));
+    }
+
+    /// The jobs one model runs at once.
+    pub fn slots_of(&self, model: &ModelId) -> usize {
+        self.slots.get(model).copied().unwrap_or(self.caps.per_model)
     }
 
     /// Changes the limits; running jobs are not affected.
@@ -251,7 +265,7 @@ impl Scheduler {
                         .spec
                         .model
                         .as_ref()
-                        .is_none_or(|m| running.iter().filter(|r| r.spec.model.as_ref() == Some(m)).count() < self.caps.per_model);
+                        .is_none_or(|m| running.iter().filter(|r| r.spec.model.as_ref() == Some(m)).count() < self.slots_of(m));
                     let app_ok = j
                         .spec
                         .app_cap
@@ -425,6 +439,33 @@ mod tests {
             tokens: 0,
         };
         assert_eq!(z.effective(&j, 1_000_000), Priority::Batch, "aging 0 disables aging");
+    }
+
+    #[test]
+    fn requests_beyond_the_models_slots_queue() {
+        let mut s = Scheduler::new(Caps {
+            max_running: 10,
+            per_model: 1,
+            ..Caps::default()
+        });
+        let m = ModelId::parse("m").unwrap();
+        assert_eq!(s.slots_of(&m), 1, "the default cap");
+        s.set_model_slots(&m, 3);
+        let ids: Vec<JobId> = (0..5)
+            .map(|i| s.submit(spec("a", Some("m"), Priority::Interactive), i).unwrap())
+            .collect();
+        let other = s.submit(spec("a", Some("n"), Priority::Interactive), 9).unwrap();
+        assert_eq!(
+            s.dispatch(10),
+            vec![ids[0], ids[1], ids[2], other],
+            "three slots, the rest queue; others use the default"
+        );
+        s.finish(ids[0]);
+        assert_eq!(s.dispatch(11), vec![ids[3]]);
+        s.set_model_slots(&m, 0);
+        assert_eq!(s.slots_of(&m), 1, "zero is read as one");
+        s.finish(ids[1]);
+        assert!(s.dispatch(12).is_empty(), "two still running, above the new count");
     }
 
     #[test]

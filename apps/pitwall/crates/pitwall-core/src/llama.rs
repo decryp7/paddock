@@ -27,13 +27,14 @@ pub struct Launch {
     pub alias: String,
     /// The loopback port.
     pub port: u16,
-    /// Context tokens (shared by the slots).
+    /// `--ctx-size`: the KV positions of **all** slots together. llama-server splits it evenly, so each slot gets
+    /// `context / parallel` tokens; build it with `Slots::launch_context` from the context per slot.
     pub context: u32,
     /// Layers on the GPU (`None`: all).
     pub gpu_layers: Option<u32>,
     /// CPU threads (0: llama.cpp decides).
     pub threads: u32,
-    /// Parallel slots.
+    /// `--parallel`: slots, i.e. requests served at once.
     pub parallel: u32,
     /// What it serves.
     pub kind: ServeKind,
@@ -388,6 +389,22 @@ mod tests {
         .join(" ");
         assert!(e.contains("--embeddings") && e.contains("--n-gpu-layers 10") && e.contains("--threads 6") && !e.contains("--mmproj"));
         assert!(args(&launch(ServeKind::Rerank)).contains(&"--reranking".to_string()));
+    }
+
+    #[test]
+    fn parallel_slots_split_the_context_size() {
+        use crate::slots::Slots;
+        let slots = Slots::new(4).unwrap();
+        let a = args(&Launch {
+            context: slots.launch_context(8192),
+            parallel: slots.get(),
+            ..launch(ServeKind::Chat)
+        });
+        let pos = |flag: &str| a.iter().position(|x| x == flag).map(|i| a[i + 1].clone());
+        assert_eq!(pos("--ctx-size").as_deref(), Some("32768"), "per-slot context x slots");
+        assert_eq!(pos("--parallel").as_deref(), Some("4"));
+        // llama-server hands each slot ctx-size / parallel tokens: the context per slot is what was asked for.
+        assert_eq!(32_768 / 4, 8192);
     }
 
     #[test]

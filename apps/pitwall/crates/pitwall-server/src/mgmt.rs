@@ -24,6 +24,7 @@ use pitwall_core::mgmt::{
 use pitwall_core::presets::{Known, PresetError, Presets};
 use pitwall_core::runtimes::builds;
 use pitwall_core::scheduler::JobKind;
+use pitwall_core::slots::{self, Slots};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -70,6 +71,13 @@ fn arg<T: DeserializeOwned>(a: &Value, name: &str) -> R<T> {
 fn model(a: &Value, name: &str) -> R<ModelId> {
     let s: String = arg(a, name)?;
     ModelId::parse(&s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))
+}
+
+/// An optional slot count argument: absent or null is `None`; out of range is a bad request.
+fn parse_slots_opt(a: &Value, name: &str) -> R<Option<Slots>> {
+    let n: Option<u32> = arg(a, name)?;
+    n.map(|n| Slots::new(n).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string())))
+        .transpose()
 }
 
 fn ok<T: serde::Serialize>(v: T) -> R<Value> {
@@ -171,7 +179,15 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                 .library
                 .local()
                 .iter()
-                .map(|f| crate::library::to_dto(f, st.serving.is_loaded(&f.id), &s.prefs(&f.id), s.models.default_context, &room))
+                .map(|f| {
+                    crate::library::to_dto(
+                        f,
+                        st.serving.loaded_slots(&f.id),
+                        &s.prefs(&f.id),
+                        (s.models.default_context, s.models.default_slots),
+                        &room,
+                    )
+                })
                 .collect();
             ok(v)
         }
@@ -245,6 +261,57 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let secs: Option<u64> = arg(a, "idleSecs")?;
             update_prefs(st, &id, |p| p.idle_secs = secs)?;
             ok(())
+        }
+        "set_model_slots" => {
+            let id = model(a, "id")?;
+            let slots = parse_slots_opt(a, "slots")?;
+            if !st.library.local().iter().any(|f| f.id == id) {
+                return Err(err(mgmt::ErrorCode::NotFound, format!("the model {id} is not installed")));
+            }
+            update_prefs(st, &id, |p| p.slots = slots)?;
+            let now = st.cfg().slots_for(&id);
+            let loaded = st.serving.loaded_slots(&id);
+            ok(mgmt::SlotsChange {
+                slots: now.get(),
+                loaded_slots: loaded.map(Slots::get),
+                applies_on_next_load: loaded.is_some_and(|l| l != now),
+            })
+        }
+        "model_fit" => {
+            let id = model(a, "id")?;
+            let s = st.cfg();
+            let f = st
+                .library
+                .local()
+                .into_iter()
+                .find(|f| f.id == id)
+                .ok_or_else(|| err(mgmt::ErrorCode::NotFound, format!("the model {id} is not installed")))?;
+            let context: Option<u32> = arg(a, "context")?;
+            let context = match context {
+                Some(c) if !(slots::MIN_CONTEXT..=slots::MAX_CONTEXT).contains(&c) => {
+                    return Err(err(
+                        mgmt::ErrorCode::BadRequest,
+                        format!(
+                            "the context must be between {} and {} tokens",
+                            slots::MIN_CONTEXT,
+                            slots::MAX_CONTEXT
+                        ),
+                    ))
+                }
+                Some(c) => c,
+                None => s.prefs(&id).context.unwrap_or(s.models.default_context),
+            };
+            let chosen = parse_slots_opt(a, "slots")?.unwrap_or_else(|| s.slots_for(&id));
+            let room = crate::system::room(&st.hardware, st.serving.hot_ram().0);
+            let trained = f.info.context_length.map(|c| c.min(u64::from(u32::MAX)) as u32);
+            ok(slots::solve(
+                Some(&crate::library::size_of(&f)),
+                context,
+                chosen,
+                trained,
+                f.info.kv_is_exact(),
+                &room,
+            ))
         }
         "disk_usage" => ok(disk_usage(st)),
         "engines" => ok(engines(st)),
