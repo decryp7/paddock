@@ -13,6 +13,10 @@ pub enum Command {
     Uninstall,
     /// Print the effective configuration and its problems.
     CheckConfig,
+    /// Ask the running service for its status.
+    Status,
+    /// Internal (Windows): send Ctrl+Break to a runner's process group from inside its console.
+    CtrlBreak(u32),
     /// Print the version.
     Version,
     /// Print the usage.
@@ -20,7 +24,7 @@ pub enum Command {
 }
 
 /// The usage text.
-pub const USAGE: &str = "usage: pitcrew-service <run | service | install | uninstall | check-config | --version | --help>";
+pub const USAGE: &str = "usage: pitcrew-service <run | status | service | install | uninstall | check-config | --version | --help>";
 
 /// A command line that is not understood.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -30,18 +34,27 @@ pub struct UsageError(String);
 /// Parses the arguments after the program name.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, UsageError> {
     let args: Vec<String> = args.into_iter().collect();
-    let cmd = match args.first().map(String::as_str) {
-        None | Some("help" | "--help" | "-h") => Command::Help,
-        Some("run") => Command::Run,
-        Some("service") => Command::Service,
-        Some("install") => Command::Install,
-        Some("uninstall") => Command::Uninstall,
-        Some("check-config") => Command::CheckConfig,
-        Some("version" | "--version" | "-V") => Command::Version,
+    let (cmd, takes) = match args.first().map(String::as_str) {
+        None | Some("help" | "--help" | "-h") => (Command::Help, 0),
+        Some("run") => (Command::Run, 0),
+        Some("service") => (Command::Service, 0),
+        Some("install") => (Command::Install, 0),
+        Some("uninstall") => (Command::Uninstall, 0),
+        Some("check-config") => (Command::CheckConfig, 0),
+        Some("status") => (Command::Status, 0),
+        Some("version" | "--version" | "-V") => (Command::Version, 0),
+        Some("ctrl-break") => {
+            let pid = args
+                .get(1)
+                .and_then(|p| p.parse::<u32>().ok())
+                .filter(|p| *p > 0)
+                .ok_or_else(|| UsageError("ctrl-break needs a process id".into()))?;
+            (Command::CtrlBreak(pid), 1)
+        }
         Some(other) => return Err(UsageError(format!("unknown command {other:?}"))),
     };
-    if args.len() > 1 {
-        return Err(UsageError(format!("unexpected argument {:?}", args[1])));
+    if let Some(extra) = args.get(1 + takes) {
+        return Err(UsageError(format!("unexpected argument {extra:?}")));
     }
     Ok(cmd)
 }
@@ -62,8 +75,10 @@ mod tests {
         assert_eq!(p(&["install"]), Ok(Command::Install));
         assert_eq!(p(&["uninstall"]), Ok(Command::Uninstall));
         assert_eq!(p(&["check-config"]), Ok(Command::CheckConfig));
+        assert_eq!(p(&["status"]), Ok(Command::Status));
         assert_eq!(p(&["--version"]), Ok(Command::Version));
         assert_eq!(p(&["-h"]), Ok(Command::Help));
+        assert_eq!(p(&["ctrl-break", "42"]), Ok(Command::CtrlBreak(42)));
     }
 
     #[test]
@@ -71,5 +86,8 @@ mod tests {
         let e = p(&["start"]).unwrap_err();
         assert!(e.to_string().contains("unknown command \"start\"") && e.to_string().contains("usage:"));
         assert!(p(&["run", "--now"]).is_err());
+        assert!(p(&["ctrl-break"]).is_err());
+        assert!(p(&["ctrl-break", "0"]).is_err());
+        assert!(p(&["ctrl-break", "1", "2"]).is_err());
     }
 }

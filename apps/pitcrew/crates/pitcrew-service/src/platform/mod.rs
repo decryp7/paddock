@@ -1,6 +1,8 @@
 //! Registering the service with the OS (ADR 0003). One adapter per platform behind the same three functions.
 
 #[cfg(windows)]
+pub mod win_session;
+#[cfg(windows)]
 mod windows;
 #[cfg(windows)]
 pub use windows::{dispatch, install, uninstall};

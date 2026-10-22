@@ -1,8 +1,10 @@
 //! `pitcrew-service`: the background process that keeps the runners going (ADR 0001, 0003).
+// No console window when Windows starts the Ctrl+Break helper or the service.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "console")]
 
 use pitcrew_service::cli::{self, Command};
 use pitcrew_service::error::Error;
-use pitcrew_service::{dispatch, paths, platform, supervisor};
+use pitcrew_service::{host, paths, platform, supervisor};
 
 fn main() {
     let command = match cli::parse(std::env::args().skip(1)) {
@@ -25,13 +27,15 @@ fn execute(command: Command) -> Result<(), Error> {
             Ok(())
         }
         Command::Version => {
-            println!("pitcrew-service {}", dispatch::SERVICE_VERSION);
+            println!("pitcrew-service {}", supervisor::SERVICE_VERSION);
             Ok(())
         }
-        Command::Run => supervisor::run(&data_dir()?),
+        Command::Run => host::run_foreground(data_dir()?),
+        Command::Status => pitcrew_service::status::print(&data_dir()?),
         Command::Service => platform::dispatch(),
         Command::Install => platform::install(),
         Command::Uninstall => platform::uninstall(),
+        Command::CtrlBreak(pid) => ctrl_break(pid),
         Command::CheckConfig => {
             let dir = data_dir()?;
             let loaded = supervisor::load_config(&dir)?;
@@ -47,6 +51,19 @@ fn execute(command: Command) -> Result<(), Error> {
             Ok(())
         }
     }
+}
+
+#[cfg(windows)]
+fn ctrl_break(pid: u32) -> Result<(), Error> {
+    platform::win_session::send_ctrl_break(pid).map_err(|reason| Error::Os {
+        what: "Stopping the runner",
+        reason,
+    })
+}
+
+#[cfg(not(windows))]
+fn ctrl_break(_pid: u32) -> Result<(), Error> {
+    Err(Error::Unsupported("ctrl-break (Windows only)"))
 }
 
 fn data_dir() -> Result<std::path::PathBuf, Error> {

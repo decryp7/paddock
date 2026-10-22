@@ -17,12 +17,43 @@ path = "src/main.rs"
 
 [dependencies]
 pitcrew-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+toml.workspace = true
+# Local time for update windows and day boundaries.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+# The IPC server (named pipe / Unix socket) only; supervision runs on plain threads.
+tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros", "signal"] }
+# Child processes, machine metrics and disk space without platform FFI.
+sysinfo = { version = "0.37", default-features = false, features = ["system", "disk"] }
+# Release discovery and downloads: HTTPS with the OS certificate store.
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 
 # The Service Control Manager integration (MIT OR Apache-2.0, maintained by Mullvad): safe wrappers around the
 # service dispatcher, control handler and service manager APIs.
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"
+# Session APIs (WTSQueryUserToken, CreateProcessAsUserW), console control events and the pipe ACL (ADR 0003, 0004).
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_Environment",
+  "Win32_System_Pipes",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading",
+] }
+
+# Graceful stop (SIGTERM to the runner's process group) without unsafe code.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["signal", "process", "user"] }
+
+[dev-dependencies]
+# The fake runner (examples/fake_runner.rs) stops on Ctrl+Break / SIGTERM like the real one.
+ctrlc = { version = "3.5", features = ["termination"] }
 
 [lints]
 workspace = true

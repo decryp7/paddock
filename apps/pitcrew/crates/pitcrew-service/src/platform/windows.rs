@@ -51,13 +51,13 @@ pub fn dispatch() -> Result<(), Error> {
 }
 
 fn service_main(_arguments: Vec<OsString>) {
-    // Nobody sees a service's standard error; the service log is part of the supervision work still to do.
+    // Nobody sees a service's standard error; problems go to the service log (<data>/logs/service.log).
     let _ = run_service();
 }
 
 fn status(state: ServiceState) -> ServiceStatus {
     let controls = if state == ServiceState::Running {
-        ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN
+        ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN | ServiceControlAccept::SESSION_CHANGE
     } else {
         ServiceControlAccept::empty()
     };
@@ -67,16 +67,21 @@ fn status(state: ServiceState) -> ServiceStatus {
         controls_accepted: controls,
         exit_code: ServiceExitCode::Win32(0),
         checkpoint: 0,
-        wait_hint: Duration::from_secs(if state == ServiceState::StopPending { 60 } else { 0 }),
+        wait_hint: Duration::from_secs(if state == ServiceState::StopPending { 30 } else { 0 }),
         process_id: None,
     }
 }
 
 fn run_service() -> Result<(), Error> {
-    let (stop_tx, stop_rx) = mpsc::channel::<()>();
+    let (event_tx, event_rx) = mpsc::channel::<Event>();
+    let stop_tx = event_tx.clone();
     let handler = move |control| match control {
         ServiceControl::Stop | ServiceControl::Shutdown => {
-            let _ = stop_tx.send(());
+            let _ = event_tx.send(Event::Stop);
+            ServiceControlHandlerResult::NoError
+        }
+        ServiceControl::SessionChange(_) => {
+            let _ = event_tx.send(Event::Session);
             ServiceControlHandlerResult::NoError
         }
         ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -84,22 +89,45 @@ fn run_service() -> Result<(), Error> {
     };
     let handle =
         service_control_handler::register(WINDOWS_SERVICE_NAME, handler).map_err(|e| os_error("Registering the control handler", e))?;
+    let data_dir = crate::paths::data_dir().ok_or(Error::Os {
+        what: "Finding the data folder",
+        reason: "ProgramData is not set".into(),
+    })?;
+    let host = crate::host::Host::start(data_dir, move |_| {
+        let _ = stop_tx.send(Event::Stop);
+    });
+    let host = match host {
+        Ok(h) => h,
+        Err(e) => {
+            let _ = handle.set_service_status(ServiceStatus {
+                exit_code: ServiceExitCode::Win32(1),
+                ..status(ServiceState::Stopped)
+            });
+            return Err(e);
+        }
+    };
     handle
         .set_service_status(status(ServiceState::Running))
         .map_err(|e| os_error("Reporting the service status", e))?;
-    // Supervision is not built yet (crate::supervisor::run); the service runs and answers the SCM so that
-    // registration, start, stop and the recovery actions can be tried on a real machine.
-    let _ = stop_rx.recv();
+    while let Ok(Event::Session) = event_rx.recv() {
+        host.send(crate::supervisor::Msg::LogonChanged);
+    }
     handle
         .set_service_status(status(ServiceState::StopPending))
         .map_err(|e| os_error("Reporting the service status", e))?;
+    host.stop();
     handle
         .set_service_status(status(ServiceState::Stopped))
         .map_err(|e| os_error("Reporting the service status", e))?;
     Ok(())
 }
 
-/// Registers the service: automatic (delayed) start, LocalSystem, restart on failure.
+enum Event {
+    Stop,
+    Session,
+}
+
+/// Registers the service (automatic delayed start, LocalSystem, restart on failure) and starts it.
 pub fn install() -> Result<(), Error> {
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE)
         .map_err(|e| os_error("Installing the service", e))?;
@@ -153,7 +181,9 @@ pub fn install() -> Result<(), Error> {
     service
         .set_failure_actions_on_non_crash_failures(true)
         .map_err(|e| os_error("Setting the recovery actions", e))?;
-    Ok(())
+    service
+        .start::<&std::ffi::OsStr>(&[])
+        .map_err(|e| os_error("Starting the service", e))
 }
 
 /// Stops and removes the service. Removing a service that is not installed succeeds.
@@ -174,6 +204,15 @@ pub fn uninstall() -> Result<(), Error> {
         .current_state;
     if state != ServiceState::Stopped {
         service.stop().map_err(|e| os_error("Stopping the service", e))?;
+        // Wait (a minute at most) so an installer can replace the binary afterwards; runners are asked to stop and
+        // finish a running job, and a busy one is adopted by the next service.
+        for _ in 0..120 {
+            match service.query_status() {
+                Ok(s) if s.current_state == ServiceState::Stopped => break,
+                Ok(_) => std::thread::sleep(Duration::from_millis(500)),
+                Err(_) => break,
+            }
+        }
     }
     service.delete().map_err(|e| os_error("Removing the service", e))
 }
