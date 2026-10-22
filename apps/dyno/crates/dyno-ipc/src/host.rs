@@ -192,13 +192,16 @@ impl Client {
             }) => return Err(IpcError::Timeout(CONNECT_TIMEOUT)),
             Err(e) => return Err(e),
         };
-        stream.set_read_timeout(None)?;
         match answer {
-            Frame::Welcome { version: v } if v == version => Ok(Connection {
-                stream,
-                limit,
-                peer_pid: None,
-            }),
+            // Only now: macOS refuses setsockopt (EINVAL) on a socket whose peer already refused and closed.
+            Frame::Welcome { version: v } if v == version => {
+                stream.set_read_timeout(None)?;
+                Ok(Connection {
+                    stream,
+                    limit,
+                    peer_pid: None,
+                })
+            }
             Frame::Welcome { version: theirs } | Frame::Hello { version: theirs, .. } => Err(IpcError::Version { ours: version, theirs }),
             Frame::Fail { error, .. } if error.code == codes::VERSION => Err(IpcError::Version {
                 ours: version,
