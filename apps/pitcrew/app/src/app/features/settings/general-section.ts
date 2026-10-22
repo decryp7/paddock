@@ -6,7 +6,8 @@ import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { PreferencesService } from '../../core/preferences.service';
 import { ThemeService, type ThemePreference } from '../../core/theme.service';
-import { NOTIFICATION_KINDS, notificationKindLabel } from '../../shared/labels';
+import { notificationKindLabel } from '../../shared/labels';
+import { KIND_GROUPS } from './channels/channels-model';
 
 /** Theme, start at log-in, and which notifications show in this window. */
 @Component({
@@ -21,7 +22,12 @@ import { NOTIFICATION_KINDS, notificationKindLabel } from '../../shared/labels';
           @for (t of themes; track t.key) {
             <button type="button" role="radio" class="theme" [attr.aria-checked]="theme.preference() === t.key" (click)="theme.setPreference(t.key)">
               <span class="preview" [class]="t.key"><span></span><span></span></span>
-              <span class="label"><mat-icon [svgIcon]="'pc:' + t.icon" aria-hidden="true" />{{ t.label }}</span>
+              <span class="label">
+                <mat-icon [svgIcon]="'pc:' + t.icon" aria-hidden="true" />{{ t.label }}
+                @if (theme.preference() === t.key) {
+                  <mat-icon class="check" svgIcon="pc:check" aria-hidden="true" />
+                }
+              </span>
             </button>
           }
         </div>
@@ -50,14 +56,25 @@ import { NOTIFICATION_KINDS, notificationKindLabel } from '../../shared/labels';
         <span class="meta">shown in this window; stored on this computer</span>
       </header>
       <div class="card-body">
-        <ul class="kinds">
-          @for (k of kinds; track k) {
-            <li>
-              <span>{{ label(k) }}</span>
-              <mat-slide-toggle hideIcon [checked]="prefs.isEnabled(k)" (change)="prefs.setEnabled(k, $event.checked)" [aria-label]="label(k)" />
-            </li>
-          }
-        </ul>
+        @for (g of groups; track g.key) {
+          <div class="group">
+            <div class="group-head">
+              <h3>{{ g.title }}</h3>
+              <span class="links">
+                <button type="button" class="link" (click)="setGroup(g.kinds, true)" [attr.aria-label]="'Turn on all ' + g.title">All</button>
+                <button type="button" class="link" (click)="setGroup(g.kinds, false)" [attr.aria-label]="'Turn off all ' + g.title">None</button>
+              </span>
+            </div>
+            <ul class="kinds">
+              @for (k of g.kinds; track k) {
+                <li>
+                  <span>{{ label(k) }}</span>
+                  <mat-slide-toggle hideIcon [checked]="prefs.isEnabled(k)" (change)="prefs.setEnabled(k, $event.checked)" [aria-label]="label(k)" />
+                </li>
+              }
+            </ul>
+          </div>
+        }
       </div>
     </section>
   `,
@@ -87,6 +104,9 @@ import { NOTIFICATION_KINDS, notificationKindLabel } from '../../shared/labels';
     .theme[aria-checked='true'] {
       border-color: var(--accent);
       box-shadow: 0 0 0 1px var(--accent);
+    }
+    .label {
+      width: 100%;
     }
     .preview {
       display: grid;
@@ -126,6 +146,10 @@ import { NOTIFICATION_KINDS, notificationKindLabel } from '../../shared/labels';
       height: 15px;
       color: var(--text-2);
     }
+    .label .check {
+      margin-left: auto;
+      color: var(--accent);
+    }
     .row {
       display: flex;
       align-items: center;
@@ -138,10 +162,43 @@ import { NOTIFICATION_KINDS, notificationKindLabel } from '../../shared/labels';
     .small {
       font-size: var(--text-sm);
     }
+    .card-body {
+      max-width: 560px;
+    }
+    .group + .group {
+      margin-top: var(--space-4);
+    }
+    .group-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: var(--space-1);
+    }
+    h3 {
+      margin: 0;
+      font-size: var(--text-sm);
+      font-weight: var(--weight-medium);
+      color: var(--text-2);
+    }
+    .links {
+      display: flex;
+      gap: var(--space-3);
+    }
+    .link {
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--text-2);
+      font: inherit;
+      font-size: var(--text-sm);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    .link:hover {
+      color: var(--text);
+    }
     .kinds {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0 var(--space-8);
       margin: 0;
       padding: 0;
       list-style: none;
@@ -165,7 +222,7 @@ export class GeneralSection {
     { key: 'light', label: 'Light', icon: 'sun' },
     { key: 'dark', label: 'Dark', icon: 'moon' },
   ];
-  protected readonly kinds = NOTIFICATION_KINDS;
+  protected readonly groups = KIND_GROUPS;
   protected readonly autostart = signal<boolean | null>(null);
   protected readonly autostartError = signal<string | null>(null);
 
@@ -174,6 +231,10 @@ export class GeneralSection {
       (on) => this.autostart.set(on),
       (e) => this.autostartError.set(toCommandError(e).message),
     );
+  }
+
+  protected setGroup(kinds: readonly NotificationKind[], on: boolean): void {
+    for (const k of kinds) this.prefs.setEnabled(k, on);
   }
 
   protected label(k: NotificationKind): string {
