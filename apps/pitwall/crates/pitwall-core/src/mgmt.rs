@@ -700,6 +700,9 @@ pub struct LocalModel {
     pub pinned: bool,
     /// Own idle time.
     pub idle_secs: Option<u64>,
+    /// The engine pack that serves it (`None`: llama.cpp).
+    #[serde(default)]
+    pub engine: Option<String>,
     /// Fit now.
     pub fit: Fit,
 }

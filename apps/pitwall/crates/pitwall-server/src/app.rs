@@ -76,6 +76,8 @@ pub struct AppState {
     pub installs: Mutex<std::collections::BTreeMap<String, mgmt::Download>>,
     /// Count of running engine installs' cancel flags.
     pub install_cancel: Mutex<std::collections::BTreeMap<String, crate::egress::CancelFlag>>,
+    /// Benchmark results of this session.
+    pub benchmarks: Mutex<Vec<mgmt::BenchmarkResult>>,
     /// Secrets of just-created apps, handed over once to the UI.
     pub new_secrets: Mutex<std::collections::HashMap<String, String>>,
     /// The port actually bound.
@@ -157,6 +159,7 @@ impl AppState {
             recent: Mutex::new(VecDeque::new()),
             installs: Mutex::new(Default::default()),
             install_cancel: Mutex::new(Default::default()),
+            benchmarks: Mutex::new(Vec::new()),
             new_secrets: Mutex::new(Default::default()),
             port: std::sync::atomic::AtomicU16::new(0),
         });

@@ -481,3 +481,14 @@ async fn a_dead_engine_is_forgotten_and_reloaded() {
     h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]).await;
     assert_eq!(h.starts.load(Ordering::SeqCst), 2, "reloaded after release");
 }
+
+#[tokio::test]
+async fn benchmarks_are_kept_and_models_report_their_engine() {
+    let h = harness(false).await;
+    let b = h.rpc("run_benchmark", json!({"modelId": "tiny-q4_k_m"})).await;
+    assert_eq!(b.status, 200, "{}", b.body);
+    assert!(b.json()["genTps"].as_f64().unwrap() > 0.0);
+    assert_eq!(h.rpc("benchmarks", json!({})).await.json().as_array().unwrap().len(), 1);
+    let m = h.rpc("local_models", json!({})).await.json();
+    assert!(m[0]["engine"].is_null());
+}

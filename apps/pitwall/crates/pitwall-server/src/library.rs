@@ -407,6 +407,7 @@ pub fn to_dto(f: &LocalFile, loaded: bool, prefs: &pitwall_core::config::ModelPr
         loaded,
         pinned: prefs.pinned,
         idle_secs: prefs.idle_secs,
+        engine: prefs.engine.clone(),
         fit: fit::assess(Some(&size), prefs.context.unwrap_or(context), room),
     }
 }

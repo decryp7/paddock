@@ -371,7 +371,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             mgmt::ErrorCode::NotFound,
             "request content is not kept. Turn on \"Keep request content\" in Settings > Privacy to inspect prompts on this machine.",
         )),
-        "benchmarks" => ok(Vec::<mgmt::BenchmarkResult>::new()),
+        "benchmarks" => ok(lock(&st.benchmarks).clone()),
         "run_benchmark" => {
             let id = model(a, "modelId")?;
             run_benchmark(st, id).await
@@ -819,7 +819,7 @@ async fn run_benchmark(st: &Arc<AppState>, id: ModelId) -> R<Value> {
     }
     let (u, t) = done.ok_or_else(|| err(mgmt::ErrorCode::Internal, "the benchmark ended early"))?;
     let secs = start.elapsed().as_secs_f64().max(0.001);
-    ok(mgmt::BenchmarkResult {
+    let result = mgmt::BenchmarkResult {
         model_id: id.to_string(),
         build: st.llama.active().map(|b| b.id).unwrap_or_default(),
         at: now_ms(),
@@ -832,7 +832,13 @@ async fn run_benchmark(st: &Arc<AppState>, id: ModelId) -> R<Value> {
             .iter()
             .find(|m| m.model_id == id.as_str())
             .map_or(0, |m| m.context_tokens),
-    })
+    };
+    {
+        let mut g = lock(&st.benchmarks);
+        g.retain(|b| b.model_id != result.model_id);
+        g.push(result.clone());
+    }
+    ok(result)
 }
 
 async fn live(State(st): S, h: HeaderMap) -> Response {
