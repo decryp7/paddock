@@ -1,10 +1,10 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { CommandError, DiskUsage, HfModel, HfRepo, LocalModel, PackEngine, PacksInfo, QuantVariant, Recommendation } from '../../core/api.types';
+import type { CommandError, DiskUsage, HfModel, HfRepo, LocalModel, PackEngine, PacksInfo, QuantVariant, Recommendation, SlotsChange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
-import { bytes } from '../../shared/format';
+import { bytes, slotsText } from '../../shared/format';
 
 interface ModelsState {
   library: LocalModel[];
@@ -216,6 +216,23 @@ export const ModelsStore = signalStore(
       async setIdle(id: string, idleSecs: number | null): Promise<void> {
         const ok = await act(`model:${id}`, () => backend.setModelIdle(id, idleSecs), idleSecs === null ? 'Uses the global idle time again.' : 'Idle time saved.');
         if (ok) patchState(store, { library: store.library().map((m) => (m.id === id ? { ...m, idleSecs } : m)) });
+      },
+
+      /**
+       * Sets a model's parallel slots (null: the default). The engine applies them the next time the model loads;
+       * a loaded model is never reloaded or interrupted, so the message says when the change takes effect.
+       */
+      async setSlots(id: string, slots: number | null): Promise<boolean> {
+        const result: { change?: SlotsChange } = {};
+        const ok = await act(`model:${id}`, async () => {
+          result.change = await backend.setModelSlots(id, slots);
+        });
+        const c = result.change;
+        if (!ok || !c) return false;
+        const name = store.library().find((m) => m.id === id)?.name ?? id;
+        patchState(store, { library: store.library().map((m) => (m.id === id ? { ...m, slots: c.slots, slotsCustom: slots !== null, loadedSlots: c.loadedSlots } : m)) });
+        toasts.ok(c.appliesOnNextLoad ? `${slotsText(c.slots)} saved. ${name} keeps ${slotsText(c.loadedSlots ?? c.slots)} until it loads again.` : `${slotsText(c.slots)} saved.`);
+        return true;
       },
 
       async deleteModel(id: string): Promise<void> {

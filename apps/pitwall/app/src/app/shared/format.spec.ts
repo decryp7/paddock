@@ -1,4 +1,4 @@
-import { ago, bytes, clock, compact, countdown, date, duration, gb, int, percent, rate, seconds } from './format';
+import { ago, bytes, clock, compact, concurrencyText, countdown, date, duration, gb, int, percent, rate, seconds, slotsText, tokensText } from './format';
 
 const GB = 1024 ** 3;
 
@@ -69,5 +69,15 @@ describe('format', () => {
     expect(rate(undefined)).toBe('—');
     expect(int(12345.6)).toBe('12,346');
     expect(int(null)).toBe('—');
+  });
+
+  it('words slots, concurrency and tokens', () => {
+    expect(slotsText(1)).toBe('1 slot');
+    expect(slotsText(4)).toBe('4 slots');
+    expect(concurrencyText(0)).toBe('does not fit even one request');
+    expect(concurrencyText(1)).toBe('one request at a time');
+    expect(concurrencyText(6)).toBe('up to 6 requests at once');
+    expect(tokensText(8192)).toBe('8,192 tokens');
+    expect(tokensText(1)).toBe('1 token');
   });
 });

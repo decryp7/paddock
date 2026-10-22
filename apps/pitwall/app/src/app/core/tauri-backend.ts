@@ -7,6 +7,8 @@ import type {
   BenchmarkResult,
   CreatedKey,
   DiskUsage,
+  SlotFit,
+  SlotsChange,
   Download,
   Engine,
   AppDetail,
@@ -145,6 +147,12 @@ export class TauriBackend implements PitwallBackend {
   }
   setModelIdle(id: string, idleSecs: number | null): Promise<void> {
     return this.run('set_model_idle', { id, idleSecs });
+  }
+  setModelSlots(id: string, slots: number | null): Promise<SlotsChange> {
+    return this.run('set_model_slots', { id, slots });
+  }
+  modelFit(id: string, context: number | null, slots: number | null): Promise<SlotFit> {
+    return this.run('model_fit', { id, context, slots });
   }
   diskUsage(): Promise<DiskUsage> {
     return this.run('disk_usage');

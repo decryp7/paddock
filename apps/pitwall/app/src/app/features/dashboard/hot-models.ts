@@ -5,7 +5,7 @@ import { RouterLink } from '@angular/router';
 import type { LoadedModel } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
-import { bytes, countdown } from '../../shared/format';
+import { bytes, countdown, slotsText } from '../../shared/format';
 import { hotStateLook } from '../../shared/labels';
 import { seriesColor } from '../../shared/theme-tokens';
 import { EmptyState } from '../../shared/ui/empty-state';
@@ -48,7 +48,7 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
               }
               <span>{{ size(m.ramBytes) }} RAM</span>
               @if (!compact()) {
-                <span>{{ ctx(m.contextTokens) }} ctx</span>
+                <span>{{ ctx(m.contextTokens) }} ctx each · {{ slotsOf(m.slots) }}</span>
               }
             </div>
           </div>
@@ -264,6 +264,7 @@ export class HotModels {
   protected readonly live = inject(LiveStore);
   protected readonly look = (m: LoadedModel) => hotStateLook(m.state);
   protected readonly size = bytes;
+  protected readonly slotsOf = slotsText;
   protected readonly countdownText = countdown;
   protected readonly progress = idleProgress;
   private readonly theme = inject(ThemeService);

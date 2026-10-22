@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, input, signal } fro
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { Fit, QuantVariant, Recommendation } from '../../core/api.types';
-import { ago, bytes, compact } from '../../shared/format';
+import { ago, bytes, compact, concurrencyText } from '../../shared/format';
 import { fitLook } from '../../shared/labels';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
@@ -134,7 +134,12 @@ export function fitDetail(f: Fit): string {
                     }
                   </td>
                   <td class="right num">{{ size(v.sizeBytes) }}</td>
-                  <td><span class="pill dot" [attr.data-tone]="look(v).tone" [matTooltip]="v.fit.message">{{ look(v).label }}</span></td>
+                  <td>
+                    <span class="pill dot" [attr.data-tone]="look(v).tone" [matTooltip]="v.fit.message">{{ look(v).label }}</span>
+                    @if (v.fit.verdict !== 'wontFit' && v.fit.verdict !== 'unknown') {
+                      <span class="faint parts">{{ concurrency(v.maxSlots) }}</span>
+                    }
+                  </td>
                   <td class="needs" [matTooltip]="v.fit.message">{{ detail(v.fit) }}</td>
                   <td class="right">
                     @if (v.downloaded) {
@@ -360,6 +365,7 @@ export class DiscoverTab implements OnInit {
   protected readonly count = compact;
   protected readonly when = ago;
   protected readonly detail = fitDetail;
+  protected readonly concurrency = concurrencyText;
   protected readonly look = (v: QuantVariant) => fitLook(v.fit.verdict);
 
   ngOnInit(): void {

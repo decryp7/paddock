@@ -9,6 +9,28 @@ test.describe('models', () => {
     await expect(page.getByText('Loaded', { exact: true }).first()).toBeVisible();
   });
 
+  test('slots: see what each adds, check the fit table, save, and learn a loaded model keeps its count', async ({ page }) => {
+    await openApp(page, '/models');
+    // A loaded model: the change is saved but applies on the next load.
+    await page.getByRole('button', { name: /^Parallel slots for Qwen3 8B Instruct/ }).click();
+    const panel = page.locator('pw-slots-panel');
+    await expect(panel).toContainText('Parallel slots · Qwen3 8B Instruct');
+    await expect(panel.getByRole('radio', { name: /^4 adds ~/ })).toBeVisible();
+    await expect(panel.locator('.fit-table tbody tr')).toHaveCount(4);
+    await expect(panel.locator('.sum')).toContainText('requests at once');
+    await panel.getByRole('radio', { name: /^8 / }).click();
+    await expect(panel.locator('.fit-table tr.sel')).toContainText('8');
+    await panel.getByRole('button', { name: 'Save 8 slots' }).click();
+    await expect(page.getByText(/8 slots saved\. Qwen3 8B Instruct keeps 2 slots until it loads again/)).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Parallel slots for Qwen3 8B Instruct: 8 slots/ })).toBeVisible();
+    // Discover shows the concurrency answer next to the verdict.
+    await page.getByRole('tab', { name: /Discover/ }).click();
+    await page.getByLabel('Search Hugging Face for GGUF models').fill('gemma');
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+    await page.locator('pw-discover-tab .hit').first().click();
+    await expect(page.locator('pw-discover-tab tbody')).toContainText(/requests at once|one request at a time/);
+  });
+
   test('searches Hugging Face, shows fit verdicts and downloads a variant', async ({ page }) => {
     await openApp(page, '/models');
     await page.getByRole('tab', { name: /Discover/ }).click();

@@ -10,8 +10,11 @@ import type {
   AppUpdateStatus,
   BenchmarkResult,
   CommandError,
+  Fit,
   CreatedKey,
   DiskUsage,
+  SlotFit,
+  SlotsChange,
   Download,
   Engine,
   EngineIssue,
@@ -64,12 +67,17 @@ import {
   demoPairings,
   demoPresets,
   demoRepo,
+  demoSlotFit,
   demoRequests,
   demoSearch,
   demoSettings,
   presetMemory,
   prng,
 } from './mock-data';
+
+/** The slots a model loads with unless it has its own choice, and the context each slot gets (mirrors the engine's defaults). */
+const DEFAULT_SLOTS = 2;
+const DEFAULT_CONTEXT = 8192;
 
 export interface MockOptions {
   /** Reference time for all demo data (default: now). */
@@ -293,7 +301,7 @@ export class MockBackend implements PitwallBackend {
       const quant = /-(Q\d\w*|F16|BF16)(?:-|\.)/i.exec(d.name)?.[1] ?? null;
       const id = d.name.replace(/\.gguf$/i, '').toLowerCase();
       if (!this.library.some((m) => m.id === id)) {
-        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, fit: demoFit(d.bytesTotal) });
+        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, fit: demoFit(d.bytesTotal) });
       }
     } else {
       const engine = this.engineOfBuild(d.id.replace(/^eng-\d+-/, ''));
@@ -321,7 +329,10 @@ export class MockBackend implements PitwallBackend {
 
   private setLibraryLoaded(id: string, loaded: boolean): void {
     const m = this.library.find((x) => x.id === id);
-    if (m) m.loaded = loaded;
+    if (m) {
+      m.loaded = loaded;
+      m.loadedSlots = loaded ? m.slots : null;
+    }
   }
 
   private async reply<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
@@ -492,8 +503,9 @@ export class MockBackend implements PitwallBackend {
       if (!this.loaded.some((x) => x.modelId === id)) {
         const now = this.now();
         const vram = Math.min(m.sizeBytes * 0.9, 3.5 * GiB);
-        this.loaded.push({ modelId: id, name: m.name, engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: m.sizeBytes * 1.1 - vram, vramBytes: vram, contextTokens: 8192, pinned: m.pinned, activeRequests: 0, loadedAt: now, lastUsedAt: now, idleReleaseAt: m.pinned ? null : now + (m.idleSecs ?? this.settings_.memory.idleUnloadSecs) * 1000, coldStartMs: 2100, capabilities: m.capabilities });
+        this.loaded.push({ modelId: id, name: m.name, engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: m.sizeBytes * 1.1 - vram, vramBytes: vram, contextTokens: 8192, slots: m.slots, pinned: m.pinned, activeRequests: 0, loadedAt: now, lastUsedAt: now, idleReleaseAt: m.pinned ? null : now + (m.idleSecs ?? this.settings_.memory.idleUnloadSecs) * 1000, coldStartMs: 2100, capabilities: m.capabilities });
         m.loaded = true;
+        m.loadedSlots = m.slots;
         this.pushEvent({ kind: 'modelLoaded', severity: 'info', message: `Loaded ${m.name} (2.1 s cold start)`, modelId: id, appId: null, reason: null });
         this.emit({ kind: 'models', models: clone(this.loaded) });
       }
@@ -529,6 +541,32 @@ export class MockBackend implements PitwallBackend {
       const lib = this.library.find((x) => x.id === id) ?? this.fail('notFound', `No model ${id}.`);
       lib.idleSecs = idleSecs;
     });
+  }
+
+  setModelSlots(id: string, slots: number | null): Promise<SlotsChange> {
+    return this.reply('setModelSlots', () => {
+      if (slots !== null && (!Number.isInteger(slots) || slots < 1 || slots > 16)) this.fail('badRequest', 'Parallel slots must be between 1 and 16, not ' + slots + '.');
+      const lib = this.library.find((x) => x.id === id) ?? this.fail('notFound', `No model ${id}.`);
+      lib.slots = slots ?? DEFAULT_SLOTS;
+      lib.slotsCustom = slots !== null;
+      lib.fit = this.fitAt(lib);
+      return { slots: lib.slots, loadedSlots: lib.loadedSlots, appliesOnNextLoad: lib.loadedSlots !== null && lib.loadedSlots !== lib.slots };
+    });
+  }
+
+  modelFit(id: string, context: number | null, slots: number | null): Promise<SlotFit> {
+    return this.reply('modelFit', () => {
+      const lib = this.library.find((x) => x.id === id) ?? this.fail('notFound', `No model ${id}.`);
+      if (context !== null && (context < 512 || context > 1_048_576)) this.fail('badRequest', 'The context must be between 512 and 1048576 tokens.');
+      if (slots !== null && (!Number.isInteger(slots) || slots < 1 || slots > 16)) this.fail('badRequest', 'Parallel slots must be between 1 and 16, not ' + slots + '.');
+      return demoSlotFit(lib, context ?? DEFAULT_CONTEXT, slots ?? lib.slots);
+    });
+  }
+
+  /** The library fit at the model's slots (the table shows one verdict per row). */
+  private fitAt(m: LocalModel): Fit {
+    const f = demoSlotFit(m, DEFAULT_CONTEXT, m.slots);
+    return { ...m.fit, verdict: f.verdict, message: f.verdict === 'wontFit' ? `${m.slots} slots do not fit; choose fewer or a shorter context.` : m.fit.message };
   }
 
   diskUsage(): Promise<DiskUsage> {

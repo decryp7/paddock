@@ -105,7 +105,10 @@ export interface LoadedModel {
   state: HotState;
   ramBytes: number;
   vramBytes: number;
+  /** Context per slot. */
   contextTokens: number;
+  /** Parallel slots it was loaded with; a change in its preferences applies on the next load. */
+  slots: number;
   pinned: boolean;
   activeRequests: number;
   loadedAt: number;
@@ -474,6 +477,55 @@ export interface LocalModel {
    * server's `local_models` does not report it yet (the UI then remembers the choice it sent).
    */
   engine?: string | null;
+  /** Parallel slots it loads with: its own choice or the default. */
+  slots: number;
+  /** The slots are this model's own choice (false: the default from the settings). */
+  slotsCustom: boolean;
+  /** The slots it is loaded with now (null: not loaded). A different `slots` applies on the next load. */
+  loadedSlots: number | null;
+}
+
+/** One row of the slots fit table: what `slots` parallel slots mean at the asked context per slot. */
+export interface SlotChoice {
+  slots: number;
+  verdict: FitVerdict;
+  /** Memory the model needs with this many slots. */
+  needBytes: number;
+  /** What this adds over a single slot. */
+  extraBytes: number;
+  /** Largest context per slot that fits ("tight" counts). */
+  maxContext: number;
+  /** Largest context per slot that fits with room to spare. */
+  comfortableContext: number;
+}
+
+/** The engine's answer to "how much context or concurrency fits" for a model. */
+export interface SlotFit {
+  /** Context per slot asked about. */
+  context: number;
+  /** The slots chosen. */
+  slots: number;
+  verdict: FitVerdict;
+  /** Memory independent of the slots (weights, projector, compute buffers). */
+  baseBytes: number;
+  /** What each slot adds at this context. */
+  perSlotBytes: number;
+  /** The KV size comes from the model's header (false: a typical-model estimate). */
+  kvExact: boolean;
+  /** The most slots that fit at this context (0: not even one). */
+  maxSlots: number;
+  /** The most slots that fit with room to spare. */
+  comfortableSlots: number;
+  choices: SlotChoice[];
+  message: string;
+}
+
+/** The result of changing a model's slots. */
+export interface SlotsChange {
+  slots: number;
+  loadedSlots: number | null;
+  /** It is loaded with a different count: the change applies the next time it loads. */
+  appliesOnNextLoad: boolean;
 }
 
 export interface HfModel {
@@ -494,6 +546,8 @@ export interface QuantVariant {
   parts: number;
   sha256: string | null;
   fit: Fit;
+  /** The most parallel slots that fit at the context the fit was checked at (0: not even one). */
+  maxSlots: number;
   downloaded: boolean;
 }
 

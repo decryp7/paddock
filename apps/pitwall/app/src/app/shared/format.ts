@@ -105,3 +105,20 @@ export function int(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return '—';
   return Math.round(n).toLocaleString('en-US');
 }
+
+/** `1 slot`, `4 slots`. */
+export function slotsText(n: number): string {
+  return `${n} ${n === 1 ? 'slot' : 'slots'}`;
+}
+
+/** What a model's parallel capacity means in words: `up to 4 requests at once`, `no parallel requests`. */
+export function concurrencyText(maxSlots: number): string {
+  if (maxSlots <= 0) return 'does not fit even one request';
+  if (maxSlots === 1) return 'one request at a time';
+  return `up to ${maxSlots} requests at once`;
+}
+
+/** Tokens as a plain count with separators: `8,192 tokens`. */
+export function tokensText(n: number): string {
+  return `${int(n)} ${n === 1 ? 'token' : 'tokens'}`;
+}

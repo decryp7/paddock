@@ -156,6 +156,43 @@ describe('MockBackend', () => {
     expect(await mock.releaseMemory()).toBeGreaterThan(0);
   });
 
+  it('sets parallel slots, tells when they apply, and answers the fit table', async () => {
+    const mock = new MockBackend({ now: clock });
+    const before = (await mock.localModels()).find((m) => m.id === 'qwen3-8b-instruct-q4_k_m')!;
+    expect([before.slots, before.slotsCustom, before.loadedSlots]).toEqual([2, false, 2]);
+    // Loaded: the change applies on the next load.
+    expect(await mock.setModelSlots('qwen3-8b-instruct-q4_k_m', 8)).toEqual({ slots: 8, loadedSlots: 2, appliesOnNextLoad: true });
+    expect((await mock.localModels()).find((m) => m.id === before.id)!.slotsCustom).toBe(true);
+    expect(await mock.setModelSlots('qwen3-8b-instruct-q4_k_m', null)).toMatchObject({ slots: 2, appliesOnNextLoad: false });
+    // Not loaded: nothing pending; loading applies them.
+    expect(await mock.setModelSlots('gemma-3-12b-it-q4_k_m', 1)).toEqual({ slots: 1, loadedSlots: null, appliesOnNextLoad: false });
+    await mock.loadModel('gemma-3-12b-it-q4_k_m');
+    expect((await mock.localModels()).find((m) => m.id === 'gemma-3-12b-it-q4_k_m')!.loadedSlots).toBe(1);
+    await expect(mock.setModelSlots('gemma-3-12b-it-q4_k_m', 0)).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(mock.setModelSlots('gemma-3-12b-it-q4_k_m', 17)).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(mock.setModelSlots('nope', 2)).rejects.toMatchObject({ code: 'notFound' });
+
+    const fit = await mock.modelFit('qwen3-8b-instruct-q4_k_m', 8192, 4);
+    expect(fit.choices.map((c) => c.slots)).toEqual([1, 2, 4, 8]);
+    expect(fit.choices[0]!.extraBytes).toBe(0);
+    expect(fit.choices[2]!.needBytes - fit.choices[1]!.needBytes).toBeCloseTo(2 * fit.perSlotBytes);
+    expect(fit.choices[0]!.maxContext).toBeGreaterThan(fit.choices[3]!.maxContext);
+    expect(fit.maxSlots).toBeGreaterThanOrEqual(fit.comfortableSlots);
+    expect((await mock.modelFit('qwen3-8b-instruct-q4_k_m', null, null)).context).toBe(8192);
+    expect((await mock.modelFit('qwen3-8b-instruct-q4_k_m', 4096, 5)).choices.map((c) => c.slots)).toContain(5);
+    // A model too big for even one slot says so.
+    const big = await mock.modelFit('qwen3-8b-instruct-q4_k_m', 1_000_000, 1);
+    expect(big.maxSlots).toBe(0);
+    expect(big.message).toContain('Not even one slot');
+    await expect(mock.modelFit('qwen3-8b-instruct-q4_k_m', 10, null)).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(mock.modelFit('qwen3-8b-instruct-q4_k_m', null, 99)).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(mock.modelFit('nope', null, null)).rejects.toMatchObject({ code: 'notFound' });
+    // Variants report how many requests fit at once.
+    const repo = await mock.repoFiles('Qwen/Qwen3-8B-Instruct-GGUF');
+    expect(repo.variants.every((v) => v.maxSlots >= 0 && v.maxSlots <= 16)).toBe(true);
+    expect(repo.variants.some((v) => v.maxSlots > 0)).toBe(true);
+  });
+
   it('refuses to load a model that will not fit', async () => {
     const mock = new MockBackend({ now: clock });
     const d = await mock.downloadModel('Qwen/Qwen3-32B-Instruct-GGUF', 'Qwen3-32B-Instruct-F16-00001-of-00002.gguf', null);

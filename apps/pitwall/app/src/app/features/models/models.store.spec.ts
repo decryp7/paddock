@@ -155,3 +155,26 @@ describe('ModelsStore', () => {
     expect(store.library().length).toBe(6);
   });
 });
+
+describe('ModelsStore slots', () => {
+  it('saves slots, keeps the library in step and says when a loaded model picks them up', async () => {
+    const { store, toasts } = setup();
+    await store.load();
+    expect(await store.setSlots('qwen3-8b-instruct-q4_k_m', 8)).toBe(true);
+    const m = store.library().find((x) => x.id === 'qwen3-8b-instruct-q4_k_m')!;
+    expect([m.slots, m.slotsCustom, m.loadedSlots]).toEqual([8, true, 2]);
+    expect(toasts.toasts().at(-1)?.message).toContain('keeps 2 slots until it loads again');
+    expect(await store.setSlots('gemma-3-12b-it-q4_k_m', 1)).toBe(true);
+    expect(toasts.toasts().at(-1)?.message).toBe('1 slot saved.');
+    expect(await store.setSlots('gemma-3-12b-it-q4_k_m', null)).toBe(true);
+    expect(store.library().find((x) => x.id === 'gemma-3-12b-it-q4_k_m')).toMatchObject({ slots: 2, slotsCustom: false });
+  });
+
+  it('reports a refused change and leaves the library alone', async () => {
+    const { store, toasts } = setup(new MockBackend());
+    await store.load();
+    expect(await store.setSlots('gemma-3-12b-it-q4_k_m', 99)).toBe(false);
+    expect(toasts.toasts().at(-1)?.tone).toBe('bad');
+    expect(store.library().find((x) => x.id === 'gemma-3-12b-it-q4_k_m')?.slots).toBe(2);
+  });
+});

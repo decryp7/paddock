@@ -21,6 +21,7 @@ const model = (over: Partial<LoadedModel> = {}): LoadedModel => ({
   ramBytes: 1024 ** 3,
   vramBytes: 0,
   contextTokens: 4096,
+  slots: 2,
   pinned: false,
   activeRequests: 0,
   loadedAt: NOW - 60_000,

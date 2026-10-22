@@ -3,12 +3,13 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output, si
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
-import { ago, bytes, seconds } from '../../shared/format';
+import { ago, bytes, seconds, slotsText } from '../../shared/format';
 import { CAPABILITY_LABEL, fitLook } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
 import { ModelsStore } from './models.store';
+import { SlotsPanel } from './slots-panel';
 
 /** Per-model idle choices (seconds); `null` follows Settings ▸ Memory. */
 export const IDLE_CHOICES: readonly number[] = [60, 120, 300, 600, 1800, 3600];
@@ -35,7 +36,7 @@ export function contextText(tokens: number | null): string {
 /** The local library: disk usage with clean-up, and every model with load, pin, idle override and delete. */
 @Component({
   selector: 'pw-library-tab',
-  imports: [MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, EmptyState],
+  imports: [MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, EmptyState, SlotsPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Disk" icon="disk" [loading]="store.loading()" [error]="store.disk() ? null : store.error()" [ready]="!!store.disk()" [skeletonLines]="2" (retry)="store.load()">
@@ -79,6 +80,7 @@ export function contextText(tokens: number | null): string {
                 <th scope="col" class="right">Size</th>
                 <th scope="col">Capabilities</th>
                 <th scope="col">Engine</th>
+                <th scope="col">Slots</th>
                 <th scope="col">Release when idle</th>
                 <th scope="col">Status</th>
                 <th scope="col"><span class="sr-only">Actions</span></th>
@@ -114,6 +116,25 @@ export function contextText(tokens: number | null): string {
                     } @else {
                       <span class="faint">llama.cpp</span>
                     }
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      class="btn ghost sm idle-btn"
+                      [id]="'slots-' + m.id"
+                      cdkOverlayOrigin
+                      #slotsOrigin="cdkOverlayOrigin"
+                      [attr.aria-label]="'Parallel slots for ' + m.name + ': ' + slotsLabel(m)"
+                      aria-haspopup="dialog"
+                      [attr.aria-expanded]="slotsOpen() === m.id"
+                      [matTooltip]="slotsHint(m)"
+                      (click)="toggleSlots(m.id)"
+                    >
+                      {{ slotsLabel(m) }}<mat-icon svgIcon="pw:chevron-down" aria-hidden="true" />
+                    </button>
+                    <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="slotsOrigin" [cdkConnectedOverlayOpen]="slotsOpen() === m.id" [cdkConnectedOverlayPush]="true" [cdkConnectedOverlayViewportMargin]="12" (overlayOutsideClick)="slotsOpen.set(null)" (detach)="slotsOpen.set(null)">
+                      <pw-slots-panel role="dialog" [attr.aria-label]="'Parallel slots for ' + m.name" [model]="m" (closed)="slotsOpen.set(null)" (keydown.escape)="slotsOpen.set(null)" />
+                    </ng-template>
                   </td>
                   <td>
                     <button
@@ -390,6 +411,22 @@ export class LibraryTab {
   });
 
   protected readonly idleOpen = signal<string | null>(null);
+  protected readonly slotsOpen = signal<string | null>(null);
+
+  /** `4 slots`, with the default marked: `2 slots (default)`. */
+  protected slotsLabel(m: LocalModel): string {
+    return m.slotsCustom ? slotsText(m.slots) : `${slotsText(m.slots)} (default)`;
+  }
+
+  /** What the button tells on hover, including that a loaded model keeps its count until it loads again. */
+  protected slotsHint(m: LocalModel): string {
+    if (m.loadedSlots !== null && m.loadedSlots !== m.slots) return `Loaded with ${slotsText(m.loadedSlots)}; ${slotsText(m.slots)} apply the next time it loads`;
+    return 'Requests this model serves at once; each slot keeps its own context in memory';
+  }
+
+  protected toggleSlots(id: string): void {
+    this.slotsOpen.update((open) => (open === id ? null : id));
+  }
 
   /** The trigger's text: the model's own idle time, or "Global". */
   protected idleLabel(secs: number | null): string {

@@ -36,6 +36,7 @@ import type {
   UsageCounters,
   UsageRange,
   UsageSeries,
+  SlotFit,
 } from './api.types';
 
 export const GiB = 1024 ** 3;
@@ -127,6 +128,60 @@ export function demoFit(size: number): Fit {
   return fit('wontFit', need, 0, 'none', `Needs about ${(need / GiB).toFixed(0)} GB; this machine has 32 GB.`);
 }
 
+/** The memory the demo box can give a model (free RAM plus VRAM, mock only). */
+const DEMO_BUDGET = 14.6 * GiB + 4.1 * GiB;
+
+/** KV cache bytes per token of a demo model of `paramsB` billion parameters (about 128 KiB for 8B, mock only). */
+function demoKvPerToken(paramsB: number): number {
+  return Math.min(512 * 1024, Math.max(16 * 1024, (paramsB / 8) * 128 * 1024));
+}
+
+/** How many parallel slots a downloaded-size model would fit at 8,192 tokens each on the demo box (mock only). */
+export function demoMaxSlots(size: number): number {
+  const base = size * 1.05 + 512 * MiB;
+  const per = 8192 * demoKvPerToken((size / GiB) * 1.7);
+  if (base + per > DEMO_BUDGET) return 0;
+  return Math.min(16, Math.floor((DEMO_BUDGET * 0.8 - base) / per) || 1);
+}
+
+/** The slots fit table of a demo model (mock only: the real numbers come from the engine). */
+export function demoSlotFit(m: Pick<LocalModel, 'sizeBytes' | 'paramsB' | 'contextMax'>, context: number, slots: number): SlotFit {
+  const paramsB = m.paramsB ?? (m.sizeBytes / GiB) * 1.7;
+  const kv = demoKvPerToken(paramsB);
+  const base = m.sizeBytes * 1.05 + 512 * MiB;
+  const per = kv * context;
+  const cap = m.contextMax ?? 1_048_576;
+  const verdictOf = (n: number): FitVerdict => {
+    const need = base + n * per;
+    return need <= DEMO_BUDGET * 0.8 ? 'fits' : need <= DEMO_BUDGET ? 'tight' : 'wontFit';
+  };
+  const maxCtx = (n: number, share: number): number => {
+    const room = DEMO_BUDGET * share - base;
+    if (room <= 0) return 0;
+    return Math.min(cap, Math.floor(room / n / kv / 256) * 256);
+  };
+  const counts = [...new Set([1, 2, 4, 8, slots])].sort((a, b) => a - b);
+  const fitting = (share: number): number => {
+    let n = 0;
+    while (n < 16 && base + (n + 1) * per <= DEMO_BUDGET * share) n++;
+    return n;
+  };
+  const maxSlots = fitting(1);
+  const gb = (n: number): string => `${(n / GiB).toFixed(1)} GB`;
+  return {
+    context,
+    slots,
+    verdict: verdictOf(slots),
+    baseBytes: base,
+    perSlotBytes: per,
+    kvExact: m.paramsB !== null,
+    maxSlots,
+    comfortableSlots: fitting(0.8),
+    choices: counts.map((n) => ({ slots: n, verdict: verdictOf(n), needBytes: base + n * per, extraBytes: (n - 1) * per, maxContext: maxCtx(n, 1), comfortableContext: maxCtx(n, 0.8) })),
+    message: maxSlots === 0 ? 'Not even one slot of this size fits on this machine. Choose a shorter context or a smaller quantisation.' : `Each slot adds about ${gb(per)}. Up to ${maxSlots} ${maxSlots === 1 ? 'slot fits' : 'slots fit'} at this context.`,
+  };
+}
+
 export function demoLocalModels(now: number): LocalModel[] {
   const m = (p: Partial<LocalModel> & Pick<LocalModel, 'id' | 'repo' | 'file' | 'name' | 'sizeBytes'>): LocalModel => ({
     quant: null,
@@ -140,12 +195,15 @@ export function demoLocalModels(now: number): LocalModel[] {
     loaded: false,
     pinned: false,
     idleSecs: null,
+    slots: 2,
+    slotsCustom: false,
+    loadedSlots: null,
     fit: demoFit(p.sizeBytes),
     ...p,
   });
   return [
-    m({ id: 'qwen3-8b-instruct-q4_k_m', repo: 'Qwen/Qwen3-8B-Instruct-GGUF', file: 'Qwen3-8B-Instruct-Q4_K_M.gguf', name: 'Qwen3 8B Instruct', quant: 'Q4_K_M', sizeBytes: 5.03 * GiB, paramsB: 8.2, contextMax: 32768, architecture: 'qwen3', capabilities: ['chat', 'tools', 'json'], loaded: true, lastUsedAt: now - 48_000, addedAt: now - 34 * DAY }),
-    m({ id: 'llama-3.2-3b-instruct-q5_k_m', repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF', file: 'Llama-3.2-3B-Instruct-Q5_K_M.gguf', name: 'Llama 3.2 3B Instruct', quant: 'Q5_K_M', sizeBytes: 2.32 * GiB, paramsB: 3.2, contextMax: 131072, architecture: 'llama', capabilities: ['chat', 'tools'], loaded: true, lastUsedAt: now - 2_000, idleSecs: 300 }),
+    m({ id: 'qwen3-8b-instruct-q4_k_m', repo: 'Qwen/Qwen3-8B-Instruct-GGUF', file: 'Qwen3-8B-Instruct-Q4_K_M.gguf', name: 'Qwen3 8B Instruct', quant: 'Q4_K_M', sizeBytes: 5.03 * GiB, paramsB: 8.2, contextMax: 32768, architecture: 'qwen3', capabilities: ['chat', 'tools', 'json'], loaded: true, loadedSlots: 2, lastUsedAt: now - 48_000, addedAt: now - 34 * DAY }),
+    m({ id: 'llama-3.2-3b-instruct-q5_k_m', repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF', file: 'Llama-3.2-3B-Instruct-Q5_K_M.gguf', name: 'Llama 3.2 3B Instruct', quant: 'Q5_K_M', sizeBytes: 2.32 * GiB, paramsB: 3.2, contextMax: 131072, architecture: 'llama', capabilities: ['chat', 'tools'], loaded: true, slots: 4, slotsCustom: true, loadedSlots: 4, lastUsedAt: now - 2_000, idleSecs: 300 }),
     m({ id: 'nomic-embed-text-v1.5-f16', repo: 'nomic-ai/nomic-embed-text-v1.5-GGUF', file: 'nomic-embed-text-v1.5.f16.gguf', name: 'nomic-embed-text v1.5', quant: 'F16', sizeBytes: 262 * MiB, paramsB: 0.14, contextMax: 8192, architecture: 'nomic-bert', capabilities: ['embeddings'], loaded: true, pinned: true, lastUsedAt: now - 9_000 }),
     m({ id: 'gemma-3-12b-it-q4_k_m', repo: 'unsloth/gemma-3-12b-it-GGUF', file: 'gemma-3-12b-it-Q4_K_M.gguf', name: 'Gemma 3 12B', quant: 'Q4_K_M', sizeBytes: 6.79 * GiB, paramsB: 12.2, contextMax: 131072, architecture: 'gemma3', capabilities: ['chat', 'vision', 'json'], projector: 'mmproj-F16.gguf', lastUsedAt: now - 2 * DAY, idleSecs: 120 }),
     m({ id: 'bge-reranker-v2-m3-q8_0', repo: 'gpustack/bge-reranker-v2-m3-GGUF', file: 'bge-reranker-v2-m3-Q8_0.gguf', name: 'BGE reranker v2 m3', quant: 'Q8_0', sizeBytes: 606 * MiB, paramsB: 0.57, contextMax: 8192, architecture: 'xlm-roberta', capabilities: ['rerank'], lastUsedAt: now - 5 * HOUR }),
@@ -155,9 +213,9 @@ export function demoLocalModels(now: number): LocalModel[] {
 
 export function demoLoaded(now: number, idleSecs = 600): LoadedModel[] {
   return [
-    { modelId: 'qwen3-8b-instruct-q4_k_m', name: 'Qwen3 8B Instruct', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: 0.9 * GiB, vramBytes: 6.1 * GiB, contextTokens: 16384, pinned: false, activeRequests: 0, loadedAt: now - 52 * MIN, lastUsedAt: now - 48_000, idleReleaseAt: now - 48_000 + idleSecs * 1000, coldStartMs: 3_420, capabilities: ['chat', 'tools', 'json'] },
-    { modelId: 'llama-3.2-3b-instruct-q5_k_m', name: 'Llama 3.2 3B Instruct', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'busy', ramBytes: 0.4 * GiB, vramBytes: 2.9 * GiB, contextTokens: 8192, pinned: false, activeRequests: 2, loadedAt: now - 14 * MIN, lastUsedAt: now - 2_000, idleReleaseAt: null, coldStartMs: 1_610, capabilities: ['chat', 'tools'] },
-    { modelId: 'nomic-embed-text-v1.5-f16', name: 'nomic-embed-text v1.5', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: 0.12 * GiB, vramBytes: 0.33 * GiB, contextTokens: 8192, pinned: true, activeRequests: 0, loadedAt: now - 5 * HOUR, lastUsedAt: now - 9_000, idleReleaseAt: null, coldStartMs: 420, capabilities: ['embeddings'] },
+    { modelId: 'qwen3-8b-instruct-q4_k_m', name: 'Qwen3 8B Instruct', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: 0.9 * GiB, vramBytes: 6.1 * GiB, contextTokens: 16384, slots: 2, pinned: false, activeRequests: 0, loadedAt: now - 52 * MIN, lastUsedAt: now - 48_000, idleReleaseAt: now - 48_000 + idleSecs * 1000, coldStartMs: 3_420, capabilities: ['chat', 'tools', 'json'] },
+    { modelId: 'llama-3.2-3b-instruct-q5_k_m', name: 'Llama 3.2 3B Instruct', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'busy', ramBytes: 0.4 * GiB, vramBytes: 2.9 * GiB, contextTokens: 8192, slots: 4, pinned: false, activeRequests: 2, loadedAt: now - 14 * MIN, lastUsedAt: now - 2_000, idleReleaseAt: null, coldStartMs: 1_610, capabilities: ['chat', 'tools'] },
+    { modelId: 'nomic-embed-text-v1.5-f16', name: 'nomic-embed-text v1.5', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: 0.12 * GiB, vramBytes: 0.33 * GiB, contextTokens: 8192, slots: 1, pinned: true, activeRequests: 0, loadedAt: now - 5 * HOUR, lastUsedAt: now - 9_000, idleReleaseAt: null, coldStartMs: 420, capabilities: ['embeddings'] },
   ];
 }
 
@@ -290,13 +348,13 @@ export function demoRepo(repo: string, local: LocalModel[]): HfRepo {
     const size = params * 1e9 * bpp;
     const parts = size > 40 * GiB ? 2 : 1;
     const file = parts > 1 ? `${base}-${quant}-00001-of-0000${parts}.gguf` : `${base}-${quant}.gguf`;
-    return { file, quant, sizeBytes: size, parts, sha256: null, fit: demoFit(size), downloaded: local.some((l) => l.repo === repo && l.quant === quant) };
+    return { file, quant, sizeBytes: size, parts, sha256: null, fit: demoFit(size), maxSlots: demoMaxSlots(size), downloaded: local.some((l) => l.repo === repo && l.quant === quant) };
   });
   const vision = /gemma-3|vision|vl/i.test(repo);
   return {
     repo,
     variants,
-    projectors: vision ? [{ file: 'mmproj-F16.gguf', quant: 'F16', sizeBytes: 854 * MiB, parts: 1, sha256: null, fit: demoFit(854 * MiB), downloaded: false }] : [],
+    projectors: vision ? [{ file: 'mmproj-F16.gguf', quant: 'F16', sizeBytes: 854 * MiB, parts: 1, sha256: null, fit: demoFit(854 * MiB), maxSlots: 0, downloaded: false }] : [],
     license: /gemma/i.test(repo) ? 'gemma' : /llama/i.test(repo) ? 'llama3.2' : 'apache-2.0',
     gated: /meta-llama/i.test(repo),
   };

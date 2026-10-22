@@ -6,6 +6,8 @@ import type {
   BenchmarkResult,
   CreatedKey,
   DiskUsage,
+  SlotFit,
+  SlotsChange,
   Download,
   Engine,
   AppDetail,
@@ -69,6 +71,10 @@ export interface PitwallBackend {
   unloadModel(id: string): Promise<void>;
   pinModel(id: string, pinned: boolean): Promise<void>;
   setModelIdle(id: string, idleSecs: number | null): Promise<void>;
+  /** Parallel slots for one model (1 to 16; null: the default). Applies on the model's next load. */
+  setModelSlots(id: string, slots: number | null): Promise<SlotsChange>;
+  /** How much context and concurrency fit for a model; unset arguments use its current context and slots. */
+  modelFit(id: string, context: number | null, slots: number | null): Promise<SlotFit>;
   diskUsage(): Promise<DiskUsage>;
   /** Engine packs, pack problems and the catalog's recommendations for this machine, optionally for one tag. */
   packs(tag?: string | null): Promise<PacksInfo>;

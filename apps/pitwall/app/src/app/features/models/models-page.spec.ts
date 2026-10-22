@@ -12,6 +12,7 @@ import { fitDetail } from './discover-tab';
 import { etaMs } from './downloads-list';
 import { contextText, idleOptions, paramsText } from './library-tab';
 import { ModelsPage, nextTab } from './models-page';
+import { ModelsStore } from './models.store';
 
 const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
@@ -176,6 +177,7 @@ describe('ModelsPage', () => {
     expect(el.textContent).toContain('Tight');
     expect(el.textContent).toContain("Won't fit");
     expect(el.textContent).toContain('In library');
+    expect(el.querySelector('pw-discover-tab tbody')?.textContent).toMatch(/up to \d+ requests at once|one request at a time/);
     (el.querySelector('pw-discover-tab input[type="checkbox"]') as HTMLInputElement).click();
     fixture.detectChanges();
     (el.querySelector('button[aria-label^="Download gemma-3-12b-it-Q2_K"]') as HTMLButtonElement).click();
@@ -225,5 +227,33 @@ describe('ModelsPage', () => {
     (el.querySelector('#tab-downloads') as HTMLButtonElement).click();
     await settle();
     expect(el.textContent).toContain('No downloads');
+  });
+
+  it('has a Slots column that opens the slots panel, saves a count and says a loaded model keeps its own', async () => {
+    const backend = new MockBackend();
+    const { el, settle, fixture } = await render(backend);
+    expect(el.querySelector('pw-library-tab thead')?.textContent).toContain('Slots');
+    const trigger = el.querySelector('button[aria-label="Parallel slots for Gemma 3 12B: 2 slots (default)"]') as HTMLButtonElement;
+    expect(trigger).not.toBeNull();
+    expect(el.querySelector('button[aria-label^="Parallel slots for Llama 3.2 3B Instruct"]')?.textContent).toContain('4 slots');
+    trigger.click();
+    await settle();
+    const panel = document.querySelector('pw-slots-panel') as HTMLElement;
+    expect(panel.textContent).toContain('Parallel slots · Gemma 3 12B');
+    (Array.from(panel.querySelectorAll('[role="radio"]')).find((b) => b.querySelector('b')?.textContent === '4') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    (Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Save')) as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('pw-slots-panel')).toBeNull();
+    expect((await backend.localModels()).find((m) => m.id === 'gemma-3-12b-it-q4_k_m')?.slots).toBe(4);
+    expect(el.querySelector('button[aria-label="Parallel slots for Gemma 3 12B: 4 slots"]')).not.toBeNull();
+    // A loaded model with a different saved count explains it on hover.
+    await backend.setModelSlots('qwen3-8b-instruct-q4_k_m', 8);
+    const store = fixture.debugElement.injector.get(ModelsStore);
+    await store.load();
+    fixture.detectChanges();
+    el.querySelector('button[aria-label^="Parallel slots for Qwen3 8B Instruct"]')!.dispatchEvent(new Event('mouseenter'));
+    await settle();
+    expect(document.body.textContent).toContain('Loaded with 2 slots; 8 slots apply the next time it loads');
   });
 });
