@@ -544,6 +544,8 @@ export interface RequestRecord {
   endpoint: string;
   modelId: string | null;
   chosenBy: ChosenBy;
+  /** The preset (alias) the app asked for, when its `model` field named one; `modelId` is what it resolved to. */
+  alias: string | null;
   priority: Priority;
   status: number;
   stream: boolean;
@@ -556,6 +558,46 @@ export interface RequestRecord {
   error: string | null;
   /** Content was kept (Settings ▸ Privacy ▸ keep request content). */
   hasContent: boolean;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Model presets and aliases (ADR 0014)
+
+/** A saved preset: `alias` is what apps send as `model`. */
+export interface ModelPreset {
+  alias: string;
+  /** An installed model id, or a capability selection such as `auto:chat,fast`. */
+  target: string;
+  /** Context the model loads with for this preset. */
+  context: number | null;
+  temperature: number | null;
+  topP: number | null;
+  maxTokens: number | null;
+  /** Added in front only when the request has no system message of its own. */
+  systemPrompt: string | null;
+  /** `llama.cpp` or an engine pack's id. */
+  engine: string | null;
+}
+
+/** What the editor sends: the same fields, parsed and validated by the engine. */
+export type PresetDraft = ModelPreset;
+
+/** Where a preset stands now (the engine's answer). */
+export type PresetStatus =
+  | { state: 'ready'; modelId: string; chosenBy: ChosenBy; reason: string; loaded: boolean }
+  | { state: 'stale'; message: string }
+  | { state: 'noMatch'; message: string }
+  | { state: 'shadowed'; message: string };
+
+export interface PresetEntry {
+  preset: ModelPreset;
+  status: PresetStatus;
+}
+
+/** The editor's live check: what is wrong with the draft, and what its target resolves to now. */
+export interface PresetPreview {
+  problem: string | null;
+  status: PresetStatus | null;
 }
 
 export interface RequestContent {

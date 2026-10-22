@@ -12,6 +12,7 @@ import type {
   Preset,
   Priority,
   ProcessHealth,
+  PresetStatus,
   ReleaseReason,
   SelfTest,
   Severity,
@@ -200,6 +201,20 @@ export function eventIcon(kind: EventKind): string {
     limitWarning: 'alert',
   };
   return map[kind];
+}
+
+/** Where a preset stands: always words, never colour alone. */
+export function presetStatusLook(s: PresetStatus): Look {
+  switch (s.state) {
+    case 'ready':
+      return { label: s.loaded ? 'Ready, loaded' : 'Ready', tone: 'ok' };
+    case 'stale':
+      return { label: 'Model removed', tone: 'bad' };
+    case 'noMatch':
+      return { label: 'No model matches', tone: 'warn' };
+    case 'shadowed':
+      return { label: 'Shadowed by a model', tone: 'warn' };
+  }
 }
 
 /** Status-code tone for the request inspector. */

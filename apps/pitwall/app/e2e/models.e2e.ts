@@ -32,4 +32,34 @@ test.describe('models', () => {
     await page.getByRole('tab', { name: /Downloads/ }).click();
     await expect(page.locator('pw-downloads-list')).toContainText('Qwen2.5-Coder');
   });
+
+  test('presets: create one with a live preview from the engine, fix a stale one, delete with a confirmation', async ({ page }) => {
+    await openApp(page, '/models');
+    await page.getByRole('tab', { name: /Presets/ }).click();
+    const list = page.locator('pw-presets-tab');
+    await expect(list).toContainText('debrief-explain');
+    await expect(list).toContainText('Model removed');
+
+    await page.getByRole('button', { name: 'New preset' }).first().click();
+    await page.getByLabel('Name apps send as the model').fill('dyno-notes');
+    await page.getByLabel('Serves from').fill('auto:chat,small');
+    await page.getByLabel('Temperature').fill('0.4');
+    const preview = page.getByRole('status', { name: 'What this preset resolves to' });
+    await expect(preview).toContainText('Would serve');
+    await page.getByLabel('Serves from').fill('no-such-model');
+    await expect(preview).toContainText('Cannot be saved');
+    await expect(page.getByRole('button', { name: 'Create preset' })).toBeDisabled();
+    await page.getByLabel('Serves from').fill('auto:chat,small');
+    await page.getByRole('button', { name: 'Create preset' }).click();
+    await expect(list.getByRole('row', { name: /dyno-notes/ })).toContainText('temperature 0.4');
+
+    await page.getByRole('button', { name: 'Edit legacy-explain' }).click();
+    await page.getByLabel('Serves from').fill('qwen3-8b-instruct-q4_k_m');
+    await page.getByRole('button', { name: 'Save preset' }).click();
+    await expect(list).not.toContainText('Model removed');
+
+    await page.getByRole('button', { name: 'Delete dyno-notes' }).click();
+    await page.getByRole('button', { name: 'Delete preset' }).click();
+    await expect(list.getByRole('row', { name: /dyno-notes/ })).toHaveCount(0);
+  });
 });

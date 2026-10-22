@@ -11,6 +11,7 @@ import {
   LIMIT_LABEL,
   limitStateLook,
   pressureLook,
+  presetStatusLook,
   selfTestLook,
   severityTone,
   statusTone,
@@ -84,5 +85,15 @@ describe('limit labels', () => {
     expect(limitStateLook('warning')).toEqual({ label: 'Close to the limit', tone: 'warn' });
     expect(limitStateLook('exceeded')).toEqual({ label: 'Limit reached', tone: 'bad' });
     expect(eventIcon('limitWarning')).toBe('alert');
+  });
+});
+
+describe('presetStatusLook', () => {
+  it('always has words, and warns for what cannot be served', () => {
+    expect(presetStatusLook({ state: 'ready', modelId: 'm', chosenBy: 'explicit', reason: 'r', loaded: false })).toEqual({ label: 'Ready', tone: 'ok' });
+    expect(presetStatusLook({ state: 'ready', modelId: 'm', chosenBy: 'capabilities', reason: 'r', loaded: true }).label).toBe('Ready, loaded');
+    expect(presetStatusLook({ state: 'stale', message: 'm' })).toEqual({ label: 'Model removed', tone: 'bad' });
+    expect(presetStatusLook({ state: 'noMatch', message: 'm' })).toEqual({ label: 'No model matches', tone: 'warn' });
+    expect(presetStatusLook({ state: 'shadowed', message: 'm' })).toEqual({ label: 'Shadowed by a model', tone: 'warn' });
   });
 });

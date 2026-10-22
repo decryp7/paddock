@@ -55,7 +55,12 @@ import { RequestsStore } from './requests.store';
         <h3 id="pw-req-route">Routing</h3>
         <dl class="kv pitwall-selectable">
           <dt>API</dt><dd>{{ api[r().api] }}</dd>
-          <dt>Model</dt><dd class="mono">{{ r().modelId ?? 'none' }}</dd>
+          @if (r().alias; as alias) {
+            <dt>Preset asked for</dt><dd class="mono">{{ alias }}</dd>
+            <dt>Resolved to</dt><dd class="mono">{{ r().modelId ?? 'none' }}</dd>
+          } @else {
+            <dt>Model</dt><dd class="mono">{{ r().modelId ?? 'none' }}</dd>
+          }
           <dt>Chosen by</dt><dd>{{ chosen[r().chosenBy] }}</dd>
           <dt>Priority</dt><dd>{{ priority[r().priority] }}</dd>
           <dt>Prompt tokens</dt><dd class="num">{{ count(r().promptTokens) }}</dd>

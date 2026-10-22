@@ -9,6 +9,10 @@ import type {
   Download,
   Engine,
   AppDetail,
+  ModelPreset,
+  PresetDraft,
+  PresetEntry,
+  PresetPreview,
   History,
   HistoryRange,
   UsageRange,
@@ -89,6 +93,15 @@ export interface PitwallBackend {
   approvePairing(id: string, permissions: AppPermissions): Promise<void>;
   denyPairing(id: string): Promise<void>;
   pairings(): Promise<PairingRequest[]>;
+
+  // Model presets and aliases
+  presets(): Promise<PresetEntry[]>;
+  createPreset(preset: PresetDraft): Promise<ModelPreset>;
+  /** Replaces the preset `alias` (the draft's alias may rename it). */
+  updatePreset(alias: string, preset: PresetDraft): Promise<ModelPreset>;
+  deletePreset(alias: string): Promise<void>;
+  /** The engine's live check of a draft; `editing` is the alias being edited (not a duplicate of itself). */
+  resolvePreset(preset: PresetDraft, editing: string | null): Promise<PresetPreview>;
 
   // Request inspector
   requests(limit: number): Promise<RequestRecord[]>;

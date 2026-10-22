@@ -14,6 +14,7 @@ const rec = (p: Partial<RequestRecord>): RequestRecord => ({
   id: 'r',
   at: 0,
   appId: 'debrief',
+  alias: null,
   api: 'openai',
   endpoint: '/v1/chat/completions',
   modelId: 'qwen3-8b',
@@ -37,6 +38,11 @@ describe('filterRequests', () => {
 
   it('passes everything without a filter', () => {
     expect(filterRequests(list, NO_FILTER).length).toBe(4);
+  });
+
+  it('finds a request by the preset it asked for', () => {
+    const withAlias = [rec({ id: 'a', alias: 'debrief-explain' }), rec({ id: 'b' })];
+    expect(filterRequests(withAlias, { ...NO_FILTER, text: 'EXPLAIN' }).map((r) => r.id)).toEqual(['a']);
   });
 
   it('filters by app, status and plain text over endpoint and model', () => {

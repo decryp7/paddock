@@ -4,6 +4,7 @@
  * deterministic. Browser development and UI tests only: this is never the reference for behaviour.
  */
 import type {
+  ModelPreset,
   PacksInfo,
   Recommendation,
   AppDetail,
@@ -459,6 +460,7 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
       endpoint,
       modelId: status === 400 ? null : modelId,
       chosenBy: rnd() > 0.6 ? 'explicit' : rnd() > 0.4 ? 'capabilities' : 'default',
+      alias: null,
       priority: appId === 'spotter' ? 'batch' : appId === 'pitcrew' || appId === 'dyno' ? 'background' : 'interactive',
       status,
       stream: !embedding && rnd() > 0.3,
@@ -473,7 +475,24 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
     });
     at -= Math.round(2_000 + rnd() * 25_000);
   }
+  // Some apps ask for a preset by name; `modelId` is what it resolved to.
+  out.forEach((r, i) => {
+    if (r.status === 400 || r.endpoint.includes('embed') || r.endpoint.includes('rerank')) return;
+    if (r.appId === 'debrief' && i % 3 === 0) Object.assign(r, { alias: 'debrief-explain', modelId: 'qwen3-8b-instruct-q4_k_m', chosenBy: 'explicit' });
+    if (r.appId === 'pitcrew' && i % 2 === 0) Object.assign(r, { alias: 'pitcrew-triage', chosenBy: 'capabilities' });
+  });
   return out;
+}
+
+/** Presets an engineer might have set up. `legacy-explain` points at a model that was removed. */
+export function demoPresets(): ModelPreset[] {
+  const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null };
+  return [
+    { ...base, alias: 'debrief-explain', target: 'qwen3-8b-instruct-q4_k_m', temperature: 0.3, maxTokens: 800, systemPrompt: 'Explain the log excerpt to an engineer in plain language. Be concise and name the likely cause first.' },
+    { ...base, alias: 'pitcrew-triage', target: 'auto:chat,tools,fast', context: 16384, temperature: 0.1 },
+    { ...base, alias: 'spotter-summarise', target: 'llama-3.2-3b-instruct-q5_k_m', temperature: 0.2, topP: 0.9, maxTokens: 300, systemPrompt: 'Summarise the text in three short bullet points.' },
+    { ...base, alias: 'legacy-explain', target: 'mistral-7b-instruct-v0.3-q4_k_m' },
+  ];
 }
 
 export function demoBenchmarks(now: number): BenchmarkResult[] {

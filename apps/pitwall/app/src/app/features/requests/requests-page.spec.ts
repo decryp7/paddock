@@ -81,6 +81,26 @@ describe('RequestsPage', () => {
     expect(el.querySelector('pw-request-detail')).toBeNull();
   });
 
+  it('shows which preset an app asked for and what it resolved to', async () => {
+    const { fixture, el, store } = await render();
+    const withAlias = store.records().find((x) => x.alias !== null)!;
+    store.select(withAlias.id);
+    await settle(fixture);
+    expect(el.querySelector('[role="row"][aria-label]')).not.toBeNull();
+    expect(el.textContent).toContain(`via ${withAlias.alias}`);
+    const route = (el.querySelector('pw-request-detail') as HTMLElement).querySelector('[aria-labelledby="pw-req-route"]')!.textContent!;
+    expect(route).toContain('Preset asked for');
+    expect(route).toContain(withAlias.alias!);
+    expect(route).toContain('Resolved to');
+    expect(route).toContain(withAlias.modelId!);
+    const plain = store.records().find((x) => x.alias === null && x.modelId !== null)!;
+    store.select(plain.id);
+    await settle(fixture);
+    const route2 = (el.querySelector('pw-request-detail') as HTMLElement).querySelector('[aria-labelledby="pw-req-route"]')!.textContent!;
+    expect(route2).not.toContain('Preset asked for');
+    expect(route2).toContain('Model');
+  });
+
   it('explains when a request kept no content', async () => {
     const { fixture, el, store } = await render();
     const r = store.records().find((x) => !x.hasContent && x.error)!;

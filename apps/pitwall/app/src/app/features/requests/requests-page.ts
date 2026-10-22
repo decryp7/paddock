@@ -102,7 +102,7 @@ export function msCell(ms: number | null): string {
                 <span role="cell" class="app">{{ appName(r.appId) }}</span>
                 <span role="cell" class="faint">{{ api[r.api] }}</span>
                 <span role="cell" class="mono ep">{{ r.endpoint }}</span>
-                <span role="cell" class="model">{{ r.modelId ? model(r.modelId) : '—' }}</span>
+                <span role="cell" class="model">{{ r.modelId ? model(r.modelId) : '—' }}@if (r.alias) {<span class="faint via"> via {{ r.alias }}</span>}</span>
                 <span role="cell" class="faint">{{ chosen[r.chosenBy] }}</span>
                 <span role="cell"><span class="pill" [attr.data-tone]="tone(r.status)">{{ r.status }}</span></span>
                 <span role="cell" class="num r faint">{{ ms(r.queuedMs) }}</span>

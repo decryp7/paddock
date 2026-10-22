@@ -1,4 +1,4 @@
-import type { AppPermissions, LiveUpdate, PlaygroundEvent, PlaygroundRequest, Settings } from './api.types';
+import type { AppPermissions, LiveUpdate, PlaygroundEvent, PlaygroundRequest, PresetDraft, Settings } from './api.types';
 import type { PitwallBackend } from './backend';
 import { LIVE_EVENT, TauriBackend, type TauriBridge } from './tauri-backend';
 
@@ -39,6 +39,8 @@ const PERMS: AppPermissions = {
 };
 const SETTINGS = { general: { theme: 'dark' } } as unknown as Settings;
 
+const DRAFT: PresetDraft = { alias: 'debrief-explain', target: 'auto:chat', context: null, temperature: 0.3, topP: null, maxTokens: null, systemPrompt: null, engine: null };
+
 /**
  * The command table the Rust side implements (`app/src-tauri/src/commands.rs`). Each row: the call, the command
  * name and the exact arguments. Changing a row is a contract change: mirror it in Rust in the same commit.
@@ -75,6 +77,11 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['rollbackBuild', (b) => b.rollbackBuild(), 'rollback_build', undefined],
   ['apps', (b) => b.apps(), 'apps', undefined],
   ['appDetail', (b) => b.appDetail('pitcrew'), 'app_detail', { appId: 'pitcrew' }],
+  ['presets', (b) => b.presets(), 'presets', undefined],
+  ['createPreset', (b) => b.createPreset(DRAFT), 'create_preset', { preset: DRAFT }],
+  ['updatePreset', (b) => b.updatePreset('old', DRAFT), 'update_preset', { alias: 'old', preset: DRAFT }],
+  ['deletePreset', (b) => b.deletePreset('old'), 'delete_preset', { alias: 'old' }],
+  ['resolvePreset', (b) => b.resolvePreset(DRAFT, 'old'), 'resolve_preset', { preset: DRAFT, editing: 'old' }],
   ['createApp', (b) => b.createApp('Tool'), 'create_app', { name: 'Tool' }],
   ['deleteApp', (b) => b.deleteApp('a1'), 'delete_app', { id: 'a1' }],
   ['createKey', (b) => b.createKey('a1'), 'create_key', { appId: 'a1' }],

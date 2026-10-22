@@ -1,5 +1,10 @@
 import type {
   AppDetail,
+  ModelPreset,
+  PresetDraft,
+  PresetEntry,
+  PresetPreview,
+  PresetStatus,
   AppInfo,
   AppPermissions,
   AppUpdateStatus,
@@ -57,6 +62,7 @@ import {
   demoLocalModels,
   demoPacks,
   demoPairings,
+  demoPresets,
   demoRepo,
   demoRequests,
   demoSearch,
@@ -93,6 +99,9 @@ const clone = <T>(v: T): T => structuredClone(v);
  * The browser-build backend: realistic, deterministic demo data and simulated live updates. Browser development and
  * UI tests only; it mimics the contract and is never the reference for behaviour.
  */
+const CAPABILITY_WORDS = ['chat', 'vision', 'tools', 'json', 'embeddings', 'rerank', 'transcription'];
+const PREFER_WORDS = ['fast', 'quality', 'small', 'balanced'];
+
 export class MockBackend implements PitwallBackend {
   private readonly now: () => number;
   private readonly latency: number;
@@ -114,6 +123,7 @@ export class MockBackend implements PitwallBackend {
   private engines_: Engine[];
   private downloads_: Download[] = [];
   private readonly requests_: RequestRecord[];
+  private presets_: ModelPreset[];
   private readonly benchmarks_: BenchmarkResult[];
   private readonly histories = new Map<HistoryRange, History>();
   private readonly listeners = new Set<(u: LiveUpdate) => void>();
@@ -166,6 +176,7 @@ export class MockBackend implements PitwallBackend {
     this.events_ = empty ? [] : demoEvents(now);
     this.engines_ = demoEngines(now);
     this.requests_ = empty ? [] : demoRequests(now);
+    this.presets_ = empty ? [] : demoPresets();
     this.benchmarks_ = empty ? [] : demoBenchmarks(now);
     this.memory = this.sampleMemory(now);
     this.queue = empty ? { running: [], waiting: [], depth: { interactive: 0, background: 0, batch: 0 } } : this.demoQueue(now);
@@ -596,6 +607,97 @@ export class MockBackend implements PitwallBackend {
       const e = this.engines_[0]!;
       if (!e.rollbackTo) this.fail('conflict', 'There is nothing to roll back to.');
       e.rollbackTo = null;
+    });
+  }
+
+  // ---- Model presets and aliases -----------------------------------------------------------------------------
+
+  /** What a target resolves to, a simplified mirror of the engine's rules (the real engine is the reference). */
+  private presetStatus(p: ModelPreset): PresetStatus {
+    if (!p.target.startsWith('auto')) {
+      const m = this.library.find((x) => x.id === p.target);
+      return m
+        ? { state: 'ready', modelId: m.id, chosenBy: 'explicit', reason: `the preset ${p.alias} names this model`, loaded: m.loaded }
+        : { state: 'stale', message: `the preset "${p.alias}" points to the model "${p.target}", which is no longer installed; edit the preset in Models > Presets` };
+    }
+    const words = p.target.slice('auto'.length + 1).split(/[,+ ]+/).filter(Boolean);
+    const caps = words.filter((w) => CAPABILITY_WORDS.includes(w));
+    const prefer = words.find((w) => PREFER_WORDS.includes(w)) ?? 'balanced';
+    const fits = this.library.filter((m) => (caps.length ? caps : ['chat']).every((c) => m.capabilities.includes(c as never)));
+    if (!fits.length) return { state: 'noMatch', message: `the preset "${p.alias}" matched no model: no installed model offers ${(caps.length ? caps : ['chat']).join(', ')}; download one in Pitwall > Models` };
+    const size = (m: LocalModel) => m.paramsB ?? 0;
+    const pick = prefer === 'quality' ? fits.reduce((a, b) => (size(b) > size(a) ? b : a)) : prefer === 'balanced' ? (fits.find((m) => m.loaded) ?? fits[0]!) : fits.reduce((a, b) => (size(b) < size(a) ? b : a));
+    return { state: 'ready', modelId: pick.id, chosenBy: 'capabilities', reason: `the preset ${p.alias}: chosen for ${(caps.length ? caps : ['chat']).join(', ')}`, loaded: pick.loaded };
+  }
+
+  /** The first thing wrong with a draft, in words, or null. A simplified mirror of the engine's validation. */
+  private presetProblem(d: PresetDraft, editing: string | null): string | null {
+    const alias = d.alias.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{0,47}$/.test(alias) || alias.includes('..')) return `"${d.alias}" is not a valid preset name: use up to 48 letters, digits and the characters "-_.", starting with a letter or digit`;
+    if (alias === 'auto' || alias === 'default') return `"${alias}" is reserved (it already means Pitwall's own choice of model); choose another name`;
+    const target = d.target.trim().toLowerCase();
+    if (target === 'auto' || target.startsWith('auto:')) {
+      const bad = target.slice(5).split(/[,+ ]+/).filter(Boolean).find((w) => !CAPABILITY_WORDS.includes(w) && !PREFER_WORDS.includes(w) && !/^\d+k?$/.test(w));
+      if (bad) return `"${bad}" is not a capability (chat, vision, tools, json, embeddings, rerank), a context like 8k, or fast/quality/small`;
+    } else if (!this.library.some((m) => m.id === target)) {
+      return `the model "${target}" is not installed; pick an installed model or a capability selection such as auto:chat`;
+    }
+    if (this.library.some((m) => m.id === alias)) return `"${alias}" is the id of an installed model; choose another name so requests for the model are not redirected`;
+    if (d.context !== null && (d.context < 512 || d.context > 1_048_576)) return 'context: use between 512 and 1048576 tokens';
+    if (d.temperature !== null && (d.temperature < 0 || d.temperature > 2)) return 'temperature: use a value between 0 and 2';
+    if (d.topP !== null && (d.topP < 0 || d.topP > 1)) return 'top-p: use a value between 0 and 1';
+    if (d.maxTokens !== null && (d.maxTokens < 1 || d.maxTokens > 1_048_576)) return 'max tokens: use between 1 and 1048576';
+    if (d.systemPrompt !== null && d.systemPrompt.length > 8192) return 'system prompt: use at most 8 KB of text';
+    if (d.engine !== null && d.engine.trim() !== '' && d.engine.trim() !== 'llama.cpp') return `the engine "${d.engine}" is not available; pick llama.cpp or an installed engine pack, or leave it empty`;
+    if (alias !== editing && this.presets_.some((p) => p.alias === alias)) return `a preset named "${alias}" already exists`;
+    return null;
+  }
+
+  private presetFrom(d: PresetDraft): ModelPreset {
+    return { ...d, alias: d.alias.trim().toLowerCase(), target: d.target.trim().toLowerCase(), systemPrompt: d.systemPrompt?.trim() ? d.systemPrompt : null, engine: d.engine?.trim() ? d.engine.trim() : null };
+  }
+
+  presets(): Promise<PresetEntry[]> {
+    return this.reply('presets', () => [...this.presets_].sort((a, b) => a.alias.localeCompare(b.alias)).map((preset) => ({ preset, status: this.presetStatus(preset) })));
+  }
+
+  createPreset(draft: PresetDraft): Promise<ModelPreset> {
+    return this.reply('createPreset', () => {
+      const problem = this.presetProblem(draft, null);
+      if (problem) this.fail(problem.includes('already exists') || problem.includes('installed model;') ? 'conflict' : 'badRequest', problem);
+      if (this.presets_.length >= 64) this.fail('conflict', 'there are already 64 presets; delete one first');
+      const preset = this.presetFrom(draft);
+      this.presets_.push(preset);
+      return preset;
+    });
+  }
+
+  updatePreset(alias: string, draft: PresetDraft): Promise<ModelPreset> {
+    return this.reply('updatePreset', () => {
+      const i = this.presets_.findIndex((p) => p.alias === alias);
+      if (i < 0) this.fail('notFound', `there is no preset named "${alias}"`);
+      const problem = this.presetProblem(draft, alias);
+      if (problem) this.fail(problem.includes('already exists') ? 'conflict' : 'badRequest', problem);
+      const preset = this.presetFrom(draft);
+      this.presets_[i] = preset;
+      return preset;
+    });
+  }
+
+  deletePreset(alias: string): Promise<void> {
+    return this.reply('deletePreset', () => {
+      const i = this.presets_.findIndex((p) => p.alias === alias);
+      if (i < 0) this.fail('notFound', `there is no preset named "${alias}"`);
+      this.presets_.splice(i, 1);
+    });
+  }
+
+  resolvePreset(draft: PresetDraft, editing: string | null): Promise<PresetPreview> {
+    return this.reply('resolvePreset', () => {
+      const problem = this.presetProblem(draft, editing);
+      // Like the engine: the target's status is shown whenever the target itself parses, even if the name is wrong.
+      const targetParses = !problem?.includes('is not a capability');
+      return { problem, status: targetParses ? this.presetStatus(this.presetFrom({ ...draft, alias: 'preview' })) : null };
     });
   }
 

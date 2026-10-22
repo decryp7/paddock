@@ -7,12 +7,14 @@ import { Panel } from '../../shared/ui/panel';
 import { DiscoverTab } from './discover-tab';
 import { DownloadsList } from './downloads-list';
 import { LibraryTab } from './library-tab';
+import { PresetsTab } from './presets-tab';
 import { ModelsStore } from './models.store';
 
-export type ModelsTab = 'library' | 'discover' | 'downloads';
+export type ModelsTab = 'library' | 'discover' | 'presets' | 'downloads';
 const TABS: { id: ModelsTab; label: string }[] = [
   { id: 'library', label: 'Library' },
   { id: 'discover', label: 'Discover' },
+  { id: 'presets', label: 'Presets' },
   { id: 'downloads', label: 'Downloads' },
 ];
 
@@ -27,7 +29,7 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
 /** Models: the local library, Hugging Face discovery with fit verdicts, and downloads. */
 @Component({
   selector: 'pw-models-page',
-  imports: [MatIconModule, Panel, LibraryTab, DiscoverTab, DownloadsList],
+  imports: [MatIconModule, Panel, LibraryTab, DiscoverTab, PresetsTab, DownloadsList],
   providers: [ModelsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -72,6 +74,9 @@ export function nextTab(current: ModelsTab, key: string): ModelsTab | null {
           }
           @case ('discover') {
             <pw-discover-tab [now]="now()" />
+          }
+          @case ('presets') {
+            <pw-presets-tab />
           }
           @case ('downloads') {
             <pw-panel heading="Downloads" icon="download" [sub]="downloadsSub()">

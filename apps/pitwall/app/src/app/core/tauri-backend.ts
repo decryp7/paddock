@@ -10,6 +10,10 @@ import type {
   Download,
   Engine,
   AppDetail,
+  ModelPreset,
+  PresetDraft,
+  PresetEntry,
+  PresetPreview,
   History,
   HistoryRange,
   UsageRange,
@@ -167,6 +171,23 @@ export class TauriBackend implements PitwallBackend {
   }
   rollbackBuild(): Promise<void> {
     return this.run('rollback_build');
+  }
+
+  // Model presets and aliases
+  presets(): Promise<PresetEntry[]> {
+    return this.run('presets');
+  }
+  createPreset(preset: PresetDraft): Promise<ModelPreset> {
+    return this.run('create_preset', { preset });
+  }
+  updatePreset(alias: string, preset: PresetDraft): Promise<ModelPreset> {
+    return this.run('update_preset', { alias, preset });
+  }
+  async deletePreset(alias: string): Promise<void> {
+    await this.run('delete_preset', { alias });
+  }
+  resolvePreset(preset: PresetDraft, editing: string | null): Promise<PresetPreview> {
+    return this.run('resolve_preset', { preset, editing });
   }
 
   // Apps and keys

@@ -13,7 +13,7 @@ export interface RequestFilter {
   /** An app id, or `all`. */
   app: string;
   status: StatusFilter;
-  /** Plain text matched against endpoint and model (case-insensitive), never a pattern. */
+  /** Plain text matched against endpoint, model and preset name (case-insensitive), never a pattern. */
   text: string;
 }
 
@@ -26,7 +26,7 @@ export function filterRequests(list: readonly RequestRecord[], f: RequestFilter)
     if (f.app !== 'all' && r.appId !== f.app) return false;
     if (f.status === 'ok' && r.status >= 400) return false;
     if (f.status === 'errors' && r.status < 400) return false;
-    if (text && !r.endpoint.toLowerCase().includes(text) && !(r.modelId ?? '').toLowerCase().includes(text)) return false;
+    if (text && !r.endpoint.toLowerCase().includes(text) && !(r.modelId ?? '').toLowerCase().includes(text) && !(r.alias ?? '').toLowerCase().includes(text)) return false;
     return true;
   });
 }

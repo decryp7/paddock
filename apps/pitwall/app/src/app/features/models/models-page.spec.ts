@@ -74,11 +74,21 @@ describe('models helpers', () => {
     expect(nextTab('downloads', 'ArrowRight')).toBe('library');
     expect(nextTab('discover', 'Home')).toBe('library');
     expect(nextTab('discover', 'End')).toBe('downloads');
+    expect(nextTab('discover', 'ArrowRight')).toBe('presets');
+    expect(nextTab('presets', 'ArrowRight')).toBe('downloads');
     expect(nextTab('discover', 'a')).toBeNull();
   });
 });
 
 describe('ModelsPage', () => {
+  it('has a Presets tab that lists the presets', async () => {
+    const { el, settle, fixture } = await render();
+    expect(Array.from(el.querySelectorAll('[role="tab"]')).map((t) => t.textContent!.trim().replace(/\s+\d+$/, ''))).toEqual(['Library', 'Discover', 'Presets', 'Downloads']);
+    fixture.componentInstance.tab.set('presets');
+    await settle();
+    expect(el.querySelector('pw-presets-tab')?.textContent).toContain('debrief-explain');
+  });
+
   it('lists the library with disk usage, status and actions', async () => {
     const { el } = await render();
     const rows = el.querySelectorAll('pw-library-tab tbody tr');

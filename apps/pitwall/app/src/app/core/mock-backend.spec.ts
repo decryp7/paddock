@@ -358,4 +358,76 @@ describe('MockBackend usage', () => {
     expect(state(100).state).toBe('exceeded');
     expect(state(100).message).toContain('refused');
   });
+
+  describe('presets', () => {
+    const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null };
+    const draft = (alias: string, target = 'qwen3-8b-instruct-q4_k_m') => ({ ...base, alias, target });
+    const message = async (p: Promise<unknown>) => ((await p.catch((e) => e)) as { message: string }).message;
+
+    it('lists the demo presets with their status', async () => {
+      const mock = new MockBackend({ now: clock });
+      const list = await mock.presets();
+      const by = Object.fromEntries(list.map((e) => [e.preset.alias, e.status]));
+      expect(by['debrief-explain']).toMatchObject({ state: 'ready', modelId: 'qwen3-8b-instruct-q4_k_m', chosenBy: 'explicit', loaded: true });
+      expect(by['pitcrew-triage']).toMatchObject({ state: 'ready', chosenBy: 'capabilities', modelId: 'llama-3.2-3b-instruct-q5_k_m' });
+      expect(by['legacy-explain']).toMatchObject({ state: 'stale' });
+      expect(await new MockBackend({ now: clock, empty: true }).presets()).toEqual([]);
+    });
+
+    it('creates, updates (rename), and deletes', async () => {
+      const mock = new MockBackend({ now: clock });
+      const made = await mock.createPreset({ ...draft(' Dyno-Notes '), systemPrompt: '  ', engine: ' ' });
+      expect(made).toMatchObject({ alias: 'dyno-notes', systemPrompt: null, engine: null });
+      const renamed = await mock.updatePreset('dyno-notes', { ...draft('dyno-short', 'auto:chat,small'), temperature: 0.2 });
+      expect(renamed.alias).toBe('dyno-short');
+      expect((await mock.presets()).map((e) => e.preset.alias)).toContain('dyno-short');
+      await mock.deletePreset('dyno-short');
+      expect((await mock.presets()).some((e) => e.preset.alias === 'dyno-short')).toBe(false);
+    });
+
+    it('refuses what the engine refuses, in words', async () => {
+      const mock = new MockBackend({ now: clock });
+      expect(await message(mock.createPreset(draft('debrief-explain')))).toContain('already exists');
+      expect(await message(mock.createPreset(draft('qwen3-8b-instruct-q4_k_m', 'gemma-3-12b-it-q4_k_m')))).toContain('installed model');
+      expect(await message(mock.createPreset(draft('x', 'gone')))).toContain('not installed');
+      expect(await message(mock.createPreset(draft('bad name')))).toContain('valid preset name');
+      expect(await message(mock.createPreset(draft('auto')))).toContain('reserved');
+      expect(await message(mock.createPreset(draft('x', 'auto:telepathy')))).toContain('not a capability');
+      for (const [patch, word] of [
+        [{ context: 10 }, 'context'],
+        [{ temperature: 5 }, 'temperature'],
+        [{ topP: 3 }, 'top-p'],
+        [{ maxTokens: 0 }, 'max tokens'],
+        [{ systemPrompt: 'x'.repeat(9000) }, 'system prompt'],
+        [{ engine: 'mlx' }, 'engine'],
+      ] as const) {
+        expect(await message(mock.createPreset({ ...draft('x'), ...patch }))).toContain(word);
+      }
+      expect(await message(mock.updatePreset('nothing', draft('y')))).toContain('no preset');
+      expect(await message(mock.updatePreset('debrief-explain', draft('pitcrew-triage')))).toContain('already exists');
+      expect(await message(mock.deletePreset('nothing'))).toContain('no preset');
+      for (let i = (await mock.presets()).length; i < 64; i++) await mock.createPreset(draft(`p${i}`));
+      expect(await message(mock.createPreset(draft('one-too-many')))).toContain('delete one');
+    });
+
+    it('previews like the engine: status when the target parses, a problem in words, not a duplicate of itself', async () => {
+      const mock = new MockBackend({ now: clock });
+      expect(await mock.resolvePreset(draft('new-one'), null)).toMatchObject({ problem: null, status: { state: 'ready', modelId: 'qwen3-8b-instruct-q4_k_m' } });
+      expect(await mock.resolvePreset(draft('new-one', 'auto:vision'), null)).toMatchObject({ problem: null, status: { state: 'ready', modelId: 'gemma-3-12b-it-q4_k_m' } });
+      expect((await mock.resolvePreset(draft('new-one', 'auto:chat,quality'), null)).status).toMatchObject({ modelId: 'gemma-3-12b-it-q4_k_m' });
+      expect((await mock.resolvePreset(draft('new-one', 'auto:chat,small'), null)).status).toMatchObject({ modelId: 'qwen2.5-coder-1.5b-q8_0' });
+      expect((await mock.resolvePreset(draft('new-one', 'auto:rerank'), null)).status).toMatchObject({ state: 'ready', modelId: 'bge-reranker-v2-m3-q8_0' });
+      expect((await mock.resolvePreset(draft('new-one', 'auto:transcription'), null)).status).toMatchObject({ state: 'noMatch' });
+      const gone = await mock.resolvePreset(draft('new-one', 'gone'), null);
+      expect(gone.problem).toContain('not installed');
+      expect(gone.status?.state).toBe('stale');
+      const unknown = await mock.resolvePreset(draft('new-one', 'auto:nope'), null);
+      expect(unknown.problem).toContain('not a capability');
+      expect(unknown.status).toBeNull();
+      expect((await mock.resolvePreset(draft('bad name'), null)).problem).toContain('valid preset name');
+      expect((await mock.resolvePreset(draft('debrief-explain'), null)).problem).toContain('already exists');
+      expect((await mock.resolvePreset(draft('debrief-explain'), 'debrief-explain')).problem).toBeNull();
+      expect((await mock.resolvePreset(draft('gemma-3-12b-it-q4_k_m'), null)).problem).toContain('installed model');
+    });
+  });
 });
