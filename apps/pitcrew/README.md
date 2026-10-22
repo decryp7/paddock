@@ -74,6 +74,12 @@ Every feature, with screenshots, is in [docs/features.md](docs/features.md).
 8. **Adopts existing runners.** A registered runner folder is used as it is; configuration is a versioned `pitcrew.toml`
    that tolerates damage.
 9. **Updates itself** with the Tauri updater: minisign-signed releases, opt-in ([docs/releasing.md](docs/releasing.md)).
+10. **Edits a runner's configuration** ([ADR 0011](docs/adr/0011-runner-config-editing.md)). A form and an Advanced YAML
+    editor for the runner's `config.yaml`; comments and layout stay, a diff and a timestamped backup come before every
+    save, and the runner restarts after its current job and is checked for the labels it declares.
+11. **Tracks the processes a runner starts** ([ADR 0012](docs/adr/0012-process-tracking-and-leftover-cleanup.md)). A live
+    list with the job of each process, leftovers of finished jobs, and automatic cleanup (on by default; only when the
+    runner is idle, with per-process rules and keep times).
 
 ### Screenshots
 
@@ -158,14 +164,16 @@ and notarisation, headless-host service modes, per-runner `env` on Windows.
 | [docs/releasing.md](docs/releasing.md) | Releases and signed updates |
 | [docs/testing-manual.md](docs/testing-manual.md) | Manual tests that need a real desktop and server |
 | [docs/roadmap.md](docs/roadmap.md) | Planned work and engineering follow-ups |
-| [docs/adr/](docs/adr/0001-architecture.md) | Architecture decision records 0001 to 0010 |
+| [docs/adr/](docs/adr/0001-architecture.md) | Architecture decision records 0001 to 0012 |
 
 Decisions: [0001 architecture](docs/adr/0001-architecture.md), [0002 runner auto-update](docs/adr/0002-runner-auto-update.md),
 [0003 service model](docs/adr/0003-service-model.md), [0004 IPC protocol and ACL](docs/adr/0004-ipc-protocol-and-acl.md),
 [0005 credential storage](docs/adr/0005-credential-storage.md), [0006 supervision and housekeeping](docs/adr/0006-supervision-and-housekeeping.md),
 [0007 runner-scoped metrics](docs/adr/0007-runner-scoped-metrics.md), [0008 native feel](docs/adr/0008-native-feel.md),
 [0009 Linux service and runner environment](docs/adr/0009-linux-service-and-runner-environment.md),
-[0010 design system](docs/adr/0010-design-system.md).
+[0010 design system](docs/adr/0010-design-system.md),
+[0011 runner configuration editing](docs/adr/0011-runner-config-editing.md),
+[0012 process tracking and leftover cleanup](docs/adr/0012-process-tracking-and-leftover-cleanup.md).
 
 ## Building from source
 

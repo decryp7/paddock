@@ -27,6 +27,10 @@ nothing planned is in the code yet. The remaining engineering follow-ups are at 
 - The login shell's `PATH` for runners and `[runners.env]` on macOS and Linux; the service restarts itself when its
   program changes. *(Done.)*
 
+- Editing a runner's `config.yaml` from Pitcrew (form, Advanced editor, diff, backups, restart after the job, label check)
+  and a Processes tab with automatic cleanup of leftovers. *(Done; [ADR 0011](adr/0011-runner-config-editing.md),
+  [0012](adr/0012-process-tracking-and-leftover-cleanup.md); Windows paths are verified on CI only.)*
+
 ## Phase 3: more runners and platforms *(planned)*
 
 - **Forgejo's runner:** on Windows and macOS a user-provided binary (upstream publishes none); OpenPGP-verified updates on

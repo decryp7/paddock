@@ -15,6 +15,8 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 - [Housekeeping](#housekeeping)
 - [Dashboard](#dashboard)
 - [Runners and a runner's page](#runners-and-a-runners-page)
+- [Editing a runner's configuration](#editing-a-runners-configuration)
+- [Processes and leftovers](#processes-and-leftovers)
 - [Activity and history](#activity-and-history)
 - [Logs](#logs)
 - [Registering and adopting runners](#registering-and-adopting-runners)
@@ -132,8 +134,43 @@ covers installing, registering runners and everyday use ([macOS](macos.md), [Lin
 - **A runner's page** shows the current job, where it runs (session, a note when nobody is logged on), CPU and memory
   with trends, the version and update controls, the disk panel and its configuration (folder, labels, server, session),
   with a shortcut to the logs folder and a *Back to runners* link.
-- **Per-runner overrides** of the update policy, the stall rule and the cleanup policy; everything else follows the
+- **Per-runner overrides** of the update policy, the stall rule, the cleanup policy and the leftover-process policy; everything else follows the
   defaults in Settings.
+
+## Editing a runner's configuration
+
+A runner's page has a **Configuration** tab for the runner's own `config.yaml` ([ADR 0011](adr/0011-runner-config-editing.md)).
+
+- **A form** for the common settings: jobs at once (capacity), labels, job timeout, fetch interval and timeout, cache
+  (enabled, folder, size limit), job environment variables, container network, privileged, options and allowed volumes
+  (shown for container runners), and the runner's log level. Every field can be left unset (the runner's default). The
+  engine checks each value and says what to fix; errors block saving, warnings do not.
+- **Advanced**: the whole file as YAML, with syntax and type checks against the gitea-runner 5.x reference (unknown keys are
+  warnings with a suggestion) and line numbers.
+- **Comments and layout are kept.** The form changes only the lines of the keys you changed; a file the form cannot edit
+  safely is refused with a reason.
+- **Review, then save.** A diff shows exactly what changes. Saving first makes a timestamped backup
+  (`config.yaml.bak-YYYYMMDD-HHMMSS`, the newest 10 are kept), and a save is refused if the file changed on disk meanwhile.
+- **Applied after the current job.** The runner restarts through the same drain as the Restart button ("Restarts after the
+  current job"); comment-only changes need no restart. After the restart Pitcrew checks that the runner declared the labels
+  the file asks for and reports a mismatch.
+
+## Processes and leftovers
+
+A runner's page has a **Processes** tab ([ADR 0012](adr/0012-process-tracking-and-leftover-cleanup.md)).
+
+- **A live list** of the processes the runner started: name, pid, CPU, memory, age, the job each belongs to and its command
+  line (secrets removed). Bounded to 300 rows.
+- **Leftovers** are processes of a finished job that are still alive. They are marked, counted on the runner's tile and
+  shown with a countdown ("stops in 2 h 14 min").
+- **Automatic cleanup is on by default**: leftovers are stopped 10 minutes after their job ended, only while the runner is
+  idle and only if they belong to that runner. Rules give a process its own time (Gradle and Kotlin daemons 3 h,
+  emulators and QEMU 30 min) or "never stop" (adb). Settings and per-runner overrides can change the times, edit the rules
+  or turn cleanup off. A stop asks first (SIGTERM) and ends the process after a timeout.
+- **Keep longer** and **Stop now** (with confirmation) act on one process; Pitcrew refuses anything outside the runner's
+  tree and never stops the runner itself unless you choose that explicitly.
+- **Every stop is recorded** in the runner's log and in Activity with the name, pid, age and the rule used; Activity also
+  shows each job's peak CPU and memory and how many processes it left behind.
 
 ## Activity and history
 

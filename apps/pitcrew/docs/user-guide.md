@@ -85,6 +85,42 @@ it. The card shows **Idle** once the server accepts it.
 - **Quitting the app** never stops the runners. To stop supervising, stop the runners or remove the service
   (Settings ▸ Service ▸ Uninstall); the runner folders stay.
 
+## Changing a runner's configuration
+
+Runner page ▸ **Configuration**. Change a setting in the form (or switch to **Advanced** to edit the YAML), then **Review
+changes**: the dialog shows the diff, says a backup of the current file is made and whether the runner restarts. **Save and
+apply** writes the file; a running runner restarts after its current job. Comments and layout in your file are kept. Backups
+are `config.yaml.bak-<date>-<time>` next to the file (the newest 10 are kept); to undo, copy one back over `config.yaml`.
+After the restart the tab says whether the runner declared the labels from the file. If the form says it cannot edit a
+key safely (for example a block scalar), use Advanced.
+
+## Processes and leftovers
+
+Runner page ▸ **Processes** lists what the runner started. A **leftover** (a process of a finished job that is still
+running) is stopped automatically 10 minutes after its job ended, but only while the runner is idle. Use **Keep longer**
+for one process or Stop now (asks for confirmation). Settings ▸ Defaults ▸ *Leftover processes* turns the cleanup off,
+changes the default time and edits the rules; a runner's page can override them. Examples:
+
+```toml
+[defaults.processes]
+cleanup = true                              # false: leftovers are listed, never stopped
+keep = { amount = 10, unit = "minutes" }    # minutes, hours or days
+stop_timeout_secs = 15                      # asked to stop, ended after this long
+
+[[defaults.processes.rules]]                # first match wins; * and ? ; name, path or command line
+pattern = "*GradleDaemon*"
+keep = { amount = 3, unit = "hours" }
+
+[[defaults.processes.rules]]
+pattern = "adb"
+keep = "never"
+
+[runners.processes]                         # per runner: cleanup, keep and rules (tried first)
+cleanup = false
+```
+
+The shipped rules are Gradle and Kotlin daemons 3 h, QEMU and the Android emulator 30 min, adb never.
+
 ## Updates
 
 - **Runners.** Per runner (page ▸ Version and Update policy) and as defaults (Updates page ▸ Default schedule): *Automatic*
@@ -119,7 +155,7 @@ labels = ["ubuntu-latest:host"]
 NODE_ENV = "ci"
 ```
 
-Per runner you can override `update`, `watchdog` and `cleanup`; everything else follows `[defaults]`. A damaged file is set
+Per runner you can override `update`, `watchdog`, `cleanup` and `processes`; everything else follows `[defaults]`. A damaged file is set
 aside as `pitcrew.toml.damaged-<time>` and the last good copy (`pitcrew.toml.bak`) is used; one bad runner entry is
 skipped with a problem shown in Settings; a file from a newer Pitcrew is read-only.
 

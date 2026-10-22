@@ -130,6 +130,8 @@ The service is deliberately thin around the core (level 3, [service components](
 | [0008](adr/0008-native-feel.md) | The window behaves like a desktop application: opt-in selection, one context-menu policy, browser keys and drops blocked. |
 | [0009](adr/0009-linux-service-and-runner-environment.md) | Linux: a systemd user service, XDG paths, the login shell's `PATH` for runners (macOS and Linux), `[runners.env]`. |
 | [0010](adr/0010-design-system.md) | Tokens first, measured accessibility, shared partials and components, standard loading, empty and error states. |
+| [0011](adr/0011-runner-config-editing.md) | Runner `config.yaml` editing: a form and a raw editor over one pipeline, a comment-preserving patcher, diff, timestamped backups, restart after the job, label verification. |
+| [0012](adr/0012-process-tracking-and-leftover-cleanup.md) | A runner's process list with jobs, leftovers of finished jobs, and automatic cleanup (on by default, idle-only, per-process rules, graceful then forced). |
 
 ## Behaviour in text
 
@@ -200,6 +202,50 @@ The data folder is `%ProgramData%\Pitcrew` on Windows, `~/Library/Application Su
 - Failures are contained: one runner's failure is a state of that runner; a bad configuration entry is skipped; a bad
   state file falls back to its backup; the UI shows an inline error with Retry per panel.
 
+### Saving a runner's configuration
+
+```mermaid
+sequenceDiagram
+  actor U as Owner
+  participant UI as Configuration tab
+  participant S as Service (supervisor)
+  participant F as config.yaml
+  participant R as Runner process
+  U->>UI: change a setting / edit YAML
+  UI->>S: PreviewRunnerConfig(edit)
+  S->>F: read (bounded)
+  S-->>UI: new text, diff, findings, restartNeeded
+  U->>UI: Save and apply
+  UI->>S: SaveRunnerConfig(edit, base fingerprint)
+  S->>S: validate again, compare fingerprint
+  S->>F: backup config.yaml.bak-time, write temp, rename
+  S->>R: controller Restart (after the current job)
+  R-->>S: exits when idle, starts again
+  R-->>S: log "declare successfully", labels
+  S->>S: labels match? record LabelsVerified or LabelsMismatch
+  S-->>UI: status and history events
+```
+
+### Stopping a leftover
+
+```mermaid
+sequenceDiagram
+  participant P as Probe (every 5 s)
+  participant W as ProcessWatch
+  participant C as process_track (pure)
+  participant O as Terminator (OS)
+  P->>W: runner tree: names, commands, start times
+  W->>C: classify(tree, job spans, policy)
+  C-->>W: job per process, leftovers, stop times
+  Note over W: runner idle and a leftover is due?
+  W->>O: ask (SIGTERM to that pid)
+  loop each tick
+    W->>O: still alive?
+  end
+  W->>O: end (SIGKILL) after the stop timeout
+  W-->>W: history ProcessStopped (name, pid, age, rule)
+```
+
 ## Extension points
 
 - **A new runner kind** (Forgejo's runner, later GitHub's): a new `RunnerKind` with its release description in
@@ -211,4 +257,4 @@ The data folder is `%ProgramData%\Pitcrew` on Windows, `~/Library/Application Su
 
 See also: [features](features.md), [user guide](user-guide.md), [development](development.md),
 [macOS guide](macos.md), [Linux guide](linux.md), and the ADRs [0001](adr/0001-architecture.md) to
-[0010](adr/0010-design-system.md).
+[0012](adr/0012-process-tracking-and-leftover-cleanup.md).

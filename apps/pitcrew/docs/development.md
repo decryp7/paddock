@@ -8,7 +8,7 @@ crates/pitcrew-service   the background service: supervision, OS service integra
 app/src-tauri            the Tauri 2 shell: tray, window, commands, updater
 app/src                  the Angular UI (standalone components, signals, SignalStores)
 scripts/                 commit-lint, release manifest (latest.json), sidecar.mjs, check-index.mjs, macos-bootstrap.sh, macos-verify.sh
-docs/adr/                architecture decisions (0001-0010)
+docs/adr/                architecture decisions (0001-0012)
 docs/diagrams/           draw.io sources (.drawio) and exported SVGs; see design.md
 .gitea/workflows/        CI
 ```

@@ -85,3 +85,19 @@ and `scripts/linux-verify.sh` cover the read-only checks of an installed Pitcrew
 | 40 | Windows: connect to `\\.\pipe\pitcrew` from a network logon or a service account. | Refused. Another interactive user may connect (documented limitation). |
 | 41 | macOS and Linux: `ls -l` the socket and its folder. | Socket 0600, folder 0700, owned by you; another user cannot connect. |
 | 42 | Export diagnostics and search the zip for the registration token and the server's runner token. | Neither appears. |
+
+## Runner configuration and processes
+
+| # | Steps | Expected |
+|---|-------|----------|
+| 43 | Runner page ▸ Configuration: change *Jobs at once* and Review changes. | The diff shows only that line; comments elsewhere in `config.yaml` are untouched after Save. A backup `config.yaml.bak-<time>` appears next to it. |
+| 44 | Save while a job runs. | "Restarts after the current job"; the job finishes, then the runner restarts; the tab reports the labels verified. |
+| 45 | Enter capacity 0, a timeout of `soon`, a label with a space. | Messages next to each field; Save is disabled. |
+| 46 | Advanced: break the YAML, then add a misspelt key. | The syntax error is shown with its line; the unknown key is a warning with a suggestion. |
+| 47 | Change `config.yaml` in an editor after opening the tab, then Save. | Refused: the file changed on disk; Reload. |
+| 48 | Put a label in the file the server does not accept or edit `.runner`'s labels. | After the restart a label mismatch warning appears. |
+| 49 | Run a job that starts a background process (`sleep 600 &`); open Processes. | After the job ends the process is a leftover with a countdown; Keep longer adds time; Stop now asks for confirmation. |
+| 50 | Wait the keep time with the runner idle. | The leftover is stopped; Activity and the runner log name the process, pid, age and rule. |
+| 51 | Start a new job before a leftover is due. | Nothing is stopped while the job runs. |
+| 52 | Add a rule `sleep` = never; repeat 49. | The process is never stopped automatically (the countdown says so). |
+
