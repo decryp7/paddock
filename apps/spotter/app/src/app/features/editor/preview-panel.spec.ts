@@ -52,11 +52,31 @@ describe('PreviewPanel', () => {
     expect(t).toContain('3 pre-releases left out.');
     expect(t).toContain('1 did not match the filters.');
     expect(t).toContain('1.2.0');
-    expect(t).toContain('Pre-release');
+    expect(f.nativeElement.querySelectorAll('.pre')).toHaveLength(1);
+    expect(t).toContain('pre-release');
     expect(t).toContain('2.0 KiB');
     expect(t).toContain('1 name held no version');
     expect(t).toContain('README.txt');
     expect(f.nativeElement.querySelectorAll('tbody tr')).toHaveLength(2);
+  });
+
+  it('shows the name column only when a name differs from its version, and dims the version suffix', async () => {
+    const f = make();
+    await render(f, value(preview({ releases: [rel('1.2.0'), rel('1.3.0-rc.1')] })));
+    const headers = () => Array.from(f.nativeElement.querySelectorAll('thead th') as NodeListOf<HTMLElement>).map((h) => text(h));
+    expect(headers()).toEqual(['Version', 'Name', 'Date', 'Size']);
+    expect(f.nativeElement.querySelectorAll('tbody td.truncate')).toHaveLength(2);
+    expect(text(f.nativeElement.querySelector('tbody sp-ver .sfx'))).toBe('-rc.1');
+    expect(f.nativeElement.querySelectorAll('tbody sp-ver .sfx')).toHaveLength(1);
+    await render(f, value(preview({ releases: [rel('1.2.0', { name: '1.2.0' }), rel('1.3.0', { name: '1.3.0' })] })));
+    expect(headers()).toEqual(['Version', 'Date', 'Size']);
+    expect(f.nativeElement.querySelectorAll('tbody td.truncate')).toHaveLength(0);
+  });
+
+  it('shows a dash for an unknown size', async () => {
+    const f = make();
+    await render(f, value(preview({ releases: [rel('1.0.0', { size: null })] })));
+    expect(text(f.nativeElement.querySelector('tbody td.num'))).toBe('—');
   });
 
   it('uses the singular forms', async () => {

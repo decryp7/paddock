@@ -15,6 +15,10 @@ async function make(backend = makeMock()) {
   return { f, backend, store: TestBed.inject(SettingsStore) };
 }
 const el = <T extends Element>(f: { nativeElement: HTMLElement }, sel: string) => f.nativeElement.querySelector(sel) as T;
+const tab = (f: { nativeElement: HTMLElement }, group: string, label: string) =>
+  Array.from(f.nativeElement.querySelectorAll<HTMLButtonElement>(`.seg-tabs[aria-label="${group}"] button`)).find((b) => text(b) === label)!;
+const pressed = (f: { nativeElement: HTMLElement }, group: string) =>
+  Array.from(f.nativeElement.querySelectorAll<HTMLButtonElement>(`.seg-tabs[aria-label="${group}"] button`)).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => text(b));
 const toggle = async (f: Parameters<typeof settle>[0], input: HTMLInputElement, on: boolean) => {
   input.checked = on;
   input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -34,19 +38,30 @@ describe('SettingsPage', () => {
     expect(t).toContain('Your watches were brought over from Release Monitor.');
     expect(text(el(f, '.note.warn'))).toContain('Old mirror');
     expect(el<HTMLInputElement>(f, '#autostart').checked).toBe(false);
-    expect(el<HTMLSelectElement>(f, '#interval').value).toBe(String(6 * 3600));
+    expect(pressed(f, 'Default check interval')).toEqual(['6 hours']);
+    expect(pressed(f, 'Digest')).toEqual(['At once']);
+    expect(pressed(f, 'Pause notifications')).toEqual(['On']);
+    expect(el<HTMLInputElement>(f, '#notif').checked).toBe(true);
   });
 
   it('saves a toggle and a select through the store', async () => {
     const { f, backend } = await make();
     await toggle(f, el(f, '#notif'), false);
     expect((await backend.getSettings()).notifications).toBe(false);
-    typeInto(el(f, '#digest'), 'daily', 'change');
+    tab(f, 'Digest', 'Daily').click();
     await settle(f);
     expect((await backend.getSettings()).digest).toBe('daily');
-    typeInto(el(f, '#interval'), '900', 'change');
+    expect(pressed(f, 'Digest')).toEqual(['Daily']);
+    tab(f, 'Digest', 'Weekly').click();
+    await settle(f);
+    expect((await backend.getSettings()).digest).toBe('weekly');
+    tab(f, 'Digest', 'At once').click();
+    await settle(f);
+    expect((await backend.getSettings()).digest).toBe('off');
+    tab(f, 'Default check interval', '15 minutes').click();
     await settle(f);
     expect((await backend.getSettings()).defaultIntervalSecs).toBe(900);
+    expect(pressed(f, 'Default check interval')).toEqual(['15 minutes']);
     await toggle(f, el(f, '#auto-upd'), false);
     expect((await backend.getSettings()).checkAppUpdates).toBe(false);
     await toggle(f, el(f, '#osweb'), true);
@@ -81,13 +96,19 @@ describe('SettingsPage', () => {
 
   it('pauses notifications and shows the remaining time, then resumes', async () => {
     const { f, backend } = await make();
-    (byText(f.nativeElement, 'button', '1 day') as HTMLButtonElement).click();
+    tab(f, 'Pause notifications', 'Pause 1 day').click();
     await settle(f);
     expect(text(f.nativeElement)).toContain('Paused for another 1 day');
     expect(await backend.getSettings()).toMatchObject({ notificationsPausedUntilMs: NOW + 24 * 3_600_000 });
-    (byText(f.nativeElement, 'button', 'Resume') as HTMLButtonElement).click();
+    expect(pressed(f, 'Pause notifications')).not.toContain('On');
+    tab(f, 'Pause notifications', 'On').click();
     await settle(f);
     expect(text(f.nativeElement)).toContain('Notifications are on.');
+    expect(pressed(f, 'Pause notifications')).toEqual(['On']);
+    tab(f, 'Pause notifications', 'Pause 1 hour').click();
+    await settle(f);
+    expect(text(f.nativeElement)).toContain('Paused for another 1 h');
+    expect(await backend.getSettings()).toMatchObject({ notificationsPausedUntilMs: NOW + 3_600_000 });
   });
 
   it('downloads Chromium once and then hides the button', async () => {
@@ -110,6 +131,7 @@ describe('SettingsPage', () => {
     expect(text(f.nativeElement)).toContain(word);
     expect(text(f.nativeElement)).toContain('Invented detail');
     expect(f.componentInstance['rendererTone']()).toBe(tone);
+    expect(el(f, '.l .dot').classList.contains(tone)).toBe(true);
   });
 
   it('checks for updates, announces the version and installs', async () => {

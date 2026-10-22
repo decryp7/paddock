@@ -37,11 +37,11 @@ const fill = async (f: F, sel: string, value: string, event = 'input') => {
   typeInto(q(f, sel), value, event);
   await settle(f);
 };
-const card = (f: F, label: string) => Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('button.card')).find((b) => text(b).startsWith(label))!;
+const card = (f: F, label: string) => Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('button.card')).find((b) => text(b.querySelector('.t')).startsWith(label))!;
 
 /** Adds a GitHub watch through the Source kinds tab and stops on the Configure step. */
 async function startGithub(f: F, repo = 'owner/tool') {
-  await click(f, byText(f.nativeElement, 'button[role=tab]', 'Source kinds'));
+  await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
   await click(f, card(f, 'GitHub'));
   await fill(f, '#f-repo', repo);
 }
@@ -78,7 +78,7 @@ describe('EditorPage: adding a watch', () => {
     await settings.change({ defaultIntervalSecs: 900 });
     const f = TestBed.createComponent(EditorPage);
     await settle(f);
-    await click(f, byText(f.nativeElement, 'button[role=tab]', 'Source kinds'));
+    await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
     await click(f, card(f, 'GitHub'));
     await fill(f, '#f-repo', 'a/b');
     await goNext(f, 2);
@@ -87,7 +87,7 @@ describe('EditorPage: adding a watch', () => {
 
   it('groups the source kinds and walks the whole wizard to a saved watch', async () => {
     const { f, backend, router } = await make();
-    await click(f, byText(f.nativeElement, 'button[role=tab]', 'Source kinds'));
+    await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
     expect(f.nativeElement.querySelectorAll('h3.group').length).toBeGreaterThan(1);
     await click(f, card(f, 'GitHub'));
 
@@ -302,7 +302,7 @@ describe('EditorPage: editing a watch', () => {
 
 describe('EditorPage: finding a feed and importing a list', () => {
   afterEach(() => vi.restoreAllMocks());
-  const tab = (f: F, label: string) => click(f, byText(f.nativeElement, 'button[role=tab]', label));
+  const tab = (f: F, label: string) => click(f, byText(f.nativeElement, '.ways button', label));
 
   it('finds the feeds of a page and builds a feed watch from one', async () => {
     const { f } = await make();
@@ -395,7 +395,7 @@ describe('FieldForm kinds (through the wizard)', () => {
     const { f, backend } = await make();
     const kinds = (await backend.sourceKinds()).map((k) => k.id);
     expect(kinds).toEqual(expect.arrayContaining(['folder', 'web-page', 'crates']));
-    await click(f, byText(f.nativeElement, 'button[role=tab]', 'Source kinds'));
+    await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
     // folder: a folder picker and a toggle
     await click(f, card(f, 'Folder'));
     await click(f, byText(f.nativeElement, 'sp-field-form button', 'Browse…'));
@@ -406,14 +406,14 @@ describe('FieldForm kinds (through the wizard)', () => {
     expect(q<HTMLInputElement>(f, 'sp-field-form input[type=checkbox]').checked).toBe(true);
     // The wizard offers all the choices through the Back button back to the kinds.
     await click(f, button(f, 'Back'));
-    await click(f, byText(f.nativeElement, 'button[role=tab]', 'Source kinds'));
+    await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
     await click(f, card(f, 'Web page'));
     const select = q<HTMLSelectElement>(f, 'sp-field-form select');
     expect(select.selectedOptions[0]!.value).toBe(select.value);
     await fill(f, 'sp-field-form select', select.options[select.options.length - 1]!.value, 'change');
     expect(q<HTMLSelectElement>(f, 'sp-field-form select').selectedOptions[0]!.value).toBe(select.options[select.options.length - 1]!.value);
     await click(f, button(f, 'Back'));
-    await click(f, byText(f.nativeElement, 'button[role=tab]', 'Source kinds'));
+    await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
     await click(f, card(f, 'crates.io'));
     const days = q<HTMLInputElement>(f, '#f-days');
     expect(days.value).toBe('0');
@@ -422,11 +422,38 @@ describe('FieldForm kinds (through the wizard)', () => {
     await fill(f, '#f-days', '30');
     expect(q<HTMLInputElement>(f, '#f-days').value).toBe('30');
     await click(f, button(f, 'Back'));
-    await click(f, byText(f.nativeElement, 'button[role=tab]', 'Source kinds'));
+    await click(f, byText(f.nativeElement, '.ways button', 'Source kinds'));
     await click(f, card(f, 'GitHub'));
     const secret = q<HTMLInputElement>(f, 'sp-field-form input[type=password]');
     expect(secret.autocomplete).toBe('off');
     await fill(f, '#f-token', 'abc');
     expect(secret.value).toBe('abc');
+  });
+});
+
+describe('SourceStep: search and category filter', () => {
+  it('filters the preset tiles by text and category and says when nothing matches', async () => {
+    const { f } = await make();
+    const labels = () => Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('button.card .t')).map((t) => text(t));
+    const all = labels();
+    expect(all.length).toBeGreaterThan(2);
+    expect(f.nativeElement.querySelector('button.card sp-avatar')).not.toBeNull();
+    await fill(f, 'input[type=search]', all[0]!.toLowerCase());
+    expect(labels()).toContain(all[0]);
+    expect(labels().length).toBeLessThan(all.length);
+    await fill(f, 'input[type=search]', 'zzzz-nothing');
+    expect(labels()).toEqual([]);
+    expect(text(q(f, '.help'))).toContain('Nothing matches "zzzz-nothing"');
+    await fill(f, 'input[type=search]', '');
+    const cats = Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('.seg-tabs[aria-label=Category] button'));
+    expect(text(cats[0])).toBe('All');
+    expect(cats[0]!.getAttribute('aria-pressed')).toBe('true');
+    expect(cats.length).toBeGreaterThan(1);
+    await click(f, cats[1]!);
+    expect(cats[1]!.getAttribute('aria-pressed')).toBe('true');
+    expect(labels().length).toBeGreaterThan(0);
+    expect(labels().length).toBeLessThanOrEqual(all.length);
+    await click(f, cats[0]!);
+    expect(labels()).toEqual(all);
   });
 });

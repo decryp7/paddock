@@ -1,4 +1,4 @@
-import { bucketLabel, formatBytes, formatDate, formatDateTime, formatDuration, formatInterval, lastSegment, relativeTime, shortHash, spanText } from './format';
+import { agoShort, bucketLabel, formatShortDateTime, mebibytes, formatBytes, formatDate, formatDateTime, formatDuration, formatInterval, lastSegment, relativeTime, shortHash, spanText } from './format';
 
 const MIN = 60_000;
 const H = 60 * MIN;
@@ -54,5 +54,42 @@ describe('format', () => {
     expect(lastSegment('https://x.test/a/b/')).toBe('b');
     expect(lastSegment('C:\\drops\\acme')).toBe('acme');
     expect(lastSegment('')).toBe('');
+  });
+});
+
+describe('short formats', () => {
+  const NOW = new Date(2026, 9, 22, 16, 30).getTime();
+
+  it('writes unknown values as a dash', () => {
+    expect(formatShortDateTime(null, NOW)).toBe('—');
+    expect(formatShortDateTime(undefined, NOW)).toBe('—');
+    expect(mebibytes(null)).toBe('—');
+    expect(mebibytes(undefined)).toBe('—');
+    expect(agoShort(null, NOW)).toBe('—');
+    expect(agoShort(undefined, NOW)).toBe('—');
+  });
+
+  it('shows the time this year and only the date in other years', () => {
+    const thisYear = new Date(2026, 9, 22, 16, 20).getTime();
+    expect(formatShortDateTime(thisYear, NOW)).toMatch(/Oct/);
+    expect(formatShortDateTime(thisYear, NOW)).toMatch(/4:20|16:20/);
+    const old = new Date(2024, 2, 5, 8, 15).getTime();
+    expect(formatShortDateTime(old, NOW)).toContain('2024');
+    expect(formatShortDateTime(old, NOW)).not.toMatch(/8:15|08:15/);
+  });
+
+  it('scales mebibytes to keep three significant digits', () => {
+    expect(mebibytes(0)).toBe('0.00');
+    expect(mebibytes(1048576 * 25.5)).toBe('25.5');
+    expect(mebibytes(1048576 * 5.25)).toBe('5.25');
+    expect(mebibytes(1048576 * 250)).toBe('250');
+  });
+
+  it('writes a compact ago', () => {
+    expect(agoShort(NOW - 10_000, NOW)).toBe('now');
+    expect(agoShort(NOW + 10_000, NOW)).toBe('now');
+    expect(agoShort(NOW - 20 * MIN, NOW)).toBe('20 min');
+    expect(agoShort(NOW - 3 * H, NOW)).toBe('3 h');
+    expect(agoShort(NOW - 2 * D, NOW)).toBe('2 days');
   });
 });

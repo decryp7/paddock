@@ -171,8 +171,12 @@ describe('MockBackend', () => {
     expect(after.checks).toHaveLength(1);
     expect(after.summary.lastCheckMs).toBe(NOW);
     await b.checkNow(null);
-    expect((await b.getWatch('w-8')).checks).toHaveLength(12); // paused: untouched
-    expect((await b.getWatch('w-1')).checks).toHaveLength(13);
+    const paused = await b.getWatch('w-8');
+    expect(paused.checks).toHaveLength(30); // paused: untouched
+    expect(paused.checks.at(-1)?.atMs).toBeLessThan(NOW);
+    const checked = await b.getWatch('w-1');
+    expect(checked.checks).toHaveLength(30); // the history keeps the last 30 checks
+    expect(checked.checks.at(-1)?.atMs).toBe(NOW);
     expect((await rejection(b.checkNow('nope'))).code).toBe('notFound');
   });
 

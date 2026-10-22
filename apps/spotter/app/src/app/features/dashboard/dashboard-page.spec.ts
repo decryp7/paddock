@@ -33,38 +33,74 @@ const button = (f: F, label: string | RegExp) => byText(f.nativeElement, 'button
 describe('DashboardPage', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('shows the counts, a tile per watch with status and version, and the computation time', async () => {
+  it('shows the counts, the summary strip and the computation time', async () => {
     const { f } = await make();
     expect(text(q(f, '.sub'))).toMatch(/^8 watches · next check in/);
-    const tiles = qa(f, 'pd-card');
-    expect(tiles).toHaveLength(8);
-    expect(text(tiles[0])).toContain('Acme Installer');
-    expect(text(tiles[3])).toContain('Unreachable');
-    expect(text(tiles[7])).toContain('Paused');
-    expect(text(tiles[0])).toMatch(/checked 20 min ago · every \d+ days? on average/);
+    const strip = qa(f, 'dl.strip > div').map((d) => text(d));
+    expect(strip).toHaveLength(4);
+    expect(strip[0]).toMatch(/^8Watches$/);
+    expect(strip[1]).toMatch(/^\d+New releases$/);
+    expect(strip[2]).toMatch(/^\d+Need attention$/);
+    expect(strip[3]).toMatch(/Until next check$/);
+    expect(strip[3]).not.toMatch(/^—/);
     expect(text(q(f, 'footer.foot'))).toMatch(/^Computed in/);
   });
 
-  it('lists what is new and acts on a release', async () => {
+  it('lists the watches that need attention with the reason, linking to them', async () => {
+    const { f } = await make();
+    const rows = qa(f, 'ul.attention li');
+    const store = TestBed.inject(WatchesStore);
+    expect(rows).toHaveLength(store.attention().length);
+    expect(rows.length).toBeGreaterThan(0);
+    const first = store.attention()[0]!;
+    expect(text(rows[0])).toContain(first.name);
+    expect(text(rows[0])).toContain(first.status.message ?? '');
+    expect(rows[0]!.querySelector('a')!.getAttribute('href')).toBe(`/watches/${first.id}`);
+    expect(rows[0]!.querySelector('sp-avatar')).not.toBeNull();
+  });
+
+  it('lists what is new, grouped by day, and acts on a release', async () => {
     const { f, backend } = await make();
-    const items = qa(f, 'sp-whats-new li');
+    const items = qa(f, 'sp-whats-new li.item');
     expect(items).toHaveLength(8);
-    expect(items.some((li) => text(li).includes('New'))).toBe(true);
-    const unseen = items.find((li) => li.classList.contains('unseen'))!;
-    await click(f, unseen.querySelector('button[aria-label^="Mark "]'));
+    expect(qa(f, 'sp-whats-new section.day h3').length).toBeGreaterThan(0);
+    expect(items.some((li) => li.querySelector('.unseen-dot:not(.off)'))).toBe(true);
+    const unseen = items.find((li) => li.querySelector('.unseen-dot:not(.off)'))!;
+    expect(unseen.classList.contains('seen')).toBe(false);
+    unseen.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }));
+    await settle(f);
     await click(f, items[0]!.querySelector('button[aria-label^="Open "]'));
     await click(f, items[0]!.querySelector('button[aria-label^="Download "]'));
     expect(backend.calls).toEqual(expect.arrayContaining(['acknowledge', 'openRelease', 'downloadRelease']));
     expect(TestBed.inject(ToastStore).toasts().map((t) => t.title)).toEqual(expect.arrayContaining(['Marked as seen', 'Download finished']));
   });
 
-  it('shows chips for pre-releases and versions newer than installed', async () => {
+  it('shows the installed to latest token and sizes', async () => {
     const { f } = await make();
-    expect(f.nativeElement.querySelectorAll('sp-whats-new .chip.info').length).toBeGreaterThan(0);
     const all = text(q(f, 'sp-whats-new'));
-    expect(all).toContain('Newer than installed');
-    expect(all).toMatch(/released .* ago/);
+    expect(qa(f, 'sp-whats-new .token mat-icon').length).toBeGreaterThan(0);
     expect(all).toMatch(/\d+(\.\d+)? (MiB|GiB)/);
+  });
+
+  it('marks everything seen from the section header', async () => {
+    const { f, backend } = await make();
+    await click(f, button(f, 'Mark all seen'));
+    expect(backend.calls).toContain('acknowledge');
+    expect(TestBed.inject(WatchesStore).unseen()).toHaveLength(0);
+    expect(byText(f.nativeElement, 'button', 'Mark all seen')).toBeNull();
+  });
+
+  it('draws a cadence card for each watch that released something and switches the range', async () => {
+    const { f, backend } = await make();
+    const cards = qa(f, 'sp-cadence-cards a.card');
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards[0]!.getAttribute('href')).toMatch(/^\/watches\/w-/);
+    const tabs = qa(f, '.seg-tabs button');
+    expect(tabs.map((b) => text(b))).toEqual(['30 days', '90 days', '1 year']);
+    expect(tabs.find((b) => b.getAttribute('aria-pressed') === 'true')).toBeDefined();
+    const calls = backend.calls.length;
+    await click(f, tabs.find((b) => b.getAttribute('aria-pressed') === 'true') ?? null);
+    expect(backend.calls.length).toBe(calls);
   });
 
   it('draws the releases chart with a description and redraws for another range', async () => {
@@ -74,16 +110,19 @@ describe('DashboardPage', () => {
     TestBed.inject(WatchesStore).start();
     const f = TestBed.createComponent(DashboardPage);
     await settle(f);
+    expect(text(q(f, '#chart-h'))).toBe('Releases per day');
     expect(q(f, 'sp-chart [role=img]').getAttribute('aria-label')).toMatch(/^Releases found per day: \d+ in total across \d+ watch/);
     expect(charts[0]!.options).toHaveLength(1);
-    const range = qa(f, 'pd-segmented-control button, pd-segmented-control [role=radio]').find((b) => text(b) === '1 year')!;
-    range.click();
+    const year = qa(f, '.seg-tabs button').find((b) => text(b) === '1 year')!;
+    year.click();
     await settle(f);
     expect(backend.calls).toContain('dashboard');
+    expect(text(q(f, '#chart-h'))).toBe('Releases per week');
     expect(q(f, 'sp-chart [role=img]').getAttribute('aria-label')).toContain('per week');
+    expect(qa(f, '.seg-tabs button').find((b) => text(b) === '1 year')!.getAttribute('aria-pressed')).toBe('true');
     // Choosing the current range again does not ask again.
     const calls = backend.calls.length;
-    qa(f, 'pd-segmented-control button, pd-segmented-control [role=radio]').find((b) => text(b) === '1 year')!.click();
+    qa(f, '.seg-tabs button').find((b) => text(b) === '1 year')!.click();
     await settle(f);
     expect(backend.calls.length).toBe(calls);
   });
@@ -96,21 +135,27 @@ describe('DashboardPage', () => {
       return { ...d, watches: d.watches.map((w) => ({ ...w, releases: w.releases.map(() => 0) })) };
     });
     const { f } = await make(backend);
-    expect(text(q(f, '.chart'))).toBe('No releases in this range.');
     expect(f.nativeElement.querySelector('sp-chart')).toBeNull();
+    expect(f.nativeElement.querySelector('sp-cadence-cards')).toBeNull();
+    expect(q(f, '#chart-h')).toBeNull();
   });
 
-  it('opens a watch from its tile', async () => {
+  it('opens a watch from a feed row', async () => {
     const { f } = await make();
-    q(f, 'pd-card').dispatchEvent(new CustomEvent('activated'));
-    f.componentInstance['goto']('w-3');
+    qa(f, 'sp-whats-new li.item')[0]!.click();
     await flush(5);
-    expect(TestBed.inject(Router).url).toBe('/watches/w-3');
+    expect(TestBed.inject(Router).url).toMatch(/^\/watches\/w-\d+$/);
   });
 
-  it('checks everything now and opens the downloads folder', async () => {
+  const menu = () => Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container [cdkMenuItem]'));
+  const openHeadMenu = (f: F) => click(f, q(f, 'button[aria-label="Dashboard actions"]'));
+  afterEach(() => document.querySelectorAll('.cdk-overlay-container').forEach((e) => (e.innerHTML = '')));
+
+  it('checks everything now from the header menu and opens the downloads folder', async () => {
     const { f, backend } = await make();
-    await click(f, button(f, 'Check all now'));
+    await openHeadMenu(f);
+    byText(document.body, '[cdkMenuItem]', 'Check all now')!.click();
+    await settle(f);
     await click(f, button(f, 'Open downloads folder'));
     expect(backend.calls).toEqual(expect.arrayContaining(['checkNow', 'open:downloads']));
   });
@@ -118,26 +163,26 @@ describe('DashboardPage', () => {
   it('pauses notifications from the menu, shows it, and resumes', async () => {
     const { f } = await make(makeMock({ now: () => Date.now() }));
     const settings = TestBed.inject(SettingsStore);
-    await click(f, q(f, 'button[aria-label="Pause notifications"]'));
-    const items = () => Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container [cdkMenuItem]'));
-    expect(items().map((i) => text(i))).toEqual(['For 1 hour', 'Until tomorrow']);
-    items()[0]!.click();
+    await openHeadMenu(f);
+    expect(menu().map((i) => text(i))).toEqual(['Check all now', 'Pause notifications for 1 hour', 'Pause notifications until tomorrow']);
+    menu()[1]!.click();
     await settle(f);
     expect(settings.settings().value?.notificationsPausedUntilMs).toBeGreaterThan(Date.now());
-    expect(text(q(f, 'button[aria-label="Pause notifications"]'))).toBe('Notifications paused');
-    await click(f, q(f, 'button[aria-label="Pause notifications"]'));
-    expect(items().map((i) => text(i))).toContain('Resume now');
-    items().find((i) => text(i) === 'Resume now')!.click();
+    expect(text(q(f, '.sub'))).toContain('notifications paused');
+    await openHeadMenu(f);
+    expect(menu().map((i) => text(i))).toEqual(['Check all now', 'Resume notifications']);
+    menu()[1]!.click();
     await settle(f);
     expect(settings.settings().value?.notificationsPausedUntilMs).toBeNull();
+    expect(text(q(f, '.sub'))).not.toContain('notifications paused');
   });
 
   it('pauses until tomorrow for between a minute and a day', async () => {
     const { f, backend } = await make(makeMock({ now: () => Date.now() }));
     const settings = TestBed.inject(SettingsStore);
     const before = Date.now();
-    await click(f, q(f, 'button[aria-label="Pause notifications"]'));
-    byText(document.body, '[cdkMenuItem]', 'Until tomorrow')!.click();
+    await openHeadMenu(f);
+    byText(document.body, '[cdkMenuItem]', 'until tomorrow')!.click();
     await settle(f);
     const until = settings.settings().value!.notificationsPausedUntilMs!;
     expect(until - before).toBeGreaterThan(0);
@@ -149,7 +194,9 @@ describe('DashboardPage', () => {
     const { f } = await make(makeMock({ scenario: 'empty' }));
     expect(text(f.nativeElement)).toContain('Nothing to watch yet');
     expect(text(q(f, '.sub'))).toContain('Spotter tells you the moment a new release appears.');
-    expect((button(f, 'Check all now')).disabled).toBe(true);
+    await openHeadMenu(f);
+    expect(byText(document.body, '[cdkMenuItem]', 'Check all now')!.getAttribute('aria-disabled')).toBe('true');
+    expect(q(f, 'dl.strip')).toBeNull();
     expect(q(f, 'footer.foot')).toBeNull();
   });
 

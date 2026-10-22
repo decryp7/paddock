@@ -1,5 +1,5 @@
 import type { Dashboard } from '../../core/api.types';
-import { releaseChartSummary, releaseSeries, releasesOption } from './chart-options';
+import { releaseChartSummary, releaseSeries, releaseTotals, releasesOption } from './chart-options';
 
 const num = (id: string, releases: number[]) => ({ watchId: id, averageIntervalMs: null, sinceLastMs: null, releases, failedChecks: [], checks: [], sparkline: [] });
 const d: Dashboard = {
@@ -27,14 +27,27 @@ describe('chart options', () => {
     expect(releaseSeries(d, [], 9)[0]?.name).toBe('d');
   });
 
-  it('summarises and builds stacked bars', () => {
+  it('sums every watch per bucket', () => {
+    expect(releaseTotals(d)).toEqual([7, 1, 3]);
+    expect(releaseTotals({ ...d, watches: [] })).toEqual([0, 0, 0]);
+    expect(releaseTotals({ ...d, watches: [num('x', [1])] })).toEqual([1, 0, 0]);
+  });
+
+  it('summarises the releases', () => {
     const series = releaseSeries(d, names);
     expect(releaseChartSummary(d, series)).toContain('11 in total across 3 watches');
     expect(releaseChartSummary({ ...d, range: '1y' }, series.slice(0, 1))).toContain('per week');
     expect(releaseChartSummary(d, series.slice(0, 1))).toContain('1 watch.');
-    const o = releasesOption(d, series) as { series: { stack: string }[]; xAxis: { data: string[] } };
-    expect(o.series.length).toBe(3);
-    expect(o.series[0]?.stack).toBe('releases');
+  });
+
+  it('builds one series of per-bucket totals from zero', () => {
+    const o = releasesOption(d) as { series: { name: string; data: number[]; stack?: string }[]; xAxis: { data: string[] }; yAxis: { min: number; name: string } };
+    expect(o.series.length).toBe(1);
+    expect(o.series[0]?.data).toEqual([7, 1, 3]);
+    expect(o.series[0]?.stack).toBeUndefined();
     expect(o.xAxis.data.length).toBe(3);
+    expect(o.yAxis.min).toBe(0);
+    expect(o.yAxis.name).toBe('Releases per day');
+    expect((releasesOption({ ...d, range: '1y' }) as { yAxis: { name: string } }).yAxis.name).toBe('Releases per week');
   });
 });
