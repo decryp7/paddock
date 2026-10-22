@@ -14,6 +14,7 @@ export const routes: Routes = [
     children: [
       { path: '', pathMatch: 'full', title: 'Dashboard · Dyno', loadComponent: () => import('./features/dashboard/dashboard').then((m) => m.Dashboard) },
       { path: 'processes', title: 'Processes · Dyno', loadComponent: () => import('./features/processes/processes-page').then((m) => m.ProcessesPage) },
+      { path: 'inventory', title: 'Inventory · Dyno', loadComponent: () => import('./features/inventory/inventory-page').then((m) => m.InventoryPage) },
       { path: 'cpu', title: 'CPU · Dyno', loadComponent: () => import('./features/cpu/cpu-detail').then((m) => m.CpuDetail) },
       { path: 'why-slow', title: 'Why slow · Dyno', loadComponent: () => import('./features/why-slow/why-slow-page').then((m) => m.WhySlowPage) },
       { path: 'rules', title: 'CPU taming · Dyno', loadComponent: () => import('./features/rules/rules-page').then((m) => m.RulesPage) },

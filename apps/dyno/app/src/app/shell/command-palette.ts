@@ -143,6 +143,7 @@ export class CommandPalette {
   private readonly items = computed<PaletteItem[]>(() => {
     const go = (path: string) => () => void this.router.navigateByUrl(path);
     const screens: PaletteItem[] = NAV.map((n) => ({ id: `go${n.path.replace('/', '-')}`, section: 'Go to', label: n.label, hint: '', icon: n.icon, keywords: n.keywords, run: go(n.path) }));
+    screens.push({ id: 'go-cpu', section: 'Go to', label: 'CPU details', hint: 'Per core', icon: 'cpu', keywords: 'cores per core heatmap frequency performance efficiency', run: go('/cpu') });
     const actions: PaletteItem[] = [
       {
         id: 'why-slow',

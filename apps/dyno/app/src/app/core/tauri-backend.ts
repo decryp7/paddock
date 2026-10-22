@@ -30,6 +30,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   StartupState,
+  SystemInventory,
   Timestamp,
   TuningSuggestion,
   WeeklyReport,
@@ -292,6 +293,10 @@ export class TauriBackend implements DynoBackend {
   }
 
   // ---------------------------------------------------------------------------------- reports, settings, plugins
+
+  inventory(): Promise<SystemInventory> {
+    return this.request('inventory');
+  }
 
   weeklyReport(): Promise<WeeklyReport> {
     return this.request('weeklyReport');

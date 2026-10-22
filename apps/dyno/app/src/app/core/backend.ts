@@ -29,6 +29,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   StartupState,
+  SystemInventory,
   Timestamp,
   TuningSuggestion,
   WeeklyReport,
@@ -93,6 +94,9 @@ export interface DynoBackend {
   revertTuning(id: string): Promise<ActivityEntry>;
   startupEntries(): Promise<StartupEntry[]>;
   setStartupState(id: string, state: StartupState): Promise<ActivityEntry>;
+
+  // What is installed (memory modules, CPU, disks) and hints.
+  inventory(): Promise<SystemInventory>;
 
   // Reports, settings, plugins.
   weeklyReport(): Promise<WeeklyReport>;

@@ -32,6 +32,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   StartupState,
+  SystemInventory,
   SystemSample,
   Timestamp,
   TuningSuggestion,
@@ -55,6 +56,7 @@ import {
   healthReasons,
 } from './mock/data';
 import { mockHistory } from './mock/history';
+import { mockInventory } from './mock/inventory';
 import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
@@ -816,6 +818,10 @@ export class MockBackend implements DynoBackend {
   }
 
   // ------------------------------------------------------------------------------- reports, settings, plugins
+
+  inventory(): Promise<SystemInventory> {
+    return this.reply('inventory', () => mockInventory(this.profile.os));
+  }
 
   weeklyReport(): Promise<WeeklyReport> {
     return this.reply('weeklyReport', () => ({

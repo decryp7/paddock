@@ -19,7 +19,7 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
   void mock;
 }
 
-const SCREENS: { name: string; path: string; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
+const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
   {
     name: 'dashboard',
     path: '/#/',
@@ -49,6 +49,17 @@ const SCREENS: { name: string; path: string; ready: (page: Page) => Promise<void
       await page.clock.runFor(1_000);
     },
   },
+  {
+    name: 'inventory',
+    path: '/#/inventory',
+    mock: 'windows',
+    ready: async (page) => void (await expect(page.getByRole('img', { name: /memory slots filled/ })).toBeVisible()),
+  },
+  {
+    name: 'inventory-apple',
+    path: '/#/inventory',
+    ready: async (page) => void (await expect(page.getByRole('img', { name: /Unified memory/ })).toBeVisible()),
+  },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why slow' })).toBeVisible()) },
   { name: 'rules', path: '/#/rules', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'CPU taming' })).toBeVisible()) },
   { name: 'cleanup', path: '/#/cleanup', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Cleanup' })).toBeVisible()) },
@@ -70,7 +81,7 @@ for (const theme of ['dark', 'light'] as const) {
     test(`${screen.name} (${theme})`, async ({ page }) => {
       if (screen.size) await page.setViewportSize(screen.size);
       await prepare(page, theme);
-      await page.goto(`${screen.path.replace('/#/', '/?latency=0#/')}`);
+      await page.goto(`${screen.path.replace('/#/', `/?latency=0${screen.mock ? `&mock=${screen.mock}` : ''}#/`)}`);
       await expect(page.locator('dy-shell, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);
       await screen.ready(page);
