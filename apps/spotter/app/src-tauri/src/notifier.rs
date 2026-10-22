@@ -77,17 +77,24 @@ impl ShellNotifier {
         let mut downloaded: Option<String> = None;
         for action in &request.actions {
             let failure = match action {
-                Action::OpenLocation => self
+                Action::OpenLocation { variant, extension } => self
                     .inner
                     .opener
-                    .open(&request.release.location)
+                    .open(&request.release.with_artifact(variant, extension).location)
                     .err()
                     .map(|e| ("open-location", e)),
-                Action::Download { folder, verify } => self
-                    .download(request, &self.folder_for(folder), *verify, &mut downloaded)
-                    .await
-                    .err()
-                    .map(|e| ("download", e)),
+                Action::Download {
+                    folder,
+                    verify,
+                    variant,
+                    extension,
+                } => {
+                    let release = request.release.with_artifact(variant, extension);
+                    self.download(request, &release, &self.folder_for(folder), *verify, &mut downloaded)
+                        .await
+                        .err()
+                        .map(|e| ("download", e))
+                }
                 Action::RunCommand { program, args } => {
                     let path = downloaded.clone().unwrap_or_else(|| request.release.location.clone());
                     run_command(program, &command_args(args, &request.release, &path))
@@ -102,15 +109,22 @@ impl ShellNotifier {
         }
     }
 
-    async fn download(&self, request: &ActionRequest, folder: &Path, verify: bool, downloaded: &mut Option<String>) -> Result<(), String> {
-        let result = spotter_sources::download::download(&self.inner.http, &request.release, folder, verify).await;
+    async fn download(
+        &self,
+        request: &ActionRequest,
+        release: &spotter_core::release::Release,
+        folder: &Path,
+        verify: bool,
+        downloaded: &mut Option<String>,
+    ) -> Result<(), String> {
+        let result = spotter_sources::download::download(&self.inner.http, release, folder, verify).await;
         if let Some(engine) = self.inner.engine.get() {
             let outcome = result
                 .as_ref()
                 .map(|d| (d.path.display().to_string(), d.size, d.verified))
                 .map_err(Clone::clone);
             // The journal entry is the record; a failure to write it is not worth failing the action for.
-            let _ = engine.record_download(&request.watch_id, &request.release.version.text, outcome);
+            let _ = engine.record_download(&request.watch_id, &release.version.text, outcome);
         }
         result.map(|d| *downloaded = Some(d.path.display().to_string()))
     }
@@ -216,6 +230,7 @@ mod tests {
             published_at: None,
             size: None,
             sha256: None,
+            detail: Default::default(),
         }
     }
 
@@ -265,8 +280,11 @@ mod tests {
         });
         let toasts = Arc::new(Toasts::default());
         let n = notifier(opened.clone(), toasts.clone());
-        n.run(&request(vec![Action::OpenLocation, Action::OpenLocation], "https://example.org/a"))
-            .await;
+        n.run(&request(
+            vec![Action::open_location(), Action::open_location()],
+            "https://example.org/a",
+        ))
+        .await;
         assert_eq!(opened.seen.lock().unwrap().len(), 2, "the second action still ran");
         let t = toasts.0.lock().unwrap();
         assert_eq!(t.len(), 2);
@@ -279,8 +297,7 @@ mod tests {
         let n = notifier(Arc::new(Opened::default()), toasts.clone());
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().display().to_string();
-        n.run(&request(vec![Action::Download { folder, verify: true }], "not-a-location"))
-            .await;
+        n.run(&request(vec![Action::download(&folder, true)], "not-a-location")).await;
         assert!(toasts.0.lock().unwrap()[0].0.contains("download failed"));
     }
 

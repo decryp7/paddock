@@ -143,6 +143,18 @@ impl Release {
             .or_else(|| self.detail.artifacts.first())
     }
 
+    /// The same release with its primary file replaced by the artifact called `name`; `None` when it has none by that
+    /// name (a webview cannot make Spotter open or fetch anything that is not one of the release's files).
+    pub fn with_artifact_named(&self, name: &str) -> Option<Release> {
+        let a = self.detail.artifacts.iter().find(|a| a.name == name)?;
+        Some(Release {
+            name: a.name.clone(),
+            location: a.location.clone(),
+            size: a.size.or(self.size),
+            ..self.clone()
+        })
+    }
+
     /// The same release with its primary file replaced by the chosen artifact (what actions run on).
     pub fn with_artifact(&self, variant: &str, kind: &str) -> Release {
         match self.pick(variant, kind) {
@@ -648,6 +660,9 @@ mod tests {
         assert_eq!(pro.pick("", "ISO").unwrap().kind, "iso");
         assert_eq!(pro.pick("arm64", "").unwrap().kind, "exe", "falls back to the primary");
         assert_eq!(pro.with_artifact("", ".iso").location, "/drops/Acme-PRO-R3.10.00T32.iso");
+        assert_eq!(pro.with_artifact_named("Acme-PRO-R3.10.00T32.iso").unwrap().name, "Acme-PRO-R3.10.00T32.iso");
+        assert!(pro.with_artifact_named("../../etc/passwd").is_none());
+        assert_eq!(select(vec![file("app-1.0.0.zip", Some(1))], &VersionScheme::Semver, &ReleaseFilter::default(), 1).releases[0].with_artifact("x", "y").name, "app-1.0.0.zip");
         // Pre-releases, per-product limits and restricting to products.
         let with = ReleaseFilter {
             include_prereleases: true,

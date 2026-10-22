@@ -28,6 +28,7 @@ const text = (key: string, label: string, over: Partial<FieldSpec> = {}): FieldS
   min: null,
   max: null,
   options: [],
+  advanced: false,
   ...over,
 });
 
@@ -40,7 +41,21 @@ export const SOURCE_KINDS: SourceKind[] = [
     group: 'files',
     fields: [
       text('path', 'Folder', { kind: 'folder', help: 'Each file or sub-folder name is a release.', placeholder: '/srv/drops/acme' }),
-      text('recursive', 'Look in sub-folders', { kind: 'toggle', required: false, default: 'false' }),
+      text('matchAgainst', 'Read the version from', {
+        kind: 'choice',
+        required: false,
+        default: 'name',
+        options: [
+          { value: 'name', label: 'The file name' },
+          { value: 'folder', label: 'The folder the file is in' },
+          { value: 'path', label: 'The path below the folder' },
+        ],
+      }),
+      text('depth', 'Folder levels', { kind: 'integer', required: false, default: '0', min: 0, max: 8, help: '0 looks only in this folder; higher numbers also look inside sub-folders.' }),
+      text('extensions', 'File types', { required: false, placeholder: 'iso, exe, msi, zip', help: 'Optional: only these extensions, separated by commas.' }),
+      text('skipHidden', 'Skip hidden files', { kind: 'toggle', required: false, default: 'false' }),
+      text('maxEntries', 'Most entries per check', { kind: 'integer', required: false, default: '200000', min: 100, max: 5000000, advanced: true }),
+      text('settleSeconds', 'Settle time (seconds)', { kind: 'integer', required: false, default: '5', min: 0, max: 300, advanced: true }),
     ],
   },
   {
@@ -210,6 +225,11 @@ export function makeReleases(seed: number, scheme: VersionSchemeId, count: numbe
       firstSeenMs: at + Math.round(r() * 3 * HOUR),
       size: Math.round(20_000_000 + r() * 180_000_000),
       sha256: Array.from({ length: 64 }, () => Math.floor(r() * 16).toString(16)).join(''),
+      product: null,
+      channel: '',
+      fields: {},
+      artifacts: [],
+      updatedInPlace: false,
     });
   }
   return out;

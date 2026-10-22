@@ -420,6 +420,11 @@ mod tests {
                 first_seen_ms: 0,
                 size: None,
                 sha256: None,
+                product: None,
+                channel: String::new(),
+                fields: Vec::new(),
+                artifacts: Vec::new(),
+                updated_in_place: false,
             }),
             acknowledged: None,
             installed: None,
@@ -429,6 +434,7 @@ mod tests {
             next_check_ms: None,
             failures: 0,
             interval_secs: 3600,
+            product_count: 0,
         }
     }
 

@@ -621,10 +621,19 @@ impl Engine {
     /// A release the watch knows (the latest or one in its history), by its version text. The shell downloads or opens
     /// it; the engine does not.
     pub fn release_of(&self, id: &str, version: &str) -> Result<spotter_core::release::Release> {
+        self.release_of_product(id, None, version)
+    }
+
+    /// Like [`Engine::release_of`], for a product of a watch with an `id` group (versions can repeat across products).
+    pub fn release_of_product(&self, id: &str, product: Option<&str>, version: &str) -> Result<spotter_core::release::Release> {
         self.find_spec(id)?;
         let wid = self.watch_id(id)?;
         let states = lock(&self.inner.states);
         let state = states.get(&wid);
+        let state = match product {
+            Some(p) => state.and_then(|s| s.products.get(p)),
+            None => state,
+        };
         state
             .into_iter()
             .flat_map(|s| s.latest.iter().chain(s.history.iter()))

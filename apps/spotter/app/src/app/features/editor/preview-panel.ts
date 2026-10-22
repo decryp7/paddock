@@ -5,11 +5,12 @@ import { statusView } from '../../shared/labels';
 import type { SourcePreview } from '../../core/api.types';
 import type { Loadable } from '../../state/loadable';
 import { Panel } from '../../shared/ui/panel';
+import { ExtractionPanel } from './extraction-panel';
 
 /** "Test this source": what the draft would find right now, with the reasons for everything it left out. */
 @Component({
   selector: 'sp-preview-panel',
-  imports: [SuStatusPill, Panel],
+  imports: [SuStatusPill, Panel, ExtractionPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="surface" aria-labelledby="pv-h" aria-live="polite">
@@ -43,7 +44,9 @@ import { Panel } from '../../shared/ui/panel';
                 @if (p.prereleasesSkipped) { {{ p.prereleasesSkipped }} pre-release{{ p.prereleasesSkipped === 1 ? '' : 's' }} left out. }
                 @if (p.namesSkipped) { {{ p.namesSkipped }} did not match the filters. }
               </p>
-              @if (p.releases.length) {
+              @if (p.extraction; as x) {
+                <sp-extraction-panel [extraction]="x" />
+              } @else if (p.releases.length) {
                 <table class="table" aria-label="Releases found">
                   <thead><tr><th scope="col">Version</th><th scope="col">Name</th><th scope="col">Date</th><th scope="col">Size</th></tr></thead>
                   <tbody>

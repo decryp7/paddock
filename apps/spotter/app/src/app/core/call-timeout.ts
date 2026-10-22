@@ -4,14 +4,16 @@ import type { CommandError } from './api.types';
 export const DEFAULT_TIMEOUT_MS = 15_000;
 const LONG_TIMEOUT_MS = 120_000;
 const MEDIUM_TIMEOUT_MS = 45_000;
+/** Looking through a big share (the wizard's test) may use the whole scan limit. */
+const SCAN_TIMEOUT_MS = 90_000;
 
 /** Network checks, downloads and installs legitimately take longer than reads. */
 const LONG = new Set(['download_release', 'install_renderer', 'install_app_update', 'check_app_update']);
-const MEDIUM = new Set(['test_source', 'save_watch', 'discover_feeds', 'check_now', 'import_list']);
+const MEDIUM = new Set(['save_watch', 'discover_feeds', 'check_now', 'import_list']);
 
 /** The time one command gets (pure). */
 export function timeoutFor(cmd: string): number {
-  return LONG.has(cmd) ? LONG_TIMEOUT_MS : MEDIUM.has(cmd) ? MEDIUM_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  return LONG.has(cmd) ? LONG_TIMEOUT_MS : cmd === 'test_source' ? SCAN_TIMEOUT_MS : MEDIUM.has(cmd) ? MEDIUM_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
 }
 
 /** The error a call that did not answer in time becomes. */

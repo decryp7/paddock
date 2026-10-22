@@ -246,6 +246,8 @@ pub struct VersionPreview {
 pub struct ProductPreview {
     /// The id; `None` for a watch of one thing.
     pub id: Option<String>,
+    /// The watch tracks it (no product list, or it is on the list).
+    pub tracked: bool,
     /// Versions in the chosen order, newest first.
     pub versions: Vec<VersionPreview>,
 }

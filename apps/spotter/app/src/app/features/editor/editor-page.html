@@ -36,6 +36,9 @@
                 (secretChange)="store.setSecret($event.key, $event.value)"
                 (secretClear)="store.clearSecret($event)"
               />
+              @if (kind.id === 'folder') {
+                <sp-extension-chips [value]="draft().source.values['extensions'] ?? ''" (valueChange)="store.setValue('extensions', $event)" />
+              }
               @if (store.missing().length) {
                 <p class="help" role="status">Still needed: {{ store.missing()[0]?.label }}@if (store.missing().length > 1) { and {{ store.missing().length - 1 }} more }.</p>
               }
@@ -60,11 +63,13 @@
               </select>
             </div>
             @if (draft().versions === 'custom') {
-              <div class="field">
-                <label for="pattern">Pattern</label>
-                <input id="pattern" class="input" [value]="draft().versionPattern ?? ''" (input)="store.update(d => ({ ...d, versionPattern: value($event) }))" placeholder="^v(?P&lt;major&gt;\d+)\.(?P&lt;minor&gt;\d+)" />
-                <span class="help">A regular expression with named groups <code>major</code>, <code>minor</code>, <code>patch</code> (and optionally <code>build</code>). Spotter rejects patterns that are too long or too complex.</span>
-              </div>
+              <sp-pattern-helper
+                [pattern]="draft().versionPattern ?? ''"
+                [missingOlder]="draft().tracking.missingOlder"
+                [presets]="store.schemes().value ?? []"
+                [examples]="store.examples()"
+                (patternChange)="store.setPattern($event)"
+              />
             }
             <label class="check"><input type="checkbox" [checked]="draft().includePrereleases" (change)="store.update(d => ({ ...d, includePrereleases: checked($event) }))" /><span>Include pre-releases (alpha, beta, release candidates)</span></label>
             <div class="field">
@@ -81,6 +86,34 @@
               <input id="soak" class="input narrow" type="number" min="0" [value]="draft().filter.soakHours" (input)="store.update(d => ({ ...d, filter: { ...d.filter, soakHours: +value($event) || 0 } }))" />
               <span class="help">Soak time: a release must exist this long before it is announced. 0 announces at once.</span>
             </div>
+            <div class="field">
+              <label for="latest-by">The latest release is the one with the newest</label>
+              <select id="latest-by" class="input narrow" [value]="draft().tracking.latestBy" (change)="setLatestBy($event)">
+                <option value="version" [selected]="draft().tracking.latestBy === 'version'">Version number</option>
+                <option value="modified" [selected]="draft().tracking.latestBy === 'modified'">Modified time</option>
+                <option value="created" [selected]="draft().tracking.latestBy === 'created'" [disabled]="store.createdUnavailable()">Created time@if (store.createdUnavailable()) { (not available on this source) }</option>
+                <option value="name" [selected]="draft().tracking.latestBy === 'name'">Name (numbers in natural order)</option>
+              </select>
+              <span class="help" [title]="store.extraction()?.orderNote ?? ''">{{ store.extraction()?.orderNote ?? 'Version: compares the number groups in order; ties go to the newer modified time, then the name.' }}</span>
+            </div>
+            @if (draft().tracking.latestBy === 'version') {
+              <label class="check"><input type="checkbox" [checked]="draft().tracking.missingOlder" (change)="store.setMissingOlder(checked($event))" /><span>A number the name leaves out counts as older than any number (default: as 0)</span></label>
+            }
+            @if (store.discovered().length) {
+              <section class="stack" aria-labelledby="prod-h">
+                <h3 id="prod-h">Products found in the names</h3>
+                <p class="help">One watch follows each product separately: its own latest version, new state, mute and notification. Untick a product to leave it out.</p>
+                @for (id of store.discovered(); track id) {
+                  <div class="product-row">
+                    <label class="check"><input type="checkbox" [checked]="isTracked(id)" (change)="store.setTracked(id, checked($event))" [attr.aria-label]="'Follow ' + id" /><span class="mono">{{ id }}</span></label>
+                    <input class="input" [value]="setting(id)?.name ?? ''" (input)="store.setProduct(id, { name: value($event) })" [attr.aria-label]="'Display name for ' + id" placeholder="Shown as" />
+                    <label class="check"><input type="checkbox" [checked]="setting(id)?.muted ?? false" (change)="store.setProduct(id, { muted: checked($event) })" /><span>Mute</span></label>
+                    <input class="input narrow" type="number" min="0" [value]="setting(id)?.soakHours ?? ''" (input)="store.setProduct(id, { soakHours: value($event) === '' ? null : +value($event) })" [attr.aria-label]="'Wait hours for ' + id" placeholder="Wait (h)" />
+                  </div>
+                }
+                <label class="check"><input type="checkbox" [checked]="draft().tracking.products.announceNew" (change)="store.setAnnounceNew(checked($event))" /><span>Tell me when a new product appears (off: it becomes the new baseline quietly)</span></label>
+              </section>
+            }
           </section>
           <sp-preview-panel [state]="store.preview()" [ready]="store.missing().length === 0" (rerun)="store.runPreview()" />
         </div>

@@ -11,17 +11,21 @@ import type {
   ImportFormat,
   ImportResult,
   OpenTarget,
+  PatternSelection,
+  PatternTest,
   Preset,
   RendererStatus,
+  SchemePreset,
   Settings,
   SourceKind,
   SourcePreview,
   StatePush,
+  VersionSchemeId,
   WatchDetail,
   WatchDraft,
   WatchSummary,
 } from './api.types';
-import type { SpotterBackend } from './backend';
+import type { ReleaseTarget, SpotterBackend } from './backend';
 import { timeoutFor, withTimeout } from './call-timeout';
 import { toCommandError } from './command-error';
 import type { Platform } from './window-chrome';
@@ -90,11 +94,23 @@ export class TauriBackend implements SpotterBackend {
   setInstalled(id: string, version: string | null): Promise<void> {
     return this.run('set_installed', { id, version });
   }
-  openRelease(id: string, version: string): Promise<void> {
-    return this.run('open_release', { id, version });
+  acknowledgeProduct(id: string, product: string): Promise<void> {
+    return this.run('acknowledge_product', { id, product });
   }
-  downloadRelease(id: string, version: string): Promise<string> {
-    return this.run('download_release', { id, version });
+  openRelease(id: string, version: string, target?: ReleaseTarget): Promise<void> {
+    return this.run('open_release', { id, version, product: target?.product ?? null, artifact: target?.artifact ?? null });
+  }
+  downloadRelease(id: string, version: string, target?: ReleaseTarget): Promise<string> {
+    return this.run('download_release', { id, version, product: target?.product ?? null, artifact: target?.artifact ?? null });
+  }
+  suggestPattern(example: string, selections: PatternSelection[]): Promise<string> {
+    return this.run('suggest_pattern', { example, selections });
+  }
+  testPattern(versions: VersionSchemeId, versionPattern: string | null, missingOlder: boolean, text: string): Promise<PatternTest> {
+    return this.run('test_pattern', { versions, versionPattern, missingOlder, text });
+  }
+  versionSchemes(): Promise<SchemePreset[]> {
+    return this.run('version_schemes');
   }
   dashboard(range: DashboardRange): Promise<Dashboard> {
     return this.run('dashboard', { range });

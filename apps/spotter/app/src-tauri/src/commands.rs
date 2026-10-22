@@ -162,6 +162,49 @@ pub async fn acknowledge(state: State<'_, Shared>, id: String, version: Option<S
     Ok(state.engine.acknowledge(&id, version.as_deref())?)
 }
 
+/// `acknowledge_product`: the latest release of one product of a watch has been seen.
+#[tauri::command]
+pub async fn acknowledge_product(state: State<'_, Shared>, id: String, product: String) -> Out<()> {
+    text_ok("watch id", &id)?;
+    text_ok("product", &product)?;
+    Ok(state.engine.acknowledge_product(&id, &product)?)
+}
+
+/// `suggest_pattern`: a regular expression written from an example name and the selected parts.
+#[tauri::command]
+pub async fn suggest_pattern(state: State<'_, Shared>, example: String, selections: Vec<PatternSelectionDto>) -> Out<String> {
+    text_ok("example", &example)?;
+    if selections.len() > 16 {
+        return Err(CommandError::bad("Select at most 16 parts."));
+    }
+    let selections: Vec<_> = selections.into_iter().map(Into::into).collect();
+    Ok(state.engine.suggest_pattern(&example, &selections)?)
+}
+
+/// `test_pattern`: tries a version scheme on one name.
+#[tauri::command]
+pub async fn test_pattern(
+    state: State<'_, Shared>,
+    versions: String,
+    version_pattern: Option<String>,
+    missing_older: bool,
+    text: String,
+) -> Out<PatternTestDto> {
+    text_ok("version scheme", &versions)?;
+    text_ok("pattern", version_pattern.as_deref().unwrap_or(""))?;
+    text_ok("name", &text)?;
+    Ok((&state
+        .engine
+        .test_pattern(&versions, version_pattern.as_deref(), missing_older, &text))
+        .into())
+}
+
+/// `version_schemes`: patterns to start from.
+#[tauri::command]
+pub async fn version_schemes(state: State<'_, Shared>) -> Out<Vec<SchemePresetDto>> {
+    Ok(state.engine.version_schemes().iter().map(Into::into).collect())
+}
+
 /// `reset_acknowledgement`.
 #[tauri::command]
 pub async fn reset_acknowledgement(state: State<'_, Shared>, id: String) -> Out<()> {
@@ -179,19 +222,32 @@ pub async fn set_installed(state: State<'_, Shared>, id: String, version: Option
 
 /// `open_release`: opens the release's location with the system's handler.
 #[tauri::command]
-pub async fn open_release<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>, id: String, version: String) -> Out<()> {
+pub async fn open_release<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+    id: String,
+    version: String,
+    product: Option<String>,
+    artifact: Option<String>,
+) -> Out<()> {
     text_ok("watch id", &id)?;
     text_ok("version", &version)?;
-    let release = state.engine.release_of(&id, &version)?;
+    let release = chosen_release(&state, &id, &version, product.as_deref(), artifact.as_deref())?;
     lifecycle::opener(&app).open(&release.location).map_err(CommandError::unavailable)
 }
 
 /// `download_release`: downloads or copies the release into the downloads folder, verifying its checksum.
 #[tauri::command]
-pub async fn download_release(state: State<'_, Shared>, id: String, version: String) -> Out<String> {
+pub async fn download_release(
+    state: State<'_, Shared>,
+    id: String,
+    version: String,
+    product: Option<String>,
+    artifact: Option<String>,
+) -> Out<String> {
     text_ok("watch id", &id)?;
     text_ok("version", &version)?;
-    let release = state.engine.release_of(&id, &version)?;
+    let release = chosen_release(&state, &id, &version, product.as_deref(), artifact.as_deref())?;
     let folder = downloads_dir(&state);
     let result = spotter_sources::download::download(&state.http, &release, &folder, true).await;
     let outcome = result
@@ -200,6 +256,26 @@ pub async fn download_release(state: State<'_, Shared>, id: String, version: Str
         .map_err(Clone::clone);
     let _ = state.engine.record_download(&id, &version, outcome);
     result.map(|d| d.path.display().to_string()).map_err(CommandError::unavailable)
+}
+
+/// The release a command acts on: the watch's own record of it (never a path from the webview), with the primary
+/// file replaced by the named artifact when one is asked for.
+fn chosen_release(
+    state: &Shared,
+    id: &str,
+    version: &str,
+    product: Option<&str>,
+    artifact: Option<&str>,
+) -> Result<spotter_core::release::Release, CommandError> {
+    text_ok("product", product.unwrap_or(""))?;
+    text_ok("artifact", artifact.unwrap_or(""))?;
+    let release = state.engine.release_of_product(id, product, version)?;
+    match artifact.filter(|a| !a.is_empty()) {
+        None => Ok(release),
+        Some(name) => release
+            .with_artifact_named(name)
+            .ok_or_else(|| CommandError::bad(format!("The release has no file called \"{name}\"."))),
+    }
 }
 
 // ---- dashboard ----

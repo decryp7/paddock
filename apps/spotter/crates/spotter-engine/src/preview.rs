@@ -53,6 +53,12 @@ pub fn order_note(latest_by: LatestBy) -> &'static str {
 
 /// The preview for a source's candidates.
 pub fn extraction(watch: &Watch, candidates: Vec<Candidate>, scan: Option<ScanFacts>) -> ExtractionPreview {
+    // The product list narrows what a watch tracks, not what the wizard shows: every product found is listed (so one
+    // can be added to the list), with `tracked` saying whether the watch follows it.
+    let only = watch.filter.products.clone();
+    let mut watch = watch.clone();
+    watch.filter.products.clear();
+    let watch = &watch;
     let latest_by = watch.filter.latest_by;
     let rows = preview_rows(candidates.clone(), &watch.scheme, &watch.filter);
     let mut read_rows = Vec::new();
@@ -122,7 +128,11 @@ pub fn extraction(watch: &Watch, candidates: Vec<Candidate>, scan: Option<ScanFa
         rows: all,
         products: by_product
             .into_iter()
-            .map(|(id, versions)| ProductPreview { id, versions })
+            .map(|(id, versions)| ProductPreview {
+                tracked: id.as_ref().is_none_or(|p| only.is_empty() || only.contains(p)),
+                id,
+                versions,
+            })
             .collect(),
         scan: scan.map(|s| s.stats),
         ignored_count,
@@ -248,6 +258,19 @@ mod tests {
     }
 
     #[test]
+    fn every_product_is_listed_and_the_chosen_ones_are_marked() {
+        let w = watch(ACME, |s| s.tracking.products.only = vec!["QA".into()]);
+        let p = extraction(
+            &w,
+            vec![cand("Acme-PRO-R3.10.00T32.iso", 5), cand("Acme-QA-R1.00.00T05.zip", 1)],
+            None,
+        );
+        let tracked: Vec<_> = p.products.iter().map(|x| (x.id.as_deref().unwrap(), x.tracked)).collect();
+        assert_eq!(tracked, [("PRO", false), ("QA", true)]);
+        assert!(p.rows.iter().all(|r| r.read.is_some()), "restricting products does not hide names");
+    }
+
+    #[test]
     fn scans_add_counts_samples_and_creation_support() {
         let w = watch(ACME, |s| s.tracking.latest_by = LatestBy::Created);
         let facts = ScanFacts {
@@ -263,8 +286,7 @@ mod tests {
         let p = extraction(&w, vec![cand("Acme-PRO-R3.10.00T32.iso", 5)], Some(facts));
         assert_eq!(p.scan.unwrap().scanned, 48_213);
         assert_eq!(
-            p.ignored_count,
-            48_213,
+            p.ignored_count, 48_213,
             "nothing could be read under 'created' without creation times"
         );
         assert!(!p.created_available);

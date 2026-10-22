@@ -7,7 +7,7 @@ const item = (over: Partial<WhatsNewItem> = {}, release: Partial<WhatsNewItem['r
   watchId: 'w-1',
   watchName: 'Acme Installer',
   sourceKind: 'folder',
-  release: { version: '4.0.0-rc.1', prerelease: true, name: 'n', location: 'l', publishedAtMs: null, firstSeenMs: 1, size: null, sha256: null, ...release },
+  release: { version: '4.0.0-rc.1', prerelease: true, name: 'n', location: 'l', publishedAtMs: null, firstSeenMs: 1, size: null, sha256: null, product: null, channel: '', fields: {}, artifacts: [], updatedInPlace: false, ...release },
   releasedAtMs: 1_000,
   newerThanInstalled: false,
   unseen: false,
