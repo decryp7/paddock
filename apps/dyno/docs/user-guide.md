@@ -43,8 +43,14 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **Command palette.** Ctrl or Cmd + K jumps to a screen or action.
 - **Tray.** The icon shows the metric you chose; its dropdown is a compact dashboard. Closing the window keeps Dyno in the
   tray and the agent measuring; **Quit** closes the app (the agent keeps measuring until you stop it).
-- **CPU taming, Cleanup, Health and tuning, Reports, Why slow** are placeholders for now. Their engine parts exist (see
-  features.md); rules ship disabled and cannot act until you enable them.
+- **Why slow** explains the likeliest cause of a slow PC: what was measured, which apps are behind it, where to look closer and
+  the fixes Dyno proposes. Fixes that change a process show what they will do and wait for your click. **Run again** checks anew;
+  **Copy as text** puts the result on the clipboard.
+- **Reports** shows a summary of the week (pick the week at the top): health score and trend, the busiest apps, disk space and
+  how soon a disk fills, what needed attention and what changed. **Export** saves it as Markdown or a web page wherever you
+  choose; nothing is sent anywhere. A week without history says "Nothing to report".
+- **CPU taming, Cleanup and Health and tuning** may still be placeholders; rules ship disabled and cannot act until you enable
+  them (see features.md).
 
 ## Undo
 

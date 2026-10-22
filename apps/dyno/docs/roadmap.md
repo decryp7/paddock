@@ -27,7 +27,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-05 | Tuning catalogue | planned |
 | WP-06 | Issues with statistics | planned |
 | WP-07 | New and unusual processes | planned |
-| WP-08 | Alerts and the weekly report | engine partly built, rest planned (superseded in part by WP-26) |
+| WP-08 | Alerts and the weekly report | built: weekly report from stored data (health trend, apps, disk forecast, issues, changes), Reports page with week selector, Markdown/HTML export; Why slow page (G10). Planned: alert history on the page, weekly OS notification (superseded in part by WP-26) |
 | WP-09 | Right-click search | planned |
 | WP-10 | Watched folders with keep-for times | planned |
 | WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
@@ -71,10 +71,10 @@ What the code does today, read from the code on 2026-10-22. Each is a small task
 | G4 | The history `crashes` list is always empty and the health report gets `crashes_7d: 0`, so the crashes chart and the "crashing apps" health reason have no data | `crates/dyno-agent/src/handlers.rs` (`history`, `health`) | Filled by WP-06 (Issues) |
 | G5 | Plugins are wired minimally: the agent starts the host on first `Request::Plugins` and lists plugins; sensor, cleanup-proposal and rule-action contributions are not connected to the sampler, the scanner or the engine | `crates/dyno-agent/src/handlers.rs`, `sampler.rs`, `crates/dyno-plugin-host` | Connect contributions through guarded adapters (ADR 0007), trim the host to sensors, cleanup proposals and rule actions |
 | G6 | The helper is not built: `crates/dyno-helper/src/main.rs` is `fn main() {}`; only `HelperAction` and its validation exist | `crates/dyno-helper` | WP-01 |
-| G7 | Cleanup (`CleanupCategories`, `ScanCleanup`, `RunCleanup`, `Quarantine`, `RestoreQuarantine`), `DiskUsage`, tuning (`Tuning`, `ApplyTuning`, `RevertTuning`) and `WeeklyReport` answer `Unsupported: "<x> is not built yet."` | `crates/dyno-agent/src/handlers.rs` | WP-04, WP-05, WP-08 |
+| G7 | Cleanup (`CleanupCategories`, `ScanCleanup`, `RunCleanup`, `Quarantine`, `RestoreQuarantine`), `DiskUsage` and tuning (`Tuning`, `ApplyTuning`, `RevertTuning`) answer `Unsupported: "<x> is not built yet."` | `crates/dyno-agent/src/handlers.rs` | WP-04, WP-05, WP-08 |
 | G8 | Windows wires sensors (PDH), process control and user activity only. Process details use `NoDetails`; file locks (Restart Manager), startup entries and facts are the in-memory fakes | `crates/dyno-platform/src/windows/mod.rs` | Windows details probe (command line, modules, connections, signature), Restart Manager locks, registry / Startup folder / scheduled-task startup, facts (disk health, updates, power plan); verify on the Windows CI runner |
 | G9 | The doc comments on `Overhead::agent_cpu` and `Load::own_cpu` say "percent of the machine", but the sampler multiplies by the core count: the value is a share of one core (ADR 0002 section 4) | `crates/dyno-core/src/protocol.rs`, `sampling.rs` | Fix the comments (and the UI label) or change the unit; keep the budget comparison consistent |
-| G10 | The Why slow, CPU taming, Cleanup, Health and Reports screens are placeholders in the UI (marked "Soon" in the sidebar) although the engine answers `WhySlow`, `Rules`, `SaveRules`, `SetProfile`, `PauseRules`, `Health`, `StartupEntries`, `SetStartupState`, `Alerts`, `Anomalies` | `app/src/app/features/*`, `app/src/app/core/api.types.ts`, the mock | WP-02, WP-03, WP-08 |
+| G10 | The CPU taming, Cleanup and Health screens may still be placeholders in the UI (Why slow and Reports are built) although the engine answers `WhySlow`, `Rules`, `SaveRules`, `SetProfile`, `PauseRules`, `Health`, `StartupEntries`, `SetStartupState`, `Alerts`, `Anomalies` | `app/src/app/features/*`, `app/src/app/core/api.types.ts`, the mock | WP-02, WP-03, WP-08 |
 | G11 | The login-shell `PATH` resolver (ADR 0010 item 9) does not exist; nothing starts user tools yet | `crates/dyno-platform/src/process.rs` | Needed by WP-14 and WP-15; bounded, timed out, cached, with a validated per-item override |
 | G12 | On Windows nothing restarts a crashed agent until the app or the next logon does | `crates/dyno-agent/src/service` | Optional: a Task Scheduler "restart on failure" entry |
 | G13 | Dyno's overhead was measured once, under a high load average, on one machine; there is no CI artifact (`dyno-agent bench`) per OS | `docs/architecture.md`, `.gitea/workflows/build.yml` | Run `bench` on release builds on a quiet runner per OS, record load next to the numbers, fail on a regression |
@@ -187,6 +187,9 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
   changed). Exportable.
 - **Acceptance.** Alerts are rate limited and deduplicated; the report is a pure function over stored data with tests; "nothing
   to report" is a valid report.
+- **Status.** Report, page and export are built. Open: the alert history on the Reports page, the optional weekly OS notification
+  (needs the agent to push a notice to the shell; design before building), and the score is recorded only while the app asks
+  for the health report (move recording into the sampler).
 - **Depends on.** WP-06 for issues; G10.
 - **Touches.** `crates/dyno-core/src/{alerts,report}.rs`, handlers, `app/src/app/features/reports/**`, `state/alerts.store.ts`.
 
@@ -438,11 +441,11 @@ feature needs its images; a row is done when both exist and show the built scree
 | Processes (grouped tree, details, undo) | `processes-*.png` | built |
 | Settings | `settings-*.png` | built |
 | Tray dropdown | `tray-*.png` | built |
-| Why slow | `why-slow-*.png` | placeholder; real screen with WP-02/WP-06 |
+| Why slow | `why-slow-*.png` | real screen built; capture pending |
 | CPU taming | `rules-*.png` | placeholder; real screen with WP-02 |
 | Cleanup | `cleanup-*.png` | placeholder; real screen with WP-04 |
 | Health and tuning | `health-*.png` | placeholder; real screen with WP-03 and WP-05 |
-| Reports and alerts | `reports-*.png` | placeholder; real screen with WP-08 |
+| Reports and alerts | `reports-*.png` | real screen built; capture pending |
 | Issues with statistics | `issues-*.png` | not started (WP-06) |
 | Unusual processes | `unusual-*.png` | not started (WP-07) |
 | Watched folders | `watched-folders-*.png` | not started (WP-10) |

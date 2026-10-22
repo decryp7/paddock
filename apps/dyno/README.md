@@ -14,8 +14,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 > **Status: v0.1.0, unreleased.** The agent (sampling, history, process actions with undo, rules engine, diagnosis,
 > health, startup list, service registration), the dashboard, processes, settings and tray are built and tested. CPU
-> taming, Why slow, Health, Reports and Cleanup screens are still placeholders in the UI; cleanup, tuning, the weekly
-> report and the privileged helper are not built. [docs/features.md](docs/features.md) says exactly what is real and
+> taming, Health and Cleanup screens may still be placeholders in the UI; cleanup, tuning and the privileged helper are not built. [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
 
 ![The dashboard](docs/screenshots/dashboard-dark.png)
@@ -82,7 +81,7 @@ Taken against the mock backend (`docs/screenshots`, dark and light for every scr
 | ![Settings, dark](docs/screenshots/settings-dark.png) | ![Settings, light](docs/screenshots/settings-light.png) |
 | ![Tray dropdown, dark](docs/screenshots/tray-dark.png) | ![Tray dropdown, light](docs/screenshots/tray-light.png) |
 
-Why slow, CPU taming, Cleanup, Health and Reports are placeholder screens until their work packages are done
+CPU taming, Cleanup and Health may still be placeholder screens until their work packages are done
 ([roadmap](docs/roadmap.md)); their placeholder images are listed in the [screenshot checklist](docs/roadmap.md#screenshot-checklist).
 
 ## Quick start
