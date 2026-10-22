@@ -25,7 +25,14 @@ async function mount(opts: { backend?: MockBackend; load?: boolean; patch?: (o: 
   await settle(fixture);
   const el = fixture.nativeElement as HTMLElement;
   const btn = (label: string) => Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.trim() === label || b.textContent!.includes(label)) as HTMLButtonElement;
-  return { fixture, el, live, backend, btn };
+  /** Opens the header's More actions menu and runs one item. */
+  const more = async (item: string) => {
+    (el.querySelector('button[aria-label="More actions"]') as HTMLButtonElement).click();
+    await settle(fixture);
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    await settle(fixture);
+  };
+  return { fixture, el, live, backend, btn, more };
 }
 
 describe('shortModel', () => {
@@ -96,15 +103,10 @@ describe('Dashboard', () => {
     expect(off.el.querySelector('.offline')!.textContent).toBe('Offline mode');
   });
 
-  it('links to the main places', async () => {
+  it('has no quick-link row: the sidebar already goes everywhere', async () => {
     const { el } = await mount();
-    const links = Array.from(el.querySelectorAll('nav.quick a')).map((a) => [a.textContent!.trim(), a.getAttribute('href')]);
-    expect(links).toEqual([
-      ['Open Models', '/models'],
-      ['Pair an app', '/apps'],
-      ['Playground', '/playground'],
-      ['Requests', '/requests'],
-    ]);
+    expect(el.querySelector('nav.quick')).toBeNull();
+    expect(el.querySelector('[aria-label="Quick actions"]')).toBeNull();
   });
 
   it('loads the 1 h history on init and draws the memory, throughput, latency and request charts', async () => {
@@ -130,24 +132,23 @@ describe('Dashboard', () => {
     expect(TestBed.inject(Toasts).toasts().at(-1)?.message).toBe('Low memory preset applied.');
   });
 
-  it('releases memory and toasts the result', async () => {
-    const { fixture, backend, btn } = await mount();
+  it('releases memory from the More actions menu and toasts the result', async () => {
+    const { fixture, backend, more } = await mount();
     const spy = vi.spyOn(backend, 'releaseMemory');
-    btn('Release memory').click();
-    await settle(fixture);
+    await more('Release memory');
     expect(spy).toHaveBeenCalled();
     expect(TestBed.inject(Toasts).toasts().at(-1)?.tone).toBe('ok');
   });
 
   it('pauses serving, shows the banner and Resume, then resumes', async () => {
-    const { fixture, el, live, btn } = await mount();
-    expect(el.querySelector('.banner')).toBeNull();
-    btn('Pause serving').click();
-    await settle(fixture);
+    const { fixture, el, live, btn, more } = await mount();
+    expect(el.querySelector('.callout')).toBeNull();
+    expect(Array.from(el.querySelectorAll('.page-head button')).map((b) => b.textContent!.trim()).filter(Boolean)).toEqual(['Low memory', 'Balanced', 'Performance']);
+    await more('Pause serving');
     expect(live.isBusy()('serving')).toBe(false);
     patchState(live as unknown as WritableStateSource<object>, { overview: { ...live.overview()!, server: { ...live.overview()!.server, serving: 'paused' } } });
     await settle(fixture);
-    expect(el.querySelector('.banner')!.textContent).toContain('Serving is paused.');
+    expect(el.querySelector('.callout')!.textContent).toContain('Serving is paused.');
     expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent!.includes('Pause serving'))).toBe(false);
     const spy = vi.spyOn(TestBed.inject(BACKEND), 'setServing');
     btn('Resume serving').click();
@@ -156,9 +157,13 @@ describe('Dashboard', () => {
   });
 
   it('disables the quick actions until the overview is loaded', async () => {
-    const { el, btn } = await mount({ backend: new MockBackend({ failing: ['overview'] }) });
-    expect(btn('Release memory').disabled).toBe(true);
-    expect(btn('Pause serving').disabled).toBe(true);
+    const { el, fixture } = await mount({ backend: new MockBackend({ failing: ['overview'] }) });
+    (el.querySelector('button[aria-label="More actions"]') as HTMLButtonElement).click();
+    await settle(fixture);
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item'));
+    expect(items.map((i) => i.textContent!.trim())).toEqual(['Release memory', 'Pause serving']);
+    expect(items.every((i) => i.getAttribute('aria-disabled') === 'true')).toBe(true);
+    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')!.click();
     for (const r of Array.from(el.querySelectorAll('[aria-label="Memory preset"] button')) as HTMLButtonElement[]) expect(r.disabled).toBe(true);
   });
 

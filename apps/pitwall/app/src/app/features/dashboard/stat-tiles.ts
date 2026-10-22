@@ -16,7 +16,9 @@ import { Skeleton } from '../../shared/ui/skeleton';
       <div class="head">
         <span id="t-ram" class="label"><mat-icon svgIcon="pw:memory" aria-hidden="true" />System memory</span>
         @if (pressure(); as p) {
-          <span class="pill dot" [attr.data-tone]="p.tone">{{ p.label }}</span>
+          @if (p.tone !== 'ok') {
+            <span class="status" [attr.data-tone]="p.tone">{{ p.label }}</span>
+          }
         }
       </div>
       @if (live.memory(); as m) {
@@ -65,7 +67,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
       <div class="head">
         <span id="t-proc" class="label"><mat-icon svgIcon="pw:cpu" aria-hidden="true" />Processors</span>
         @if (live.memory()?.foregroundBusy) {
-          <span class="pill" data-tone="warn" matTooltip="A full-screen app is in front: Pitwall yields">Yielding</span>
+          <span class="status" data-tone="warn" matTooltip="A full-screen app is in front: Pitwall yields">Yielding</span>
         }
       </div>
       @if (live.memory(); as m) {
@@ -92,9 +94,11 @@ import { Skeleton } from '../../shared/ui/skeleton';
       <div class="head">
         <span id="t-tps" class="label"><mat-icon svgIcon="pw:bolt" aria-hidden="true" />Throughput</span>
         @if (live.paused()) {
-          <span class="pill dot" data-tone="warn">Paused</span>
+          <span class="status" data-tone="warn">Paused</span>
         } @else if (live.throughput(); as t) {
-          <span class="pill dot" [attr.data-tone]="t.activeRequests ? 'info' : 'muted'">{{ t.activeRequests }} active</span>
+          @if (t.activeRequests) {
+            <span class="gpu-name num">{{ t.activeRequests }} active</span>
+          }
         }
       </div>
       @if (live.throughput(); as t) {
@@ -148,8 +152,8 @@ import { Skeleton } from '../../shared/ui/skeleton';
       }
     }
     .gpu-name {
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;

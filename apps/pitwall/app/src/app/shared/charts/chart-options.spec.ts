@@ -20,22 +20,30 @@ describe('chart options', () => {
   });
 
   it('marks loads, releases by reason and restarts', () => {
-    expect(eventMark(ev('modelLoaded', null), t)).toMatchObject({ glyph: '▲', color: t.accent });
-    expect(eventMark(ev('modelUnloaded', 'pressure'), t)!.color).toBe(t.bad);
+    expect(eventMark(ev('modelLoaded', null), t)).toMatchObject({ glyph: '▲', shape: 'triangle', color: t.text2 });
+    expect(eventMark(ev('modelUnloaded', 'pressure'), t)).toMatchObject({ shape: 'diamond', color: t.bad });
     expect(eventMark(ev('modelUnloaded', 'failed'), t)!.color).toBe(t.bad);
-    expect(eventMark(ev('modelUnloaded', 'manual'), t)!.color).toBe(t.text2);
+    expect(eventMark(ev('modelUnloaded', 'manual'), t)).toMatchObject({ shape: 'circle', color: t.text2 });
+    expect(eventMark(ev('contextReleased', 'idle'), t)!.color).toBe(t.text2);
     expect(eventMark(ev('contextReleased', 'idle'), t)!.label).toBe('Released (idle)');
     expect(eventMark(ev('modelUnloaded', null), t)!.label).toBe('Released (manual)');
     expect(eventMark(ev('modelUnloaded', 'evicted'), t)!.label).toBe('Released (made room)');
-    expect(eventMark(ev('engineRestarted', null), t)!.glyph).toBe('◆');
+    expect(eventMark(ev('engineRestarted', null), t)).toMatchObject({ glyph: '■', shape: 'rect' });
     expect(eventMark(ev('download', null), t)).toBeNull();
   });
 
   it('draws memory with one axis, event marks and an escaping tooltip', () => {
     const o = memoryChart({ points: h.points, events: [...h.events, ev('download', null)], range: '1h', stepMs: h.stepMs, zoom: true }, t) as unknown as Opt;
-    expect(o.series.map((s) => s['name'])).toEqual(['RAM used', 'VRAM used', 'Pitwall']);
-    const marks = (o.series[0]!['markLine'] as { data: unknown[] }).data;
+    expect(o.series.map((s) => s['name'])).toEqual(['RAM used', 'VRAM used', 'Pitwall', 'Events']);
+    // The events sit on their own lane (a second grid), not as lines through the data.
+    expect(o.series.at(-1)!['name']).toBe('Events');
+    expect((o['grid'] as unknown[]).length).toBe(2);
+    const marks = o.series.at(-1)!['data'] as { symbol: string; name: string }[];
     expect(marks.length).toBe(h.events.length);
+    expect(marks.every((m) => ['triangle', 'circle', 'diamond', 'rect'].includes(m.symbol))).toBe(true);
+    const laneTip = (o.series.at(-1)!['tooltip'] as { formatter: (p: { name: string }) => string }).formatter({ name: '<b>x</b>' });
+    expect(laneTip).toBe('&lt;b&gt;x&lt;/b&gt;');
+    expect(o.series.slice(0, 3).map((s) => (s['lineStyle'] as { color: string }).color)).toEqual([...t.history]);
     expect((o['dataZoom'] as unknown[]).length).toBe(2);
     const tooltip = o['tooltip'] as { formatter: (p: unknown) => string };
     const at = h.events[0]!.at;
@@ -54,7 +62,7 @@ describe('chart options', () => {
     const o = memoryChart({ points: h.points, events: [], range: '1h', stepMs: h.stepMs, zoom: true }, t) as unknown as Opt;
     const slider = (o['dataZoom'] as { labelFormatter?: (v: number) => string }[])[1]!;
     expect(slider.labelFormatter!(new Date(2026, 0, 1, 7, 3).getTime())).toBe('07:03');
-    const yLabel = (o['yAxis'] as { axisLabel: { formatter: (v: number) => string } }).axisLabel.formatter(16 * 1024 ** 3);
+    const yLabel = (o['yAxis'] as { axisLabel: { formatter: (v: number) => string } }[])[0]!.axisLabel.formatter(16 * 1024 ** 3);
     expect(yLabel).toBe('16 GB');
   });
 

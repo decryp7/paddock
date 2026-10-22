@@ -15,7 +15,7 @@ import { availabilityLook, type Look } from '../../shared/labels';
         <li [class.off]="e.availability.state !== 'available'">
           <div class="main">
             <span class="name">{{ e.name }}</span>
-            <span class="sub" [matTooltip]="reason(e)">
+            <span class="sub" [matTooltip]="e.availability.state === 'available' ? '' : reason(e)">
               @if (e.availability.state === 'available') {
                 {{ e.activeBuild ?? 'no build' }} · {{ e.processes }} {{ e.processes === 1 ? 'process' : 'processes' }}
               } @else {
@@ -23,7 +23,7 @@ import { availabilityLook, type Look } from '../../shared/labels';
               }
             </span>
           </div>
-          <span class="pill" [class.dot]="look(e).tone !== 'muted'" [attr.data-tone]="look(e).tone" [matTooltip]="reason(e)">{{ look(e).label }}</span>
+          <span class="status" [attr.data-tone]="look(e).tone" [matTooltip]="reason(e)">{{ look(e).label }}</span>
         </li>
       }
     </ul>
@@ -36,7 +36,7 @@ import { availabilityLook, type Look } from '../../shared/labels';
     }
     li {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: var(--sp-3);
       padding: 8px 0;
@@ -60,12 +60,17 @@ import { availabilityLook, type Look } from '../../shared/labels';
     .off .name {
       color: var(--text-2);
     }
+    /* The reason an engine is off may take two lines; the tooltip has all of it. */
     .sub {
-      font-size: var(--fs-xs);
-      color: var(--text-3);
-      white-space: nowrap;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
       overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+    }
+    .status {
+      flex: none;
     }
   `,
 })

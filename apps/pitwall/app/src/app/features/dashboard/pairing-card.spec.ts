@@ -62,7 +62,9 @@ describe('PairingCard', () => {
     expect(el.querySelector('.title')!.textContent).toContain('Notes App wants to use Pitwall');
     expect(el.querySelector('.digits')!.textContent).toBe('123 456');
     expect(el.querySelector('.sub')!.textContent).toContain('Asked 5 min ago');
-    expect(Array.from(el.querySelectorAll('.perms li')).map((l) => l.textContent)).toEqual(['Every model', 'Up to interactive priority', 'Tools']);
+    // One muted line, not a row of chips.
+    expect(el.querySelector('.perms')!.textContent).toBe('Every model · Up to interactive priority · Tools');
+    expect(el.querySelector('.tag')).toBeNull();
   });
 
   it('approves with exactly the requested permissions and clears the request', async () => {

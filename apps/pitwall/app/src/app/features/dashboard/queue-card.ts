@@ -15,21 +15,18 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (live.queue(); as q) {
-      <div class="depth" role="list" aria-label="Waiting by priority">
+      <p class="depth num" aria-label="Waiting by priority">
         @for (p of priorities; track p) {
-          <div class="d" role="listitem">
-            <span class="n num">{{ q.depth[p] }}</span>
-            <span class="k"><i [attr.data-p]="p"></i>{{ label[p] }}</span>
-          </div>
+          <span>{{ q.depth[p] }} {{ label[p].toLowerCase() }}</span>
         }
-      </div>
+      </p>
       @if (jobs().length === 0) {
         <p class="none">Nothing running or waiting.</p>
       }
       <ul class="jobs" aria-label="Jobs">
         @for (j of jobs().slice(0, max()); track j.id) {
           <li>
-            <span class="status" [attr.data-state]="j.state" [attr.aria-label]="j.state === 'running' ? 'Running' : 'Waiting'"></span>
+            <span class="job-dot" [attr.data-state]="j.state" [attr.aria-label]="j.state === 'running' ? 'Running' : 'Waiting'"></span>
             <div class="main">
               <div class="line1">
                 <span class="app">{{ appName(j.appId) }}</span>
@@ -67,45 +64,17 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
     :host {
       display: block;
     }
+    /* The priority split is one muted line: "1 interactive · 1 background · 1 batch". */
     .depth {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1px;
-      margin-bottom: var(--sp-3);
-      background: var(--border-soft);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-md);
-      overflow: hidden;
-      .d {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: var(--sp-2) var(--sp-3);
-        background: var(--bg-card);
-      }
-      .n {
-        font-size: var(--fs-xl);
-        font-weight: var(--fw-semibold);
-        line-height: 1.2;
-      }
-      .k {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        font-size: var(--fs-xs);
-        color: var(--text-3);
-      }
-      i {
-        width: 6px;
-        height: 6px;
-        border-radius: 2px;
-        background: var(--accent);
-        &[data-p='background'] {
-          background: color-mix(in srgb, var(--accent) 55%, var(--text-3));
-        }
-        &[data-p='batch'] {
-          background: var(--text-3);
-        }
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0 var(--sp-2);
+      margin: 0 0 var(--sp-2);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      span + span::before {
+        content: '·';
+        margin-right: var(--sp-2);
       }
     }
     .none {
@@ -144,7 +113,7 @@ const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
         opacity: 1;
       }
     }
-    .status {
+    .job-dot {
       width: 7px;
       height: 7px;
       border-radius: 50%;

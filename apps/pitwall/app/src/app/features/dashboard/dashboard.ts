@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, isDevMode } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink } from '@angular/router';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { HistoryRange, Preset } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
@@ -11,6 +10,7 @@ import { EChart } from '../../shared/charts/echart';
 import { duration } from '../../shared/format';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
+import { ContextMenuService } from '../../shared/ui/context-menu';
 import { Panel } from '../../shared/ui/panel';
 import { UsageCard } from '../usage/usage-card';
 import { AppsCard } from './apps-card';
@@ -50,7 +50,7 @@ export class PerfMeter {
 /** Home: everything Pitwall is doing right now, how it got here, and the actions you need most. */
 @Component({
   selector: 'pw-dashboard',
-  imports: [MatIconModule, MatTooltipModule, RouterLink, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
+  imports: [MatIconModule, MatTooltipModule, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -77,14 +77,10 @@ export class PerfMeter {
               </button>
             }
           </div>
-          <button type="button" class="btn" [disabled]="live.isBusy()('release') || !live.overview()" (click)="live.releaseMemory()" matTooltip="Unload every model that is not pinned or busy">
-            <mat-icon svgIcon="pw:release" aria-hidden="true" />Release memory
-          </button>
           @if (live.paused()) {
             <button type="button" class="btn primary" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume serving</button>
-          } @else {
-            <button type="button" class="btn" [disabled]="live.isBusy()('serving') || !live.overview()" (click)="live.setServing(true)"><mat-icon svgIcon="pw:pause" aria-hidden="true" />Pause serving</button>
           }
+          <button type="button" class="btn ghost icon" aria-label="More actions" aria-haspopup="menu" matTooltip="More actions" (click)="openMore($event)"><mat-icon svgIcon="pw:more" aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -93,7 +89,7 @@ export class PerfMeter {
       }
 
       @if (live.paused()) {
-        <div class="banner" role="status">
+        <div class="callout" data-tone="warn" role="status">
           <mat-icon svgIcon="pw:pause" aria-hidden="true" />
           <span><b>Serving is paused.</b> Apps can still connect; new requests wait in the queue until you resume.</span>
         </div>
@@ -107,24 +103,17 @@ export class PerfMeter {
 
       <pw-update-banner mode="summary" />
 
-      <nav class="quick" aria-label="Quick actions">
-        <a class="btn" routerLink="/models"><mat-icon svgIcon="pw:models" aria-hidden="true" />Open Models</a>
-        <a class="btn" routerLink="/apps"><mat-icon svgIcon="pw:apps" aria-hidden="true" />Pair an app</a>
-        <a class="btn" routerLink="/playground"><mat-icon svgIcon="pw:sparkles" aria-hidden="true" />Playground</a>
-        <a class="btn" routerLink="/requests"><mat-icon svgIcon="pw:requests" aria-hidden="true" />Requests</a>
-      </nav>
-
       @if (!live.error() || live.overview()) {
         <pw-stat-tiles />
 
         <div class="grid now">
-          <pw-panel class="c5" heading="Loaded models" icon="models" [sub]="hotSummary()" [loading]="live.loading()" [ready]="!!live.overview()">
+          <pw-panel class="c4" heading="Loaded models" icon="models" [sub]="hotSummary()" [loading]="live.loading()" [ready]="!!live.overview()">
             <pw-hot-models [now]="now()" />
           </pw-panel>
           <pw-panel class="c4" heading="Queue" icon="queue" [sub]="queueSummary()" [loading]="live.loading()" [ready]="!!live.overview()">
             <pw-queue-card [now]="now()" />
           </pw-panel>
-          <pw-panel class="c3" heading="Engines" icon="engines" [loading]="live.loading()" [ready]="!!live.overview()">
+          <pw-panel class="c4" heading="Engines" icon="engines" [loading]="live.loading()" [ready]="!!live.overview()">
             <pw-engines-card />
           </pw-panel>
         </div>
@@ -142,14 +131,14 @@ export class PerfMeter {
       <div class="grid">
         <pw-panel class="c8" heading="Memory" icon="memory" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.history()" [skeletonLines]="8" (retry)="store.select(store.range())">
           <div panel-actions class="legend" aria-hidden="true">
-            <span><i class="sw" [style.background]="tokens().series[0]"></i>RAM</span>
-            <span><i class="sw" [style.background]="tokens().series[1]"></i>VRAM</span>
-            <span><i class="sw dash" [style.border-color]="tokens().series[2]"></i>Pitwall</span>
+            <span><i class="sw" [style.background]="tokens().history[0]"></i>RAM</span>
+            <span><i class="sw" [style.background]="tokens().history[1]"></i>VRAM</span>
+            <span><i class="sw dash" [style.border-color]="tokens().history[2]"></i>Pitwall</span>
             <span class="sep"></span>
-            <span><b [style.color]="tokens().accent">▲</b>load</span>
-            <span><b [style.color]="tokens().warn">▼</b>idle</span>
-            <span><b [style.color]="tokens().bad">▼</b>pressure</span>
-            <span><b [style.color]="tokens().text2">▼</b>manual</span>
+            <span><i class="mk tri" [style.background]="tokens().text2"></i>Loaded</span>
+            <span><i class="mk circ" [style.background]="tokens().text2"></i>Released</span>
+            <span><i class="mk dia" [style.background]="tokens().bad"></i>Memory pressure</span>
+            <span><i class="mk sq" [style.background]="tokens().bad"></i>Engine restart</span>
           </div>
           <pw-echart [option]="memoryOption()" [themeKey]="chartKey()" height="300px" label="RAM, VRAM and Pitwall memory over time, with model loads and releases marked" />
         </pw-panel>
@@ -230,31 +219,14 @@ export class PerfMeter {
         padding: 0 var(--sp-2);
       }
     }
-    .quick {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--sp-2);
-      a.btn {
-        text-decoration: none;
-      }
-    }
-    .banner {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-      padding: var(--sp-2) var(--sp-3);
-      font-size: var(--fs-sm);
-      background: var(--warn-soft);
-      border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
-      border-radius: var(--r-md);
-      mat-icon {
-        color: var(--warn);
-      }
-    }
     .grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
       gap: var(--sp-3);
+    }
+    /* The three live cards size to their content; they do not stretch to match the tallest. */
+    .now {
+      align-items: start;
     }
     .c3 {
       grid-column: span 3;
@@ -297,8 +269,19 @@ export class PerfMeter {
         align-items: center;
         gap: 5px;
       }
-      b {
-        font-size: 9px;
+      /* The lane's markers, drawn in CSS so the legend's shapes are the chart's shapes. */
+      .mk {
+        width: 9px;
+        height: 9px;
+        &.tri {
+          clip-path: polygon(50% 0, 100% 100%, 0 100%);
+        }
+        &.circ {
+          border-radius: 50%;
+        }
+        &.dia {
+          clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+        }
       }
       .sw {
         width: 10px;
@@ -347,6 +330,7 @@ export class Dashboard implements OnInit {
   protected readonly live = inject(LiveStore);
   protected readonly store = inject(DashboardStore);
   private readonly theme = inject(ThemeService);
+  private readonly menu = inject(ContextMenuService);
   protected readonly now = injectNow();
   protected readonly ranges = RANGES;
   protected readonly presets = PRESETS;
@@ -401,6 +385,15 @@ export class Dashboard implements OnInit {
 
   ngOnInit(): void {
     void this.store.select('1h');
+  }
+
+  /** Release memory and Pause serving: occasional actions, kept out of the header's way. */
+  protected openMore(e: Event): void {
+    const busy = !this.live.overview();
+    this.menu.openFrom(e.currentTarget as HTMLElement, [
+      { label: 'Release memory', run: () => void this.live.releaseMemory(), disabled: busy || this.live.isBusy()('release') },
+      { label: this.live.paused() ? 'Resume serving' : 'Pause serving', run: () => void this.live.setServing(!this.live.paused()), disabled: busy || this.live.isBusy()('serving') },
+    ]);
   }
 }
 

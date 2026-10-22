@@ -582,6 +582,38 @@ textarea.input {
   }
 }
 
+/* A callout: one status bar on the card surface, never a filled block; the status is also in its words. */
+.callout {
+  --callout: var(--border-strong);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--callout);
+  border-radius: var(--r-md);
+  &[data-tone='warn'] {
+    --callout: var(--warn);
+  }
+  &[data-tone='bad'] {
+    --callout: var(--bad);
+  }
+  &[data-tone='info'] {
+    --callout: var(--info);
+  }
+  &[data-tone='ok'] {
+    --callout: var(--ok);
+  }
+  > mat-icon {
+    flex: none;
+    margin-top: 1px;
+    color: var(--callout);
+  }
+}
+
 /* A count next to a tab or a nav label: neutral, never a status colour. */
 .count {
   display: inline-flex;

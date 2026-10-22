@@ -30,18 +30,14 @@ export function permissionSummary(p: AppPermissions): string[] {
       <div class="main">
         <p class="title"><b>{{ request().appName }}</b> wants to use Pitwall</p>
         <p class="sub">Check that it shows the same code. Asked {{ when(request().requestedAt, now()) }}.</p>
-        <ul class="perms" aria-label="Requested permissions">
-          @for (p of perms(request().permissions); track p) {
-            <li class="tag">{{ p }}</li>
-          }
-        </ul>
+        <p class="perms" aria-label="Requested permissions">{{ perms(request().permissions).join(' · ') }}</p>
       </div>
       <div class="code" aria-label="Pairing code">
         <span class="code-label">Code</span>
         <span class="digits mono">{{ code(request().code) }}</span>
       </div>
       <div class="actions">
-        <button type="button" class="btn" [disabled]="busy()" (click)="live.denyPairing(request().id)">Deny</button>
+        <button type="button" class="btn ghost" [disabled]="busy()" (click)="live.denyPairing(request().id)">Deny</button>
         <button type="button" class="btn primary" [disabled]="busy()" (click)="live.approvePairing(request().id, request().permissions)">
           <mat-icon svgIcon="pw:check" aria-hidden="true" />Approve
         </button>
@@ -66,8 +62,8 @@ export function permissionSummary(p: AppPermissions): string[] {
       width: 36px;
       height: 36px;
       border-radius: var(--r-lg);
-      background: var(--accent);
-      color: var(--text-on-accent);
+      background: var(--accent-soft);
+      color: var(--accent);
       mat-icon {
         width: 18px;
         height: 18px;
@@ -82,12 +78,9 @@ export function permissionSummary(p: AppPermissions): string[] {
       color: var(--text-2);
     }
     .perms {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--sp-1);
-      margin: var(--sp-2) 0 0;
-      padding: 0;
-      list-style: none;
+      margin: var(--sp-1) 0 0;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
     .code {
       display: flex;
@@ -99,15 +92,15 @@ export function permissionSummary(p: AppPermissions): string[] {
       border-radius: var(--r-md);
     }
     .code-label {
-      font-size: var(--fs-2xs);
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: var(--tracking-caps);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
     .digits {
-      font-size: 22px;
+      font-size: var(--fs-3xl);
       font-weight: var(--fw-semibold);
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
     }
     .actions {
       display: flex;

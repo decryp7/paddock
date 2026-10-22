@@ -31,6 +31,11 @@ export interface ThemeTokens {
   tooltipText: string;
   /** Categorical series colours, fixed order. */
   series: readonly string[];
+  /**
+   * The memory history's three lines: RAM, VRAM, Pitwall (the suite guide's sky blue, orange and bluish green). Pitwall's
+   * own line is also dashed, so the three never depend on hue alone.
+   */
+  history: readonly [string, string, string];
 }
 
 export const THEME_TOKENS: Record<ResolvedTheme, ThemeTokens> = {
@@ -54,6 +59,7 @@ export const THEME_TOKENS: Record<ResolvedTheme, ThemeTokens> = {
     tooltipBg: '#1b1d23',
     tooltipText: '#f3f4f6',
     series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
+    history: ['#0072b2', '#c77f00', '#007a5e'],
   },
   dark: {
     surface: '#141519',
@@ -75,6 +81,7 @@ export const THEME_TOKENS: Record<ResolvedTheme, ThemeTokens> = {
     tooltipBg: '#e9eaee',
     tooltipText: '#121317',
     series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'],
+    history: ['#56b4e9', '#f0a030', '#2ec4a0'],
   },
 };
 

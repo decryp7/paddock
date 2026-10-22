@@ -56,8 +56,8 @@ describe('StatTiles', () => {
     const { tile } = await mount((o) => ({ ...o, memory: mem() }));
     const t = tile(0);
     expect(text(t.querySelector('.value')!)).toBe('16.0GBof32GB');
-    expect(t.querySelector('.pill')!.textContent).toBe('Normal');
-    expect(t.querySelector('.pill')!.getAttribute('data-tone')).toBe('ok');
+    // Normal pressure is the calm state: nothing is said about it.
+    expect(t.querySelector('.status')).toBeNull();
     expect(t.querySelector('.stack')!.getAttribute('aria-label')).toBe('50 percent used, 13 percent by Pitwall');
     expect((t.querySelector('.seg.own') as HTMLElement).style.width).toBe('13%');
     expect((t.querySelector('.seg.other') as HTMLElement).style.width).toBe('37%');
@@ -67,7 +67,7 @@ describe('StatTiles', () => {
   it('caps the Pitwall share at the used share and shows critical pressure', async () => {
     const { tile } = await mount((o) => ({ ...o, memory: mem({ ramAvailable: 29 * GiB, pitwallRss: 10 * GiB, pressure: 'critical' }) }));
     expect(tile(0).querySelector('.stack')!.getAttribute('aria-label')).toBe('9 percent used, 9 percent by Pitwall');
-    expect(tile(0).querySelector('.pill')!.getAttribute('data-tone')).toBe('bad');
+    expect(tile(0).querySelector('.status')!.getAttribute('data-tone')).toBe('bad');
   });
 
   it('shows GPU memory with the name shortened and the model share', async () => {
@@ -121,7 +121,7 @@ describe('StatTiles', () => {
     expect(Array.from(t.querySelectorAll('.bar-row')).map(text)).toEqual(['CPU24%']);
     expect(t.querySelector('.bar-row .meter')!.getAttribute('data-tone')).toBe('neutral');
     expect(text(t.querySelector('.foot')!)).toBe('Commit50%swap1.0GB');
-    expect(t.querySelector('.pill')).toBeNull();
+    expect(t.querySelector('.status')).toBeNull();
   });
 
   it('shows an unknown commit charge and GPU load as dashes, and yielding to a full-screen app', async () => {
@@ -129,7 +129,7 @@ describe('StatTiles', () => {
     const t = tile(2);
     expect(text(t.querySelector('.foot')!)).toContain('Commit—');
     expect(text(t.querySelector('.value')!)).toBe('24%CPU');
-    expect(t.querySelector('.pill')!.textContent).toBe('Yielding');
+    expect(t.querySelector('.status')!.textContent).toBe('Yielding');
   });
 
   it('shows throughput with the active request count', async () => {
@@ -138,18 +138,19 @@ describe('StatTiles', () => {
     const t = tile(3);
     expect(text(t.querySelector('.value')!)).toBe('58.4tok/sgeneration');
     expect(text(t.querySelector('.trio')!)).toBe('Prompt1,184tok/sTTFTp50214msRequests37/min');
-    expect(t.querySelector('.pill')!.textContent).toBe('3 active');
-    expect(t.querySelector('.pill')!.getAttribute('data-tone')).toBe('info');
+    expect(t.querySelector('.gpu-name')!.textContent).toBe('3 active');
+    expect(t.querySelector('.pill')).toBeNull();
   });
 
-  it('mutes the pill when idle and shows Paused while serving is paused', async () => {
+  it('says nothing about activity when idle and shows Paused while serving is paused', async () => {
     const throughput: Throughput = { genTps: 0, promptTps: 0, ttftP50Ms: 0, requestsPerMin: 0, activeRequests: 0 };
     const { tile, set, fixture, live } = await mount((o) => ({ ...o, throughput }));
-    expect(tile(3).querySelector('.pill')!.getAttribute('data-tone')).toBe('muted');
+    expect(tile(3).querySelector('.gpu-name')).toBeNull();
+    expect(tile(3).querySelector('.status')).toBeNull();
     set((o) => ({ ...o, throughput, server: { ...o.server, serving: 'paused' } }));
     await settle(fixture);
     expect(live.paused()).toBe(true);
-    expect(tile(3).querySelector('.pill')!.textContent).toBe('Paused');
-    expect(tile(3).querySelector('.pill')!.getAttribute('data-tone')).toBe('warn');
+    expect(tile(3).querySelector('.status')!.textContent).toBe('Paused');
+    expect(tile(3).querySelector('.status')!.getAttribute('data-tone')).toBe('warn');
   });
 });

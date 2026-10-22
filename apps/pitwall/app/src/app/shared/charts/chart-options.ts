@@ -98,21 +98,27 @@ function area(color: string): Record<string, unknown> {
   };
 }
 
-/** How an event is drawn on the memory timeline. */
+/** How an event is drawn on the memory timeline's event lane: a shape and a colour, never colour alone. */
 export interface EventMark {
   glyph: string;
+  /** The ECharts symbol of the lane marker; the glyph is its text twin for tooltips and the legend. */
+  shape: 'triangle' | 'circle' | 'diamond' | 'rect';
   color: string;
   label: string;
 }
 
+/**
+ * The lane's vocabulary: a triangle for a load, a circle for a release, a diamond for a release forced by memory pressure
+ * or a failure, a square for an engine restart. Only the forced ones use a status colour; the rest are neutral.
+ */
 export function eventMark(e: PitwallEvent, t: ThemeTokens): EventMark | null {
-  if (e.kind === 'modelLoaded') return { glyph: '▲', color: t.accent, label: 'Model loaded' };
+  if (e.kind === 'modelLoaded') return { glyph: '▲', shape: 'triangle', color: t.text2, label: 'Model loaded' };
   if (e.kind === 'modelUnloaded' || e.kind === 'contextReleased') {
     const reason: ReleaseReason = e.reason ?? 'manual';
-    const color = reason === 'pressure' || reason === 'failed' ? t.bad : reason === 'manual' ? t.text2 : t.warn;
-    return { glyph: '▼', color, label: `Released (${REASON_LABEL[reason]})` };
+    const forced = reason === 'pressure' || reason === 'failed';
+    return forced ? { glyph: '◆', shape: 'diamond', color: t.bad, label: `Released (${REASON_LABEL[reason]})` } : { glyph: '●', shape: 'circle', color: t.text2, label: `Released (${REASON_LABEL[reason]})` };
   }
-  if (e.kind === 'engineRestarted' || e.kind === 'engineFailed') return { glyph: '◆', color: t.bad, label: 'Engine restarted' };
+  if (e.kind === 'engineRestarted' || e.kind === 'engineFailed') return { glyph: '■', shape: 'rect', color: t.bad, label: 'Engine restarted' };
   return null;
 }
 
@@ -143,29 +149,40 @@ export interface MemoryChartInput {
 
 const gbText = (v: number) => `${(v / GB).toFixed(1)} GB`;
 
-/** RAM, VRAM and Pitwall's own memory over time, with loads, releases and restarts marked on the timeline. */
+/** Height of the event lane under the plot (px), and the room the time axis labels need between them. */
+const LANE = 16;
+const AXIS_LABELS = 22;
+
+/**
+ * RAM, VRAM and Pitwall's own memory over time (the guide's sky blue, orange and bluish green; Pitwall's line dashed),
+ * with loads, releases and restarts on their own lane under the plot instead of lines drawn through the data.
+ */
 export function memoryChart(input: MemoryChartInput, t: ThemeTokens): EChartsCoreOption {
   const { points, events, range, stepMs } = input;
+  const [cRam, cVram, cOwn] = t.history;
   const ram = points.map((p) => [p.at, p.ramUsed] as [number, number]);
   const vram = points.map((p) => [p.at, p.vramUsed] as [number, number | null]);
   const own = points.map((p) => [p.at, p.pitwallRss] as [number, number]);
   const total = points[points.length - 1]?.ramTotal ?? null;
   const from = points[0]?.at ?? 0;
+  const to = points[points.length - 1]?.at ?? 0;
   const marks = events
     .filter((e) => e.at >= from)
     .map((e) => ({ e, m: eventMark(e, t) }))
     .filter((x): x is { e: PitwallEvent; m: EventMark } => x.m !== null)
-    .map(({ e, m }) => ({
-      xAxis: e.at,
-      name: e.message,
-      lineStyle: { color: m.color, type: 'dashed', width: 1, opacity: 0.7 },
-      label: { show: true, formatter: m.glyph, color: m.color, position: 'end', distance: 2, fontSize: 9 },
-    }));
+    .map(({ e, m }) => ({ name: `${m.label}: ${e.message}`, value: [e.at, 0.5], symbol: m.shape, itemStyle: { color: m.color } }));
   const tf = timeLabel(range);
+  const sliderRoom = input.zoom ? 34 : 0;
+  const laneBottom = 6 + sliderRoom;
+  const x = (gridIndex: number, show: boolean) => ({ ...timeAxis(t, range, gridIndex, show), min: from || undefined, max: to || undefined });
   return {
     ...base(t),
-    color: [seriesColor(t, 0), seriesColor(t, 1), seriesColor(t, 2)],
-    grid: { left: 8, right: 16, top: 22, bottom: input.zoom ? 52 : 8 },
+    color: [cRam, cVram, cOwn],
+    grid: [
+      { left: 8, right: 16, top: 22, bottom: laneBottom + LANE + AXIS_LABELS },
+      { left: 8, right: 16, height: LANE, bottom: laneBottom },
+    ],
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
     legend: { show: false },
     tooltip: {
       ...(base(t)['tooltip'] as object),
@@ -178,16 +195,27 @@ export function memoryChart(input: MemoryChartInput, t: ThemeTokens): EChartsCor
         return `<div style="opacity:.7;margin-bottom:4px">${range === '1h' || range === '24h' ? clock(at) : date(at, true)}</div>${tooltipRows(params, gbText)}${evs}`;
       },
     },
-    xAxis: timeAxis(t, range),
-    yAxis: valueAxis(t, 0, (v) => `${Math.round(v / GB)} GB`, { max: total ?? undefined, interval: total ? total / 4 : undefined }),
-    dataZoom: [{ type: 'inside', filterMode: 'none' }, ...(input.zoom ? [zoomSlider(t, tf)] : [])],
+    xAxis: [x(0, true), { ...x(1, false), axisLine: { show: false } }],
+    yAxis: [
+      valueAxis(t, 0, (v) => `${Math.round(v / GB)} GB`, { max: total ?? undefined, interval: total ? total / 4 : undefined }),
+      { type: 'value', gridIndex: 1, min: 0, max: 1, show: false },
+    ],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], filterMode: 'none' }, ...(input.zoom ? [zoomSlider(t, tf)] : [])],
     series: [
-      line('RAM used', seriesColor(t, 0), ram, {
-        ...area(seriesColor(t, 0)),
-        markLine: { silent: false, symbol: ['none', 'none'], animation: false, data: marks, emphasis: { lineStyle: { width: 1.5 } }, tooltip: { show: false } },
-      }),
-      line('VRAM used', seriesColor(t, 1), vram),
-      line('Pitwall', seriesColor(t, 2), own, { lineStyle: { width: 2, color: seriesColor(t, 2), type: [4, 3] } }),
+      line('RAM used', cRam, ram, { ...area(cRam) }),
+      line('VRAM used', cVram, vram),
+      line('Pitwall', cOwn, own, { lineStyle: { width: 2, color: cOwn, type: [4, 3] } }),
+      {
+        name: 'Events',
+        type: 'scatter',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: marks,
+        symbolSize: 9,
+        animation: false,
+        tooltip: { trigger: 'item', formatter: (p: { name: string }) => escapeHtml(p.name) },
+        emphasis: { scale: 1.4 },
+      },
     ],
   };
 }

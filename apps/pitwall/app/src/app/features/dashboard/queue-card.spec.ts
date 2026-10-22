@@ -59,12 +59,12 @@ describe('QueueCard', () => {
 
   it('shows the depth by priority and the running then waiting jobs with app names', async () => {
     const { el } = await mount();
-    const depth = Array.from(el.querySelectorAll('.depth .d')).map((d) => d.textContent!.replace(/\s+/g, ' ').trim());
-    expect(depth.length).toBe(3);
-    expect(depth[0]).toMatch(/^\d+Interactive$/);
+    // The priority split is one muted line, not three tiles.
+    expect(el.querySelector('.depth')!.textContent!.replace(/\s+/g, ' ').trim()).toMatch(/^\d+ interactive\d+ background\d+ batch$/);
+    expect(el.querySelectorAll('.depth .d').length).toBe(0);
     const rows = el.querySelectorAll('.jobs li');
     expect(rows.length).toBe(4);
-    expect(rows[0]!.querySelector('.status')!.getAttribute('aria-label')).toBe('Running');
+    expect(rows[0]!.querySelector('.job-dot')!.getAttribute('aria-label')).toBe('Running');
     expect(rows[0]!.querySelector('.app')!.textContent).toBe('Debrief');
     expect(rows[0]!.querySelector('.kind')!.textContent).toBe('chat');
     expect(el.querySelector('.more')!.textContent).toContain('and 1 more waiting');
@@ -93,7 +93,7 @@ describe('QueueCard', () => {
   it('shows how long a waiting job has waited and no progress bar', async () => {
     const { el } = await mount(withQueue([], [job({ id: 'w', state: 'queued', startedAt: null, submittedAt: NOW - 12_000, progress: 0 })]));
     expect(el.querySelector('.line2')!.textContent).toContain('waiting 12 s');
-    expect(el.querySelector('.status')!.getAttribute('aria-label')).toBe('Waiting');
+    expect(el.querySelector('.job-dot')!.getAttribute('aria-label')).toBe('Waiting');
     expect(el.querySelector('.prog')).toBeNull();
   });
 

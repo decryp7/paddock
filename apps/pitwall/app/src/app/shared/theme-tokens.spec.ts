@@ -65,6 +65,12 @@ describe.each(THEMES)('%s theme tokens', (theme) => {
     expect(contrast(t.accent, t.surface)).toBeGreaterThanOrEqual(4.5);
   });
 
+  it('draws the memory history in the guide palette, each line readable against the card', () => {
+    expect(t.history.length).toBe(3);
+    for (const c of t.history) expect(contrast(c, t.surface)).toBeGreaterThanOrEqual(3);
+    expect(deltaE(t.history[0], t.history[1])).toBeGreaterThanOrEqual(15);
+  });
+
   it('keeps neighbouring series apart for protanopia and deuteranopia (ΔE ≥ 8) and for normal vision (ΔE ≥ 15)', () => {
     expect(t.series.length).toBe(8);
     expect(worstAdjacent(t.series, 'protan')).toBeGreaterThanOrEqual(8);

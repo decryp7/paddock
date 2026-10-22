@@ -9,6 +9,7 @@ import { bytes, countdown, slotsText } from '../../shared/format';
 import { hotStateLook } from '../../shared/labels';
 import { seriesColor } from '../../shared/theme-tokens';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { contextText } from '../models/library-tab';
 
 /** How far a model is through its idle time (0 just used … 1 due), for the countdown bar. */
 export function idleProgress(m: LoadedModel, now: number): number | null {
@@ -34,7 +35,7 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
     <ul class="list" [class.compact]="compact()" aria-label="Loaded models">
       @for (m of live.models(); track m.modelId) {
         <li class="row">
-          <div class="main">
+          <div class="main" [matTooltip]="compact() ? '' : ctx(m.contextTokens) + ' context per slot · ' + slotsOf(m.slots)" matTooltipShowDelay="600">
             <div class="title">
               <span class="state" [attr.data-tone]="look(m).tone" [attr.aria-label]="look(m).label"></span>
               <span class="name">{{ m.name }}</span>
@@ -47,9 +48,6 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
                 <span>{{ size(m.vramBytes) }} VRAM</span>
               }
               <span>{{ size(m.ramBytes) }} RAM</span>
-              @if (!compact()) {
-                <span>{{ ctx(m.contextTokens) }} ctx each · {{ slotsOf(m.slots) }}</span>
-              }
             </div>
           </div>
           <div class="side">
@@ -203,16 +201,19 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
       color: var(--text-3);
       flex: none;
     }
+    .main {
+      min-width: 0;
+    }
     .meta {
-      display: flex;
-      gap: var(--sp-2);
       margin: 2px 0 0 15px;
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      overflow: hidden;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      text-overflow: ellipsis;
       white-space: nowrap;
       span + span::before {
         content: '·';
-        margin-right: var(--sp-2);
+        margin: 0 var(--sp-2);
       }
     }
     .side {
@@ -252,9 +253,21 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
         transition: width 1s linear;
       }
     }
+    /* Pin and unload appear with the pointer or keyboard focus, not as a column of icons. */
     .actions {
       display: flex;
       gap: 2px;
+      opacity: 0;
+      transition: opacity var(--dur-fast) var(--ease);
+    }
+    .row:hover .actions,
+    .row:focus-within .actions {
+      opacity: 1;
+    }
+    @media (hover: none) {
+      .actions {
+        opacity: 1;
+      }
     }
   `,
 })
@@ -286,7 +299,5 @@ export class HotModels {
     return { total, used: g.vramUsed, segments: withPct, label: `GPU memory: ${withPct.map((s) => `${s.name} ${Math.round(s.pct)}%`).join(', ')}` };
   });
 
-  protected ctx(tokens: number): string {
-    return tokens >= 1024 ? `${Math.round(tokens / 1024)}k` : String(tokens);
-  }
+  protected readonly ctx = contextText;
 }

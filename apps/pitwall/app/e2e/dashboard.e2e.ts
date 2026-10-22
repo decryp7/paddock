@@ -14,17 +14,20 @@ test.describe('dashboard', () => {
     await expect(page.locator('pw-events-feed')).not.toBeEmpty();
   });
 
-  test('pauses and resumes serving, releases memory and navigates with the quick actions', async ({ page }) => {
+  test('pauses and resumes serving and releases memory from the More actions menu; no quick-link row', async ({ page }) => {
     await openApp(page);
-    await page.getByRole('button', { name: 'Pause serving' }).click();
+    await expect(page.getByRole('navigation', { name: 'Quick actions' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'More actions' }).click();
+    await page.getByRole('menuitem', { name: 'Pause serving' }).click();
     await expect(page.getByText('Serving is paused.')).toBeVisible();
     await page.getByRole('button', { name: 'Resume serving' }).click();
     await expect(page.getByText('Serving is paused.')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Release memory' }).click();
+    await page.getByRole('button', { name: 'More actions' }).click();
+    await page.getByRole('menuitem', { name: 'Release memory' }).click();
     await expect(page.getByRole('status').filter({ hasText: /Released|Nothing to release/ })).toBeVisible();
     await page.getByRole('radio', { name: 'Low memory' }).click();
     await expect(page.getByRole('radio', { name: 'Low memory' })).toHaveAttribute('aria-checked', 'true');
-    await page.getByRole('link', { name: 'Open Models' }).click();
+    await page.getByRole('link', { name: 'Models' }).first().click();
     await expect(page.getByRole('heading', { name: 'Models', level: 1 })).toBeVisible();
   });
 

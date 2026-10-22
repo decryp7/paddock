@@ -71,7 +71,8 @@ describe('HotModels', () => {
     expect(row.querySelector('.state')!.getAttribute('aria-label')).toBe('Ready');
     expect(row.querySelector('.meta')!.textContent).toContain('2.0 GB VRAM');
     expect(row.querySelector('.meta')!.textContent).toContain('1.0 GB RAM');
-    expect(row.querySelector('.meta')!.textContent).toContain('16k ctx');
+    // Context and slots are secondary: they are in the row's tooltip, not on its line.
+    expect(row.querySelector('.meta')!.textContent).not.toContain('ctx');
     expect(row.querySelector('.when')!.getAttribute('aria-label')).toBe('Released in 0:10');
     expect((row.querySelector('.idle span') as HTMLElement).style.width).toBe('50%');
   });
@@ -86,11 +87,11 @@ describe('HotModels', () => {
     expect(compact.el.querySelector('a[href="/models"]')).toBeNull();
   });
 
-  it('omits VRAM when zero and shows small contexts as plain numbers', async () => {
+  it('omits VRAM when zero', async () => {
     const { el } = await mountWith([model({ vramBytes: 0, contextTokens: 512 })]);
     const meta = el.querySelector('.meta')!.textContent!;
     expect(meta).not.toContain('VRAM');
-    expect(meta).toContain('512 ctx');
+    expect(meta).toContain('RAM');
   });
 
   it('shows request counts for busy models, with singular and plural', async () => {

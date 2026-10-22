@@ -90,13 +90,12 @@ import { EmptyState } from '../../shared/ui/empty-state';
       display: flex;
       gap: var(--sp-2);
       margin-top: 2px;
-      font-size: var(--fs-xs);
-      color: var(--text-3);
+      font-size: var(--fs-sm);
+      color: var(--text-2);
     }
-    .reason {
-      padding: 0 5px;
-      border: 1px solid var(--border);
-      border-radius: var(--r-xs);
+    .reason::before {
+      content: '·';
+      margin-right: var(--sp-2);
     }
   `,
 })

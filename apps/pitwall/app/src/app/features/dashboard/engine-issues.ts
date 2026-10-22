@@ -50,16 +50,16 @@ export function restartText(issue: EngineIssue, now: number): string | null {
       align-items: center;
       gap: var(--sp-3);
       padding: var(--sp-3) var(--sp-4);
-      background: var(--warn-soft);
-      border: 1px solid color-mix(in srgb, var(--warn) 32%, transparent);
-      border-radius: var(--r-lg);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--warn);
+      border-radius: var(--r-md);
       animation: rise var(--dur-base) var(--ease);
       mat-icon {
         color: var(--warn);
       }
       &[data-state='failed'] {
-        background: var(--bad-soft);
-        border-color: color-mix(in srgb, var(--bad) 35%, transparent);
+        border-left-color: var(--bad);
         mat-icon {
           color: var(--bad);
         }
