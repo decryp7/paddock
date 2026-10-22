@@ -12,7 +12,7 @@ import { provideIcons } from './shared/icons';
 /**
  * Mock options from the browser URL, for UI tests and screenshots: `?mock-fail=overview,history` makes those calls
  * fail, `?mock-empty` starts with nothing, `?mock-static` stops the simulated live updates, `?mock-consent` shows the first-run service question and
- * `?mock-update` offers an app update.
+ * `?mock-update` offers an app update, `?mock-updates` offers model updates.
  */
 export function mockOptionsFrom(search: string): MockOptions {
   const q = new URLSearchParams(search);
@@ -24,6 +24,7 @@ export function mockOptionsFrom(search: string): MockOptions {
     empty: q.has('mock-empty'),
     askConsent: q.has('mock-consent'),
     updateAvailable: q.has('mock-update'),
+    modelUpdates: q.has('mock-updates'),
     crashed: q.has('mock-crash'),
     failing: fail ? (fail.split(',') as (keyof PitwallBackend)[]) : [],
   };

@@ -108,7 +108,7 @@ describe('ModelsPage', () => {
   it('lists the library with disk usage, status and actions', async () => {
     const { el } = await render();
     const rows = el.querySelectorAll('pw-library-tab tbody tr');
-    expect(rows.length).toBe(6);
+    expect(rows.length).toBe(8);
     expect(rows[0]!.textContent).toContain('Qwen3 8B Instruct');
     expect(rows[0]!.textContent).toContain('Loaded');
     expect(el.textContent).toContain('Partial downloads');

@@ -79,7 +79,7 @@ import { UpdatesStore } from '../updates/updates.store';
 
       <section class="models" aria-label="Loaded models">
         <h2>Loaded models</h2>
-        <pw-hot-models [now]="now()" [compact]="true" />
+        <pw-hot-models [now]="now()" [compact]="true" [limit]="modelLimit()" />
       </section>
 
       <footer>
@@ -101,7 +101,7 @@ import { UpdatesStore } from '../updates/updates.store';
     .tray {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--sp-2);
       height: 100%;
       padding: var(--sp-3) var(--sp-4) var(--sp-4);
       background: var(--bg-content);
@@ -277,6 +277,8 @@ export class TrayPopover {
     if (!g || !g.vramTotal || g.vramUsed === null) return null;
     return { used: g.vramUsed, total: g.vramTotal, pct: percent(g.vramUsed, g.vramTotal), util: g.utilisation };
   });
+  /** Two loaded models fit under a banner, three without one; the rest is summarised so no row is cut off. */
+  protected readonly modelLimit = computed(() => (this.live.pairings().length > 0 || this.updates.count() > 0 ? 2 : 3));
   protected readonly tps = computed(() => (this.live.paused() ? '0.0' : rate(this.live.throughput()?.genTps ?? 0)));
 
   constructor() {

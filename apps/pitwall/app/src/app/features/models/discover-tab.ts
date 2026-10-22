@@ -335,6 +335,10 @@ export function fitDetail(f: Fit): string {
       text-align: right;
     }
     .needs {
+      max-width: 340px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       font-size: var(--fs-sm);
       color: var(--text-2);
     }

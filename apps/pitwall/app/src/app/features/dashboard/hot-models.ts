@@ -33,7 +33,7 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
       </pw-empty-state>
     }
     <ul class="list" [class.compact]="compact()" aria-label="Loaded models">
-      @for (m of live.models(); track m.modelId) {
+      @for (m of shown(); track m.modelId) {
         <li class="row">
           <div class="main" [matTooltip]="compact() ? '' : ctx(m.contextTokens) + ' context per slot · ' + slotsOf(m.slots)" matTooltipShowDelay="600">
             <div class="title">
@@ -77,6 +77,9 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
         </li>
       }
     </ul>
+    @if (more() > 0) {
+      <p class="more faint">+{{ more() }} more loaded</p>
+    }
     @if (!compact() && split(); as s) {
       <div class="split">
         <div class="split-head"><span>GPU memory by model</span><span class="num faint">{{ size(s.used) }} of {{ size(s.total) }}</span></div>
@@ -94,6 +97,11 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
     }
   `,
   styles: `
+    .more {
+      margin: 0;
+      padding-top: 6px;
+      font-size: var(--fs-xs);
+    }
     .split {
       margin-top: var(--sp-3);
       padding-top: var(--sp-3);
@@ -274,6 +282,13 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
 export class HotModels {
   readonly now = input.required<number>();
   readonly compact = input(false);
+  /** Show only the first N models, then "+K more loaded" (the tray has room for two or three). */
+  readonly limit = input<number | null>(null);
+  protected readonly shown = computed(() => {
+    const l = this.limit();
+    return l === null ? this.live.models() : this.live.models().slice(0, l);
+  });
+  protected readonly more = computed(() => this.live.models().length - this.shown().length);
   protected readonly live = inject(LiveStore);
   protected readonly look = (m: LoadedModel) => hotStateLook(m.state);
   protected readonly size = bytes;

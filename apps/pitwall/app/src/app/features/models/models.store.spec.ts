@@ -19,7 +19,7 @@ describe('ModelsStore', () => {
     expect(store.loading()).toBe(true);
     await done;
     expect(store.loaded()).toBe(true);
-    expect(store.library().length).toBe(6);
+    expect(store.library().length).toBe(8);
     expect(store.disk()?.unusedAfterDays).toBe(30);
     expect(store.unusedModels().map((m) => m.id)).toEqual(['qwen2.5-coder-1.5b-q8_0']);
     expect(store.unusedBytes()).toBeGreaterThan(0);
@@ -120,7 +120,7 @@ describe('ModelsStore', () => {
     await store.unloadModel('gemma-3-12b-it-q4_k_m');
     await store.deleteModel('qwen3-8b-instruct-q4_k_m');
     expect(toasts.toasts().at(-1)?.message).toContain('Unload the model');
-    expect(store.library().length).toBe(6);
+    expect(store.library().length).toBe(8);
   });
 
   it('ignores a second action on the same model while one is running', async () => {
@@ -152,7 +152,7 @@ describe('ModelsStore', () => {
     await store.load();
     await store.cleanUnused();
     expect(toasts.toasts().at(-1)?.tone).toBe('bad');
-    expect(store.library().length).toBe(6);
+    expect(store.library().length).toBe(8);
   });
 });
 

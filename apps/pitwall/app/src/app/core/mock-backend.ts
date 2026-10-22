@@ -212,7 +212,7 @@ export class MockBackend implements PitwallBackend {
     if (!empty) {
       this.downloads_ = [
         { id: 'dl-1', kind: 'model', name: 'Qwen3-14B-Instruct-Q4_K_M.gguf', host: 'huggingface.co', bytesDone: 3.1 * GiB, bytesTotal: 8.38 * GiB, speedBps: 38 * MiB, state: 'downloading', error: null, startedAt: now - 90_000 },
-        { id: 'dl-0', kind: 'model', name: 'Phi-4-mini-instruct-Q4_K_M.gguf', host: 'huggingface.co', bytesDone: 1.02 * GiB, bytesTotal: 2.49 * GiB, speedBps: 0, state: 'paused', error: 'Connection reset; resumes from 1.0 GB', startedAt: now - 3_600_000 },
+        { id: 'dl-0', kind: 'model', name: 'gemma-3-27b-it-Q4_K_M.gguf', host: 'huggingface.co', bytesDone: 6.2 * GiB, bytesTotal: 15.4 * GiB, speedBps: 0, state: 'paused', error: 'Connection reset; resumes from 6.2 GB', startedAt: now - 3_600_000 },
       ];
     }
   }

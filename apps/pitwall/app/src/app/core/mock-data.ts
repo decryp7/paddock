@@ -209,6 +209,8 @@ export function demoLocalModels(now: number): LocalModel[] {
     m({ id: 'llama-3.2-3b-instruct-q5_k_m', repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF', file: 'Llama-3.2-3B-Instruct-Q5_K_M.gguf', name: 'Llama 3.2 3B Instruct', quant: 'Q5_K_M', sizeBytes: 2.32 * GiB, paramsB: 3.2, contextMax: 131072, architecture: 'llama', capabilities: ['chat', 'tools'], loaded: true, slots: 4, slotsCustom: true, loadedSlots: 4, lastUsedAt: now - 2_000, idleSecs: 300 }),
     m({ id: 'nomic-embed-text-v1.5-f16', repo: 'nomic-ai/nomic-embed-text-v1.5-GGUF', file: 'nomic-embed-text-v1.5.f16.gguf', name: 'nomic-embed-text v1.5', quant: 'F16', sizeBytes: 262 * MiB, paramsB: 0.14, contextMax: 8192, architecture: 'nomic-bert', capabilities: ['embeddings'], loaded: true, pinned: true, lastUsedAt: now - 9_000 }),
     m({ id: 'gemma-3-12b-it-q4_k_m', repo: 'unsloth/gemma-3-12b-it-GGUF', file: 'gemma-3-12b-it-Q4_K_M.gguf', name: 'Gemma 3 12B', quant: 'Q4_K_M', sizeBytes: 6.79 * GiB, paramsB: 12.2, contextMax: 131072, architecture: 'gemma3', capabilities: ['chat', 'vision', 'json'], projector: 'mmproj-F16.gguf', lastUsedAt: now - 2 * DAY, idleSecs: 120 }),
+    m({ id: 'mistral-nemo-instruct-2407-q4_k_m', repo: 'bartowski/Mistral-Nemo-Instruct-2407-GGUF', file: 'Mistral-Nemo-Instruct-2407-Q4_K_M.gguf', name: 'Mistral Nemo 12B Instruct', quant: 'Q4_K_M', sizeBytes: 6.96 * GiB, paramsB: 12.2, contextMax: 131072, architecture: 'llama', capabilities: ['chat', 'tools'], lastUsedAt: now - 3 * DAY, addedAt: now - 19 * DAY }),
+    m({ id: 'phi-4-mini-instruct-q8_0', repo: 'unsloth/Phi-4-mini-instruct-GGUF', file: 'Phi-4-mini-instruct-Q8_0.gguf', name: 'Phi-4 mini Instruct', quant: 'Q8_0', sizeBytes: 3.82 * GiB, paramsB: 3.8, contextMax: 131072, architecture: 'phi3', capabilities: ['chat', 'tools', 'json'], lastUsedAt: now - 6 * DAY, addedAt: now - 11 * DAY }),
     m({ id: 'bge-reranker-v2-m3-q8_0', repo: 'gpustack/bge-reranker-v2-m3-GGUF', file: 'bge-reranker-v2-m3-Q8_0.gguf', name: 'BGE reranker v2 m3', quant: 'Q8_0', sizeBytes: 606 * MiB, paramsB: 0.57, contextMax: 8192, architecture: 'xlm-roberta', capabilities: ['rerank'], lastUsedAt: now - 5 * HOUR }),
     m({ id: 'qwen2.5-coder-1.5b-q8_0', repo: 'Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF', file: 'qwen2.5-coder-1.5b-instruct-q8_0.gguf', name: 'Qwen2.5 Coder 1.5B', quant: 'Q8_0', sizeBytes: 1.76 * GiB, paramsB: 1.5, contextMax: 32768, architecture: 'qwen2', capabilities: ['chat'], lastUsedAt: now - 41 * DAY, addedAt: now - 80 * DAY }),
   ];
@@ -616,6 +618,8 @@ export function demoBenchmarks(now: number): BenchmarkResult[] {
     { modelId: 'llama-3.2-3b-instruct-q5_k_m', build: 'cuda-13 · b11669', at: now - 2 * DAY, promptTps: 4380, genTps: 118.4, ttftMs: 96, contextTokens: 4096 },
     { modelId: 'gemma-3-12b-it-q4_k_m', build: 'cuda-13 · b11669', at: now - 6 * DAY, promptTps: 1210, genTps: 38.9, ttftMs: 384, contextTokens: 4096 },
     { modelId: 'qwen2.5-coder-1.5b-q8_0', build: 'vulkan · b11669', at: now - 12 * DAY, promptTps: 5120, genTps: 141.2, ttftMs: 71, contextTokens: 4096 },
+    { modelId: 'mistral-nemo-instruct-2407-q4_k_m', build: 'cuda-13 · b11669', at: now - 4 * DAY, promptTps: 1380, genTps: 44.6, ttftMs: 342, contextTokens: 4096 },
+    { modelId: 'phi-4-mini-instruct-q8_0', build: 'cuda-13 · b11669', at: now - 5 * DAY, promptTps: 3210, genTps: 83.7, ttftMs: 128, contextTokens: 4096 },
     { modelId: 'qwen3-8b-instruct-q4_k_m', build: 'vulkan · b11669', at: now - 3 * DAY, promptTps: 1490, genTps: 52.3, ttftMs: 268, contextTokens: 4096 },
   ];
 }

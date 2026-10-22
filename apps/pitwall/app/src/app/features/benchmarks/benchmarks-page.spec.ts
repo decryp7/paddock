@@ -20,9 +20,9 @@ describe('BenchmarksPage', () => {
     expect(items.some((li) => li.textContent?.includes('never run'))).toBe(false);
     expect(items.some((li) => li.textContent?.includes('nomic'))).toBe(false);
     const rows = el.querySelectorAll('tbody tr');
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(7);
     expect(rows[0]!.textContent).toContain('Qwen3 8B Instruct');
-    expect(el.querySelector('.panel, pw-panel[heading="Results"]')?.textContent).toContain('5 runs');
+    expect(el.querySelector('.panel, pw-panel[heading="Results"]')?.textContent).toContain('7 runs');
   });
 
   it('draws the speed chart with one row per model and build', async () => {
@@ -33,9 +33,9 @@ describe('BenchmarksPage', () => {
     expect(el.querySelector('pw-echart')!.getAttribute('aria-label')).toContain('tokens per second');
     const chart = FakeChart.all.at(-1)!;
     const option = chart.options.at(-1)!.option as any;
-    expect(option.series[0].data).toHaveLength(5);
+    expect(option.series[0].data).toHaveLength(7);
     expect(option.yAxis[0].data.at(-1)).toContain('Qwen2.5 Coder 1.5B');
-    expect(el.querySelector('pw-echart')!.getAttribute('style')).toContain('282px');
+    expect(el.querySelector('pw-echart')!.getAttribute('style')).toContain('362px');
   });
 
   it('shows empty states when nothing was measured and models say never run', async () => {
@@ -78,7 +78,7 @@ describe('BenchmarksPage', () => {
     await settle(fixture);
     expect(run.disabled).toBe(false);
     expect(run.classList.contains('on')).toBe(false);
-    expect(el.querySelectorAll('tbody tr')).toHaveLength(6);
+    expect(el.querySelectorAll('tbody tr')).toHaveLength(8);
     expect(el.querySelector('tbody tr')!.textContent).toContain('Qwen3 8B Instruct');
   });
 

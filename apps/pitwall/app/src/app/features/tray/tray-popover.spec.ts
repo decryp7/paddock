@@ -48,7 +48,9 @@ describe('TrayPopover', () => {
     expect(text(el.querySelectorAll('.mem .row')[1]!)).toMatch(/^VRAM[\d.]+GB\/12GB\d+%busy$/);
     const stats = Array.from(el.querySelectorAll('.stats div')).map(text);
     expect(stats).toEqual(['58.4tok/s', '2running', '3waiting']);
-    expect(el.querySelectorAll('pw-hot-models li.row').length).toBe(3);
+    // The pairing banner leaves room for two rows; the rest is summarised instead of cut off.
+    expect(el.querySelectorAll('pw-hot-models li.row').length).toBe(2);
+    expect(el.querySelector('pw-hot-models .more')!.textContent).toContain('+1 more loaded');
     expect(el.querySelector('pw-hot-models .actions')).toBeNull();
   });
 

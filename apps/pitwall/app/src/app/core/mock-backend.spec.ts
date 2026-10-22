@@ -140,7 +140,7 @@ describe('MockBackend', () => {
     const mock = new MockBackend({ now: clock });
     await expect(mock.deleteModel('qwen3-8b-instruct-q4_k_m')).rejects.toMatchObject({ code: 'conflict' });
     await mock.deleteModel('qwen2.5-coder-1.5b-q8_0');
-    expect((await mock.localModels()).length).toBe(5);
+    expect((await mock.localModels()).length).toBe(7);
     await mock.loadModel('gemma-3-12b-it-q4_k_m');
     await mock.loadModel('gemma-3-12b-it-q4_k_m');
     await expect(mock.loadModel('nope')).rejects.toMatchObject({ code: 'notFound' });

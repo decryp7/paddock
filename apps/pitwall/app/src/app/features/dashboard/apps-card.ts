@@ -59,7 +59,7 @@ export function limitsText(l: AppLimits): string {
               <td class="right num">{{ dur(a.today.busyMs) }}</td>
               <td class="right num" [class.bad]="a.today.errors > 0">{{ a.today.errors }}</td>
               <td class="limits"><span class="lim" [matTooltip]="limits(a.permissions.limits)">{{ limits(a.permissions.limits) }}</span></td>
-              <td class="trend"><pw-sparkline [values]="trend(a)" [color]="color(a)" [width]="80" [height]="22" /></td>
+              <td class="trend"><pw-sparkline [values]="trend(a)" [color]="color(a)" [width]="64" [height]="22" /></td>
             </tr>
           }
         </tbody>
@@ -120,12 +120,12 @@ export function limitsText(l: AppLimits): string {
     }
     .lim {
       display: block;
-      max-width: 110px;
+      max-width: 84px;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .trend {
-      width: 96px;
+      width: 80px;
     }
   `,
 })

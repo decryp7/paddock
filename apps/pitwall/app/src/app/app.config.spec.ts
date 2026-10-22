@@ -2,7 +2,7 @@ import { appConfig, mockOptionsFrom } from './app.config';
 
 describe('mockOptionsFrom', () => {
   it('defaults to simulated latency, live ticks and streaming delay', () => {
-    expect(mockOptionsFrom('')).toEqual({ latencyMs: 120, autoTick: true, streamDelayMs: 28, empty: false, askConsent: false, updateAvailable: false, crashed: false, failing: [] });
+    expect(mockOptionsFrom('')).toEqual({ latencyMs: 120, autoTick: true, streamDelayMs: 28, empty: false, askConsent: false, updateAvailable: false, modelUpdates: false, crashed: false, failing: [] });
   });
 
   it('mock-fast removes the delays', () => {
@@ -15,6 +15,10 @@ describe('mockOptionsFrom', () => {
     const o = mockOptionsFrom('?mock-static&mock-empty');
     expect(o.autoTick).toBe(false);
     expect(o.empty).toBe(true);
+  });
+
+  it('mock-updates offers model updates', () => {
+    expect(mockOptionsFrom('?mock-updates').modelUpdates).toBe(true);
   });
 
   it('mock-consent and mock-update switch on the first-run question and an available update', () => {

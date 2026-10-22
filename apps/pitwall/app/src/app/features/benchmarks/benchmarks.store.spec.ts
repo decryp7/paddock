@@ -20,7 +20,7 @@ describe('BenchmarksStore', () => {
     expect(store.loading()).toBe(true);
     await p;
     expect(store.loading()).toBe(false);
-    expect(store.results()).toHaveLength(5);
+    expect(store.results()).toHaveLength(7);
     expect(store.models().length).toBeGreaterThan(0);
   });
 
@@ -60,7 +60,7 @@ describe('BenchmarksStore', () => {
     expect(store.isRunning('other')).toBe(false);
     await p;
     expect(store.isRunning(QWEN)).toBe(false);
-    expect(store.results()).toHaveLength(6);
+    expect(store.results()).toHaveLength(8);
     expect(store.results()[0]).toMatchObject({ modelId: QWEN, at: NOW });
     expect(store.latest().get(QWEN)!.at).toBe(NOW);
     expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'ok' });
@@ -73,14 +73,14 @@ describe('BenchmarksStore', () => {
     const first = store.run(QWEN);
     await store.run(QWEN);
     await first;
-    expect(store.results()).toHaveLength(6);
+    expect(store.results()).toHaveLength(8);
   });
 
   it('reports a failing run, keeps the results and frees the model', async () => {
     const { store, toasts } = setup(new MockBackend({ failing: ['runBenchmark'] }));
     await store.load();
     await store.run(QWEN);
-    expect(store.results()).toHaveLength(5);
+    expect(store.results()).toHaveLength(7);
     expect(store.isRunning(QWEN)).toBe(false);
     expect(toasts.toasts().at(-1)?.tone).toBe('bad');
   });

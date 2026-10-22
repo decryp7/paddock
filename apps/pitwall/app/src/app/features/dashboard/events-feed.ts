@@ -38,6 +38,8 @@ import { EmptyState } from '../../shared/ui/empty-state';
       overflow: auto;
       margin: 0 calc(-1 * var(--sp-2));
       padding: 0 var(--sp-2);
+      /* A list longer than its card fades out instead of showing a half item at the edge. */
+      mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
     }
     ol {
       list-style: none;
