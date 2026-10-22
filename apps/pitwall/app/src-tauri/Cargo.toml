@@ -29,6 +29,8 @@ tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
 # elsewhere. It must sit here, not under a target table: tauri-build checks only this list against the config.
 tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-autostart = "2"
+# A second launch focuses the running app instead of starting another one (release builds; see window::second_launch).
+tauri-plugin-single-instance = "2"
 # >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version). No "zip": Pitwall publishes v2
 # updater artifacts (the installers themselves). "rustls-tls" with the platform verifier trusts the OS certificate
 # store. The updater is the only outbound HTTP in the shell, and only when the user asks for an update check.

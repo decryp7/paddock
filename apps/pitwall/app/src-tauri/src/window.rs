@@ -65,6 +65,12 @@ pub fn started_hidden(args: &[String]) -> bool {
     args.iter().any(|a| a == HIDDEN_ARG)
 }
 
+/// What a second launch of the app (the user opened Pitwall again, or log-in started it again) does in the running
+/// one: show its window, unless it was only a login start in the tray (`--hidden`), which changes nothing.
+pub fn second_launch(args: &[String]) -> Option<Lifecycle> {
+    (!started_hidden(args)).then_some(Lifecycle::TrayOpen)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +105,15 @@ mod tests {
         assert_eq!(react(Lifecycle::StartedHidden, true, true), Reaction::DestroyWindow);
         assert_eq!(react(Lifecycle::StartedHidden, true, false), Reaction::Nothing);
         assert_eq!(react(Lifecycle::StartedHidden, false, true), Reaction::Nothing);
+    }
+
+    #[test]
+    fn a_second_launch_focuses_the_running_app_unless_it_is_a_login_start() {
+        assert_eq!(second_launch(&["pitwall-app".into()]), Some(Lifecycle::TrayOpen));
+        assert_eq!(second_launch(&["pitwall-app".into(), "--hidden".into()]), None);
+        // The decision composes with the lifecycle table: an existing window is focused, a destroyed one rebuilt.
+        assert_eq!(react(Lifecycle::TrayOpen, true, true), Reaction::FocusWindow);
+        assert_eq!(react(Lifecycle::TrayOpen, false, true), Reaction::CreateWindow);
     }
 
     #[test]

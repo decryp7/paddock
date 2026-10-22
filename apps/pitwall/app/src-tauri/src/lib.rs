@@ -96,7 +96,15 @@ pub fn run() {
     ));
     let client: SharedClient = Arc::new(server_client::LoopbackClient::new(data_dir, keys));
     let model: SharedModel = Arc::new(Mutex::new(TrayModel::new()));
-    let result = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Must be the first plugin. Debug builds skip it so a development run does not collide with an installed Pitwall.
+    #[cfg(all(not(debug_assertions), any(target_os = "macos", windows, target_os = "linux")))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        if let Some(event) = window::second_launch(&args) {
+            shell::handle(app, event);
+        }
+    }));
+    let result = builder
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![window::HIDDEN_ARG]),

@@ -651,7 +651,10 @@ async fn an_idle_models_context_is_cleared_before_its_weights_are_released() {
     let h = harness(false).await;
     let key = h.make_key("Context Test").await;
     assert_eq!(h.rpc("apply_preset", json!({"preset": "lowMemory"})).await.status, 200);
-    assert_eq!(h.rpc("set_model_idle", json!({"id": "tiny-q4_k_m", "idleSecs": 2})).await.status, 200);
+    assert_eq!(
+        h.rpc("set_model_idle", json!({"id": "tiny-q4_k_m", "idleSecs": 2})).await.status,
+        200
+    );
     let ask = || h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]);
     assert_eq!(ask().await.status, 200);
     h.st.serving.tick();

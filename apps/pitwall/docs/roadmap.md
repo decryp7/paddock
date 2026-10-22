@@ -70,6 +70,8 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | MLX (Apple Silicon) and vLLM (Linux, NVIDIA) engines | Show as "not available" with the reason; **planned** |
 | Dedicated embedding and reranker adapters | Embeddings work through llama.cpp with an embedding model; rerank **planned** |
 | Real-engine automated test (`PITWALL_LLAMA_E2E=1`) | **Planned**; the smoke test is manual |
+| Usage per connected app | **Approved, not built.** Tokens, requests and peak memory per app over time (a dashboard chart and an app detail view), stored locally with bounded retention, with optional per-app limits (requests per minute, tokens per day) enforced in serving with a typed, explained error. Per-app counters and limits exist in the core (`usage`, `limits`); the history, the chart and the detail view do not |
+| Model update notices | **Approved, not built.** On a schedule, and only when offline mode allows, ask Hugging Face for newer revisions or better quantisations of installed models; notify and offer them, never download by themselves. Tests use a fake Hugging Face API |
 
 ## Phase 4: the suite *(planned)*
 

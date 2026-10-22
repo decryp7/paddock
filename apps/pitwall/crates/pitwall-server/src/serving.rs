@@ -647,11 +647,19 @@ impl Serving {
                 }
                 let path = format!("/slots/{slot}?action=erase");
                 if let Err(e) = h.running.client.send("POST", &path, None, Duration::from_secs(5)).await {
-                    me.event(EventKind::ContextReleased, Severity::Warn, format!("Could not clear the context of {}: {e}", h.id));
+                    me.event(
+                        EventKind::ContextReleased,
+                        Severity::Warn,
+                        format!("Could not clear the context of {}: {e}", h.id),
+                    );
                     return;
                 }
             }
-            me.event(EventKind::ContextReleased, Severity::Info, format!("Cleared the context of {} ({why:?}); its weights stay loaded.", h.id));
+            me.event(
+                EventKind::ContextReleased,
+                Severity::Info,
+                format!("Cleared the context of {} ({why:?}); its weights stay loaded.", h.id),
+            );
         });
     }
 
