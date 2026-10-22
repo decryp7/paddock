@@ -6,6 +6,7 @@ import { Router } from '@angular/router';
 import type { LogLine } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { ClockService } from '../../core/clock.service';
+import { DebriefButton } from '../../shared/ui/debrief-button';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { StatusStore } from '../../state/status.store';
 import { ToastStore } from '../../state/toast.store';
@@ -19,7 +20,7 @@ const ROW = 22;
 /** A runner's log: virtual scrolling, follow mode, plain-text search and copying a line. */
 @Component({
   selector: 'pc-logs-page',
-  imports: [CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, MatIcon, MatTooltip, EmptyState],
+  imports: [DebriefButton, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, MatIcon, MatTooltip, EmptyState],
   providers: [LogsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './logs-page.html',

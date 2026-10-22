@@ -8,6 +8,7 @@ import { jobsPerDayOption, sumJobDays } from '../../shared/charts/chart-options'
 import { formatBytes, formatDateTime, formatDuration, formatPermille, formatRelative } from '../../shared/format';
 import { outcomeLook } from '../../shared/labels';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { DebriefButton } from '../../shared/ui/debrief-button';
 import { LoadState } from '../../shared/ui/load-state';
 import { Sparkline } from '../../shared/ui/sparkline';
 import { Timeline, type TimelineRow } from '../../shared/ui/timeline';
@@ -17,7 +18,7 @@ import { ACTIVITY_DAYS, ActivityStore, type ActivityDays } from './activity.stor
 /** History per runner or for all: uptime timeline, per-day sparklines, jobs per day, updates and recent jobs. */
 @Component({
   selector: 'pc-activity-page',
-  imports: [RouterLink, Chart, Timeline, Sparkline, LoadState, EmptyState],
+  imports: [RouterLink, DebriefButton, Chart, Timeline, Sparkline, LoadState, EmptyState],
   providers: [ActivityStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './activity-page.html',

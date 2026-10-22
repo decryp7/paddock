@@ -38,6 +38,9 @@
           <span class="dot pulse live" aria-hidden="true"></span>
         }
       </button>
+      @if (selected(); as runner) {
+        <pc-debrief-button [runner]="runner" label="whole-log" [small]="false" text="Open in Debrief" />
+      }
       <button type="button" class="btn icon" (click)="reveal()" aria-label="Show the log folder" matTooltip="Show the log folder"><mat-icon svgIcon="pc:folder" aria-hidden="true" /></button>
     </div>
 

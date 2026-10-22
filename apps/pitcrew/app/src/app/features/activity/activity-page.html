@@ -101,6 +101,7 @@
                 <th scope="col" class="num">Peak memory</th>
                 <th scope="col">Left running</th>
                 <th scope="col" class="num">Finished</th>
+                <th scope="col"><span class="visually-hidden">Open in Debrief</span></th>
               </tr>
             </thead>
             <tbody>
@@ -126,9 +127,10 @@
                     }
                   </td>
                   <td class="num muted">{{ ago(row.job.finishedAt) }}</td>
+                  <td><pc-debrief-button [runner]="row.name" [label]="'run-' + (row.job.info.runNumber ?? row.job.startedAt)" [startedAt]="row.job.startedAt" [finishedAt]="row.job.finishedAt" /></td>
                 </tr>
               } @empty {
-                <tr><td colspan="10" class="faint">No jobs in this range.</td></tr>
+                <tr><td colspan="11" class="faint">No jobs in this range.</td></tr>
               }
             </tbody>
           </table>
