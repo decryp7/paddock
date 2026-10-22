@@ -189,3 +189,15 @@ describe('formatAffinity', () => {
     expect(formatAffinity(0b11011110, 8)).toBe('1–4, 6, 7');
   });
 });
+
+describe('formatMetric', () => {
+  it('keeps digits proportional to size', async () => {
+    const { formatMetric } = await import('./format');
+    expect(formatMetric(2410.4)).toMatch(/2.?410/);
+    expect(formatMetric(612.3)).toBe('612');
+    expect(formatMetric(58.44)).toBe('58.4');
+    expect(formatMetric(0.923)).toBe('0.92');
+    expect(formatMetric(NaN)).toBe('—');
+    expect(formatMetric(null)).toBe('—');
+  });
+});

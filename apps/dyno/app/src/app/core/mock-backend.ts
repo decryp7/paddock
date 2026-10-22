@@ -33,6 +33,11 @@ import type {
   StartupEntry,
   StartupState,
   SystemInventory,
+  BenchComparison,
+  BenchOverview,
+  BenchProgress,
+  BenchRun,
+  StartBenchmark,
   SystemSample,
   Timestamp,
   TuningSuggestion,
@@ -55,6 +60,7 @@ import {
   diskTree,
   healthReasons,
 } from './mock/data';
+import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHistory } from './mock/history';
 import { mockInventory } from './mock/inventory';
 import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
@@ -821,6 +827,77 @@ export class MockBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.reply('inventory', () => mockInventory(this.profile.os));
+  }
+
+  private benchRuns: BenchRun[] | null = null;
+  private benchRunning: BenchProgress | null = null;
+
+  private runs(): BenchRun[] {
+    return (this.benchRuns ??= [
+      mockRun('r3', this.start - 2 * 60 * MIN, 'Power mode: High performance (after)', 1.12, { group: 'Power mode: High performance', phase: 'after' }),
+      mockRun('r2', this.start - 3 * 60 * MIN, 'Power mode: High performance (before)', 1, { group: 'Power mode: High performance', phase: 'before' }),
+      mockRun('r1', this.start - 2 * DAY, 'Baseline', 0.99, { load: { cpuPercent: 31, memoryPercent: 61, onBattery: false } }),
+    ]);
+  }
+
+  benchmarks(): Promise<BenchOverview> {
+    return this.reply('benchmarks', () => ({ running: this.benchRunning, runs: this.runs() }));
+  }
+
+  startBenchmark(r: StartBenchmark): Promise<BenchOverview> {
+    return this.reply('startBenchmark', () => {
+      if (this.benchRunning) throw err('busy', 'A benchmark is already running; wait for it or cancel it.');
+      if (!r.kinds.length) throw err('badRequest', 'Choose at least one benchmark to run.');
+      const kinds = [...new Set(r.kinds)];
+      const progress: BenchProgress = { runId: `r${this.runs().length + 1}`, startedAt: Date.now(), kinds, current: kinds[0] ?? null, done: [] };
+      this.benchRunning = progress;
+      const step = (i: number) => {
+        const p = this.benchRunning;
+        if (!p || p.runId !== progress.runId) return;
+        if (i >= kinds.length) {
+          const run = mockRun(p.runId, this.start, r.label || 'Benchmark', r.phase === 'after' ? 1.12 : 1, {
+            group: r.group ?? null,
+            phase: r.phase ?? null,
+            results: kinds.map((k) => mockKindResult(k, r.phase === 'after' ? 1.12 : 1, false)),
+          });
+          this.runs().unshift(run);
+          this.benchRunning = null;
+          return;
+        }
+        const kind = kinds[i]!;
+        p.current = kind;
+        setTimeout(() => {
+          p.done.push(kind);
+          p.current = null;
+          step(i + 1);
+        }, 900);
+      };
+      step(0);
+      return { running: this.benchRunning, runs: this.runs() };
+    });
+  }
+
+  cancelBenchmark(): Promise<void> {
+    return this.reply('cancelBenchmark', () => {
+      this.benchRunning = null;
+    });
+  }
+
+  deleteBenchmark(id: string): Promise<void> {
+    return this.reply('deleteBenchmark', () => {
+      const i = this.runs().findIndex((x) => x.id === id);
+      if (i < 0) throw err('notFound', 'That benchmark run no longer exists.');
+      this.runs().splice(i, 1);
+    });
+  }
+
+  compareBenchmarks(before: string, after: string): Promise<BenchComparison> {
+    return this.reply('compareBenchmarks', () => {
+      const b = this.runs().find((x) => x.id === before);
+      const a = this.runs().find((x) => x.id === after);
+      if (!a || !b) throw err('notFound', 'That benchmark run no longer exists.');
+      return mockCompare(b, a);
+    });
   }
 
   weeklyReport(): Promise<WeeklyReport> {

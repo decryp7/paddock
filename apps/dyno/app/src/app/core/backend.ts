@@ -30,6 +30,9 @@ import type {
   StartupEntry,
   StartupState,
   SystemInventory,
+  BenchComparison,
+  BenchOverview,
+  StartBenchmark,
   Timestamp,
   TuningSuggestion,
   WeeklyReport,
@@ -97,6 +100,13 @@ export interface DynoBackend {
 
   // What is installed (memory modules, CPU, disks) and hints.
   inventory(): Promise<SystemInventory>;
+
+  // Benchmarks: start only on a click; poll `benchmarks()` while a run is in progress.
+  benchmarks(): Promise<BenchOverview>;
+  startBenchmark(request: StartBenchmark): Promise<BenchOverview>;
+  cancelBenchmark(): Promise<void>;
+  deleteBenchmark(id: string): Promise<void>;
+  compareBenchmarks(before: string, after: string): Promise<BenchComparison>;
 
   // Reports, settings, plugins.
   weeklyReport(): Promise<WeeklyReport>;

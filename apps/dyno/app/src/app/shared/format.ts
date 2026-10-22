@@ -168,3 +168,10 @@ export function splitValue(text: string): [string, string] {
   const m = /^([−+-]?[\d.,]+)\s*(.*)$/.exec(text);
   return m ? [m[1]!, m[2] ?? ''] : [text, ''];
 }
+
+/** A benchmark number with sensible digits for its size: `2 410`, `58.4`, `0.92`. */
+export function formatMetric(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  const digits = Math.abs(value) >= 1000 ? 0 : Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2;
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(value);
+}

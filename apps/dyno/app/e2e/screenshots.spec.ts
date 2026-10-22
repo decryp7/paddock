@@ -50,6 +50,31 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     },
   },
   {
+    name: 'benchmarks',
+    path: '/#/benchmarks',
+    ready: async (page) => void (await expect(page.getByRole('region', { name: 'Latest result' })).toBeVisible()),
+  },
+  {
+    name: 'benchmarks-running',
+    path: '/#/benchmarks',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Run benchmarks' }).click();
+      await expect(page.getByRole('list', { name: 'Progress' })).toBeVisible();
+      await page.clock.runFor(1_000);
+    },
+  },
+  {
+    name: 'benchmarks-compare',
+    path: '/#/benchmarks',
+    size: { width: 1440, height: 1500 },
+    ready: async (page) => {
+      await page.getByRole('checkbox', { name: 'Select Power mode: High performance (before)' }).check();
+      await page.getByRole('checkbox', { name: 'Select Power mode: High performance (after)' }).check();
+      await page.getByRole('button', { name: 'Compare selected' }).click();
+      await expect(page.getByRole('region', { name: 'Comparison' })).toBeVisible();
+    },
+  },
+  {
     name: 'inventory',
     path: '/#/inventory',
     mock: 'windows',

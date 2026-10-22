@@ -15,6 +15,7 @@ export const NAV: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: 'dashboard', keywords: 'home overview health live' },
   { path: '/processes', label: 'Processes', icon: 'processes', keywords: 'task manager apps end kill suspend' },
   { path: '/inventory', label: 'Inventory', icon: 'memory', keywords: 'memory ram modules slots upgrade hardware dimm' },
+  { path: '/benchmarks', label: 'Benchmarks', icon: 'gauge', keywords: 'benchmark speed score cpu memory disk before after compare' },
   { path: '/why-slow', planned: true, label: 'Why slow', icon: 'why', keywords: 'diagnosis slow cause anomalies' },
   { path: '/rules', planned: true, label: 'CPU taming', icon: 'rules', keywords: 'rules profiles throttle cap protected' },
   { path: '/cleanup', planned: true, label: 'Cleanup', icon: 'cleanup', keywords: 'clean disk space temp cache quarantine treemap' },

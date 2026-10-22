@@ -31,6 +31,9 @@ import type {
   StartupEntry,
   StartupState,
   SystemInventory,
+  BenchComparison,
+  BenchOverview,
+  StartBenchmark,
   Timestamp,
   TuningSuggestion,
   WeeklyReport,
@@ -296,6 +299,26 @@ export class TauriBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.request('inventory');
+  }
+
+  benchmarks(): Promise<BenchOverview> {
+    return this.request('benchmarks');
+  }
+
+  startBenchmark(r: StartBenchmark): Promise<BenchOverview> {
+    return this.request({ startBenchmark: { kinds: r.kinds, label: r.label, group: r.group ?? null, phase: r.phase ?? null, diskMib: r.diskMib ?? null } });
+  }
+
+  cancelBenchmark(): Promise<void> {
+    return this.request('cancelBenchmark');
+  }
+
+  deleteBenchmark(id: string): Promise<void> {
+    return this.request({ deleteBenchmark: { id } });
+  }
+
+  compareBenchmarks(before: string, after: string): Promise<BenchComparison> {
+    return this.request({ compareBenchmarks: { before, after } });
   }
 
   weeklyReport(): Promise<WeeklyReport> {

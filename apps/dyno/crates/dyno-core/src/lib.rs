@@ -7,6 +7,7 @@ pub mod activity;
 pub mod alarms;
 pub mod alerts;
 pub mod anomaly;
+pub mod bench;
 pub mod cleanup;
 pub mod diagnosis;
 pub mod diagnostics;

@@ -1080,6 +1080,92 @@ export interface SavedDiagnostics {
   files: number;
 }
 
+// ------------------------------------------------------------------------------------------------------ benchmarks
+// Mirrors `dyno_core::bench`. Runs start only on a click; the engine answers `BenchOverview` and the UI polls it
+// while `running` is set.
+
+export type BenchKind = 'cpu' | 'memory' | 'disk' | 'gpu';
+export type BenchPhase = 'before' | 'after';
+
+export interface BenchMetric {
+  id: string;
+  label: string;
+  value: number;
+  unit: string;
+  higherIsBetter: boolean;
+}
+
+export type BenchStatus =
+  | { state: 'done'; metrics: BenchMetric[] }
+  | { state: 'unavailable'; reason: string }
+  | { state: 'stopped'; reason: string }
+  | { state: 'failed'; reason: string };
+
+export interface BenchKindResult {
+  kind: BenchKind;
+  status: BenchStatus;
+  millis: number;
+}
+
+export interface LoadAtRun {
+  cpuPercent: number;
+  memoryPercent: number;
+  onBattery: boolean | null;
+}
+
+export interface BenchRun {
+  id: string;
+  startedAt: number;
+  label: string;
+  group: string | null;
+  phase: BenchPhase | null;
+  load: LoadAtRun;
+  machine: string;
+  results: BenchKindResult[];
+}
+
+export interface BenchProgress {
+  runId: string;
+  startedAt: number;
+  kinds: BenchKind[];
+  current: BenchKind | null;
+  done: BenchKind[];
+}
+
+export interface BenchOverview {
+  running: BenchProgress | null;
+  runs: BenchRun[];
+}
+
+export type BenchVerdict = 'better' | 'worse' | 'same';
+
+export interface MetricDelta {
+  kind: BenchKind;
+  id: string;
+  label: string;
+  unit: string;
+  higherIsBetter: boolean;
+  before: number;
+  after: number;
+  changePercent: number;
+  verdict: BenchVerdict;
+}
+
+export interface BenchComparison {
+  before: string;
+  after: string;
+  deltas: MetricDelta[];
+  warnings: string[];
+}
+
+export interface StartBenchmark {
+  kinds: BenchKind[];
+  label: string;
+  group?: string | null;
+  phase?: BenchPhase | null;
+  diskMib?: number | null;
+}
+
 // ===================================================================================================================
 // END rust-agent additions. Also appended to `Settings` (all optional in the JSON): dashboard, trayItems, alarms,
 // flightRecorder (see the widgets, alarms and recorder blocks above).

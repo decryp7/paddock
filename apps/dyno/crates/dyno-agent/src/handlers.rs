@@ -53,6 +53,35 @@ pub fn handle(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
     }
 }
 
+/// Starts a benchmark run after validating the request; the load recorded is the machine's as of the click.
+fn start_benchmark(
+    shared: &Arc<Shared>,
+    kinds: &[dyno_core::bench::BenchKind],
+    label: &str,
+    group: Option<&str>,
+    phase: Option<dyno_core::bench::BenchPhase>,
+    disk_mib: Option<u32>,
+) -> Answer {
+    let plan = dyno_core::bench::plan(kinds, disk_mib, label, group).map_err(bad)?;
+    let load = {
+        let core = lock(&shared.core);
+        core.recent
+            .back()
+            .map(|s| dyno_core::bench::LoadAtRun {
+                cpu_percent: s.cpu.total,
+                memory_percent: s.memory_percent(),
+                on_battery: s.battery.value().map(|b| b.source == dyno_core::metrics::PowerSource::Battery),
+            })
+            .unwrap_or_default()
+    };
+    let inv = crate::inventory::get(shared);
+    let machine = format!("{} · {}", inv.os, inv.cpu.name);
+    shared
+        .bench
+        .start(plan, phase, load, machine)
+        .map(|o| Reply::Benchmarks(Box::new(o)))
+}
+
 fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
     match request {
         Request::Subscribe { detail } => subscribe(shared, conn, detail),
@@ -132,6 +161,31 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             Ok(Reply::Settings(Box::new(s)))
         }
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
+        Request::Benchmarks => Ok(Reply::Benchmarks(Box::new(shared.bench.overview()))),
+        Request::StartBenchmark {
+            kinds,
+            label,
+            group,
+            phase,
+            disk_mib,
+        } => start_benchmark(shared, &kinds, &label, group.as_deref(), phase, disk_mib),
+        Request::CancelBenchmark => {
+            shared.bench.cancel();
+            Ok(Reply::Ok)
+        }
+        Request::DeleteBenchmark { id } => shared.bench.delete(&id).map(|()| Reply::Ok),
+        Request::CompareBenchmarks { before, after } => {
+            let find = |id: &str| {
+                shared
+                    .bench
+                    .run(id)
+                    .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That benchmark run no longer exists."))
+            };
+            Ok(Reply::BenchComparison(Box::new(dyno_core::bench::compare(
+                &find(&before)?,
+                &find(&after)?,
+            ))))
+        }
         Request::Inventory => Ok(Reply::Inventory(Box::new(crate::inventory::get(shared)))),
         Request::Alarms { filter } => {
             let t = now();

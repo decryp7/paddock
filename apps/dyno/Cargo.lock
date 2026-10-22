@@ -1016,6 +1016,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyno-bench"
+version = "0.1.0"
+dependencies = [
+ "dyno-core",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "dyno-core"
 version = "0.1.0"
 dependencies = [

@@ -197,6 +197,8 @@ pub struct Shared {
     pub plugins: dyno_plugin_host::PluginHost,
     /// Opens the file manager.
     pub reveal: Reveal,
+    /// Benchmark runs (only on the user's click).
+    pub bench: crate::bench::BenchCentre,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -269,6 +271,14 @@ impl Shared {
                 None,
             );
         }
+        let (bench, bench_note) = crate::bench::BenchCentre::load(
+            dirs.benchmarks(),
+            std::env::temp_dir(),
+            Box::new(crate::bench::ProcessLauncher::beside_agent()),
+        );
+        if let Some(n) = bench_note {
+            core.log(t, ActivityKind::System, "Benchmark history reset".into(), n, UndoRecord::None, None);
+        }
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let Platform {
             sensors,
@@ -293,6 +303,7 @@ impl Shared {
             },
             subs: Mutex::new(Vec::new()),
             reveal,
+            bench,
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

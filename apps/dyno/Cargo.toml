@@ -6,6 +6,7 @@ members = [
     "crates/dyno-plugin-host",
     "crates/dyno-platform",
     "crates/dyno-agent",
+    "crates/dyno-bench",
     "crates/dyno-helper",
     "plugins/dyno-plugin-example",
     "app/src-tauri",
@@ -28,6 +29,7 @@ dyno-plugin-api = { path = "crates/dyno-plugin-api" }
 dyno-plugin-host = { path = "crates/dyno-plugin-host" }
 dyno-platform = { path = "crates/dyno-platform" }
 dyno-agent = { path = "crates/dyno-agent" }
+dyno-bench = { path = "crates/dyno-bench" }
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -264,6 +264,35 @@ pub enum Request {
         /// The destination.
         path: String,
     },
+    /// The benchmark runs and the one in progress. Appended.
+    Benchmarks,
+    /// Starts a benchmark run (answers the overview; refused with `Busy` while one runs). Never automatic. Appended.
+    StartBenchmark {
+        /// What to measure.
+        kinds: Vec<crate::bench::BenchKind>,
+        /// The user's name for the run.
+        label: String,
+        /// The change this run brackets (shared by its before and after runs).
+        group: Option<String>,
+        /// Before or after that change.
+        phase: Option<crate::bench::BenchPhase>,
+        /// Scratch file size for the disk test, MiB (default and cap in `bench`).
+        disk_mib: Option<u32>,
+    },
+    /// Stops the run in progress after the current kind (that kind is stopped at once). Appended.
+    CancelBenchmark,
+    /// Deletes a saved run. Appended.
+    DeleteBenchmark {
+        /// The run id.
+        id: String,
+    },
+    /// Compares two saved runs. Appended.
+    CompareBenchmarks {
+        /// The earlier run.
+        before: String,
+        /// The later run.
+        after: String,
+    },
 }
 
 /// Dyno's own cost.
@@ -493,6 +522,10 @@ pub enum Reply {
     DiagnosticsPreview(Box<crate::diagnostics::BundlePreview>),
     /// The bundle was written. Appended.
     DiagnosticsSaved(crate::diagnostics::SavedDiagnostics),
+    /// The benchmark overview. Appended.
+    Benchmarks(Box<crate::bench::BenchOverview>),
+    /// Two runs compared. Appended.
+    BenchComparison(Box<crate::bench::Comparison>),
 }
 
 impl Reply {
@@ -533,6 +566,8 @@ impl Reply {
             Reply::RecorderSnapshot(x) => v(x),
             Reply::DiagnosticsPreview(x) => v(x),
             Reply::DiagnosticsSaved(x) => v(x),
+            Reply::Benchmarks(x) => v(x),
+            Reply::BenchComparison(x) => v(x),
         }
     }
 }
@@ -721,6 +756,7 @@ mod tests {
             Reply::Alarms(vec![]),
             Reply::AlarmStats(Box::default()),
             Reply::AlarmChanges(vec![]),
+            Reply::Benchmarks(Box::default()),
             Reply::RecorderSnapshots(vec![]),
             Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {
                 path: "/x.zip".into(),

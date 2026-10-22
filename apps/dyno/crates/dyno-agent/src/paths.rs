@@ -59,6 +59,11 @@ impl Dirs {
         self.root.join("process-control.json")
     }
 
+    /// The benchmark run history.
+    pub fn benchmarks(&self) -> PathBuf {
+        self.root.join("benchmarks.json")
+    }
+
     /// The discovery file the app reads to find a running agent.
     pub fn discovery(&self) -> PathBuf {
         self.root.join("agent.json")

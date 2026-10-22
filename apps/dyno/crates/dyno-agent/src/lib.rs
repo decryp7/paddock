@@ -4,6 +4,7 @@
 
 pub mod agent;
 pub mod alarms;
+pub mod bench;
 pub mod cleanup;
 pub mod cli;
 pub mod diagnostics;
