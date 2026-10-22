@@ -2,7 +2,6 @@ import type { EChartsCoreOption } from 'echarts/core';
 import type { CoreKind, History } from '../../core/api.types';
 import { formatClock, formatDate, formatPercent } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
-import { EVENT_STYLE } from '../dashboard/history-options';
 import { coreOrder } from './core-layout';
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
