@@ -5,9 +5,9 @@ use super::SourceError;
 use crate::checksum::Sha256Digest;
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::Candidate;
+use crate::schema::Config;
 use crate::time::Timestamp;
 use serde::Deserialize;
-use crate::schema::Config;
 
 /// Which forge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

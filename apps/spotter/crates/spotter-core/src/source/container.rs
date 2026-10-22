@@ -6,8 +6,8 @@ use super::http::HttpRequest;
 use super::SourceError;
 use crate::limits::MAX_CANDIDATES;
 use crate::release::Candidate;
-use serde::Deserialize;
 use crate::schema::Config;
+use serde::Deserialize;
 
 /// A container image source.
 #[derive(Debug, Clone, PartialEq, Eq)]

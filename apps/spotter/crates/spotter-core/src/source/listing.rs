@@ -5,8 +5,8 @@ use super::SourceError;
 use crate::limits::MAX_CANDIDATES;
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::Candidate;
-use regex::Regex;
 use crate::schema::Config;
+use regex::Regex;
 use std::sync::OnceLock;
 use url::Url;
 

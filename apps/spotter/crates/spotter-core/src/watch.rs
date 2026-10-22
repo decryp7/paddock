@@ -1,12 +1,15 @@
 //! Watches: what to monitor and how. A [`WatchSpec`] is the stored (and edited) form; [`Watch`] is the parsed one.
 
 use crate::action::Action;
+use crate::filter::VersionFilter;
 use crate::limits::{MAX_ACTIONS, MAX_NAME_CHARS};
-use crate::notify::NotificationPolicy;
+use crate::notify::{DigestMode, NotificationChannel, NotificationPolicy, MAX_CHANNELS};
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::ReleaseFilter;
 use crate::schedule::clamp_interval;
+use crate::source::web_page::PageMode;
 use crate::source::{Source, SourceConfig};
+use crate::time::QuietHours;
 use crate::version::VersionScheme;
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +96,15 @@ pub struct WatchSpec {
     /// What to do with a new release.
     #[serde(default)]
     pub actions: Vec<Action>,
+    /// Extra notification channels (webhook, ntfy, e-mail); off unless added.
+    #[serde(default)]
+    pub channels: Vec<NotificationChannel>,
+    /// Version prefix and soak time.
+    #[serde(default)]
+    pub version_filter: VersionFilter,
+    /// The watch may reach the loopback and link-local ranges (a service on this machine or in a lab).
+    #[serde(default)]
+    pub allow_local: bool,
     /// Not checked while paused.
     #[serde(default)]
     pub paused: bool,
@@ -117,6 +129,12 @@ pub struct Watch {
     pub notify: NotificationPolicy,
     /// What to do with a new release.
     pub actions: Vec<Action>,
+    /// Extra notification channels.
+    pub channels: Vec<NotificationChannel>,
+    /// Version prefix and soak time.
+    pub version_filter: VersionFilter,
+    /// May reach loopback and link-local addresses.
+    pub allow_local: bool,
     /// Not checked while paused.
     pub paused: bool,
     /// The stored form.
@@ -145,6 +163,16 @@ impl Watch {
             problems.push(format!("A watch can have at most {MAX_ACTIONS} actions."));
         }
         problems.extend(spec.actions.iter().filter_map(|a| a.check().err()));
+        if spec.channels.len() > MAX_CHANNELS {
+            problems.push(format!("A watch can have at most {MAX_CHANNELS} notification channels."));
+        }
+        problems.extend(spec.channels.iter().filter_map(|c| c.check().err()));
+        problems.extend(spec.version_filter.check().err());
+        // A page watched for changes has no version to read: its releases are dated.
+        let scheme = match (&source, scheme) {
+            (Some(Source::WebPage(p)), Some(_)) if p.mode == PageMode::Change => Some(VersionScheme::Date),
+            (_, scheme) => scheme,
+        };
         match (id, source, scheme, name_filter) {
             (Some(id), Some(source), Some(scheme), Some(name_filter)) if problems.is_empty() => Ok(Watch {
                 id,
@@ -158,6 +186,9 @@ impl Watch {
                 interval_secs: clamp_interval(spec.interval_secs),
                 notify: spec.notify,
                 actions: spec.actions.clone(),
+                channels: spec.channels.clone(),
+                version_filter: spec.version_filter.clone(),
+                allow_local: spec.allow_local,
                 paused: spec.paused,
                 spec: spec.clone(),
             }),
@@ -204,6 +235,15 @@ pub struct Settings {
     /// The check interval new watches start with.
     #[serde(default = "default_interval")]
     pub default_interval_secs: u32,
+    /// Announce releases at once or collect them into one notification.
+    #[serde(default)]
+    pub digest: DigestMode,
+    /// Hours when notifications wait, for every watch (a watch's own quiet hours add to these).
+    #[serde(default)]
+    pub quiet_hours: Option<QuietHours>,
+    /// Use an OS webview for JavaScript pages when no Chromium browser is found.
+    #[serde(default)]
+    pub allow_os_webview: bool,
 }
 
 impl Default for Settings {
@@ -215,6 +255,9 @@ impl Default for Settings {
             check_app_updates: false,
             downloads_folder: None,
             default_interval_secs: default_interval(),
+            digest: DigestMode::Off,
+            quiet_hours: None,
+            allow_os_webview: false,
         }
     }
 }
@@ -243,6 +286,9 @@ pub(crate) mod tests {
             interval_secs: 60,
             notify: NotificationPolicy::default(),
             actions: Vec::new(),
+            channels: Vec::new(),
+            version_filter: VersionFilter::default(),
+            allow_local: false,
             paused: false,
         }
     }
@@ -273,6 +319,37 @@ pub(crate) mod tests {
         assert_eq!(w.interval_secs, crate::limits::MIN_INTERVAL_SECS);
         assert!(!w.filter.name.is_any());
         assert_eq!(w.spec, s);
+    }
+
+    #[test]
+    fn channels_filters_and_page_changes_are_checked() {
+        use crate::notify::{ChannelKind, NotificationChannel};
+        let mut s = spec("w1");
+        s.channels = vec![NotificationChannel {
+            kind: ChannelKind::Email,
+            target: "nobody".into(),
+        }];
+        s.version_filter.soak_hours = u32::MAX;
+        assert_eq!(Watch::parse(&s).unwrap_err().len(), 2);
+        s.channels = vec![
+            NotificationChannel {
+                kind: ChannelKind::Ntfy,
+                target: "topic".into(),
+            };
+            MAX_CHANNELS + 1
+        ];
+        s.version_filter.soak_hours = 0;
+        assert_eq!(Watch::parse(&s).unwrap_err().len(), 1);
+        s.channels.truncate(1);
+        assert_eq!(Watch::parse(&s).unwrap().channels.len(), 1);
+        let mut page = spec("w2");
+        page.source = SourceConfig::new("web-page", &[("url", "https://a.b/"), ("mode", "change")]);
+        page.allow_local = true;
+        let w = Watch::parse(&page).unwrap();
+        assert_eq!(w.scheme.id(), "date", "a watched page has dated releases whatever was chosen");
+        assert!(w.allow_local);
+        let from_toml: WatchSpec = toml::from_str("id = \"a\"\nname = \"A\"\n[source]\nkind = \"folder\"").unwrap();
+        assert_eq!((from_toml.versions.as_str(), from_toml.interval_secs), ("semver", 300));
     }
 
     #[test]
@@ -308,6 +385,10 @@ pub(crate) mod tests {
             ..Settings::default()
         };
         assert!(!off.notifications_active(0));
+        let digest: Settings =
+            toml::from_str("digest = \"daily\"\nallow_os_webview = true\n[quiet_hours]\nstart = \"22:00\"\nend = \"07:00\"").unwrap();
+        assert_eq!(digest.digest, DigestMode::Daily);
+        assert!(digest.allow_os_webview && digest.quiet_hours.is_some());
         let themed: Settings = toml::from_str("theme = \"dark\"").unwrap();
         assert_eq!(themed.theme, Theme::Dark);
     }

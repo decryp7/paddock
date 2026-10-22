@@ -14,10 +14,11 @@ pub mod http;
 pub mod json_api;
 pub mod json_select;
 pub mod listing;
+pub mod web_page;
 
 use crate::release::Candidate;
-use serde::{Deserialize, Serialize};
 use crate::schema::{check_all, Config};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -28,6 +29,7 @@ pub use forge::{Forge, ForgeSource};
 pub use http::HttpRequest;
 pub use json_api::JsonApiSource;
 pub use listing::WebDirectorySource;
+pub use web_page::{PageMode, WebPageSource};
 
 /// A source as stored: its kind and the values of the kind's form. Secret fields are never stored here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +97,8 @@ pub enum SourceError {
     InvalidConfig(String),
     /// The answer could not be read.
     InvalidResponse(String),
+    /// A page asked for a login or a captcha; the user has to deal with it (never solved automatically).
+    NeedsYou(String),
     /// Anything else.
     Failed(String),
 }
@@ -108,6 +112,7 @@ impl SourceError {
             | SourceError::NotFound(m)
             | SourceError::InvalidConfig(m)
             | SourceError::InvalidResponse(m)
+            | SourceError::NeedsYou(m)
             | SourceError::Failed(m) => m,
         }
     }
@@ -151,6 +156,8 @@ pub enum Source {
     Container(ContainerSource),
     /// A JSON API read with selectors (also the package registries).
     JsonApi(JsonApiSource),
+    /// A web page: a version read with a selector or pattern, or the page's text watched for changes.
+    WebPage(WebPageSource),
 }
 
 /// What to read for a check.
@@ -165,6 +172,15 @@ pub enum Plan {
         /// The request (secrets already in its headers).
         request: HttpRequest,
         /// How to read the answer.
+        parser: Parser,
+    },
+    /// Render the page in a browser (it needs JavaScript), then [`Parser::parse`] the DOM.
+    Render {
+        /// The page.
+        url: String,
+        /// Element to wait for.
+        wait_selector: Option<String>,
+        /// How to read the DOM.
         parser: Parser,
     },
 }
@@ -182,6 +198,8 @@ pub enum Parser {
     Tags(ContainerSource),
     /// JSON with selectors.
     Json(JsonApiSource),
+    /// A web page.
+    Page(WebPageSource),
 }
 
 impl Parser {
@@ -193,6 +211,7 @@ impl Parser {
             Parser::Forge(s) => s.parse(body),
             Parser::Tags(s) => s.parse(body),
             Parser::Json(s) => s.parse(body),
+            Parser::Page(s) => s.parse(body),
         }
     }
 }
@@ -216,6 +235,7 @@ impl Source {
             catalog::GITLAB => one(ForgeSource::from_config(Forge::GitLab, &config).map(Source::Forge)),
             catalog::CONTAINER => one(ContainerSource::from_config(&config).map(Source::Container)),
             catalog::PACKAGE => one(json_api::package(&config).map(Source::JsonApi)),
+            catalog::WEB_PAGE => one(WebPageSource::from_config(&config).map(Source::WebPage)),
             _ => one(JsonApiSource::from_config(&config).map(Source::JsonApi)),
         }
     }
@@ -225,7 +245,7 @@ impl Source {
         match self {
             Source::Forge(_) | Source::JsonApi(_) => vec![catalog::TOKEN.into()],
             Source::Container(_) => vec![catalog::TOKEN.into()],
-            Source::Folder(_) | Source::WebDirectory(_) | Source::Feed { .. } => Vec::new(),
+            Source::Folder(_) | Source::WebDirectory(_) | Source::Feed { .. } | Source::WebPage(_) => Vec::new(),
         }
     }
 
@@ -254,6 +274,15 @@ impl Source {
                 request: j.request(token),
                 parser: Parser::Json(j.clone()),
             },
+            Source::WebPage(p) if p.rendered => Plan::Render {
+                url: p.url.clone(),
+                wait_selector: p.wait_selector.clone(),
+                parser: Parser::Page(p.clone()),
+            },
+            Source::WebPage(p) => Plan::Http {
+                request: HttpRequest::get(p.url.clone()).header("Accept", "text/html, application/xhtml+xml"),
+                parser: Parser::Page(p.clone()),
+            },
         }
     }
 
@@ -266,6 +295,7 @@ impl Source {
             Source::Forge(f) => f.describe(),
             Source::Container(c) => c.describe(),
             Source::JsonApi(j) => j.describe(),
+            Source::WebPage(p) => p.describe(),
         }
     }
 
@@ -299,6 +329,11 @@ mod tests {
                 "json-api",
                 &[("url", "https://api.example.org/v"), ("items", "$[*]"), ("version", "$.v")],
             ),
+            SourceConfig::new("web-page", &[("url", "https://example.org/dl"), ("selector", "b")]),
+            SourceConfig::new(
+                "web-page",
+                &[("url", "https://example.org/app"), ("rendered", "true"), ("wait", "#v")],
+            ),
         ];
         let secrets: Secrets = [("token".to_string(), " t ".to_string())].into();
         for cfg in cases {
@@ -308,9 +343,35 @@ mod tests {
             match (&s, plan) {
                 (Source::Folder(_), Plan::Folder(_)) => assert!(s.secret_keys().is_empty()),
                 (_, Plan::Http { request, .. }) => assert!(request.url.starts_with("https://"), "{}", request.url),
+                (Source::WebPage(_), Plan::Render { url, .. }) => assert!(url.starts_with("https://")),
                 other => panic!("unexpected plan {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn parsers_read_each_kind_of_answer() {
+        let feed = br#"<rss><channel><item><title>App 1.2.0</title><link>l</link></item></channel></rss>"#;
+        assert_eq!(Parser::Feed.parse(feed).unwrap().len(), 1);
+        let web = WebDirectorySource::from_config(&Config::new().with("url", "https://a.b/d/")).unwrap();
+        let html = br#"<a href="app-1.0.0.zip">app-1.0.0.zip</a>"#;
+        assert_eq!(Parser::Listing(web).parse(html).unwrap().len(), 1);
+        let json = JsonApiSource::from_config(&Config::new().with("url", "https://a.b/v").with("version", "$.v")).unwrap();
+        assert_eq!(Parser::Json(json).parse(br#"[{"v":"1.0"}]"#).unwrap().len(), 1);
+        let page = WebPageSource::from_config(&Config::new().with("url", "https://a.b/")).unwrap();
+        assert_eq!(Parser::Page(page).parse(b"<p>1.0.0</p>").unwrap().len(), 1);
+        let forge = ForgeSource::from_config(Forge::GitHub, &Config::new().with("repo", "o/r")).unwrap();
+        assert!(Parser::Forge(forge).parse(b"[]").unwrap().is_empty());
+        let image = ContainerSource::from_config(&Config::new().with("image", "nginx")).unwrap();
+        assert!(Parser::Tags(image).parse(br#"{"tags":[]}"#).unwrap().is_empty());
+    }
+
+    #[test]
+    fn secret_keys_follow_the_kind() {
+        let token = |kind: &str, values: &[(&str, &str)]| Source::parse(&SourceConfig::new(kind, values)).unwrap().secret_keys();
+        assert_eq!(token("github", &[("repo", "o/r")]), ["token"]);
+        assert_eq!(token("container", &[("image", "nginx")]), ["token"]);
+        assert!(token("web-page", &[("url", "https://a.b/")]).is_empty());
     }
 
     #[test]

@@ -1,0 +1,58 @@
+# Built-in presets (real public projects). Spotter reads each project's public release list; nothing is sent about you.
+
+[[preset]]
+id = "home-assistant"
+name = "Home Assistant"
+description = "Open source home automation."
+category = "Self-hosting"
+source = { kind = "github", values = { repo = "home-assistant/core" } }
+
+[[preset]]
+id = "grafana"
+name = "Grafana"
+description = "Dashboards and observability."
+category = "Self-hosting"
+source = { kind = "github", values = { repo = "grafana/grafana" } }
+
+[[preset]]
+id = "prometheus"
+name = "Prometheus"
+description = "Monitoring and alerting."
+category = "Self-hosting"
+source = { kind = "github", values = { repo = "prometheus/prometheus" } }
+
+[[preset]]
+id = "caddy"
+name = "Caddy"
+description = "A web server with automatic HTTPS."
+category = "Self-hosting"
+source = { kind = "github", values = { repo = "caddyserver/caddy" } }
+
+[[preset]]
+id = "syncthing"
+name = "Syncthing"
+description = "Continuous file synchronisation."
+category = "Self-hosting"
+source = { kind = "github", values = { repo = "syncthing/syncthing" } }
+
+[[preset]]
+id = "jellyfin"
+name = "Jellyfin"
+description = "The free software media system."
+category = "Self-hosting"
+source = { kind = "github", values = { repo = "jellyfin/jellyfin" } }
+
+[[preset]]
+id = "gitea"
+name = "Gitea"
+description = "A self-hosted Git service."
+category = "Self-hosting"
+source = { kind = "github", values = { repo = "go-gitea/gitea" } }
+
+[[preset]]
+id = "forgejo"
+name = "Forgejo"
+description = "A community-driven self-hosted forge (releases on Codeberg)."
+category = "Self-hosting"
+source = { kind = "gitea", values = { server = "https://codeberg.org", repo = "forgejo/forgejo" } }
+

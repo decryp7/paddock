@@ -1,0 +1,107 @@
+# Built-in presets (real public projects). Spotter reads each project's public release list; nothing is sent about you.
+
+[[preset]]
+id = "ripgrep"
+name = "ripgrep"
+description = "Fast recursive search."
+category = "Command-line tools"
+source = { kind = "github", values = { repo = "BurntSushi/ripgrep" } }
+
+[[preset]]
+id = "fd"
+name = "fd"
+description = "A simple, fast alternative to find."
+category = "Command-line tools"
+source = { kind = "github", values = { repo = "sharkdp/fd" } }
+
+[[preset]]
+id = "bat"
+name = "bat"
+description = "A cat clone with syntax highlighting."
+category = "Command-line tools"
+source = { kind = "github", values = { repo = "sharkdp/bat" } }
+
+[[preset]]
+id = "jq"
+name = "jq"
+description = "A command-line JSON processor."
+category = "Command-line tools"
+source = { kind = "github", values = { repo = "jqlang/jq" } }
+
+[[preset]]
+id = "curl"
+name = "curl"
+description = "Transfer data with URLs."
+category = "Command-line tools"
+source = { kind = "github", values = { repo = "curl/curl" } }
+
+[[preset]]
+id = "git"
+name = "Git"
+description = "The Git version control system (release tags)."
+category = "Command-line tools"
+source = { kind = "feed", values = { url = "https://github.com/git/git/tags.atom" } }
+
+[[preset]]
+id = "gh"
+name = "GitHub CLI"
+description = "GitHub on the command line."
+category = "Command-line tools"
+source = { kind = "github", values = { repo = "cli/cli" } }
+
+[[preset]]
+id = "starship"
+name = "Starship"
+description = "A fast, customisable shell prompt."
+category = "Command-line tools"
+source = { kind = "github", values = { repo = "starship/starship" } }
+
+[[preset]]
+id = "neovim"
+name = "Neovim"
+description = "A hyperextensible Vim-based editor."
+category = "Editors"
+source = { kind = "github", values = { repo = "neovim/neovim" } }
+
+[[preset]]
+id = "helix"
+name = "Helix"
+description = "A post-modern modal text editor."
+category = "Editors"
+source = { kind = "github", values = { repo = "helix-editor/helix" } }
+
+[[preset]]
+id = "vscode"
+name = "Visual Studio Code"
+description = "The code editor from Microsoft."
+category = "Editors"
+source = { kind = "github", values = { repo = "microsoft/vscode" } }
+
+[[preset]]
+id = "zed"
+name = "Zed"
+description = "A high-performance multiplayer code editor."
+category = "Editors"
+source = { kind = "github", values = { repo = "zed-industries/zed" } }
+
+[[preset]]
+id = "docker-compose"
+name = "Docker Compose"
+description = "Define and run multi-container applications."
+category = "Developer tools"
+source = { kind = "github", values = { repo = "docker/compose" } }
+
+[[preset]]
+id = "kubernetes"
+name = "Kubernetes"
+description = "Container orchestration."
+category = "Developer tools"
+source = { kind = "github", values = { repo = "kubernetes/kubernetes" } }
+
+[[preset]]
+id = "terraform"
+name = "Terraform"
+description = "Infrastructure as code."
+category = "Developer tools"
+source = { kind = "github", values = { repo = "hashicorp/terraform" } }
+

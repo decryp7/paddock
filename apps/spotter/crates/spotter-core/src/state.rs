@@ -8,7 +8,7 @@ use crate::source::SourceError;
 use crate::time::{ClockTime, Timestamp};
 use crate::version::Version;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 /// A watch's status after its last check.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -25,6 +25,8 @@ pub enum WatchStatus {
     Unreachable(String),
     /// Credentials are missing or were refused.
     AuthNeeded(String),
+    /// A page asked for a login or a captcha; the user has to deal with it in the page.
+    NeedsYou(String),
     /// The watch's configuration is not valid (e.g. an unknown source kind).
     Invalid(String),
     /// Any other failure.
@@ -38,6 +40,7 @@ impl WatchStatus {
         match e {
             SourceError::Unreachable(_) => WatchStatus::Unreachable(m),
             SourceError::Unauthorized(_) => WatchStatus::AuthNeeded(m),
+            SourceError::NeedsYou(_) => WatchStatus::NeedsYou(m),
             SourceError::InvalidConfig(_) => WatchStatus::Invalid(m),
             SourceError::NotFound(_) | SourceError::InvalidResponse(_) | SourceError::Failed(_) => WatchStatus::Failed(m),
         }
@@ -107,6 +110,8 @@ pub struct WatchState {
     pub actions_done: Option<Version>,
     /// Recent checks, newest last, at most [`MAX_CHECK_LOG`].
     pub checks: VecDeque<CheckRecord>,
+    /// Versions seen but not yet announced because of the soak time, by version text: when each was first seen.
+    pub soaking: BTreeMap<String, Timestamp>,
 }
 
 /// The context of a check.
@@ -441,6 +446,7 @@ mod tests {
             (SourceError::NotFound("m".into()), "Failed"),
             (SourceError::InvalidResponse("m".into()), "Failed"),
             (SourceError::Failed("m".into()), "Failed"),
+            (SourceError::NeedsYou("m".into()), "NeedsYou"),
         ];
         for (e, name) in cases {
             assert!(format!("{:?}", WatchStatus::from_error(&e)).starts_with(name));

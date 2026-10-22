@@ -21,6 +21,8 @@ pub const CONTAINER: &str = "container";
 pub const PACKAGE: &str = "package";
 /// Any JSON API.
 pub const JSON_API: &str = "json-api";
+/// A web page (selector, pattern or change detection).
+pub const WEB_PAGE: &str = "web-page";
 /// The key of the optional access token field.
 pub const TOKEN: &str = "token";
 
@@ -183,6 +185,39 @@ pub fn builtin_kinds() -> Vec<SourceKindSpec> {
                 .required()
                 .placeholder("serde"),
         ),
+        SourceKindSpec::new(
+            WEB_PAGE,
+            "Web page",
+            "A page that shows the current version, or any page whose text you want to know about when it changes.",
+        )
+        .with_field(FieldSpec::new("url", "Address", FieldKind::Url).required().placeholder("https://example.org/download"))
+        .with_field(
+            FieldSpec::new(
+                "mode",
+                "Watch for",
+                FieldKind::Choice(vec![
+                    ChoiceOption::new("version", "A version number on the page"),
+                    ChoiceOption::new("change", "Any change of the text"),
+                ]),
+            )
+            .default_value("version"),
+        )
+        .with_field(
+            FieldSpec::new("selector", "Element (CSS selector)", FieldKind::Text)
+                .placeholder("#latest .version")
+                .help("Where the version is, or the part of the page to watch. Empty: the whole page, or the version it states in its metadata."),
+        )
+        .with_field(FieldSpec::new("attribute", "Attribute", FieldKind::Text).help("Read this attribute of the element instead of its text.").placeholder("data-version"))
+        .with_field(
+            FieldSpec::new("pattern", "Pattern", FieldKind::Text)
+                .help("Regular expression applied to the text; its first group is the version.")
+                .placeholder(r"Latest:\s*v?([0-9.]+)"),
+        )
+        .with_field(
+            FieldSpec::new("rendered", "Page needs JavaScript", FieldKind::Toggle)
+                .help("Open the page in a browser first (slower, uses more memory)."),
+        )
+        .with_field(FieldSpec::new("wait", "Wait for element", FieldKind::Text).help("For JavaScript pages: the element that shows when the page is ready.")),
         SourceKindSpec::new(
             JSON_API,
             "JSON API",

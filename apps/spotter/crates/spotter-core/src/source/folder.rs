@@ -4,8 +4,8 @@
 
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::Candidate;
-use crate::time::Timestamp;
 use crate::schema::Config;
+use crate::time::Timestamp;
 
 /// Which entries a folder source looks at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -31,6 +31,11 @@ pub enum EventKind {
         /// Why.
         message: String,
     },
+    /// A page asked for a login or a captcha; the user has to deal with it.
+    NeedsYou {
+        /// What the page asked for.
+        message: String,
+    },
     /// A failing watch works again.
     Recovered,
     /// A download finished (and was verified when a checksum was known).

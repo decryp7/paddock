@@ -8,19 +8,24 @@
 //!   notifies, when it checks next and what it does with a new release.
 //! - [`config`] / [`store`]: the configuration and state files, versioned and tolerant of damage, with the migration
 //!   from the old Release Monitor.
-//! - [`journal`] / [`dashboard`]: the dashboard's bounded history and its numbers; [`plugin_health`]: quarantine.
+//! - [`journal`] / [`dashboard`]: the dashboard's bounded history and its numbers; [`filter`]: version prefix and soak time; [`pack`]: declarative presets and
+//!   version schemes; [`import`]: winget, Brewfile and OPML lists; [`render`]: the port for JavaScript pages.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod action;
 pub mod checksum;
 pub mod config;
 pub mod dashboard;
+pub mod filter;
+pub mod import;
 pub mod journal;
 pub mod limits;
 pub mod notify;
+pub mod pack;
 pub mod pattern;
 
 pub mod release;
+pub mod render;
 pub mod schema;
 pub mod schedule;
 pub mod source;

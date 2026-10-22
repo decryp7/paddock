@@ -146,6 +146,9 @@ fn migrate_legacy(table: &toml::Table) -> Loaded {
             quiet_hours: None,
         },
         actions: Vec::new(),
+        channels: Vec::new(),
+        version_filter: Default::default(),
+        allow_local: false,
         paused: false,
     };
     Loaded {

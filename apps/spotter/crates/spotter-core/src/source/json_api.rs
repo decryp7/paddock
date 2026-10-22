@@ -6,8 +6,8 @@ use super::json_select::{Item, Selector};
 use super::SourceError;
 use crate::checksum::Sha256Digest;
 use crate::release::Candidate;
-use crate::time::Timestamp;
 use crate::schema::Config;
+use crate::time::Timestamp;
 
 /// Where a release's location comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]

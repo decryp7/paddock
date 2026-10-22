@@ -1,0 +1,56 @@
+# Built-in presets (real public projects). Spotter reads each project's public release list; nothing is sent about you.
+
+[[scheme]]
+id = "go"
+name = "Go toolchain tags (go1.23.1, go1.24rc1)"
+pattern = 'go(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:(?<pre>rc\d+|beta\d+))?'
+
+[[preset]]
+id = "rust"
+name = "Rust"
+description = "The Rust compiler and standard library."
+category = "Languages"
+source = { kind = "github", values = { repo = "rust-lang/rust" } }
+
+[[preset]]
+id = "node"
+name = "Node.js"
+description = "JavaScript runtime (release tags)."
+category = "Languages"
+source = { kind = "feed", values = { url = "https://github.com/nodejs/node/tags.atom" } }
+
+[[preset]]
+id = "go"
+name = "Go"
+description = "The Go toolchain (release tags)."
+category = "Languages"
+source = { kind = "feed", values = { url = "https://github.com/golang/go/tags.atom" } }
+versions = "go"
+[[preset]]
+id = "python"
+name = "Python"
+description = "CPython (release tags)."
+category = "Languages"
+source = { kind = "feed", values = { url = "https://github.com/python/cpython/tags.atom" } }
+
+[[preset]]
+id = "deno"
+name = "Deno"
+description = "A secure runtime for JavaScript and TypeScript."
+category = "Languages"
+source = { kind = "github", values = { repo = "denoland/deno" } }
+
+[[preset]]
+id = "bun"
+name = "Bun"
+description = "A fast JavaScript runtime and toolkit."
+category = "Languages"
+source = { kind = "github", values = { repo = "oven-sh/bun" } }
+
+[[preset]]
+id = "zig"
+name = "Zig"
+description = "The Zig programming language."
+category = "Languages"
+source = { kind = "github", values = { repo = "ziglang/zig" } }
+
