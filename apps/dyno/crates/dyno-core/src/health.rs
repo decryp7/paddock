@@ -14,13 +14,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Grade {
-    /// 90–100.
-    Excellent,
-    /// 75–89.
+    /// 80–100.
     Good,
-    /// 50–74.
+    /// 60–79.
     Fair,
-    /// Below 50.
+    /// Below 60.
     Poor,
 }
 
@@ -127,9 +125,8 @@ pub struct HealthInput<'a> {
 /// The grade for a score.
 pub fn grade(score: u32) -> Grade {
     match score {
-        90.. => Grade::Excellent,
-        75..=89 => Grade::Good,
-        50..=74 => Grade::Fair,
+        80.. => Grade::Good,
+        60..=79 => Grade::Fair,
         _ => Grade::Poor,
     }
 }
@@ -378,7 +375,7 @@ mod tests {
     fn a_healthy_machine_scores_100() {
         let r = run(&sample(0), &SystemFacts::unknown("w"), &[], &[], 0, &[]);
         assert_eq!(r.score, 100);
-        assert_eq!(r.grade, Grade::Excellent);
+        assert_eq!(r.grade, Grade::Good);
         assert!(r.reasons.is_empty());
     }
 
@@ -491,6 +488,7 @@ mod tests {
         assert_eq!(r.grade, Grade::Poor);
         assert_eq!(grade(60), Grade::Fair);
         assert_eq!(grade(80), Grade::Good);
+        assert_eq!((grade(79), grade(59), grade(100), grade(0)), (Grade::Fair, Grade::Poor, Grade::Good, Grade::Poor));
         let r = run(&sample(0), &SystemFacts::unknown("w"), &[], &[], 0, &[("C:".into(), Forecast::FullInDays(90.0))]);
         assert_eq!(r.score, 100);
     }
