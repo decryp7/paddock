@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// An operating system. Linux is planned (see README); the release logic already knows its asset names.
+/// An operating system Pitcrew runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Os {

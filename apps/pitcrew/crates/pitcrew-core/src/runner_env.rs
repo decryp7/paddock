@@ -89,8 +89,11 @@ pub fn fallback_path(inputs: &FallbackInputs, exists: impl Fn(&Path) -> bool) ->
     if let Some(n) = &inputs.nvm_node_bin {
         dirs.push(n.clone());
     }
-    dirs.push(inputs.home.join(".cargo/bin"));
-    dirs.push(inputs.home.join(".local/bin"));
+    // Unix paths (the login environment is macOS and Linux only), joined with `/` whatever the host.
+    let home = inputs.home.to_string_lossy();
+    let home = home.trim_end_matches('/');
+    dirs.push(format!("{home}/.cargo/bin").into());
+    dirs.push(format!("{home}/.local/bin").into());
     dirs.push("/opt/homebrew/bin".into());
     dirs.push("/opt/homebrew/sbin".into());
     dirs.push("/usr/local/bin".into());
