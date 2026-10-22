@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(p.scan.unwrap().scanned, 48_213);
         assert_eq!(
             p.ignored_count,
-            48_213 - 0,
+            48_213,
             "nothing could be read under 'created' without creation times"
         );
         assert!(!p.created_available);

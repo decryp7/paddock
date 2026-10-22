@@ -190,11 +190,8 @@ impl Engine {
             .gather(&watch, &secrets, validators, baseline.as_ref(), snapshot.as_ref(), now)
             .await;
         let took_ms = started.elapsed().as_millis() as u64;
-        if let Ok(Gathered::Fresh {
-            folder: Some((snap, _)), ..
-        }) = &gathered
-        {
-            let mut snap = snap.clone();
+        if let Ok(Gathered::Fresh { folder: Some(found), .. }) = &gathered {
+            let mut snap = found.0.clone();
             snap.fingerprint = snapshot_fp;
             self.inner.db.kv_set(&folder_key, &snap.render())?;
         }

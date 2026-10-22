@@ -39,7 +39,7 @@ pub enum Gathered {
         /// The page baseline for change watching, new or updated.
         baseline: Option<PageBaseline>,
         /// What a folder scan remembers for the next check, and how the scan went.
-        folder: Option<(Snapshot, ScanStats)>,
+        folder: Option<Box<(Snapshot, ScanStats)>>,
     },
 }
 
@@ -90,7 +90,7 @@ impl Checker {
                     candidates: scan.candidates,
                     validators: Validators::default(),
                     baseline: None,
-                    folder: Some((scan.snapshot, scan.stats)),
+                    folder: Some(Box::new((scan.snapshot, scan.stats))),
                 });
             }
             Plan::Http { request, parser } => {
