@@ -129,9 +129,11 @@ See [releasing.md](releasing.md).
   bash scripts/export-diagrams.sh   # needs draw.io desktop (DRAWIO overrides the executable) and node
   ```
 
-  It writes `docs/diagrams/svg/<name>.svg`, which `design.md` and the README embed. `pitcrew-overview.svg` is a
-  hand-written SVG (light and dark palette) and is edited directly. Open the exported SVGs and check them for overlaps and
-  clipped text before committing.
+  It writes `docs/diagrams/svg/<name>.svg` (transparent, follows light or dark; `design.md` and the README embed these)
+  and `docs/diagrams/png/<name>.png` (2x, not committed). `pitcrew-overview.svg` is a hand-written SVG with the same tokens
+  and is edited directly. The export script is copied unchanged from Paddock's diagram kit (`diagrams/` in the paddock
+  repo), which also has the shape library and templates. Open the exported SVGs and check them for overlaps and clipped
+  text, in light and dark, before committing.
 - Screenshots: `SCREENSHOTS=1 npx playwright test --project=screenshots` (see above).
 
 ## Where to add things
