@@ -117,3 +117,17 @@ pub fn run() {
         _ => {}
     });
 }
+
+#[cfg(test)]
+mod capability_tests {
+    /// The window has an overlay title bar on macOS (and no native one where decorations are off): the page's drag
+    /// regions only move it when the webview may start a window drag. Without the permission dragging fails silently.
+    #[test]
+    fn the_main_window_can_be_dragged_by_its_drag_regions() {
+        let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let granted: Vec<&str> = caps["permissions"].as_array().unwrap().iter().filter_map(|p| p.as_str()).collect();
+        assert!(granted.contains(&"core:window:allow-start-dragging"), "{granted:?}");
+        assert!(granted.contains(&"core:window:allow-internal-toggle-maximize"), "{granted:?}");
+        assert!(caps["windows"].as_array().unwrap().iter().any(|w| w == "main"));
+    }
+}
