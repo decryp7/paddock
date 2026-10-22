@@ -45,9 +45,29 @@ pub fn day_start(ms: Millis) -> Millis {
     ms - ms % DAY
 }
 
+/// The start of the UTC calendar month `ms` falls in.
+pub fn month_start(ms: Millis) -> Millis {
+    let (_, _, d) = civil(ms / DAY);
+    day_start(ms) - (d - 1) * DAY
+}
+
+/// The start of the UTC hour `ms` falls in.
+pub fn hour_start(ms: Millis) -> Millis {
+    ms - ms % HOUR
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn month_and_hour_starts() {
+        // 2024-02-29T23:59:59.999Z -> 2024-02-01T00:00:00Z
+        assert_eq!(month_start(1_709_251_199_999), 1_706_745_600_000);
+        assert_eq!(month_start(1_706_745_600_000), 1_706_745_600_000);
+        assert_eq!(month_start(0), 0);
+        assert_eq!(hour_start(HOUR + 5), HOUR);
+    }
 
     #[test]
     fn formats_known_instants() {

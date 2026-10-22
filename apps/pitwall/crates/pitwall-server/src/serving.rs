@@ -744,7 +744,12 @@ impl Serving {
         lock(&self.inner.hot).contains_key(id)
     }
 
-    /// Sum of resident memory of hot models.
+    /// The resident footprint (RAM plus video memory, an estimate) of a loaded model; 0 when it is not loaded.
+    pub fn footprint(&self, id: &ModelId) -> u64 {
+        lock(&self.inner.hot).get(id).map_or(0, |h| h.ram.saturating_add(h.vram))
+    }
+
+    /// RAM and VRAM of the loaded models.
     pub fn hot_ram(&self) -> (u64, u64) {
         lock(&self.inner.hot).values().fold((0, 0), |a, h| (a.0 + h.ram, a.1 + h.vram))
     }

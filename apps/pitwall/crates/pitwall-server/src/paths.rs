@@ -65,6 +65,10 @@ impl Dirs {
     pub fn benchmarks(&self) -> PathBuf {
         self.root.join("benchmarks.json")
     }
+    /// Per-app usage over time.
+    pub fn usage(&self) -> PathBuf {
+        self.root.join("usage.json")
+    }
     /// Metrics history.
     pub fn metrics(&self) -> PathBuf {
         self.root.join("metrics.json")

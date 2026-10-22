@@ -118,6 +118,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::overview,
             commands::history,
+            commands::usage_series,
+            commands::app_detail,
             commands::events,
             commands::set_serving,
             commands::release_memory,

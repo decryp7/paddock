@@ -7,11 +7,12 @@ pub use crate::events::{Event as PitwallEvent, EventKind, Severity};
 pub use crate::fit::{Fit, Offload, Verdict};
 pub use crate::hf::HfModel;
 pub use crate::limits::{AppLimits, AppPermissions};
+pub use crate::limits::{LimitKind, LimitState, LimitStatus};
 pub use crate::memory::{Preset, ReleaseReason};
 pub use crate::metrics::{HistoryPoint, KeyedSeries, Range as HistoryRange};
 pub use crate::scheduler::{Depth, JobKind, Priority};
 pub use crate::select::Capability;
-pub use crate::usage::Counters as UsageCounters;
+pub use crate::usage::{AppUsageSeries, Counters as UsageCounters, UsageRange, UsageSeries};
 
 use crate::time::Millis;
 use serde::{Deserialize, Serialize};
@@ -497,6 +498,21 @@ pub struct AppInfo {
     pub permissions: AppPermissions,
     /// Today's usage.
     pub today: UsageCounters,
+}
+
+/// One app in detail (`AppDetail`): the listing, this month, where each configured limit stands, and its latest
+/// requests (metadata only, never content).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppDetail {
+    /// The listing, with today's usage.
+    pub app: AppInfo,
+    /// This UTC month so far.
+    pub month: UsageCounters,
+    /// Every configured limit and how much of it is used.
+    pub limits: Vec<LimitStatus>,
+    /// The app's latest requests, newest first.
+    pub recent: Vec<RequestRecord>,
 }
 
 /// A new key (`CreatedKey`).
@@ -1016,6 +1032,15 @@ mod tests {
             json!({"interactive": 1, "background": 2, "batch": 3})
         );
         assert_eq!(serde_json::to_value(HistoryRange::Day).unwrap(), "24h");
+        assert_eq!(serde_json::to_value(UsageRange::Week).unwrap(), "7d");
+        assert_eq!(serde_json::to_value(LimitKind::TokensPerMonth).unwrap(), "tokensPerMonth");
+        assert_eq!(serde_json::to_value(LimitState::Warning).unwrap(), "warning");
+        assert_eq!(serde_json::to_value(EventKind::LimitWarning).unwrap(), "limitWarning");
+        let l: AppLimits = serde_json::from_str(r#"{"requestsPerDay":5,"tokensPerMonth":9,"maxMemoryPercent":40}"#).unwrap();
+        assert_eq!(
+            (l.requests_per_day, l.tokens_per_month, l.max_memory_percent),
+            (Some(5), Some(9), Some(40))
+        );
         assert_eq!(serde_json::to_value(ReleaseReason::DeepIdle).unwrap(), "deepIdle");
         assert_eq!(serde_json::to_value(Preset::LowMemory).unwrap(), "lowMemory");
         assert_eq!(serde_json::to_value(DownloadState::SelfTest).unwrap(), "selfTest");

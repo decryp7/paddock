@@ -107,6 +107,26 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                 events,
             })
         }
+        "usage_series" => {
+            let range: mgmt::UsageRange = arg(a, "range")?;
+            let app: Option<String> = arg(a, "appId")?;
+            ok(lock(&st.usage).series(range, now, app.as_deref()))
+        }
+        "app_detail" => {
+            let id: String = arg(a, "appId")?;
+            let Some(app) = apps(st).into_iter().find(|x| x.id == id) else {
+                return Err(err(mgmt::ErrorCode::NotFound, "no such app"));
+            };
+            let month = lock(&st.usage).month(now, &id);
+            let limits = st.limit_statuses(&id, &app.permissions.limits, now);
+            let recent = lock(&st.requests).iter().filter(|r| r.app_id == id).take(20).cloned().collect();
+            ok(mgmt::AppDetail {
+                app,
+                month,
+                limits,
+                recent,
+            })
+        }
         "events" => {
             let limit: usize = arg(a, "limit")?;
             ok(lock(&st.events).recent(limit.min(500)))
@@ -333,6 +353,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "set_permissions" => {
             let app: String = arg(a, "appId")?;
             let p: mgmt::AppPermissions = arg(a, "permissions")?;
+            p.limits.validate().map_err(|m| err(mgmt::ErrorCode::BadRequest, m))?;
             if !st.auth.set_permissions(&app, p) {
                 return Err(err(mgmt::ErrorCode::NotFound, "no such app"));
             }
@@ -346,6 +367,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "approve_pairing" => {
             let id: String = arg(a, "id")?;
             let p: mgmt::AppPermissions = arg(a, "permissions")?;
+            p.limits.validate().map_err(|m| err(mgmt::ErrorCode::BadRequest, m))?;
             if !st.auth.decide_pairing(&id, Some(p), now) {
                 return Err(err(
                     mgmt::ErrorCode::NotFound,
@@ -790,7 +812,7 @@ fn install_pack(st: &Arc<AppState>, pe: crate::pack_engine::PackEngine) -> R<Val
 
 fn apps(st: &AppState) -> Vec<mgmt::AppInfo> {
     let now = now_ms();
-    let usage = lock(&st.usage).clone();
+    let usage = lock(&st.usage);
     st.auth.list(|app| usage.today(now, app), now)
 }
 

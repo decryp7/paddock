@@ -173,6 +173,11 @@ impl Auth {
         lock(&self.rates).entry(id.clone()).or_default().admit(now, per_min)
     }
 
+    /// Requests the app made in the last minute.
+    pub fn requests_last_minute(&self, id: &AppId, now: u64) -> u64 {
+        lock(&self.rates).get(id).map_or(0, |w| w.count_since(now) as u64)
+    }
+
     /// The admin key, for the local window (read from the owner-only file by the app).
     pub fn admin_matches(&self, c: &str) -> bool {
         keys::constant_time_eq(c, &self.admin)

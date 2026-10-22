@@ -399,6 +399,13 @@ async fn embed(
         st.auth
             .admit(&app, p.limits.requests_per_min, now_ms())
             .map_err(|d| ApiError::new(ErrorKind::RateLimit, d.to_string()))?;
+        let used = crate::app_lock(&st.usage).budget_use(now_ms(), app.as_str());
+        pitwall_core::limits::check_budget(&used, &p.limits).map_err(|d| {
+            ApiError::new(
+                if d.is_rate() { ErrorKind::RateLimit } else { ErrorKind::Permission },
+                d.to_string(),
+            )
+        })?;
     }
     let started = std::time::Instant::now();
     let permit = st
@@ -413,7 +420,15 @@ async fn embed(
     drop(permit);
     let ms = started.elapsed().as_millis() as u64;
     let out = out.map_err(|e| ApiError::new(ErrorKind::Engine, format!("the embedding model failed: {}", e.0)))?;
-    crate::app_lock(&st.usage).record(now_ms(), app.as_str(), u64::from(out.prompt_tokens), 0, ms, false);
+    crate::app_lock(&st.usage).record(&pitwall_core::usage::UsageEvent {
+        at: now_ms(),
+        app: app.as_str(),
+        prompt_tokens: u64::from(out.prompt_tokens),
+        completion_tokens: 0,
+        busy_ms: ms,
+        failed: false,
+        memory_bytes: st.serving.footprint(&resolved.id),
+    });
     let _ = endpoint;
     Ok((out, resolved.id.to_string(), ms))
 }

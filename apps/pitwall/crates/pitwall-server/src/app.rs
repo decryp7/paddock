@@ -19,8 +19,8 @@ use pitwall_core::metrics::{Metrics, Sample};
 use pitwall_core::mgmt::{self, ChosenBy, EngineKind, LiveUpdate, RequestRecord, Throughput};
 use pitwall_core::runtimes::BuildChoice;
 use pitwall_core::scheduler::{JobKind, Priority};
-use pitwall_core::usage::Usage;
-use std::collections::VecDeque;
+use pitwall_core::usage::{Usage, UsageEvent};
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
@@ -60,8 +60,10 @@ pub struct AppState {
     pub events: Arc<Mutex<EventLog>>,
     /// Time series.
     pub metrics: Mutex<Metrics>,
-    /// Per-app counters.
+    /// Per-app usage over time.
     pub usage: Mutex<Usage>,
+    /// Limit warnings already raised (app, limit, start of its period), so each is raised once per period.
+    pub limit_warned: Mutex<HashSet<(String, limits::LimitKind, u64)>>,
     /// Detected hardware.
     pub hardware: Hardware,
     /// When the server started.
@@ -147,6 +149,12 @@ impl AppState {
             .ok()
             .filter(|t| t.len() < 32 << 20)
             .map_or_else(|| Metrics::new(30), |t| Metrics::restore(&t, 30));
+        let usage = paths::read_with_backup(&dirs.usage(), 32 << 20);
+        let usage = [usage.0, usage.1]
+            .into_iter()
+            .flatten()
+            .find_map(|t| Usage::restore(&t, now_ms()))
+            .unwrap_or_default();
         let (live, _) = broadcast::channel(256);
         let st = Arc::new(AppState {
             dirs,
@@ -162,7 +170,8 @@ impl AppState {
             auth,
             events,
             metrics: Mutex::new(metrics),
-            usage: Mutex::new(Usage::default()),
+            usage: Mutex::new(usage),
+            limit_warned: Mutex::new(HashSet::new()),
             hardware,
             started_at: now_ms(),
             live,
@@ -280,8 +289,65 @@ impl AppState {
                     let json = lock(&me.metrics).to_json();
                     let _ = paths::write_atomic(&me.dirs.metrics(), json.as_bytes());
                 }
+                if n.is_multiple_of(15) {
+                    me.save_usage();
+                }
             }
         });
+    }
+
+    /// Writes the per-app usage (atomic, with a backup). Failures are ignored: usage is rebuilt as requests arrive.
+    pub fn save_usage(&self) {
+        let json = lock(&self.usage).to_json();
+        let _ = paths::write_atomic(&self.dirs.usage(), json.as_bytes());
+    }
+
+    /// Where each configured limit of an app stands now.
+    pub fn limit_statuses(&self, app: &str, limits: &limits::AppLimits, now: u64) -> Vec<limits::LimitStatus> {
+        let (used, peak) = {
+            let u = lock(&self.usage);
+            (u.budget_use(now, app), u.today(now, app).peak_memory_bytes)
+        };
+        let requests_last_minute = AppId::parse(app).map_or(0, |id| self.auth.requests_last_minute(&id, now));
+        limits::statuses(
+            limits,
+            &limits::StatusInput {
+                used,
+                requests_last_minute,
+                peak_memory_today: peak,
+                machine_bytes: system::read_system(&self.hardware).total,
+            },
+        )
+    }
+
+    /// Raises an event the first time an app reaches 80% of a limit in a period.
+    pub(crate) fn warn_limits(&self, app: &str, limits: &limits::AppLimits, now: u64) {
+        for s in self.limit_statuses(app, limits, now) {
+            let (limits::LimitState::Warning, Some(period)) = (s.state, s.kind.period_start(now)) else {
+                continue;
+            };
+            let first = {
+                let mut w = lock(&self.limit_warned);
+                if w.len() >= 1024 {
+                    w.clear();
+                }
+                w.insert((app.to_string(), s.kind, period))
+            };
+            if first {
+                let e = {
+                    let mut log = lock(&self.events);
+                    let ev = log.push(
+                        now,
+                        EventKind::LimitWarning,
+                        Severity::Warn,
+                        format!("{app}: {}", s.message.unwrap_or_default()),
+                    );
+                    ev.app_id = Some(app.to_string());
+                    ev.clone()
+                };
+                self.push(&LiveUpdate::Event { event: e });
+            }
+        }
     }
 
     /// Memory and GPU reading for the dashboard.
@@ -388,8 +454,8 @@ impl AppState {
                     .authorize(Some(&resolved.id), wanted, !req.tools.is_empty(), meta.extended)
                     .map_err(denied)?;
                 self.auth.admit(&app, p.limits.requests_per_min, now).map_err(denied)?;
-                let used = lock(&self.usage).today(now, app.as_str()).tokens();
-                limits::check_tokens(used, p.limits.tokens_per_day).map_err(denied)?;
+                let used = lock(&self.usage).budget_use(now, app.as_str());
+                limits::check_budget(&used, &p.limits).map_err(denied)?;
                 app_cap = p.limits.max_concurrent.map(|c| c as usize);
                 pr
             }
@@ -412,6 +478,11 @@ impl AppState {
                     resolved.id
                 ),
             ));
+        }
+        let memory_bytes = self.serving.footprint(&resolved.id);
+        if let Some(p) = &perms {
+            limits::check_memory(memory_bytes, system::read_system(&self.hardware).total, p.limits.max_memory_percent).map_err(denied)?;
+            self.warn_limits(app.as_str(), &p.limits, now);
         }
         let queued_ms = queued.elapsed().as_millis() as u64;
         let name = resolved.id.to_string();
@@ -440,6 +511,8 @@ impl AppState {
                 endpoint: meta.endpoint,
                 priority,
                 started: Instant::now(),
+                memory_bytes,
+                limits: perms.as_ref().map(|p| p.limits.clone()),
                 queued_ms,
                 ttft: None,
                 stream,
@@ -500,6 +573,10 @@ pub struct Recorder {
     endpoint: String,
     priority: Priority,
     started: Instant,
+    /// The footprint of the model that serves the request (bytes), attributed to the app as its peak memory.
+    memory_bytes: u64,
+    /// The app's limits, for the 80% warning after the request is counted.
+    limits: Option<limits::AppLimits>,
     queued_ms: u64,
     ttft: Option<u64>,
     stream: bool,
@@ -539,14 +616,18 @@ impl Recorder {
         let now = now_ms();
         let total_ms = self.started.elapsed().as_millis() as u64;
         let failed = error.is_some();
-        lock(&self.st.usage).record(
-            now,
-            &self.app,
-            u64::from(usage.prompt_tokens),
-            u64::from(usage.completion_tokens),
-            total_ms,
+        lock(&self.st.usage).record(&UsageEvent {
+            at: now,
+            app: &self.app,
+            prompt_tokens: u64::from(usage.prompt_tokens),
+            completion_tokens: u64::from(usage.completion_tokens),
+            busy_ms: total_ms,
             failed,
-        );
+            memory_bytes: self.memory_bytes,
+        });
+        if let Some(l) = &self.limits {
+            self.st.warn_limits(&self.app, l, now);
+        }
         lock(&self.st.metrics).request(now, &self.app, &self.model, total_ms);
         if let Some(t) = timings {
             let mut r = lock(&self.st.recent);

@@ -36,6 +36,8 @@ pub enum EventKind {
     PresetChanged,
     /// A request failed.
     RequestFailed,
+    /// An app has used 80% of one of its limits.
+    LimitWarning,
 }
 
 /// How bad.

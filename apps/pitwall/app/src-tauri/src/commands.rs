@@ -9,7 +9,7 @@ use crate::server_client::ServerClient;
 use pitwall_core::config::UiSettings;
 use pitwall_core::limits::AppPermissions;
 use pitwall_core::memory::Preset;
-use pitwall_core::mgmt::{CommandError, ErrorCode, HistoryRange, PlaygroundRequest};
+use pitwall_core::mgmt::{CommandError, ErrorCode, HistoryRange, PlaygroundRequest, UsageRange};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -76,6 +76,7 @@ impl Validate for u32 {}
 impl Validate for Option<u32> {}
 impl Validate for Preset {}
 impl Validate for HistoryRange {}
+impl Validate for UsageRange {}
 impl Validate for UiSettings {}
 
 impl Validate for AppPermissions {
@@ -83,6 +84,7 @@ impl Validate for AppPermissions {
         if self.models.as_ref().is_some_and(|m| m.len() > 4096) {
             return Err(bad(field, "too many models"));
         }
+        self.limits.validate().map_err(|why| bad(field, &why))?;
         Ok(())
     }
 }
@@ -135,6 +137,12 @@ rpc!(
 rpc!(
     /// Metrics history.
     history => "history", range: HistoryRange = "range");
+rpc!(
+    /// Per-app usage over a range (one app, or all).
+    usage_series => "usage_series", range: UsageRange = "range", app_id: Option<String> = "appId");
+rpc!(
+    /// One app in detail: usage, limits and its latest requests.
+    app_detail => "app_detail", app_id: String = "appId");
 rpc!(
     /// Recent events.
     events => "events", limit: u32 = "limit");
@@ -394,6 +402,22 @@ mod tests {
         r.model_id = "m".repeat(MAX_TEXT + 1);
         assert!(r.validate("r").is_err());
         assert!(AppPermissions::default().validate("p").is_ok());
+        assert!(UsageRange::Week.validate("range").is_ok());
+    }
+
+    #[test]
+    fn nonsense_limits_are_refused_before_they_are_forwarded() {
+        let mut p = AppPermissions::default();
+        p.limits.max_memory_percent = Some(150);
+        let e = p.validate("permissions").unwrap_err();
+        assert!(
+            e.message.starts_with("permissions:") && e.message.contains("memory share"),
+            "{}",
+            e.message
+        );
+        let mut p = AppPermissions::default();
+        p.limits.requests_per_day = Some(0);
+        assert!(p.validate("permissions").is_err());
     }
 
     #[test]
