@@ -2,17 +2,43 @@
 
 Updated at the end of each round. Items are listed with their state.
 
+## Next (paused 2026-10-23 so Debrief can ship; resume in this order)
+
+Done this round: Tauri shell (async commands, `dto.rs` mirroring `api.types.ts`, tray + popup, `Notifier`/`OsToast`, keyring
+secrets, least-privilege capability and CSP with tests, window lifecycle, single instance, start at login, updater),
+renderer on `spotter-core`'s `PageRenderer`, pinned Chrome for Testing manifest with SHA-256 (ADR 0004, verified
+against the real macOS archive), version typography, coverage (core 99.5%, engine 96.8%, sources 92%, Angular 100% lines),
+architecture diagrams and the overview SVG (`docs/diagrams`).
+
+1. **CI green on three OSes.** Fixed locally, not yet re-run: the DNS-dependent `guard` test (injected resolver) and the
+   slow-runner `real_browser` missing-element assertion. Last run (7a92461) failed on Ubuntu (guard test) and Windows
+   (`real_browser`: "the page did not finish loading in time" in 3 tests; the pages load slowly on the Windows runner:
+   raise the render timeouts of those tests or find the cause). Push, re-run, read logs through
+   `GET /api/v1/repos/decryp7/spotter/actions/runs/<run>/jobs` and `actions/jobs/<id>/logs` with GITEA_TOKEN. Dispatch only
+   when no Debrief run is queued or running.
+2. **Regex extraction, products, artifacts, "Latest by", folder scaling.** Work in progress on branch
+   `feat/regex-extraction` (worktree `../spotter-wt-regex`): `id`/`channel`/`variant`/text groups, version text with
+   letters and leading zeros, Rust preview and pattern helper commands, per-product state, artifacts per release, settle
+   time, snapshots and caps for big shares, Latest by (version / modified / created / name / updated in place). Merge into
+   wip/redevelop, then finish what the branch report lists as open.
+3. **Visual redesign and UI review 2** (briefs `ui-review-2-spotter.md`, `ui-review-2-patterns.md`, `design-review-spotter.md`):
+   avatars (owner avatar / favicon / monogram), summary strip, release feed grouped by day with one primary action,
+   cadence timeline, watch detail hero with upgrade line, no-wrap releases table, dense watch list, wizard step indicator
+   and preset tiles, tray popover, empty states, motion; every P1 and P2 fixed and marked at the bottom of the review file.
+4. **Screenshots** at 1440x900, DPR 2, both themes, realistic invented data, every screen viewed and iterated; update the
+   README.
+5. Tray extras: popup height fitted to content, rounded corners on Windows 11 (DWMWCP_ROUND), toast action buttons and
+   click-through (Open, Mark as seen), e-mail channel delivery.
+6. Re-run the coverage guards after the merges (core >= 99%, UI >= 80%, stores/services near 100%).
+
 ## Renderer
 
-- Pinned Chromium build not configured: `crates/spotter-render/src/chromium-manifest.toml` holds placeholder entries
-  (URL and SHA-256 per platform), so `install` returns "the pinned Chromium build is not configured yet" and
-  `RendererStatus.canDownload` is false. The download, checksum, safe extraction and self-test mechanism is built and
-  tested against a local server; filling the manifest (for example Chrome for Testing zips with hashes computed from
-  the downloaded files) is the only missing step. Not started.
+- Pinned Chromium: done (ADR 0004). The manifest pins Chrome for Testing 156.0.8078.47 with SHA-256 for five platforms;
+  `node scripts/pin-chromium.mjs` re-pins; the download only happens on the user's request. Windows and Linux archives were
+  not extracted and run on those OSes yet (only macOS arm64 was, with the `#[ignore]` test).
 - OS web view renderer: only the status kind and the `Unavailable` hint exist; no renderer is built on the OS web view
   (it cannot be supervised or isolated). Not started.
-- Windows type-check of `spotter-render` could not run on the Mac (the TLS dependency needs the Windows SDK); it
-  relies on the Windows CI runner.
+- Windows type-check of `spotter-render` and the shell relies on the Windows CI runner (compiled there in run 4).
 - The CDP driver is still inside `spotter-render` (modules `cdp`, `launch`, `page`, `process`, `discover`, `ready`,
   `challenge`, `install`, `manifest`); extraction to the shared paddock repo is pending.
 
