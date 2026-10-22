@@ -8,7 +8,7 @@
     },
     "json": {
       "label": "JSON and JSON-schema output",
-      "minBuild": 2487
+      "minBuild": 3782
     },
     "tools": {
       "label": "Tool calling",

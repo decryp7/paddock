@@ -104,7 +104,7 @@ async fn json_schema_vision_and_embeddings_are_gated_too() {
         "response_format": {"type": "json_schema", "json_schema": {"name": "o", "schema": {"type": "object"}}}});
     let r = h.call("POST", "/v1/chat/completions", Some(&key), Some(schema), &[]).await;
     assert_eq!(r.status, 503, "{}", r.body);
-    assert!(r.json()["error"]["message"].as_str().unwrap().contains("b2487"));
+    assert!(r.json()["error"]["message"].as_str().unwrap().contains("b3782"));
 
     let png = "data:image/png;base64,iVBORw0KGgo=";
     let vision = json!({"model": TINY, "messages": [{"role": "user", "content": [

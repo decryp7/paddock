@@ -81,7 +81,7 @@ no build numbers, so the numbers come from the tags.
 
 | Capability | Change | Merged | First release (floor) |
 |---|---|---|---|
-| JSON-schema output | #5978 json-schema-to-grammar improvements, added to the server | 2024-03-21 | b2487 |
+| JSON-schema output | #9527 `response_format` `json_schema` on `/v1/chat/completions` (the form Pitwall sends; #5978, b2487, only covered `/completion`) | 2024-09-18 | b3782 |
 | Tool calling | #9639 tool call support (generic and native templates) with lazy grammars | 2025-01-30 | b4599 |
 | Vision (mtmd) | #12898 server: vision support via libmtmd | 2025-05-09 | b5331 |
 | Embeddings | #5190 server: OpenAI-compatible embeddings | 2024-01-29 | b2004 |
@@ -101,7 +101,7 @@ caches less. Recorded with the same method (re-checked 2026-10-23):
 | A request that pins a busy slot leaves it untouched | #30295 | 2026-10-10 | b11552 |
 
 Pitwall starts every engine with `--jinja` (#11016, b4524) and `--offline` (#13804, b5501), so a build older than b5501 does
-not start at all; that is a start-up requirement, not a feature in the matrix. The `json` floor (b2487) is where
+not start at all; that is a start-up requirement, not a feature in the matrix. The `json` floor (b3782) is where
 `json_schema` reached the server's `/completion`; Pitwall sends the OpenAI `response_format` of type `json_schema` to
 `/v1/chat/completions`, which arrived with #9527 (2024-09-18, b3782). Everything the catalog installs is far newer.
 
