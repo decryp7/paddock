@@ -432,3 +432,52 @@ async fn recommendations_come_from_the_catalog_packs() {
     assert!(rec.iter().all(|r| r["tags"].as_array().unwrap().iter().any(|t| t == "code")));
     assert!(!h.rpc("packs", json!({})).await.json()["recommendations"].as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn task_and_token_endpoints() {
+    let h = harness(false).await;
+    let key = h.make_key("Tasker").await;
+    let r = h.call("POST", "/x/v1/tasks/summarize", Some(&key), Some(json!({"text": "Long text here.", "style": "bullets"})), &[]).await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.json()["result"], "Hello world");
+    assert_eq!(r.json()["template"], "summarize@1");
+    assert_eq!(h.call("POST", "/x/v1/tasks/nope", Some(&key), Some(json!({})), &[]).await.status, 404);
+    assert_eq!(h.call("POST", "/x/v1/tasks/summarize", Some(&key), Some(json!({})), &[]).await.status, 400);
+    let r = h.call("POST", "/x/v1/tokens/count", Some(&key), Some(json!({"text": "hello there"})), &[]).await;
+    assert!(r.json()["tokens"].as_u64().unwrap() > 0);
+    let r = h.call("POST", "/x/v1/tokens/truncate", Some(&key), Some(json!({"text": "word ".repeat(500), "maxTokens": 20, "keep": "middle"})), &[]).await;
+    assert_eq!(r.json()["truncated"], true);
+    assert_eq!(h.call("POST", "/x/v1/tokens/truncate", Some(&key), Some(json!({"text": "x"})), &[]).await.status, 400);
+}
+
+#[tokio::test]
+async fn a_model_that_cannot_fit_is_refused_with_a_typed_error_and_nothing_starts() {
+    let h = harness(false).await;
+    let key = h.make_key("Greedy").await;
+    // A sparse 4 TiB "model": parses as GGUF but can never fit in memory.
+    let p = h.dir.path().join("models/big/m/huge-Q4_K_M.gguf");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let mut b = common::gguf("llama");
+    b.truncate(70_000);
+    std::fs::write(&p, &b).unwrap();
+    std::fs::OpenOptions::new().write(true).open(&p).unwrap().set_len(4 << 40).unwrap();
+    let r = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("huge-q4_k_m", false)), &[]).await;
+    assert_eq!(r.status, 503, "{}", r.body);
+    assert!(r.json()["error"]["message"].as_str().unwrap().contains("needs about"), "{}", r.body);
+    assert_eq!(h.starts.load(Ordering::SeqCst), 0, "no engine was started for it");
+    let events = h.rpc("events", json!({"limit": 5})).await.json();
+    assert!(events.as_array().unwrap().iter().any(|e| e["kind"] == "requestFailed"));
+    let m = h.rpc("local_models", json!({})).await.json();
+    assert!(m.as_array().unwrap().iter().any(|x| x["id"] == "huge-q4_k_m" && x["fit"]["verdict"] == "wontFit"));
+}
+
+#[tokio::test]
+async fn a_dead_engine_is_forgotten_and_reloaded() {
+    let h = harness(false).await;
+    let key = h.make_key("Phoenix").await;
+    h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]).await;
+    assert_eq!(h.st.serving.loaded().len(), 1);
+    h.st.serving.release_all();
+    h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]).await;
+    assert_eq!(h.starts.load(Ordering::SeqCst), 2, "reloaded after release");
+}

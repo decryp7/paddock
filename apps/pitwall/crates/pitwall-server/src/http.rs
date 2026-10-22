@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::Router;
 use pitwall_core::api::{anthropic, ollama, openai, ApiError, ApiFamily, ErrorKind, LoadedEntry, ModelEntry};
-use pitwall_core::chat::{ChatEvent, ChatOutput, ChatRequest, Finish, ModelRef};
+use pitwall_core::chat::{ChatEvent, ChatOutput, ModelRef};
 use pitwall_core::events::{EventKind, Severity};
 use pitwall_core::ids::AppId;
 use pitwall_core::privacy;
@@ -50,6 +50,9 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/x/v1/pair/{id}", get(x_pair_poll))
         .route("/x/v1/select", post(x_select))
         .route("/x/v1/models", get(x_models))
+        .route("/x/v1/tasks/{task}", post(x_task))
+        .route("/x/v1/tokens/count", post(x_tokens_count))
+        .route("/x/v1/tokens/truncate", post(x_tokens_truncate))
         .route("/x/v1/jobs", get(x_jobs))
         .route("/x/v1/jobs/{id}", delete(x_cancel))
         .merge(crate::mgmt::routes())
@@ -736,5 +739,48 @@ async fn x_cancel(State(st): S, h: HeaderMap, Path(job): Path<u64>) -> Response 
     }
 }
 
-#[allow(dead_code)]
-fn _finish_used(_: Finish, _: ChatRequest) {}
+async fn x_task(State(st): S, h: HeaderMap, Path(task): Path<String>, body: Bytes) -> Response {
+    let who = gate!(st, h, ApiFamily::Extended);
+    let go = async {
+        let t = pitwall_core::tasks::Task::parse(&task).ok_or_else(|| ApiError::new(ErrorKind::NotFound, "tasks are summarize, classify, extract and translate"))?;
+        let v = json_body(&body)?;
+        let (mut req, template) = pitwall_core::tasks::build(t, &v)?;
+        if let Some(m) = v.get("model").and_then(Value::as_str) {
+            req.model = ModelRef::Named(m.to_string());
+        }
+        req.stream = false;
+        let m = meta(ApiFamily::Extended, &format!("/x/v1/tasks/{task}"), &h, JobKind::Task)?;
+        let run = st.start_chat(&who, m, req).await?;
+        let (out, run) = collect(run).await?;
+        let result = if t == pitwall_core::tasks::Task::Summarize || t == pitwall_core::tasks::Task::Translate { Value::String(out.text.trim().to_string()) } else { serde_json::from_str(out.text.trim()).unwrap_or(Value::String(out.text.clone())) };
+        Ok(json_response(json!({"result": result, "template": template, "model": run.resolved.id.as_str(), "usage": {"promptTokens": out.usage.prompt_tokens, "completionTokens": out.usage.completion_tokens}}), &run))
+    };
+    go.await.unwrap_or_else(|e: ApiError| fail(&e, ApiFamily::Extended))
+}
+
+async fn x_tokens_count(State(st): S, h: HeaderMap, body: Bytes) -> Response {
+    gate!(st, h, ApiFamily::Extended);
+    let go = || -> Result<Response, ApiError> {
+        let v = json_body(&body)?;
+        let text = v.get("text").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("`text` is required"))?;
+        Ok(axum::Json(json!({"tokens": pitwall_core::tokens::estimate(text), "estimate": true})).into_response())
+    };
+    go().unwrap_or_else(|e| fail(&e, ApiFamily::Extended))
+}
+
+async fn x_tokens_truncate(State(st): S, h: HeaderMap, body: Bytes) -> Response {
+    gate!(st, h, ApiFamily::Extended);
+    let go = || -> Result<Response, ApiError> {
+        let v = json_body(&body)?;
+        let text = v.get("text").and_then(Value::as_str).ok_or_else(|| ApiError::invalid("`text` is required"))?;
+        let max = v.get("maxTokens").and_then(Value::as_u64).ok_or_else(|| ApiError::invalid("`maxTokens` is required"))?.min(u64::from(u32::MAX)) as u32;
+        let keep = match v.get("keep").and_then(Value::as_str).unwrap_or("start") {
+            "end" => pitwall_core::tokens::Keep::Tail,
+            "ends" | "middle" => pitwall_core::tokens::Keep::Middle,
+            _ => pitwall_core::tokens::Keep::Head,
+        };
+        let (t, cut) = pitwall_core::tokens::truncate(text, max, keep);
+        Ok(axum::Json(json!({"text": t, "truncated": cut})).into_response())
+    };
+    go().unwrap_or_else(|e| fail(&e, ApiFamily::Extended))
+}
