@@ -190,15 +190,17 @@ mod tests {
 
     #[test]
     fn data_dir_per_os() {
+        // "Absolute" depends on the host: a Windows path needs a drive.
+        let xdg = if cfg!(windows) { "C:/xdg" } else { "/xdg" };
         let env = Env {
             home: Some("/h".into()),
             appdata: Some("/ad".into()),
-            xdg_data_home: Some("/xdg".into()),
+            xdg_data_home: Some(xdg.into()),
             ..Env::default()
         };
         assert_eq!(data_dir(&env, Os::Windows), PathBuf::from("/ad/Pitwall"));
         assert_eq!(data_dir(&env, Os::Mac), PathBuf::from("/h/Library/Application Support/Pitwall"));
-        assert_eq!(data_dir(&env, Os::Other), PathBuf::from("/xdg/pitwall"));
+        assert_eq!(data_dir(&env, Os::Other), PathBuf::from(xdg).join("pitwall"));
         let rel = Env {
             home: Some("/h".into()),
             xdg_data_home: Some("rel".into()),

@@ -596,7 +596,8 @@ fn crashy_pack(dir: &std::path::Path, die_after_ms: u64) {
 }
 
 async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&common::Harness) -> bool) {
-    for _ in 0..200 {
+    // Generous: loaded CI runners are slow (docs/suite-lessons.md).
+    for _ in 0..900 {
         h.st.serving.tick();
         if done(h) {
             return;
@@ -686,7 +687,12 @@ async fn an_idle_models_context_is_cleared_before_its_weights_are_released() {
     // Half the idle time has passed: the context goes, the weights stay.
     tokio::time::sleep(std::time::Duration::from_millis(1300)).await;
     h.st.serving.tick();
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    for _ in 0..100 {
+        if h.erases.load(Ordering::SeqCst) >= 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     let erased = h.erases.load(Ordering::SeqCst);
     assert!(erased >= 1, "the engine's slots were erased");
     assert_eq!(h.st.serving.loaded().len(), 1, "still loaded");
