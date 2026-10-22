@@ -6,8 +6,8 @@ This page ties together the design diagrams in [`docs/diagrams/`](diagrams/), al
 service (`crates/pitcrew-service`) that supervises the runners and carries out the core's decisions, a thin Tauri 2
 shell (`app/src-tauri`) and an Angular UI (`app/src/app`) that only talk to the service through one local IPC.
 
-The diagrams follow [diagrams/STYLE.md](diagrams/STYLE.md): planned work (not in the code yet) is drawn
-with a dashed outline and "(planned)" after its name.
+The diagrams follow [diagrams/STYLE.md](diagrams/STYLE.md) (the suite spec in Paddock plus Pitcrew's colours): planned work
+(not in the code yet) is drawn with a dashed outline and a "planned" tag.
 
 ## Overview
 

@@ -3,8 +3,8 @@
 All of Pitcrew's design diagrams on one page, from the big picture down to individual flows. Each image is exported
 from its editable draw.io source (linked under the image) with
 [`scripts/export-diagrams.sh`](../scripts/export-diagrams.sh); edit the `.drawio`, then re-run the script. The SVGs are
-re-exported from the sources (draw.io desktop); until then they may lag behind the `.drawio` files. The style rules are
-in [diagrams/STYLE.md](diagrams/STYLE.md), the reasoning behind the design in the [architecture decision
+re-exported from the sources (draw.io desktop); until then they may lag behind the `.drawio` files. The images follow your
+light or dark setting. The style rules are in [diagrams/STYLE.md](diagrams/STYLE.md), the reasoning behind the design in the [architecture decision
 records](adr/0001-architecture.md), and the prose overview in [architecture.md](architecture.md).
 
 Contents: [Overview](#overview) · [C4 model](#c4-model) · [Deployment](#deployment) · [Use cases](#use-cases) ·
@@ -17,8 +17,8 @@ holds every rule.
 
 ![Pitcrew at a glance](diagrams/pitcrew-overview.svg)
 
-Source: [pitcrew-overview.svg](diagrams/pitcrew-overview.svg) (hand-written SVG with a dark-mode palette; the other
-diagrams are draw.io).
+Source: [pitcrew-overview.svg](diagrams/pitcrew-overview.svg) (hand-written SVG that follows the light or dark setting;
+the other diagrams are draw.io).
 
 ## C4 model
 
@@ -51,9 +51,21 @@ records and configuration, and the wire types the app shares. Everything here is
 go out as values (ADR [0002](adr/0002-runner-auto-update.md), [0006](adr/0006-supervision-and-housekeeping.md),
 [0007](adr/0007-runner-scoped-metrics.md)).
 
-![C4 core components](diagrams/svg/c4-3-components-core.svg)
+![C4 core: supervising a runner](diagrams/svg/c4-3-core-supervision.svg)
 
-Source: [c4-3-components-core.drawio](diagrams/c4-3-components-core.drawio)
+Source: [c4-3-core-supervision.drawio](diagrams/c4-3-core-supervision.drawio)
+
+Updates:
+
+![C4 core: updates](diagrams/svg/c4-3-core-updates.svg)
+
+Source: [c4-3-core-updates.drawio](diagrams/c4-3-core-updates.drawio)
+
+Records, configuration and helpers:
+
+![C4 core: records and helpers](diagrams/svg/c4-3-core-support.svg)
+
+Source: [c4-3-core-support.drawio](diagrams/c4-3-core-support.drawio)
 
 ### Level 3 — service components
 
@@ -61,26 +73,60 @@ Inside `pitcrew-service`: the command line and host, the platform adapters, the 
 centre, and everything slow or OS-specific behind it (launcher and process control, probe, runner log file, store,
 worker steps, HTTPS client, cleanup, login environment).
 
-![C4 service components](diagrams/svg/c4-3-components-service.svg)
+![C4 service: control path](diagrams/svg/c4-3-service-control.svg)
 
-Source: [c4-3-components-service.drawio](diagrams/c4-3-components-service.drawio)
+Source: [c4-3-service-control.drawio](diagrams/c4-3-service-control.drawio)
+
+What the supervisor drives:
+
+![C4 service: what the supervisor drives](diagrams/svg/c4-3-service-supervisor.svg)
+
+Source: [c4-3-service-supervisor.drawio](diagrams/c4-3-service-supervisor.drawio)
 
 ## Deployment
 
 Where each part runs on a build machine, per OS. Each OS has its own service manager, data folder and IPC endpoint; on Linux the service is a systemd user
 service (ADR [0009](adr/0009-linux-service-and-runner-environment.md), [Linux guide](linux.md)).
 
-![Deployment](diagrams/svg/uml-deployment.svg)
+Windows:
 
-Source: [uml-deployment.drawio](diagrams/uml-deployment.drawio)
+![Deployment on Windows](diagrams/svg/uml-deployment-windows.svg)
+
+Source: [uml-deployment-windows.drawio](diagrams/uml-deployment-windows.drawio)
+
+macOS:
+
+![Deployment on macOS](diagrams/svg/uml-deployment-macos.svg)
+
+Source: [uml-deployment-macos.drawio](diagrams/uml-deployment-macos.drawio)
+
+Linux:
+
+![Deployment on Linux](diagrams/svg/uml-deployment-linux.svg)
+
+Source: [uml-deployment-linux.drawio](diagrams/uml-deployment-linux.drawio)
 
 ## Use cases
 
 What the build-machine owner does with Pitcrew, and what Pitcrew does by itself when time passes or something fails.
 
-![Use cases](diagrams/svg/uml-use-cases.svg)
+Running runners:
 
-Source: [uml-use-cases.drawio](diagrams/uml-use-cases.drawio)
+![Use cases: running runners](diagrams/svg/uml-use-cases-runners.svg)
+
+Source: [uml-use-cases-runners.drawio](diagrams/uml-use-cases-runners.drawio)
+
+Updates and upkeep:
+
+![Use cases: updates and upkeep](diagrams/svg/uml-use-cases-maintenance.svg)
+
+Source: [uml-use-cases-maintenance.drawio](diagrams/uml-use-cases-maintenance.drawio)
+
+On its own:
+
+![Use cases: what Pitcrew does on its own](diagrams/svg/uml-use-cases-automatic.svg)
+
+Source: [uml-use-cases-automatic.drawio](diagrams/uml-use-cases-automatic.drawio)
 
 ## Domain model
 
@@ -88,9 +134,23 @@ The core's main types as the service and the app use them: configuration (`Confi
 policies), the runner's live state (`Controller`, `UpdateMachine`, `RunnerSnapshot`), the records kept (`ServiceState`,
 `RunnerState`, `History`) and the metrics series (`TieredStore`, `MachineSample`, `Usage`).
 
-![Domain model](diagrams/svg/uml-class-domain.svg)
+Configuration:
 
-Source: [uml-class-domain.drawio](diagrams/uml-class-domain.drawio)
+![Domain model: configuration](diagrams/svg/uml-class-config.svg)
+
+Source: [uml-class-config.drawio](diagrams/uml-class-config.drawio)
+
+Runtime:
+
+![Domain model: runtime](diagrams/svg/uml-class-runtime.svg)
+
+Source: [uml-class-runtime.drawio](diagrams/uml-class-runtime.drawio)
+
+Records and metrics:
+
+![Domain model: records and metrics](diagrams/svg/uml-class-records.svg)
+
+Source: [uml-class-records.drawio](diagrams/uml-class-records.drawio)
 
 ## Flows
 
@@ -109,9 +169,17 @@ Source: [uml-seq-register-runner.drawio](diagrams/uml-seq-register-runner.drawio
 Download, verify, wait for the running job, swap, restart, confirm; roll back automatically if the new runner does not
 come up. A running job is never killed (ADR [0002](adr/0002-runner-auto-update.md)).
 
-![Safe update with roll-back](diagrams/svg/uml-seq-safe-update.svg)
+Part 1, find, download and verify:
 
-Source: [uml-seq-safe-update.drawio](diagrams/uml-seq-safe-update.drawio)
+![Safe update: find, download and verify](diagrams/svg/uml-seq-update-fetch.svg)
+
+Source: [uml-seq-update-fetch.drawio](diagrams/uml-seq-update-fetch.drawio)
+
+Part 2, swap, restart and confirm:
+
+![Safe update: swap, restart and confirm](diagrams/svg/uml-seq-update-swap.svg)
+
+Source: [uml-seq-update-swap.drawio](diagrams/uml-seq-update-swap.drawio)
 
 ### Stall detection and restart
 
