@@ -178,6 +178,8 @@ pub struct ModelPrefs {
     pub idle_secs: Option<u64>,
     /// Its own context length.
     pub context: Option<u32>,
+    /// The engine pack that serves it (`None`: llama.cpp).
+    pub engine: Option<String>,
 }
 
 /// Model settings.
@@ -458,7 +460,7 @@ mod tests {
         assert!(s.memory.notify_on_release, "kept");
         assert_eq!(s.memory.policy(), Policy { ..Policy::preset(Preset::LowMemory) });
         let id = ModelId::parse("m").unwrap();
-        s.models.prefs.insert(id.clone(), ModelPrefs { pinned: true, idle_secs: Some(30), context: None });
+        s.models.prefs.insert(id.clone(), ModelPrefs { pinned: true, idle_secs: Some(30), context: None, engine: None });
         let mut ui = s.ui();
         ui.server.port = 12345;
         let merged = s.with_ui(ui.clone()).unwrap();

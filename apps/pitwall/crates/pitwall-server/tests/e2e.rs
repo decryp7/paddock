@@ -380,3 +380,55 @@ async fn embeddings_need_an_embedding_model() {
         .await;
     assert_eq!(r.json()["embeddings"][0], json!([0.5, 0.25]));
 }
+
+#[tokio::test]
+async fn an_engine_pack_serves_a_model_through_a_real_child_process() {
+    // The pack launches this very binary as an OpenAI-compatible engine (`--fake-engine`).
+    let dir = tempfile::tempdir().unwrap();
+    let exe = env!("CARGO_BIN_EXE_pitwall-server");
+    let packs = dir.path().join("packs");
+    std::fs::create_dir_all(&packs).unwrap();
+    std::fs::write(
+        packs.join("fake.engine.toml"),
+        format!(
+            "format = 1\nid = \"fakeoai\"\nname = \"Fake OpenAI engine\"\nversion = \"1\"\n[capabilities]\nchat = true\n[launch]\ncommand = {exe:?}\nargs = [\"--fake-engine\", \"--host\", \"{{host}}\", \"--port\", \"{{port}}\", \"--model\", \"{{model}}\"]\n[health]\npath = \"/health\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(packs.join("broken.engine.toml"), "format = 1\nid = \"broken\"\n").unwrap();
+    let m = dir.path().join("models/o/r");
+    std::fs::create_dir_all(&m).unwrap();
+    std::fs::write(m.join("tiny-Q4_K_M.gguf"), common::gguf("llama")).unwrap();
+    let h = common::harness_in(dir, false).await;
+    let key = h.make_key("Pack User").await;
+
+    // The bad pack is reported, the good one listed, the built-in one too.
+    let p = h.rpc("packs", json!({})).await.json();
+    assert!(p["problems"][0]["file"] == "broken.engine.toml" && p["problems"][0]["message"].as_str().unwrap().contains("name"));
+    let ids: Vec<&str> = p["engines"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&"fakeoai") && ids.contains(&"llamafile"));
+    let engines = h.rpc("engines", json!({})).await.json();
+    let fake = engines.as_array().unwrap().iter().find(|e| e["name"] == "Fake OpenAI engine").unwrap();
+    assert_eq!(fake["availability"]["state"], "available");
+
+    // Route the model to the pack and chat through the real child process.
+    assert_eq!(h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "nope"})).await.status, 404);
+    assert_eq!(h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "fakeoai"})).await.status, 200);
+    let r = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[]).await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(r.json()["choices"][0]["message"]["content"], "Hello world");
+    assert_eq!(h.starts.load(Ordering::SeqCst), 0, "the built-in fake engine was not used");
+    let loaded = h.rpc("overview", json!({})).await.json()["models"][0].clone();
+    assert_eq!(loaded["engine"], "pack");
+    assert_eq!(loaded["build"], "fakeoai");
+    assert!(h.rpc("unload_model", json!({"id": "tiny-q4_k_m"})).await.status == 200, "dropping the engine ends the child");
+}
+
+#[tokio::test]
+async fn recommendations_come_from_the_catalog_packs() {
+    let h = harness(false).await;
+    let p = h.rpc("packs", json!({"tag": "code"})).await.json();
+    let rec = p["recommendations"].as_array().unwrap();
+    assert!(rec.iter().all(|r| r["tags"].as_array().unwrap().iter().any(|t| t == "code")));
+    assert!(!h.rpc("packs", json!({})).await.json()["recommendations"].as_array().unwrap().is_empty());
+}

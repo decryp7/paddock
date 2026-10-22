@@ -30,6 +30,7 @@ pub mod llama;
 pub mod memory;
 pub mod metrics;
 pub mod mgmt;
+pub mod packs;
 pub mod privacy;
 pub mod quant;
 pub mod runtimes;

@@ -1,0 +1,44 @@
+# Built-in model catalog pack: small, well-known GGUF models Pitwall can recommend. The fit check
+# ("will this fit?") uses the sizes below until the real file list is fetched from Hugging Face.
+format = 1
+id = "starter"
+name = "Starter models"
+
+[[model]]
+id = "qwen2.5-0.5b-instruct"
+name = "Qwen2.5 0.5B Instruct"
+repo = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+context = 32768
+capabilities = ["chat", "json"]
+tags = ["small", "fast", "tiny"]
+variants = [
+  { quant = "Q4_K_M", file = "qwen2.5-0.5b-instruct-q4_k_m.gguf", size_bytes = 491400032 },
+  { quant = "Q8_0", file = "qwen2.5-0.5b-instruct-q8_0.gguf", size_bytes = 675710816 },
+]
+
+[[model]]
+id = "qwen2.5-coder-1.5b-instruct"
+name = "Qwen2.5 Coder 1.5B Instruct"
+repo = "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
+context = 32768
+capabilities = ["chat", "json"]
+tags = ["code", "small"]
+variants = [{ quant = "Q4_K_M", file = "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf", size_bytes = 986048000 }]
+
+[[model]]
+id = "qwen2.5-7b-instruct"
+name = "Qwen2.5 7B Instruct"
+repo = "Qwen/Qwen2.5-7B-Instruct-GGUF"
+context = 32768
+capabilities = ["chat", "json", "tools"]
+tags = ["general", "quality"]
+variants = [{ quant = "Q4_K_M", file = "qwen2.5-7b-instruct-q4_k_m.gguf", size_bytes = 4683073184 }]
+
+[[model]]
+id = "nomic-embed-text-v1.5"
+name = "Nomic Embed Text v1.5"
+repo = "nomic-ai/nomic-embed-text-v1.5-GGUF"
+context = 2048
+capabilities = ["embeddings"]
+tags = ["embeddings", "small"]
+variants = [{ quant = "Q4_K_M", file = "nomic-embed-text-v1.5.Q4_K_M.gguf", size_bytes = 84106624 }]

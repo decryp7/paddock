@@ -59,6 +59,10 @@ pub struct Running {
 pub trait Engine: Send + Sync {
     /// Which engine this is.
     fn kind(&self) -> EngineKind;
+    /// The id models name it by (`llama.cpp`, or a pack's id).
+    fn id(&self) -> String {
+        "llama.cpp".into()
+    }
     /// Whether it can run here, and why not.
     fn availability(&self) -> Availability;
     /// Start serving `launch` (its port is chosen by the caller).
@@ -298,7 +302,7 @@ fn dir_size(p: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-fn make_executable(p: &Path) {
+pub(crate) fn make_executable(p: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -344,6 +348,11 @@ pub async fn self_test(bin: &Path) -> Result<Vec<String>, String> {
 /// Unpack `archive` (a `.zip` or `.tar.gz`) into `dest`, keeping only the files Pitwall expects, flat, with
 /// bounded sizes. Symlinks are recreated only when their target is a plain sibling name.
 pub fn unpack(archive: &Path, dest: &Path, name: &str) -> Result<(), EngineError> {
+    unpack_with(archive, dest, name, &runtimes::is_expected)
+}
+
+/// [`unpack`] keeping the entries `keep` accepts (by flat file name).
+pub fn unpack_with(archive: &Path, dest: &Path, name: &str, keep: &dyn Fn(&str) -> bool) -> Result<(), EngineError> {
     const MAX_FILE: u64 = 3 * 1024 * 1024 * 1024;
     const MAX_ENTRIES: usize = 2000;
     let bad = |e: &dyn std::fmt::Display| EngineError::Install(format!("the engine archive is damaged: {e}"));
@@ -380,7 +389,7 @@ pub fn unpack(archive: &Path, dest: &Path, name: &str) -> Result<(), EngineError
             }
             let mut e = e.map_err(|e| bad(&e))?;
             let path = e.path().map_err(|e| bad(&e))?.to_string_lossy().into_owned();
-            let Some(flat) = runtimes::flat_name(&path).filter(|n| runtimes::is_expected(n)).map(str::to_string) else {
+            let Some(flat) = runtimes::flat_name(&path).filter(|n| keep(n)).map(str::to_string) else {
                 continue;
             };
             let kind = e.header().entry_type();
@@ -498,7 +507,7 @@ impl Engine for LlamaCpp {
     }
 }
 
-fn hex(b: &[u8]) -> String {
+pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 

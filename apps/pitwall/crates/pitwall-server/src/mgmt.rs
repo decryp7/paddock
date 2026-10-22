@@ -4,6 +4,7 @@
 
 use crate::app::{lock, AppState, Meta};
 use crate::auth::Principal;
+use crate::engines::Engine as _;
 use crate::http::gate;
 use crate::paths::now_ms;
 use axum::body::{Body, Bytes};
@@ -23,7 +24,7 @@ use pitwall_core::mgmt::{
 use pitwall_core::runtimes::builds;
 use pitwall_core::scheduler::JobKind;
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 type S = State<Arc<AppState>>;
@@ -252,6 +253,32 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
             ok(())
         }
+        "packs" => {
+            let s = st.cfg();
+            let room = crate::system::room(&st.hardware, st.serving.hot_ram().0);
+            let tag: Option<String> = arg(a, "tag").unwrap_or(None);
+            let rec = pitwall_core::packs::recommend(&st.packs.models, tag.as_deref(), &room);
+            ok(json!({
+                "engines": st.packs.engines.iter().map(|e| json!({"id": e.id, "name": e.name, "version": e.version})).collect::<Vec<_>>(),
+                "problems": st.packs.problems,
+                "warnings": st.packs.warnings,
+                "recommendations": rec.iter().map(|r| json!({
+                    "id": r.model.id, "name": r.model.name, "repo": r.model.repo, "file": r.variant.file, "quant": r.variant.quant,
+                    "sizeBytes": r.variant.size_bytes, "tags": r.model.tags, "fit": r.fit, "contextTokens": r.model.context.min(s.models.default_context)
+                })).collect::<Vec<_>>(),
+            }))
+        }
+        "set_model_engine" => {
+            let id = model(a, "id")?;
+            let engine: Option<String> = arg(a, "engine")?;
+            if let Some(e) = &engine {
+                if e != "llama.cpp" && !st.pack_engines.iter().any(|p| &p.pack.id == e) {
+                    return Err(err(mgmt::ErrorCode::NotFound, format!("there is no engine pack \"{e}\"")));
+                }
+            }
+            update_prefs(st, &id, |p| p.engine = engine.filter(|e| e != "llama.cpp"))?;
+            ok(())
+        }
         "apps" => ok(apps(st)),
         "create_app" => {
             let name: String = arg(a, "name")?;
@@ -465,7 +492,8 @@ fn engines(st: &AppState) -> Vec<mgmt::Engine> {
     let active = st.llama.active().map(|b| b.id);
     let suggested = st.llama.suggested();
     let cfg = st.cfg();
-    st.engines
+    let mut list: Vec<mgmt::Engine> = st
+        .engines
         .iter()
         .map(|e| {
             let llama = e.kind() == EngineKind::LlamaCpp;
@@ -477,6 +505,7 @@ fn engines(st: &AppState) -> Vec<mgmt::Engine> {
                 EngineKind::Mlx => ("MLX", "Apple's array framework for Apple Silicon."),
                 EngineKind::Vllm => ("vLLM", "High-throughput serving on Linux with NVIDIA GPUs."),
                 EngineKind::WhisperCpp => ("whisper.cpp", "Speech-to-text."),
+                EngineKind::Pack => ("Engine pack", "An engine declared by a pack."),
             };
             mgmt::Engine {
                 kind: e.kind(),
@@ -538,7 +567,27 @@ fn engines(st: &AppState) -> Vec<mgmt::Engine> {
                 rollback_to: if llama { cfg.engines.previous_build.clone() } else { None },
             }
         })
-        .collect()
+        .collect();
+    list.extend(st.pack_engines.iter().map(|pe| {
+        let installed = pe.binary().is_some();
+        let dl = pe.pack.downloads.iter().find(|d| d.platform == platform);
+        mgmt::Engine {
+            kind: EngineKind::Pack,
+            name: pe.pack.name.clone(),
+            description: if pe.pack.description.is_empty() { "An engine pack.".into() } else { pe.pack.description.clone() },
+            availability: pe.availability(),
+            build_choice: "auto".into(),
+            builds: if installed {
+                vec![mgmt::InstalledBuild { id: pe.pack.id.clone(), tag: pe.pack.version.clone(), label: pe.pack.name.clone(), size_bytes: dl.map_or(0, |d| d.size), self_test: mgmt::SelfTest::NotRun, self_test_message: None, devices: vec![], active: true, outdated: false }]
+            } else {
+                vec![]
+            },
+            catalog: dl.map(|d| vec![mgmt::CatalogBuild { id: pe.pack.id.clone(), label: pe.pack.name.clone(), tag: pe.pack.version.clone(), download_bytes: d.size, suggested: false, installed }]).unwrap_or_default(),
+            processes: vec![],
+            rollback_to: None,
+        }
+    }));
+    list
 }
 
 fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
@@ -547,6 +596,9 @@ fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
             mgmt::ErrorCode::Offline,
             pitwall_core::privacy::EgressError::Offline.to_string(),
         ));
+    }
+    if let Some(pe) = st.pack_engines.iter().find(|p| p.pack.id == id).cloned() {
+        return install_pack(st, pe);
     }
     let platform = st.llama.platform();
     let build = st
@@ -639,6 +691,41 @@ fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
         lock(&st2.install_cancel).remove(&dl_id);
     });
     ok(dl)
+}
+
+fn install_pack(st: &Arc<AppState>, pe: crate::pack_engine::PackEngine) -> R<Value> {
+    let dl = pe.pack.downloads.iter().find(|d| d.platform == st.llama.platform()).ok_or_else(|| err(mgmt::ErrorCode::NotAvailable, format!("the {} pack has no build for this platform", pe.pack.name)))?;
+    let dl_id = format!("eng-{}", lock(&st.installs).len());
+    let cancel = crate::egress::CancelFlag::default();
+    let entry = Download { id: dl_id.clone(), kind: DownloadKind::Engine, name: format!("{} {}", pe.pack.name, pe.pack.version), host: dl.url.host().to_string(), bytes_done: 0, bytes_total: dl.size, speed_bps: 0, state: DownloadState::Downloading, error: None, started_at: now_ms() };
+    lock(&st.installs).insert(dl_id.clone(), entry.clone());
+    lock(&st.install_cancel).insert(dl_id.clone(), cancel.clone());
+    let st2 = st.clone();
+    tokio::spawn(async move {
+        let res = pe
+            .install(&cancel, |done, _| {
+                if let Some(d) = lock(&st2.installs).get_mut(&dl_id) {
+                    d.bytes_done = done;
+                }
+            })
+            .await;
+        let mut g = lock(&st2.installs);
+        if let Some(d) = g.get_mut(&dl_id) {
+            match &res {
+                Ok(()) => {
+                    d.state = DownloadState::Done;
+                    d.bytes_done = d.bytes_total;
+                }
+                Err(e) => {
+                    d.state = if matches!(e, crate::engines::EngineError::Download(crate::egress::DownloadError::Cancelled)) { DownloadState::Cancelled } else { DownloadState::Failed };
+                    d.error = Some(e.to_string());
+                }
+            }
+            st2.push(&LiveUpdate::Download { download: d.clone() });
+        }
+        lock(&st2.install_cancel).remove(&dl_id);
+    });
+    ok(entry)
 }
 
 fn apps(st: &AppState) -> Vec<mgmt::AppInfo> {

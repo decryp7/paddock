@@ -54,6 +54,8 @@ pub struct HotModel {
     pub vision: bool,
     /// How long the load took.
     pub cold_start_ms: u64,
+    /// The engine that serves it.
+    pub engine: (String, pitwall_core::mgmt::EngineKind),
     /// What it can do.
     pub capabilities: Vec<pitwall_core::select::Capability>,
 }
@@ -125,6 +127,7 @@ impl Drop for Permit {
 
 struct Inner {
     engine: Arc<dyn Engine>,
+    packs: RwLock<HashMap<String, Arc<dyn Engine>>>,
     library: Library,
     settings: Arc<RwLock<Settings>>,
     hardware: RwLock<Hardware>,
@@ -170,6 +173,7 @@ impl Serving {
         Serving {
             inner: Arc::new(Inner {
                 engine,
+                packs: RwLock::new(HashMap::new()),
                 library,
                 settings,
                 hardware: RwLock::new(hardware),
@@ -182,6 +186,20 @@ impl Serving {
                 next_port: AtomicU64::new(0),
                 cancelled: Mutex::new(vec![]),
             }),
+        }
+    }
+
+    /// Register the engines declared by packs (models choose one through their preferences).
+    pub fn set_pack_engines(&self, engines: Vec<Arc<dyn Engine>>) {
+        if let Ok(mut g) = self.inner.packs.write() {
+            *g = engines.into_iter().map(|e| (e.id(), e)).collect();
+        }
+    }
+
+    fn engine_for(&self, id: Option<&str>) -> Result<Arc<dyn Engine>, ApiError> {
+        match id {
+            None | Some("llama.cpp") => Ok(self.inner.engine.clone()),
+            Some(i) => self.inner.packs.read().ok().and_then(|g| g.get(i).cloned()).ok_or_else(|| api(ErrorKind::NotAvailable, format!("the engine pack \"{i}\" is not loaded; fix or remove the model's engine choice in Models"))),
         }
     }
 
@@ -469,7 +487,8 @@ impl Serving {
         let port = self.free_port().await;
         let launch = self.launch_for(&f, context, port);
         self.event(EventKind::EngineStarted, Severity::Info, format!("Loading {id}"));
-        let running = self.inner.engine.start(&launch).await.map_err(|e| {
+        let engine = self.engine_for(prefs.engine.as_deref())?;
+        let running = engine.start(&launch).await.map_err(|e| {
             self.event(EventKind::EngineFailed, Severity::Error, format!("{id}: {e}"));
             match e {
                 EngineError::NotInstalled | EngineError::NotAvailable(_) => api(ErrorKind::Engine, e.to_string()),
@@ -489,6 +508,7 @@ impl Serving {
             active: AtomicUsize::new(0),
             last_used: AtomicU64::new(now_ms()),
             vision,
+            engine: (engine.id(), engine.kind()),
             cold_start_ms: started.elapsed().as_millis() as u64,
             capabilities: library::capabilities(&f),
         });
@@ -578,8 +598,8 @@ impl Serving {
                 LoadedModel {
                     model_id: h.id.to_string(),
                     name: h.id.to_string(),
-                    engine: pitwall_core::mgmt::EngineKind::LlamaCpp,
-                    build: h.running.props.build.clone().unwrap_or_default(),
+                    engine: h.engine.1,
+                    build: h.running.props.build.clone().unwrap_or_else(|| h.engine.0.clone()),
                     state: if busy { HotState::Busy } else { HotState::Ready },
                     ram_bytes: h.ram,
                     vram_bytes: h.vram,

@@ -107,11 +107,16 @@ pub fn gguf(arch: &str) -> Vec<u8> {
 }
 
 pub async fn harness(fail: bool) -> Harness {
-    let dir = tempfile::tempdir().unwrap();
+    harness_in(tempfile::tempdir().unwrap(), fail).await
+}
+
+pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
     let dirs = Dirs::at(dir.path());
     let m = dirs.models().join("o/r");
     std::fs::create_dir_all(&m).unwrap();
-    std::fs::write(m.join("tiny-Q4_K_M.gguf"), gguf("llama")).unwrap();
+    if !m.join("tiny-Q4_K_M.gguf").exists() {
+        std::fs::write(m.join("tiny-Q4_K_M.gguf"), gguf("llama")).unwrap();
+    }
     let starts = Arc::new(AtomicUsize::new(0));
     let engine: Arc<dyn Engine> = Arc::new(FakeEngine {
         starts: starts.clone(),

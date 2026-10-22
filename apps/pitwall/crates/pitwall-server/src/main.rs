@@ -9,11 +9,16 @@ use std::net::SocketAddr;
 #[tokio::main]
 async fn main() {
     let mut args = std::env::args().skip(1);
-    let (mut port, mut dir) = (None::<u16>, None::<String>);
+    let (mut port, mut dir, mut fake) = (None::<u16>, None::<String>, false);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--port" => port = args.next().and_then(|p| p.parse().ok()),
             "--data-dir" => dir = args.next(),
+            // Test fixture: act as an OpenAI-compatible engine with canned answers (used by engine pack tests).
+            "--fake-engine" => fake = true,
+            "--host" | "--model" => {
+                args.next();
+            }
             "--version" => {
                 println!("pitwall-server {}", env!("CARGO_PKG_VERSION"));
                 return;
@@ -27,6 +32,13 @@ async fn main() {
                 std::process::exit(2);
             }
         }
+    }
+    if fake {
+        if let Err(e) = pitwall_server::fake_engine::serve(port.unwrap_or(0)).await {
+            eprintln!("fake engine: {e}");
+            std::process::exit(1);
+        }
+        return;
     }
     let dirs = dir.map_or_else(Dirs::for_user, Dirs::at);
     let st = AppState::open(dirs, None).await;

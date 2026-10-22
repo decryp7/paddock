@@ -116,7 +116,7 @@ export interface LoadedModel {
   capabilities: Capability[];
 }
 
-export type EngineKind = 'llama.cpp' | 'mlx' | 'vllm' | 'whisper.cpp';
+export type EngineKind = 'llama.cpp' | 'mlx' | 'vllm' | 'whisper.cpp' | 'pack';
 
 export type Availability =
   | { state: 'available' }

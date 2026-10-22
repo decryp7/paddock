@@ -214,6 +214,9 @@ pub enum EngineKind {
     /// whisper.cpp.
     #[serde(rename = "whisper.cpp")]
     WhisperCpp,
+    /// A declarative engine pack (ADR 0011).
+    #[serde(rename = "pack")]
+    Pack,
 }
 
 /// A loaded model (`LoadedModel`).
