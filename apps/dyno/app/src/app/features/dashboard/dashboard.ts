@@ -62,7 +62,7 @@ import { TopApps } from './top-apps';
         <dy-disks-tile />
 
         @if (showHero()) {
-          <dy-health-hero class="hero" />
+          <dy-health-hero class="health" />
         }
         <dy-diagnosis-card class="diag" />
 
@@ -89,14 +89,14 @@ import { TopApps } from './top-apps';
     .page-head p { color: var(--text-3); }
     .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--sp-4); margin-top: var(--sp-4); align-items: stretch; }
     .grid > * { grid-column: span 4; min-width: 0; }
-    .grid > .hero { grid-column: span 7; }
+    .grid > .health { grid-column: span 7; }
     .grid > .diag { grid-column: span 5; }
     .grid.no-hero > .diag { grid-column: span 12; }
     .grid > dy-network-tile, .grid > dy-gpu-tile, .grid > dy-battery-tile, .grid > dy-sensors-tile { grid-column: span 3; }
     .grid > .hist { grid-column: span 8; }
     .grid > .side { grid-column: span 4; display: grid; gap: var(--sp-4); align-content: start; }
     @container dash (max-width: 1060px) {
-      .grid > .hero, .grid > .diag, .grid > .hist, .grid > .side { grid-column: span 12; }
+      .grid > .health, .grid > .diag, .grid > .hist, .grid > .side { grid-column: span 12; }
       .grid > dy-cpu-tile, .grid > dy-memory-tile, .grid > dy-disks-tile { grid-column: span 6; }
       .grid > dy-disks-tile { grid-column: span 12; }
       .grid > dy-network-tile, .grid > dy-gpu-tile, .grid > dy-battery-tile, .grid > dy-sensors-tile { grid-column: span 6; }

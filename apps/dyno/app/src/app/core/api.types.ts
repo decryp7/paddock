@@ -892,3 +892,112 @@ export interface TrayItems {
   version: number;
   items: TrayItem[];
 }
+
+// ---------------------------------------------------------------------------------------------------------- alarms
+// ISA-18.2 style alarms. Requests (agent protocol, camelCase): `alarms {filter}` -> Alarm[], `alarmStats` -> AlarmStats,
+// `acknowledgeAlarms {ids}`, `shelveAlarm {id, until}`, `unshelveAlarm {id}`, `muteRule {rule, muted}`,
+// `noteAlarm {id, text}` (each answers the changed Alarm[]), `alarmHistory {alarmId, limit}` -> AlarmChange[].
+// Pushed message: `alarm` carrying an AlarmChange. `Settings.alarms` is an AlarmConfig.
+
+export type AlarmState = 'active' | 'acknowledged' | 'cleared' | 'clearedUnacknowledged';
+export type ShelveFor = 'oneHour' | 'untilTomorrow' | 'untilReboot' | { custom: Timestamp };
+export type Shelf = { until: Timestamp } | 'untilReboot';
+
+export interface AlarmNote {
+  at: Timestamp;
+  text: string;
+}
+
+export interface Alarm {
+  id: number;
+  /** The source rule, e.g. "alert:lowDisk" (what muting and statistics group by). */
+  rule: string;
+  /** The condition's identity; one open alarm per key. */
+  key: string;
+  severity: Severity;
+  state: AlarmState;
+  title: string;
+  detail: string;
+  /** Open the chart around this time. */
+  firstSeen: Timestamp;
+  lastSeen: Timestamp;
+  repeatCount: number;
+  currentValue: number | null;
+  /** The metric to chart (null when none). */
+  metric: WidgetMetric | null;
+  notes: AlarmNote[];
+  acknowledgedAt: Timestamp | null;
+  clearedAt: Timestamp | null;
+  shelved: Shelf | null;
+  muted: boolean;
+  chattering: boolean;
+  expiresAt: Timestamp | null;
+}
+
+export interface AlarmFilter {
+  /** Empty means every open alarm. */
+  states: AlarmState[];
+  minSeverity: Severity | null;
+  rule: string | null;
+  includeShelved: boolean;
+  /** 1..500; 0 means 100. */
+  limit: number;
+}
+
+export type AlarmChangeKind =
+  | 'raised'
+  | 'repeated'
+  | 'returned'
+  | 'acknowledged'
+  | 'shelved'
+  | 'unshelved'
+  | 'muted'
+  | 'noted'
+  | 'chattering'
+  | 'pruned';
+
+export interface AlarmChange {
+  kind: AlarmChangeKind;
+  alarm: Alarm;
+  /** Show a desktop notification. */
+  notify: boolean;
+  at: Timestamp;
+}
+
+export interface AlarmQuietHours {
+  enabled: boolean;
+  /** Minutes after local midnight, 0..1439; an end before the start wraps past midnight. */
+  startMinute: number;
+  endMinute: number;
+  criticalBypass: boolean;
+}
+
+export interface AlarmConfig {
+  quiet: AlarmQuietHours;
+  /** 3..50 */
+  chatterTransitions: number;
+  /** 1..240 */
+  chatterWindowMinutes: number;
+  /** 50..5000 */
+  maxAlarms: number;
+  /** 1..90 */
+  keepClearedDays: number;
+  /** Local offset from UTC in minutes (set from `-new Date().getTimezoneOffset()`). */
+  utcOffsetMinutes: number;
+}
+
+export interface AlarmSuggestion {
+  rule: string;
+  kind: 'tune' | 'retire';
+  message: string;
+}
+
+export interface AlarmStats {
+  open: number;
+  unacknowledged: number;
+  chattering: string[];
+  noisiest: { rule: string; occurrences: number }[];
+  meanTimeToAcknowledgeMs: number | null;
+  medianTimeToAcknowledgeMs: number | null;
+  suggestions: AlarmSuggestion[];
+}

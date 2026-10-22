@@ -8,8 +8,10 @@ test.describe('screens', () => {
     await page.goto(url());
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
     const nav = page.getByRole('navigation', { name: /./ }).or(page.locator('aside nav'));
+    await page.getByRole('button', { name: /Coming/ }).click();
     for (const [label, heading] of [
       ['Processes', 'Processes'],
+      ['Inventory', 'Inventory'],
       ['Why slow', 'Why slow'],
       ['CPU taming', 'CPU taming'],
       ['Cleanup', 'Cleanup'],
@@ -25,7 +27,7 @@ test.describe('screens', () => {
 
   test('planned screens say what is coming and show no fake data', async ({ page }) => {
     await page.goto(url('/cleanup'));
-    await expect(page.getByText('Planned')).toBeVisible();
+    await expect(page.getByText('Planned', { exact: true })).toBeVisible();
     await expect(page.getByText('This screen is not built yet')).toBeVisible();
   });
 
@@ -232,5 +234,21 @@ test.describe('native feel', () => {
     expect(await probe(box.x + 12, box.y + 6)).toBe(true);
     await page.keyboard.press('Escape');
     expect(await probe(box.x + box.width + 150, box.y + box.height + 150)).toBe(false);
+  });
+});
+
+test.describe('inventory', () => {
+  test('draws the slots, hints and a table view on a PC with two of four slots filled', async ({ page }) => {
+    await page.goto(url('/inventory', '&mock=windows'));
+    await expect(page.getByRole('img', { name: /2 of 4 memory slots filled/ })).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Upgrade hints' }).getByRole('listitem')).toHaveCount(4);
+    await page.getByRole('button', { name: 'Table' }).click();
+    await expect(page.getByRole('row')).toHaveCount(5);
+  });
+
+  test('Apple silicon shows unified memory that cannot be upgraded', async ({ page }) => {
+    await page.goto(url('/inventory', '&mock=macos'));
+    await expect(page.getByRole('img', { name: /Unified memory/ })).toBeVisible();
+    await expect(page.getByText(/cannot be upgraded/).first()).toBeVisible();
   });
 });

@@ -41,7 +41,7 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
         @if (zoomed()) {
           <button type="button" class="chip-toggle reset" (click)="resetZoom()"><dy-icon name="undo" /> Reset zoom</button>
         }
-        <dy-chart [options]="option()" [label]="chartLabel()" (zoomed)="zoomed.set(true)" style="--chart-h: 360px" />
+        <dy-chart [options]="option()" [label]="chartLabel()" (zoomed)="zoomed.set(true)" style="--chart-h: 430px" />
         <div class="legend" role="group" aria-label="Events on the timeline">
           @for (e of events(); track e.kind) {
             <button type="button" class="chip-toggle" [attr.aria-pressed]="!hidden().has(e.kind)" (click)="toggle(e.kind)" [title]="'Show or hide: ' + label(e.kind)">
@@ -60,7 +60,7 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
     .card { height: 100%; padding-bottom: var(--sp-3); }
     .card-head { padding-bottom: var(--sp-1); }
     dy-async { padding: 0 var(--sp-4); }
-    .chart-skeleton { height: 360px; margin-top: var(--sp-2); }
+    .chart-skeleton { height: 430px; margin-top: var(--sp-2); }
     .reset { justify-self: start; margin-bottom: var(--sp-1); }
     .legend { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding-top: var(--sp-1); }
     .chip-toggle { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--surface-inset); color: var(--text-2); font: var(--fs-xs) var(--font-sans); cursor: default; }

@@ -82,7 +82,7 @@ import { FixDialog } from './fix-dialog';
     .trend { color: var(--text-2); font-size: var(--fs-sm); }
     .reasons { display: grid; gap: var(--sp-2); min-width: 0; }
     ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); }
-    li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
+    li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-1); border-bottom: 1px solid var(--border-subtle); }
     .txt { flex: 1; min-width: 0; display: grid; }
     .t { font-weight: var(--fw-medium); }
     .t .badge { margin-right: 4px; vertical-align: 1px; }

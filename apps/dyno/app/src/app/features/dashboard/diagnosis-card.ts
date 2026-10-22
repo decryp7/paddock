@@ -79,7 +79,7 @@ import { DiagnosisStore } from '../../state/diagnosis.store';
     .body { padding: var(--sp-3) var(--sp-4) var(--sp-4); display: grid; gap: var(--sp-3); align-content: start; }
     .idle { color: var(--text-2); max-width: 62ch; }
     .headline { font: var(--fw-semibold) var(--fs-lg) / 1.3 var(--font-display); }
-    .cause { display: flex; gap: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-inset); }
+    .cause { display: flex; gap: var(--sp-3); padding: var(--sp-3); border-radius: var(--r-md); background: var(--surface-inset); }
     .ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--r-md); background: var(--accent-soft); color: var(--accent-text); flex: none; }
     .txt { display: grid; gap: var(--sp-1); min-width: 0; }
     .txt > span { color: var(--text-2); font-size: var(--fs-sm); }

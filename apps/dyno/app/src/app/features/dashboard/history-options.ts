@@ -65,8 +65,8 @@ export function historyOption(history: History, t: ThemeTokens, hidden: Readonly
     animationDuration: 250,
     textStyle: { fontFamily: FONT },
     grid: [
-      { left: 40, right: 16, top: 34, bottom: 66 },
-      { left: 40, right: 16, height: 14, bottom: 40 },
+      { left: 40, right: 16, top: 34, bottom: 58 },
+      { left: 40, right: 16, height: 14, bottom: 14 },
     ],
     legend: { top: 0, left: 0, itemWidth: 14, itemHeight: 3, itemGap: 18, textStyle: { color: t.text2, fontFamily: FONT, fontSize: 12 }, icon: 'roundRect', selectedMode: true, data: ['CPU', 'Memory'] },
     tooltip: {

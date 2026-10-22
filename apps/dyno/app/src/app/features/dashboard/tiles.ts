@@ -163,10 +163,10 @@ export class MemoryTile {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-tile title="Disk" icon="disk" [ready]="live.connected()">
+      @if (multi()) {
+        <span badge class="badge outline">{{ n(sys()!.disks.length) }} volumes</span>
+      }
       @if (sys(); as s) {
-        @if (s.disks.length > 1) {
-          <span badge class="badge outline">{{ n(s.disks.length) }} volumes</span>
-        }
         <div class="hero"><b>{{ rd(s.diskIo.readBps)[0] }}</b><small>{{ rd(s.diskIo.readBps)[1] }} read</small></div>
         <dy-sparkline [values]="live.series().diskRead" [values2]="live.series().diskWrite" color="var(--chart-1)" color2="var(--chart-2)" label="Disk read and write over the last minute" style="--spark-h: 32px" />
         <dl class="caps">
@@ -199,6 +199,7 @@ export class DisksTile {
   protected readonly pct = formatPercent;
   protected readonly rate = formatRate;
   protected readonly n = formatCount;
+  protected readonly multi = computed(() => (this.sys()?.disks.length ?? 0) > 1);
   protected readonly rd = (bps: number) => parts(formatRate(bps));
   protected readonly used = (total: number, free: number) => (total > 0 ? ((total - free) / total) * 100 : 0);
   protected readonly tone = (total: number, free: number) => usedTone(this.used(total, free));
