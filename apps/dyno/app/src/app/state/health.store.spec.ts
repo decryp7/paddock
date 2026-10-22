@@ -110,4 +110,15 @@ describe('HealthStore', () => {
     expect(store.startup()).toEqual(snapshot);
     expect(notifier.toasts().at(-1)?.tone).toBe('bad');
   });
+
+  it('an engine without tuning gives an empty list, not an error with a Retry', async () => {
+    const mock = new MockBackend({ latencyMs: 0 });
+    vi.spyOn(mock, 'tuning').mockRejectedValue({ code: 'unsupported', message: 'Tuning is not built yet.' });
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+    const store = TestBed.inject(HealthStore);
+    await store.loadTuning();
+    expect(store.tuningError()).toBeNull();
+    expect(store.tuningLoaded()).toBe(true);
+    expect(store.tuning()).toEqual([]);
+  });
 });

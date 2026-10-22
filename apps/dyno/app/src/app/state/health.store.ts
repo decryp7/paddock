@@ -55,7 +55,10 @@ export const HealthStore = signalStore(
         try {
           patchState(store, { tuning: await backend.tuning(), tuningLoaded: true });
         } catch (e) {
-          patchState(store, { tuningError: toCommandError(e) });
+          const err = toCommandError(e);
+          // An engine that does not offer tuning yet is an empty list, not a failure with a Retry that can never work.
+          if (err.code === 'unsupported') patchState(store, { tuning: [], tuningLoaded: true });
+          else patchState(store, { tuningError: err });
         }
       },
       async loadStartup(): Promise<void> {
