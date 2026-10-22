@@ -93,10 +93,20 @@ fn rpc(m: &str) -> String {
     format!("/mgmt/v1/rpc/{m}")
 }
 
+/// The CLI with an empty environment, except what Windows sockets need to start (without SystemRoot every connect fails).
+fn bare(args: &[&str]) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_pitwall"));
+    c.args(args).env_clear();
+    for k in ["SystemRoot", "windir"] {
+        if let Some(v) = std::env::var_os(k) {
+            c.env(k, v);
+        }
+    }
+    c
+}
+
 fn pitwall(home: &std::path::Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_pitwall"))
-        .args(args)
-        .env_clear()
+    bare(args)
         .env("PITWALL_HOME", home)
         .env("PITWALL_ADMIN_KEY", ADMIN)
         .env("PITWALL_API_KEY", APP_KEY)
@@ -482,9 +492,7 @@ fn chat_streams_to_stdout_with_the_app_key() {
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out.stderr).contains("pitwall models"));
     // stdin is the prompt when none is given
-    let mut child = Command::new(env!("CARGO_BIN_EXE_pitwall"))
-        .args(["chat", "fast", "--port", &port])
-        .env_clear()
+    let mut child = bare(&["chat", "fast", "--port", &port])
         .env("PITWALL_HOME", h.path())
         .env("PITWALL_API_KEY", APP_KEY)
         .stdin(Stdio::piped())
@@ -499,9 +507,7 @@ fn chat_streams_to_stdout_with_the_app_key() {
     // an empty stdin is a usage error; a missing key is explained
     let out = pitwall(h.path(), &["chat", "fast", "--port", &port]);
     assert_eq!(out.status.code(), Some(2));
-    let out = Command::new(env!("CARGO_BIN_EXE_pitwall"))
-        .args(["chat", "fast", "hi", "--port", &port])
-        .env_clear()
+    let out = bare(&["chat", "fast", "hi", "--port", &port])
         .env("PITWALL_HOME", h.path())
         .output()
         .unwrap();
