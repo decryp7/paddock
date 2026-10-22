@@ -1,7 +1,7 @@
 # Pitwall on Windows
 
 Pitwall on Windows is the app (tray icon and window) plus the Pitwall server running as a **Windows service named `Pitwall`**,
-so it keeps serving with the window closed and, if you choose, before anyone logs on.
+so it keeps serving with the window closed. The service (LocalSystem) is a supervisor: it starts the server inside the logged-on user's session (chosen with `WTSEnumerateSessionsW`: active, then console, then lowest id) and restarts it when it exits or the session changes, so the data stays in your own `%APPDATA%\Pitwall`.
 
 > **Not yet verified on a real Windows machine.** The Windows code type-checks and its pure parts are tested, and the Windows CI
 > runner builds it, but no real run (engine install, model, service, installer) has been done. CUDA and Vulkan builds are
@@ -24,9 +24,9 @@ so it keeps serving with the window closed and, if you choose, before anyone log
 - **Recovery:** if it fails the Service Control Manager restarts it after 10 seconds, then 60 seconds, then 5 minutes (repeated),
   and forgets earlier failures after 24 hours.
 - The server also restarts onto a new program after an app update, only when idle.
-- Engines are children of the service, started with no console window and at below-normal priority, and killed with it. Windows
+- Engines are children of the server (which runs in your session), started with no console window and at below-normal priority, and killed with it. Windows
   adds a `conhost.exe` child to console programs; do not count that as a model process.
-- Check it: `sc.exe query Pitwall`, `services.msc`. Logs: `%APPDATA%\Pitwall\logs\`.
+- Check it: `sc.exe query Pitwall`, `services.msc`. The supervisor's log is `%ProgramData%\Pitwall\logs\service.log`; the server's logs are in `%APPDATA%\Pitwall\logs\`.
 - Over **Remote Desktop** your session is not the console session; the window works in your own session and the service does not
   depend on either.
 
