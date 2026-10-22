@@ -380,7 +380,9 @@ jobs:
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
-          BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+          # The public address installed apps download from. Inside the runners github.server_url is Gitea's internal
+          # http address, which the updater must never be given.
+          BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
           node --test scripts/release/latest-json.test.mjs
           if ! find artifacts -name '*.sig' | grep -q .; then
