@@ -19,6 +19,19 @@ pub fn get(shared: &Shared) -> SystemInventory {
     if let Some(i) = lock(&shared.core).inventory.clone() {
         return i;
     }
+    // One reader at a time (the warm-up thread and a request can arrive together), and wait a moment for the first
+    // sample so the volumes are known; otherwise the two would cache different answers.
+    static GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = GATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(i) = lock(&shared.core).inventory.clone() {
+        return i;
+    }
+    for _ in 0..30 {
+        if lock(&shared.core).recent.back().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     let (total, disks) = {
         let core = lock(&shared.core);
         let sample = core.recent.back();
