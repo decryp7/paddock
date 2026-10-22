@@ -104,11 +104,11 @@ import { KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS, SIZE_LABEL,
     .empty { display: grid; justify-items: center; gap: var(--sp-1); padding: var(--sp-10); color: var(--text-2); }
     .empty dy-icon { --icon-size: 28px; color: var(--text-3); }
     .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--sp-3); align-items: stretch; }
-    .cell { position: relative; min-width: 0; display: grid; }
+    .cell { position: relative; min-width: 0; display: grid; grid-template-rows: 1fr auto; gap: var(--sp-1); }
     .cell dy-widget { height: 100%; }
     .editing .cell dy-widget { outline: 1px dashed var(--border-strong); outline-offset: 2px; }
-    .edit { position: absolute; left: var(--sp-2); right: var(--sp-2); bottom: var(--sp-2); display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--overlay-bg); box-shadow: var(--shadow-2); }
-    .edit .seg { margin: 0 2px; } .edit .select { width: 130px; }
+    .edit { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--overlay-bg); box-shadow: var(--shadow-2); }
+    .edit .seg { margin: 0 2px; } .edit .select { width: 120px; max-width: 100%; }
     .grab { cursor: grab; }
     .cdk-drag-preview { box-shadow: var(--shadow-3); border-radius: var(--r-lg); }
     .cdk-drag-placeholder { opacity: 0.35; }

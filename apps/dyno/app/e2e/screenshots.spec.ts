@@ -106,7 +106,9 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     ready: async (page) => {
       const section = page.getByRole('region', { name: 'Menu bar items' });
       await section.getByRole('button', { name: 'Add item' }).click();
+      await expect(section.getByRole('listitem')).toHaveCount(3);
       await section.getByRole('button', { name: 'Add item' }).click();
+      await expect(section.getByRole('listitem')).toHaveCount(4);
       await section.getByLabel('Style of item 1').selectOption('graphAndNumber');
       await section.getByLabel('Metric of item 2').selectOption('memory');
       await section.getByLabel('Style of item 2').selectOption('ring');

@@ -1047,3 +1047,40 @@ export interface RecorderSnapshot {
   /** About one per second, oldest first (thinned if the capture was large). */
   samples: RecorderSample[];
 }
+
+// ------------------------------------------------------------------------------------------------------ diagnostics
+// Agent requests: `diagnosticsPreview` -> BundlePreview (nothing is written), `saveDiagnostics {path}` -> SavedDiagnostics.
+// The path comes from the user's save dialog: absolute, ending in `.zip`, in an existing folder (the engine re-checks).
+
+export interface RedactionCounts {
+  homePaths: number;
+  profilePaths: number;
+  machineNames: number;
+  userNames: number;
+  emails: number;
+  ipAddresses: number;
+}
+
+export interface BundleFileInfo {
+  path: string;
+  description: string;
+  bytes: number;
+}
+
+export interface BundlePreview {
+  /** Every file with its size, the manifest included. */
+  files: BundleFileInfo[];
+  totalBytes: number;
+  redactions: RedactionCounts;
+}
+
+export interface SavedDiagnostics {
+  path: string;
+  bytes: number;
+  files: number;
+}
+
+// ===================================================================================================================
+// END rust-agent additions. Also appended to `Settings` (all optional in the JSON): dashboard, trayItems, alarms,
+// flightRecorder (see the widgets, alarms and recorder blocks above).
+// ===================================================================================================================
