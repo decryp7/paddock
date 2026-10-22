@@ -403,7 +403,6 @@ or other shared OS services must poll rarely or use change notifications.
 ## Later (after v1)
 <a id="after-v1"></a>
 
-- **Prometheus `/metrics` endpoint** on the local API (loopback, token-authenticated, text exposition format, off by default). Moved here by the user's decision: Dyno is a local tool, so it is not built now.
 
 Not part of v1; anything new goes here.
 
