@@ -3,6 +3,7 @@
 //! not built yet answer `Unsupported` with a message saying so.
 
 use crate::agent::{lock, now, Shared, FACTS_TTL};
+use dyno_core::alarms::{Alarm, AlarmEvent, ShelveFor};
 use dyno_core::activity::{inverse, undo_state, ActivityEntry, ActivityKind, Previous, UndoRecord, UndoState};
 use dyno_core::anomaly;
 use dyno_core::diagnosis;
@@ -121,6 +122,8 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::SaveSettings { settings } => {
             let mut core = lock(&shared.core);
             core.settings = settings.normalised();
+            let alarm_config = core.settings.alarms;
+            core.alarms.set_config(alarm_config);
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
@@ -129,6 +132,50 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         }
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
         Request::Inventory => Ok(Reply::Inventory(Box::new(crate::inventory::get(shared)))),
+        Request::Alarms { filter } => {
+            let t = now();
+            Ok(Reply::Alarms(lock(&shared.core).alarms.list(&filter, t)))
+        }
+        Request::AlarmStats => {
+            let t = now();
+            Ok(Reply::AlarmStats(Box::new(lock(&shared.core).alarms.stats(t))))
+        }
+        Request::AcknowledgeAlarms { ids } => {
+            if ids.is_empty() || ids.len() > 500 {
+                return Err(bad("Choose between 1 and 500 alarms to acknowledge."));
+            }
+            alarm_event(shared, AlarmEvent::Acknowledge { ids, at: now() })
+        }
+        Request::ShelveAlarm { id, until } => {
+            let t = now();
+            if let ShelveFor::Custom(end) = until {
+                if end <= t {
+                    return Err(bad("Choose a time in the future to shelve the alarm until."));
+                }
+            }
+            known_alarm(shared, id)?;
+            alarm_event(shared, AlarmEvent::Shelve { id, how: until, at: t })
+        }
+        Request::UnshelveAlarm { id } => {
+            known_alarm(shared, id)?;
+            alarm_event(shared, AlarmEvent::Unshelve { id })
+        }
+        Request::MuteRule { rule, muted } => {
+            if rule.trim().is_empty() || rule.chars().count() > dyno_core::alarms::MAX_TEXT {
+                return Err(bad("Give the rule to mute (up to 200 characters)."));
+            }
+            alarm_event(shared, AlarmEvent::Mute { rule, muted })
+        }
+        Request::NoteAlarm { id, text } => {
+            if text.trim().is_empty() {
+                return Err(bad("Write something in the note."));
+            }
+            known_alarm(shared, id)?;
+            alarm_event(shared, AlarmEvent::Note { id, text, at: now() })
+        }
+        Request::AlarmHistory { alarm_id, limit } => Ok(Reply::AlarmChanges(
+            lock(&shared.core).store.alarm_events(alarm_id, limit).map_err(internal)?,
+        )),
         Request::Health => Ok(Reply::Health(Box::new(health(shared)?))),
         Request::StartupEntries => Ok(Reply::Startup(lock(&shared.ports.startup).list()?)),
         Request::SetStartupState { id, state } => set_startup(shared, &id, state).map(Reply::Activity),
@@ -145,6 +192,26 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Tuning | Request::ApplyTuning { .. } | Request::RevertTuning { .. } => Err(not_built("Tuning")),
         Request::WeeklyReport => Err(not_built("The weekly report")),
     }
+}
+
+fn known_alarm(shared: &Shared, id: u64) -> Result<(), AgentError> {
+    if lock(&shared.core).alarms.exists(id) {
+        Ok(())
+    } else {
+        Err(AgentError::new(ErrorCode::NotFound, "That alarm is no longer in the list."))
+    }
+}
+
+/// Applies an alarm event, pushes its changes and answers the changed alarms.
+fn alarm_event(shared: &Shared, event: AlarmEvent) -> Answer {
+    let changes = {
+        let mut core = lock(&shared.core);
+        let core = &mut *core;
+        core.alarms.apply(&core.store, event)
+    };
+    let alarms: Vec<Alarm> = changes.iter().map(|c| c.alarm.clone()).collect();
+    crate::sampler::push_alarm_changes(shared, changes);
+    Ok(Reply::Alarms(alarms))
 }
 
 fn subscribe(shared: &Arc<Shared>, conn: &Conn, detail: LiveDetail) -> Answer {

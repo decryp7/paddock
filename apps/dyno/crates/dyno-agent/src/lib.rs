@@ -3,6 +3,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod agent;
+pub mod alarms;
 pub mod cleanup;
 pub mod cli;
 pub mod discovery;

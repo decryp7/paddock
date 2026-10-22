@@ -161,6 +161,8 @@ pub struct Settings {
     pub dashboard: crate::widgets::DashboardLayout,
     /// The tray / menu-bar items.
     pub tray_items: crate::widgets::TrayItems,
+    /// Alarm behaviour (quiet hours, chatter detection, retention).
+    pub alarms: crate::alarms::AlarmConfig,
 }
 
 impl Default for Settings {
@@ -177,6 +179,7 @@ impl Default for Settings {
             web_api: WebApi::default(),
             dashboard: Default::default(),
             tray_items: Default::default(),
+            alarms: Default::default(),
         }
     }
 }
@@ -200,6 +203,7 @@ impl Settings {
         self.web_api.port = self.web_api.port.max(1024);
         self.dashboard = self.dashboard.normalised();
         self.tray_items = self.tray_items.normalised();
+        self.alarms = self.alarms.clamped();
         self
     }
 }

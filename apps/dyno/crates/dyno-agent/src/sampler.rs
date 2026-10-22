@@ -182,6 +182,8 @@ impl Sampler {
         let groups = core.latest.groups.clone();
         let new_alerts = core.alerts.tick(&settings, sample, &groups, &[]);
         for a in new_alerts {
+            let changes = core.alarms.alert(&core.store, &a);
+            push_alarm_changes(shared, changes);
             if core.store.put_alert(&a).is_ok() {
                 let _ = core.store.put_event(&TimelineEvent {
                     at: a.at,
@@ -191,6 +193,8 @@ impl Sampler {
                 shared.broadcast(&Message::Alert(a));
             }
         }
+        let ticked = core.alarms.tick(&core.store, t);
+        push_alarm_changes(shared, ticked);
         let pressure = sample
             .memory
             .pressure
@@ -218,6 +222,13 @@ impl Sampler {
 }
 
 fn drop_pressure_unused(_: MemoryPressure) {}
+
+/// Pushes alarm changes to every connected app.
+pub fn push_alarm_changes(shared: &Shared, changes: Vec<dyno_core::alarms::AlarmChange>) {
+    for c in changes {
+        shared.broadcast(&Message::Alarm(c));
+    }
+}
 
 fn top(groups: &[AppGroup], key: impl Fn(&AppGroup) -> f64) -> Vec<AppGroup> {
     let mut v: Vec<AppGroup> = groups.to_vec();
@@ -310,6 +321,11 @@ pub fn apply_commands(shared: &Arc<Shared>, commands: Vec<Command>, t: Timestamp
             }
             Command::Notify { rule_name, app, cpu } => {
                 let mut core = lock(&shared.core);
+                let changes = {
+                    let core = &mut *core;
+                    core.alarms.rule_notify(&core.store, &rule_name, &app, t)
+                };
+                push_alarm_changes(shared, changes);
                 let entry = core.log(
                     t,
                     ActivityKind::Alert,

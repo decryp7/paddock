@@ -102,6 +102,8 @@ pub struct Core {
     pub counter: u64,
     /// The hardware inventory, read once (at start or on first request).
     pub inventory: Option<dyno_core::inventory::SystemInventory>,
+    /// Alarms: the engine and its persistence.
+    pub alarms: crate::alarms::AlarmCentre,
 }
 
 impl Core {
@@ -238,6 +240,7 @@ impl Shared {
         });
         notes.extend(warn);
         let rules = rules.unwrap_or_default();
+        let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms);
         let mut core = Core {
             store,
             settings,
@@ -251,6 +254,7 @@ impl Shared {
             facts: None,
             counter: 0,
             inventory: None,
+            alarms,
         };
         for n in notes {
             core.log(

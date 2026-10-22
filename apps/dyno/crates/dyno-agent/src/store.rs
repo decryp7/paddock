@@ -1,6 +1,10 @@
 //! The history database (SQLite, ADR 0008): points per tier, per-app minutes, disk free space, timeline events,
 //! the activity log, alerts, snapshots, boots, app starts and crashes, and health scores.
 //!
+//! Tables added after v1 (all `IF NOT EXISTS`, so the schema number stays 1): `alarms` and `alarm_events`
+//! ([`alarms`]), `recorder_snapshots` ([`recorder`]). Names reserved for later work, not created yet: `baselines`
+//! (per-metric time-of-week learned statistics), `ssd_wear` and `battery_trend` (slow health trends).
+//!
 //! The database is a cache of the past, never the only copy of anything the user made: a damaged file is moved
 //! aside and a fresh one created. Values are JSON text (small, debuggable, versioned by serde defaults).
 
@@ -15,6 +19,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+
+mod alarms;
+mod recorder;
 
 /// The schema version.
 pub const SCHEMA: i64 = 1;
@@ -132,12 +139,16 @@ impl Store {
     pub fn memory() -> Result<Store> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA_SQL)?;
+        conn.execute_batch(alarms::SCHEMA_SQL)?;
+        conn.execute_batch(recorder::SCHEMA_SQL)?;
         Ok(Store { conn })
     }
 
     fn try_open(path: &Path) -> Result<Store> {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA_SQL)?;
+        conn.execute_batch(alarms::SCHEMA_SQL)?;
+        conn.execute_batch(recorder::SCHEMA_SQL)?;
         let version: Option<String> = conn
             .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| r.get(0))
             .optional()?;
@@ -532,6 +543,7 @@ impl Store {
         )?;
         self.conn
             .execute("DELETE FROM activity WHERE at < ?1", [now.minus(400 * DAY).millis()])?;
+        self.prune_alarm_events(now)?;
         Ok(())
     }
 }

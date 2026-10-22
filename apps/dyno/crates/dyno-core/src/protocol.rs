@@ -202,6 +202,51 @@ pub enum Request {
     Shutdown,
     /// The hardware inventory (memory slots, CPU, disks); read once and cached by the agent. Appended.
     Inventory,
+    /// Alarms matching a filter, newest first. Appended.
+    Alarms {
+        /// Which alarms.
+        filter: crate::alarms::AlarmFilter,
+    },
+    /// Alarm statistics (noisiest rules, time to acknowledge, suggestions). Appended.
+    AlarmStats,
+    /// Acknowledge alarms; answers the changed alarms. Appended.
+    AcknowledgeAlarms {
+        /// The alarm ids.
+        ids: Vec<u64>,
+    },
+    /// Shelve an alarm; answers the changed alarm. Appended.
+    ShelveAlarm {
+        /// The alarm.
+        id: u64,
+        /// For how long.
+        until: crate::alarms::ShelveFor,
+    },
+    /// Bring a shelved alarm back. Appended.
+    UnshelveAlarm {
+        /// The alarm.
+        id: u64,
+    },
+    /// Mute or unmute every alarm of a rule. Appended.
+    MuteRule {
+        /// The rule.
+        rule: String,
+        /// Muted (true) or not.
+        muted: bool,
+    },
+    /// Attach a note to an alarm. Appended.
+    NoteAlarm {
+        /// The alarm.
+        id: u64,
+        /// The text.
+        text: String,
+    },
+    /// The change log of an alarm (all alarms when absent), newest first. Appended.
+    AlarmHistory {
+        /// The alarm.
+        alarm_id: Option<u64>,
+        /// At most this many (1-500).
+        limit: u32,
+    },
 }
 
 /// Dyno's own cost.
@@ -415,6 +460,12 @@ pub enum Reply {
     Plugins(Vec<PluginInfo>),
     /// The hardware inventory. Appended.
     Inventory(Box<crate::inventory::SystemInventory>),
+    /// Alarms. Appended.
+    Alarms(Vec<crate::alarms::Alarm>),
+    /// Alarm statistics. Appended.
+    AlarmStats(Box<crate::alarms::AlarmStats>),
+    /// Alarm changes. Appended.
+    AlarmChanges(Vec<crate::alarms::AlarmChange>),
 }
 
 impl Reply {
@@ -447,6 +498,9 @@ impl Reply {
             Reply::Settings(x) => v(x),
             Reply::Plugins(x) => v(x),
             Reply::Inventory(x) => v(x),
+            Reply::Alarms(x) => v(x),
+            Reply::AlarmStats(x) => v(x),
+            Reply::AlarmChanges(x) => v(x),
         }
     }
 }
@@ -524,6 +578,8 @@ pub enum Message {
     Alert(Alert),
     /// Agent → app: a new activity entry.
     Activity(ActivityEntry),
+    /// Agent → app: an alarm changed (raised, acknowledged, cleared...). Appended.
+    Alarm(crate::alarms::AlarmChange),
 }
 
 #[cfg(test)]
@@ -600,6 +656,9 @@ mod tests {
             Reply::Plugins(vec![]),
             Reply::Inventory(Box::new(crate::inventory::SystemInventory::new(String::new(), None, Default::default(), crate::inventory::MemoryLayout::unified(1, Default::default(), None), vec![]))),
             Reply::Rules(Box::default()),
+            Reply::Alarms(vec![]),
+            Reply::AlarmStats(Box::default()),
+            Reply::AlarmChanges(vec![]),
         ];
         for r in all {
             assert!(r.into_json().is_ok());

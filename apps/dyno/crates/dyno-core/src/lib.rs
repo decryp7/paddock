@@ -5,6 +5,7 @@
 
 pub mod activity;
 pub mod alerts;
+pub mod alarms;
 pub mod anomaly;
 pub mod cleanup;
 pub mod diagnosis;
