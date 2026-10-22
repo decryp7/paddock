@@ -615,4 +615,17 @@ describe('mock CPU layout', () => {
     expect(c.min).toBeLessThanOrEqual(c.avg);
     expect(c.avg).toBeLessThanOrEqual(c.max);
   });
+
+  it('rules answers a copy, and switching a rule off releases what it had in effect', async () => {
+    const b = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
+    const set = await b.rules();
+    set.paused = true;
+    expect((await b.rules()).paused).toBe(false);
+    expect(b.liveUpdate('summary').activeActions).toHaveLength(1);
+    set.paused = false;
+    set.rules = set.rules.map((r) => ({ ...r, enabled: false }));
+    await b.saveRules(set);
+    expect((await b.rules()).rules.every((r) => !r.enabled)).toBe(true);
+    expect(b.liveUpdate('summary').activeActions).toHaveLength(0);
+  });
 });

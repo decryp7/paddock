@@ -3,7 +3,7 @@ import { patchState, signalStore, withComputed, withHooks, withMethods, withStat
 import type { Alarm, AlarmChange, AlarmFilter, AlarmStats, CommandError, Settings, ShelveFor } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { mergeAlarms, needsAcknowledge, prependChange, sortOpen } from '../features/alarms/alarms-model';
+import { mergeAlarms, needsAcknowledge, prependChange, sortOpen } from './alarm-list';
 import { Notifier } from '../shared/notifier';
 import { SettingsStore } from './settings.store';
 

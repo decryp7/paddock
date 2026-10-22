@@ -1,5 +1,9 @@
 import type { Alarm, AlarmChange, AlarmConfig, AlarmQuietHours, AlarmState, CustomAlertRule, CustomMetric, Severity, Shelf } from '../../core/api.types';
 import { formatClock, formatDate } from '../../shared/format';
+import { needsAcknowledge } from '../../state/alarm-list';
+
+// The open-list helpers live with the state (the store uses them); re-exported for the page code and its specs.
+export { mergeAlarms, needsAcknowledge, prependChange, sortOpen } from '../../state/alarm-list';
 
 /** The metrics a custom rule can watch, in the order the dialog lists them. */
 export const CUSTOM_METRICS: readonly { id: CustomMetric; label: string; unit: '%' | '°C'; hint: string }[] = [
@@ -102,10 +106,6 @@ export function stateTone(s: AlarmState): 'bad' | 'warn' | 'calm' {
   return s === 'active' ? 'bad' : s === 'clearedUnacknowledged' ? 'warn' : 'calm';
 }
 
-export function needsAcknowledge(a: Alarm): boolean {
-  return a.state === 'active' || a.state === 'clearedUnacknowledged';
-}
-
 export function isShelved(shelf: Shelf | null, now: number): boolean {
   return shelf === 'untilReboot' || (shelf !== null && shelf.until > now);
 }
@@ -150,19 +150,3 @@ export function changeLabel(c: AlarmChange): string {
   }
 }
 
-/** Open alarms, most recently seen first. */
-export function sortOpen(alarms: readonly Alarm[]): Alarm[] {
-  return [...alarms].sort((a, b) => b.lastSeen - a.lastSeen || b.id - a.id);
-}
-
-/** Replaces (or adds) the changed alarms; cleared ones leave the open list. */
-export function mergeAlarms(open: readonly Alarm[], changed: readonly Alarm[]): Alarm[] {
-  const ids = new Set(changed.map((a) => a.id));
-  return sortOpen([...open.filter((a) => !ids.has(a.id)), ...changed.filter((a) => a.state !== 'cleared')]);
-}
-
-/** Puts a change on top of a newest-first log unless the same change is already there. */
-export function prependChange(log: readonly AlarmChange[], c: AlarmChange, limit: number): AlarmChange[] {
-  if (log.some((x) => x.kind === c.kind && x.at === c.at && x.alarm.id === c.alarm.id)) return [...log];
-  return [c, ...log].sort((a, b) => b.at - a.at).slice(0, limit);
-}

@@ -23,6 +23,9 @@ import { TrayItemsEditor } from './tray-items-editor';
           <h1>Settings</h1>
           <p>Dyno measures first. Everything that changes your PC is off until you turn it on.</p>
         </div>
+        @if (store.saveError(); as failed) {
+          <span class="save-error" role="alert">{{ failed.message }}</span>
+        }
         @if (dirty()) {
           <button type="button" class="btn" (click)="revert()">Discard changes</button>
           <button type="button" class="btn primary" [disabled]="store.saving()" (click)="save()">Save changes</button>
@@ -180,6 +183,7 @@ import { TrayItemsEditor } from './tray-items-editor';
   `,
   styles: `
     :host { display: block; }
+    .save-error { color: var(--bad); font-size: 12px; align-self: center; }
     .page { display: grid; gap: var(--sp-4); }
     .page-head { margin-bottom: 0; }
     .stack { display: grid; gap: var(--sp-4); }

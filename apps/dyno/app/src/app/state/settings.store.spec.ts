@@ -72,4 +72,18 @@ describe('SettingsStore', () => {
     expect(store.settings()).toBeNull();
     expect(notifier.toasts().at(-1)).toMatchObject({ tone: 'bad', text: expect.stringContaining('250 ms') });
   });
+  it('a failed save keeps the error and puts the stored theme back', async () => {
+    const { store, mock, theme } = setup();
+    await store.load();
+    const stored = store.settings()?.theme;
+    const s = structuredClone(await mock.settings());
+    s.sampling.intervalMs = 10;
+    s.theme = stored === 'dark' ? 'light' : 'dark';
+    theme.set(s.theme);
+    expect(await store.save(s)).toBe(false);
+    expect(store.saveError()?.message).toContain('250 ms');
+    expect(theme.preference()).toBe(stored);
+    expect(await store.save(structuredClone(await mock.settings()))).toBe(true);
+    expect(store.saveError()).toBeNull();
+  });
 });

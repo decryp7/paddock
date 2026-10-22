@@ -706,7 +706,7 @@ export class MockBackend implements DynoBackend {
   // ------------------------------------------------------------------------------------------------- rules
 
   rules(): Promise<RuleSet> {
-    return this.reply('rules', () => this.ruleSet);
+    return this.reply('rules', () => copy(this.ruleSet));
   }
 
   saveRules(rules: RuleSet): Promise<RuleSet> {
@@ -717,7 +717,10 @@ export class MockBackend implements DynoBackend {
         if (r.ladder.length === 0) throw err('badRequest', `“${r.name}”: add at least one step.`);
       }
       this.ruleSet = { ...copy(rules), builtInProtected: BUILT_IN_PROTECTED, profiles: PROFILES };
-      return this.ruleSet;
+      // A rule that is off (or gone) holds nothing: the real engine releases what it had in effect.
+      const on = new Set(this.ruleSet.rules.filter((r) => r.enabled).map((r) => r.id));
+      this.activeActions = this.activeActions.filter((a) => on.has(a.ruleId));
+      return copy(this.ruleSet);
     });
   }
 
@@ -726,7 +729,7 @@ export class MockBackend implements DynoBackend {
       if (!PROFILES.some((p) => p.id === profile)) throw err('badRequest', 'Unknown profile.');
       this.ruleSet = { ...this.ruleSet, profile };
       this.log('system', `Switched to the ${PROFILES.find((p) => p.id === profile)!.name} profile`, 'Rules for this profile are active now', 'notUndoable');
-      return this.ruleSet;
+      return copy(this.ruleSet);
     });
   }
 
@@ -735,7 +738,7 @@ export class MockBackend implements DynoBackend {
       this.ruleSet = { ...this.ruleSet, paused };
       if (paused) this.activeActions = [];
       this.log('system', paused ? 'Paused all rules' : 'Resumed rules', paused ? 'Everything Dyno did was released' : 'Rules apply again', 'notUndoable');
-      return this.ruleSet;
+      return copy(this.ruleSet);
     });
   }
 
