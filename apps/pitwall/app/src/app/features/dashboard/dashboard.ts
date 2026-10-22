@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, isDevMode } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { RouterLink } from '@angular/router';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { HistoryRange, Preset } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
@@ -46,7 +47,7 @@ export class PerfMeter {
 /** Home: everything Pitwall is doing right now, how it got here, and the actions you need most. */
 @Component({
   selector: 'pw-dashboard',
-  imports: [MatIconModule, MatTooltipModule, Panel, EChart, StatTiles, HotModels, QueueCard, EnginesCard, EventsFeed, AppsCard, PairingCard],
+  imports: [MatIconModule, MatTooltipModule, RouterLink, Panel, EChart, StatTiles, HotModels, QueueCard, EnginesCard, EventsFeed, AppsCard, PairingCard],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -99,19 +100,28 @@ export class PerfMeter {
         <pw-pairing-card [request]="p" [now]="now()" />
       }
 
-      <pw-stat-tiles />
+      <nav class="quick" aria-label="Quick actions">
+        <a class="btn" routerLink="/models"><mat-icon svgIcon="pw:models" aria-hidden="true" />Open Models</a>
+        <a class="btn" routerLink="/apps"><mat-icon svgIcon="pw:apps" aria-hidden="true" />Pair an app</a>
+        <a class="btn" routerLink="/playground"><mat-icon svgIcon="pw:sparkles" aria-hidden="true" />Playground</a>
+        <a class="btn" routerLink="/requests"><mat-icon svgIcon="pw:requests" aria-hidden="true" />Requests</a>
+      </nav>
 
-      <div class="grid now">
-        <pw-panel class="c5" heading="Loaded models" icon="models" [sub]="hotSummary()" [loading]="live.loading()" [ready]="!!live.overview()">
-          <pw-hot-models [now]="now()" />
-        </pw-panel>
-        <pw-panel class="c4" heading="Queue" icon="queue" [sub]="queueSummary()" [loading]="live.loading()" [ready]="!!live.overview()">
-          <pw-queue-card [now]="now()" />
-        </pw-panel>
-        <pw-panel class="c3" heading="Engines" icon="engines" [loading]="live.loading()" [ready]="!!live.overview()">
-          <pw-engines-card />
-        </pw-panel>
-      </div>
+      @if (!live.error() || live.overview()) {
+        <pw-stat-tiles />
+
+        <div class="grid now">
+          <pw-panel class="c5" heading="Loaded models" icon="models" [sub]="hotSummary()" [loading]="live.loading()" [ready]="!!live.overview()">
+            <pw-hot-models [now]="now()" />
+          </pw-panel>
+          <pw-panel class="c4" heading="Queue" icon="queue" [sub]="queueSummary()" [loading]="live.loading()" [ready]="!!live.overview()">
+            <pw-queue-card [now]="now()" />
+          </pw-panel>
+          <pw-panel class="c3" heading="Engines" icon="engines" [loading]="live.loading()" [ready]="!!live.overview()">
+            <pw-engines-card />
+          </pw-panel>
+        </div>
+      }
 
       <div class="history-head">
         <h2 class="section">History</h2>
@@ -209,6 +219,14 @@ export class PerfMeter {
         height: 22px;
         min-width: 40px;
         padding: 0 var(--sp-2);
+      }
+    }
+    .quick {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sp-2);
+      a.btn {
+        text-decoration: none;
       }
     }
     .banner {

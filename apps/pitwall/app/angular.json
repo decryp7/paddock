@@ -87,6 +87,7 @@
             "buildTarget": "::development",
             "runner": "vitest",
             "coverageReporters": ["text-summary", "lcov"],
+            "coverageInclude": ["src/app/**/*.ts"],
             "coverageExclude": ["src/**/*.spec.ts", "src/main.ts", "src/test-setup.ts", "src/testing/**"],
             "setupFiles": ["src/test-setup.ts"]
           }

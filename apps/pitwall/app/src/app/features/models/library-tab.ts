@@ -77,6 +77,7 @@ export function contextText(tokens: number | null): string {
                 <th scope="col" class="right">Context</th>
                 <th scope="col" class="right">Size</th>
                 <th scope="col">Capabilities</th>
+                <th scope="col">Engine</th>
                 <th scope="col">Release when idle</th>
                 <th scope="col">Status</th>
                 <th scope="col"><span class="sr-only">Actions</span></th>
@@ -99,6 +100,19 @@ export function contextText(tokens: number | null): string {
                         <span class="tag">{{ capability[c] }}</span>
                       }
                     </span>
+                  </td>
+                  <td>
+                    @if (store.engineChoices().length) {
+                      <label class="sr-only" [for]="'engine-' + m.id">Engine for {{ m.name }}</label>
+                      <select class="select idle" [id]="'engine-' + m.id" [disabled]="m.loaded || store.isBusy()('model:' + m.id)" [matTooltip]="m.loaded ? 'Unload the model to change its engine' : ''" (change)="setEngine(m, $any($event.target).value)">
+                        <option value="" [selected]="!m.engine">llama.cpp</option>
+                        @for (e of store.engineChoices(); track e.id) {
+                          <option [value]="e.id" [selected]="m.engine === e.id">{{ e.name }}</option>
+                        }
+                      </select>
+                    } @else {
+                      <span class="faint">llama.cpp</span>
+                    }
                   </td>
                   <td>
                     <label class="sr-only" [for]="'idle-' + m.id">Release {{ m.name }} when idle</label>
@@ -302,6 +316,10 @@ export class LibraryTab {
 
   protected setIdle(m: LocalModel, value: string): void {
     void this.store.setIdle(m.id, value === '' ? null : Number(value));
+  }
+
+  protected setEngine(m: LocalModel, value: string): void {
+    void this.store.setEngine(m.id, value === '' ? null : value);
   }
 
   protected async remove(m: LocalModel): Promise<void> {

@@ -296,4 +296,20 @@ describe('mock data', () => {
     expect(demoSearch('', NOW).length).toBe(12);
     expect(presetMemory('lowMemory', presetMemory('balanced', presetMemory('custom', { preset: 'balanced' } as never))).maxHotModels).toBe(1);
   });
+
+  it('serves packs with a tag filter, and refuses an unknown model or engine', async () => {
+    const mock = new MockBackend({ now: () => NOW });
+    const all = await mock.packs();
+    const code = await mock.packs('code');
+    expect(code.recommendations.length).toBeLessThan(all.recommendations.length);
+    expect(code.recommendations.every((r) => r.tags.includes('code'))).toBe(true);
+    expect(all.recommendations[0]!.fit.verdict).toBe('fits');
+    expect((await mock.packs('nope')).recommendations).toEqual([]);
+    await expect(mock.setModelEngine('nope', null)).rejects.toMatchObject({ code: 'notFound' });
+    await expect(mock.setModelEngine('qwen3-8b-instruct-q4_k_m', 'missing-pack')).rejects.toMatchObject({ code: 'notFound' });
+    await mock.setModelEngine('qwen3-8b-instruct-q4_k_m', 'ik-llama-cpu');
+    expect((await mock.localModels()).find((m) => m.id === 'qwen3-8b-instruct-q4_k_m')?.engine).toBe('ik-llama-cpu');
+    await mock.setModelEngine('qwen3-8b-instruct-q4_k_m', 'llama.cpp');
+    expect((await mock.localModels()).find((m) => m.id === 'qwen3-8b-instruct-q4_k_m')?.engine).toBeNull();
+  });
 });

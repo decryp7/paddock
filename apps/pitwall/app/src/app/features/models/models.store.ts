@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { CommandError, DiskUsage, HfModel, HfRepo, LocalModel, QuantVariant } from '../../core/api.types';
+import type { CommandError, DiskUsage, HfModel, HfRepo, LocalModel, PackEngine, PacksInfo, QuantVariant, Recommendation } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
@@ -21,6 +21,16 @@ interface ModelsState {
   repo: HfRepo | null;
   repoLoading: boolean;
   repoError: CommandError | null;
+  /** Catalog recommendations and pack notes for this machine (filtered by `packTag`). */
+  packs: PacksInfo | null;
+  packsLoading: boolean;
+  packsError: CommandError | null;
+  packTag: string | null;
+  /** Every tag seen in the unfiltered recommendations (the filter chips). */
+  packTags: string[];
+  /** Ids of the pack engines that have an installed build, and every loaded pack engine. */
+  installedPacks: string[];
+  packEngines: PackEngine[];
   /** Actions in flight, by key (`model:<id>`, `download:<file>`, `cancel:<id>`, `cleanup`). */
   busy: Record<string, true>;
 }
@@ -40,13 +50,25 @@ const initial: ModelsState = {
   repo: null,
   repoLoading: false,
   repoError: null,
+  packs: null,
+  packsLoading: false,
+  packsError: null,
+  packTag: null,
+  packTags: [],
+  installedPacks: [],
+  packEngines: [],
   busy: {},
 };
 
 /** The Models screen: the local library with disk usage, Hugging Face search and a repo's quantisation variants. */
 export const ModelsStore = signalStore(
   withState(initial),
-  withComputed(({ library, disk, busy }) => ({
+  withComputed(({ library, disk, busy, packEngines, installedPacks }) => ({
+    /** Engines a model can be pinned to besides llama.cpp: pack engines that are installed. */
+    engineChoices: computed<PackEngine[]>(() => {
+      const have = new Set(installedPacks());
+      return packEngines().filter((e) => have.has(e.id));
+    }),
     unusedModels: computed(() => {
       const ids = new Set(disk()?.unused ?? []);
       return library().filter((m) => ids.has(m.id));
@@ -93,8 +115,31 @@ export const ModelsStore = signalStore(
       }
     }
 
+    async function loadPacks(tag: string | null = store.packTag()): Promise<void> {
+      patchState(store, { packsLoading: true, packsError: null, packTag: tag });
+      try {
+        const packs = await backend.packs(tag);
+        if (store.packTag() !== tag) return;
+        patchState(store, { packs, packsLoading: false, ...(tag === null ? { packTags: [...new Set(packs.recommendations.flatMap((r) => r.tags))].sort() } : {}) });
+      } catch (e) {
+        if (store.packTag() === tag) patchState(store, { packsLoading: false, packsError: toCommandError(e) });
+      }
+    }
+
+    /** Which pack engines have a build installed (secondary: a failure leaves llama.cpp as the only choice). */
+    async function loadInstalledPacks(): Promise<void> {
+      try {
+        const [engines, packs] = await Promise.all([backend.engines(), backend.packs()]);
+        patchState(store, { installedPacks: engines.filter((e) => e.kind === 'pack').flatMap((e) => e.builds.map((b) => b.id)), packEngines: packs.engines });
+      } catch {
+        patchState(store, { installedPacks: [], packEngines: [] });
+      }
+    }
+
     return {
       load,
+      loadPacks,
+      loadInstalledPacks,
 
       async search(query: string): Promise<void> {
         patchState(store, { query, searching: true, searchError: null });
@@ -125,6 +170,29 @@ export const ModelsStore = signalStore(
         const repo = store.repoName();
         if (!repo) return Promise.resolve(false);
         return act(`download:${variant.file}`, () => backend.downloadModel(repo, variant.file, projector), `Downloading ${variant.file}.`);
+      },
+
+      /**
+       * One-click download of a recommendation: looks the repo up for the exact file (and the vision projector of a
+       * vision model) and starts the download; progress arrives as live updates.
+       */
+      downloadRecommendation(rec: Recommendation): Promise<boolean> {
+        return act(
+          `rec:${rec.id}`,
+          async () => {
+            const repo = await backend.repoFiles(rec.repo);
+            const file = repo.variants.find((v) => v.file === rec.file)?.file ?? rec.file;
+            const projector = rec.tags.includes('vision') ? (repo.projectors[0]?.file ?? null) : null;
+            await backend.downloadModel(rec.repo, file, projector);
+          },
+          `Downloading ${rec.name}.`,
+        );
+      },
+
+      /** Chooses the engine for one model: a pack engine id, or null for llama.cpp. */
+      async setEngine(id: string, engine: string | null): Promise<void> {
+        const ok = await act(`model:${id}`, () => backend.setModelEngine(id, engine), engine === null ? 'Uses llama.cpp.' : 'Engine saved. The model uses it from its next load.');
+        if (ok) patchState(store, { library: store.library().map((m) => (m.id === id ? { ...m, engine } : m)) });
       },
 
       cancelDownload(id: string): Promise<boolean> {
