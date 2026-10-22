@@ -29,9 +29,11 @@ pub fn tray_id(item: &str) -> String {
 
 /// The popover window label and page route an item opens.
 pub fn popover_target(spec: &ItemSpec) -> (String, String) {
-    match spec.opens {
-        Opens::Main => (DROPDOWN.to_string(), "index.html#/tray".to_string()),
-        Opens::Own => (format!("popover-{}", spec.id), format!("index.html#/popover/{}", spec.id)),
+    // An id that cannot be a window label opens the shared popover.
+    if spec.opens == Opens::Own && popover::valid_item_id(&spec.id) {
+        (format!("popover-{}", spec.id), format!("index.html#/popover/{}", spec.id))
+    } else {
+        (DROPDOWN.to_string(), "index.html#/tray".to_string())
     }
 }
 
@@ -146,23 +148,20 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Makes the set of tray icons match `specs`: creates the missing, removes the stale. Returns the first error.
+/// Makes the tray icons match `specs`: every existing one is replaced (a click handler holds what its item opened when it
+/// was made, so a changed `opens` needs a new icon). Called only when the items changed. Returns the first error.
 pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()> {
     if app.try_state::<TrayState>().is_none() {
         app.manage(TrayState::default());
     }
     let state = app.state::<TrayState>();
-    let wanted: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
-    let stale: Vec<String> = lock(&state.pause).keys().filter(|id| !wanted.contains(id)).cloned().collect();
-    for id in stale {
+    let old: Vec<String> = lock(&state.pause).drain().map(|(id, _)| id).collect();
+    for id in old {
         let _ = app.remove_tray_by_id(&tray_id(&id));
-        lock(&state.pause).remove(&id);
-        lock(&state.painted).remove(&id);
     }
+    lock(&state.painted).clear();
     for spec in specs {
-        if app.tray_by_id(&tray_id(&spec.id)).is_none() {
-            create_item(app, spec)?;
-        }
+        create_item(app, spec)?;
     }
     Ok(())
 }
@@ -227,7 +226,7 @@ pub fn popover_blurred(app: &AppHandle<Wry>, label: &str) {
 mod tests {
     use super::*;
     use crate::tray_model::Glyph;
-    use dyno_core::settings::TrayMetric;
+    use dyno_core::widgets::Metric;
 
     #[test]
     fn the_static_icons_are_png_files() {
@@ -244,18 +243,15 @@ mod tests {
 
     #[test]
     fn items_open_the_shared_or_their_own_popover() {
-        let mut spec = ItemSpec {
-            id: "cpu-1".into(),
-            metrics: vec![TrayMetric::Cpu],
-            glyph: Glyph::Ring,
-            opens: Opens::Main,
-        };
+        let mut spec = ItemSpec::new("cpu-1", Metric::CpuTotal, Glyph::Ring, Opens::Main);
         assert_eq!(popover_target(&spec), ("tray".into(), "index.html#/tray".into()));
         spec.opens = Opens::Own;
         let (label, route) = popover_target(&spec);
         assert_eq!((label.as_str(), route.as_str()), ("popover-cpu-1", "index.html#/popover/cpu-1"));
         assert!(popover::is_popover_label(&label));
         assert_eq!(tray_id("cpu-1"), "dyno-cpu-1");
+        spec.id = "Bad Id".into();
+        assert_eq!(popover_target(&spec).0, "tray", "an id that cannot be a window label falls back");
     }
 
     #[test]

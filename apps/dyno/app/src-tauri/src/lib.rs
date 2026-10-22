@@ -64,7 +64,7 @@ pub fn run() {
             app.manage(shell.clone());
             app.manage(link.clone());
             popover::init(app.handle());
-            let items = shell::initial_items(&dyno_core::settings::Settings::default().tray);
+            let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
             if let Err(e) = tray::sync_items(app.handle(), &items) {
                 // Linux without a status-notifier host or libayatana-appindicator: the window is then the only way in,
                 // so closing it must exit (see `window::keeps_running`).

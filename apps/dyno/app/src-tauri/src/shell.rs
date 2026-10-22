@@ -33,10 +33,10 @@ const TRAY_INTERVAL: Duration = Duration::from_millis(500);
 const LOG_EVERY: u64 = 60;
 
 /// The tray items: the user's settings, or the comma-separated `DYNO_TRAY_ITEMS` (development and measurements).
-pub fn initial_items(tray: &dyno_core::settings::Tray) -> Vec<crate::tray_model::ItemSpec> {
+pub fn initial_items(items: &dyno_core::widgets::TrayItems) -> Vec<crate::tray_model::ItemSpec> {
     let from_env = std::env::var("DYNO_TRAY_ITEMS").map(|t| parse_items(&t)).unwrap_or_default();
     if from_env.is_empty() {
-        items_from_settings(tray)
+        items_from_settings(items)
     } else {
         from_env
     }
@@ -62,7 +62,7 @@ impl Shell {
         let size = if cfg!(target_os = "macos") { 44 } else { 32 };
         Arc::new(Shell {
             app,
-            tray: Mutex::new(TrayItems::new(initial_items(&Settings::default().tray), size)),
+            tray: Mutex::new(TrayItems::new(initial_items(&Settings::default().tray_items), size)),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
             launch_at_login: Mutex::new(None),
@@ -95,7 +95,7 @@ impl Shell {
     /// `launchAtLogin` registers or removes the login items. The first sight only records the value: Dyno never
     /// registers itself unasked.
     pub fn settings_changed(&self, settings: &Settings, link: &AgentLink) -> Result<(), String> {
-        self.set_items(initial_items(&settings.tray));
+        self.set_items(initial_items(&settings.tray_items));
         let previous = *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner());
         let wanted = settings.launch_at_login;
         match previous {
