@@ -1,0 +1,107 @@
+# Pitcrew on macOS: build, install, register a runner, verify
+
+Pitcrew on macOS is the app (menu-bar icon and window) plus the Pitcrew service running as **your own launch agent**
+(ADR 0003): it starts when you log in, needs no administrator rights, and runs the runners in your session, so jobs
+get your keychain, GUI session and tools (Xcode, simulators, WebKit).
+
+The steps below take about 15 minutes on a Mac with Xcode, Rust and Node installed.
+
+## 1. Build
+
+```sh
+git clone https://dev.decryptology.net/decryp7/Pitcrew.git && cd Pitcrew
+bash scripts/macos-bootstrap.sh
+```
+
+It checks macOS 13+, the Xcode command line tools, Rust and Node 24, runs `npm ci` and `npx tauri build --bundles
+app,dmg`, and prints where `Pitcrew.app` and the `.dmg` are (`target/dist/bundle/`). It installs nothing.
+
+Apple Silicon builds an arm64 app; on an Intel Mac it is x86_64. The runner Pitcrew installs matches the Mac
+(`gitea-runner-<v>-darwin-arm64` or `-darwin-amd64`).
+
+## 2. Install
+
+1. Open the `.dmg`, drag **Pitcrew** to **Applications**.
+2. The build is **not notarised** (no Apple Developer ID yet). The first start: right-click Pitcrew in Applications ▸
+   **Open** ▸ **Open**, or System Settings ▸ Privacy & Security ▸ **Open Anyway**.
+3. In Pitcrew, **Settings ▸ Service ▸ Turn on**. Pitcrew registers its launch agent with `SMAppService`; macOS shows a
+   notification and lists Pitcrew in **System Settings ▸ General ▸ Login Items ▸ Allow in the Background** — switch it
+   on. (Pitcrew opens that page for you if approval is needed.)
+4. Allow notifications when macOS asks (stalls, crash loops, updates and low disk are announced).
+
+Permissions: **Login Items** (required). **Notifications** (recommended). **Full Disk Access is not needed** for
+Pitcrew; grant it to the runner only if your jobs read protected folders (Desktop, Documents, Mail…), and then to
+`~/Library/Application Support/Pitcrew/runners/<name>/bin/gitea-runner`.
+
+## 3. Register the runner
+
+Before Pitcrew takes over, stop any other supervisor of the same runner folder (e.g. a hand-made launchd job:
+`launchctl bootout gui/$(id -u)/<its label>`), or Pitcrew refuses to start a second copy and tells you so.
+
+In Pitcrew: **Runners ▸ Add runner**.
+
+- **Server URL**: e.g. `https://dev.decryptology.net`.
+- **Registration token**: from the server (Site Administration, organisation or repository ▸ Actions ▸ Runners ▸
+  Create new runner). Tick "remember" to keep it in your Keychain for further runners; it is never written to
+  Pitcrew's files.
+- **Name**: e.g. `mac-mini`; the server shows the display name.
+- **Labels**: `macos-latest,macos-arm64` (add `:host` forms such as `macos-latest:host` if your server expects them).
+- **Folder**: the default (`~/Library/Application Support/Pitcrew/runners/<name>`) or an existing registered runner
+  folder to adopt.
+
+Pitcrew downloads the latest Gitea runner for the Mac, verifies its SHA-256 against both `dl.gitea.com` and the
+gitea.com release, writes its configuration (jobs and cache inside the runner folder, so housekeeping finds them),
+registers it and starts it. The Dashboard shows it as **Idle** once the server accepts it.
+
+Optional: **Settings ▸ Gitea API** — a read token (scopes `read:repository`) shows workflow names, job outcomes and
+queue times on the dashboard. It is kept in your Keychain.
+
+## 4. A dedicated build Mac
+
+The agent runs while you are logged in. For a Mac that only builds:
+
+- System Settings ▸ Users & Groups ▸ **Automatically log in as** the CI user (needs FileVault off on most Macs; with
+  FileVault on, macOS asks for the password after a restart).
+- System Settings ▸ Energy ▸ **Prevent automatic sleeping**; Lock Screen ▸ "Turn display off" is fine (jobs keep
+  running).
+- Software Update: install updates manually, so a restart never happens in the middle of a job.
+
+## 5. Verify
+
+```sh
+bash scripts/macos-verify.sh
+```
+
+It checks the bundle, the launch agent in launchd, the service's socket and answer (`pitcrew-service status`), and
+prints the end of each runner's log, including whether the server accepted it ("declare successfully"). Then push a
+commit to a repository with a job such as:
+
+```yaml
+jobs:
+  hello:
+    runs-on: macos-latest
+    steps:
+      - run: sw_vers && uname -m
+```
+
+The dashboard shows the job while it runs (repository, job, elapsed time, a link to the run).
+
+## Logs and files
+
+| What | Where |
+| --- | --- |
+| Configuration (`pitcrew.toml`), state | `~/Library/Application Support/Pitcrew/` |
+| Service log | `~/Library/Application Support/Pitcrew/logs/service.log` |
+| Runner folder, log | `~/Library/Application Support/Pitcrew/runners/<name>/`, `…/logs/runner.log` |
+| Service socket | `~/Library/Application Support/Pitcrew/pitcrew.sock` (only you can connect) |
+
+## Removing Pitcrew
+
+Settings ▸ Service ▸ **Turn off** (unregisters the agent; runners stop after their jobs), quit Pitcrew, delete it from
+Applications. The runner folders stay; remove the runners on the server if you no longer need them.
+
+## What was verified where
+
+The macOS code paths (launch agent, Unix socket with mode 0600, SIGTERM stops, Keychain, SMAppService) are built and
+tested by the `macos` CI job on a `macos-latest` runner; the `.dmg` is built by the `bundle` job on tags, nightly and
+manual runs. See the README for the current state.

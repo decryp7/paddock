@@ -30,6 +30,10 @@ logs/
 .idea/
 .vscode/
 .claude/
-.serena/
+.serena/cache/
+.serena/project.local.yml
 .DS_Store
 ._*
+
+# Tauri sidecar built by scripts/sidecar.mjs
+app/src-tauri/binaries/

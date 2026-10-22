@@ -104,9 +104,9 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
   files (`rustfmt <files>`). Use a private `CARGO_TARGET_DIR`.
 - Commit only complete, owned work. Never commit a workspace `Cargo.toml` listing crates whose sources aren't
   committed.
-- Windows-only and macOS-only code must at least type-check on the other hosts:
-  `cargo clippy -p pitcrew-core -p pitcrew-service --target x86_64-apple-darwin` and
-  `--target x86_64-pc-windows-msvc` (the core and the service need no platform SDK to check).
+- Windows-only and macOS-only code is checked and tested on its own CI runner (`windows-latest`, `macos-latest`; the
+  Mac is the owner's machine: macOS jobs stay lean and leave no processes or launch agents behind). The core needs no
+  platform SDK: `cargo check -p pitcrew-core --target x86_64-apple-darwin` works anywhere.
 
 ## Contracts
 
@@ -163,5 +163,8 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
 
 - Research official sources before choosing libraries or relying on a runner's behaviour (release layout, log
   messages, signals), and record what you found and when in the ADR or doc comment.
+- Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of
+  reading whole files; it saves context and cost. The project config is `.serena/project.yml`; starter memories are in
+  `.serena/memories/` (keep them current when the layout changes).
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper
   models. Keep architecture and review on the main model.

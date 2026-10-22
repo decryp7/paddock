@@ -1,7 +1,8 @@
 # Checks Pitcrew on every push and pull request. Installers are built only for v* tags (which also publish a Gitea
 # release with them attached), the nightly run and manual runs (see the bundle job).
 #
-# Runner labels: ubuntu-latest, windows-latest (macos-latest once a macOS runner is registered).
+# Runner labels: ubuntu-latest, windows-latest, macos-latest (a host runner on the owner's Apple Silicon Mac: one job at
+# a time, so macOS jobs stay lean; they install nothing system-wide and leave no processes or launch agents behind).
 # Linux jobs run in the catthehacker/ubuntu:act-latest container (Node for JavaScript actions, git, sudo-free root).
 # Releases need a repository secret RELEASE_TOKEN (a Gitea access token with write:repository scope); signed
 # updates need TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD and TAURI_UPDATER_PUBKEY
@@ -66,12 +67,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # The macOS service code type-checks here too (no macOS runner yet): these crates need no Apple SDK.
-      - name: Clippy for macOS (core + service)
-        run: |
-          rustup target add x86_64-apple-darwin
-          cargo clippy -p pitcrew-core -p pitcrew-service --all-targets --target x86_64-apple-darwin -- -D warnings
-
       - uses: actions/cache/save@v4
         if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
         with:
@@ -133,6 +128,35 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+  # The macOS code for real (the launch agent, Unix socket, SIGTERM stops, Keychain, SMAppService): clippy and the
+  # tests on the Mac host runner. Host toolchains are used as they are (Rust and Node are installed there).
+  macos:
+    name: macOS clippy + tests
+    runs-on: macos-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../.pitcrew-ci-target
+      CARGO_BUILD_JOBS: "4"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain present
+        run: |
+          rustc --version && cargo --version
+          cargo clippy --version || { echo "::error::clippy is missing on the Mac runner (rustup component add clippy)"; exit 1; }
+
+      - name: Clippy (macOS)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests (macOS)
+        run: cargo test --workspace
+
+      # Nothing may stay behind on the host: no fake runners, no test sockets.
+      - name: Clean up test processes
+        if: always()
+        run: |
+          pkill -f fake_runner || true
+          rm -rf "${TMPDIR:-/tmp}"/pitcrew-* || true
 
   licences:
     name: licences, scripts + commits
@@ -224,9 +248,8 @@ jobs:
         include:
           - os: windows-latest
             bundles: nsis
-          # macOS is off until a runner with the macos-latest label is registered; uncomment to build the .dmg.
-          # - os: macos-latest
-          #   bundles: dmg
+          - os: macos-latest
+            bundles: dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -240,7 +263,9 @@ jobs:
           echo CARGO_TARGET_DIR=%USERPROFILE%\.pitcrew-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
+      # The Mac host runner keeps its own toolchain (nothing is installed there).
       - uses: dtolnay/rust-toolchain@stable
+        if: runner.os != 'macOS'
 
       # Host runners keep their own Node; fail fast when it is missing or not the major version app/.nvmrc asks for.
       - name: Host Node matches app/.nvmrc
@@ -269,6 +294,8 @@ jobs:
         working-directory: app
         shell: bash
         env:
+          # Tauri's DMG step skips Finder window scripting on CI (no Automation permission prompt on the host).
+          CI: "true"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
@@ -306,7 +333,7 @@ jobs:
   release:
     name: release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [bundle, rust-lint, rust-test, licences, frontend]
+    needs: [bundle, rust-lint, rust-test, macos, licences, frontend]
     runs-on: ubuntu-latest
     container:
       image: catthehacker/ubuntu:act-latest
