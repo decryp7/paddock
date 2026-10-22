@@ -13,14 +13,16 @@ choice on Windows (a service) is the wrong one for Dyno.
 ## Decision
 
 1. **The agent runs per user, in the user's session, on every OS.**
-   - **macOS: a launch agent.** `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` runs `dyno-agent run` at
-     login (`RunAtLoad`, `KeepAlive`, `ThrottleInterval` 10 s, `LimitLoadToSessionType Aqua`, `ProcessType
-     Background`), logging to `~/Library/Logs/Dyno/agent.log`. Registration is `launchctl bootstrap gui/<uid>`,
-     always preceded by `bootout`: after an app update launchd may hold the old definition or fail to spawn the new
-     binary until it is bootstrapped again (`Service::install`, `Service::ensure`). The app bundle is ad-hoc signed
-     (`signingIdentity "-"`) because `SMAppService` and launch agents refuse a linker-signed bundle (-67056); moving the
-     registration to `SMAppService` (a plist inside the bundle, approved in System Settings > Login Items) is the
-     intended end state and keeps the same re-registration-after-update rule.
+   - **macOS: a launch agent.** The bundle carries
+     `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`, and the shell registers it with
+     `SMAppService` (macOS 13+; approval in System Settings > Login Items when the OS asks). The plist runs
+     `dyno-agent run` at login (`RunAtLoad`, `KeepAlive`, `ThrottleInterval` 10 s, `LimitLoadToSessionType Aqua`,
+     `ProcessType Background`). The bundle is ad-hoc signed (`signingIdentity "-"`) because `SMAppService` and launch
+     agents refuse a linker-signed bundle (-67056). After an app update launchd may keep the old code requirement and
+     refuse the new binary ("needs LWCR update", spawn failed); the shell detects that in `launchctl print` and
+     registers again (`login::stale_registration`). Outside a bundle (development, the CLI) `dyno-agent service
+     install` writes `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` and runs `launchctl bootout` then
+     `bootstrap`, logging to `~/Library/Logs/Dyno/agent.log`.
    - **Linux: a systemd user unit.** `~/.config/systemd/user/dyno-agent.service`, `Restart=always`, `RestartSec=5`,
      `Nice=10`, `CPUWeight=20`, `IOSchedulingClass=idle`, `MemoryHigh=256M`, `WantedBy=default.target`, enabled with
      `systemctl --user enable --now`. Without systemd the app starts the agent itself (ADR 0002).
