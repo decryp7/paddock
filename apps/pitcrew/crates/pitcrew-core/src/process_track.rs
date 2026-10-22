@@ -219,8 +219,15 @@ pub fn prune_extensions(ext: &mut Extensions, alive: &[ProcessMeta]) {
     ext.retain(|(pid, started), _| alive.iter().any(|m| m.pid == *pid && m.started_ms == Some(*started)));
 }
 
+/// Processes started within this long of the runner process belong to the runner itself (its console host).
+pub const RUNNER_OWN_MS: u64 = 2_000;
+
 /// Classifies the runner's processes. `runner_pid` is the runner process itself.
 pub fn classify(runner_pid: u32, procs: &[ProcessMeta], spans: &[JobSpan], policy: &ProcessPolicy, ext: &Extensions) -> Vec<Tracked> {
+    // What started with the runner process belongs to it, not to a job: Windows gives every console program a
+    // `conhost.exe` child, and a runner restarted while a job's window was open must not lose its own to cleanup.
+    let runner_start = procs.iter().find(|m| m.pid == runner_pid).and_then(|m| m.started_ms);
+    let belongs_to_runner = |started: u64| runner_start.is_some_and(|r| started <= r.saturating_add(RUNNER_OWN_MS));
     procs
         .iter()
         .map(|m| {
@@ -228,7 +235,7 @@ pub fn classify(runner_pid: u32, procs: &[ProcessMeta], spans: &[JobSpan], polic
             let span = if is_runner {
                 None
             } else {
-                m.started_ms.and_then(|s| job_of(s, spans))
+                m.started_ms.filter(|s| !belongs_to_runner(*s)).and_then(|s| job_of(s, spans))
             };
             let job = span.map(|s| s.label.clone());
             let finished = span.and_then(|s| s.finished);
@@ -491,6 +498,38 @@ mod tests {
         assert_eq!(spans(many, None).len(), MAX_JOB_SPANS);
         // A job that ended before it started is a zero-length span.
         assert_eq!(spans(vec![job(100, 50, "a/b")], None)[0].finished, Some(t(100)));
+    }
+
+    #[test]
+    fn what_starts_with_the_runner_is_never_a_leftover() {
+        // The runner was restarted (pid 50, started at 10_000) inside a job's window that never got its end in
+        // time; its console host (pid 51) starts with it and must not be stopped as that job's leftover.
+        let meta = |pid: u32, started: u64, name: &str| ProcessMeta {
+            pid,
+            ppid: Some(50),
+            name: name.into(),
+            exe: None,
+            command: String::new(),
+            started_ms: Some(started),
+            cpu_permille: 0,
+            mem_bytes: 1,
+        };
+        let procs = [
+            meta(50, 10_000, "gitea-runner.exe"),
+            meta(51, 10_400, "conhost.exe"),
+            meta(60, 15_000, "node.exe"),
+        ];
+        let spans = [JobSpan {
+            label: JobRef {
+                job: Some("build".into()),
+                ..JobRef::default()
+            },
+            started: Timestamp(5_000),
+            finished: Some(Timestamp(20_000)),
+        }];
+        let tracked = classify(50, &procs, &spans, &ProcessPolicy::default(), &Extensions::default());
+        assert!(tracked[1].leftover.is_none() && tracked[1].job.is_none(), "{:?}", tracked[1]);
+        assert!(tracked[2].leftover.is_some(), "a job's process is still a leftover");
     }
 
     #[test]
