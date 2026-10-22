@@ -3109,6 +3109,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pitwall-cli"
+version = "0.1.0"
+dependencies = [
+ "keyring",
+ "pitwall-core",
+ "pitwall-loopback",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "pitwall-core"
 version = "0.1.0"
 dependencies = [

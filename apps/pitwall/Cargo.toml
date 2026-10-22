@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/pitwall-core",
+  "crates/pitwall-cli",
   "crates/pitwall-loopback",
   "crates/pitwall-server",
   "app/src-tauri",
