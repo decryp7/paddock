@@ -213,3 +213,25 @@ impl Harness {
         k.json()["secret"].as_str().unwrap().to_string()
     }
 }
+
+/// A server over a temp folder with the *real* engine manager (no fake): for the opt-in end-to-end test that installs
+/// llama.cpp and a tiny model (`PITWALL_LLAMA_E2E=1`).
+pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
+    let dirs = Dirs::at(dir.path());
+    let st = AppState::open(dirs.clone(), None).await;
+    let app = pitwall_server::http::router(st.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let admin = std::fs::read_to_string(dirs.admin_key()).unwrap().trim().to_string();
+    Harness {
+        st,
+        client: Client::new(LoopbackPort::new(port).unwrap(), None),
+        admin,
+        starts: Arc::new(AtomicUsize::new(0)),
+        erases: Arc::new(AtomicUsize::new(0)),
+        dir,
+    }
+}

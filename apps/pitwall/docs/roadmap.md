@@ -57,9 +57,9 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | Token counting and truncation helpers (`/x/v1/tokens/...`) | Implemented as estimates (no tokenizer call yet); **partial** |
 | Response cache and prompt-prefix policy | Policy in the core (`cache.rs`); **not wired** into the server |
 | Stored benchmarks feeding "fast" selection | A benchmark run works and results are kept in memory; not written to disk, not used by selection; **partial** |
-| OS memory-pressure signals and foreground-app yielding | Rules in the core; the server does not read the signals yet |
-| Releasing a model's context before its weights | Planned in the policy; the server only unloads |
-| Engine restart with backoff | Policy in the core; the server reloads on the next request instead; **partial** |
+| OS memory-pressure signals and foreground-app yielding | **Built.** Linux PSI, macOS `sysctl` and `pmset`, Windows memory notification and `SHQueryUserNotificationState`; foreground detection is not available on Linux. Verified on macOS; Windows and Linux are checked by their CI runners |
+| Releasing a model's context before its weights | **Built.** At half the idle time the engine's slots are erased (KV and prompt cache); the weights go at the full idle time. The KV buffer itself is only returned on unload |
+| Engine restart with backoff | **Built.** Restart with exponential backoff, a crash-loop guard, and engine problems with Retry on the dashboard |
 | Request inspector with prompts on demand | Metadata only; content not kept yet |
 | LAN sharing with TLS and certificate pinning | Settings and status fields exist; **not built** |
 | Knowledge collections (local RAG: store, chunk, embed, rerank, query) | **Not built** |
@@ -69,8 +69,12 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | MLX (Apple Silicon) and vLLM (Linux, NVIDIA) engines | Show as "not available" with the reason; **planned** |
 | Dedicated embedding and reranker adapters | Embeddings work through llama.cpp with an embedding model; rerank **planned** |
 | Real-engine automated test (`PITWALL_LLAMA_E2E=1`) | **Planned**; the smoke test is manual |
-| Usage per connected app | **Approved, not built.** Tokens, requests and peak memory per app over time (a dashboard chart and an app detail view), stored locally with bounded retention, with optional per-app limits (requests per minute, tokens per day) enforced in serving with a typed, explained error. Per-app counters and limits exist in the core (`usage`, `limits`); the history, the chart and the detail view do not |
+| Usage per connected app | **Approved, partly built.** Per-app limits (requests per minute, tokens per day) are enforced with a typed, explained error today. Missing: tokens, requests and peak memory per app over time (a dashboard chart and an app detail view), stored locally with bounded retention |
 | Model update notices | **Approved, not built.** On a schedule, and only when offline mode allows, ask Hugging Face for newer revisions or better quantisations of installed models; notify and offer them, never download by themselves. Tests use a fake Hugging Face API |
+| Model presets and aliases | **Approved for v1, not built.** An app asks for a name such as `debrief-explain`; the user decides which model and parameters (context, temperature, system prompt, engine) serve it. Resolved in the core next to capability selection; shown in Models and in the request inspector |
+| Parallel slots per model, with their memory cost | **Approved for v1, not built.** Choose the number of parallel slots per model; the UI shows the memory each adds, and the fit check answers "how much context or concurrency fits" instead of only yes or no |
+| `pitwall` command-line tool | **Approved for v1, not built.** A small Rust CLI over the local management and standard APIs (status, models, load, unload, pull, keys, chat) for scripts and terminals; no new server surface |
+| Engine version pin, rollback and capability gating | **Approved for v1, partly built.** Pinned catalog, rollback and self-test exist; missing: pin a build per model or globally from the UI, and gate features (vision, tools, embeddings, rerank) by what the active build supports |
 
 ## Phase 4: the suite *(planned)*
 
