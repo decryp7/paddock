@@ -1,5 +1,17 @@
 import type {
   ActivityReply,
+  CacheCleaned,
+  CacheInfo,
+  CacheLimits,
+  CachePlan,
+  ChannelSettings,
+  DebriefStatus,
+  EngineReport,
+  Handoff,
+  InsightsReply,
+  PruneResult,
+  PrunePreview,
+  PruneSelection,
   AppUpdateInfo,
   AppUpdateStatus,
   BackendEvent,
@@ -58,6 +70,7 @@ import {
 } from './mock/mock-data';
 import { fingerprint, labelText, previewOf, sampleConfigText, viewOf } from './mock/mock-runner-config';
 import { demoProcesses, keepMs } from './mock/mock-processes';
+import { demoCache, demoCachePlan, demoEngineReport, demoInsights, demoPrunePreview, emptyChannels } from './mock/mock-ops';
 
 /** Which world the mock shows. */
 export type MockScenario = 'demo' | 'empty' | 'unavailable' | 'notInstalled' | 'mismatch';
@@ -111,6 +124,10 @@ export class MockBackend implements PitcrewBackend {
   private service: ServiceInstall;
   private autostartOn = true;
   private readonly startedAt: number;
+  private channelSettings: ChannelSettings = emptyChannels();
+  private readonly channelSecrets = new Set<string>();
+  private cacheTrimmedBytes = new Map<string, number>();
+  private debrief = true;
 
   constructor(options: MockOptions = {}) {
     this.scenario = options.scenario ?? 'demo';
@@ -516,6 +533,116 @@ export class MockBackend implements PitcrewBackend {
     if (extra.amount < 1) throw fail('badRequest', 'the keep time must be at least 1');
     if (!e.leftover || e.leftover.fate.kind !== 'stopsAt') throw fail('badRequest', 'that process is not a leftover waiting to be stopped.');
     e.leftover.fate = { kind: 'stopsAt', at: e.leftover.fate.at + keepMs(extra) };
+  }
+
+  // ---- insights, hygiene, cache, Debrief, channels -----------------------------------------------------------------------
+
+  async insights(days: number): Promise<InsightsReply> {
+    await this.delay();
+    this.ensureService();
+    return { insights: demoInsights(this.now(), Math.min(Math.max(days, 1), 90)), hasApiToken: this.tokens.size > 0, pendingOutcomes: 0 };
+  }
+
+  async engineReport(): Promise<EngineReport> {
+    await this.delay();
+    this.ensureService();
+    return demoEngineReport(this.now());
+  }
+
+  async previewEnginePrune(selection: PruneSelection): Promise<PrunePreview> {
+    await this.delay();
+    this.ensureService();
+    if (selection.kinds.length === 0) throw fail('badRequest', 'choose what to prune');
+    return demoPrunePreview(selection);
+  }
+
+  async pruneEngine(selection: PruneSelection): Promise<PruneResult> {
+    await this.delay();
+    this.ensureService();
+    if (selection.kinds.length === 0) throw fail('badRequest', 'choose what to prune');
+    if (this.runners.some((r) => r.currentJob)) {
+      throw fail('busy', 'a job is running; Pitcrew will not remove anything while a runner works. Try again when it is idle, or drain the runner first');
+    }
+    const p = demoPrunePreview(selection);
+    return { freed: p.items.map((i) => [i.kind, i.bytes]), failures: [], at: this.now() };
+  }
+
+  async cacheReport(runner: string): Promise<CacheInfo> {
+    await this.delay();
+    const r = this.find(runner);
+    const info = demoCache(this.now(), `${r.dir}\cache`);
+    const trimmed = this.cacheTrimmedBytes.get(runner) ?? 0;
+    return { ...info, bytes: Math.max(0, info.bytes - trimmed), overLimit: info.bytes - trimmed > (info.sizeLimitMb ?? Infinity) * 1024 * 1024 };
+  }
+
+  async previewCacheClean(runner: string, limits: CacheLimits): Promise<CachePlan> {
+    await this.delay();
+    if (limits.maxMb <= 0 && limits.maxAgeDays <= 0) throw fail('badRequest', 'set a size limit, an age limit, or both');
+    return demoCachePlan(await this.cacheReport(runner), limits, this.now());
+  }
+
+  async cleanCache(runner: string, limits: CacheLimits): Promise<CacheCleaned> {
+    await this.delay();
+    if (this.find(runner).currentJob) throw fail('busy', 'a job is running; Pitcrew will not remove anything while a runner works. Try again when it is idle, or drain the runner first');
+    const plan = await this.previewCacheClean(runner, limits);
+    this.cacheTrimmedBytes.set(runner, (this.cacheTrimmedBytes.get(runner) ?? 0) + plan.bytes);
+    return { plan, failures: [] };
+  }
+
+  async debriefStatus(): Promise<DebriefStatus> {
+    await this.delay();
+    return { installed: this.debrief, program: this.debrief ? '/Applications/Debrief.app/Contents/MacOS/imt' : null, cliName: 'imt' };
+  }
+
+  async openInDebrief(runner: string, label: string, startedAt: number | null, finishedAt: number | null): Promise<Handoff> {
+    await this.delay();
+    this.find(runner);
+    if ((startedAt === null) !== (finishedAt === null)) throw fail('badRequest', 'a job needs both its start and its end');
+    const file = `~/Library/Application Support/Pitcrew/debrief-handoff/${runner}-${label.replace(/[^A-Za-z0-9-]/g, '_')}.log`;
+    return this.debrief
+      ? { result: 'opened', file }
+      : { result: 'notInstalled', file, message: 'Debrief was not found (looked for `imt`). Install Debrief, or open this file in it by hand.' };
+  }
+
+  async channels(): Promise<ChannelSettings> {
+    await this.delay();
+    return structuredClone(this.channelSettings);
+  }
+
+  async saveChannels(settings: ChannelSettings): Promise<void> {
+    await this.delay();
+    if (settings.channels.length > 8) throw fail('badRequest', 'at most 8 channels are allowed');
+    const ids = new Set(settings.channels.map((c) => c.id));
+    if (ids.size !== settings.channels.length) throw fail('badRequest', 'channel ids must be unique');
+    for (const c of settings.channels) {
+      const t = c.transport;
+      if ((t.type === 'webhook' && !/^https?:\/\//.test(t.url)) || (t.type === 'ntfy' && !/^https?:\/\//.test(t.server))) {
+        throw fail('badRequest', `channel “${c.name}”: the address must start with http:// or https://`);
+      }
+    }
+    this.channelSettings = structuredClone(settings);
+  }
+
+  async setChannelSecret(key: string, value: string): Promise<void> {
+    await this.delay();
+    if (!key || !value) throw fail('badRequest', 'the secret must be 1-512 characters on one line');
+    this.channelSecrets.add(key);
+  }
+
+  async clearChannelSecret(key: string): Promise<void> {
+    await this.delay();
+    this.channelSecrets.delete(key);
+  }
+
+  async hasChannelSecret(key: string): Promise<boolean> {
+    await this.delay();
+    return this.channelSecrets.has(key);
+  }
+
+  async testChannel(id: string): Promise<string> {
+    await this.delay();
+    if (!this.channelSettings.channels.some((c) => c.id === id)) throw fail('badRequest', 'save the channel first, then test it');
+    return 'Sent. Check the destination.';
   }
 
   // ---- settings and runners ----------------------------------------------------------------------------------------

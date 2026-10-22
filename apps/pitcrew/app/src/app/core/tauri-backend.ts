@@ -2,6 +2,18 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   ActivityReply,
+  CacheCleaned,
+  CacheInfo,
+  CacheLimits,
+  CachePlan,
+  ChannelSettings,
+  DebriefStatus,
+  EngineReport,
+  Handoff,
+  InsightsReply,
+  PruneResult,
+  PrunePreview,
+  PruneSelection,
   AppUpdateInfo,
   AppUpdateStatus,
   BackendEvent,
@@ -212,6 +224,52 @@ export class TauriBackend implements PitcrewBackend {
   }
   keepProcess(runner: string, pid: number, startedAt: number, extra: KeepFor): Promise<void> {
     return this.run('runner_process_keep', { runner, pid, startedAt, extra });
+  }
+
+  insights(days: number): Promise<InsightsReply> {
+    return this.run('fleet_insights', { days, utcOffsetMinutes: -new Date().getTimezoneOffset() });
+  }
+  engineReport(): Promise<EngineReport> {
+    return this.run('engine_report');
+  }
+  previewEnginePrune(selection: PruneSelection): Promise<PrunePreview> {
+    return this.run('engine_prune_preview', { selection });
+  }
+  pruneEngine(selection: PruneSelection): Promise<PruneResult> {
+    return this.run('engine_prune', { selection });
+  }
+  cacheReport(runner: string): Promise<CacheInfo> {
+    return this.run('cache_report', { runner });
+  }
+  previewCacheClean(runner: string, limits: CacheLimits): Promise<CachePlan> {
+    return this.run('cache_preview', { runner, limits });
+  }
+  cleanCache(runner: string, limits: CacheLimits): Promise<CacheCleaned> {
+    return this.run('cache_clean', { runner, limits });
+  }
+  debriefStatus(): Promise<DebriefStatus> {
+    return this.run('debrief_status');
+  }
+  openInDebrief(runner: string, label: string, startedAt: number | null, finishedAt: number | null): Promise<Handoff> {
+    return this.run('open_in_debrief', { runner, label, startedAt, finishedAt });
+  }
+  channels(): Promise<ChannelSettings> {
+    return this.run('channels_get');
+  }
+  saveChannels(settings: ChannelSettings): Promise<void> {
+    return this.run('channels_save', { settings });
+  }
+  setChannelSecret(key: string, value: string): Promise<void> {
+    return this.run('channel_secret_set', { key, value });
+  }
+  clearChannelSecret(key: string): Promise<void> {
+    return this.run('channel_secret_clear', { key });
+  }
+  hasChannelSecret(key: string): Promise<boolean> {
+    return this.run('channel_secret_present', { key });
+  }
+  testChannel(id: string): Promise<string> {
+    return this.run('channel_test', { id });
   }
 
   settings(): Promise<SettingsReply> {

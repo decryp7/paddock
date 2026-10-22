@@ -1,4 +1,5 @@
 import type {
+  HoldReason,
   CleanupTrigger,
   DeleteReason,
   EntryKind,
@@ -205,6 +206,10 @@ export function eventLook(e: HistoryEvent): Look & { title: string; detail: stri
       return { label: 'Stopped', tone: 'neutral', icon: 'stop-circle', title: 'Stopped', detail: 'Stopped manually.' };
     case 'paused':
       return { label: 'Paused', tone: 'neutral', icon: 'pause-circle', title: 'Paused', detail: 'Takes no new jobs.' };
+    case 'held':
+      return { label: 'Held', tone: 'warning', icon: 'pause-circle', title: 'Held by Pitcrew', detail: `Paused by itself: ${holdWords(e.reason)}.` };
+    case 'released':
+      return { label: 'Released', tone: 'success', icon: 'play', title: 'Released by Pitcrew', detail: `Takes jobs again; the reason is gone (${holdWords(e.reason)}).` };
     case 'resumed':
       return { label: 'Resumed', tone: 'success', icon: 'play', title: 'Resumed', detail: 'Takes jobs again.' };
     case 'jobFinished': {
@@ -259,6 +264,11 @@ export function isFeedEvent(e: HistoryEvent): boolean {
   return e.kind !== 'jobFinished' && e.kind !== 'started';
 }
 
+/** Why Pitcrew holds a runner, in words (`hold::HoldReason::words`). */
+export function holdWords(r: HoldReason): string {
+  return r === 'lowDisk' ? 'the disk is nearly full' : r === 'schedule' ? 'a pause window is open' : 'the machine is busy with other work';
+}
+
 export function severityTone(s: Severity): Tone {
   return s === 'error' ? 'danger' : s === 'warning' ? 'warning' : 'info';
 }
@@ -276,6 +286,10 @@ const KIND_LABEL: Record<NotificationKind, string> = {
   cleanedUp: 'A cleanup finished',
   cleanupProblems: 'A cleanup could not delete everything',
   labelMismatch: 'A runner declared other labels than configured',
+  held: 'A runner was paused by Pitcrew (low disk, pause window)',
+  released: 'A runner took jobs again after a pause',
+  updateDeadline: 'A runner update is near its deadline',
+  updateLoop: 'An update keeps failing',
 };
 
 export const NOTIFICATION_KINDS = Object.keys(KIND_LABEL) as NotificationKind[];

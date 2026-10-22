@@ -129,6 +129,8 @@ export interface UpdatePolicy {
   check_every_hours: number;
   channel: Channel;
   skipped: Version[];
+  /** Remind when a newer release has been available this many days (0: off). ADR 0014. */
+  deadline_days: number;
 }
 
 export interface DiskUse {
@@ -172,6 +174,41 @@ export interface RunnerSnapshot {
   usage: Usage | null;
   /** How many processes a finished job left behind are still alive. */
   leftovers: number;
+  /** Why Pitcrew itself holds the runner now (low disk, a pause window, a busy machine). ADR 0013. */
+  hold: HoldInfo | null;
+  /** The countdown to the owner's update deadline while behind the latest release. ADR 0014. */
+  deadline: Deadline | null;
+  /** Updates going round in circles, with the likely cause. */
+  updateLoop: UpdateLoop | null;
+}
+
+export type HoldReason = 'lowDisk' | 'schedule' | 'busy';
+
+export interface HoldInfo {
+  reasons: HoldReason[];
+  /** The runner takes no new jobs now (false while the current job finishes). */
+  paused: boolean;
+  /** Minutes until the pause window closes. */
+  minutesLeft: number | null;
+}
+
+export type DeadlineState = 'ok' | 'soon' | 'overdue';
+
+export interface Deadline {
+  behindSince: Timestamp;
+  dueAt: Timestamp;
+  /** Whole days left; negative once overdue. */
+  daysLeft: number;
+  state: DeadlineState;
+}
+
+export type LoopKind = 'failing' | 'notSticking' | 'postponed';
+
+export interface UpdateLoop {
+  target: Version;
+  kind: LoopKind;
+  attempts: number;
+  cause: string;
 }
 
 /**
@@ -234,7 +271,11 @@ export type NotificationKind =
   | 'diskLow'
   | 'cleanedUp'
   | 'cleanupProblems'
-  | 'labelMismatch';
+  | 'labelMismatch'
+  | 'held'
+  | 'released'
+  | 'updateDeadline'
+  | 'updateLoop';
 
 export type Severity = 'info' | 'warning' | 'error';
 
@@ -266,6 +307,8 @@ export type HistoryEvent = { at: Timestamp } & (
   | { kind: 'stopped' }
   | { kind: 'paused' }
   | { kind: 'resumed' }
+  | { kind: 'held'; reason: HoldReason }
+  | { kind: 'released'; reason: HoldReason }
   | { kind: 'jobFinished'; job: FinishedJob }
   | { kind: 'updateFinished'; outcome: UpdateOutcome }
   | { kind: 'cleanup'; trigger: CleanupTrigger; freedBytes: number; deleted: number; failed: number }
@@ -459,6 +502,8 @@ export interface Config {
     logs: { max_bytes: number; keep: number };
     cleanup: CleanupPolicy;
     processes: ProcessPolicy;
+    disk_guard: DiskGuardPolicy;
+    pause: PausePolicy;
   };
   runners: RunnerConfig[];
 }
@@ -733,4 +778,234 @@ export interface ProcessList {
   entries: ProcessEntry[];
   truncated: boolean;
   takenAt: Timestamp;
+}
+
+/** `disk_guard::DiskGuardPolicy` (config schema: snake_case). ADR 0013. */
+export interface DiskGuardPolicy {
+  enabled: boolean;
+  drain_below_mb: number;
+  resume_above_mb: number;
+  reserve_mb: number;
+}
+
+/** `pause::PauseMode`. */
+export type PauseMode = 'off' | 'schedule' | 'when-idle';
+
+/** `pause::PausePolicy` (config schema: snake_case). */
+export interface PausePolicy {
+  mode: PauseMode;
+  windows: UpdateWindow[];
+  busy_percent: number;
+  quiet_minutes: number;
+}
+
+// ---- Workflow insights (ADR 0015) -----------------------------------------------------------------------------------
+
+export interface RepoDay {
+  start: Timestamp;
+  success: number;
+  failure: number;
+}
+
+export interface RepoInsight {
+  repo: string;
+  jobs: number;
+  success: number;
+  failure: number;
+  /** Success share of the jobs that succeeded or failed, per mille. */
+  successPermille: number | null;
+  earlierPermille: number | null;
+  laterPermille: number | null;
+  avgQueuedMs: number | null;
+  days: RepoDay[];
+}
+
+export interface JobStat {
+  repo: string;
+  job: string;
+  runs: number;
+  avgMs: number;
+  p95Ms: number;
+  maxMs: number;
+}
+
+export interface FlakyJob {
+  repo: string;
+  job: string;
+  runs: number;
+  failures: number;
+  flips: number;
+}
+
+export interface QueueStats {
+  samples: number;
+  avgMs: number | null;
+  p95Ms: number | null;
+  maxMs: number | null;
+}
+
+export interface RunnerLoad {
+  runner: string;
+  jobs: number;
+  /** The share of the range with a job running, per mille. */
+  busyPermille: number;
+}
+
+export type AdviceKind = 'addCapacity' | 'checkLabels' | 'spareCapacity' | 'successDropped';
+
+export interface Advice {
+  kind: AdviceKind;
+  title: string;
+  detail: string;
+}
+
+export interface Insights {
+  rangeDays: number;
+  jobs: number;
+  jobsWithOutcome: number;
+  repos: RepoInsight[];
+  slowest: JobStat[];
+  flaky: FlakyJob[];
+  queue: QueueStats;
+  runners: RunnerLoad[];
+  advice: Advice[];
+}
+
+export interface InsightsReply {
+  insights: Insights;
+  hasApiToken: boolean;
+  /** Finished jobs whose outcome the server has not been asked about yet; each refresh asks for more. */
+  pendingOutcomes: number;
+}
+
+// ---- Container engine hygiene and the Actions cache (ADR 0016) -------------------------------------------------------
+
+export type EngineKind = 'docker' | 'podman';
+export type PruneKind = 'stoppedContainers' | 'danglingImages' | 'unusedImages' | 'buildCache' | 'volumes';
+
+export interface PruneSelection {
+  kinds: PruneKind[];
+  /** Only things older than this many days (0: any age). */
+  olderThanDays: number;
+}
+
+export interface EngineUse {
+  what: string;
+  total: number;
+  active: number;
+  bytes: number;
+  reclaimableBytes: number;
+}
+
+export interface FolderUse {
+  label: string;
+  path: string;
+  exists: boolean;
+  bytes: number;
+  entries: number;
+  truncated: boolean;
+}
+
+export interface EngineReport {
+  engine: EngineKind | null;
+  problem: string | null;
+  usage: EngineUse[];
+  folders: FolderUse[];
+  at: Timestamp;
+}
+
+export interface PreviewItem {
+  kind: PruneKind;
+  count: number;
+  bytes: number;
+  examples: string[];
+}
+
+export interface PrunePreview {
+  items: PreviewItem[];
+  totalBytes: number;
+}
+
+export interface PruneResult {
+  freed: [PruneKind, number][];
+  failures: [PruneKind, string][];
+  at: Timestamp;
+}
+
+export interface CacheEntry {
+  name: string;
+  bytes: number;
+  modified: Timestamp;
+}
+
+export interface CacheLimits {
+  /** Keep the cache at most this big, in MB (0: no size limit). */
+  maxMb: number;
+  /** Delete entries not changed for this many days (0: no age limit). */
+  maxAgeDays: number;
+}
+
+export type CacheReason = 'old' | 'overLimit';
+
+export interface CacheInfo {
+  enabled: boolean | null;
+  dir: string;
+  defaultDir: boolean;
+  exists: boolean;
+  bytes: number;
+  entries: number;
+  top: CacheEntry[];
+  sizeLimitMb: number | null;
+  overLimit: boolean;
+  freeBytes: number | null;
+  truncated: boolean;
+  problem: string | null;
+}
+
+export interface CachePlan {
+  entries: [CacheEntry, CacheReason][];
+  bytes: number;
+}
+
+export interface CacheCleaned {
+  plan: CachePlan;
+  failures: [string, string][];
+}
+
+// ---- Debrief hand-off (ADR 0018) -------------------------------------------------------------------------------------
+
+export interface DebriefStatus {
+  installed: boolean;
+  program: string | null;
+  /** The command-line name Pitcrew looks for. */
+  cliName: string;
+}
+
+export type Handoff =
+  | { result: 'opened'; file: string }
+  | { result: 'notInstalled'; file: string; message: string }
+  | { result: 'noLines'; message: string };
+
+// ---- Notification channels (ADR 0017), the shareable `notify-channels` module's settings --------------------------------
+
+export type ChannelSeverity = 'info' | 'warning' | 'error';
+export type SmtpTls = 'startTls' | 'implicit';
+
+export type ChannelTransport =
+  | { type: 'webhook'; url: string; secretKey: string | null }
+  | { type: 'ntfy'; server: string; topic: string; secretKey: string | null }
+  | { type: 'email'; host: string; port: number; tls: SmtpTls; username: string; secretKey: string; from: string; to: string[] };
+
+export interface ChannelConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** The notification kinds this channel gets (empty: none). */
+  events: string[];
+  minSeverity: ChannelSeverity;
+  transport: ChannelTransport;
+}
+
+export interface ChannelSettings {
+  channels: ChannelConfig[];
 }

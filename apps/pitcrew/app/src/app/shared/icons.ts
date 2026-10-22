@@ -24,6 +24,8 @@ export const ICONS: Record<string, string> = {
   activity: outline(p('M3 12h4l2.5-6 5 12 2.5-6h4')),
   logs: outline(p('M4 5h16v14H4zM7.5 9.5l2.5 2.5-2.5 2.5M12.5 15h4')),
   updates: outline(c(12, 12, 8.5) + p('M12 16V8M8.5 11.5 12 8l3.5 3.5')),
+  insights: outline(p('M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6')),
+  storage: outline(p('M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 7v5c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5')),
   settings: outline(
     c(12, 12, 3) +
       p('M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2') +

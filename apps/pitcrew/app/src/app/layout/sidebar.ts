@@ -16,6 +16,8 @@ const NAV: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: 'dashboard', exact: true },
   { path: '/runners', label: 'Runners', icon: 'runner' },
   { path: '/activity', label: 'Activity', icon: 'activity' },
+  { path: '/insights', label: 'Insights', icon: 'insights' },
+  { path: '/storage', label: 'Storage', icon: 'storage' },
   { path: '/logs', label: 'Logs', icon: 'logs' },
   { path: '/updates', label: 'Updates', icon: 'updates' },
   { path: '/settings', label: 'Settings', icon: 'settings' },

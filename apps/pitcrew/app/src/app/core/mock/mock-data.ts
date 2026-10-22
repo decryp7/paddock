@@ -378,6 +378,7 @@ export const DEFAULT_UPDATE: UpdatePolicy = {
   check_every_hours: 24,
   channel: 'stable',
   skipped: [],
+  deadline_days: 30,
 };
 
 export const DEFAULT_CLEANUP: CleanupPolicy = {
@@ -409,6 +410,8 @@ export function defaultConfig(runners: RunnerConfig[]): Config {
       logs: { max_bytes: 10 * MB, keep: 5 },
       cleanup: structuredClone(DEFAULT_CLEANUP),
       processes: structuredClone(DEFAULT_PROCESS_POLICY),
+      disk_guard: { enabled: true, drain_below_mb: 4096, resume_above_mb: 6144, reserve_mb: 1024 },
+      pause: { mode: 'off', windows: [{ days: [], start: '22:00', end: '06:00' }], busy_percent: 40, quiet_minutes: 5 },
     },
     runners,
   };
@@ -487,6 +490,9 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
     nextCleanupAt: startOfLocalDay(now) + DAY + 3 * HOUR,
     usage: demoUsage(4, 0.06, 1),
     leftovers: 0,
+    hold: null,
+    deadline: null,
+    updateLoop: null,
   });
   const byName = new Map(configs.map((c) => [c.name, c]));
   const out: RunnerSnapshot[] = [];
@@ -516,6 +522,7 @@ export function demoSnapshots(now: number, configs: RunnerConfig[], defaults: Co
       lastUpdate: { outcome: { result: 'updated', plan: { from: '5.1.1', to: '5.2.0' } }, finishedAt: startOfLocalDay(now) - 3 * DAY + 3 * HOUR + 20 * MINUTE },
       disk: { folderBytes: 17.9 * GB, freeBytes: 196 * GB, low: false },
       usage: demoUsage(8, 0.4, 3),
+      deadline: { behindSince: now - 26 * DAY, dueAt: now + 4 * DAY, daysLeft: 4, state: 'soon' },
     });
   }
   const docker = byName.get('docker-lab');

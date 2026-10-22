@@ -1,6 +1,18 @@
 import { InjectionToken } from '@angular/core';
 import type {
   ActivityReply,
+  CacheCleaned,
+  CacheInfo,
+  CacheLimits,
+  CachePlan,
+  ChannelSettings,
+  DebriefStatus,
+  EngineReport,
+  Handoff,
+  InsightsReply,
+  PruneResult,
+  PrunePreview,
+  PruneSelection,
   AppUpdateInfo,
   AppUpdateStatus,
   BackendEvent,
@@ -85,6 +97,30 @@ export interface PitcrewBackend {
   stopProcess(runner: string, pid: number, startedAt: number | null, allowRunner: boolean): Promise<void>;
   /** Adds time before the automatic cleanup stops a leftover. */
   keepProcess(runner: string, pid: number, startedAt: number, extra: KeepFor): Promise<void>;
+
+  // Workflow insights (ADR 0015): the Gitea API with the read token, cached and bounded; the engine aggregates.
+  insights(days: number): Promise<InsightsReply>;
+
+  // Container engine hygiene and the Actions cache (ADR 0016). Previews delete nothing; prunes are refused while a job runs.
+  engineReport(): Promise<EngineReport>;
+  previewEnginePrune(selection: PruneSelection): Promise<PrunePreview>;
+  pruneEngine(selection: PruneSelection): Promise<PruneResult>;
+  cacheReport(runner: string): Promise<CacheInfo>;
+  previewCacheClean(runner: string, limits: CacheLimits): Promise<CachePlan>;
+  cleanCache(runner: string, limits: CacheLimits): Promise<CacheCleaned>;
+
+  // Debrief, the owner's log-analysis app (ADR 0018). `startedAt`/`finishedAt` cut one job out of the runner's log.
+  debriefStatus(): Promise<DebriefStatus>;
+  openInDebrief(runner: string, label: string, startedAt: number | null, finishedAt: number | null): Promise<Handoff>;
+
+  // Notification channels (ADR 0017). Secrets live in the OS credential store and never come back to the UI.
+  channels(): Promise<ChannelSettings>;
+  saveChannels(settings: ChannelSettings): Promise<void>;
+  setChannelSecret(key: string, value: string): Promise<void>;
+  clearChannelSecret(key: string): Promise<void>;
+  hasChannelSecret(key: string): Promise<boolean>;
+  /** Sends a test message through a saved channel; resolves with a sentence for the user. */
+  testChannel(id: string): Promise<string>;
 
   // Settings and runners.
   settings(): Promise<SettingsReply>;

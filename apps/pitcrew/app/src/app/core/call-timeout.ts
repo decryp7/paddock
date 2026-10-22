@@ -6,8 +6,8 @@ export const DEFAULT_TIMEOUT_MS = 15_000;
 const LONG_TIMEOUT_MS = 120_000;
 const MEDIUM_TIMEOUT_MS = 60_000;
 
-const LONG = new Set(['clean_disk', 'register_runner', 'install_service', 'uninstall_service', 'install_app_update', 'check_app_update', 'export_diagnostics']);
-const MEDIUM = new Set(['runner_disk', 'add_runner', 'remove_runner', 'save_settings']);
+const LONG = new Set(['engine_prune', 'cache_clean', 'channel_test', 'clean_disk', 'register_runner', 'install_service', 'uninstall_service', 'install_app_update', 'check_app_update', 'export_diagnostics']);
+const MEDIUM = new Set(['fleet_insights', 'engine_report', 'engine_prune_preview', 'cache_report', 'cache_preview', 'open_in_debrief', 'runner_disk', 'add_runner', 'remove_runner', 'save_settings']);
 /** Reading, previewing and process queries are quick; saving a config file may wait for the runner to restart. */
 const QUICK = new Set(['runner_config_get', 'runner_config_preview', 'runner_processes', 'runner_process_keep']);
 const SAVE = new Set(['runner_config_save', 'runner_process_stop']);
