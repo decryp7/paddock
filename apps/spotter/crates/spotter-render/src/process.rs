@@ -87,9 +87,23 @@ pub fn kill_tree(root: u32) {
     }
 }
 
+/// Parents and resident memory only. Reading every process's command line, environment and working directory
+/// (`everything()`) walks each process's memory on Windows and takes long enough, once a second per browser and for
+/// every kill, to starve a loaded runner while Chrome is still starting.
 fn snapshot() -> System {
     let mut sys = System::new();
-    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::everything());
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_memory());
+    sys
+}
+
+/// [`snapshot`] plus command lines (only leak checks need them).
+fn snapshot_with_cmd() -> System {
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_memory().with_cmd(sysinfo::UpdateKind::Always),
+    );
     sys
 }
 
@@ -135,7 +149,7 @@ pub fn current_tree_memory(root: u32) -> u64 {
 
 /// Process ids whose command line mentions `needle` (leak checks: a throwaway profile path is unique to a run).
 pub fn processes_mentioning(needle: &str) -> Vec<u32> {
-    let sys = snapshot();
+    let sys = snapshot_with_cmd();
     sys.processes()
         .iter()
         .filter(|(_, p)| p.cmd().iter().any(|a| a.to_string_lossy().contains(needle)))
