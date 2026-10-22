@@ -1,0 +1,192 @@
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Insights</h1>
+      <p class="subtitle">How your workflows run on your runners</p>
+    </div>
+    <div class="btn-row">
+      <div class="segmented" role="radiogroup" aria-label="Range">
+        @for (d of dayOptions; track d.key) {
+          <button type="button" role="radio" [attr.aria-checked]="store.days() === d.key" (click)="setDays(d.key)">{{ d.label }}</button>
+        }
+      </div>
+      <button type="button" class="btn" [disabled]="store.reply().loading" (click)="store.retry()">
+        <mat-icon svgIcon="pc:refresh" aria-hidden="true" />
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <pc-load-state what="Insights" [hasValue]="!!data()" [error]="store.reply().error" [skeleton]="[90, 140, 220]" (retry)="store.retry()">
+    @if (data(); as d) {
+      @if (reply()?.hasApiToken === false) {
+        <div class="callout info" role="note">
+          <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+          <div class="callout-body">
+            <strong>Outcomes and queue times need a Gitea read token</strong>
+            <span class="muted">Add one under <a routerLink="/settings" [queryParams]="{ section: 'tokens' }">Settings, API tokens</a>.</span>
+          </div>
+        </div>
+      }
+      @if (pendingText(); as p) {
+        <div class="callout info" role="status">
+          <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+          <div class="callout-body">{{ p }}</div>
+        </div>
+      }
+
+      @if (d.jobs === 0) {
+        <section class="card">
+          <pc-empty-state icon="activity" title="No jobs in this period" text="Insights appear once your runners have finished jobs in the selected range." />
+        </section>
+      } @else {
+        <section class="card" aria-labelledby="advice-title">
+          <header class="card-header"><h2 id="advice-title">Advice</h2></header>
+          <div class="card-body advice">
+            @for (a of advice(); track $index) {
+              <article class="advice-card" [class.warning]="a.warning">
+                <mat-icon [svgIcon]="'pc:' + a.icon" aria-hidden="true" />
+                <div>
+                  <strong>{{ a.title }}</strong>
+                  <p class="muted">{{ a.detail }}</p>
+                </div>
+              </article>
+            } @empty {
+              <p class="muted">Nothing to act on in this period</p>
+            }
+          </div>
+        </section>
+
+        <section class="kpis" aria-label="Summary">
+          @for (k of kpis(); track k.label) {
+            <div class="kpi card">
+              <span class="hero num">{{ k.value }}</span>
+              <span class="faint">{{ k.label }}</span>
+            </div>
+          }
+        </section>
+
+        <section class="card" aria-labelledby="repos-title">
+          <header class="card-header"><h2 id="repos-title">Success rate per repository</h2></header>
+          <div class="card-body scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Repository</th>
+                  <th scope="col" class="num">Jobs</th>
+                  <th scope="col" class="num">Success rate</th>
+                  <th scope="col">Per day</th>
+                  <th scope="col">Trend</th>
+                  <th scope="col" class="num">Average queue</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of repos(); track r.repo) {
+                  <tr>
+                    <th scope="row" class="name">{{ r.repo }}</th>
+                    <td class="num">{{ r.jobs }}</td>
+                    <td class="num">{{ r.rate }}</td>
+                    <td class="spark"><pc-chart [option]="r.option" [label]="r.label" [height]="32" /></td>
+                    <td>
+                      @if (r.trend; as t) {
+                        <span [class.tone-danger]="t.direction === 'down'" [class.tone-success]="t.direction === 'up'">{{ t.text }}</span>
+                      } @else {
+                        <span class="faint">—</span>
+                      }
+                    </td>
+                    <td class="num">{{ r.queue }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="slow-title">
+          <header class="card-header"><h2 id="slow-title">Slowest jobs</h2></header>
+          <div class="card-body scroll">
+            @if (slowest().length) {
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Repository</th>
+                    <th scope="col">Job</th>
+                    <th scope="col" class="num">Runs</th>
+                    <th scope="col" class="num">Average</th>
+                    <th scope="col" class="num">95th percentile</th>
+                    <th scope="col" class="num">Longest</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (j of slowest(); track j.repo + j.job) {
+                    <tr>
+                      <td>{{ j.repo }}</td>
+                      <td>{{ j.job }}</td>
+                      <td class="num">{{ j.runs }}</td>
+                      <td class="num">{{ j.avg }}</td>
+                      <td class="num">{{ j.p95 }}</td>
+                      <td class="num">{{ j.max }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            } @else {
+              <p class="muted">No job has run often enough to rank.</p>
+            }
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="flaky-title">
+          <header class="card-header"><h2 id="flaky-title">Flaky jobs</h2></header>
+          <div class="card-body scroll">
+            <p class="muted explain">A job is flaky when it keeps switching between passing and failing on the same repository; a flip is one such switch.</p>
+            @if (flaky().length) {
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Repository</th>
+                    <th scope="col">Job</th>
+                    <th scope="col" class="num">Runs</th>
+                    <th scope="col" class="num">Failures</th>
+                    <th scope="col" class="num">Flips</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (j of flaky(); track j.repo + j.job) {
+                    <tr>
+                      <td>{{ j.repo }}</td>
+                      <td>{{ j.job }}</td>
+                      <td class="num">{{ j.runs }}</td>
+                      <td class="num">{{ j.failures }}</td>
+                      <td class="num">{{ j.flips }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            } @else {
+              <p class="muted">No flaky jobs in this period.</p>
+            }
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="load-title">
+          <header class="card-header"><h2 id="load-title">Runner load</h2><span class="meta">Share of the period with a job running</span></header>
+          <div class="card-body">
+            <ul class="load">
+              @for (r of runners(); track r.name) {
+                <li>
+                  <span class="name truncate">{{ r.name }}</span>
+                  <span class="meter" role="img" [attr.aria-label]="r.name + ' busy ' + r.busy"><span [style.width.%]="r.width"></span></span>
+                  <span class="num pct">{{ r.busy }}</span>
+                  <span class="faint num jobs">{{ r.jobs }}</span>
+                </li>
+              } @empty {
+                <li class="muted">No runner ran a job in this period.</li>
+              }
+            </ul>
+          </div>
+        </section>
+      }
+    }
+  </pc-load-state>
+</div>
