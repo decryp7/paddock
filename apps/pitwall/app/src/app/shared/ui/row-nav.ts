@@ -23,11 +23,11 @@ export function isMenuKey(e: Pick<KeyboardEvent, 'key' | 'shiftKey'>): boolean {
   return e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey);
 }
 
-/** Moves focus between the rows (`tr[tabindex]`) of the table a keydown happened in; true when it moved. */
+/** Moves focus between the rows (`tr` or `role=row` elements with a tabindex) a keydown happened in; true when it moved. */
 export function moveRowFocus(e: KeyboardEvent): boolean {
-  const row = (e.target as HTMLElement | null)?.closest<HTMLElement>('tr[tabindex]') ?? null;
+  const row = (e.target as HTMLElement | null)?.closest<HTMLElement>('tr[tabindex], [role="row"][tabindex]') ?? null;
   if (!row || e.target !== row) return false;
-  const rows = Array.from(row.closest('tbody')?.querySelectorAll<HTMLElement>('tr[tabindex]') ?? []);
+  const rows = Array.from(row.parentElement?.querySelectorAll<HTMLElement>(':scope > [tabindex]') ?? []);
   const to = rowTarget(rows, row, e.key);
   if (!to) return false;
   e.preventDefault();

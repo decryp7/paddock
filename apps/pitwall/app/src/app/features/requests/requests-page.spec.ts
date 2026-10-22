@@ -5,7 +5,8 @@ import type { PitwallBackend } from '../../core/backend';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { registerIcons } from '../../shared/icons';
-import { RequestsPage, msCell } from './requests-page';
+import { COLUMNS, RequestsPage, layout, msCell } from './requests-page';
+import { secondsCell, statusText, tokensCell } from './request-labels';
 import { RequestsStore } from './requests.store';
 
 async function settle(fixture: { detectChanges(): void; whenStable(): Promise<unknown> }) {
@@ -35,12 +36,86 @@ describe('msCell', () => {
   });
 });
 
+describe('request cells', () => {
+  it('words an error status, shows seconds and joins the tokens', () => {
+    expect(statusText(429)).toBe('429 Rate limited');
+    expect(statusText(418)).toBe('418');
+    expect(secondsCell(null)).toBe('—');
+    expect(secondsCell(143)).toBe('0.1');
+    expect(secondsCell(2900)).toBe('2.9');
+    expect(secondsCell(13_400)).toBe('13');
+    expect(secondsCell(130_000)).toBe('130');
+    expect(tokensCell(212, 1400)).toBe('212 / 1.4k');
+  });
+
+  it('lays out the default columns and adds the optional ones on request', () => {
+    const base = layout(new Set());
+    expect(base.cols.some((c) => c.optional)).toBe(false);
+    expect(base.template.endsWith(' 32px')).toBe(true);
+    const all = layout(new Set(COLUMNS.filter((c) => c.optional).map((c) => c.id)));
+    expect(all.cols.length).toBe(COLUMNS.length);
+    expect(base.narrow).not.toBe(base.template);
+    expect(base.tiny).toBe('76px minmax(100px, 1fr) 148px 32px');
+  });
+});
+
 describe('RequestsPage', () => {
+  it('shows nothing in the status column for a success and the status word for an error', async () => {
+    const { fixture: f, el, store } = await render();
+    const failed = store.records().find((r) => r.status >= 400)!;
+    const ok = store.records().find((r) => r.status < 400)!;
+    const rows = Array.from(el.querySelectorAll<HTMLElement>('[role="row"][aria-label]'));
+    const rowOf = (id: string) => rows.find((r) => r.getAttribute('aria-label')!.includes(store.records().find((x) => x.id === id)!.endpoint));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(el.querySelectorAll('.c-status .status').length).toBe(rows.filter((r) => r.classList.contains('failed')).length);
+    expect(rowOf(ok.id)).toBeDefined();
+    store.setFilter({ status: 'errors' });
+    await settle(f);
+    expect(el.querySelector('.c-status .status')?.textContent).toContain(String(failed.status));
+  });
+
+  it('adds a column from the Columns menu', async () => {
+    const { fixture, el } = await render();
+    (Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.includes('Columns')) as HTMLButtonElement).click();
+    await settle(fixture);
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')).find((b) => b.textContent!.includes('API'))!;
+    item.click();
+    await settle(fixture);
+    expect(Array.from(el.querySelectorAll('[role="columnheader"]')).map((h) => h.textContent!.trim())).toContain('API');
+    item.click();
+    await settle(fixture);
+    expect(Array.from(el.querySelectorAll('[role="columnheader"]')).map((h) => h.textContent!.trim())).not.toContain('API');
+  });
+
+  it('opens the details with Enter, and offers copy and an app filter in the row menu', async () => {
+    const { fixture, el, store } = await render();
+    const row = el.querySelector<HTMLElement>('[role="row"][tabindex]')!;
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle(fixture);
+    expect(store.selected()).not.toBeNull();
+    const write = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: write } });
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    await settle(fixture);
+    const labels = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item'));
+    expect(labels.map((b) => b.textContent!.trim())).toEqual(['Details', 'Copy request id', 'Copy endpoint', expect.stringContaining('Only requests from')]);
+    labels[1]!.click();
+    await settle(fixture);
+    expect(write).toHaveBeenCalledWith(store.visible()[0]!.id);
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await settle(fixture);
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).at(-1)!.click();
+    await settle(fixture);
+    expect(store.filter().app).not.toBe('all');
+    vi.unstubAllGlobals();
+  });
+
   it('renders the filter row and the table header', async () => {
     const { el, store } = await render();
     expect(el.querySelector('[role="search"]')).not.toBeNull();
-    expect(el.querySelectorAll('[role="columnheader"]').length).toBe(12);
-    expect(el.querySelector('.shown')?.textContent).toContain(`${store.records().length} of ${store.records().length}`);
+    // Calm by default: the columns that repeat on every row (API, chosen by, queued, cold start) are off.
+    expect(Array.from(el.querySelectorAll('[role="columnheader"]')).map((h) => h.textContent!.trim())).toEqual(['Time', 'App', 'Model', 'Endpoint', 'TTFT ms', 'Total s', 'Tokens in / out', 'Status', 'Actions']);
+    expect(el.querySelector('.shown')?.textContent).toContain(`${store.records().length} requests`);
     const options = Array.from(el.querySelectorAll('#pw-req-app option')).map((o) => o.textContent?.trim());
     expect(options[0]).toBe('All apps');
     expect(options.length).toBeGreaterThan(2);
@@ -76,7 +151,7 @@ describe('RequestsPage', () => {
     (Array.from(drawer.querySelectorAll('button')).find((b) => b.textContent?.includes('Hide content')) as HTMLButtonElement).click();
     await settle(fixture);
     expect(drawer.querySelector('pre')).toBeNull();
-    drawer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle(fixture);
     expect(el.querySelector('pw-request-detail')).toBeNull();
   });

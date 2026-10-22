@@ -1,36 +1,28 @@
-import { A11yModule } from '@angular/cdk/a11y';
 import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import type { RequestRecord } from '../../core/api.types';
 import { date, duration, int } from '../../shared/format';
-import { PRIORITY_LABEL, statusTone } from '../../shared/labels';
-import { API_LABEL, CHOSEN_LABEL } from './request-labels';
+import { PRIORITY_LABEL } from '../../shared/labels';
+import { DetailPanel } from '../../shared/ui/detail-panel';
+import { Fact } from '../../shared/ui/fact';
+import { API_LABEL, CHOSEN_LABEL, statusText } from './request-labels';
 import { RequestsStore } from './requests.store';
 
-/** The detail drawer of one request. Prompt and response stay hidden until the user asks for them. */
+/** The details of one request, in the panel beside the log. Prompt and response stay hidden until the user asks for them. */
 @Component({
   selector: 'pw-request-detail',
-  imports: [A11yModule, MatIconModule],
+  imports: [MatIconModule, DetailPanel, Fact],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'pw-req-title', '(keydown.escape)': 'closed.emit()' },
   template: `
-    <div class="inner" cdkTrapFocus [cdkTrapFocusAutoCapture]="true">
-      <header>
-        <div>
-          <p class="eyebrow mono pitwall-selectable">{{ r().id }}</p>
-          <h2 id="pw-req-title"><span class="mono">{{ r().endpoint }}</span></h2>
-          <p class="faint">{{ appName() }} · {{ when(r().at) }}</p>
-        </div>
-        <button type="button" class="btn ghost icon" aria-label="Close details" (click)="closed.emit()" cdkFocusInitial><mat-icon svgIcon="pw:close" aria-hidden="true" /></button>
-      </header>
-
-      <div class="status-line">
-        <span class="pill dot" [attr.data-tone]="tone(r().status)">{{ r().status }}</span>
-        @if (r().stream) {
-          <span class="tag">Streamed</span>
+    <pw-detail-panel [heading]="r().endpoint" [sub]="appName() + ' · ' + when(r().at)" (closed)="closed.emit()">
+      <div class="state">
+        @if (r().status >= 400) {
+          <span class="status" [attr.data-tone]="r().status >= 500 ? 'bad' : 'warn'">{{ statusLabel(r().status) }}</span>
+        } @else {
+          <span class="status" data-tone="ok">Succeeded · {{ r().status }}</span>
         }
-        @if (r().coldStartMs !== null) {
-          <span class="tag warn">Cold start {{ dur(r().coldStartMs) }}</span>
+        @if (r().stream) {
+          <span class="faint">Streamed</span>
         }
       </div>
       @if (r().error) {
@@ -49,23 +41,25 @@ import { RequestsStore } from './requests.store';
           <div><dt><i class="t"></i>First token</dt><dd class="num">{{ dur(r().ttftMs) }}</dd></div>
           <div><dt><i class="g"></i>Total</dt><dd class="num">{{ dur(r().totalMs) }}</dd></div>
         </dl>
+        @if (r().coldStartMs !== null) {
+          <pw-fact label="Cold start" [value]="dur(r().coldStartMs)" [num]="true" />
+        }
       </section>
 
       <section aria-labelledby="pw-req-route">
         <h3 id="pw-req-route">Routing</h3>
-        <dl class="kv pitwall-selectable">
-          <dt>API</dt><dd>{{ api[r().api] }}</dd>
-          @if (r().alias; as alias) {
-            <dt>Preset asked for</dt><dd class="mono">{{ alias }}</dd>
-            <dt>Resolved to</dt><dd class="mono">{{ r().modelId ?? 'none' }}</dd>
-          } @else {
-            <dt>Model</dt><dd class="mono">{{ r().modelId ?? 'none' }}</dd>
-          }
-          <dt>Chosen by</dt><dd>{{ chosen[r().chosenBy] }}</dd>
-          <dt>Priority</dt><dd>{{ priority[r().priority] }}</dd>
-          <dt>Prompt tokens</dt><dd class="num">{{ count(r().promptTokens) }}</dd>
-          <dt>Completion tokens</dt><dd class="num">{{ count(r().completionTokens) }}</dd>
-        </dl>
+        <pw-fact label="API" [value]="api[r().api]" />
+        @if (r().alias; as alias) {
+          <pw-fact label="Preset asked for" [value]="alias" [mono]="true" />
+          <pw-fact label="Resolved to" [value]="r().modelId ?? 'none'" [mono]="true" />
+        } @else {
+          <pw-fact label="Model" [value]="r().modelId ?? 'none'" [mono]="true" />
+        }
+        <pw-fact label="Chosen by" [value]="chosen[r().chosenBy]" />
+        <pw-fact label="Priority" [value]="priority[r().priority]" />
+        <pw-fact label="Prompt tokens" [value]="count(r().promptTokens)" [num]="true" />
+        <pw-fact label="Completion tokens" [value]="count(r().completionTokens)" [num]="true" />
+        <pw-fact label="Request id" [value]="r().id" [copy]="true" [mono]="true" />
       </section>
 
       <section aria-labelledby="pw-req-content">
@@ -98,60 +92,17 @@ import { RequestsStore } from './requests.store';
           </div>
         }
       </section>
-    </div>
+    </pw-detail-panel>
   `,
   styles: `
     :host {
-      position: fixed;
-      top: calc(var(--titlebar-h) + var(--sp-3));
-      right: var(--sp-3);
-      bottom: var(--sp-3);
-      z-index: 40;
-      width: 440px;
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: var(--r-xl);
-      box-shadow: var(--shadow-pop);
-      animation: slide var(--dur) var(--ease);
-      overflow: hidden;
+      display: contents;
     }
-    @keyframes slide {
-      from {
-        opacity: 0;
-        transform: translateX(16px);
-      }
-    }
-    .inner {
-      height: 100%;
-      overflow: auto;
-      padding: var(--sp-5);
-    }
-    header {
+    .state {
       display: flex;
-      justify-content: space-between;
+      align-items: center;
       gap: var(--sp-3);
-      h2 {
-        margin: 2px 0;
-        font-size: var(--fs-md);
-        word-break: break-all;
-      }
-      p {
-        font-size: var(--fs-sm);
-      }
-    }
-    .eyebrow {
-      font-size: var(--fs-xs);
-      color: var(--text-3);
-    }
-    .status-line {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--sp-2);
-      margin-top: var(--sp-4);
-      .warn {
-        color: var(--warn);
-        border-color: color-mix(in srgb, var(--warn) 40%, transparent);
-      }
+      font-size: var(--fs-sm);
     }
     .err {
       display: flex;
@@ -160,27 +111,26 @@ import { RequestsStore } from './requests.store';
       margin-top: var(--sp-3);
       padding: var(--sp-2) var(--sp-3);
       font-size: var(--fs-sm);
-      background: var(--bad-soft);
-      border-radius: var(--r-md);
+      border-left: 3px solid var(--bad);
+      background: var(--bg-sunken);
+      border-radius: var(--r-sm);
       mat-icon {
         color: var(--bad);
         flex: none;
       }
     }
     section {
-      margin-top: var(--sp-5);
+      margin-top: var(--sp-4);
     }
     h3 {
       margin-bottom: var(--sp-2);
-      font-size: var(--fs-xs);
+      font-size: var(--fs-sm);
       font-weight: var(--fw-semibold);
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: var(--tracking-caps);
+      color: var(--text-2);
     }
     .timing {
       display: flex;
-      gap: 2px;
+      gap: 1px;
       height: 8px;
       border-radius: var(--r-full);
       overflow: hidden;
@@ -194,21 +144,21 @@ import { RequestsStore } from './requests.store';
       background: var(--text-3);
     }
     .t {
-      background: var(--warn);
+      background: var(--viz-2);
     }
     .g {
-      background: var(--accent);
+      background: var(--viz-1);
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      margin: var(--sp-3) 0 0;
+      margin: var(--sp-3) 0 var(--sp-2);
       dt {
         display: flex;
         align-items: center;
         gap: 6px;
-        font-size: var(--fs-xs);
-        color: var(--text-3);
+        font-size: var(--fs-sm);
+        color: var(--text-2);
       }
       i {
         width: 8px;
@@ -221,30 +171,15 @@ import { RequestsStore } from './requests.store';
         font-weight: var(--fw-semibold);
       }
     }
-    .kv {
-      display: grid;
-      grid-template-columns: 140px 1fr;
-      gap: 8px var(--sp-3);
-      margin: 0;
-      font-size: var(--fs-sm);
-      dt {
-        color: var(--text-3);
-      }
-      dd {
-        margin: 0;
-        word-break: break-all;
-      }
-    }
     .hidden-box {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
       gap: var(--sp-2);
-      padding: var(--sp-4);
+      padding: var(--sp-3);
       font-size: var(--fs-sm);
       color: var(--text-2);
       background: var(--bg-sunken);
-      border: 1px dashed var(--border-strong);
       border-radius: var(--r-md);
       mat-icon {
         color: var(--text-3);
@@ -255,19 +190,19 @@ import { RequestsStore } from './requests.store';
       justify-content: space-between;
       align-items: center;
       margin-bottom: var(--sp-1);
-      font-size: var(--fs-xs);
+      font-size: var(--fs-sm);
     }
     .label2 {
       display: block;
       margin: var(--sp-3) 0 var(--sp-1);
-      font-size: var(--fs-xs);
+      font-size: var(--fs-sm);
     }
     pre {
       margin: 0;
       padding: var(--sp-3);
-      max-height: 260px;
+      max-height: 220px;
       overflow: auto;
-      font-size: var(--fs-xs);
+      font-size: var(--fs-sm);
       line-height: 1.5;
       white-space: pre-wrap;
       word-break: break-word;
@@ -284,7 +219,7 @@ export class RequestDetail {
   protected readonly store = inject(RequestsStore);
   protected readonly dur = duration;
   protected readonly count = int;
-  protected readonly tone = statusTone;
+  protected readonly statusLabel = statusText;
   protected readonly api = API_LABEL;
   protected readonly chosen = CHOSEN_LABEL;
   protected readonly priority = PRIORITY_LABEL;

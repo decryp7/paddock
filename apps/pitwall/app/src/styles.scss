@@ -757,8 +757,14 @@ textarea.input {
   }
   pw-detail-panel {
     position: sticky;
-    top: 0;
-    max-height: calc(100vh - var(--sp-10) * 2);
+    top: var(--sp-6);
+    max-height: calc(100vh - var(--sp-6) * 2);
+  }
+  /* In a page that fills the window (the request log) the panel is as tall as the list. */
+  &.fill pw-detail-panel {
+    position: static;
+    align-self: stretch;
+    max-height: none;
   }
 }
 
