@@ -1,7 +1,8 @@
 // Builds the library and publishes it to the Gitea npm registry (https://dev.decryptology.net/api/packages/decryp7/npm/).
 //   node scripts/release.mjs            build and `npm pack --dry-run` of dist/paddock-ui (shows what would be published)
 //   node scripts/release.mjs --publish  also npm publish and create the Gitea release v<version> with notes (no assets)
-//                                       Token: PACKAGE_TOKEN (write:package), else GITEA_TOKEN. The tag must already be pushed.
+//                                       Auth: PACKAGE_AUTH (base64 of user:password, basic auth; CI builds it from the DOCKER_* secrets), else
+//                                       PACKAGE_TOKEN / GITEA_TOKEN (token with write:package). The tag must already be pushed.
 // Publishing a version that already exists is reported as "already published" and is not an error.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,16 +24,18 @@ copyFileSync(join(ui, 'README.md'), join(dist, 'README.md'));
 if (!process.argv.includes('--publish')) {
   run('npm', ['pack', dist, '--dry-run']);
 } else {
+  const basic = process.env.PACKAGE_AUTH;
   const token = process.env.PACKAGE_TOKEN || process.env.GITEA_TOKEN;
-  if (!token) throw new Error('PACKAGE_TOKEN (or GITEA_TOKEN) is not set: it needs the write:package scope');
+  const secret = basic || token;
+  if (!secret) throw new Error('PACKAGE_AUTH (basic) or PACKAGE_TOKEN / GITEA_TOKEN is not set: it needs the write:package scope');
 
   // The token goes into a throw-away npmrc that is deleted afterwards; it is never printed.
   const dir = mkdtempSync(join(tmpdir(), 'paddock-npm-'));
   const npmrc = join(dir, 'npmrc');
-  writeFileSync(npmrc, `@decryp7:registry=${registry}\n//${registry.replace(/^https:\/\//, '')}:_authToken=${token}\n`, { mode: 0o600 });
+  writeFileSync(npmrc, `@decryp7:registry=${registry}\n//${registry.replace(/^https:\/\//, '')}:${basic ? `_auth=${basic}` : `_authToken=${token}`}\n`, { mode: 0o600 });
   try {
     const res = spawnSync('npm', ['publish', dist, '--userconfig', npmrc, '--registry', registry], { cwd: ui, encoding: 'utf8' });
-    const output = `${res.stdout}${res.stderr}`.split(token).join('***');
+    const output = `${res.stdout}${res.stderr}`.split(secret).join('***');
     process.stdout.write(output);
     if (res.status === 0) console.log(`published @decryp7/paddock-ui@${version}`);
     else if (/\b409\b|already exists|cannot publish over|previously published/i.test(output)) {
@@ -43,7 +46,7 @@ if (!process.argv.includes('--publish')) {
   }
 
   const api = 'https://dev.decryptology.net/api/v1/repos/decryp7/paddock';
-  const headers = { Authorization: `token ${token}` };
+  const headers = { Authorization: token ? `token ${token}` : `Basic ${basic}` };
   const tag = `v${version}`;
   let res = await fetch(`${api}/releases/tags/${tag}`, { headers });
   if (res.ok) console.log(`release ${tag} already exists`);

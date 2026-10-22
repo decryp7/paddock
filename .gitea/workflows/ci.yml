@@ -70,8 +70,15 @@ jobs:
       - run: npm ci
       - name: Publish to the npm registry and create the release
         env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
           GITEA_TOKEN: ${{ github.token }}
-        run: node scripts/release.mjs --publish
+        run: |
+          # Basic-auth credential for the registry, built here, masked and never printed.
+          PACKAGE_AUTH=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
+          echo "::add-mask::$PACKAGE_AUTH"
+          export PACKAGE_AUTH
+          node scripts/release.mjs --publish
 
   # rust:
   #   name: rust (fmt, clippy, test, deny)
