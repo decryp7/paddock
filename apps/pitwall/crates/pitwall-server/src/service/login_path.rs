@@ -110,6 +110,8 @@ mod tests {
         );
     }
 
+    // Unix paths ("/opt/fish") are not absolute under Windows' rules; login shells exist only on Unix.
+    #[cfg(unix)]
     #[test]
     fn shells_are_absolute_existing_and_unique() {
         let exists = |p: &Path| p == Path::new("/bin/zsh") || p == Path::new("/opt/fish");
