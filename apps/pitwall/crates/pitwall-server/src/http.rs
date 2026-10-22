@@ -185,7 +185,12 @@ fn meta(family: ApiFamily, endpoint: &str, h: &HeaderMap, kind: JobKind) -> Resu
 type Fmt = Box<dyn FnMut(&ChatEvent) -> Vec<String> + Send>;
 
 fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'static str) -> Response {
-    let (model, by, cold, engine) = (run.resolved.id.to_string(), run.resolved.chosen_by, run.cold_start_ms, run.engine.clone());
+    let (model, by, cold, engine) = (
+        run.resolved.id.to_string(),
+        run.resolved.chosen_by,
+        run.cold_start_ms,
+        run.engine.clone(),
+    );
     struct St {
         run: Run,
         pending: VecDeque<String>,
@@ -271,7 +276,13 @@ async fn collect(mut run: Run) -> Result<(ChatOutput, Run), ApiError> {
 
 fn json_response(v: Value, run: &Run) -> Response {
     let mut r = axum::Json(v).into_response();
-    provenance(&mut r, run.resolved.id.as_str(), &run.engine, run.resolved.chosen_by, run.cold_start_ms);
+    provenance(
+        &mut r,
+        run.resolved.id.as_str(),
+        &run.engine,
+        run.resolved.chosen_by,
+        run.cold_start_ms,
+    );
     r
 }
 

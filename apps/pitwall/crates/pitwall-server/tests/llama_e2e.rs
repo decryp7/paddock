@@ -14,19 +14,19 @@ fn enabled() -> bool {
     std::env::var("PITWALL_LLAMA_E2E").is_ok_and(|v| v == "1")
 }
 
-/// Polls `downloads` until the named job ends; returns its final state or panics after `limit`.
-async fn wait_download(h: &common::Harness, name_part: &str, limit: Duration) {
+/// Polls `downloads` until every job has ended (an install shows as the archive's file name); panics when one failed.
+async fn wait_downloads(h: &common::Harness, what: &str, limit: Duration) {
     let start = Instant::now();
     loop {
         let d = h.rpc("downloads", json!({})).await.json();
-        if let Some(j) = d.as_array().unwrap().iter().find(|j| j["name"].as_str().is_some_and(|n| n.contains(name_part))) {
-            match j["state"].as_str().unwrap() {
-                "done" => return,
-                "failed" | "cancelled" => panic!("{name_part} did not finish: {j}"),
-                _ => {}
-            }
+        let jobs = d.as_array().unwrap();
+        if let Some(j) = jobs.iter().find(|j| matches!(j["state"].as_str(), Some("failed" | "cancelled"))) {
+            panic!("{what} did not finish: {j}");
         }
-        assert!(start.elapsed() < limit, "timed out waiting for {name_part}");
+        if !jobs.is_empty() && jobs.iter().all(|j| j["state"] == "done") {
+            return;
+        }
+        assert!(start.elapsed() < limit, "timed out waiting for {what}: {d}");
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
@@ -41,7 +41,12 @@ async fn the_real_engine_answers_one_chat_request() {
 
     // The pinned CPU build where there is one (Apple Silicon ships only Metal): checksummed and self-tested by the installer.
     let engines = h.rpc("engines", json!({})).await.json();
-    let llama = engines.as_array().unwrap().iter().find(|e| e["kind"] == "llama.cpp").expect("llama.cpp is listed");
+    let llama = engines
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == "llama.cpp")
+        .expect("llama.cpp is listed");
     let catalog = llama["catalog"].as_array().unwrap();
     let build = catalog
         .iter()
@@ -51,11 +56,13 @@ async fn the_real_engine_answers_one_chat_request() {
     let cpu = build["id"].as_str().unwrap().to_string();
     let r = h.rpc("install_build", json!({"buildId": cpu})).await;
     assert_eq!(r.status, 200, "{}", r.body);
-    wait_download(&h, &cpu, Duration::from_secs(600)).await;
+    wait_downloads(&h, "the engine build", Duration::from_secs(300)).await;
 
-    let r = h.rpc("download_model", json!({"repo": REPO, "file": FILE, "projector": null})).await;
+    let r = h
+        .rpc("download_model", json!({"repo": REPO, "file": FILE, "projector": null}))
+        .await;
     assert_eq!(r.status, 200, "{}", r.body);
-    wait_download(&h, FILE, Duration::from_secs(600)).await;
+    wait_downloads(&h, "the model", Duration::from_secs(300)).await;
 
     let model = h.rpc("local_models", json!({})).await.json()[0]["id"].as_str().unwrap().to_string();
     let key = h.make_key("Real Engine Test").await;
