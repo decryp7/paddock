@@ -33,9 +33,11 @@ let nextId = 0;
           <rect class="ring" [attr.x]="l.lid.x" [attr.y]="l.lid.y" [attr.width]="l.lid.w" [attr.height]="l.lid.h" rx="8" />
           <path class="pin1" d="M12 12 L24 12 L12 24 Z" />
           @for (m of l.memory; track $index) {
+            <rect class="memsub" [attr.x]="m.x - 3" [attr.y]="m.y - 3" [attr.width]="m.w + 6" [attr.height]="m.h + 6" rx="6" />
             <rect class="dram" [attr.x]="m.x" [attr.y]="m.y" [attr.width]="m.w" [attr.height]="m.h" rx="4" [attr.fill]="'url(#' + id + '-pkg)'" />
-            <rect class="mark" [attr.x]="m.x + 5" [attr.y]="m.y + 5" [attr.width]="m.w - 10" [attr.height]="m.h - 10" rx="2" />
-            <circle class="dot" [attr.cx]="m.x + 8" [attr.cy]="m.y + 8" r="1.25" />
+            <rect class="memlid" [attr.x]="m.x + 3" [attr.y]="m.y + 3" [attr.width]="m.w - 6" [attr.height]="m.h - 6" rx="2.5" />
+            <rect class="mark" [attr.x]="m.x + 7" [attr.y]="m.y + 7" [attr.width]="m.w - 14" [attr.height]="m.h - 14" rx="1.5" />
+            <circle class="dot" [attr.cx]="m.x + 10" [attr.cy]="m.y + 10" r="1.25" />
           }
           @for (d of l.dies; track $index) {
             <rect class="die" [attr.x]="d.x" [attr.y]="d.y" [attr.width]="d.w" [attr.height]="d.h" rx="4" [attr.fill]="'url(#' + id + '-die)'" />
@@ -106,6 +108,8 @@ let nextId = 0;
     .passive { fill: var(--hw-passive); fill-opacity: 0.6; }
     .ring { fill: none; stroke: var(--hw-lid-ring); stroke-opacity: 0.7; stroke-width: 1; }
     .pin1 { fill: var(--hw-gold-a); fill-opacity: 0.9; }
+    .memsub { fill: var(--hw-substrate-a); fill-opacity: 0.75; stroke: var(--hw-substrate-edge); stroke-opacity: 0.8; stroke-width: 1; }
+    .memlid { fill: var(--hw-metal-b); fill-opacity: 0.14; stroke: var(--hw-metal-edge); stroke-opacity: 0.45; stroke-width: 1; }
     .dram, .soc { stroke: var(--hw-pkg-edge); stroke-width: 1; }
     .mark { fill: none; stroke: var(--hw-pkg-mark); stroke-opacity: 0.35; stroke-width: 1; shape-rendering: crispEdges; }
     .dot { fill: var(--hw-pkg-mark); fill-opacity: 0.7; }

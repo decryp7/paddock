@@ -96,10 +96,6 @@ const HINT_TONE: Record<HintKind, string> = {
             } @else if (unified(); as u) {
               <div class="chipwrap">
                 <dy-chip-package class="soc" [model]="soc()!" />
-                <div class="txt">
-                  <strong>{{ u.upgradeable ? 'Memory' : isApple(inv.cpu.name) ? 'Unified memory' : 'Soldered memory' }}</strong>
-                  <p>{{ bytes(u.total) }} {{ kind(u.kind) }}{{ u.manufacturer ? ' by ' + u.manufacturer : '' }}{{ isApple(inv.cpu.name) ? ', shared by the CPU and the GPU. It is part of the chip package' : ', soldered to the mainboard' }}{{ u.upgradeable ? '.' : ' and cannot be upgraded.' }}</p>
-                </div>
               </div>
             } @else if (totalOnly(); as t) {
               <div class="na">

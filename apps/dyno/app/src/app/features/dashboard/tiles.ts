@@ -121,7 +121,7 @@ export class CpuTile {
       @if (mem(); as m) {
         <div class="hero"><b>{{ used(m.used)[0] }}</b><small>{{ used(m.used)[1] }} of {{ bytes(m.total) }}</small></div>
         <div class="bar-track" [attr.data-tone]="barTone()" role="img" [attr.aria-label]="'Memory used ' + pct(usedPercent())"><span [style.width.%]="usedPercent()"></span></div>
-        <dy-sparkline [values]="live.series().memory" [max]="100" label="Memory use over the last minute" style="--spark-h: 32px" />
+        <dy-sparkline [values]="live.series().memory" [max]="100" [zoom]="true" color="var(--chart-1)" label="Memory use over the last minute" style="--spark-h: 32px" />
         <dl class="caps">
           <div><dt>In use</dt><dd>{{ pct(usedPercent()) }}</dd></div>
           <div><dt>Available</dt><dd>{{ bytes(m.available) }}</dd></div>

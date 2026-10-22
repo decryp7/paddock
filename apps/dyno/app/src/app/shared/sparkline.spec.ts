@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { Sparkline, sparkMax, sparkPath } from './sparkline';
+import { Sparkline, sparkMax, sparkPath, zoomRange } from './sparkline';
 
 describe('sparkPath', () => {
   it('is empty without values or a positive scale', () => {
@@ -60,5 +60,27 @@ describe('Sparkline component', () => {
   });
   it('draws a second line when given', () => {
     expect(make([1, 2], [2, 1]).querySelector('path.second')).not.toBeNull();
+  });
+});
+
+describe('zoomRange', () => {
+  it('widens a flat level to the minimum span around it', () => {
+    expect(zoomRange([50, 50, 50], 8)).toEqual({ min: 46, max: 54 });
+  });
+  it('follows the data with padding when it moves more than the minimum', () => {
+    const r = zoomRange([40, 60], 8);
+    expect(r.min).toBeCloseTo(37);
+    expect(r.max).toBeCloseTo(63);
+  });
+  it('stays inside 0 and the ceiling and handles no data', () => {
+    expect(zoomRange([2, 2], 8)).toEqual({ min: 0, max: 8 });
+    expect(zoomRange([99, 99], 8)).toEqual({ min: 92, max: 100 });
+    expect(zoomRange([], 8)).toEqual({ min: 0, max: 100 });
+  });
+  it('draws a zoomed line with slope instead of a flat edge', () => {
+    const { min, max } = zoomRange([50, 52], 8);
+    const d = sparkPath([50, 52], max, 100, 2, min);
+    expect(d).not.toContain('100.00L100.00 100.00');
+    expect(d.startsWith('M0.00')).toBe(true);
   });
 });

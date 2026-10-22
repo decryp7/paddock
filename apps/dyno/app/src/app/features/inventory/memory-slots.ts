@@ -189,6 +189,8 @@ interface RowArt {
     .rib { fill: var(--hw-socket-b); stroke: var(--hw-socket-edge); stroke-width: 1; }
     .arm { fill: var(--hw-latch); stroke: var(--hw-latch-edge); stroke-width: 1; }
     .shine { fill: #fff; fill-opacity: 0.5; }
+    .latch.open { opacity: 0.5; }
+    .latch.open .arm, .latch.open .hook { fill-opacity: 0.55; stroke-opacity: 0.6; }
     .hook { fill: var(--hw-latch); stroke: var(--hw-latch-edge); stroke-width: 1; }
     .ghost rect { fill: var(--hw-ghost-fill); fill-opacity: 0.5; stroke: var(--hw-ghost); stroke-width: 1; stroke-opacity: 0.8; }
     .ghost .plus circle { fill: none; stroke: var(--hw-ghost); }
