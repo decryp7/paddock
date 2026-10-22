@@ -41,6 +41,14 @@ const SCREENS: { name: string; path: string; ready: (page: Page) => Promise<void
       await page.clock.runFor(1_000);
     },
   },
+  {
+    name: 'cpu-detail',
+    path: '/#/cpu',
+    ready: async (page) => {
+      await expect(page.getByRole('region', { name: 'Per-core history' }).locator('canvas').first()).toBeVisible();
+      await page.clock.runFor(1_000);
+    },
+  },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why slow' })).toBeVisible()) },
   { name: 'rules', path: '/#/rules', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'CPU taming' })).toBeVisible()) },
   { name: 'cleanup', path: '/#/cleanup', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Cleanup' })).toBeVisible()) },
@@ -67,6 +75,12 @@ for (const theme of ['dark', 'light'] as const) {
       await page.clock.runFor(45_000);
       await screen.ready(page);
       await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`) });
+      if (screen.name === 'dashboard') {
+        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('button', { name: 'Per core' }).click();
+        await page.clock.runFor(1_000);
+        await page.getByRole('group', { name: 'CPU', exact: true }).screenshot({ path: join(OUT, `cpu-per-core-tile-${theme}.png`) });
+        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('button', { name: 'Overall' }).click();
+      }
       if (screen.name === 'dashboard') {
         // The whole page, for the README and for review (the 1440x900 image only shows the top).
         await page.setViewportSize({ width: 1440, height: 2300 });

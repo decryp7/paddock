@@ -1,9 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import type { Reading } from '../../core/api.types';
 import { formatBytes, formatDuration, formatFraction, formatGhz, formatPercent, formatRate, formatCount } from '../../shared/format';
 import { PRESSURE_LABEL, PRESSURE_TONE, readingReason, readingValue } from '../../shared/labels';
 import { Sparkline } from '../../shared/sparkline';
 import { LiveStore } from '../../state/live.store';
+import { Icon } from '../../shared/icon';
+import { ViewPrefs } from '../../core/view-prefs';
+import { coreGroups } from '../cpu/core-layout';
 import { Tile } from './tile';
 
 /** The tone of a used-fraction bar (visual only: the number is always printed). */
@@ -13,41 +17,83 @@ function usedTone(percent: number): 'ok' | 'warn' | 'bad' | null {
 
 const combine = <T>(reading: Reading<T> | undefined) => ({ value: reading ? readingValue(reading) : null, reason: reading ? readingReason(reading) : null });
 
-/** CPU: the big number, a minute of history and one cell per core. */
+/** CPU: the big number, a minute of history and one cell per core; the toggle switches to one live bar per core, grouped by core kind. */
 @Component({
   selector: 'dy-cpu-tile',
-  imports: [Tile, Sparkline],
+  imports: [Tile, Sparkline, RouterLink, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-tile title="CPU" icon="cpu" [ready]="live.connected()">
+      @if (cpu()) {
+        <span badge class="head">
+          <span class="seg sm" role="group" aria-label="CPU view">
+            <button type="button" [attr.aria-pressed]="prefs.cpuView() === 'overall'" (click)="prefs.setCpuView('overall')">Overall</button>
+            <button type="button" [attr.aria-pressed]="prefs.cpuView() === 'cores'" (click)="prefs.setCpuView('cores')">Per core</button>
+          </span>
+          <a class="btn ghost icon sm" routerLink="/cpu" aria-label="CPU details" title="CPU details"><dy-icon name="arrow-right" /></a>
+        </span>
+      }
       @if (cpu(); as c) {
         <div class="headline">
           <span class="big num">{{ pct(c.total) }}</span>
           <span class="sub num">{{ ghz(c.frequencyMhz) }} · base {{ ghz(c.baseFrequencyMhz) }}</span>
         </div>
-        <dy-sparkline [values]="live.series().cpu" [max]="100" label="CPU use over the last minute" style="--spark-h: 56px" />
-        <div class="cores" role="img" [attr.aria-label]="coreLabel()">
-          @for (v of c.perCore; track $index) {
-            <span class="core" [style.background]="coreColor(v)" [title]="'Core ' + count($index) + ': ' + pct(v)"></span>
-          }
-        </div>
-        <p class="legend">{{ coresText() }}</p>
+        @if (prefs.cpuView() === 'overall') {
+          <dy-sparkline [values]="live.series().cpu" [max]="100" label="CPU use over the last minute" style="--spark-h: 56px" />
+          <div class="cores" role="img" [attr.aria-label]="coreLabel()">
+            @for (v of c.perCore; track $index) {
+              <span class="core" [style.background]="coreColor(v)" [title]="'Core ' + count($index) + ': ' + pct(v)"></span>
+            }
+          </div>
+          <p class="legend">{{ coresText() }}</p>
+        } @else {
+          <div class="groups">
+            @for (g of groups(); track g.kind) {
+              <section [attr.aria-label]="g.title">
+                <h3>{{ g.title }}</h3>
+                <ul>
+                  @for (core of g.cores; track core.index) {
+                    <li>
+                      <span class="lbl num">{{ core.label }}</span>
+                      <span class="bar-track" role="img" [attr.aria-label]="core.label + ' ' + pct(c.perCore[core.index] ?? 0)"><span [style.width.%]="c.perCore[core.index] ?? 0"></span></span>
+                      <span class="val num">{{ pct(c.perCore[core.index] ?? 0) }}</span>
+                    </li>
+                  }
+                </ul>
+              </section>
+            }
+          </div>
+        }
       }
     </dy-tile>
   `,
   styles: `
     :host { display: block; min-width: 0; }
     dy-tile { height: 100%; }
+    .head { display: inline-flex; align-items: center; gap: var(--sp-1); }
+    .seg.sm button { height: 20px; padding: 0 var(--sp-2); font-size: var(--fs-xs); }
     .headline { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
     .big { font: var(--fw-semibold) var(--fs-display) / 1 var(--font-display); letter-spacing: -0.03em; }
     .sub, .legend { color: var(--text-3); font-size: var(--fs-sm); }
     .cores { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; height: 22px; }
     .core { border-radius: 3px; background-color: var(--surface-active); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+    .groups { display: grid; gap: var(--sp-3); }
+    h3 { font-size: var(--fs-xs); color: var(--text-3); font-weight: var(--fw-semibold); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: var(--sp-1); }
+    ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px var(--sp-4); }
+    li { display: grid; grid-template-columns: 22px minmax(0, 1fr) 38px; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); }
+    .lbl { color: var(--text-3); }
+    .val { text-align: right; }
+    .bar-track { height: 5px; }
   `,
 })
 export class CpuTile {
   protected readonly live = inject(LiveStore);
+  protected readonly prefs = inject(ViewPrefs);
   protected readonly cpu = computed(() => this.live.system()?.cpu ?? null);
+  protected readonly groups = computed(() => {
+    const c = this.cpu();
+    return c ? coreGroups(c.coreKinds, c.perCore.length) : [];
+  });
   protected readonly pct = formatPercent;
   protected readonly ghz = formatGhz;
   protected readonly count = (i: number) => formatCount(i + 1);

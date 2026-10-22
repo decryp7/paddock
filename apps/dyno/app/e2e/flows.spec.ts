@@ -50,7 +50,7 @@ test.describe('screens', () => {
 test.describe('dashboard', () => {
   test('shows live tiles, history and the diagnosis on request', async ({ page }) => {
     await page.goto(url());
-    await expect(page.getByRole('group', { name: 'CPU' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'CPU', exact: true })).toBeVisible();
     await expect(page.getByRole('group', { name: 'Memory' })).toBeVisible();
     await expect(page.locator('dy-chart canvas').first()).toBeVisible();
     await page.getByRole('button', { name: 'Check now' }).click();
@@ -80,6 +80,36 @@ test.describe('dashboard', () => {
     await expect(dialog.getByText('What will change')).toBeVisible();
     await dialog.getByRole('button', { name: 'Not now' }).click();
     await expect(dialog).toBeHidden();
+  });
+});
+
+test.describe('cpu per core', () => {
+  test('the tile switches to per-core bars grouped by kind and the choice is remembered', async ({ page }) => {
+    await page.goto(url());
+    const tile = page.getByRole('group', { name: 'CPU', exact: true });
+    await tile.getByRole('button', { name: 'Per core' }).click();
+    await expect(tile.getByRole('heading', { name: 'Performance cores' })).toBeVisible();
+    await expect(tile.getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('group', { name: 'CPU', exact: true }).getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
+  });
+
+  test('a uniform CPU shows one plain Cores group', async ({ page }) => {
+    await page.goto(url('/', '&mock=uniform'));
+    const tile = page.getByRole('group', { name: 'CPU', exact: true });
+    await tile.getByRole('button', { name: 'Per core' }).click();
+    await expect(tile.getByRole('heading', { name: 'Cores', exact: true })).toBeVisible();
+    await expect(tile.getByRole('heading', { name: 'Performance cores' })).toHaveCount(0);
+  });
+
+  test('the detail view shows cores now, hottest apps and the per-core heatmap', async ({ page }) => {
+    await page.goto(url());
+    await page.getByRole('link', { name: 'CPU details' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'CPU' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Hottest apps' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Per-core history' }).locator('canvas').first()).toBeVisible();
+    await page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '1h' }).click();
+    await expect(page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '1h' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
