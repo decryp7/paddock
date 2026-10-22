@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // End-to-end tests run against the browser build, where the app injects the in-memory MockBackend.
-const PORT = Number(process.env['PW_E2E_PORT'] ?? 4310);
+const PORT = Number(process.env['PW_E2E_PORT'] ?? 4350);
 const CI = !!process.env['CI'];
 
 export default defineConfig({
@@ -10,7 +10,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
-  workers: CI ? 2 : 3,
+  workers: 1,
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${PORT}`,

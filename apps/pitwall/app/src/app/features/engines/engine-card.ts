@@ -14,6 +14,11 @@ export function modelLabel(id: string): string {
   return id.replace(/[-.](q\d\w*|f16|bf16|f32)$/i, '');
 }
 
+/** Engine downloads are named `<engine> <build>` (llama.cpp builds and pack engines alike): each card shows only its own. */
+export function ownsDownload(engineName: string, downloadName: string): boolean {
+  return downloadName.startsWith(`${engineName} `);
+}
+
 /** An engine that can serve: its build choice, rollback, installed builds, the pinned catalog and its processes. */
 @Component({
   selector: 'pw-engine-card',
@@ -321,7 +326,7 @@ export class EngineCard {
     return unhealthy ? { label: `${unhealthy} unhealthy`, tone: 'bad' as const } : availabilityLook(e.availability);
   });
   protected readonly activeBuild = computed(() => this.engine().builds.find((b) => b.active) ?? null);
-  protected readonly installing = computed(() => this.live.downloads().filter((d) => d.kind === 'engine' && downloadActive(d.state)));
+  protected readonly installing = computed(() => this.live.downloads().filter((d) => d.kind === 'engine' && ownsDownload(this.engine().name, d.name) && downloadActive(d.state)));
 
   protected async remove(b: InstalledBuild): Promise<void> {
     const ok = await this.confirm.ask({ title: `Remove ${b.label} ${b.tag}?`, message: `Frees ${bytes(b.sizeBytes)}. You can install it again from the catalog.`, confirm: 'Remove', danger: true });
