@@ -27,6 +27,20 @@ fn is_link_local_v6(ip: Ipv6Addr) -> bool {
 
 /// Checks that `url` may be requested: http or https, and not local unless `allow_local`.
 pub async fn check_url(url: &Url, allow_local: bool) -> Result<(), SourceError> {
+    check_url_with(url, allow_local, system_resolver).await
+}
+
+/// The operating system's resolver: every address of `name`.
+async fn system_resolver(name: String, port: u16) -> std::io::Result<Vec<IpAddr>> {
+    Ok(tokio::net::lookup_host((name, port)).await?.map(|a| a.ip()).collect())
+}
+
+/// The policy behind [`check_url`] with the name resolution injected, so it can be tested without a network.
+async fn check_url_with<R, F>(url: &Url, allow_local: bool, resolve: R) -> Result<(), SourceError>
+where
+    R: FnOnce(String, u16) -> F,
+    F: std::future::Future<Output = std::io::Result<Vec<IpAddr>>>,
+{
     if !matches!(url.scheme(), "http" | "https") {
         return Err(SourceError::InvalidConfig(format!(
             "{} is not an http:// or https:// address.",
@@ -48,13 +62,13 @@ pub async fn check_url(url: &Url, allow_local: bool) -> Result<(), SourceError> 
         Some(Host::Ipv4(ip)) => (!is_local_ip(IpAddr::V4(ip))).then_some(()).ok_or_else(refuse),
         Some(Host::Ipv6(ip)) => (!is_local_ip(IpAddr::V6(ip))).then_some(()).ok_or_else(refuse),
         Some(Host::Domain(name)) => {
-            let addrs = tokio::net::lookup_host((name, port))
+            let addrs = resolve(name.to_string(), port)
                 .await
                 .map_err(|_| SourceError::Unreachable(format!("{name} could not be found. Spotter will try again.")))?;
             let mut any = false;
             for a in addrs {
                 any = true;
-                if is_local_ip(a.ip()) {
+                if is_local_ip(a) {
                     return Err(refuse());
                 }
             }
@@ -118,7 +132,6 @@ mod tests {
             "http://127.0.0.1:8080/",
             "http://[::1]/",
             "http://169.254.169.254/latest/meta-data?token=secret",
-            "http://localhost/",
         ] {
             let e = check_url(&u(bad), false).await.unwrap_err();
             assert!(matches!(e, SourceError::InvalidConfig(_)), "{bad}: {e:?}");
@@ -127,7 +140,36 @@ mod tests {
         assert!(check_url(&u("http://127.0.0.1/"), true).await.is_ok());
         assert!(check_url(&u("ftp://example.org/"), true).await.is_err());
         assert!(check_url(&u("file:///etc/passwd"), false).await.is_err());
-        let e = check_url(&u("http://nonexistent.invalid/"), false).await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn names_are_resolved_through_the_injected_resolver() {
+        let u = Url::parse("http://some.example:8080/").unwrap();
+        let fixed = |ips: Vec<IpAddr>| {
+            move |_: String, port: u16| async move {
+                assert_eq!(port, 8080);
+                Ok(ips)
+            }
+        };
+        assert!(check_url_with(&u, false, fixed(vec![ip("8.8.8.8")])).await.is_ok());
+        let e = check_url_with(&u, false, fixed(vec![ip("8.8.8.8"), ip("127.0.0.1")]))
+            .await
+            .unwrap_err();
+        assert!(matches!(e, SourceError::InvalidConfig(_)), "{e:?}");
+        let e = check_url_with(&u, false, fixed(vec![])).await.unwrap_err();
         assert!(matches!(e, SourceError::Unreachable(_)), "{e:?}");
+        let e = check_url_with(&u, false, |_, _| async { Err(std::io::Error::other("no dns")) })
+            .await
+            .unwrap_err();
+        assert!(matches!(e, SourceError::Unreachable(_)), "{e:?}");
+        let e = check_url_with(&u, true, |_, _| async { Err(std::io::Error::other("unused")) }).await;
+        assert!(e.is_ok(), "allow_local skips resolution");
+    }
+
+    #[tokio::test]
+    async fn the_system_resolver_answers_for_literals() {
+        assert_eq!(system_resolver("127.0.0.1".into(), 80).await.unwrap(), vec![ip("127.0.0.1")]);
+        let e = check_url(&Url::parse("http://localhost/").unwrap(), false).await.unwrap_err();
+        assert!(matches!(e, SourceError::InvalidConfig(_)), "{e:?}");
     }
 }
