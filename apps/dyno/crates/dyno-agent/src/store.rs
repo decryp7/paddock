@@ -641,7 +641,12 @@ mod tests {
     #[test]
     fn activity_alerts_and_snapshots() {
         let s = Store::memory().unwrap();
-        let undo = UndoRecord::Tuning { id: "powerPlan".into() };
+        let undo = UndoRecord::Tuning {
+            id: "powerPlan".into(),
+            apply: dyno_core::helper::HelperAction::SetVisualEffects(2),
+            revert: dyno_core::helper::HelperAction::SetVisualEffects(0),
+            after: "2".into(),
+        };
         s.put_activity(&entry("a", 1, ActivityKind::Tuning, None), &undo).unwrap();
         s.put_activity(&entry("b", 2, ActivityKind::Cleanup, Some(500)), &UndoRecord::None)
             .unwrap();

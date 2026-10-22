@@ -1,11 +1,41 @@
 //! Tuning suggestions: each explained, previewed, applied only on the user's click through the helper, and
-//! reversible (the inverse action is recorded when it is applied).
+//! reversible (the inverse action is recorded when it is applied). [`catalog`] adds the suggestions that read
+//! the system itself (sleep timers, hibernation, power profile, charge limit) and decides what can run now.
+
+pub mod catalog;
 
 use crate::cleanup::Os;
 use crate::facts::SystemFacts;
 use crate::helper::{scheme_name, HelperAction, BALANCED_SCHEME};
 use crate::metrics::{PowerSource, Reading};
 use serde::{Deserialize, Serialize};
+
+/// What a suggestion is about, for grouping on the Tuning page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TuningCategory {
+    /// Power plan or mode.
+    Power,
+    /// Sleep and hibernation.
+    Sleep,
+    /// Battery care.
+    Battery,
+    /// Search indexing and antivirus scanning of code folders.
+    Developer,
+    /// Animations, transparency, background apps.
+    Appearance,
+}
+
+/// The category a suggestion id belongs to.
+pub fn category_of(id: &str) -> TuningCategory {
+    match id {
+        "sleepOnBattery" | "hibernate" => TuningCategory::Sleep,
+        "chargeLimit" => TuningCategory::Battery,
+        "indexDevFolders" | "defenderDevFolders" => TuningCategory::Developer,
+        "visualEffects" | "backgroundApps" => TuningCategory::Appearance,
+        _ => TuningCategory::Power,
+    }
+}
 
 /// A suggestion as the UI shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,6 +55,16 @@ pub struct TuningSuggestion {
     pub needs_admin: bool,
     /// Already applied by Dyno (offers Revert).
     pub applied: bool,
+    /// What it is about.
+    pub category: TuningCategory,
+    /// The exact change, one line each, shown before anything is applied.
+    pub preview: Vec<String>,
+    /// The exact inverse, one line each (what Revert does).
+    pub undo_preview: Vec<String>,
+    /// Why it cannot be applied now (for example it needs administrator rights), when it cannot. Applying is then refused.
+    pub blocked: Option<String>,
+    /// Applied by Dyno, but the setting has been changed by something else since: Revert asks before overwriting.
+    pub changed_outside: bool,
 }
 
 /// A suggestion with the change that applies it and the change that reverts it.
@@ -53,6 +93,11 @@ pub fn plans(facts: &SystemFacts, os: Os, power: Option<PowerSource>, applied: &
                     proposed,
                     needs_admin: apply.needs_admin(),
                     applied: applied.iter().any(|a| a == id),
+                    category: category_of(id),
+                    preview: apply.preview(),
+                    undo_preview: revert.preview(),
+                    blocked: None,
+                    changed_outside: false,
                 },
                 apply,
                 revert,
@@ -186,6 +231,10 @@ pub fn applied_entry(id: &str, revert: &HelperAction) -> TuningSuggestion {
             "indexDevFolders" => "Code folders not indexed (applied by Dyno)".into(),
             "defenderDevFolders" => "Code folders excluded from Defender (applied by Dyno)".into(),
             "lowPowerMode" => "Low Power Mode off (applied by Dyno)".into(),
+            "powerProfile" => "Balanced power profile (applied by Dyno)".into(),
+            "sleepOnBattery" => "Shorter sleep timer on battery (applied by Dyno)".into(),
+            "hibernate" => "Hibernation off (applied by Dyno)".into(),
+            "chargeLimit" => "Charge limit (applied by Dyno)".into(),
             other => format!("{other} (applied by Dyno)"),
         },
         explanation: "Dyno applied this change. Revert puts the previous setting back.".into(),
@@ -196,6 +245,11 @@ pub fn applied_entry(id: &str, revert: &HelperAction) -> TuningSuggestion {
         },
         needs_admin: revert.needs_admin(),
         applied: true,
+        category: category_of(id),
+        preview: Vec::new(),
+        undo_preview: revert.preview(),
+        blocked: None,
+        changed_outside: false,
     }
 }
 
@@ -281,6 +335,10 @@ mod tests {
             "indexDevFolders",
             "defenderDevFolders",
             "lowPowerMode",
+            "powerProfile",
+            "sleepOnBattery",
+            "hibernate",
+            "chargeLimit",
             "other",
         ] {
             let e = applied_entry(id, &HelperAction::SetVisualEffects(0));
