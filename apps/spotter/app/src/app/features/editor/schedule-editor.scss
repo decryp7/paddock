@@ -55,13 +55,13 @@
 }
 .runs {
   margin: 0;
-  padding-left: var(--pd-space-5);
+  padding-left: var(--pd-space-6);
 }
 .warn {
   color: var(--pd-warning, var(--pd-text));
 }
 .problems {
   margin: 0;
-  padding: var(--pd-space-1) var(--pd-space-1) var(--pd-space-1) var(--pd-space-5);
+  padding: var(--pd-space-1) var(--pd-space-1) var(--pd-space-1) var(--pd-space-6);
   color: var(--pd-danger);
 }

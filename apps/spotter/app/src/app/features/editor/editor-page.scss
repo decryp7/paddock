@@ -151,3 +151,13 @@
 .spacer {
   flex: 1;
 }
+
+.seg-tabs.wrap {
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+}
+.field .label {
+  font-size: var(--pd-text-label);
+  font-weight: var(--pd-weight-medium);
+}

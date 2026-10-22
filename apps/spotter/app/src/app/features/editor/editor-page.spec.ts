@@ -115,7 +115,7 @@ describe('EditorPage: adding a watch', () => {
     // Versions
     await goNext(f);
     expect(text(q(f, '#ver-h'))).toBe('Versions and filters');
-    expect(q<HTMLSelectElement>(f, '#scheme').selectedOptions[0]!.textContent).toContain('Semantic version');
+    expect(text(q(f, '#scheme button[aria-pressed="true"]'))).toContain('Semantic version');
     await check(f, q(f, '.check input'), true);
     await fill(f, '#prefix', '1.');
     await fill(f, '#names', '*-setup.exe');
@@ -135,7 +135,7 @@ describe('EditorPage: adding a watch', () => {
     await new Promise((r) => setTimeout(r, SCHEDULE_DEBOUNCE_MS + 50));
     await settle(f);
     expect(text(q(f, 'sp-schedule-editor .preview'))).toContain('Next check');
-    await fill(f, '#mode', 'newer-than-installed', 'change');
+    await click(f, button(f, 'Newer than installed'));
 
     // Review
     await goNext(f);
@@ -156,7 +156,7 @@ describe('EditorPage: adding a watch', () => {
     const { f } = await make();
     await startGithub(f);
     await goNext(f);
-    await fill(f, '#scheme', 'custom', 'change');
+    await click(f, button(f, 'Custom pattern'));
     expect(button(f, 'Next').disabled).toBe(true);
     await fill(f, '#pattern', '^v(?P<major>\\d+)');
     expect(button(f, 'Next').disabled).toBe(false);
@@ -186,7 +186,7 @@ describe('EditorPage: adding a watch', () => {
     // Channels
     await click(f, button(f, 'Add a place to send to'));
     await fill(f, 'input[aria-label="Channel 1 address"]', 'topic-one');
-    await fill(f, 'select[aria-label="Channel 1 kind"]', 'webhook', 'change');
+    await click(f, byText(q(f, '[aria-label="Channel 1 kind"]'), 'button', 'Webhook'));
     await click(f, button(f, 'Add a place to send to'));
     expect(f.nativeElement.querySelectorAll('input[aria-label$=" address"]')).toHaveLength(2);
     await click(f, q(f, 'button[aria-label="Remove channel 1"]'));

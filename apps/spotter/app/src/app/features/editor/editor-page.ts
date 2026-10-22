@@ -75,12 +75,12 @@ export class EditorPage {
     this.store.setValue(c.key, c.value);
   }
 
-  protected setScheme(e: Event): void {
-    this.store.update((d) => ({ ...d, versions: this.value(e) as VersionSchemeId }));
+  protected setScheme(versions: string): void {
+    this.store.update((d) => ({ ...d, versions: versions as VersionSchemeId }));
   }
 
-  protected setLatestBy(e: Event): void {
-    this.store.setLatestBy(this.value(e) as LatestBy);
+  protected setLatestBy(by: LatestBy): void {
+    this.store.setLatestBy(by);
   }
 
   protected isTracked(id: string): boolean {
@@ -92,8 +92,14 @@ export class EditorPage {
     return this.draft().tracking.products.settings[id];
   }
 
-  protected setMode(e: Event): void {
-    this.store.update((d) => ({ ...d, notify: { ...d.notify, mode: this.value(e) as NotifyMode } }));
+  protected readonly channelKinds: { value: ChannelKind; label: string }[] = [
+    { value: 'ntfy', label: 'ntfy' },
+    { value: 'webhook', label: 'Webhook' },
+    { value: 'email', label: 'Email' },
+  ];
+
+  protected setMode(mode: NotifyMode): void {
+    this.store.update((d) => ({ ...d, notify: { ...d.notify, mode } }));
   }
 
   protected setQuiet(on: boolean): void {

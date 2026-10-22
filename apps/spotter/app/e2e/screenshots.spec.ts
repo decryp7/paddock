@@ -58,6 +58,17 @@ for (const scheme of ['dark', 'light'] as const) {
       await settle(page, 1200);
       await page.screenshot({ path: `${OUT}/tray-${scheme}.png` });
     });
+    test(`schedule ${scheme}`, async ({ page }) => {
+      await page.goto('/#/watches/new');
+      await page.getByRole('button', { name: /Node\.js/ }).click();
+      await settle(page, 800);
+      await page.getByRole('button', { name: 'Next' }).click();
+      await page.getByRole('button', { name: 'Next' }).click();
+      await page.getByRole('group', { name: 'How to schedule checks' }).getByRole('button', { name: 'Cron' }).click();
+      await page.getByLabel('Cron expression').fill('0 9,14 * * 1-5');
+      await settle(page, 1200);
+      await page.screenshot({ path: `${OUT}/wizard-schedule-${scheme}.png` });
+    });
     test(`wizard ${scheme}`, async ({ page }) => {
       await page.goto('/#/watches/new');
       await settle(page, 700);

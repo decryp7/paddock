@@ -55,12 +55,12 @@
           <section class="stack" aria-labelledby="ver-h">
             <h2 id="ver-h">Versions and filters</h2>
             <div class="field">
-              <label for="scheme">How versions are written</label>
-              <select id="scheme" class="input" [value]="draft().versions" (change)="setScheme($event)">
+              <span class="label">How versions are written</span>
+              <div id="scheme" class="seg-tabs wrap" role="group" aria-label="How versions are written">
                 @for (s of schemes; track s.value) {
-                  <option [value]="s.value" [selected]="s.value === draft().versions">{{ s.label }} ({{ s.help }})</option>
+                  <button type="button" [attr.aria-pressed]="s.value === draft().versions" [attr.title]="s.help" (click)="setScheme(s.value)">{{ s.label }}</button>
                 }
-              </select>
+              </div>
             </div>
             @if (draft().versions === 'custom') {
               <sp-pattern-helper
@@ -87,13 +87,13 @@
               <span class="help">Soak time: a release must exist this long before it is announced. 0 announces at once.</span>
             </div>
             <div class="field">
-              <label for="latest-by">The latest release is the one with the newest</label>
-              <select id="latest-by" class="input narrow" [value]="draft().tracking.latestBy" (change)="setLatestBy($event)">
-                <option value="version" [selected]="draft().tracking.latestBy === 'version'">Version number</option>
-                <option value="modified" [selected]="draft().tracking.latestBy === 'modified'">Modified time</option>
-                <option value="created" [selected]="draft().tracking.latestBy === 'created'" [disabled]="store.createdUnavailable()">Created time@if (store.createdUnavailable()) { (not available on this source) }</option>
-                <option value="name" [selected]="draft().tracking.latestBy === 'name'">Name (numbers in natural order)</option>
-              </select>
+              <span class="label">The latest release is the one with the newest</span>
+              <div id="latest-by" class="seg-tabs wrap" role="group" aria-label="The latest release is the one with the newest">
+                <button type="button" [attr.aria-pressed]="draft().tracking.latestBy === 'version'" (click)="setLatestBy('version')">Version number</button>
+                <button type="button" [attr.aria-pressed]="draft().tracking.latestBy === 'modified'" (click)="setLatestBy('modified')">Modified time</button>
+                <button type="button" [attr.aria-pressed]="draft().tracking.latestBy === 'created'" [disabled]="store.createdUnavailable()" [attr.title]="store.createdUnavailable() ? 'Not available on this source' : null" (click)="setLatestBy('created')">Created time</button>
+                <button type="button" [attr.aria-pressed]="draft().tracking.latestBy === 'name'" (click)="setLatestBy('name')">Name (natural order)</button>
+              </div>
               <span class="help" [title]="store.extraction()?.orderNote ?? ''">{{ store.extraction()?.orderNote ?? 'Version: compares the number groups in order; ties go to the newer modified time, then the name.' }}</span>
             </div>
             @if (draft().tracking.latestBy === 'version') {
@@ -129,12 +129,12 @@
           <section class="stack" aria-labelledby="not-h">
             <h2 id="not-h">Notifications</h2>
             <div class="field">
-              <label for="mode">Tell me about</label>
-              <select id="mode" class="input narrow" [value]="draft().notify.mode" (change)="setMode($event)">
-                <option value="every-new">Every new release</option>
-                <option value="newer-than-installed">Only releases newer than what I have installed</option>
-                <option value="off">Nothing (just keep the history)</option>
-              </select>
+              <span class="label">Tell me about</span>
+              <div id="mode" class="seg-tabs wrap" role="group" aria-label="Tell me about">
+                <button type="button" [attr.aria-pressed]="draft().notify.mode === 'every-new'" (click)="setMode('every-new')">Every new release</button>
+                <button type="button" [attr.aria-pressed]="draft().notify.mode === 'newer-than-installed'" (click)="setMode('newer-than-installed')">Newer than installed</button>
+                <button type="button" [attr.aria-pressed]="draft().notify.mode === 'off'" (click)="setMode('off')">Nothing</button>
+              </div>
             </div>
             <label class="check"><input type="checkbox" [checked]="draft().notify.nag" (change)="store.update(d => ({ ...d, notify: { ...d.notify, nag: checked($event) } }))" /><span>Keep reminding me until I mark it seen</span></label>
             <label class="check"><input type="checkbox" [checked]="!!draft().notify.quietHours" (change)="setQuiet(checked($event))" /><span>Quiet hours for this watch</span></label>
@@ -147,11 +147,11 @@
             <h3>Also send to</h3>
             @for (c of draft().channels; track $index; let i = $index) {
               <div class="inline">
-                <select class="input narrow" [value]="c.kind" (change)="setChannel(i, { kind: $any(value($event)) })" [attr.aria-label]="'Channel ' + (i + 1) + ' kind'">
-                  <option value="ntfy">ntfy</option>
-                  <option value="webhook">Webhook</option>
-                  <option value="email">Email</option>
-                </select>
+                <div class="seg-tabs" role="group" [attr.aria-label]="'Channel ' + (i + 1) + ' kind'">
+                  @for (k of channelKinds; track k.value) {
+                    <button type="button" [attr.aria-pressed]="c.kind === k.value" (click)="setChannel(i, { kind: k.value })">{{ k.label }}</button>
+                  }
+                </div>
                 <input class="input" [value]="c.target" (input)="setChannel(i, { target: value($event) })" placeholder="Address or URL" [attr.aria-label]="'Channel ' + (i + 1) + ' address'" />
                 <button type="button" class="btn ghost icon" (click)="removeChannel(i)" [attr.aria-label]="'Remove channel ' + (i + 1)"><mat-icon svgIcon="sp:x" aria-hidden="true" /></button>
               </div>

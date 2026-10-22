@@ -2,34 +2,23 @@
 
 Updated at the end of each round. Items are listed with their state.
 
-## Next (paused 2026-10-23 so Debrief can ship; resume in this order)
+## Next (round 3 finished 2026-10-23)
 
-Done this round: Tauri shell (async commands, `dto.rs` mirroring `api.types.ts`, tray + popup, `Notifier`/`OsToast`, keyring
-secrets, least-privilege capability and CSP with tests, window lifecycle, single instance, start at login, updater),
-renderer on `spotter-core`'s `PageRenderer`, pinned Chrome for Testing manifest with SHA-256 (ADR 0004, verified
-against the real macOS archive), version typography, coverage (core 99.5%, engine 96.8%, sources 92%, Angular 100% lines),
-architecture diagrams and the overview SVG (`docs/diagrams`).
+Done in round 3: regex extraction branch merged and verified (products, artifacts, Latest by, match on name/folder/path, live
+Rust preview, pattern helper, scale limits, settle time); updater `BASE_URL` is the public https URL; releases are published
+through `scripts/release/publish.mjs` (no Go action); visual redesign and every UI review 2 P1/P2 (identity avatars, day-grouped
+feed with one action per row, dimmed version suffix, cadence cards, detail hero with upgrade line and release side panel,
+calm tables, wizard tiles, tray, empty states, both themes); check schedules (every / at times / cron, ADR 0005); Windows
+`real_browser` fix (page budget starts after the browser is up, stability flags, lighter process snapshots); engine and sources
+coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs/screenshots` (dark and light).
 
-1. **CI green on three OSes.** Fixed locally, not yet re-run: the DNS-dependent `guard` test (injected resolver) and the
-   slow-runner `real_browser` missing-element assertion. Last run (7a92461) failed on Ubuntu (guard test) and Windows
-   (`real_browser`: "the page did not finish loading in time" in 3 tests; the pages load slowly on the Windows runner:
-   raise the render timeouts of those tests or find the cause). Push, re-run, read logs through
-   `GET /api/v1/repos/decryp7/spotter/actions/runs/<run>/jobs` and `actions/jobs/<id>/logs` with GITEA_TOKEN. Dispatch only
-   when no Debrief run is queued or running.
-2. **Regex extraction, products, artifacts, "Latest by", folder scaling.** Work in progress on branch
-   `feat/regex-extraction` (worktree `../spotter-wt-regex`): `id`/`channel`/`variant`/text groups, version text with
-   letters and leading zeros, Rust preview and pattern helper commands, per-product state, artifacts per release, settle
-   time, snapshots and caps for big shares, Latest by (version / modified / created / name / updated in place). Merge into
-   wip/redevelop, then finish what the branch report lists as open.
-3. **Visual redesign and UI review 2** (briefs `ui-review-2-spotter.md`, `ui-review-2-patterns.md`, `design-review-spotter.md`):
-   avatars (owner avatar / favicon / monogram), summary strip, release feed grouped by day with one primary action,
-   cadence timeline, watch detail hero with upgrade line, no-wrap releases table, dense watch list, wizard step indicator
-   and preset tiles, tray popover, empty states, motion; every P1 and P2 fixed and marked at the bottom of the review file.
-4. **Screenshots** at 1440x900, DPR 2, both themes, realistic invented data, every screen viewed and iterated; update the
-   README.
-5. Tray extras: popup height fitted to content, rounded corners on Windows 11 (DWMWCP_ROUND), toast action buttons and
+1. **CI on three OSes:** confirm the newest run is green (Windows `real_browser` fix is inferred from logs, not reproduced).
+2. Avatars are monograms only: fetch and cache favicons / org avatars in the engine, bundle marks for the catalogue entries.
+3. Right-click context menus and Up/Down row navigation in the feed and tables; sticky headers on the detail tables.
+4. Tray extras: popup height fitted to content, rounded corners on Windows 11 (DWMWCP_ROUND), toast action buttons and
    click-through (Open, Mark as seen), e-mail channel delivery.
-6. Re-run the coverage guards after the merges (core >= 99%, UI >= 80%, stores/services near 100%).
+5. Coverage: spotter-engine and spotter-sources are below 99% lines; the rest are `?`/`map_err` regions on SQLite and file
+   errors that need fault-injection seams (see the list in the commit 5af6ee0).
 
 ## Renderer
 
@@ -53,8 +42,6 @@ Left:
   mock-backend, watches/dashboard/settings/editor stores, draft-utils, panel/ago/confirm/clipboard/chart, and every page
   component. Overall Angular coverage is therefore below the 80% target until these land (run `ng test --coverage`).
 - `npm audit --omit=dev --audit-level=high` not run yet; run a second `ng test` under another TZ.
-- Screenshots in docs/screenshots are from the first pass; no design critique iteration yet (mock data shows "newer than
-  installed" on almost every watch).
 - Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command" needs an engine field.
 - Check scripts/check-index.mjs against dist/app/browser/index.html.
 
