@@ -1,4 +1,4 @@
-//! Windows session FFI (ADR 0003): the user logged on at the console, starting a runner in that user's session
+//! Windows session FFI (ADR 0003): the logged-on user's session (at the console or over Remote Desktop), starting a runner in that user's session
 //! with their token, and the Ctrl+Break helper. This is the crate's one module of Win32 calls; every `unsafe` block
 //! says why it is sound.
 //!
@@ -25,7 +25,10 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_BREAK_EVENT};
 use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use windows::Win32::System::Pipes::CreatePipe;
-use windows::Win32::System::RemoteDesktop::{WTSGetActiveConsoleSessionId, WTSQueryUserToken};
+use windows::Win32::System::RemoteDesktop::{
+    WTSActive, WTSDisconnected, WTSEnumerateSessionsW, WTSFreeMemory, WTSGetActiveConsoleSessionId, WTSQueryUserToken,
+    WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW,
+};
 use windows::Win32::System::Threading::{
     CreateProcessAsUserW, DeleteProcThreadAttributeList, GetExitCodeProcess, InitializeProcThreadAttributeList, TerminateProcess,
     UpdateProcThreadAttribute, WaitForSingleObject, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT,
@@ -64,22 +67,47 @@ impl Drop for Owned {
 // SAFETY: process and token handles may be used and closed from any thread.
 unsafe impl Send for Owned {}
 
-/// The user at the console.
+/// The logged-on user's session (see [`pitcrew_core::session::pick_user_session`]): the console's, or a Remote
+/// Desktop session when the user works over Remote Desktop and the console shows the sign-in screen.
 pub fn console_user() -> ConsoleUser {
     // SAFETY: no arguments; returns a session id or 0xFFFFFFFF.
-    let session = unsafe { WTSGetActiveConsoleSessionId() };
-    if session == NO_SESSION {
-        return ConsoleUser::Nobody;
+    let console = unsafe { WTSGetActiveConsoleSessionId() };
+    let console = (console != NO_SESSION).then_some(console);
+    let mut candidates = Vec::new();
+    let mut info: *mut WTS_SESSION_INFOW = std::ptr::null_mut();
+    let mut count = 0u32;
+    // SAFETY: valid out pointers; the array is read below and freed with WTSFreeMemory exactly once.
+    if unsafe { WTSEnumerateSessionsW(Some(WTS_CURRENT_SERVER_HANDLE), 0, 1, &mut info, &mut count) }.is_ok() && !info.is_null() {
+        // SAFETY: WTSEnumerateSessionsW returned `count` entries at `info`.
+        let sessions = unsafe { std::slice::from_raw_parts(info, count as usize) };
+        candidates.extend(
+            sessions
+                .iter()
+                .filter(|s| s.State == WTSActive || s.State == WTSDisconnected)
+                .map(|s| (s.SessionId, s.State == WTSActive)),
+        );
+        // SAFETY: `info` was allocated by WTSEnumerateSessionsW.
+        unsafe { WTSFreeMemory(info.cast()) };
+    } else if let Some(c) = console {
+        candidates.push((c, true));
     }
-    let mut token = HANDLE::default();
-    // SAFETY: `token` is a valid out pointer; the handle is closed by `Owned`.
-    match unsafe { WTSQueryUserToken(session, &mut token) } {
-        Ok(()) => {
-            drop(Owned(token));
-            ConsoleUser::Session(session)
+    let mut users = Vec::new();
+    for (id, active) in candidates {
+        let mut token = HANDLE::default();
+        // SAFETY: `token` is a valid out pointer; the handle is closed by `Owned`.
+        match unsafe { WTSQueryUserToken(id, &mut token) } {
+            Ok(()) => {
+                drop(Owned(token));
+                users.push(pitcrew_core::session::UserSession { id, active });
+            }
+            Err(e) if e.code().0 & 0xFFFF == ERROR_PRIVILEGE_NOT_HELD => return ConsoleUser::NotSystem,
+            // No user in this session (the sign-in screen) or it went away meanwhile.
+            Err(_) => {}
         }
-        Err(e) if e.code().0 & 0xFFFF == ERROR_PRIVILEGE_NOT_HELD => ConsoleUser::NotSystem,
-        Err(_) => ConsoleUser::Nobody,
+    }
+    match pitcrew_core::session::pick_user_session(console, &users) {
+        Some(s) => ConsoleUser::Session(s),
+        None => ConsoleUser::Nobody,
     }
 }
 

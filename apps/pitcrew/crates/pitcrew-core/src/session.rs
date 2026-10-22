@@ -64,6 +64,27 @@ pub enum SessionState {
     },
 }
 
+/// A Windows session with a logged-on user (session 0, the services' session, never counts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserSession {
+    /// The session's id.
+    pub id: u32,
+    /// Connected (at the console or over Remote Desktop); `false`: disconnected, the user is still logged on.
+    pub active: bool,
+}
+
+/// The session a logged-on user's runner runs in. The physical console is only one of them: a machine used over
+/// Remote Desktop has its user in another session, and the console shows the sign-in screen. Connected sessions come
+/// before disconnected ones (a disconnected Remote Desktop session keeps running its programs), the console before
+/// other sessions, then the lowest id, so the choice is stable.
+pub fn pick_user_session(console: Option<u32>, sessions: &[UserSession]) -> Option<u32> {
+    sessions
+        .iter()
+        .filter(|s| s.id != 0)
+        .min_by_key(|s| (!s.active, Some(s.id) != console, s.id))
+        .map(|s| s.id)
+}
+
 /// Where to start a runner with `mode` and `logged_off`, given the console session (`None`: nobody logged on).
 pub fn launch_target(mode: SessionMode, logged_off: LoggedOffMode, console_session: Option<u32>) -> Result<LaunchTarget, NoLaunch> {
     match (mode, console_session, logged_off) {
@@ -97,6 +118,34 @@ pub fn state_for(mode: SessionMode, target: LaunchTarget) -> SessionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_remote_desktop_user_is_found_when_the_console_shows_the_sign_in_screen() {
+        let rdp = UserSession { id: 2, active: true };
+        // The console (session 1) has no user, so it is not in the list.
+        assert_eq!(pick_user_session(Some(1), &[rdp]), Some(2));
+        assert_eq!(pick_user_session(None, &[rdp]), Some(2));
+        assert_eq!(pick_user_session(Some(1), &[]), None);
+    }
+
+    #[test]
+    fn connected_before_disconnected_then_the_console_then_the_lowest_id() {
+        let s = |id, active| UserSession { id, active };
+        assert_eq!(pick_user_session(Some(5), &[s(3, false), s(4, true)]), Some(4));
+        assert_eq!(pick_user_session(Some(5), &[s(4, true), s(5, true)]), Some(5));
+        assert_eq!(pick_user_session(Some(9), &[s(7, true), s(6, true)]), Some(6));
+        assert_eq!(pick_user_session(Some(9), &[s(7, false), s(9, false)]), Some(9));
+        assert_eq!(
+            pick_user_session(None, &[s(8, false)]),
+            Some(8),
+            "a disconnected session still runs programs"
+        );
+        assert_eq!(
+            pick_user_session(Some(0), &[s(0, true)]),
+            None,
+            "session 0 is the services' session"
+        );
+    }
 
     const I: SessionMode = SessionMode::Interactive;
     const S: SessionMode = SessionMode::Service;
