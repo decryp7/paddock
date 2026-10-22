@@ -5,7 +5,7 @@
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://dev.decryptology.net/decryp7/paddock-kit.git",
+    "url": "https://dev.decryptology.net/decryp7/paddock.git",
     "directory": "ui"
   },
   "keywords": [

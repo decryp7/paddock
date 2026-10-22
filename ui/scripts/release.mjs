@@ -27,7 +27,7 @@ console.log(`\ntarball: ${tarball}`);
 if (process.argv.includes('--publish')) {
   const token = process.env.GITEA_TOKEN;
   if (!token) throw new Error('GITEA_TOKEN is not set');
-  const api = 'https://dev.decryptology.net/api/v1/repos/decryp7/paddock-kit';
+  const api = 'https://dev.decryptology.net/api/v1/repos/decryp7/paddock';
   const headers = { Authorization: `token ${token}` };
   const tag = `v${version}`;
   let res = await fetch(`${api}/releases/tags/${tag}`, { headers });

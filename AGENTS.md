@@ -1,4 +1,4 @@
-# paddock-kit: engineering rules for coding agents and contributors
+# paddock: engineering rules for coding agents and contributors
 
 The shared repo of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter): the Angular UI package `@decryp7/paddock-ui`
 (`ui/`), shared Rust crates (`crates/`), the design guide and lessons (`docs/`). See README.md.

@@ -6,7 +6,7 @@ redesign; Apple HIG pages are JS-rendered and returned no text, so Apple, GNOME,
 product-reference points come from established knowledge (marked "[k]" in Sources), not fresh fetches.
 
 
-> **paddock-kit 0.1.0 changes to the proposal values** (measured by `ui/test/tokens`, see `ui/README.md`): the neutral-text, status,
+> **paddock 0.1.0 changes to the proposal values** (measured by `ui/test/tokens`, see `ui/README.md`): the neutral-text, status,
 > chart-palette and Pitwall-fill values below are the validated ones; the original proposals failed WCAG or colour-vision checks.
 > A `border-control` token was added because the proposed input border (border-strong) is far below 3:1 (WCAG 1.4.11).
 > `paddock-ui` is the source of truth; if this table and `ui/projects/paddock-ui/scss/_tokens.scss` disagree, the SCSS wins.

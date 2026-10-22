@@ -1,7 +1,7 @@
 # @decryp7/paddock-ui
 
 The shared design system of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter): design tokens, base styles,
-Angular components and an ECharts theme. Part of [paddock-kit](../README.md); versioned with the repo.
+Angular components and an ECharts theme. Part of [paddock](../README.md); versioned with the repo.
 
 ![Gallery, dark](docs/screenshots/gallery-dark-debrief.png)
 
@@ -11,7 +11,7 @@ Each release attaches a built tarball to its Gitea release. Apps depend on that 
 
 ```json
 "dependencies": {
-  "@decryp7/paddock-ui": "https://dev.decryptology.net/decryp7/paddock-kit/releases/download/v0.1.0/paddock-ui-0.1.0.tgz"
+  "@decryp7/paddock-ui": "https://dev.decryptology.net/decryp7/paddock/releases/download/v0.1.0/paddock-ui-0.1.0.tgz"
 }
 ```
 

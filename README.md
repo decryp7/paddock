@@ -1,4 +1,4 @@
-# paddock-kit
+# paddock
 
 Everything the Paddock app family shares: **Debrief, Pitcrew, Pitwall, Dyno, Spotter**. One repo, one semver tag
 (`v0.1.0`, ...) that versions every part together.
@@ -13,7 +13,7 @@ Everything the Paddock app family shares: **Debrief, Pitcrew, Pitwall, Dyno, Spo
 ## Consuming the UI package
 
 ```json
-"@decryp7/paddock-ui": "https://dev.decryptology.net/decryp7/paddock-kit/releases/download/v0.1.0/paddock-ui-0.1.0.tgz"
+"@decryp7/paddock-ui": "https://dev.decryptology.net/decryp7/paddock/releases/download/v0.1.0/paddock-ui-0.1.0.tgz"
 ```
 
 `npm ci` installs it from `package-lock.json` (the lock file records the tarball URL and its sha512), so CI needs no registry
@@ -22,7 +22,7 @@ and builds nothing. Usage, tokens, components and migration notes per app are in
 ## Consuming a crate (later)
 
 ```toml
-paddock-foo = { git = "https://dev.decryptology.net/decryp7/paddock-kit", tag = "v0.2.0" }
+paddock-foo = { git = "https://dev.decryptology.net/decryp7/paddock", tag = "v0.2.0" }
 ```
 
 ## Versioning and releases
