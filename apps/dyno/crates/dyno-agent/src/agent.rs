@@ -104,6 +104,8 @@ pub struct Core {
     pub inventory: Option<dyno_core::inventory::SystemInventory>,
     /// Alarms: the engine and its persistence.
     pub alarms: crate::alarms::AlarmCentre,
+    /// The flight recorder.
+    pub recorder: crate::recorder::Recorder,
 }
 
 impl Core {
@@ -255,6 +257,7 @@ impl Shared {
             counter: 0,
             inventory: None,
             alarms,
+            recorder: crate::recorder::Recorder::new(),
         };
         for n in notes {
             core.log(

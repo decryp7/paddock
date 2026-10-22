@@ -247,6 +247,15 @@ pub enum Request {
         /// At most this many (1-500).
         limit: u32,
     },
+    /// Save the flight recorder's last ten minutes as a snapshot now; answers the snapshot's info. Appended.
+    Capture,
+    /// The saved flight recorder snapshots, newest first. Appended.
+    RecorderSnapshots,
+    /// One saved snapshot with its samples. Appended.
+    RecorderSnapshot {
+        /// Its id.
+        id: u64,
+    },
 }
 
 /// Dyno's own cost.
@@ -466,6 +475,12 @@ pub enum Reply {
     AlarmStats(Box<crate::alarms::AlarmStats>),
     /// Alarm changes. Appended.
     AlarmChanges(Vec<crate::alarms::AlarmChange>),
+    /// A flight recorder snapshot's header (answer to `Capture`). Appended.
+    Captured(crate::recorder::RecorderSnapshotInfo),
+    /// Flight recorder snapshot headers. Appended.
+    RecorderSnapshots(Vec<crate::recorder::RecorderSnapshotInfo>),
+    /// A flight recorder snapshot with its samples. Appended.
+    RecorderSnapshot(Box<crate::recorder::RecorderSnapshot>),
 }
 
 impl Reply {
@@ -501,6 +516,9 @@ impl Reply {
             Reply::Alarms(x) => v(x),
             Reply::AlarmStats(x) => v(x),
             Reply::AlarmChanges(x) => v(x),
+            Reply::Captured(x) => v(x),
+            Reply::RecorderSnapshots(x) => v(x),
+            Reply::RecorderSnapshot(x) => v(x),
         }
     }
 }
@@ -659,6 +677,8 @@ mod tests {
             Reply::Alarms(vec![]),
             Reply::AlarmStats(Box::default()),
             Reply::AlarmChanges(vec![]),
+            Reply::RecorderSnapshots(vec![]),
+            Reply::RecorderSnapshot(Box::new(crate::recorder::RecorderSnapshot::new(Timestamp(0), crate::recorder::CaptureReason::Manual, vec![]))),
         ];
         for r in all {
             assert!(r.into_json().is_ok());

@@ -163,6 +163,8 @@ pub struct Settings {
     pub tray_items: crate::widgets::TrayItems,
     /// Alarm behaviour (quiet hours, chatter detection, retention).
     pub alarms: crate::alarms::AlarmConfig,
+    /// Keep the last ten minutes at one-second resolution for captures (backs off when Dyno's CPU budget is at risk).
+    pub flight_recorder: bool,
 }
 
 impl Default for Settings {
@@ -180,6 +182,7 @@ impl Default for Settings {
             dashboard: Default::default(),
             tray_items: Default::default(),
             alarms: Default::default(),
+            flight_recorder: true,
         }
     }
 }

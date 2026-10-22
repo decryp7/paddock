@@ -11,6 +11,7 @@ pub mod files;
 pub mod handlers;
 pub mod inventory;
 pub mod paths;
+pub mod recorder;
 pub mod rollup;
 pub mod sampler;
 pub mod server;

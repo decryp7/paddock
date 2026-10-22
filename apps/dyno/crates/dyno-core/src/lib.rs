@@ -21,6 +21,7 @@ pub mod ports;
 pub mod process;
 pub mod protect;
 pub mod protocol;
+pub mod recorder;
 pub mod report;
 pub mod rules;
 pub mod sampling;

@@ -3,6 +3,7 @@
 //! not built yet answer `Unsupported` with a message saying so.
 
 use crate::agent::{lock, now, Shared, FACTS_TTL};
+use dyno_core::recorder::CaptureReason;
 use dyno_core::alarms::{Alarm, AlarmEvent, ShelveFor};
 use dyno_core::activity::{inverse, undo_state, ActivityEntry, ActivityKind, Previous, UndoRecord, UndoState};
 use dyno_core::anomaly;
@@ -173,6 +174,22 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             known_alarm(shared, id)?;
             alarm_event(shared, AlarmEvent::Note { id, text, at: now() })
         }
+        Request::Capture => {
+            let t = now();
+            let mut core = lock(&shared.core);
+            let core = &mut *core;
+            core.recorder
+                .capture(&core.store, CaptureReason::Manual, t)
+                .map(Reply::Captured)
+                .map_err(|m| AgentError::new(ErrorCode::NotFound, m))
+        }
+        Request::RecorderSnapshots => Ok(Reply::RecorderSnapshots(lock(&shared.core).store.recorder_snapshots().map_err(internal)?)),
+        Request::RecorderSnapshot { id } => lock(&shared.core)
+            .store
+            .recorder_snapshot(id)
+            .map_err(internal)?
+            .map(|s| Reply::RecorderSnapshot(Box::new(s)))
+            .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That capture no longer exists.")),
         Request::AlarmHistory { alarm_id, limit } => Ok(Reply::AlarmChanges(
             lock(&shared.core).store.alarm_events(alarm_id, limit).map_err(internal)?,
         )),

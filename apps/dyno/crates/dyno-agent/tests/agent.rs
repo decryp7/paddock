@@ -371,3 +371,39 @@ fn alarms_survive_an_agent_restart() {
     };
     assert!(!log.is_empty());
 }
+
+#[test]
+fn the_flight_recorder_captures_on_request_and_when_an_alarm_fires() {
+    let h = Harness::start();
+    h.fake.push_sample(full_disk_sample());
+    let peer = h.client();
+    let alarm = {
+        ask(&peer, Request::Subscribe { detail: LiveDetail::Summary }).unwrap();
+        wait_for_alarm(&peer)
+    };
+    // The alarm captured the ring automatically.
+    let mut auto = Vec::new();
+    for _ in 0..50 {
+        let Reply::RecorderSnapshots(list) = ask(&peer, Request::RecorderSnapshots).unwrap() else {
+            panic!("snapshots")
+        };
+        auto = list;
+        if !auto.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(auto.len(), 1, "one automatic capture");
+    assert!(matches!(auto[0].reason, dyno_core::recorder::CaptureReason::Alarm { alarm_id, .. } if alarm_id == alarm.id));
+    // A manual one on request, then read it back.
+    let Reply::Captured(info) = ask(&peer, Request::Capture).unwrap() else {
+        panic!("captured")
+    };
+    assert!(info.samples >= 1);
+    let Reply::RecorderSnapshot(snap) = ask(&peer, Request::RecorderSnapshot { id: info.id }).unwrap() else {
+        panic!("snapshot")
+    };
+    assert_eq!(snap.samples.len() as u32, info.samples);
+    assert!(snap.samples.iter().all(|s| s.memory_total > 0 && !s.cpu_cores.is_empty()));
+    assert!(ask(&peer, Request::RecorderSnapshot { id: 9_999 }).is_err());
+}

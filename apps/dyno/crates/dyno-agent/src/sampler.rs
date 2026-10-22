@@ -11,6 +11,7 @@ use dyno_core::process::{ProcessAction, ProcessSample};
 use dyno_core::protect::Protection;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Overhead, TimelineEvent, TimelineEventKind};
 use dyno_core::rules::{Command, StepAction, Tick};
+use dyno_core::recorder::system_interval_ms;
 use dyno_core::sampling::{intervals, Intervals, Load};
 use dyno_core::time::Timestamp;
 use std::sync::Arc;
@@ -69,10 +70,11 @@ impl Sampler {
     /// One tick: returns the intervals to use next.
     pub fn tick(&mut self, shared: &Arc<Shared>) -> Intervals {
         let t = now();
-        let (settings, rules_active, on_battery) = {
+        let (settings, recorder_on, rules_active, on_battery) = {
             let core = lock(&shared.core);
             (
                 core.settings.sampling,
+                core.settings.flight_recorder,
                 core.rules.rules.iter().any(|r| r.enabled) && !core.rules.paused,
                 core.recent
                     .back()
@@ -90,6 +92,11 @@ impl Sampler {
                 own_cpu: self.own_cpu,
             },
         );
+        // The flight recorder wants a one-second system sample while that is cheap; the process table keeps its pace.
+        let iv = Intervals {
+            system_ms: system_interval_ms(iv.system_ms, recorder_on, on_battery, self.own_cpu),
+            process_ms: iv.process_ms,
+        };
         let mut sample = self.sensors.sample(t);
         sample.at = t;
         let process_due = self
@@ -155,6 +162,9 @@ impl Sampler {
             core.recent.pop_front();
         }
         let core = &mut *core;
+        if core.settings.flight_recorder {
+            core.recorder.record(sample, &core.latest.groups);
+        }
         let groups_for_history: &[AppGroup] = if fresh { &core.latest.groups } else { &[] };
         if let Err(e) = core.writer.record(&mut core.store, sample, groups_for_history) {
             eprintln!("dyno-agent: history write failed: {e}");
@@ -183,6 +193,9 @@ impl Sampler {
         let new_alerts = core.alerts.tick(&settings, sample, &groups, &[]);
         for a in new_alerts {
             let changes = core.alarms.alert(&core.store, &a);
+            for c in &changes {
+                let _ = core.recorder.on_alarm(&core.store, c, t);
+            }
             push_alarm_changes(shared, changes);
             if core.store.put_alert(&a).is_ok() {
                 let _ = core.store.put_event(&TimelineEvent {
