@@ -133,7 +133,7 @@ describe('Dashboard', () => {
   });
 
   it('releases memory from the More actions menu and toasts the result', async () => {
-    const { fixture, backend, more } = await mount();
+    const { backend, more } = await mount();
     const spy = vi.spyOn(backend, 'releaseMemory');
     await more('Release memory');
     expect(spy).toHaveBeenCalled();

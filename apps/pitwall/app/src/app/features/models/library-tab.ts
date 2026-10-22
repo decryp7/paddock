@@ -184,7 +184,7 @@ export function contextText(tokens: number | null): string {
           </section>
 
           <section aria-label="Settings" class="settings">
-            <label class="field">
+            <div class="field">
               <span>Release when idle</span>
               <select class="select" [id]="'idle-' + m.id" [disabled]="m.pinned || store.isBusy()('model:' + m.id)" [attr.aria-label]="'Release ' + m.name + ' when idle'" (change)="setIdle(m, $any($event.target).value)">
                 <option value="" [selected]="m.idleSecs === null">Global setting</option>
@@ -195,9 +195,9 @@ export function contextText(tokens: number | null): string {
               @if (m.pinned) {
                 <span class="hint">Pinned models are never released automatically.</span>
               }
-            </label>
+            </div>
 
-            <label class="field">
+            <div class="field">
               <span>Engine</span>
               @if (store.engineChoices().length) {
                 <select class="select" [id]="'engine-' + m.id" [disabled]="m.loaded || store.isBusy()('model:' + m.id)" [matTooltip]="m.loaded ? 'Unload the model to change its engine' : ''" [attr.aria-label]="'Engine for ' + m.name" (change)="setEngine(m, $any($event.target).value)">
@@ -209,10 +209,10 @@ export function contextText(tokens: number | null): string {
               } @else {
                 <span class="plain">llama.cpp</span>
               }
-            </label>
+            </div>
 
             @if (!m.engine && store.enginePins() && store.pinnableBuilds().length) {
-              <label class="field">
+              <div class="field">
                 <span>Engine build</span>
                 <select class="select" [id]="'pin-' + m.id" [disabled]="store.isBusy()('pin:' + m.id)" [attr.aria-label]="'Engine build for ' + m.name" (change)="setPin(m, $any($event.target).value)">
                   <option value="" [selected]="!store.pinOf()(m.id)">Follows global choice</option>
@@ -223,7 +223,7 @@ export function contextText(tokens: number | null): string {
                 @if (store.pinOf()(m.id); as pin) {
                   <span class="hint pinned-build" [matTooltip]="m.loaded ? 'Loaded models keep their engine until they are loaded again' : 'Used from the next load'">Pinned to {{ pin.buildId }}{{ pin.tag ? ' ' + pin.tag : '' }}</span>
                 }
-              </label>
+              </div>
             }
 
             <div class="field">
