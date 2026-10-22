@@ -14,7 +14,7 @@ computer. This is the product's first promise, so it is recorded before any othe
 
 - **No cloud engines.** Pitwall runs models on this machine only (llama.cpp first; MLX, vLLM, whisper.cpp and
   embedding/reranker engines later). There is no Anthropic, OpenAI, Gemini or any other remote backend, no "fallback
-  to the cloud", and no plugin kind that adds one.
+  to the cloud".
 - **No telemetry, no crash upload, no update pings that carry data.** Logs stay in the user's data folder and never
   contain prompts, responses or file contents by default; the request inspector shows prompts only on demand, from
   local memory.
@@ -33,9 +33,8 @@ computer. This is the product's first promise, so it is recorded before any othe
   so a web page cannot use Pitwall through DNS rebinding or cross-site requests. Sharing on the user's own network is
   an explicit opt-in (off by default, TLS with a self-signed certificate whose fingerprint clients pin, per-app keys);
   it never reaches beyond that network.
-- **Plugins get no network access by default** (out of process, sandboxed; see the plugin ADR). A plugin that needs
-  the network must say so in its manifest, and the user approves it at install; request/response filter plugins never
-  get it.
+- **Engines get no network access by default.** They run as separate processes managed by the server and talk only to
+  `127.0.0.1` (ADR 0010: there is no plugin system).
 
 ## Consequences
 

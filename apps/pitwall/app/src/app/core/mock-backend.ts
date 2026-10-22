@@ -16,14 +16,12 @@ import type {
   LiveUpdate,
   LoadedModel,
   LocalModel,
-  McpServerInfo,
   MemorySample,
   Overview,
   PairingRequest,
   PitwallEvent,
   PlaygroundEvent,
   PlaygroundRequest,
-  PluginInfo,
   Preset,
   QueueSnapshot,
   RequestContent,
@@ -48,9 +46,7 @@ import {
   demoHistory,
   demoLoaded,
   demoLocalModels,
-  demoMcpServers,
   demoPairings,
-  demoPlugins,
   demoRepo,
   demoRequests,
   demoSearch,
@@ -101,8 +97,6 @@ export class MockBackend implements PitwallBackend {
   private settings_: Settings;
   private engines_: Engine[];
   private downloads_: Download[] = [];
-  private plugins_: PluginInfo[];
-  private readonly mcp: McpServerInfo[];
   private readonly requests_: RequestRecord[];
   private readonly benchmarks_: BenchmarkResult[];
   private readonly histories = new Map<HistoryRange, History>();
@@ -137,8 +131,6 @@ export class MockBackend implements PitwallBackend {
     this.pairings_ = empty ? [] : demoPairings(now);
     this.events_ = empty ? [] : demoEvents(now);
     this.engines_ = demoEngines(now);
-    this.plugins_ = empty ? [] : demoPlugins();
-    this.mcp = empty ? [] : demoMcpServers();
     this.requests_ = empty ? [] : demoRequests(now);
     this.benchmarks_ = empty ? [] : demoBenchmarks(now);
     this.memory = this.sampleMemory(now);
@@ -698,7 +690,7 @@ export class MockBackend implements PitwallBackend {
     });
   }
 
-  // ---- Settings, plugins, tools ------------------------------------------------------------------------------
+  // ---- Settings ------------------------------------------------------------------------------
 
   settings(): Promise<Settings> {
     return this.reply('settings', () => this.settings_);
@@ -716,22 +708,6 @@ export class MockBackend implements PitwallBackend {
       this.emit({ kind: 'server', server: clone(this.server) });
       return this.settings_;
     });
-  }
-
-  plugins(): Promise<PluginInfo[]> {
-    return this.reply('plugins', () => this.plugins_);
-  }
-
-  setPluginEnabled(id: string, enabled: boolean): Promise<void> {
-    return this.reply('setPluginEnabled', () => {
-      const p = this.plugins_.find((x) => x.id === id) ?? this.fail('notFound', `No plugin ${id}.`);
-      p.enabled = enabled;
-      if (p.state !== 'quarantined') p.state = enabled ? 'running' : 'stopped';
-    });
-  }
-
-  mcpServers(): Promise<McpServerInfo[]> {
-    return this.reply('mcpServers', () => this.mcp);
   }
 
   appUpdateStatus(): Promise<AppUpdateStatus> {

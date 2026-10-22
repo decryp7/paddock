@@ -1,4 +1,4 @@
-import type { DownloadState, EventKind, HotState, JobState, PluginState, ProcessHealth } from '../core/api.types';
+import type { DownloadState, EventKind, HotState, JobState, ProcessHealth } from '../core/api.types';
 import {
   availabilityLook,
   downloadActive,
@@ -8,7 +8,6 @@ import {
   healthLook,
   hotStateLook,
   jobStateLook,
-  pluginStateLook,
   pressureLook,
   selfTestLook,
   severityTone,
@@ -38,8 +37,6 @@ describe('labels', () => {
     expect(fitLook('unknown').tone).toBe('muted');
     const jobs: JobState[] = ['queued', 'running', 'done', 'failed', 'cancelled'];
     expect(jobs.map((j) => jobStateLook(j).tone)).toEqual(['muted', 'info', 'ok', 'bad', 'muted']);
-    const plugins: PluginState[] = ['running', 'stopped', 'quarantined', 'failed'];
-    expect(plugins.map((p) => pluginStateLook(p).tone)).toEqual(['ok', 'muted', 'bad', 'bad']);
   });
 
   it('knows which downloads are still moving', () => {
@@ -50,7 +47,7 @@ describe('labels', () => {
   });
 
   it('gives every event an icon that exists', () => {
-    const kinds: EventKind[] = ['modelLoaded', 'modelUnloaded', 'contextReleased', 'engineStarted', 'engineRestarted', 'engineFailed', 'download', 'pairing', 'servingChanged', 'presetChanged', 'requestFailed', 'pluginQuarantined'];
+    const kinds: EventKind[] = ['modelLoaded', 'modelUnloaded', 'contextReleased', 'engineStarted', 'engineRestarted', 'engineFailed', 'download', 'pairing', 'servingChanged', 'presetChanged', 'requestFailed'];
     for (const k of kinds) expect(ICONS[eventIcon(k)]).toBeDefined();
   });
 

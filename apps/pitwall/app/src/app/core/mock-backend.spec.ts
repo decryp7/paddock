@@ -49,13 +49,11 @@ describe('MockBackend', () => {
     expect((await mock.events(3)).length).toBe(3);
     expect((await mock.searchModels('qwen')).every((m) => m.repo.toLowerCase().includes('qwen'))).toBe(true);
     expect((await mock.repoFiles('unsloth/gemma-3-12b-it-GGUF')).projectors.length).toBe(1);
-    expect((await mock.engines()).length).toBe(5);
+    expect((await mock.engines()).length).toBe(4);
     expect((await mock.apps()).length).toBe(5);
     expect((await mock.pairings()).length).toBe(1);
     expect((await mock.requests(10)).length).toBe(10);
     expect((await mock.benchmarks()).length).toBeGreaterThan(0);
-    expect((await mock.plugins()).length).toBe(3);
-    expect((await mock.mcpServers()).length).toBe(2);
     expect((await mock.settings()).memory.preset).toBe('balanced');
     expect((await mock.appUpdateStatus()).available).toBe(false);
     expect((await mock.diskUsage()).unused).toContain('qwen2.5-coder-1.5b-q8_0');
@@ -222,18 +220,13 @@ describe('MockBackend', () => {
     await expect(mock.requestContent('nope')).rejects.toMatchObject({ code: 'notFound' });
   });
 
-  it('runs benchmarks, presets, plugins and jobs', async () => {
+  it('runs benchmarks, presets and jobs', async () => {
     const mock = new MockBackend({ now: clock });
     const r = await mock.runBenchmark('llama-3.2-3b-instruct-q5_k_m');
     expect(r.genTps).toBeGreaterThan(0);
     await expect(mock.runBenchmark('nope')).rejects.toMatchObject({ code: 'notFound' });
     expect((await mock.applyPreset('performance')).memory.maxHotModels).toBe(4);
     expect((await mock.applyPreset('custom')).memory.preset).toBe('custom');
-    await mock.setPluginEnabled('pw-web-fetch', true);
-    expect((await mock.plugins())[0]!.state).toBe('running');
-    await mock.setPluginEnabled('pw-onnx-embed', false);
-    expect((await mock.plugins())[2]!.state).toBe('quarantined');
-    await expect(mock.setPluginEnabled('nope', true)).rejects.toMatchObject({ code: 'notFound' });
     await mock.cancelJob('job-42');
     await expect(mock.cancelJob('job-42')).rejects.toMatchObject({ code: 'notFound' });
     await mock.setServing(true);

@@ -19,10 +19,8 @@ import type {
   KeyedSeries,
   LoadedModel,
   LocalModel,
-  McpServerInfo,
   PairingRequest,
   PitwallEvent,
-  PluginInfo,
   QuantVariant,
   ReleaseReason,
   RequestRecord,
@@ -182,7 +180,6 @@ export function demoEngines(now: number): Engine[] {
     { kind: 'whisper.cpp', name: 'whisper.cpp', description: 'Speech to text (OpenAI-compatible /v1/audio/transcriptions).', availability: { state: 'notInstalled', reason: 'Planned for a later version: transcription is not wired to the router yet.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
     { kind: 'mlx', name: 'MLX', description: "Apple's array framework for Apple silicon.", availability: { state: 'notAvailable', reason: 'MLX runs on Apple silicon only; this is a Windows PC.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
     { kind: 'vllm', name: 'vLLM', description: 'High-throughput serving with paged attention.', availability: { state: 'notAvailable', reason: 'vLLM needs Linux with a CUDA GPU; Windows is not supported.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
-    { kind: 'plugin', name: 'Embeddings & rerankers', description: 'Dedicated embedding and reranker runtimes as engine plugins.', availability: { state: 'notInstalled', reason: 'No engine plugin installed. llama.cpp serves embeddings and reranking today.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
   ];
 }
 
@@ -219,21 +216,6 @@ export function presetMemory(preset: Settings['memory']['preset'], current: Sett
     default:
       return { ...current, preset };
   }
-}
-
-export function demoPlugins(): PluginInfo[] {
-  return [
-    { id: 'pw-web-fetch', name: 'Web fetch tool', version: '0.3.1', kinds: ['tool'], state: 'stopped', enabled: false, network: false, failures: 0, lastError: null },
-    { id: 'pw-pii-filter', name: 'PII redaction filter', version: '1.0.0', kinds: ['filter'], state: 'running', enabled: true, network: false, failures: 0, lastError: null },
-    { id: 'pw-onnx-embed', name: 'ONNX embeddings', version: '0.1.4', kinds: ['engine', 'endpoint'], state: 'quarantined', enabled: true, network: false, failures: 3, lastError: 'Timed out after 30 s while loading model (3rd failure in 10 min).' },
-  ];
-}
-
-export function demoMcpServers(): McpServerInfo[] {
-  return [
-    { id: 'mcp-fs', name: 'Filesystem (read-only)', command: 'mcp-server-filesystem --read-only D:\\Notes', state: 'running', tools: ['read_file', 'list_directory', 'search_files'], allowedApps: ['imt', 'continue'] },
-    { id: 'mcp-git', name: 'Git', command: 'mcp-server-git --repository C:\\src\\pitwall', state: 'stopped', tools: ['git_log', 'git_diff', 'git_status'], allowedApps: [] },
-  ];
 }
 
 const HF_MODELS: [string, number, number, string[], string][] = [
@@ -412,7 +394,6 @@ export function demoEvents(now: number): PitwallEvent[] {
     e(67, 'engineRestarted', 'warn', 'llama.cpp (Llama 3.2 3B) stopped responding and was restarted', { modelId: 'llama-3.2-3b-instruct-q5_k_m' }),
     e(95, 'modelUnloaded', 'info', 'Released Qwen3 8B Instruct: idle for 10 min', { modelId: 'qwen3-8b-instruct-q4_k_m', reason: 'idle' }),
     e(130, 'presetChanged', 'info', 'Memory preset set to Balanced'),
-    e(142, 'pluginQuarantined', 'error', 'ONNX embeddings quarantined after 3 failures'),
     e(180, 'modelUnloaded', 'info', 'Released Gemma 3 12B: yielded to a full-screen app', { modelId: 'gemma-3-12b-it-q4_k_m', reason: 'yield' }),
     e(240, 'servingChanged', 'info', 'Serving resumed'),
     e(300, 'engineStarted', 'info', 'llama.cpp cuda-13 b11669 passed its self-test'),

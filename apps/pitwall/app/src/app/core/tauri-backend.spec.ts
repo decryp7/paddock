@@ -83,9 +83,6 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['runBenchmark', (b) => b.runBenchmark('m1'), 'run_benchmark', { modelId: 'm1' }],
   ['settings', (b) => b.settings(), 'settings', undefined],
   ['saveSettings', (b) => b.saveSettings(SETTINGS), 'save_settings', { settings: SETTINGS }],
-  ['plugins', (b) => b.plugins(), 'plugins', undefined],
-  ['setPluginEnabled', (b) => b.setPluginEnabled('x', false), 'set_plugin_enabled', { id: 'x', enabled: false }],
-  ['mcpServers', (b) => b.mcpServers(), 'mcp_servers', undefined],
   ['appUpdateStatus', (b) => b.appUpdateStatus(), 'app_update_status', undefined],
 ];
 

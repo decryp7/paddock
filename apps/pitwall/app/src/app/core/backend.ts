@@ -14,13 +14,11 @@ import type {
   HfRepo,
   LiveUpdate,
   LocalModel,
-  McpServerInfo,
   Overview,
   PairingRequest,
   PitwallEvent,
   PlaygroundEvent,
   PlaygroundRequest,
-  PluginInfo,
   Preset,
   RequestContent,
   RequestRecord,
@@ -89,12 +87,9 @@ export interface PitwallBackend {
   benchmarks(): Promise<BenchmarkResult[]>;
   runBenchmark(modelId: string): Promise<BenchmarkResult>;
 
-  // Settings, plugins, tools
+  // Settings
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
-  plugins(): Promise<PluginInfo[]>;
-  setPluginEnabled(id: string, enabled: boolean): Promise<void>;
-  mcpServers(): Promise<McpServerInfo[]>;
   appUpdateStatus(): Promise<AppUpdateStatus>;
 }
 

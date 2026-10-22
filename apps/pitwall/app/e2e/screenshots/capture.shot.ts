@@ -14,7 +14,6 @@ const SCREENS: { name: string; path: string; ready: string; prepare?: (page: Pag
   { name: 'requests', path: '/requests', ready: 'h1' },
   { name: 'playground', path: '/playground', ready: 'h1' },
   { name: 'benchmarks', path: '/benchmarks', ready: 'h1' },
-  { name: 'plugins', path: '/plugins', ready: 'h1' },
   { name: 'settings', path: '/settings', ready: 'h1' },
 ];
 

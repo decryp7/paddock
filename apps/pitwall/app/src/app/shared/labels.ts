@@ -7,7 +7,6 @@ import type {
   HotState,
   JobState,
   MemoryPressure,
-  PluginState,
   Preset,
   Priority,
   ProcessHealth,
@@ -151,16 +150,6 @@ export function jobStateLook(s: JobState): Look {
   return map[s];
 }
 
-export function pluginStateLook(s: PluginState): Look {
-  const map: Record<PluginState, Look> = {
-    running: { label: 'Running', tone: 'ok' },
-    stopped: { label: 'Stopped', tone: 'muted' },
-    quarantined: { label: 'Quarantined', tone: 'bad' },
-    failed: { label: 'Failed', tone: 'bad' },
-  };
-  return map[s];
-}
-
 export function severityTone(s: Severity): Tone {
   return s === 'error' ? 'bad' : s === 'warn' ? 'warn' : 'info';
 }
@@ -179,7 +168,6 @@ export function eventIcon(kind: EventKind): string {
     servingChanged: 'pause',
     presetChanged: 'sliders',
     requestFailed: 'alert',
-    pluginQuarantined: 'plugins',
   };
   return map[kind];
 }

@@ -91,7 +91,7 @@ const LIMITS: { key: LimitKey; label: string; unit: string }[] = [
         <div class="toggle-row">
           <div>
             <span class="t">Tools</span>
-            <span class="faint d">Call MCP servers and tool plugins</span>
+            <span class="faint d">Call MCP tools</span>
           </div>
           <mat-slide-toggle [checked]="tools()" (change)="tools.set($event.checked)" aria-label="Tools" />
         </div>

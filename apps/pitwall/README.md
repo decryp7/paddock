@@ -31,8 +31,8 @@ written and tested; the server and the app are next. Nothing here is ready to in
 - **Security:** per-app keys approved with a pairing code and kept in the OS credential store, per-app permissions,
   `Host`/`Origin` checks against DNS rebinding; sharing on your own network only if you turn it on (TLS, pinned
   certificate).
-- **Plugins:** Rust only, each in its own sandboxed process — engines, endpoints, tools and request filters. A
-  crashing plugin is isolated and never takes Pitwall down; plugins get no network access by default.
+- **Engines as separate processes:** each engine is an `Engine` adapter run as its own process under the server, so a
+  crashing engine never takes Pitwall down. There is no plugin system (ADR 0010).
 - **The app:** a dashboard (memory, loaded models with their idle countdown, tokens per second, queue, per-app
   usage, history), model and engine managers, apps and keys, a request inspector, a chat playground with side-by-side
   comparison, benchmarks on your hardware, and a tray / menu-bar view.
@@ -50,8 +50,6 @@ the default and offline fallback. See [ADR 0009](docs/adr/0009-app-integration-c
 | `crates/pitwall-core` | Pure logic: API formats, scheduler, memory policy, selection, keys, metrics, settings |
 | `crates/pitwall-loopback` | HTTP client that can only talk to `127.0.0.1` (engines) |
 | `crates/pitwall-server` | The server (in progress) |
-| `crates/pitwall-ipc`, `pitwall-plugin-api`, `pitwall-plugin-host` | Plugin protocol, SDK and guarded host |
-| `plugins/`, `templates/plugin` | Example plugin and the plugin template |
 | `app/` | Angular UI (Tauri shell to come) |
 | `docs/adr` | Architecture decisions |
 
@@ -62,7 +60,7 @@ Engineering rules for contributors and coding agents are in [AGENTS.md](AGENTS.m
 1. Server: engines (llama.cpp), model library and downloads, serving with load-on-first-use and idle release, the
    standard APIs, `/x/v1` and the management API, the no-network test.
 2. Tauri app: tray / menu bar, dashboard and screens, updater, start at login; Windows installer and macOS `.dmg`.
-3. ADRs for the architecture, API compatibility, engines, queue, memory release, security, plugins and metrics;
+3. ADRs for the architecture, API compatibility, engines, queue, memory release, security and metrics;
    `docs/development.md`, `docs/releasing.md`; CI on Linux, Windows and macOS.
 4. Knowledge collections, task endpoints, MCP and tool hosting, benchmarks.
 5. More engines: MLX, whisper.cpp, embeddings and rerankers, vLLM.

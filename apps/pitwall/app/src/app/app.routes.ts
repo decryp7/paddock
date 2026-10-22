@@ -9,7 +9,6 @@ export const routes: Routes = [
   { path: 'requests', title: 'Requests · Pitwall', loadComponent: () => import('./features/requests/requests-page').then((m) => m.RequestsPage) },
   { path: 'playground', title: 'Playground · Pitwall', loadComponent: () => import('./features/playground/playground-page').then((m) => m.PlaygroundPage) },
   { path: 'benchmarks', title: 'Benchmarks · Pitwall', loadComponent: () => import('./features/benchmarks/benchmarks-page').then((m) => m.BenchmarksPage) },
-  { path: 'plugins', title: 'Plugins & tools · Pitwall', loadComponent: () => import('./features/plugins/plugins-page').then((m) => m.PluginsPage) },
   { path: 'settings', title: 'Settings · Pitwall', loadComponent: () => import('./features/settings/settings-page').then((m) => m.SettingsPage) },
   { path: 'tray', title: 'Pitwall', loadComponent: () => import('./features/tray/tray-popover').then((m) => m.TrayPopover) },
   { path: '**', redirectTo: '' },

@@ -116,7 +116,7 @@ export interface LoadedModel {
   capabilities: Capability[];
 }
 
-export type EngineKind = 'llama.cpp' | 'mlx' | 'vllm' | 'whisper.cpp' | 'plugin';
+export type EngineKind = 'llama.cpp' | 'mlx' | 'vllm' | 'whisper.cpp';
 
 export type Availability =
   | { state: 'available' }
@@ -329,8 +329,7 @@ export type EventKind =
   | 'pairing'
   | 'servingChanged'
   | 'presetChanged'
-  | 'requestFailed'
-  | 'pluginQuarantined';
+  | 'requestFailed';
 
 export interface PitwallEvent {
   id: number;
@@ -580,35 +579,6 @@ export interface Settings {
   memory: MemorySettings;
   network: NetworkSettings;
   privacy: PrivacySettings;
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// Plugins and tools
-
-export type PluginKind = 'engine' | 'endpoint' | 'tool' | 'filter';
-export type PluginState = 'running' | 'stopped' | 'quarantined' | 'failed';
-
-export interface PluginInfo {
-  id: string;
-  name: string;
-  version: string;
-  kinds: PluginKind[];
-  state: PluginState;
-  enabled: boolean;
-  /** Always false unless the user granted it. */
-  network: boolean;
-  failures: number;
-  lastError: string | null;
-}
-
-export interface McpServerInfo {
-  id: string;
-  name: string;
-  command: string;
-  state: PluginState;
-  tools: string[];
-  /** App ids allowed to use its tools. */
-  allowedApps: string[];
 }
 
 export interface AppUpdateStatus {

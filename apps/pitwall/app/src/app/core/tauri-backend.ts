@@ -15,13 +15,11 @@ import type {
   HfRepo,
   LiveUpdate,
   LocalModel,
-  McpServerInfo,
   Overview,
   PairingRequest,
   PitwallEvent,
   PlaygroundEvent,
   PlaygroundRequest,
-  PluginInfo,
   Preset,
   RequestContent,
   RequestRecord,
@@ -223,21 +221,12 @@ export class TauriBackend implements PitwallBackend {
     return this.run('run_benchmark', { modelId });
   }
 
-  // Settings, plugins, tools
+  // Settings
   settings(): Promise<Settings> {
     return this.run('settings');
   }
   saveSettings(settings: Settings): Promise<Settings> {
     return this.run('save_settings', { settings });
-  }
-  plugins(): Promise<PluginInfo[]> {
-    return this.run('plugins');
-  }
-  setPluginEnabled(id: string, enabled: boolean): Promise<void> {
-    return this.run('set_plugin_enabled', { id, enabled });
-  }
-  mcpServers(): Promise<McpServerInfo[]> {
-    return this.run('mcp_servers');
   }
   appUpdateStatus(): Promise<AppUpdateStatus> {
     return this.run('app_update_status');

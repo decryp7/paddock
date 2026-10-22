@@ -28,7 +28,7 @@ describe('EnginesStore', () => {
     expect(store.loading()).toBe(true);
     await p;
     expect(store.available().map((e) => e.kind)).toEqual(['llama.cpp']);
-    expect(store.planned().map((e) => e.kind)).toEqual(['whisper.cpp', 'mlx', 'vllm', 'plugin']);
+    expect(store.planned().map((e) => e.kind)).toEqual(['whisper.cpp', 'mlx', 'vllm']);
   });
 
   it('reports a load error', async () => {
@@ -110,7 +110,7 @@ describe('EnginesPage', () => {
     expect(el.textContent).toContain('Roll back to b11602');
     expect(el.textContent).toContain('Healthy');
     const planned = el.querySelectorAll('.planned li');
-    expect(planned.length).toBe(4);
+    expect(planned.length).toBe(3);
     expect(planned[1]!.textContent).toContain('MLX runs on Apple silicon only');
     expect((el.querySelector('button[aria-label="Remove CUDA 13 (NVIDIA) b11669"]') as HTMLButtonElement).disabled).toBe(true);
   });

@@ -1,8 +1,7 @@
 # Pitwall — engineering rules for coding agents and contributors
 
 Pitwall is the local LLM server and manager of the suite (IMT, Pitcrew, Spotter, Dyno and any OpenAI, Anthropic or
-Ollama compatible tool): a Rust core (`crates/pitwall-core`), the server (`crates/pitwall-server`), the plugin system
-(`crates/pitwall-ipc`, `crates/pitwall-plugin-api`, `crates/pitwall-plugin-host`, `plugins/`, `templates/plugin`), a
+Ollama compatible tool): a Rust core (`crates/pitwall-core`), the server (`crates/pitwall-server`), a
 Tauri 2 tray app (`app/src-tauri`) and an Angular UI (`app/src`). See README.md for what it does and `docs/adr/` for why
 it is built this way.
 
@@ -22,7 +21,7 @@ This is the user's explicit requirement and overrides every other consideration 
   `request_handlers_cannot_reach_the_network` fails if a route handler can open an outbound connection.
 - Requests never cause fetching: images must be inline data, `previous_response_id` and remote URLs are refused,
   tools run locally.
-- Plugins get no network access by default (ADR 0008). Logs never contain prompts, responses or secrets; request
+- Logs never contain prompts, responses or secrets; request
   content is kept for the inspector only when the user turns it on, on this machine.
 - A change that adds any outbound connection needs an ADR and the user's approval. When in doubt, don't.
 
@@ -34,9 +33,9 @@ Apply these deliberately. They are not decoration:
   several jobs (e.g. parsing vs. scheduling vs. serving); keep request/response DTOs apart from the logic that
   produces them.
 - **Open/closed.** Extend by adding, not editing: a new engine is a new `Engine` implementation; a new API family is a
-  new module under `pitwall_core::api` plus routes; new behaviour for users is settings or plugins, not hard-coded
+  new module under `pitwall_core::api` plus routes; new behaviour for users is settings, not hard-coded
   special cases.
-- **Liskov.** Every implementation of a trait (`Engine`, the plugin traits, the UI backends) honours the documented
+- **Liskov.** Every implementation of a trait (`Engine`, the UI backends) honours the documented
   contract: same error semantics, no surprising panics.
 - **Interface segregation.** Keep traits and TypeScript interfaces small and purpose-built.
 - **Dependency inversion / code against abstractions.**
@@ -64,7 +63,7 @@ Apply these deliberately. They are not decoration:
 
 Pitwall runs native engines on untrusted model files and answers requests from other programs:
 
-- Never trust a request, the webview, an engine or a plugin: validate every field in Rust at the edge. The API binds
+- Never trust a request, the webview, or an engine: validate every field in Rust at the edge. The API binds
   127.0.0.1 only unless the user turns on LAN exposure (TLS, keys required; ADR 0007). `Host` and `Origin` headers are
   checked (DNS rebinding, cross-site requests).
 - Per-app API keys: stored hashed (SHA-256 of a 256-bit secret), shown once, compared in constant time; the admin key
@@ -86,10 +85,10 @@ Pitwall runs native engines on untrusted model files and answers requests from o
 
 ## Languages
 
-- All code that ships inside Pitwall is Rust (core, server, plugins, Tauri shell) plus the Angular UI. Don't add C#,
+- All code that ships inside Pitwall is Rust (core, server, Tauri shell) plus the Angular UI. Don't add C#,
   C++, Python or other runtimes to the product. Engines are third-party binaries Pitwall downloads, not code it ships.
-- Plugins are Rust only and always run out of process over the one IPC (`pitwall-ipc`: length-prefixed postcard
-  frames on a private local stream; ADR 0008). A plugin depends on `pitwall-plugin-api` alone.
+- There is no plugin system (ADR 0010). Engines are `Engine` trait adapters that run as separate processes managed by the
+  server; no third-party code runs inside the Pitwall process.
 - `unsafe` is denied workspace-wide. An OS integration that needs FFI gets one small module with
   `#![allow(unsafe_code)]` and a comment on every `unsafe` block, and tests on that platform's CI runner.
 
@@ -106,7 +105,7 @@ Pitwall runs native engines on untrusted model files and answers requests from o
 
 ## Robustness
 
-- **Contain failures.** One engine's crash, one bad model file, one plugin or one slow request never takes down the
+- **Contain failures.** One engine's crash, one bad model file or one slow request never takes down the
   server or another model. The app can crash or close without stopping the server.
 - **Degrade, don't fail.** No engine installed, no GPU, offline mode, a locked file, a gated model or a full disk
   produce a clear message and a next step instead of an exception. A request that does not fit in memory is queued or
@@ -117,7 +116,7 @@ Pitwall runs native engines on untrusted model files and answers requests from o
   with a backup, and loading tolerates damage (the backup, then the defaults). New persistent state must do the same.
 - **Bounded resources.** Respect the existing limits and add limits for any new unbounded input.
 - **Every robustness behaviour has a test that triggers the failure** (crashing or hanging engines, corrupt model or
-  archive, checksum mismatch, failed self-test and roll back, damaged settings, crashing plugins, full queue).
+  archive, checksum mismatch, failed self-test and roll back, damaged settings, full queue).
 
 ## Working in parallel (agents)
 
@@ -140,7 +139,6 @@ Pitwall runs native engines on untrusted model files and answers requests from o
   Change both sides of a contract in the same commit.
 - The settings schema is `pitwall_core::config` (with `SCHEMA_VERSION`). New keys are optional with defaults; a
   breaking change bumps the version and adds a migration with a test.
-- The plugin contract is `pitwall-plugin-api` (with `CONTRACT_VERSION`).
 
 ## Testing and quality gates
 

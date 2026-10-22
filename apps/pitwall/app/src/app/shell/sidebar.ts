@@ -31,7 +31,6 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { path: '/playground', label: 'Playground', icon: 'playground' },
       { path: '/benchmarks', label: 'Benchmarks', icon: 'benchmarks' },
-      { path: '/plugins', label: 'Plugins & tools', icon: 'plugins' },
     ],
   },
 ];
