@@ -81,7 +81,7 @@ default 600 s) and run under the queue caps (ADR 0005).
 
 - Task endpoints (`/x/summarize`, `/x/classify`, `/x/extract`, `/x/translate`; `pitwall_core::tasks` holds the versioned
   prompts only), token-budget helpers beyond `count_tokens`, knowledge collections (RAG), a response cache
-  (`pitwall_core::cache` is core logic only), MCP tool hosting, batch jobs with resume.
+  (designed in ADR 0019, not built yet), MCP tool hosting, batch jobs with resume.
 - `POST /v1/audio/transcriptions` (needs the whisper.cpp engine).
 - Provenance reports the engine as `llama.cpp` even for pack engines; this should name the real engine.
 - LAN access (ADR 0007): the server answers only on loopback.

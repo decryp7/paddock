@@ -68,6 +68,7 @@ are not kept side by side.
   rollback logic already work on `BuildId`s and would not change.
 - The matrix is only as accurate as its floors; a wrong floor is a data edit, not a code change, and the catalog's own pin
   (`b11669`) satisfies every entry (a test checks it).
+- The engine build is part of the cache fingerprint and a pin or rollback drops the affected cache entries (ADR 0019).
 - Gating is by release number, not by probing the binary; probing (`--help` flags) was rejected as slower, platform specific
   and still needing a table for what the flags mean.
 
@@ -85,6 +86,24 @@ no build numbers, so the numbers come from the tags.
 | Vision (mtmd) | #12898 server: vision support via libmtmd | 2025-05-09 | b5331 |
 | Embeddings | #5190 server: OpenAI-compatible embeddings | 2024-01-29 | b2004 |
 | Reranking | #9510 llama: add reranking support (`/rerank` in the server) | 2024-09-28 | b3841 |
+
+Features used by caching (ADR 0019) are not gated capabilities: they are optimisations, and a build without them just
+caches less. Recorded with the same method (re-checked 2026-10-23):
+
+| Feature | Change | Merged | First release |
+|---|---|---|---|
+| `id_slot` in a request (renamed from `slot_id`, which existed since b1413) | #5882 server refactor | 2024-03-07 | b2357 |
+| Slot save and restore (`--slot-save-path`, `/slots/{id}?action=save`) | #6341 save and restore kv cache for single seq id | 2024-04-08 | b2630 |
+| `--cache-reuse` (reuse cached chunks by KV shifting) | #9866 | 2024-10-13 | b3914 |
+| `--cache-ram` (host-memory prompt cache) | #16391 | 2025-10-09 | b6724 |
+| `--cache-ram` as a strict limit | #25070 | 2026-07-07 | b9908 |
+| `cache_reuse` per request | #17858 | 2025-12-08 | b7318 |
+| A request that pins a busy slot leaves it untouched | #30295 | 2026-10-10 | b11552 |
+
+Pitwall starts every engine with `--jinja` (#11016, b4524) and `--offline` (#13804, b5501), so a build older than b5501 does
+not start at all; that is a start-up requirement, not a feature in the matrix. The `json` floor (b2487) is where
+`json_schema` reached the server's `/completion`; Pitwall sends the OpenAI `response_format` of type `json_schema` to
+`/v1/chat/completions`, which arrived with #9527 (2024-09-18, b3782). Everything the catalog installs is far newer.
 
 These are the first releases that contain the feature, not releases known to be free of its early bugs (for example the
 embedding normalisation fix #5956 and the TEI rerank format #11942, b4738, came later); raise a floor in the data file if a

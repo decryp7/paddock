@@ -46,3 +46,4 @@ fits?". The fit check answered only yes or no for one context length. The real s
 - The default of two slots doubles the KV memory of a model compared with a single slot, in exchange for a second app being
   served at the same time; users with little memory pick one slot (or the Low memory preset's single hot model).
 - A KV cache quantisation option would change the bytes per token only; the model is one function.
+- Which slot serves a request matters for prompt-prefix reuse: ADR 0019 adds slot affinity (`id_slot`) on top of these slots.

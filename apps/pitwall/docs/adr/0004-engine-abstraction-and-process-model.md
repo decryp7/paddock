@@ -26,7 +26,7 @@ a `pitwall_loopback::Client` for its port and what `/props` reported (context, v
 **Process model.** Each loaded model is one child process of the server (`llama-server`), started with
 `--host 127.0.0.1`, a free loopback port, `--offline --no-webui --jinja`, `--n-gpu-layers 999` (all layers to the GPU unless
 told otherwise), `--parallel` from `server.maxConcurrent` (1 to 4), `--cache-ram` (1024 MiB with 16 GiB RAM or more, else
-256), `--mmproj` for vision models, `--embeddings` for embedding models. The engine is protected by a random 16-byte key
+256; ADR 0019 sizes it as 1/16 of RAM, 256 MiB to 4 GiB, unless set in Settings), `--mmproj` for vision models, `--embeddings` for embedding models. The engine is protected by a random 16-byte key
 passed in `LLAMA_API_KEY`. All children are started only in `process::command`:
 - an empty environment plus the allow-list `KEPT_ENV` (`PATH`, `SystemRoot`, `SYSTEMROOT`, `windir`, `TEMP`, `TMP`, `TMPDIR`,
   `HOME`, `USERPROFILE`, `LANG`, `LC_ALL`, `LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH`, `XDG_RUNTIME_DIR`), so tokens, proxies
