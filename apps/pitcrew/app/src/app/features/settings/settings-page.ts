@@ -6,17 +6,19 @@ import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { BrandLogo } from '../../shared/ui/brand-logo';
 import { StatusStore } from '../../state/status.store';
+import { ChannelsSection } from './channels/channels-section';
 import { DefaultsSection } from './defaults-section';
 import { GeneralSection } from './general-section';
 import { ServiceSection } from './service-section';
 import { TokensSection } from './tokens-section';
 
-export type SettingsSection = 'general' | 'service' | 'defaults' | 'tokens' | 'diagnostics' | 'about';
+export type SettingsSection = 'general' | 'service' | 'defaults' | 'channels' | 'tokens' | 'diagnostics' | 'about';
 
 const SECTIONS: { key: SettingsSection; label: string; icon: string }[] = [
   { key: 'general', label: 'General', icon: 'settings' },
   { key: 'service', label: 'Service', icon: 'server' },
   { key: 'defaults', label: 'Defaults', icon: 'gauge' },
+  { key: 'channels', label: 'Notification channels', icon: 'bell' },
   { key: 'tokens', label: 'Gitea tokens', icon: 'key' },
   { key: 'diagnostics', label: 'Diagnostics', icon: 'package' },
   { key: 'about', label: 'About', icon: 'info' },
@@ -25,7 +27,7 @@ const SECTIONS: { key: SettingsSection; label: string; icon: string }[] = [
 /** Settings, one section at a time (`?section=`). */
 @Component({
   selector: 'pc-settings-page',
-  imports: [MatIcon, BrandLogo, GeneralSection, ServiceSection, DefaultsSection, TokensSection],
+  imports: [MatIcon, BrandLogo, GeneralSection, ServiceSection, DefaultsSection, ChannelsSection, TokensSection],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -53,6 +55,9 @@ const SECTIONS: { key: SettingsSection; label: string; icon: string }[] = [
             }
             @case ('defaults') {
               <pc-defaults-section />
+            }
+            @case ('channels') {
+              <pc-channels-section />
             }
             @case ('tokens') {
               <pc-tokens-section />

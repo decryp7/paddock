@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
-import type { CleanupPolicy, Config, ProcessPolicy } from '../../core/api.types';
+import type { CleanupPolicy, Config, DiskGuardPolicy, PausePolicy, ProcessPolicy } from '../../core/api.types';
 import { CleanupPolicyEditor } from '../../shared/policy/cleanup-policy-editor';
+import { DiskGuardEditor } from '../../shared/policy/disk-guard-editor';
+import { PauseEditor } from '../../shared/policy/pause-editor';
 import { ProcessPolicyEditor } from '../../shared/policy/process-policy-editor';
 import { LoadState } from '../../shared/ui/load-state';
 import { SettingsStore } from '../../state/settings.store';
@@ -68,7 +70,7 @@ export const GROUPS: DefaultsGroup[] = [
 /** The defaults every runner uses unless it overrides them: watchdog, restarts, update timeouts, logs, cleanup. */
 @Component({
   selector: 'pc-defaults-section',
-  imports: [MatIcon, RouterLink, LoadState, CleanupPolicyEditor, ProcessPolicyEditor],
+  imports: [MatIcon, RouterLink, LoadState, CleanupPolicyEditor, ProcessPolicyEditor, DiskGuardEditor, PauseEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pc-load-state what="The settings" [hasValue]="!!settings.config()" [error]="settings.settings().error" [skeleton]="[80, 160, 160]" (retry)="settings.load()">
@@ -139,6 +141,24 @@ export const GROUPS: DefaultsGroup[] = [
           </header>
           <div class="card-body">
             <pc-process-policy-editor id="defaults-processes" [policy]="d.processes" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="saveProcesses($event)" />
+          </div>
+        </section>
+        <section class="card" aria-labelledby="guard-title">
+          <header class="card-header">
+            <h2 id="guard-title">Disk guard</h2>
+            <span class="meta">before the disk is full</span>
+          </header>
+          <div class="card-body">
+            <pc-disk-guard-editor id="defaults-guard" [policy]="d.disk_guard" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="saveDiskGuard($event)" />
+          </div>
+        </section>
+        <section class="card" aria-labelledby="pause-title">
+          <header class="card-header">
+            <h2 id="pause-title">Pause windows</h2>
+            <span class="meta">when runners take no new jobs</span>
+          </header>
+          <div class="card-body">
+            <pc-pause-editor id="defaults-pause" [policy]="d.pause" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="savePause($event)" />
           </div>
         </section>
         <p class="faint small">The update schedule is on the <a routerLink="/updates">Updates</a> page.</p>
@@ -216,12 +236,22 @@ export class DefaultsSection {
   protected save(): void {
     const c = this.settings.config();
     const d = this.draft();
-    if (c && d) void this.settings.save({ ...c, defaults: { ...d, cleanup: c.defaults.cleanup, update: c.defaults.update, processes: c.defaults.processes } }, 'Defaults saved');
+    if (c && d) void this.settings.save({ ...c, defaults: { ...d, cleanup: c.defaults.cleanup, update: c.defaults.update, processes: c.defaults.processes, disk_guard: c.defaults.disk_guard, pause: c.defaults.pause } }, 'Defaults saved');
   }
 
   protected saveProcesses(policy: ProcessPolicy): void {
     const c = this.settings.config();
     if (c) void this.settings.save({ ...c, defaults: { ...c.defaults, processes: policy } }, 'Process defaults saved');
+  }
+
+  protected saveDiskGuard(policy: DiskGuardPolicy): void {
+    const c = this.settings.config();
+    if (c) void this.settings.save({ ...c, defaults: { ...c.defaults, disk_guard: policy } }, 'Disk guard saved');
+  }
+
+  protected savePause(policy: PausePolicy): void {
+    const c = this.settings.config();
+    if (c) void this.settings.save({ ...c, defaults: { ...c.defaults, pause: policy } }, 'Pause windows saved');
   }
 
   protected saveCleanup(policy: CleanupPolicy): void {

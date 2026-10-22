@@ -19,6 +19,7 @@ const update = (over: Partial<UpdatePolicy> = {}): UpdatePolicy => ({
   check_every_hours: 6,
   channel: 'stable',
   skipped: [],
+  deadline_days: 30,
   ...over,
 });
 
@@ -175,5 +176,30 @@ describe('CleanupPolicyEditor', () => {
     const { el } = mount(cleanup(), true);
     expect(byText(el, 'button', 'Save')).toBeNull();
     expect((el.querySelector('input[type="number"]') as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+describe('deadline field', () => {
+  beforeEach(() => TestBed.configureTestingModule({ providers: appProviders(makeMock()) }));
+
+  it('edits deadline_days and explains that forges enforce none', () => {
+    const f = TestBed.createComponent(UpdatePolicyEditor);
+    f.componentRef.setInput('policy', update());
+    f.detectChanges();
+    const saved: UpdatePolicy[] = [];
+    f.componentInstance.save.subscribe((p) => saved.push(p));
+    const el = f.nativeElement as HTMLElement;
+    const field = el.querySelector<HTMLInputElement>('#upd-deadline')!;
+    expect(field.value).toBe('30');
+    expect(text(el)).toContain('0 = never');
+    expect(text(el)).toContain('Gitea and Forgejo enforce no deadline');
+    typeInto(field, '-2', 'change');
+    typeInto(field, '1.5', 'change');
+    f.detectChanges();
+    expect(byText<HTMLButtonElement>(el, 'button', 'Save')!.disabled).toBe(true);
+    typeInto(field, '0', 'change');
+    f.detectChanges();
+    byText<HTMLButtonElement>(el, 'button', 'Save')!.click();
+    expect(saved[0]!.deadline_days).toBe(0);
   });
 });

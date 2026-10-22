@@ -64,6 +64,15 @@ export function positiveInt(value: string): number | null {
     </div>
 
     <div class="field">
+      <label [for]="id() + '-deadline'">Remind me when a newer release has been available for N days (0 = never)</label>
+      <div class="with-unit">
+        <input class="input" type="number" min="0" max="365" [id]="id() + '-deadline'" [value]="d.deadline_days" (change)="setDeadline($any($event.target).value)" [disabled]="readOnly()" [attr.aria-describedby]="id() + '-deadline-hint'" />
+        <span>days</span>
+      </div>
+      <span class="hint" [id]="id() + '-deadline-hint'">Only Pitcrew reminds you; Gitea and Forgejo enforce no deadline.</span>
+    </div>
+
+    <div class="field">
       <label class="check">
         <input type="checkbox" [checked]="!!d.window" (change)="toggleWindow($any($event.target).checked)" [disabled]="readOnly()" />
         Only install inside a maintenance window
@@ -229,6 +238,11 @@ export class UpdatePolicyEditor {
   protected setHours(value: string): void {
     const n = positiveInt(value);
     if (n !== null) this.set({ check_every_hours: n });
+  }
+
+  protected setDeadline(value: string): void {
+    const n = Number(value);
+    if (value.trim() !== '' && Number.isInteger(n) && n >= 0 && n <= 365) this.set({ deadline_days: n });
   }
 
   protected toggleWindow(on: boolean): void {
