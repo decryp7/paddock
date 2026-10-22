@@ -65,6 +65,38 @@ pub struct DiskReply {
     pub policy: CleanupPolicy,
 }
 
+/// `RunnerConfigReply`: a runner's `config.yaml` for the editor (ADR 0011).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunnerConfigReply {
+    /// The file's path.
+    pub path: String,
+    /// Its text.
+    pub text: String,
+    /// Fingerprint to send back with the save.
+    pub fingerprint: String,
+    /// The form's view of it.
+    pub view: pitcrew_core::runner_config::ConfigView,
+    /// Backups that exist.
+    pub backups: u32,
+    /// A change waits for the runner to restart after its job.
+    pub restart_pending: bool,
+}
+
+/// `ConfigSaved`: what saving a runner's configuration did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigSaved {
+    /// The backup's file name.
+    pub backup: Option<String>,
+    /// What happens to the runner.
+    pub restart: pitcrew_core::protocol::RestartPlan,
+    /// Fingerprint of the file now.
+    pub fingerprint: String,
+    /// The keys that changed.
+    pub changed_keys: Vec<String>,
+}
+
 /// `SettingsReply`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

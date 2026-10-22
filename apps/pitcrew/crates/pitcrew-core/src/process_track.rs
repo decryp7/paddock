@@ -30,7 +30,7 @@ pub const MAX_COMMAND: usize = 400;
 /// Longest command line looked at before redaction (a Java class path can be huge).
 pub const MAX_RAW_COMMAND: usize = 8192;
 /// Most job spans considered for attribution.
-pub const MAX_JOB_SPANS: usize = 64;
+pub const MAX_JOB_SPANS: usize = 256;
 /// Slack when matching a process's start to a job's span (the service sees jobs on a 5 s tick).
 pub const ATTRIBUTION_SLACK: Duration = Duration::from_secs(10);
 /// Longest "keep longer" extension the user can add in one go, in days (the sum is capped by the same).
@@ -401,6 +401,29 @@ pub fn next_step(p: &StopProgress, still_alive: bool, now: Timestamp) -> StopSte
     }
 }
 
+/// How many processes (other than the runner) that started during `job` are still alive: the ones it left behind.
+pub fn survivors(job: &FinishedJob, procs: &[ProcessMeta], runner_pid: u32) -> u32 {
+    let span = [JobSpan {
+        started: job.started_at,
+        finished: Some(job.finished_at),
+        label: JobRef::default(),
+    }];
+    let n = procs
+        .iter()
+        .filter(|m| m.pid != runner_pid && m.started_ms.and_then(|s| job_of(s, &span)).is_some())
+        .count();
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// What the log and the history say about the rule behind a leftover: `rule *GradleDaemon* (3 h)` or
+/// `default keep time (10 min)`.
+pub fn rule_label(t: &Tracked) -> String {
+    match t.leftover.as_ref().and_then(|l| l.rule.as_deref()) {
+        Some(p) => format!("rule {p} ({})", t.keep_label),
+        None => format!("default keep time ({})", t.keep_label),
+    }
+}
+
 /// Counts the leftovers among `tracked`.
 pub fn leftover_count(tracked: &[Tracked]) -> u32 {
     u32::try_from(tracked.iter().filter(|t| t.leftover.is_some()).count()).unwrap_or(u32::MAX)
@@ -464,7 +487,7 @@ mod tests {
         let s = spans(vec![job(100, 200, "a/one"), job(203, 300, "a/two")], None);
         assert_eq!(job_of(204_000, &s).unwrap().label.repository.as_deref(), Some("a/two"));
         // Bounded.
-        let many: Vec<FinishedJob> = (0..200).map(|n| job(n * 10, n * 10 + 5, "x/y")).collect();
+        let many: Vec<FinishedJob> = (0..400).map(|n| job(n * 10, n * 10 + 5, "x/y")).collect();
         assert_eq!(spans(many, None).len(), MAX_JOB_SPANS);
         // A job that ended before it started is a zero-length span.
         assert_eq!(spans(vec![job(100, 50, "a/b")], None)[0].finished, Some(t(100)));
@@ -632,6 +655,32 @@ mod tests {
             assert!(!r.to_string().is_empty());
         }
         assert!(Refusal::NotInTree.to_string().contains("only stops processes the runner started"));
+    }
+
+    #[test]
+    fn survivors_are_the_job_s_processes_still_alive() {
+        let j = job(100, 200, "a/one");
+        let procs = vec![
+            proc(10, "gitea-runner", Some(1)),
+            proc(11, "sleep", Some(150)),
+            proc(12, "other", Some(500)),
+            proc(13, "x", None),
+        ];
+        assert_eq!(survivors(&j, &procs, 10), 1);
+        assert_eq!(survivors(&j, &[], 10), 0);
+        let tr = classify(10, &procs, &spans(vec![j], None), &ProcessPolicy::default(), &Extensions::new());
+        let t = tr.iter().find(|t| t.meta.pid == 11).unwrap();
+        assert_eq!(rule_label(t), "default keep time (10 min)");
+        let mut g = proc(14, "java", Some(150));
+        g.command = "GradleDaemon".into();
+        let tr = classify(
+            10,
+            &[g],
+            &spans(vec![job(100, 200, "a/one")], None),
+            &ProcessPolicy::default(),
+            &Extensions::new(),
+        );
+        assert_eq!(rule_label(&tr[0]), "rule *GradleDaemon* (3 h)");
     }
 
     #[test]

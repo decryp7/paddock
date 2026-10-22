@@ -165,6 +165,8 @@ impl UsageAcc {
 pub struct UsageTracker {
     previous: HashMap<u32, u64>,
     at_ms: Option<u64>,
+    /// Each process's share of the machine at the last reading, per mille.
+    shares: HashMap<u32, u32>,
 }
 
 impl UsageTracker {
@@ -177,6 +179,12 @@ impl UsageTracker {
     pub fn reset(&mut self) {
         self.previous.clear();
         self.at_ms = None;
+        self.shares.clear();
+    }
+
+    /// The CPU share (per mille of the machine) of one process at the last reading; 0 when unknown.
+    pub fn share_of(&self, pid: u32) -> u32 {
+        self.shares.get(&pid).copied().unwrap_or(0)
     }
 
     /// The use of `members` at `now_ms` on a machine with `cpus` logical cores.
@@ -197,6 +205,22 @@ impl UsageTracker {
                 u32::try_from((u128::from(gained) * 1000 / capacity).min(1000)).unwrap_or(1000)
             }
             _ => 0,
+        };
+        self.shares = match self.at_ms {
+            Some(before) if now_ms > before => {
+                let capacity = u128::from(now_ms - before) * cpus.max(1) as u128;
+                members
+                    .iter()
+                    .map(|p| {
+                        let gained = p.cpu_time_ms.saturating_sub(self.previous.get(&p.pid).copied().unwrap_or(0));
+                        (
+                            p.pid,
+                            u32::try_from((u128::from(gained) * 1000 / capacity).min(1000)).unwrap_or(1000),
+                        )
+                    })
+                    .collect()
+            }
+            _ => HashMap::new(),
         };
         if self.at_ms.is_none_or(|before| now_ms > before) {
             self.at_ms = Some(now_ms);
@@ -359,5 +383,27 @@ mod tests {
     fn old_json_without_new_fields_loads() {
         let u: Usage = serde_json::from_str("{}").unwrap();
         assert_eq!(u, Usage::default());
+    }
+
+    #[test]
+    fn each_process_gets_its_own_share() {
+        let mut t = UsageTracker::new();
+        let first = [p(10, None, None, 1000, 5), p(11, Some(10), None, 0, 5)];
+        t.observe(0, &first, 4);
+        assert_eq!(t.share_of(10), 0, "the first reading only sets the baseline");
+        // 1 s later on 4 cores: process 10 used 2 s of CPU (500 per mille of the machine), 11 used 1 s, 12 is new.
+        let second = [
+            p(10, None, None, 3000, 5),
+            p(11, Some(10), None, 1000, 5),
+            p(12, Some(10), None, 400, 5),
+        ];
+        let u = t.observe(1000, &second, 4);
+        assert_eq!(t.share_of(10), 500);
+        assert_eq!(t.share_of(11), 250);
+        assert_eq!(t.share_of(12), 100);
+        assert_eq!(t.share_of(99), 0);
+        assert_eq!(u.cpu_permille, 850, "the shares add up to the total");
+        t.reset();
+        assert_eq!(t.share_of(10), 0);
     }
 }

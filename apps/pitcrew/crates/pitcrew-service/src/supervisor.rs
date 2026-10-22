@@ -13,12 +13,15 @@ use crate::launch::{graceful_stop, kill_tree, LaunchSpec, LineSink, RunnerProces
 use crate::launcher::Launcher;
 use crate::logfile::LogWriter;
 use crate::probe::Probe;
+use crate::process_watch::ProcessWatch;
+use crate::runner_files;
 use crate::store;
+use crate::terminate::{OsTerminator, Terminator};
 use crate::work::{self, Registration, Sources};
 use pitcrew_core::config::{self, check_server_url, Config, RunnerConfig};
 use pitcrew_core::controller::{Action, Controller, ControllerSettings, Input, LaunchError, Life};
 use pitcrew_core::health::{self, RunnerStatus};
-use pitcrew_core::history::{summarize, HistoryKind};
+use pitcrew_core::history::{summarize, HistoryKind, StopReason};
 use pitcrew_core::housekeeping::{self, CleanupPlan, CleanupReport, CleanupTrigger, DiskScan};
 use pitcrew_core::jobs::{FinishedJob, JobInfo, JobTracker};
 use pitcrew_core::layout::{self, LOG_FILE};
@@ -28,10 +31,13 @@ use pitcrew_core::metrics::{UsagePoint, SAMPLE_EVERY};
 use pitcrew_core::names::RunnerName;
 use pitcrew_core::notify::{self, Notification};
 use pitcrew_core::platform::Platform;
+use pitcrew_core::process_track;
 use pitcrew_core::protocol::{
-    DiagnosticsSection, DiskUse, ErrorCode, Request, Response, RunnerSnapshot, ServiceError, ServiceEvent, ServiceInfo, UpdateRecord,
+    DiagnosticsSection, DiskUse, ErrorCode, ProcessList, Request, Response, RestartPlan, RunnerSnapshot, ServiceError, ServiceEvent,
+    ServiceInfo, UpdateRecord,
 };
 use pitcrew_core::redact::redact;
+use pitcrew_core::runner_config::ConfigEdit;
 use pitcrew_core::self_update::{self, BinaryStamp, RestartDecision};
 use pitcrew_core::session::{self, LaunchTarget, NoLaunch, SessionState};
 use pitcrew_core::state::{self, ServiceState, MAX_STATE_BYTES};
@@ -46,6 +52,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::time::Duration;
+
+mod config_requests;
+mod processes;
 
 /// The service's version, reported in the hello.
 pub const SERVICE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -240,6 +249,18 @@ struct Runner {
     usage_now: Option<Usage>,
     /// The probe ticks of the current sample period.
     usage_period: UsageAcc,
+    /// The runner's processes: jobs, leftovers and stops in progress (ADR 0012).
+    watch: ProcessWatch,
+    /// After a configuration change: the labels the runner must declare when it starts again (ADR 0011).
+    label_check: Option<LabelCheck>,
+}
+
+/// Labels to verify when the restarted runner declares itself.
+struct LabelCheck {
+    /// The label names the file asks for.
+    expected: Vec<String>,
+    /// Only a runner process started after this generation counts (the one that read the new file).
+    after_generation: u64,
 }
 
 /// The supervisor.
@@ -267,6 +288,8 @@ pub struct Supervisor {
     service_log: LogWriter,
     console: Option<u32>,
     pending_notes: Vec<Notification>,
+    /// Asks processes to stop (replaceable in tests of the supervisor's own logic).
+    terminator: Box<dyn Terminator>,
 }
 
 fn err(code: ErrorCode, message: impl Into<String>) -> Response {
@@ -333,6 +356,7 @@ impl Supervisor {
             service_log,
             console,
             pending_notes: vec![],
+            terminator: Box::new(OsTerminator),
             env,
         };
         for r in loaded.config.runners {
@@ -388,6 +412,8 @@ impl Supervisor {
             usage_tracker: UsageTracker::new(),
             usage_now: None,
             usage_period: UsageAcc::default(),
+            watch: ProcessWatch::new(),
+            label_check: None,
             cfg,
         };
         // A runner the previous service instance started and that still runs: adopt it instead of starting a second.
@@ -522,7 +548,8 @@ impl Supervisor {
         self.publish(now);
     }
 
-    /// Reads the process table once and records what each runner's process tree uses (ADR 0007).
+    /// Reads the process table once and records what each runner's process tree uses (ADR 0007), and what its
+    /// processes are and which ones a finished job left behind (ADR 0012).
     fn sample_usage(&mut self, now: Timestamp) {
         let table = self.probe.process_table();
         let cpus = self.probe.cpus();
@@ -530,15 +557,25 @@ impl Supervisor {
         for r in self.runners.values_mut() {
             let root = r.process.as_ref().map(|p| p.pid());
             let members = root.map(|pid| tree_members(pid, &table)).unwrap_or_default();
-            if members.is_empty() {
+            let Some(root) = root.filter(|_| !members.is_empty()) else {
                 r.usage_tracker.reset();
                 r.usage_now = None;
+                r.watch.clear();
                 continue;
-            }
+            };
             let usage = r.usage_tracker.observe(now.0, &members, cpus);
             r.usage_period.add(&usage);
             r.usage_now = Some(usage);
+            r.jobs.observe_usage(usage.cpu_permille, usage.mem_bytes);
             all.push(usage);
+            let metas = self.probe.process_metas(root, &members, &r.usage_tracker);
+            let st = self.state.runners.get(r.cfg.name.as_str());
+            let finished = st
+                .map(|st| st.history.recent_jobs(process_track::MAX_JOB_SPANS))
+                .unwrap_or_default();
+            let spans = process_track::spans(finished, r.jobs.current());
+            let policy = r.cfg.process_policy(&self.config.defaults);
+            r.watch.refresh(now, root, &metas, &spans, &policy);
         }
         self.usage_total.add(&Usage::sum(all.iter()));
     }
@@ -557,7 +594,8 @@ impl Supervisor {
             r.registered = layout::registration(&r.cfg).exists();
             if let Some(p) = &r.process {
                 let busy = self.probe.has_job_children(p.pid());
-                if let Some(job) = r.jobs.observe_children(busy, now) {
+                if let Some(mut job) = r.jobs.observe_children(busy, now) {
+                    job.leftovers = r.watch.survivors(&job);
                     record_job(&mut self.state, &r.cfg.name, job, now);
                     self.dirty = true;
                 }
@@ -567,6 +605,7 @@ impl Supervisor {
         r.ctl.handle(Input::JobRunning(running), now);
         let actions = r.ctl.handle(Input::Tick, now);
         self.act(name, actions, now);
+        self.tidy_processes(name, now, probe);
 
         // Updates.
         let Some(r) = self.runners.get_mut(name) else { return };
@@ -789,14 +828,23 @@ impl Supervisor {
         r.tail.push(&text);
         let event = classify(&text);
         if event == RunnerLogEvent::TaskStarted {
-            if let Some(job) = r.jobs.task_started(JobInfo::from_task_started(&text), now) {
+            if let Some(mut job) = r.jobs.task_started(JobInfo::from_task_started(&text), now) {
+                job.leftovers = r.watch.survivors(&job);
                 record_job(&mut self.state, name, job, now);
                 self.dirty = true;
             }
         }
         let declared = event == RunnerLogEvent::Declared;
+        let declared_labels = if declared {
+            pitcrew_core::logline::declared_labels(&text)
+        } else {
+            None
+        };
         let actions = r.ctl.handle(Input::Log(event), now);
         self.act(name, actions, now);
+        if let Some(labels) = declared_labels {
+            self.verify_labels(name, &labels, generation, now);
+        }
         if declared {
             if let Some(r) = self.runners.get(name) {
                 if matches!(r.update.phase(), UpdatePhase::Confirming { .. }) {
@@ -1296,6 +1344,22 @@ impl Supervisor {
                 },
                 _ => unknown(&runner),
             },
+            Request::GetRunnerConfig { runner } => self.get_runner_config(&runner),
+            Request::PreviewRunnerConfig { runner, edit } => self.preview_runner_config(&runner, &edit),
+            Request::SaveRunnerConfig { runner, edit, base } => self.save_runner_config(&runner, &edit, &base, now),
+            Request::Processes { runner } => self.processes_response(&runner, now),
+            Request::StopProcess {
+                runner,
+                pid,
+                started_at,
+                allow_runner,
+            } => self.stop_process(&runner, pid, started_at, allow_runner, now),
+            Request::KeepProcess {
+                runner,
+                pid,
+                started_at,
+                extra,
+            } => self.keep_process(&runner, pid, started_at, extra),
             Request::Metrics { runner, range_hours } => {
                 let range = Duration::from_secs(u64::from(range_hours.clamp(1, 90 * 24)) * 3600);
                 let folder = runner
@@ -1661,6 +1725,7 @@ impl Supervisor {
             disk,
             next_cleanup_at,
             usage: r.usage_now,
+            leftovers: r.watch.leftovers(),
         }
     }
 

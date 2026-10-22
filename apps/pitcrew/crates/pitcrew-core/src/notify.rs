@@ -37,6 +37,8 @@ pub enum NotificationKind {
     CleanedUp,
     /// Housekeeping could not delete some files.
     CleanupProblems,
+    /// After a configuration change the runner declared other labels than the file asks for.
+    LabelMismatch,
 }
 
 /// How serious.

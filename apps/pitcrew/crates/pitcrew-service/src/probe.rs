@@ -5,9 +5,13 @@
 
 use pitcrew_core::jobs::is_job_process;
 use pitcrew_core::metrics::{permille, MachineSample};
+use pitcrew_core::process_track::ProcessMeta;
 use pitcrew_core::time::Timestamp;
-use pitcrew_core::usage::{ProcessInfo, Usage};
+use pitcrew_core::usage::{ProcessInfo, Usage, UsageTracker};
 use std::path::Path;
+
+/// Most processes of one runner described with names and command lines per tick (the rest still count in the usage).
+pub const MAX_DESCRIBED: usize = 512;
 use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 
 /// The process and machine snapshot.
@@ -71,6 +75,60 @@ impl Probe {
                 rss_bytes: p.memory(),
             })
             .collect()
+    }
+
+    /// Names, executables, command lines and start times of the runner's `members` (the runner itself first), at most
+    /// [`MAX_DESCRIBED`]. Command lines are read once per process (`OnlyIfNotSet`), for these processes only.
+    pub fn process_metas(&mut self, runner_pid: u32, members: &[ProcessInfo], usage: &UsageTracker) -> Vec<ProcessMeta> {
+        let mut ordered: Vec<&ProcessInfo> = members.iter().collect();
+        ordered.sort_by_key(|p| (p.pid != runner_pid, p.pid));
+        ordered.truncate(MAX_DESCRIBED);
+        let pids: Vec<Pid> = ordered.iter().map(|p| Pid::from_u32(p.pid)).collect();
+        self.sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&pids),
+            false,
+            ProcessRefreshKind::nothing()
+                .with_exe(UpdateKind::OnlyIfNotSet)
+                .with_cmd(UpdateKind::OnlyIfNotSet),
+        );
+        ordered
+            .into_iter()
+            .map(|info| {
+                let p = self.sys.process(Pid::from_u32(info.pid));
+                let start = p.map(sysinfo::Process::start_time).filter(|s| *s > 0);
+                ProcessMeta {
+                    pid: info.pid,
+                    ppid: info.ppid,
+                    name: p.map_or_else(String::new, |p| p.name().to_string_lossy().into_owned()),
+                    exe: p.and_then(|p| p.exe()).map(|e| e.display().to_string()),
+                    command: p.map_or_else(String::new, |p| {
+                        p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ")
+                    }),
+                    started_ms: start.map(|s| s.saturating_mul(1000)),
+                    cpu_permille: usage.share_of(info.pid),
+                    mem_bytes: info.rss_bytes,
+                }
+            })
+            .collect()
+    }
+
+    /// Whether the process `pid` (started at `started_ms` when known) still runs. A zombie that nobody has reaped
+    /// yet does not count: it is dead, only its entry is left.
+    pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> bool {
+        let id = Pid::from_u32(pid);
+        self.sys
+            .refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), true, ProcessRefreshKind::nothing());
+        match self.sys.process(id) {
+            None => false,
+            Some(p) => {
+                if p.status() == sysinfo::ProcessStatus::Zombie {
+                    return false;
+                }
+                let start = p.start_time().saturating_mul(1000);
+                // The same process: start times are whole seconds, so allow rounding.
+                started_ms.is_none_or(|s| start == 0 || s.abs_diff(start) <= 1500)
+            }
+        }
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).

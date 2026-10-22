@@ -184,6 +184,22 @@ impl History {
         self.events.iter().rev().take(n).cloned().collect()
     }
 
+    /// The newest `n` finished jobs, oldest first.
+    pub fn recent_jobs(&self, n: usize) -> Vec<FinishedJob> {
+        let mut jobs: Vec<FinishedJob> = self
+            .events
+            .iter()
+            .rev()
+            .filter_map(|e| match &e.kind {
+                HistoryKind::JobFinished { job } => Some(job.clone()),
+                _ => None,
+            })
+            .take(n)
+            .collect();
+        jobs.reverse();
+        jobs
+    }
+
     /// Unplanned exits and stall restarts since `since`.
     pub fn restarts_since(&self, since: Timestamp) -> u32 {
         let n = self.events.iter().filter(|e| e.at >= since && is_restart(&e.kind)).count();
@@ -665,5 +681,17 @@ mod tests {
         assert_eq!(summarize(&h, Timestamp(DAY_MS / 2), 1, 0).busy.len(), MAX_SPANS);
         assert_eq!(summarize(&History::new(), Timestamp(0), 0, 0).days.len(), 1);
         assert_eq!(permille(5, 0), 0);
+    }
+
+    #[test]
+    fn the_newest_jobs_come_back_oldest_first() {
+        let mut h = History::new();
+        for n in 0..5u64 {
+            h.push(Timestamp(n * 10), job(n * 10, n * 10 + 5));
+            h.push(Timestamp(n * 10 + 6), HistoryKind::Started);
+        }
+        let jobs = h.recent_jobs(3);
+        assert_eq!(jobs.iter().map(|j| j.started_at.0).collect::<Vec<_>>(), vec![20, 30, 40]);
+        assert!(History::new().recent_jobs(3).is_empty());
     }
 }

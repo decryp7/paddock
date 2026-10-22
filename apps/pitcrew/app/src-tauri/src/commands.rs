@@ -3,8 +3,8 @@
 //! an app-side job (credential store, Gitea API, diagnostics file, OS integration), off the UI thread.
 
 use crate::dto::{
-    ActivityReply, AppUpdateInfo, AppUpdateStatusDto, CommandError, CommandErrorCode, ConnectionState, DiskReply, MetricsReply,
-    RegisterRequest, ServiceInstall, SettingsReply, StatusReply,
+    ActivityReply, AppUpdateInfo, AppUpdateStatusDto, CommandError, CommandErrorCode, ConfigSaved, ConnectionState, DiskReply,
+    MetricsReply, RegisterRequest, RunnerConfigReply, ServiceInstall, SettingsReply, StatusReply,
 };
 use crate::events::Latest;
 use crate::service_client::{ClientError, ServiceClient};
@@ -13,7 +13,10 @@ use pitcrew_core::config::{check_server_url, Config, RunnerConfig};
 use pitcrew_core::distribution::RunnerKind;
 use pitcrew_core::gitea_api::{job_days, job_hours, with_outcomes, RunDetails};
 use pitcrew_core::names::RunnerName;
-use pitcrew_core::protocol::{DiagnosticsSection, Request, Response, Secret};
+use pitcrew_core::process_policy::KeepFor;
+use pitcrew_core::protocol::{DiagnosticsSection, ProcessList, Request, Response, Secret};
+use pitcrew_core::runner_config::{ConfigEdit, Preview};
+use pitcrew_core::time::Timestamp;
 use pitcrew_core::version::RunnerVersion;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -359,6 +362,142 @@ pub async fn clean_disk(
     .await
 }
 
+/// `runner_config_get`: the runner's `config.yaml` for the editor.
+#[tauri::command]
+pub async fn runner_config_get(client: State<'_, SharedClient>, runner: String) -> Result<RunnerConfigReply, CommandError> {
+    let req = Request::GetRunnerConfig { runner: name(&runner)? };
+    let c = client.inner().clone();
+    blocking(move || match ask(c.as_ref(), req)? {
+        Response::RunnerConfig {
+            path,
+            text,
+            fingerprint,
+            view,
+            backups,
+            restart_pending,
+        } => Ok(RunnerConfigReply {
+            path,
+            text,
+            fingerprint,
+            view,
+            backups,
+            restart_pending,
+        }),
+        other => Err(unexpected(other)),
+    })
+    .await
+}
+
+/// `runner_config_preview`: what saving a change would do (writes nothing).
+#[tauri::command]
+pub async fn runner_config_preview(client: State<'_, SharedClient>, runner: String, edit: ConfigEdit) -> Result<Preview, CommandError> {
+    let req = Request::PreviewRunnerConfig {
+        runner: name(&runner)?,
+        edit,
+    };
+    let c = client.inner().clone();
+    blocking(move || match ask(c.as_ref(), req)? {
+        Response::RunnerConfigPreview { preview } => Ok(preview),
+        other => Err(unexpected(other)),
+    })
+    .await
+}
+
+/// `runner_config_save`: saves a change (the service validates it again and makes a backup).
+#[tauri::command]
+pub async fn runner_config_save(
+    client: State<'_, SharedClient>,
+    runner: String,
+    edit: ConfigEdit,
+    base: String,
+) -> Result<ConfigSaved, CommandError> {
+    let req = Request::SaveRunnerConfig {
+        runner: name(&runner)?,
+        edit,
+        base,
+    };
+    let c = client.inner().clone();
+    blocking(move || match ask(c.as_ref(), req)? {
+        Response::RunnerConfigSaved {
+            backup,
+            restart,
+            fingerprint,
+            changed_keys,
+        } => Ok(ConfigSaved {
+            backup,
+            restart,
+            fingerprint,
+            changed_keys,
+        }),
+        other => Err(unexpected(other)),
+    })
+    .await
+}
+
+/// `runner_processes`: the processes the runner started.
+#[tauri::command]
+pub async fn runner_processes(client: State<'_, SharedClient>, runner: String) -> Result<ProcessList, CommandError> {
+    let req = Request::Processes { runner: name(&runner)? };
+    let c = client.inner().clone();
+    blocking(move || match ask(c.as_ref(), req)? {
+        Response::Processes { list } => Ok(list),
+        other => Err(unexpected(other)),
+    })
+    .await
+}
+
+/// The request behind `runner_process_stop`.
+pub fn stop_process_request(runner: &str, pid: u32, started_at: Option<u64>, allow_runner: bool) -> Result<Request, CommandError> {
+    if pid <= 1 {
+        return Err(CommandError::bad("that is a system process"));
+    }
+    Ok(Request::StopProcess {
+        runner: name(runner)?,
+        pid,
+        started_at: started_at.map(Timestamp),
+        allow_runner,
+    })
+}
+
+/// The request behind `runner_process_keep`.
+pub fn keep_process_request(runner: &str, pid: u32, started_at: u64, extra: KeepFor) -> Result<Request, CommandError> {
+    extra.validate().map_err(CommandError::bad)?;
+    Ok(Request::KeepProcess {
+        runner: name(runner)?,
+        pid,
+        started_at: Timestamp(started_at),
+        extra,
+    })
+}
+
+/// `runner_process_stop`: asks one process of the runner's tree to stop (the service checks the tree).
+#[tauri::command]
+pub async fn runner_process_stop(
+    client: State<'_, SharedClient>,
+    runner: String,
+    pid: u32,
+    started_at: Option<u64>,
+    allow_runner: bool,
+) -> Result<(), CommandError> {
+    let req = stop_process_request(&runner, pid, started_at, allow_runner)?;
+    let c = client.inner().clone();
+    blocking(move || expect_ok(ask(c.as_ref(), req)?)).await
+}
+
+/// `runner_process_keep`: keeps a leftover longer.
+#[tauri::command]
+pub async fn runner_process_keep(
+    client: State<'_, SharedClient>,
+    runner: String,
+    pid: u32,
+    started_at: u64,
+    extra: KeepFor,
+) -> Result<(), CommandError> {
+    let req = keep_process_request(&runner, pid, started_at, extra)?;
+    let c = client.inner().clone();
+    blocking(move || expect_ok(ask(c.as_ref(), req)?)).await
+}
+
 /// `run_details`: the current job's run from the Gitea API (needs the read token).
 #[tauri::command]
 pub async fn run_details(latest: State<'_, Latest>, runner: String) -> Result<Option<RunDetails>, CommandError> {
@@ -667,5 +806,42 @@ mod tests {
         );
         assert!(matches!(platform_name(), "windows" | "macos" | "linux"));
         assert!(version("x").is_err());
+    }
+
+    #[test]
+    fn process_requests_are_parsed_and_system_processes_refused() {
+        assert!(matches!(
+            stop_process_request("build-pc", 42, Some(1000), false).unwrap(),
+            Request::StopProcess {
+                pid: 42,
+                allow_runner: false,
+                ..
+            }
+        ));
+        assert!(stop_process_request("build-pc", 1, None, true).is_err());
+        assert!(stop_process_request("../etc", 42, None, false).is_err());
+        let keep = keep_process_request("build-pc", 42, 1000, KeepFor::hours(1)).unwrap();
+        assert!(matches!(keep, Request::KeepProcess { pid: 42, .. }));
+        let bad = KeepFor {
+            amount: 0,
+            unit: pitcrew_core::process_policy::TimeUnit::Hours,
+        };
+        assert!(keep_process_request("build-pc", 42, 1000, bad).is_err());
+        assert!(keep_process_request("x y", 42, 1000, KeepFor::hours(1)).is_err());
+    }
+
+    #[test]
+    fn service_errors_reach_the_ui_with_their_message() {
+        let c = Fake {
+            sent: Mutex::new(vec![]),
+            answer: Box::new(|_| {
+                Ok(Response::Error(ServiceError::new(
+                    ErrorCode::BadRequest,
+                    "not part of this runner's process tree",
+                )))
+            }),
+        };
+        let r = ask(&c, stop_process_request("a", 5, None, false).unwrap());
+        assert!(r.unwrap_err().message.contains("process tree"));
     }
 }

@@ -455,3 +455,506 @@ fn a_replaced_service_program_restarts_the_service_only_when_no_job_runs() {
     assert!(h.sup.restart_for_new_program(t(&h, 600_000)));
     h.finish();
 }
+
+// ---- leftover processes (ADR 0012) and runner configuration (ADR 0011) -------------------------------------------
+
+use pitcrew_core::process_track::Fate;
+use pitcrew_core::protocol::{ErrorCode, ProcessList, RestartPlan};
+use pitcrew_core::runner_config::ConfigEdit;
+use pitcrew_core::runner_settings::RunnerSettings;
+
+/// Whether a process still runs (a zombie nobody reaped does not count).
+fn alive(pid: u32) -> bool {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    let s = s.trim();
+    !s.is_empty() && !s.starts_with('Z')
+}
+
+impl Harness {
+    fn processes(&mut self) -> ProcessList {
+        match self.ask(Request::Processes { runner: self.name.clone() }) {
+            Response::Processes { list } => list,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn leftover_pid(&mut self, name: &str) -> Option<u32> {
+        self.processes()
+            .entries
+            .iter()
+            .find(|e| e.name == name && e.leftover.is_some())
+            .map(|e| e.pid)
+    }
+
+    /// Runs until the job has ended and its leftovers are classified.
+    fn until_leftovers(&mut self, n: u32) {
+        self.until("the job started", Duration::from_millis(100), |h| h.status().current_job.is_some());
+        self.until("the leftovers are noticed", Duration::from_secs(6), |h| h.status().leftovers >= n);
+    }
+
+    fn process_events(&mut self) -> Vec<HistoryKind> {
+        self.history()
+            .into_iter()
+            .map(|e| e.kind)
+            .filter(|k| matches!(k, HistoryKind::ProcessStopped { .. }))
+            .collect()
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_leftover_is_listed_and_stopped_after_the_keep_time_when_the_runner_is_idle() {
+    let mut h = Harness::new("lefty", "mode=leftover\njob_secs=2\nleftovers=sleep:600\n", true);
+    h.until_leftovers(1);
+    let list = h.processes();
+    assert!(list.cleanup && list.idle);
+    let row = list.entries.iter().find(|e| e.leftover.is_some()).unwrap();
+    assert_eq!(row.name, "sleep");
+    assert_eq!(row.job.as_ref().and_then(|j| j.repository.as_deref()), Some("owner/app"));
+    let since = row.leftover.as_ref().unwrap().since;
+    assert_eq!(
+        row.leftover.as_ref().unwrap().fate,
+        Fate::StopsAt {
+            at: Timestamp(since.0 + 600_000)
+        }
+    );
+    assert!(list.entries.iter().any(|e| e.is_runner && e.leftover.is_none()));
+    let pid = row.pid;
+    // The job's record: peaks and the leftover count.
+    let jobs = h
+        .history()
+        .into_iter()
+        .filter_map(|e| match e.kind {
+            HistoryKind::JobFinished { job } => Some(job),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(jobs.len(), 1);
+    assert!(jobs[0].peak_mem_bytes > 0 && jobs[0].leftovers == 1, "{:?}", jobs[0]);
+    // Not before the time...
+    for _ in 0..5 {
+        h.pump(Duration::from_secs(60));
+    }
+    assert!(alive(pid), "still within the keep time");
+    // ...then asked to stop, once.
+    h.until("stopped", Duration::from_secs(60), |h| !h.process_events().is_empty());
+    assert!(!alive(pid));
+    let HistoryKind::ProcessStopped {
+        name,
+        pid: p,
+        rule,
+        by,
+        forced,
+        ..
+    } = h.process_events().remove(0)
+    else {
+        panic!()
+    };
+    assert_eq!(
+        (name.as_str(), p, by, forced),
+        ("sleep", pid, pitcrew_core::history::StopReason::Cleanup, false)
+    );
+    assert!(rule.contains("default keep time (10 min)"), "{rule}");
+    assert!(
+        h.log().contains("stopped sleep (process") && h.log().contains("by cleanup"),
+        "{}",
+        h.log()
+    );
+    assert_eq!(h.status().leftovers, 0);
+    h.finish();
+}
+
+#[cfg(unix)]
+#[test]
+fn rules_set_the_keep_time_per_process_and_never_means_never() {
+    let rules = "[runners.processes]\nkeep = { amount = 1, unit = \"minutes\" }\n[[runners.processes.rules]]\npattern = \"tail\"\nkeep = \"never\"\n";
+    let mut h = Harness::with_runner_toml("rulesy", "mode=leftover\njob_secs=2\nleftovers=sleep:600,tail\n", true, rules);
+    h.until_leftovers(2);
+    let sleep = h.leftover_pid("sleep").unwrap();
+    let tail = h.leftover_pid("tail").unwrap();
+    let list = h.processes();
+    let fate = |n: &str| {
+        list.entries
+            .iter()
+            .find(|e| e.name == n)
+            .unwrap()
+            .leftover
+            .as_ref()
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(fate("tail").fate, Fate::Never);
+    assert_eq!(fate("tail").rule.as_deref(), Some("tail"));
+    assert!(matches!(fate("sleep").fate, Fate::StopsAt { .. }));
+    h.until("the sleep leftover is stopped", Duration::from_secs(30), |h| {
+        !h.process_events().is_empty()
+    });
+    for _ in 0..4 {
+        h.pump(Duration::from_secs(3 * 3600));
+    }
+    assert!(!alive(sleep));
+    assert!(alive(tail), "a never rule is never stopped, however long it lives");
+    assert_eq!(h.process_events().len(), 1);
+    // The user can still stop it.
+    let started = h.processes().entries.iter().find(|e| e.pid == tail).unwrap().started_at;
+    let r = h.ask(Request::StopProcess {
+        runner: h.name.clone(),
+        pid: tail,
+        started_at: started,
+        allow_runner: false,
+    });
+    assert_eq!(r, Response::Ok);
+    h.until("stopped by the user", Duration::from_secs(5), |h| h.process_events().len() == 2);
+    assert!(!alive(tail));
+    let mine = h.process_events().into_iter().find(|k| {
+        matches!(
+            k,
+            HistoryKind::ProcessStopped {
+                by: pitcrew_core::history::StopReason::User,
+                ..
+            }
+        )
+    });
+    let Some(HistoryKind::ProcessStopped { rule, .. }) = mine else {
+        panic!("no user stop recorded")
+    };
+    assert_eq!(rule, "you");
+    h.finish();
+}
+
+#[cfg(unix)]
+#[test]
+fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
+    let mut h = Harness::new("keeper", "mode=leftover\njob_secs=2\nleftovers=sleep:600\n", true);
+    h.until_leftovers(1);
+    let row = h.processes().entries.into_iter().find(|e| e.leftover.is_some()).unwrap();
+    let r = h.ask(Request::KeepProcess {
+        runner: h.name.clone(),
+        pid: row.pid,
+        started_at: row.started_at.unwrap(),
+        extra: pitcrew_core::process_policy::KeepFor::hours(1),
+    });
+    assert_eq!(r, Response::Ok);
+    h.pump(Duration::from_secs(11 * 60));
+    h.pump(Duration::from_secs(6));
+    assert!(alive(row.pid), "an hour was added");
+    // The runner itself cannot be "kept longer": only leftovers can.
+    let me = h.processes().entries.into_iter().find(|e| e.is_runner).unwrap();
+    let r = h.ask(Request::KeepProcess {
+        runner: h.name.clone(),
+        pid: me.pid,
+        started_at: me.started_at.unwrap(),
+        extra: pitcrew_core::process_policy::KeepFor::hours(1),
+    });
+    assert!(matches!(r, Response::Error(ref e) if e.code == ErrorCode::BadRequest), "{r:?}");
+    // Turning cleanup off in the settings keeps leftovers listed, with no countdown, and stops nothing.
+    let Response::Settings { mut config, .. } = h.ask(Request::GetSettings) else {
+        panic!()
+    };
+    config.defaults.processes.cleanup = false;
+    assert_eq!(h.ask(Request::SaveSettings { config }), Response::Ok);
+    h.pump(Duration::from_secs(6));
+    assert_eq!(h.leftover_pid("sleep"), Some(row.pid));
+    assert_eq!(
+        h.processes()
+            .entries
+            .iter()
+            .find(|e| e.pid == row.pid)
+            .unwrap()
+            .leftover
+            .as_ref()
+            .unwrap()
+            .fate,
+        Fate::Off
+    );
+    h.pump(Duration::from_secs(5 * 3600));
+    h.pump(Duration::from_secs(6));
+    assert!(alive(row.pid));
+    let _ = ErrorCode::Busy;
+    h.ask(Request::Stop { runner: h.name.clone() });
+    h.finish();
+    unsafe_kill(row.pid);
+}
+
+#[cfg(unix)]
+fn unsafe_kill(pid: u32) {
+    let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+}
+
+#[cfg(unix)]
+#[test]
+fn nothing_is_stopped_while_a_job_runs() {
+    let mut h = Harness::new("busyleft", "mode=leftover\njob_secs=2\nleftovers=sleep:600\n", true);
+    h.until_leftovers(1);
+    let pid = h.leftover_pid("sleep").unwrap();
+    let name = h.name.clone();
+    // A new job keeps the runner busy past the keep time (the runner says "task started" again and again).
+    for _ in 0..80 {
+        h.sup.handle(Msg::Line {
+            runner: name.clone(),
+            generation: 1,
+            text: r#"time="2026-10-22T06:57:19+08:00" level=info msg="task started" job=next"#.into(),
+        });
+        h.pump(Duration::from_secs(10));
+    }
+    assert!(h.status().current_job.is_some());
+    assert!(alive(pid), "a busy runner's leftovers wait");
+    assert!(!h.processes().idle);
+    // The job ends; the overdue leftover is stopped.
+    h.until("stopped once idle", Duration::from_secs(6), |h| !h.process_events().is_empty());
+    assert!(!alive(pid));
+    h.finish();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stop_outside_the_runners_tree_is_refused() {
+    let mut h = Harness::new("fence", "mode=leftover\njob_secs=2\nleftovers=sleep:600\n", true);
+    h.until_leftovers(1);
+    let stranger = std::process::Command::new("sleep").arg("120").spawn();
+    let mut stranger = stranger.unwrap();
+    let refuse = |h: &mut Harness, pid: u32, allow: bool| match h.ask(Request::StopProcess {
+        runner: h.name.clone(),
+        pid,
+        started_at: None,
+        allow_runner: allow,
+    }) {
+        Response::Error(e) => {
+            assert_eq!(e.code, ErrorCode::BadRequest);
+            e.message
+        }
+        other => panic!("{other:?}"),
+    };
+    assert!(refuse(&mut h, stranger.id(), false).contains("not part of this runner's process tree"));
+    assert!(
+        refuse(&mut h, std::process::id(), true).contains("not part of this runner's process tree"),
+        "not even the service"
+    );
+    assert!(refuse(&mut h, 1, true).contains("not part of"));
+    let runner_pid = h.processes().runner_pid.unwrap();
+    assert!(refuse(&mut h, runner_pid, false).contains("the runner itself"));
+    assert!(stranger.try_wait().unwrap().is_none(), "the stranger was not touched");
+    assert!(alive(runner_pid));
+    // A pid that the app saw start at another time is refused (a reused process id).
+    let row = h.processes().entries.into_iter().find(|e| e.leftover.is_some()).unwrap();
+    let r = h.ask(Request::StopProcess {
+        runner: h.name.clone(),
+        pid: row.pid,
+        started_at: Some(Timestamp(5_000)),
+        allow_runner: false,
+    });
+    assert!(
+        matches!(r, Response::Error(ref e) if e.message.contains("different process")),
+        "{r:?}"
+    );
+    assert!(alive(row.pid));
+    let _ = stranger.kill();
+    let _ = stranger.wait();
+    h.finish();
+    unsafe_kill(row.pid);
+}
+
+fn write_config(h: &Harness, text: &str) {
+    std::fs::write(h.runner_dir.join("config.yaml"), text).unwrap();
+}
+
+fn get_config(h: &mut Harness) -> (String, String) {
+    match h.ask(Request::GetRunnerConfig { runner: h.name.clone() }) {
+        Response::RunnerConfig { text, fingerprint, .. } => (text, fingerprint),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_saved_configuration_restarts_the_runner_after_its_job_and_the_labels_are_verified() {
+    let mut h = Harness::new("cfgsave", "mode=job\njob_secs=4\n", true);
+    let original = "# my runner\nlog:\n  level: info # keep this\nrunner:\n  capacity: 1\n";
+    write_config(&h, original);
+    h.until("job seen", Duration::from_millis(200), |h| h.status().current_job.is_some());
+    let before = h.status().running_since;
+    let (text, fp) = get_config(&mut h);
+    assert_eq!(text, original);
+    let Response::RunnerConfig { view, restart_pending, .. } = h.ask(Request::GetRunnerConfig { runner: h.name.clone() }) else {
+        panic!()
+    };
+    assert_eq!(view.settings.capacity, Some(1));
+    assert!(!restart_pending);
+    // A preview writes nothing.
+    let edit = ConfigEdit::Form {
+        settings: RunnerSettings {
+            capacity: Some(2),
+            labels: vec!["x:host".into()],
+            log_level: Some(pitcrew_core::runner_settings::LogLevel::Info),
+            ..Default::default()
+        },
+    };
+    let Response::RunnerConfigPreview { preview } = h.ask(Request::PreviewRunnerConfig {
+        runner: h.name.clone(),
+        edit: edit.clone(),
+    }) else {
+        panic!()
+    };
+    assert!(preview.can_save() && preview.restart_needed && preview.diff.is_changed());
+    assert_eq!(std::fs::read_to_string(h.runner_dir.join("config.yaml")).unwrap(), original);
+    // A stale base is refused.
+    let r = h.ask(Request::SaveRunnerConfig {
+        runner: h.name.clone(),
+        edit: edit.clone(),
+        base: "stale".into(),
+    });
+    assert!(matches!(r, Response::Error(ref e) if e.code == ErrorCode::Busy), "{r:?}");
+    // Invalid values are refused by the service itself.
+    let bad = ConfigEdit::Form {
+        settings: RunnerSettings {
+            capacity: Some(0),
+            ..Default::default()
+        },
+    };
+    let r = h.ask(Request::SaveRunnerConfig {
+        runner: h.name.clone(),
+        edit: bad,
+        base: fp.clone(),
+    });
+    assert!(
+        matches!(r, Response::Error(ref e) if e.code == ErrorCode::BadRequest && e.message.contains("capacity")),
+        "{r:?}"
+    );
+    let r = h.ask(Request::SaveRunnerConfig {
+        runner: h.name.clone(),
+        edit: ConfigEdit::Raw { text: "runner: [".into() },
+        base: fp.clone(),
+    });
+    assert!(matches!(r, Response::Error(ref e) if e.message.contains("not valid YAML")), "{r:?}");
+    assert_eq!(
+        std::fs::read_to_string(h.runner_dir.join("config.yaml")).unwrap(),
+        original,
+        "nothing was written"
+    );
+    // The real save.
+    let r = h.ask(Request::SaveRunnerConfig {
+        runner: h.name.clone(),
+        edit,
+        base: fp,
+    });
+    let Response::RunnerConfigSaved {
+        backup,
+        restart,
+        changed_keys,
+        ..
+    } = r
+    else {
+        panic!("{r:?}")
+    };
+    assert_eq!(restart, RestartPlan::AfterJob);
+    assert!(changed_keys.contains(&"runner.capacity".to_string()));
+    let saved = std::fs::read_to_string(h.runner_dir.join("config.yaml")).unwrap();
+    assert!(
+        saved.contains("# my runner") && saved.contains("level: info # keep this") && saved.contains("capacity: 2"),
+        "{saved}"
+    );
+    assert_eq!(std::fs::read_to_string(h.runner_dir.join(backup.unwrap())).unwrap(), original);
+    assert!(!h.log().contains("capacity: 2"), "the file's text is not logged");
+    // The runner finishes its job first; it is not restarted under it.
+    assert_eq!(h.status().pending, Some(pitcrew_core::controller::Pending::Restart));
+    assert_eq!(h.status().running_since, before);
+    h.until("restarted after the job", Duration::from_secs(6), |h| {
+        count(&h.history(), |k| *k == HistoryKind::Started) >= 2
+    });
+    h.until("labels verified", Duration::from_secs(6), |h| {
+        count(&h.history(), |k| matches!(k, HistoryKind::LabelsVerified { .. })) == 1
+    });
+    assert!(h.log().contains("declared the labels from its configuration: x"), "{}", h.log());
+    assert_eq!(
+        count(&h.history(), |k| matches!(k, HistoryKind::ConfigSaved { restart: true, .. })),
+        1
+    );
+    // A comment-only change needs no restart.
+    let (_, fp) = get_config(&mut h);
+    let r = h.ask(Request::SaveRunnerConfig {
+        runner: h.name.clone(),
+        edit: ConfigEdit::Raw {
+            text: saved.replace("# my runner", "# my renamed runner"),
+        },
+        base: fp,
+    });
+    assert!(
+        matches!(
+            r,
+            Response::RunnerConfigSaved {
+                restart: RestartPlan::NotNeeded,
+                ..
+            }
+        ),
+        "{r:?}"
+    );
+    assert!(h.status().pending.is_none());
+    h.finish();
+}
+
+#[test]
+fn a_label_mismatch_after_the_restart_is_reported_and_a_stopped_runner_just_saves() {
+    let mut h = Harness::new("cfgmis", "mode=ok\ndeclare=other\n", true);
+    h.until("running", Duration::from_millis(200), |h| h.status().status == RunnerStatus::Idle);
+    let (_, fp) = get_config(&mut h);
+    let edit = ConfigEdit::Form {
+        settings: RunnerSettings {
+            labels: vec!["wanted:host".into()],
+            ..Default::default()
+        },
+    };
+    let r = h.ask(Request::SaveRunnerConfig {
+        runner: h.name.clone(),
+        edit,
+        base: fp,
+    });
+    assert!(
+        matches!(
+            r,
+            Response::RunnerConfigSaved {
+                restart: RestartPlan::AfterJob,
+                ..
+            }
+        ),
+        "{r:?}"
+    );
+    h.until("mismatch", Duration::from_secs(6), |h| {
+        count(&h.history(), |k| matches!(k, HistoryKind::LabelsMismatch { .. })) == 1
+    });
+    assert!(
+        h.log().contains("declared [other] but its configuration asks for [wanted]"),
+        "{}",
+        h.log()
+    );
+    assert_eq!(count(&h.history(), |k| matches!(k, HistoryKind::LabelsVerified { .. })), 0);
+    // Stopped: the next start uses the file.
+    h.ask(Request::Stop { runner: h.name.clone() });
+    h.until("stopped", Duration::from_secs(6), |h| h.status().running_since.is_none());
+    let (_, fp) = get_config(&mut h);
+    let edit = ConfigEdit::Form {
+        settings: RunnerSettings {
+            labels: vec!["wanted:host".into()],
+            capacity: Some(3),
+            ..Default::default()
+        },
+    };
+    let r = h.ask(Request::SaveRunnerConfig {
+        runner: h.name.clone(),
+        edit,
+        base: fp,
+    });
+    assert!(
+        matches!(
+            r,
+            Response::RunnerConfigSaved {
+                restart: RestartPlan::NotRunning,
+                ..
+            }
+        ),
+        "{r:?}"
+    );
+    let _ = std::fs::remove_dir_all(&h.root);
+}

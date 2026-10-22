@@ -6,6 +6,11 @@
 //! - `mode=ok` (default): declares itself and idles; `exit` exits with `code` after declaring; `stall` logs
 //!   "failed to fetch task" lines every 100 ms; `job` logs "task started" and runs a child process for `job_secs`;
 //!   `silent` never declares (an update that is not accepted).
+//! - `leftover`: like `job`, but the job's shell also starts background processes that outlive it (`leftovers`, a
+//!   comma-separated list of `sleep:<seconds>` or program names, default `sleep:600`); `job_secs` is how long the job
+//!   itself lasts. They stay in the runner's process group, as a Gradle daemon would.
+//! - The labels it declares are the names under `runner.labels` in its `config.yaml` (default `x`); `declare=a,b` in
+//!   `fake.txt` declares those instead (a runner whose registration disagrees with the file).
 //! - `--version` prints `gitea-runner version v<version>`, where the version is the text after `FAKEVER:` at the end
 //!   of the executable file (tests append it to their copy), else 5.2.0.
 //! - Writes `PATH` and `CI_FLAG` from its environment to `env.txt` next to the configuration file.
@@ -43,6 +48,28 @@ fn settings(config: Option<&str>) -> std::collections::HashMap<String, String> {
         .filter_map(|l| l.split_once('='))
         .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
         .collect()
+}
+
+/// The label names under `labels:` in the runner's configuration file.
+fn labels_from_config(config: Option<&str>) -> Vec<String> {
+    let text = config.and_then(|c| std::fs::read_to_string(c).ok()).unwrap_or_default();
+    let mut out = vec![];
+    let mut inside = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("labels:") {
+            inside = true;
+        } else if inside && t.starts_with('-') {
+            let v = t.trim_start_matches('-').trim().trim_matches(['"', '\'']);
+            out.push(v.split(':').next().unwrap_or(v).to_string());
+        } else if inside && !t.is_empty() && !t.starts_with('#') {
+            inside = false;
+        }
+    }
+    if out.is_empty() {
+        out.push("x".into());
+    }
+    out
 }
 
 fn main() {
@@ -96,13 +123,42 @@ fn main() {
     ctrlc::set_handler(move || flag.store(true, Ordering::SeqCst)).unwrap();
     log("Starting runner daemon", "");
     if mode != "silent" {
-        log("runner: fake, with version: v5.2.0, with labels: [x], declare successfully", "");
+        let labels = s
+            .get("declare")
+            .map(|d| d.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|| labels_from_config(config.as_deref()));
+        log(
+            &format!(
+                "runner: fake, with version: v5.2.0, with labels: [{}], declare successfully",
+                labels.join(" ")
+            ),
+            "",
+        );
     }
     if mode == "exit" {
         std::thread::sleep(Duration::from_millis(200));
         std::process::exit(s.get("code").and_then(|c| c.parse().ok()).unwrap_or(3));
     }
     let mut child = None;
+    if mode == "leftover" && !cfg!(windows) {
+        log(
+            "task started",
+            " address=\"https://git.example.com\" job=build job_id=7 repository=owner/app run_id=9 run_number=3 task_id=11",
+        );
+        let secs = s.get("job_secs").cloned().unwrap_or_else(|| "2".into());
+        let leftovers = s.get("leftovers").cloned().unwrap_or_else(|| "sleep:600".into());
+        let mut script = String::new();
+        for l in leftovers.split(',') {
+            match l.split_once(':') {
+                Some(("sleep", n)) => script.push_str(&format!("sleep {n} & ")),
+                _ => script.push_str(&format!("{l} -f /dev/null >/dev/null 2>&1 & ")),
+            }
+        }
+        script.push_str(&format!("sleep {secs}"));
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", &script]).stdout(std::process::Stdio::null());
+        child = Some(cmd.spawn().unwrap());
+    }
     if mode == "job" {
         log(
             "task started",
