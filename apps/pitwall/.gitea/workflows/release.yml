@@ -149,7 +149,9 @@ jobs:
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
-          BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+          # Not github.server_url: inside the runners that is Gitea's internal http://172.16.1.220:7400, which latest-json
+          # refuses (the updater needs an https base URL), failing the release job after every installer is built.
+          BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
           node --test scripts/release/latest-json.test.mjs
           if ! find artifacts -name '*.sig' | grep -q .; then
