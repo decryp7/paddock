@@ -1,0 +1,10 @@
+# Workspace root for the suite's shared Rust crates. Empty on purpose: the crates that every app copies today
+# (native feel, update state machine, ...) are extracted here later, one at a time, by the agents that own them.
+[workspace]
+resolver = "3"
+members = []
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://dev.decryptology.net/decryp7/suite-kit"

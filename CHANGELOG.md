@@ -1,0 +1,21 @@
+# Changelog
+
+Conventional Commits; one semver tag for the whole repo.
+
+## 0.1.0 - 2026-10-22
+
+### Added
+- `@decryp7/suite-ui`: tokens (neutral roles, status, five accents, 8-colour CVD-checked chart palette, diverging and sequential
+  scales, spacing, radii, type scale with tabular numerals, elevation, motion, three densities, dark and light, high contrast),
+  base styles with native feel (Debrief ADR 0028), focus rings, thin scrollbars, splash and tray-page helpers.
+- Components: `su-card`, `su-status-pill`, `su-metric`, `su-sparkline`, `su-empty-state`, `su-error-state`, `su-skeleton`,
+  `su-segmented-control`, `su-tray-popover`; `applySuiteAppearance`.
+- ECharts theme from tokens (`readSuiteTokens`, `createEchartsTheme`, `registerSuiteTheme`, `areaGradient`, `eventLaneFragment`,
+  `sequentialRamp`).
+- Token test: WCAG contrast of every pair and colour-vision separation of the chart palette (131 tests).
+- Gallery app with Playwright screenshots (every component, both themes, five accents), axe, keyboard and CSP checks.
+- `crates/` Cargo workspace root (no members), `docs/` design guide and lessons, CI workflow, release tarball script.
+
+### Changed (design guide values that failed the token test)
+- text-subtle, text-muted (light), success (light), chart-neutral-bar, Pitwall fill and the whole chart palette; added
+  `border-control` and `danger-fill`. See `ui/README.md`.

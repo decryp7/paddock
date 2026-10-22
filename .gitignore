@@ -1,0 +1,11 @@
+# Anchored on purpose: an unanchored rule can hide source folders.
+/ui/node_modules/
+/ui/dist/
+/ui/.angular/
+/ui/out-tsc/
+/ui/coverage/
+/ui/test-results/
+# Generated from scss/ by `npm run build:css`.
+/ui/projects/suite-ui/css/
+/crates/target/
+.DS_Store
