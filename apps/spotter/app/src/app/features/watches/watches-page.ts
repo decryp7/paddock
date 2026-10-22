@@ -21,7 +21,8 @@ export class WatchesPage {
   protected readonly store = inject(WatchesStore);
 
   protected readonly listState = computed<Loadable<unknown>>(() => ({
-    value: this.store.loaded() ? this.store.watches() : null,
+    // A first load that failed has nothing to show: the panel shows the error with Retry, not an empty list.
+    value: this.store.loaded() && !(this.store.error() && !this.store.watches().length) ? this.store.watches() : null,
     loading: this.store.loading(),
     error: this.store.error(),
   }));
