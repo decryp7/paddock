@@ -12,9 +12,11 @@ git tag v0.2.0 && git push origin v0.2.0
 The version in the tag must match `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`. Updaters read the
 `latest.json` of the latest release; pre-releases are not offered.
 
-Status today: the installers need the Tauri shell (`app/src-tauri`), which is still being built, and
-`scripts/ci/tauri-bundle.sh` skips cleanly while it does not exist. Nothing has been released and no installer has
-been published. The server binary builds on its own (`cargo build -p pitwall-server --profile dist`).
+Status today: the Tauri shell exists (`app/src-tauri`, with `externalBin` bundling the server as a sidecar and a
+separate `tauri.<os>.conf.json` per platform), `.gitea/workflows/build.yml` checks every push on all three platforms and
+`release.yml` builds and publishes for `v*` tags. Nothing has been released and no installer has been published yet, and
+the installers have not been installed on real Windows and Linux machines. The server binary also builds on its own
+(`cargo build -p pitwall-server --profile dist`).
 
 ## Unsigned builds
 

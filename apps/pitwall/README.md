@@ -18,8 +18,8 @@ Dyno). Like the pit wall in a race, it is where every car radios in.
 **Status: in development.** The server works end to end on macOS (Apple Silicon): a Metal llama.cpp build was
 installed through the app flow with checksum and self-test, a Hugging Face model downloaded with its SHA-256 verified,
 and OpenAI, Anthropic and Ollama requests (streaming and not, plus JSON-schema output) were answered at about 213
-tokens per second with a 0.5B model on an M4 Pro. The Tauri app, the installers and the Windows and Linux real-model
-runs are not finished; see the [roadmap](docs/roadmap.md) for exactly what is verified and what is planned.
+tokens per second with a 0.5B model on an M4 Pro. The Tauri app exists, but no installer has been published and the Windows and Linux real-model
+runs have not been done; see the [roadmap](docs/roadmap.md) for exactly what is verified and what is planned.
 
 ## Screenshots
 
@@ -73,7 +73,7 @@ Every feature, with its status, is in [docs/features.md](docs/features.md).
 - **Memory management.** Presets (Low memory, Balanced, Performance), idle and deep-idle release, pressure release,
   pinned models, a countdown on the dashboard.
 - **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits, an offline mode.
-- **Packs.** Add engines and model lists with TOML files, no code ([user guide](docs/user-guide.md#packs)).
+- **Packs.** Add engines and model lists with TOML files, no code ([user guide](docs/user-guide.md#packs-add-an-engine-or-a-model-list)).
 - **The app.** Dashboard, models, engines, apps, requests, playground, benchmarks, settings, tray.
 
 Not built yet: LAN sharing with TLS, a response cache, knowledge collections (RAG), MCP and tool hosting, speech to
@@ -81,9 +81,9 @@ text, stored benchmarks. See the [roadmap](docs/roadmap.md).
 
 ## Install
 
-There are no installers yet: they are built by the release workflow once the Tauri app lands and are unsigned until
+There are no published installers yet: the release workflow builds them for `v*` tags and they are unsigned until
 the signing keys exist ([releasing](docs/releasing.md)). Per-OS notes: [macOS](docs/macos.md),
-[Linux](docs/linux.md), [Windows](docs/windows.md). Until then, build the server from source:
+[Linux](docs/linux.md), [Windows](docs/windows.md). Until then, build from source (the server alone, or the app with `cd app && npx tauri build`):
 
 ```sh
 cargo build -p pitwall-server --release
@@ -149,7 +149,7 @@ built-in AI as the default and offline fallback. See
 | `crates/pitwall-core` | Pure logic: API formats, scheduler, memory policy, selection, keys, metrics, settings, packs |
 | `crates/pitwall-loopback` | HTTP client that can only talk to `127.0.0.1` (engines) |
 | `crates/pitwall-server` | The server: engines, library, serving, auth, HTTP APIs, management API |
-| `app/` | Angular UI (the Tauri shell in `app/src-tauri` is being built) |
+| `app/` | Angular UI and the Tauri 2 shell (`app/src-tauri`) |
 | `docs/` | [Architecture](docs/architecture.md), [design diagrams](docs/design.md), [features](docs/features.md), [user guide](docs/user-guide.md), [development](docs/development.md), [releasing](docs/releasing.md), [roadmap](docs/roadmap.md), [testing manual](docs/testing-manual.md), [ADRs](docs/adr/README.md) |
 
 Engineering rules for contributors and coding agents are in [AGENTS.md](AGENTS.md); lessons from the other suite apps

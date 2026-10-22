@@ -248,7 +248,7 @@ results between sessions (and feeding them to "fast" model selection) is **plann
 
 A compact view from the tray or menu bar: serving state, loaded models, memory, queue and live speed, with pause and release
 memory. Closing the window keeps Pitwall in the tray and the server keeps serving. With no tray (some Linux desktops) closing
-the window quits the app, but the service keeps running. The Tauri shell is being built; the popover screen exists in the UI.
+the window quits the app, but the service keeps running. The shell and the popover screen exist; they have only been exercised on macOS-style flows in tests, not on real Windows and Linux desktops.
 
 ## Settings
 
@@ -271,7 +271,7 @@ falls back to the backup and then the defaults. Works.
   closed or crash. Per OS: a Windows service named `Pitwall`, a macOS launch agent
   (`net.decryptology.pitwall.service`, registered with `SMAppService`), a Linux systemd user service (`pitwall.service`). The
   server exits after an update of its own program only when idle, and the supervisor brings it back. The service-registration
-  logic exists as pure, tested functions; the app that installs it is being built. In progress.
+  logic (`pitwall-server install`, the launch agent, the Windows service) and the app's install action exist and are unit-tested; they have not been run on real Windows and Linux machines.
 - **Discovery**: a running server writes `discovery.json` (version, API version, pid, port, base URL, start time) and removes it
   on a clean stop. Works.
 - **Updates** use the Tauri updater against a signed `latest.json`; builds without the signing key are unsigned and report that

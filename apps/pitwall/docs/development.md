@@ -10,7 +10,7 @@ quality gates and where to add code.
 crates/pitwall-core      pure logic: API formats, scheduler, memory policy, selection, keys, settings, packs (no I/O)
 crates/pitwall-loopback  HTTP client that can only reach 127.0.0.1 (used to talk to engine processes)
 crates/pitwall-server    the windowless server: engines, library, serving, auth, HTTP APIs, management API
-app/src-tauri            the Tauri 2 shell: tray, window, commands, updater (being built; not a workspace member yet)
+app/src-tauri            the Tauri 2 shell: tray, window, commands, updater 
 app/src                  the Angular UI (standalone components, signals, SignalStores)
 scripts/                 commit-lint, release manifest (latest.json), export-diagrams.sh, ci/ helpers
 docs/adr/                architecture decisions (index in docs/adr/README.md)
@@ -23,7 +23,7 @@ docs/screenshots/        UI screenshots (light and dark), produced by the Playwr
 
 - Rust stable 1.88 or newer (`rustup` with `clippy` and `rustfmt`).
 - Node 24 (`app/.nvmrc`) and npm.
-- Tauri 2 prerequisites once the shell lands: on Windows the MSVC build tools and WebView2; on macOS the Xcode command
+- Tauri 2 prerequisites: on Windows the MSVC build tools and WebView2; on macOS the Xcode command
   line tools; on Linux `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev`.
 - Optional: `cargo-deny` (licences and advisories), `cargo-llvm-cov` (coverage), `git-cliff` (changelog), `lefthook`
   (git hooks: `npx lefthook install`), draw.io desktop (diagrams).
@@ -124,7 +124,7 @@ changes, change the diagram in the same commit.
 
 | I want to... | Do this |
 | --- | --- |
-| Support a new OpenAI-compatible local engine | Write an engine pack (`*.engine.toml`), see [user-guide.md](user-guide.md#packs); no code |
+| Support a new OpenAI-compatible local engine | Write an engine pack (`*.engine.toml`), see [user-guide.md](user-guide.md#packs-add-an-engine-or-a-model-list); no code |
 | Add a curated model list | A model catalog pack (`*.models.toml`) |
 | Add an engine with its own protocol | Implement `Engine` in `crates/pitwall-server/src/engines.rs` (or a new file), register it in `AppState::open`, add the pure parts to `pitwall-core`, an ADR, and tests with the fake engine |
 | Add or change an endpoint | Parse and format in `pitwall_core::api::<family>` (pure, with a contract test), add the route and handler in `http.rs`, keep `/x/v1` changes additive ([ADR 0003](adr/0003-api-surface-and-compatibility.md)) |

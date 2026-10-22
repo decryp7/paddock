@@ -23,7 +23,7 @@ gives every app one place to use them. It has four parts:
    closed. The only outbound HTTP client lives in one module (`egress.rs`) ([ADR 0001](adr/0001-local-only.md)).
 3. **`pitwall-loopback`**, a tiny HTTP client whose port type can only mean `127.0.0.1`. The server reaches its
    engine processes through it.
-4. **The app**: a Tauri 2 shell with a tray icon (`app/src-tauri`, being built; it is not yet a workspace member)
+4. **The app**: a Tauri 2 shell with a tray icon (`app/src-tauri`)
    around an Angular 22 UI (`app/src`) that talks to the server's management API through a backend service injected
    by DI token (a real Tauri backend, or a mock for browser development and tests).
 
@@ -63,7 +63,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 
 | Module | Responsibility |
 | --- | --- |
-| `main.rs` | Flags (`--port`, `--data-dir`, `--version`, `--help`), binds `127.0.0.1`, writes `discovery.json`, starts the background tasks, stops cleanly on Ctrl-C and SIGTERM |
+| `main.rs`, `service/` | Flags (`--port`, `--data-dir`, `--version`, `--help`) and the service verbs the installers and the app call (`install`, `uninstall`, `status`, `print-unit`, `--service` on Windows); binds `127.0.0.1`, writes `discovery.json`, starts the background tasks, stops cleanly on Ctrl-C and SIGTERM |
 | `http.rs` | The router: standard APIs, `/x/v1`, and the merged management routes. The gate (Host, Origin, credential), one function per endpoint, streaming in SSE or NDJSON, provenance headers |
 | `mgmt.rs` | The management API for Pitwall's own window: `POST /mgmt/v1/rpc/{method}`, the live feed `GET /mgmt/v1/live`, and the playground stream `POST /mgmt/v1/chat`. Admin key only |
 | `app.rs` | `AppState` (everything shared), the request pipeline `start_chat`, the background tasks (release loop, live pushes, metrics sampling), packs loading |
@@ -75,7 +75,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 | `auth.rs` | Apps, keys, the admin key, pairing; `apps.json` written atomically with a backup |
 | `process.rs` | The only place child processes are started: scrubbed environment, no console window, killed on drop |
 | `paths.rs`, `system.rs` | Data folders and atomic writes; hardware and memory probes (RAM, GPUs, disk, process RSS) |
-| `service/spec.rs` | How the server is registered with each OS (names, unit text, restart-after-update decision); pure functions of a target OS |
+| `service/` | Running as an OS service: `spec.rs` (pure functions of a target OS: names, paths, unit text, restart-after-update decision), `systemd.rs`, `windows.rs`, `login_path.rs` (the user's login-shell `PATH` for supervised servers), `watch.rs` (restart itself when its own binary changed and it is idle) |
 | `fake_engine.rs` | A test double: a small OpenAI-compatible server run as `pitwall-server --fake-engine` |
 
 ### App (`app/`)
@@ -89,10 +89,20 @@ the `BACKEND` token. The screens are `dashboard`, `models`, `engines`, `apps`, `
 `settings` and the compact `tray` view. The UI does not re-implement domain rules: fit verdicts, release countdowns and
 model selection come from the core through the server.
 
-The Tauri shell (`app/src-tauri`) is being built by a separate task. Its job is fixed by the design: tray icon and
-window lifecycle, installing and starting the server per OS, reading the admin key to call the management API, the
-updater. It is not part of the workspace yet, so everything below about the shell is the intended design, marked
-"planned" in the diagrams.
+The Tauri shell (`app/src-tauri`, a workspace member) holds no model or request state of its own. It talks to the
+server only through a `ServerClient` trait (loopback HTTP to the management API and its live feed; a fake in tests):
+
+| Module | Responsibility |
+| --- | --- |
+| `server_client.rs`, `live.rs` | The management client and the live feed that is forwarded to the UI and the tray |
+| `credentials.rs` | The app's copy of the admin key in the OS credential store (Windows Credential Manager, macOS Keychain, Secret Service), falling back to `admin.key` when the store is unavailable |
+| `service_install.rs` | Registering the server with the OS: `SMAppService` and the launch agent inside the bundle on macOS, the NSIS installer's service on Windows, a systemd user unit written by `pitwall-server install` on Linux. Elevation and approval are always the OS's own |
+| `window.rs`, `tray.rs`, `tray_model.rs` | Window lifecycle as pure decisions (closing destroys the window, tray Open and Dock reopen rebuild it, only Quit exits, no tray means closing quits) and the tray menu |
+| `updater.rs` | The opt-in minisign-verified updater; inert in unsigned builds |
+| `native_feel.rs` | [ADR 0012](adr/0012-native-feel.md): selection opt-in, one context-menu policy, browser keys blocked |
+
+Closing or quitting the app never stops the server. The shell has been type-checked and unit-tested; running it on
+real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.md)).
 
 ## Decisions at a glance
 
@@ -268,10 +278,10 @@ Said plainly, so nothing in this document is read as a promise:
   model's tokenizer.
 - Engines other than llama.cpp: MLX, vLLM, whisper.cpp (`/v1/audio/transcriptions` answers 501), and dedicated
   embedding and reranker engine adapters (embeddings work through llama.cpp with an embedding model).
-- Stored benchmarks: `run_benchmark` measures one model (time to first token, prompt and generation speed) and returns
-  the result, but results are not persisted (`benchmarks` returns an empty list) and do not yet feed selection.
+- Stored benchmarks: `run_benchmark` measures one model (time to first token, prompt and generation speed); the results
+  are kept in memory for the life of the server, not written to disk, and do not yet feed selection.
 - OS memory-pressure signals and foreground-app detection (the policy takes them as inputs; the server passes false).
 - Releasing the context only (the policy plans `ReleaseContext`, the server currently carries out only unloads).
 - Restarting a crashed engine with backoff (`pitwall_core::backoff` exists; today a dead engine is dropped and the model
   is reloaded by the next request).
-- The Tauri shell and the installers.
+- Published installers, and running the shell and the services on real Windows and Linux machines.

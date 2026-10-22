@@ -37,17 +37,17 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 - Declarative packs: engine packs (the generic adapter; a llamafile pack ships, experimental) and model catalog packs.
 - Management API and live feed for the UI; versioned settings with backup; metrics with bounded retention; discovery file.
 
-## Phase 2: the app *(in progress)*
+## Phase 2: the app *(implemented, not released)*
 
 - Angular UI: dashboard, models, engines, apps, requests, playground, benchmarks, settings and tray view. **Works**
-  against the mock backend and the management API contract; being wired to the real server.
-- Tauri shell: tray and window lifecycle, service install per OS (Windows service, macOS launch agent via
-  `SMAppService`, Linux systemd user service; the pure parts exist in `service/spec.rs`), start at login, restart after
-  update. **Partial**: being built, not yet a workspace member.
+  against the mock backend and the management API contract.
+- Tauri shell: tray and window lifecycle, admin key in the OS credential store, service install per OS (Windows
+  service, macOS launch agent via `SMAppService`, Linux systemd user service), start at login, restart after update.
+  **Implemented and unit-tested**; not yet exercised on real Windows and Linux machines.
 - Installers: Windows NSIS, macOS `.dmg`, Linux `.deb` and AppImage; unsigned until the signing secrets are set
   ([releasing.md](releasing.md)).
 - Updater with signed `latest.json`: **planned**, needs the secrets.
-- CI on Linux, the Windows runner and the macOS host: workflows being added.
+- CI on Linux, the Windows runner and the macOS host: `build.yml` and `release.yml` exist.
 
 ## Phase 3: the rest of the product brief *(planned)*
 
@@ -56,7 +56,7 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | Task endpoints (`/x/v1/tasks/...`: summarise, classify, extract, translate) with versioned prompts | Implemented and tested over a fake engine; **not verified** against a real model |
 | Token counting and truncation helpers (`/x/v1/tokens/...`) | Implemented as estimates (no tokenizer call yet); **partial** |
 | Response cache and prompt-prefix policy | Policy in the core (`cache.rs`); **not wired** into the server |
-| Stored benchmarks feeding "fast" selection | One-off benchmark run works; results are not stored; **partial** |
+| Stored benchmarks feeding "fast" selection | A benchmark run works and results are kept in memory; not written to disk, not used by selection; **partial** |
 | OS memory-pressure signals and foreground-app yielding | Rules in the core; the server does not read the signals yet |
 | Releasing a model's context before its weights | Planned in the policy; the server only unloads |
 | Engine restart with backoff | Policy in the core; the server reloads on the next request instead; **partial** |

@@ -4,9 +4,8 @@ Pitwall on macOS is the app (menu-bar icon and window) plus the Pitwall server r
 starts when you log in, needs no administrator rights and keeps serving when the window is closed. The Apple Silicon path is
 the one that has been run for real; see [Verified](#verified-and-not-verified).
 
-> The Tauri app (window, menu bar, installer) is being built by the shell work and is not in the repository yet. The server, the
-> engine flow and the APIs described here exist and are tested. Until the app lands you can run the server by hand
-> (`pitwall-server`) and use the API.
+> The Tauri app (window, menu bar, installer config) is in the repository, but no installer has been published yet. You can
+> build it yourself or run the server by hand (`pitwall-server`) and use the API.
 
 ## Install
 
