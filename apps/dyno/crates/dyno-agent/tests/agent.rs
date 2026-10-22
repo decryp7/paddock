@@ -530,3 +530,76 @@ fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
         assert!(ask(&peer, Request::SaveDiagnostics { path: bad }).is_err());
     }
 }
+
+#[test]
+fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html() {
+    let h = Harness::start();
+    let peer = h.client();
+    // A just-started agent has little history; that is a valid report, and a past week is empty and says so.
+    let Reply::Report(now) = ask(&peer, Request::WeeklyReport { weeks_ago: 0 }).unwrap() else {
+        panic!("report")
+    };
+    assert_eq!(now.to.since(now.from), 7 * 24 * 3_600_000);
+    let Reply::Report(old) = ask(&peer, Request::WeeklyReport { weeks_ago: 5 }).unwrap() else {
+        panic!("report")
+    };
+    assert!(old.nothing_to_report && old.score.is_none() && old.issues.is_empty());
+    assert!(old.to < now.from);
+    assert!(ask(&peer, Request::WeeklyReport { weeks_ago: 53 })
+        .unwrap_err()
+        .contains("at most 52"));
+    // Something the user did shows up under "what changed" (not as a rule action).
+    ask(
+        &peer,
+        Request::Act {
+            target: target(100),
+            action: ProcessAction::SetPriority(Priority::BelowNormal),
+        },
+    )
+    .unwrap();
+    let Reply::Report(r) = ask(&peer, Request::WeeklyReport { weeks_ago: 0 }).unwrap() else {
+        panic!("report")
+    };
+    assert!(r.changes.iter().any(|c| c.title.contains("busy")), "{:?}", r.changes);
+    assert!(!r.nothing_to_report);
+
+    let md = h._tmp.path().join("week.md");
+    let Reply::ReportSaved(saved) = ask(
+        &peer,
+        Request::SaveReport {
+            path: md.to_string_lossy().into_owned(),
+            format: dyno_core::report::ReportFormat::Markdown,
+            weeks_ago: 0,
+        },
+    )
+    .unwrap() else {
+        panic!("saved")
+    };
+    let text = std::fs::read_to_string(&md).unwrap();
+    assert_eq!(saved.bytes, text.len() as u64);
+    assert!(text.starts_with("# Dyno weekly report"));
+    let html = h._tmp.path().join("week.html");
+    ask(
+        &peer,
+        Request::SaveReport {
+            path: html.to_string_lossy().into_owned(),
+            format: dyno_core::report::ReportFormat::Html,
+            weeks_ago: 5,
+        },
+    )
+    .unwrap();
+    assert!(std::fs::read_to_string(&html).unwrap().contains("Nothing to report"));
+    // Refused: relative path, the wrong extension for the format, a missing folder.
+    for bad in [
+        "week.md".to_string(),
+        html.to_string_lossy().into_owned(),
+        h._tmp.path().join("nope").join("w.md").to_string_lossy().into_owned(),
+    ] {
+        let request = Request::SaveReport {
+            path: bad,
+            format: dyno_core::report::ReportFormat::Markdown,
+            weeks_ago: 0,
+        };
+        assert!(ask(&peer, request).is_err());
+    }
+}

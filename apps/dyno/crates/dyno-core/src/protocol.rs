@@ -182,8 +182,11 @@ pub enum Request {
         /// The new state.
         state: StartupState,
     },
-    /// The weekly report.
-    WeeklyReport,
+    /// The weekly report for the seven days ending `weeks_ago` weeks before now (0 = the last seven days; at most 52).
+    WeeklyReport {
+        /// How many weeks back the week ends.
+        weeks_ago: u32,
+    },
     /// Recent alerts, newest first.
     Alerts {
         /// At most this many.
@@ -311,6 +314,18 @@ pub enum Request {
     ResolveHosts {
         /// Literal IP addresses.
         addresses: Vec<String>,
+    },
+
+    // ---- weekly report export (WP-08) ----
+    /// Writes a weekly report as Markdown or HTML to a path the user picked in the OS save dialog (answers `ReportSaved`).
+    /// Appended.
+    SaveReport {
+        /// Where (absolute, ending in the format's extension, in an existing folder).
+        path: String,
+        /// The file format.
+        format: crate::report::ReportFormat,
+        /// Which week, as for `WeeklyReport`.
+        weeks_ago: u32,
     },
 }
 
@@ -551,6 +566,10 @@ pub enum Reply {
     BenchComparison(Box<crate::bench::Comparison>),
     /// Host names for the addresses asked about. Appended.
     HostNames(Vec<crate::network_names::HostName>),
+
+    // ---- weekly report export (WP-08) ----
+    /// The report file was written. Appended.
+    ReportSaved(crate::report::SavedReport),
 }
 
 impl Reply {
@@ -596,6 +615,7 @@ impl Reply {
             Reply::Benchmarks(x) => v(x),
             Reply::BenchComparison(x) => v(x),
             Reply::HostNames(x) => v(x),
+            Reply::ReportSaved(x) => v(x),
         }
     }
 }
@@ -703,6 +723,17 @@ mod tests {
             serde_json::json!({"act": {"target": {"pid": 4, "started": 9}, "action": {"setPriority": "idle"}}})
         );
         assert_eq!(serde_json::to_value(Request::WhySlow).unwrap(), "whySlow");
+        let r: Request = serde_json::from_value(serde_json::json!({"weeklyReport": {"weeksAgo": 2}})).unwrap();
+        assert_eq!(r, Request::WeeklyReport { weeks_ago: 2 });
+        let r: Request =
+            serde_json::from_value(serde_json::json!({"saveReport": {"path": "/r.md", "format": "markdown", "weeksAgo": 0}})).unwrap();
+        assert!(matches!(
+            r,
+            Request::SaveReport {
+                format: crate::report::ReportFormat::Markdown,
+                ..
+            }
+        ));
         let r: Request =
             serde_json::from_value(serde_json::json!({"runCleanup": {"scanId": "s", "itemIds": ["a"], "mode": "quarantine"}})).unwrap();
         assert!(matches!(
@@ -787,6 +818,10 @@ mod tests {
             Reply::HostNames(vec![]),
             Reply::Url("https://example.com/".into()),
             Reply::RecorderSnapshots(vec![]),
+            Reply::ReportSaved(crate::report::SavedReport {
+                path: "/x.md".into(),
+                bytes: 1,
+            }),
             Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {
                 path: "/x.zip".into(),
                 bytes: 1,

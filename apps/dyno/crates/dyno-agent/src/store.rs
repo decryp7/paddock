@@ -504,6 +504,17 @@ impl Store {
             .optional()?)
     }
 
+    /// The scores recorded in `[from, to)`, oldest first.
+    pub fn scores(&self, from: Timestamp, to: Timestamp) -> Result<Vec<(Timestamp, u32)>> {
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT at, score FROM scores WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
+        let rows = st.query_map(params![from.millis(), to.millis()], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, u32>(1)?))
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).map(|(at, s)| (Timestamp(at), s)).collect())
+    }
+
     /// A small value by key.
     pub fn meta(&self, key: &str) -> Result<Option<String>> {
         Ok(self
@@ -690,5 +701,18 @@ mod tests {
         }
         let (_, note) = Store::open(&path, Timestamp(9)).unwrap();
         assert!(note.unwrap().contains("newer"));
+    }
+
+    #[test]
+    fn scores_are_listed_oldest_first_within_the_range() {
+        let s = Store::memory().unwrap();
+        for (h, score) in [(1, 60), (2, 70), (5, 90)] {
+            s.put_score(Timestamp(h * HOUR), score).unwrap();
+        }
+        assert_eq!(
+            s.scores(Timestamp(HOUR), Timestamp(5 * HOUR)).unwrap(),
+            vec![(Timestamp(HOUR), 60), (Timestamp(2 * HOUR), 70)]
+        );
+        assert!(s.scores(Timestamp(10 * HOUR), Timestamp(11 * HOUR)).unwrap().is_empty());
     }
 }
