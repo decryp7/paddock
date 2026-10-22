@@ -1,0 +1,28 @@
+[package]
+name = "pitcrew-service"
+description = "Pitcrew's background service: supervises CI runners under the Windows Service Control Manager or a macOS launch agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pitcrew-service"
+path = "src/main.rs"
+
+[dependencies]
+pitcrew-core.workspace = true
+thiserror.workspace = true
+
+# The Service Control Manager integration (MIT OR Apache-2.0, maintained by Mullvad): safe wrappers around the
+# service dispatcher, control handler and service manager APIs.
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+
+[lints]
+workspace = true

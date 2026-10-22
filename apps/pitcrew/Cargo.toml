@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pitcrew-core"]
+members = ["crates/pitcrew-core", "crates/pitcrew-service"]
 resolver = "2"
 
 # Shared by every member: `edition.workspace = true` etc.
