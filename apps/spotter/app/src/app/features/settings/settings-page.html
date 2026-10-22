@@ -67,7 +67,7 @@
         <div class="row">
           <div><label class="l" for="interval">Default check interval</label><div class="help">New watches start with this; each watch can change it.</div></div>
           <select id="interval" class="input fit" [value]="c.defaultIntervalSecs" (change)="set({ defaultIntervalSecs: +value($event) })">
-            @for (i of intervals; track i.secs) { <option [value]="i.secs">{{ i.label }}</option> }
+            @for (i of intervals; track i.secs) { <option [value]="i.secs" [selected]="i.secs === c.defaultIntervalSecs">{{ i.label }}</option> }
           </select>
         </div>
         <div class="row">
