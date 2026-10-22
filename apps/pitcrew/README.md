@@ -13,8 +13,9 @@ updates it between jobs, so the builds keep running.
 
 </div>
 
-> **Status: v0.1.0, unreleased.** The supervisor, watchdog, updates with roll-back, housekeeping, dashboard, tray and
-> Linux support are built and tested; the macOS path was verified on a real Mac on 2026-10-22. No release is published yet.
+> **Status: v1.0.0.** Supervisor, watchdog, safe updates with roll-back, housekeeping, insights, disk guard, pause
+> windows, notification channels, dashboard and tray on Windows, macOS and Linux. Installers are on the
+> [releases page](https://dev.decryptology.net/decryp7/pitcrew/releases).
 > See [Status](#status).
 
 ![The dashboard](docs/screenshots/dark/dashboard.png)
