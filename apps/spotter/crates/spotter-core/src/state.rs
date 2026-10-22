@@ -477,13 +477,13 @@ mod tests {
         };
         let mut s = WatchState::default();
         s.on_success(vec![rel("1.0.0")], &p, cx(1));
-        assert!(s.on_success(vec![rel("1.1.0")], &p, cx(2)).notify.first().is_some());
-        assert!(s.on_success(vec![rel("1.1.0")], &p, cx(3)).notify.first().is_some());
+        assert!(!s.on_success(vec![rel("1.1.0")], &p, cx(2)).notify.is_empty());
+        assert!(!s.on_success(vec![rel("1.1.0")], &p, cx(3)).notify.is_empty());
         s.acknowledge(Some(ver("1.1.0")));
-        assert!(s.on_success(vec![rel("1.1.0")], &p, cx(4)).notify.first().is_none());
+        assert!(s.on_success(vec![rel("1.1.0")], &p, cx(4)).notify.is_empty());
         s.reset_acknowledgement();
         assert!(
-            s.on_success(vec![rel("1.1.0")], &p, cx(5)).notify.first().is_some(),
+            s.on_success(vec![rel("1.1.0")], &p, cx(5)).notify.is_empty().then_some(()).is_none(),
             "after a reset the latest is new again"
         );
     }
@@ -523,7 +523,7 @@ mod tests {
             ..NotificationPolicy::default()
         };
         s.on_success(vec![rel("1.0.0")], &off, cx(1));
-        assert!(s.on_success(vec![rel("1.1.0")], &off, cx(2)).notify.first().is_none());
+        assert!(s.on_success(vec![rel("1.1.0")], &off, cx(2)).notify.is_empty());
 
         let inst = NotificationPolicy {
             mode: NotifyMode::NewerThanInstalled,
