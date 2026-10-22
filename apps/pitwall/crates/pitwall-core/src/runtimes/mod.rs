@@ -3,9 +3,11 @@
 //! IMT's `imt_ai::runtimes` and `imt-ai-worker::devices` (IMT ADR 0009).
 
 pub mod builds;
+pub mod capabilities;
 pub mod catalog;
+pub mod pins;
 
-pub use builds::BuildChoice;
+pub use builds::{BuildChoice, BuildId};
 pub use catalog::{current_platform, suggest, RuntimeAsset, RuntimeBuild, RuntimeCatalog};
 
 use serde::{Deserialize, Serialize};

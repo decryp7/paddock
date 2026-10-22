@@ -38,6 +38,28 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 #[error("{0}")]
 pub struct EngineFail(pub String);
 
+/// A capability the engine build that serves a model cannot provide (ADR 0018).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Blocked {
+    /// The capability.
+    pub capability: pitwall_core::select::Capability,
+    /// Why, in words that say what to do.
+    pub reason: String,
+    /// The llama.cpp release number that would serve it (`None`: no build of this kind can).
+    pub min_build: Option<u64>,
+}
+
+/// Answers whether the engine build that serves a model can provide a capability. Implemented by the llama.cpp
+/// manager; pack engines declare their own capabilities and are not gated.
+pub trait CapabilityGate: Send + Sync {
+    /// `Ok` when the build that serves `model` provides every capability in `needed`; else a typed, explained error.
+    /// A machine with no engine installed passes (loading the model then explains that).
+    fn check(&self, model: &str, needed: &[pitwall_core::select::Capability]) -> Result<(), ApiError>;
+    /// The capabilities among `caps` that the build serving `model` cannot provide.
+    fn blocked(&self, model: &str, caps: &[pitwall_core::select::Capability]) -> Vec<Blocked>;
+}
+
 /// One model in memory.
 pub struct HotModel {
     /// Its id.
@@ -152,6 +174,8 @@ struct Inner {
     speeds: RwLock<HashMap<String, f64>>,
     /// Model presets and aliases (ADR 0014); `AppState` loads, saves and replaces them.
     presets: RwLock<Presets>,
+    /// Gates requests by what the llama.cpp build in use supports (ADR 0018); set once by `AppState`.
+    gate: RwLock<Option<Arc<dyn CapabilityGate>>>,
 }
 
 /// The serving core.
@@ -223,6 +247,7 @@ impl Serving {
                 supervisor: Mutex::new(Supervisor::default()),
                 speeds: RwLock::new(HashMap::new()),
                 presets: RwLock::new(Presets::default()),
+                gate: RwLock::new(None),
             }),
         }
     }
@@ -307,6 +332,41 @@ impl Serving {
         self.inner.presets.read().map(|p| p.clone()).unwrap_or_default()
     }
 
+    /// Installs the capability gate for llama.cpp models.
+    pub fn set_gate(&self, gate: Arc<dyn CapabilityGate>) {
+        if let Ok(mut g) = self.inner.gate.write() {
+            *g = Some(gate);
+        }
+    }
+
+    /// The gate, when the model is served by llama.cpp (a pack engine, chosen by the preset or the model's
+    /// preferences, is not gated).
+    fn gate_for(&self, id: &ModelId, preset_engine: Option<&str>) -> Option<Arc<dyn CapabilityGate>> {
+        let s = self.settings();
+        let engine = preset_engine.map(str::to_string).or_else(|| s.prefs(id).engine);
+        match engine.as_deref() {
+            None | Some("llama.cpp") => self.inner.gate.read().ok().and_then(|g| g.clone()),
+            Some(_) => None,
+        }
+    }
+
+    /// Refuses a request that needs what the engine build serving the resolved model lacks: a 503 that names the
+    /// build needed (too old), a 400 when no build of this kind can, or a 503 for a broken pin.
+    pub fn check_capabilities(&self, r: &Resolved, needed: &[select::Capability]) -> Result<(), ApiError> {
+        if needed.is_empty() {
+            return Ok(());
+        }
+        match self.gate_for(&r.id, r.preset.as_ref().and_then(|p| p.engine.as_deref())) {
+            Some(g) => g.check(r.id.as_str(), needed),
+            None => Ok(()),
+        }
+    }
+
+    /// The capabilities among `caps` that the build serving `id` cannot provide.
+    pub fn blocked(&self, id: &ModelId, caps: &[select::Capability]) -> Vec<Blocked> {
+        self.gate_for(id, None).map_or_else(Vec::new, |g| g.blocked(id.as_str(), caps))
+    }
+
     /// Replaces the presets (after they were validated and saved).
     pub fn set_presets(&self, presets: Presets) {
         if let Ok(mut g) = self.inner.presets.write() {
@@ -335,7 +395,13 @@ impl Serving {
             .iter()
             .map(|f| Candidate {
                 id: f.id.clone(),
-                capabilities: library::capabilities(f),
+                // Capabilities the engine build that would serve the model lacks do not count: a model is not
+                // chosen for what it cannot do here.
+                capabilities: {
+                    let caps = library::capabilities(f);
+                    let out = self.blocked(&f.id, &caps);
+                    caps.into_iter().filter(|c| !out.iter().any(|b| b.capability == *c)).collect()
+                },
                 context_max: f.info.context_length.map(|c| c.min(u64::from(u32::MAX)) as u32),
                 size: f.size,
                 loaded: hot.contains_key(&f.id),
@@ -637,6 +703,7 @@ impl Serving {
             }
             match e {
                 EngineError::NotInstalled | EngineError::NotAvailable(_) => api(ErrorKind::Engine, e.to_string()),
+                EngineError::Pin(_) => api(ErrorKind::EnginePin, e.to_string()),
                 _ => api(ErrorKind::Engine, format!("could not load {id}: {e}")),
             }
         })?;

@@ -19,6 +19,7 @@ use pitwall_core::metrics::{Metrics, Sample};
 use pitwall_core::mgmt::{self, ChosenBy, EngineKind, LiveUpdate, RequestRecord, Throughput};
 use pitwall_core::runtimes::BuildChoice;
 use pitwall_core::scheduler::{JobKind, Priority};
+use pitwall_core::select::Capability;
 use pitwall_core::usage::{Usage, UsageEvent};
 use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::AtomicBool;
@@ -66,6 +67,8 @@ pub struct AppState {
     pub limit_warned: Mutex<HashSet<(String, limits::LimitKind, u64)>>,
     /// Serialises read-modify-write of the presets (the list itself lives in [`Serving`]).
     pub presets_gate: Mutex<()>,
+    /// Serialises read-modify-write of the engine pins (the pins themselves live in [`LlamaCpp`]).
+    pub pins_gate: Mutex<()>,
     /// Detected hardware.
     pub hardware: Hardware,
     /// When the server started.
@@ -179,6 +182,7 @@ impl AppState {
             usage: Mutex::new(usage),
             limit_warned: Mutex::new(HashSet::new()),
             presets_gate: Mutex::new(()),
+            pins_gate: Mutex::new(()),
             hardware,
             started_at: now_ms(),
             live,
@@ -203,6 +207,25 @@ impl AppState {
             );
         }
         st.serving.set_presets(stored_presets.presets);
+        st.serving.set_gate(Arc::new(st.llama.clone()));
+        let stored_pins = {
+            let (p, b) = paths::read_with_backup(&st.dirs.engine_pins(), pitwall_core::runtimes::pins::MAX_BYTES);
+            pitwall_core::runtimes::pins::load(p.as_deref(), b.as_deref())
+        };
+        if stored_pins.damaged || stored_pins.skipped > 0 {
+            st.event(
+                EventKind::RequestFailed,
+                Severity::Warn,
+                format!(
+                    "The engine pins file was damaged: {} pin(s) were left out. Check Engines.",
+                    stored_pins.skipped
+                ),
+            );
+        }
+        st.llama.set_pins(stored_pins.pins);
+        for p in st.llama.pins().problems(&st.llama.facts()) {
+            st.event(EventKind::EngineFailed, Severity::Warn, p.to_string());
+        }
         st.event(EventKind::EngineStarted, Severity::Info, "Pitwall started".into());
         for p in st.packs.problems.iter() {
             st.event(
@@ -317,6 +340,11 @@ impl AppState {
     /// Writes the presets (atomic, with a backup).
     pub fn save_presets(&self, presets: &pitwall_core::presets::Presets) -> std::io::Result<()> {
         paths::write_atomic(&self.dirs.presets(), presets.to_json().as_bytes())
+    }
+
+    /// Writes the engine pins (atomic, with a backup).
+    pub fn save_pins(&self, pins: &pitwall_core::runtimes::pins::EnginePins) -> std::io::Result<()> {
+        paths::write_atomic(&self.dirs.engine_pins(), pins.to_json().as_bytes())
     }
 
     /// The engine ids a preset may name: llama.cpp and the loaded engine packs.
@@ -494,9 +522,19 @@ impl AppState {
             }
             None => wanted,
         };
+        // What the request needs from the engine build that would serve the model (ADR 0018): refused up front with
+        // the build needed instead of failing obscurely inside the engine.
+        let mut needed = vec![];
         if req.has_images() {
-            // Checked after loading: the engine reports whether the projector is present.
+            needed.push(Capability::Vision);
         }
+        if !req.tools.is_empty() {
+            needed.push(Capability::Tools);
+        }
+        if matches!(req.format, pitwall_core::chat::OutputFormat::JsonSchema(_)) {
+            needed.push(Capability::Json);
+        }
+        self.serving.check_capabilities(&resolved, &needed)?;
         let queued = Instant::now();
         let permit = self
             .serving

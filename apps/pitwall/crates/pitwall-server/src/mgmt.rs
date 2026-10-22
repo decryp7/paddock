@@ -326,23 +326,26 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         }
         "select_build" => {
             let c: String = arg(a, "choice")?;
-            let mut s = st.cfg();
-            s.engines.previous_build = st.llama.active().map(|b| b.id);
+            let before = crate::engine_pins::current(st);
+            let s = st.cfg();
+            let mut s = s;
             s.engines.build_choice = c;
             st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
+            crate::engine_pins::record_change(st, before);
             ok(())
         }
-        "rollback_build" => {
-            let mut s = st.cfg();
-            let prev = s
-                .engines
-                .previous_build
-                .take()
-                .ok_or_else(|| err(mgmt::ErrorCode::NotFound, "there is no previous build to go back to"))?;
-            s.engines.build_choice = prev;
-            st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
-            ok(())
+        "engine_pins" => ok(crate::engine_pins::state(st)),
+        "set_global_pin" => {
+            let b: Option<String> = arg(a, "buildId")?;
+            ok(crate::engine_pins::set_global(st, b)?)
         }
+        "set_model_pin" => {
+            let m = model(a, "modelId")?;
+            let b: Option<String> = arg(a, "buildId")?;
+            ok(crate::engine_pins::set_model(st, &m, b)?)
+        }
+        "rollback_build" => ok(crate::engine_pins::rollback(st)?),
+        "build_capabilities" => ok(crate::engine_pins::capabilities(st)),
         "packs" => {
             let s = st.cfg();
             let room = crate::system::room(&st.hardware, st.serving.hot_ram().0);
@@ -683,7 +686,11 @@ fn engines(st: &AppState) -> Vec<mgmt::Engine> {
                 } else {
                     vec![]
                 },
-                rollback_to: if llama { cfg.engines.previous_build.clone() } else { None },
+                rollback_to: if llama {
+                    crate::engine_pins::state(st).rollback_to.map(|r| r.build_id)
+                } else {
+                    None
+                },
             }
         })
         .collect();
@@ -785,6 +792,7 @@ fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
         };
         let t0 = std::time::Instant::now();
         let mut last = std::time::Instant::now();
+        let before = crate::engine_pins::current(&st2);
         let res = st2
             .llama
             .install(&bid, &cancel, |done, total| {
@@ -804,6 +812,7 @@ fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
             .await;
         match res {
             Ok(info) => {
+                crate::engine_pins::record_change(&st2, before);
                 upd(&|d| {
                     d.state = DownloadState::Done;
                     d.bytes_done = d.bytes_total;

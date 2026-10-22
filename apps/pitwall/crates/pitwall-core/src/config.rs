@@ -231,17 +231,15 @@ impl Default for ModelSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct EngineSettings {
-    /// `auto` or a llama.cpp build id.
+    /// `auto` or a llama.cpp build id: the build automatic selection prefers. Pins (all models, or one model) are not
+    /// settings; they live in `engine-pins.json` (`runtimes::pins`, ADR 0018) and win over this.
     pub build_choice: String,
-    /// The build that was active before the last update (for roll back).
-    pub previous_build: Option<String>,
 }
 
 impl Default for EngineSettings {
     fn default() -> Self {
         EngineSettings {
             build_choice: "auto".into(),
-            previous_build: None,
         }
     }
 }

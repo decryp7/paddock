@@ -69,6 +69,11 @@ impl Dirs {
     pub fn usage(&self) -> PathBuf {
         self.root.join("usage.json")
     }
+    /// Engine version pins and the builds used before (ADR 0018).
+    pub fn engine_pins(&self) -> PathBuf {
+        self.root.join("engine-pins.json")
+    }
+
     /// Model presets and aliases (ADR 0014).
     pub fn presets(&self) -> PathBuf {
         self.root.join("presets.json")

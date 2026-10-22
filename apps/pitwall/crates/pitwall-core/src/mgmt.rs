@@ -398,6 +398,100 @@ pub struct Engine {
     pub rollback_to: Option<String>,
 }
 
+/// One model's engine pin (`ModelEnginePin`, ADR 0018).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelEnginePin {
+    /// The model.
+    pub model_id: String,
+    /// The pinned build id.
+    pub build_id: String,
+    /// Its release tag, `None` when it is not installed any more.
+    pub tag: Option<String>,
+}
+
+/// The build a one-click roll back goes to (`RollbackTarget`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RollbackTarget {
+    /// The build id.
+    pub build_id: String,
+    /// Its release tag.
+    pub tag: String,
+}
+
+/// The engine pin state (`EnginePinState`, ADR 0018).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnginePinState {
+    /// The build pinned for all models.
+    pub global: Option<String>,
+    /// Per-model pins.
+    pub models: Vec<ModelEnginePin>,
+    /// The build that serves models in general now, and why in words (`pinned for all models`, `chosen automatically`).
+    pub active: Option<String>,
+    /// Why `active` was chosen.
+    pub active_source: String,
+    /// Where roll back goes, when it can.
+    pub rollback_to: Option<RollbackTarget>,
+    /// Why roll back is not possible (shown instead of the button), when it is not.
+    pub rollback_blocked: Option<String>,
+    /// Pins that cannot be used now (build uninstalled or failed its self-test), each with what to do.
+    pub problems: Vec<String>,
+}
+
+/// The result of changing a pin or rolling back (`PinChange`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PinChange {
+    /// The state after the change.
+    pub state: EnginePinState,
+    /// Loaded models that keep running on their current build: the change applies when they next load.
+    pub applies_on_next_load: Vec<String>,
+    /// One sentence for the toast.
+    pub message: String,
+}
+
+/// Whether a build supports a capability (`CapabilityStatus`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CapabilityStatus {
+    /// Supported.
+    Supported,
+    /// Needs a newer llama.cpp build.
+    NeedsBuild,
+    /// This kind of build cannot.
+    NotSupported,
+}
+
+/// One capability of a build (`BuildCapability`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildCapability {
+    /// The capability.
+    pub capability: Capability,
+    /// Plain words.
+    pub label: String,
+    /// The verdict.
+    pub status: CapabilityStatus,
+    /// The release number that would serve it (`NeedsBuild`).
+    pub min_build: Option<u64>,
+    /// What to do, or why not.
+    pub hint: Option<String>,
+}
+
+/// What an installed build can do (`BuildCapabilities`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildCapabilities {
+    /// The build id.
+    pub build_id: String,
+    /// Its release tag.
+    pub tag: String,
+    /// One entry per capability.
+    pub capabilities: Vec<BuildCapability>,
+}
+
 /// Job states (`JobState`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1287,5 +1381,54 @@ mod tests {
             serde_json::to_value(PresetStatus::Shadowed { message: "m".into() }).unwrap()["state"],
             "shadowed"
         );
+    }
+
+    #[test]
+    fn engine_pin_dtos_use_camel_case() {
+        let c = BuildCapability {
+            capability: Capability::Vision,
+            label: "Image input".into(),
+            status: CapabilityStatus::NeedsBuild,
+            min_build: Some(5600),
+            hint: Some("Install b5600".into()),
+        };
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["status"], "needsBuild");
+        assert_eq!(v["minBuild"], 5600);
+        assert_eq!(v["capability"], "vision");
+        let state = EnginePinState {
+            global: Some("vulkan".into()),
+            models: vec![ModelEnginePin {
+                model_id: "m".into(),
+                build_id: "cpu".into(),
+                tag: None,
+            }],
+            active: None,
+            active_source: "pinned for all models".into(),
+            rollback_to: Some(RollbackTarget {
+                build_id: "cpu".into(),
+                tag: "b1".into(),
+            }),
+            rollback_blocked: None,
+            problems: vec![],
+        };
+        let change = PinChange {
+            state,
+            applies_on_next_load: vec!["m".into()],
+            message: "ok".into(),
+        };
+        let v = serde_json::to_value(&change).unwrap();
+        assert_eq!(v["appliesOnNextLoad"][0], "m");
+        assert_eq!(v["state"]["rollbackTo"]["buildId"], "cpu");
+        assert_eq!(v["state"]["models"][0]["modelId"], "m");
+        let back: PinChange = serde_json::from_value(v).unwrap();
+        assert_eq!(back, change);
+        assert_eq!(serde_json::to_value(CapabilityStatus::NotSupported).unwrap(), "notSupported");
+        let caps = BuildCapabilities {
+            build_id: "cpu".into(),
+            tag: "b1".into(),
+            capabilities: vec![c],
+        };
+        assert_eq!(serde_json::to_value(caps).unwrap()["buildId"], "cpu");
     }
 }

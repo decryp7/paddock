@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "note": "What each feature needs from the llama.cpp engine build. minBuild is a llama.cpp release number (b11669 is 11669): a build older than that cannot serve the feature. unsupportedBackends maps a build id (vulkan, metal, cuda-12, ...) to the reason that backend cannot serve it at all. The floors are deliberately conservative (a little after the feature landed in llama-server) and are reviewed whenever the catalog pin moves; a custom build of unknown number is trusted. Edit this file to change what Pitwall gates; it is read at startup.",
+  "capabilities": {
+    "chat": {
+      "label": "Chat and completion",
+      "minBuild": 0
+    },
+    "json": {
+      "label": "JSON and JSON-schema output",
+      "minBuild": 3000
+    },
+    "tools": {
+      "label": "Tool calling",
+      "minBuild": 4600
+    },
+    "vision": {
+      "label": "Image input (vision projector)",
+      "minBuild": 5600
+    },
+    "embeddings": {
+      "label": "Embeddings",
+      "minBuild": 3000
+    },
+    "rerank": {
+      "label": "Reranking",
+      "minBuild": 4100
+    }
+  }
+}

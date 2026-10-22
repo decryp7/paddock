@@ -6,6 +6,7 @@
 pub mod app;
 pub mod auth;
 pub mod egress;
+pub mod engine_pins;
 pub mod engines;
 pub mod fake_engine;
 pub mod http;

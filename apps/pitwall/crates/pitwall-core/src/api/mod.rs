@@ -54,6 +54,12 @@ pub enum ErrorKind {
     PresetTarget,
     /// The engine failed (500).
     Engine,
+    /// The engine build in use is too old for what the request needs (503, typed; ADR 0018).
+    EngineBuildTooOld,
+    /// No engine build of this kind can serve what the request needs (400, typed; ADR 0018).
+    CapabilityUnsupported,
+    /// The engine build pinned for the model is not installed or failed its self-test (503, typed; ADR 0018).
+    EnginePin,
 }
 
 /// An error, ready to be written in any API's shape.
@@ -89,7 +95,8 @@ impl ApiError {
             ErrorKind::NotFound | ErrorKind::PresetTarget => 404,
             ErrorKind::TooLarge => 413,
             ErrorKind::RateLimit => 429,
-            ErrorKind::Overloaded | ErrorKind::InsufficientMemory => 503,
+            ErrorKind::Overloaded | ErrorKind::InsufficientMemory | ErrorKind::EngineBuildTooOld | ErrorKind::EnginePin => 503,
+            ErrorKind::CapabilityUnsupported => 400,
             ErrorKind::NotAvailable => 501,
             ErrorKind::Timeout => 504,
             ErrorKind::Engine => 500,
@@ -111,6 +118,9 @@ impl ApiError {
             ErrorKind::Timeout => "timeout",
             ErrorKind::PresetTarget => "preset_target_unavailable",
             ErrorKind::Engine => "engine_error",
+            ErrorKind::EngineBuildTooOld => "engine_build_too_old",
+            ErrorKind::CapabilityUnsupported => "capability_unsupported",
+            ErrorKind::EnginePin => "engine_pin_unavailable",
         }
     }
 
@@ -119,9 +129,11 @@ impl ApiError {
         match family {
             ApiFamily::OpenAi => {
                 let t = match self.kind {
-                    ErrorKind::InvalidRequest | ErrorKind::TooLarge | ErrorKind::NotFound | ErrorKind::PresetTarget => {
-                        "invalid_request_error"
-                    }
+                    ErrorKind::InvalidRequest
+                    | ErrorKind::TooLarge
+                    | ErrorKind::NotFound
+                    | ErrorKind::PresetTarget
+                    | ErrorKind::CapabilityUnsupported => "invalid_request_error",
                     ErrorKind::Authentication => "authentication_error",
                     ErrorKind::Permission => "permission_error",
                     ErrorKind::RateLimit => "rate_limit_error",
@@ -131,13 +143,15 @@ impl ApiError {
             }
             ApiFamily::Anthropic => {
                 let t = match self.kind {
-                    ErrorKind::InvalidRequest => "invalid_request_error",
+                    ErrorKind::InvalidRequest | ErrorKind::CapabilityUnsupported => "invalid_request_error",
                     ErrorKind::Authentication => "authentication_error",
                     ErrorKind::Permission => "permission_error",
                     ErrorKind::NotFound | ErrorKind::PresetTarget => "not_found_error",
                     ErrorKind::TooLarge => "request_too_large",
                     ErrorKind::RateLimit => "rate_limit_error",
-                    ErrorKind::Overloaded | ErrorKind::InsufficientMemory => "overloaded_error",
+                    ErrorKind::Overloaded | ErrorKind::InsufficientMemory | ErrorKind::EngineBuildTooOld | ErrorKind::EnginePin => {
+                        "overloaded_error"
+                    }
                     _ => "api_error",
                 };
                 json!({"type": "error", "error": {"type": t, "message": self.message}})
@@ -268,9 +282,15 @@ mod tests {
             ErrorKind::Timeout,
             ErrorKind::PresetTarget,
             ErrorKind::Engine,
+            ErrorKind::EngineBuildTooOld,
+            ErrorKind::CapabilityUnsupported,
+            ErrorKind::EnginePin,
         ];
         let statuses: Vec<u16> = all.iter().map(|k| ApiError::new(*k, "m").status()).collect();
-        assert_eq!(statuses, vec![400, 401, 403, 404, 413, 429, 503, 503, 501, 504, 404, 500]);
+        assert_eq!(
+            statuses,
+            vec![400, 401, 403, 404, 413, 429, 503, 503, 501, 504, 404, 500, 503, 400, 503]
+        );
         for k in all {
             let e = ApiError::new(k, "msg");
             assert_eq!(e.body(ApiFamily::OpenAi)["error"]["message"], "msg");
@@ -287,6 +307,22 @@ mod tests {
         assert_eq!(
             ApiError::new(ErrorKind::Overloaded, "x").body(ApiFamily::Anthropic)["error"]["type"],
             "overloaded_error"
+        );
+        let shapes = |k| {
+            let e = ApiError::new(k, "x");
+            (
+                e.body(ApiFamily::OpenAi)["error"]["type"].clone(),
+                e.body(ApiFamily::Anthropic)["error"]["type"].clone(),
+            )
+        };
+        assert_eq!(
+            shapes(ErrorKind::EngineBuildTooOld),
+            (json!("server_error"), json!("overloaded_error"))
+        );
+        assert_eq!(shapes(ErrorKind::EnginePin), (json!("server_error"), json!("overloaded_error")));
+        assert_eq!(
+            shapes(ErrorKind::CapabilityUnsupported),
+            (json!("invalid_request_error"), json!("invalid_request_error"))
         );
         let e: ApiError = ChatError::Invalid("bad".into()).into();
         assert_eq!((e.status(), e.to_string()), (400, "bad".to_string()));

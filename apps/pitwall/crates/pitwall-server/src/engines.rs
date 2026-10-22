@@ -5,11 +5,16 @@
 use crate::egress::{CancelFlag, DownloadError, Egress};
 use crate::paths::Dirs;
 use crate::process;
+use crate::serving::{Blocked, CapabilityGate};
+use pitwall_core::api::{ApiError, ErrorKind};
 use pitwall_core::hardware::Hardware;
 use pitwall_core::llama::{self, Launch};
 use pitwall_core::mgmt::{Availability, EngineKind, SelfTest};
 use pitwall_core::privacy::DownloadUrl;
-use pitwall_core::runtimes::{self, builds, BuildChoice, RuntimeBuild, RuntimeCatalog};
+use pitwall_core::runtimes::capabilities::{BuildFacts, Gate, Matrix};
+use pitwall_core::runtimes::pins::{self, EnginePins, Installed, PinError, Selection};
+use pitwall_core::runtimes::{self, builds, BuildChoice, BuildId, RuntimeBuild, RuntimeCatalog};
+use pitwall_core::select::Capability;
 use pitwall_loopback::{Client, LoopbackPort};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -35,6 +40,9 @@ pub enum EngineError {
     /// The archive or build was unusable.
     #[error("{0}")]
     Install(String),
+    /// The build pinned for the model cannot be used (ADR 0018).
+    #[error(transparent)]
+    Pin(#[from] PinError),
 }
 
 /// A boxed future (the trait stays object-safe without extra crates).
@@ -124,6 +132,10 @@ pub struct LlamaCpp {
     catalog: std::sync::Arc<RuntimeCatalog>,
     hardware: Hardware,
     choice: std::sync::Arc<std::sync::RwLock<BuildChoice>>,
+    pins: std::sync::Arc<std::sync::RwLock<EnginePins>>,
+    matrix: std::sync::Arc<Matrix>,
+    /// The build each model was last started on (read with the loaded models, so a stale entry is harmless).
+    started_on: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, BuildId>>>,
 }
 
 impl LlamaCpp {
@@ -135,7 +147,71 @@ impl LlamaCpp {
             catalog: std::sync::Arc::new(RuntimeCatalog::embedded()),
             hardware,
             choice: std::sync::Arc::new(std::sync::RwLock::new(choice)),
+            pins: std::sync::Arc::new(std::sync::RwLock::new(EnginePins::default())),
+            matrix: std::sync::Arc::new(Matrix::embedded()),
+            started_on: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         }
+    }
+
+    /// The capability matrix (ADR 0018).
+    pub fn matrix(&self) -> &Matrix {
+        &self.matrix
+    }
+
+    /// The pins now.
+    pub fn pins(&self) -> EnginePins {
+        self.pins.read().map(|p| p.clone()).unwrap_or_default()
+    }
+
+    /// Replaces the pins (after they were validated and saved).
+    pub fn set_pins(&self, p: EnginePins) {
+        if let Ok(mut g) = self.pins.write() {
+            *g = p;
+        }
+    }
+
+    /// The installed builds as selection sees them.
+    pub fn facts(&self) -> Vec<Installed> {
+        self.installed()
+            .iter()
+            .filter_map(|b| {
+                Some(Installed {
+                    id: BuildId::parse(&b.id).ok()?,
+                    tag: b.tag.clone(),
+                    passed: b.self_test == "passed",
+                })
+            })
+            .collect()
+    }
+
+    /// The build that serves `model` (`None`: models in general) and why: model pin, global pin, then automatic.
+    pub fn select_for(&self, model: Option<&str>) -> Result<Selection, PinError> {
+        pins::select(&self.pins(), model, &self.facts(), &self.choice())
+    }
+
+    /// The matrix facts of the build that serves `model`.
+    pub fn build_facts(&self, model: Option<&str>) -> Result<BuildFacts, PinError> {
+        let sel = self.select_for(model)?;
+        let tag = self
+            .facts()
+            .into_iter()
+            .find(|i| i.id == sel.build)
+            .map(|i| i.tag)
+            .unwrap_or_default();
+        Ok(BuildFacts::new(sel.build.as_str(), &tag))
+    }
+
+    /// Records the build a model was started on (done by `start`; also how tests stand in for a running engine).
+    pub fn note_started(&self, model: &str, build: BuildId) {
+        if let Ok(mut g) = self.started_on.lock() {
+            g.insert(model.to_string(), build);
+        }
+    }
+
+    /// The models that run now, with the build each runs on (those whose engine this is).
+    pub fn running_on(&self, loaded: &[String]) -> Vec<(String, BuildId)> {
+        let map = self.started_on.lock().map(|g| g.clone()).unwrap_or_default();
+        loaded.iter().filter_map(|m| map.get(m).map(|b| (m.clone(), b.clone()))).collect()
     }
 
     /// The pinned catalog.
@@ -160,7 +236,8 @@ impl LlamaCpp {
         }
     }
 
-    fn choice(&self) -> BuildChoice {
+    /// The preferred build (`inference_build`).
+    pub fn choice(&self) -> BuildChoice {
         self.choice.read().map(|c| c.clone()).unwrap_or(BuildChoice::Auto)
     }
 
@@ -183,21 +260,29 @@ impl LlamaCpp {
         v
     }
 
-    /// The build that will serve: the first of the try order that passed its self-test.
+    /// The build that will serve models in general (the global pin, else the automatic choice), if any.
     pub fn active(&self) -> Option<BuildInfo> {
-        let ok: Vec<BuildInfo> = self.installed().into_iter().filter(|b| b.self_test == "passed").collect();
-        let ids: Vec<String> = ok.iter().map(|b| b.id.clone()).collect();
-        builds::try_order(&ids, &self.choice())
-            .into_iter()
-            .next()
-            .and_then(|id| ok.into_iter().find(|b| b.id == id))
+        let sel = self.select_for(None).ok()?;
+        self.installed().into_iter().find(|b| b.id == sel.build.as_str())
+    }
+
+    /// Path of the `llama-server` that serves `model` (`None`: models in general), and the build it belongs to.
+    pub fn binary_for(&self, model: Option<&str>) -> Result<(PathBuf, BuildId), EngineError> {
+        let sel = self.select_for(model).map_err(|e| match e {
+            PinError::NoGoodBuild => EngineError::NotInstalled,
+            e => EngineError::Pin(e),
+        })?;
+        let p = self.build_dir(sel.build.as_str()).join(server_name());
+        if p.is_file() {
+            Ok((p, sel.build))
+        } else {
+            Err(EngineError::NotInstalled)
+        }
     }
 
     /// Path of the active `llama-server`.
     pub fn binary(&self) -> Option<PathBuf> {
-        let b = self.active()?;
-        let p = self.build_dir(&b.id).join(server_name());
-        p.is_file().then_some(p)
+        self.binary_for(None).ok().map(|(p, _)| p)
     }
 
     /// Remove an installed build.
@@ -427,6 +512,8 @@ impl Engine for LlamaCpp {
     fn availability(&self) -> Availability {
         if self.binary().is_some() {
             Availability::Available
+        } else if let Err(EngineError::Pin(e)) = self.binary_for(None) {
+            Availability::NotInstalled { reason: e.to_string() }
         } else if self.catalog.builds(&self.platform()).is_empty() {
             Availability::NotAvailable {
                 reason: format!("llama.cpp has no build for {}", self.platform()),
@@ -440,7 +527,7 @@ impl Engine for LlamaCpp {
 
     fn start<'a>(&'a self, launch: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move {
-            let bin = self.binary().ok_or(EngineError::NotInstalled)?;
+            let (bin, build) = self.binary_for(Some(&launch.alias))?;
             let port = LoopbackPort::new(launch.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
             let key = hex(&crate::paths::random32()[..16]);
             let mut c = process::command(&bin, bin.parent());
@@ -494,6 +581,7 @@ impl Engine for LlamaCpp {
                 Ok((200, v)) => llama::parse_props(&v),
                 _ => llama::Props::default(),
             };
+            self.note_started(&launch.alias, build);
             Ok(Running {
                 child: Some(child),
                 guard: None,
@@ -502,6 +590,55 @@ impl Engine for LlamaCpp {
                 props,
             })
         })
+    }
+}
+
+impl CapabilityGate for LlamaCpp {
+    fn check(&self, model: &str, needed: &[Capability]) -> Result<(), ApiError> {
+        let facts = match self.build_facts(Some(model)) {
+            Ok(f) => f,
+            // Nothing installed: the engine's own availability error explains it when the model loads.
+            Err(PinError::NoGoodBuild) => return Ok(()),
+            Err(e) => return Err(ApiError::new(ErrorKind::EnginePin, e.to_string())),
+        };
+        let label = self.build_label(&facts);
+        match self.matrix.gate(needed, &facts).into_error(&self.matrix, model, &label) {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    fn blocked(&self, model: &str, caps: &[Capability]) -> Vec<Blocked> {
+        let Ok(facts) = self.build_facts(Some(model)) else {
+            return vec![];
+        };
+        caps.iter()
+            .filter_map(|&c| match self.matrix.gate(&[c], &facts) {
+                Gate::Allowed => None,
+                g => Some(Blocked {
+                    capability: c,
+                    reason: g
+                        .clone()
+                        .into_error(&self.matrix, model, &self.build_label(&facts))
+                        .map(|e| e.message)
+                        .unwrap_or_default(),
+                    min_build: match g {
+                        Gate::NeedsBuild { min_build, .. } => Some(min_build),
+                        _ => None,
+                    },
+                }),
+            })
+            .collect()
+    }
+}
+
+impl LlamaCpp {
+    /// `vulkan b11669` for messages.
+    fn build_label(&self, f: &BuildFacts) -> String {
+        match f.number {
+            Some(n) => format!("{} b{n}", f.id),
+            None => f.id.clone(),
+        }
     }
 }
 
@@ -698,5 +835,102 @@ mod tests {
         assert!(self_test(&d.path().join("missing")).await.is_err());
         m.remove("cpu").unwrap();
         assert!(m.active().is_none());
+    }
+
+    fn put(dirs: &Dirs, id: &str, tag: &str, self_test: &str, binary: bool) {
+        let b = dirs.engines().join(id);
+        std::fs::create_dir_all(&b).unwrap();
+        let info = BuildInfo {
+            id: id.into(),
+            tag: tag.into(),
+            self_test: self_test.into(),
+            message: None,
+            devices: vec![],
+            size: 1,
+        };
+        std::fs::write(b.join("build.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+        if binary {
+            std::fs::write(b.join(server_name()), b"").unwrap();
+        }
+    }
+
+    #[test]
+    fn the_binary_follows_the_model_pin_then_the_global_pin_and_pins_are_strict() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        put(&dirs, "cpu", "b11669", "passed", true);
+        put(&dirs, "vulkan", "b11669", "passed", true);
+        let facts = m.facts();
+        let ok = |p: &mut EnginePins, model: Option<&str>, build: &str| {
+            p.set_model(model.unwrap_or("x"), BuildId::parse(build).ok(), &facts).unwrap();
+        };
+        let (_, auto) = m.binary_for(Some("m")).unwrap();
+        assert_eq!(auto.as_str(), "vulkan");
+        let mut p = EnginePins::default();
+        p.set_global(Some(BuildId::parse("cpu").unwrap()), &facts).unwrap();
+        ok(&mut p, Some("m"), "vulkan");
+        m.set_pins(p);
+        assert_eq!(m.binary_for(Some("m")).unwrap().1.as_str(), "vulkan");
+        assert_eq!(m.binary_for(Some("other")).unwrap().1.as_str(), "cpu");
+        assert_eq!(m.binary_for(None).unwrap().1.as_str(), "cpu");
+        assert_eq!(m.active().unwrap().id, "cpu");
+        // The pinned build is removed: a typed error that says what to do, and the engine says it is not usable.
+        m.remove("cpu").unwrap();
+        let e = m.binary_for(Some("other")).unwrap_err();
+        assert!(
+            matches!(e, EngineError::Pin(PinError::NotInstalled { .. })) && e.to_string().contains("Install it in Engines"),
+            "{e}"
+        );
+        assert!(m.binary().is_none() && m.active().is_none());
+        assert!(matches!(m.availability(), Availability::NotInstalled { reason } if reason.contains("Install it in Engines")));
+        // A pin does not apply to a model that has its own.
+        assert_eq!(m.binary_for(Some("m")).unwrap().1.as_str(), "vulkan");
+    }
+
+    #[test]
+    fn a_build_whose_server_file_is_missing_is_not_installed() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        assert!(matches!(m.binary_for(None), Err(EngineError::NotInstalled)));
+        put(&dirs, "cpu", "b11669", "passed", false);
+        assert!(matches!(m.binary_for(None), Err(EngineError::NotInstalled)));
+        // A build that did not pass its self-test is not chosen and not pinnable.
+        put(&dirs, "vulkan", "b11669", "failed", true);
+        assert_eq!(m.facts().len(), 2);
+        assert!(m.select_for(None).is_ok_and(|s| s.build.as_str() == "cpu"));
+        assert!(m.build_facts(Some("m")).is_ok_and(|f| f.number == Some(11669)));
+    }
+
+    #[test]
+    fn the_gate_names_what_is_missing_and_stays_quiet_without_builds() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        let tools = [Capability::Tools, Capability::Vision];
+        assert!(m.check("m", &tools).is_ok(), "no builds: the load explains that");
+        assert!(m.blocked("m", &tools).is_empty());
+        put(&dirs, "cpu", "b4000", "passed", true);
+        let e = m.check("m", &tools).unwrap_err();
+        assert!(e.message.contains("b5600") && e.message.contains("cpu b4000"), "{}", e.message);
+        let b = m.blocked("m", &[Capability::Chat, Capability::Tools, Capability::Vision]);
+        assert_eq!(
+            b.iter().map(|x| (x.capability, x.min_build)).collect::<Vec<_>>(),
+            vec![(Capability::Tools, Some(4600)), (Capability::Vision, Some(5600))]
+        );
+        // A pin to something that is not installed is a typed pin error, not a capability error.
+        let mut p = EnginePins::default();
+        p.set_global(Some(BuildId::parse("cpu").unwrap()), &m.facts()).unwrap();
+        m.set_pins(p);
+        m.remove("cpu").unwrap();
+        assert_eq!(m.check("m", &tools).unwrap_err().kind, ErrorKind::EnginePin);
+        assert!(m.blocked("m", &tools).is_empty());
+    }
+
+    #[test]
+    fn running_on_reports_only_models_it_started() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        m.note_started("a", BuildId::parse("cpu").unwrap());
+        let r = m.running_on(&["a".to_string(), "b".to_string()]);
+        assert_eq!(r, vec![("a".to_string(), BuildId::parse("cpu").unwrap())]);
     }
 }

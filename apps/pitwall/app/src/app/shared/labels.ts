@@ -15,6 +15,7 @@ import type {
   PresetStatus,
   ReleaseReason,
   SelfTest,
+  BuildCapability,
   Severity,
 } from '../core/api.types';
 

@@ -248,6 +248,18 @@ rpc!(
     /// Goes back to the previous build.
     rollback_build => "rollback_build");
 rpc!(
+    /// The engine pins, what roll back goes to, and why not when it cannot.
+    engine_pins => "engine_pins");
+rpc!(
+    /// Pins one build for all models (`None`: unpins).
+    set_global_pin => "set_global_pin", build_id: Option<String> = "buildId");
+rpc!(
+    /// Pins one build for one model (`None`: unpins).
+    set_model_pin => "set_model_pin", model_id: String = "modelId", build_id: Option<String> = "buildId");
+rpc!(
+    /// What each installed build supports.
+    build_capabilities => "build_capabilities");
+rpc!(
     /// Engine packs.
     packs => "packs");
 rpc!(

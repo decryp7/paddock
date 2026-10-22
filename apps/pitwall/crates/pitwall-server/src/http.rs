@@ -408,6 +408,8 @@ async fn embed(
         m => m.clone(),
     };
     let resolved = st.serving.resolve(&model, false, false)?;
+    st.serving
+        .check_capabilities(&resolved, &[pitwall_core::select::Capability::Embeddings])?;
     let (app, perms) = match who {
         Principal::App { id, permissions } => (id.clone(), Some(permissions.clone())),
         _ => (AppId::parse("pitwall").map_err(|e| ApiError::invalid(e.to_string()))?, None),
@@ -771,7 +773,14 @@ async fn x_models(State(st): S, h: HeaderMap) -> Response {
         .library
         .local()
         .iter()
-        .map(|f| json!({"id": f.id.as_str(), "capabilities": crate::library::capabilities(f), "contextMax": f.info.context_length, "sizeBytes": f.size, "loaded": loaded.iter().any(|l| l.model_id == f.id.as_str())}))
+        .map(|f| {
+            // What the engine build in use cannot serve is left out of `capabilities` and listed in `unavailable`
+            // with the reason (ADR 0018), so a client selecting by capability never picks the model for it.
+            let all = crate::library::capabilities(f);
+            let blocked = st.serving.blocked(&f.id, &all);
+            let servable: Vec<_> = all.into_iter().filter(|c| !blocked.iter().any(|b| b.capability == *c)).collect();
+            json!({"id": f.id.as_str(), "capabilities": servable, "unavailable": blocked, "contextMax": f.info.context_length, "sizeBytes": f.size, "loaded": loaded.iter().any(|l| l.model_id == f.id.as_str())})
+        })
         .collect();
     axum::Json(json!({"models": v})).into_response()
 }

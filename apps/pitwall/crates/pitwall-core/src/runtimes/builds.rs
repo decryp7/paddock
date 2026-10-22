@@ -41,6 +41,51 @@ pub fn is_build_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
 }
 
+/// A validated build id (`vulkan`, `cuda-13`, ...): the folder an installed build lives in. Parsed once at the edge
+/// (settings, pin files, IPC) so a pin can never hold a path or an empty name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct BuildId(String);
+
+impl BuildId {
+    /// Parses a build id; case is folded, anything that is not a build id is refused with a message.
+    pub fn parse(raw: &str) -> Result<BuildId, String> {
+        let s = raw.trim().to_ascii_lowercase();
+        if is_build_id(&s) {
+            Ok(BuildId(s))
+        } else {
+            Err(format!(
+                "\"{}\" is not an engine build id (lowercase letters, digits, '.' and '-')",
+                raw.chars().take(40).collect::<String>()
+            ))
+        }
+    }
+
+    /// The id text.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for BuildId {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, String> {
+        BuildId::parse(&s)
+    }
+}
+
+impl From<BuildId> for String {
+    fn from(b: BuildId) -> String {
+        b.0
+    }
+}
+
+impl std::fmt::Display for BuildId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// The number of a llama.cpp release tag (`b11669` → 11669), to order releases.
 pub fn tag_number(tag: &str) -> Option<u64> {
     tag.strip_prefix('b').filter(|n| !n.is_empty()).and_then(|n| n.parse().ok())
@@ -138,6 +183,18 @@ mod tests {
         assert_eq!(try_order(&ids(&["cpu"]), &BuildChoice::Fixed("vulkan".into())), ids(&["cpu"]));
         assert!(try_order(&[], &BuildChoice::Auto).is_empty());
         assert!(try_order(&ids(&["future-npu"]), &BuildChoice::Auto).is_empty());
+    }
+
+    #[test]
+    fn build_ids_are_parsed_once() {
+        assert_eq!(BuildId::parse(" Cuda-13 ").unwrap().as_str(), "cuda-13");
+        assert_eq!(BuildId::parse("vulkan").unwrap().to_string(), "vulkan");
+        for bad in ["", "../x", ".hidden", "a b", &"a".repeat(33)] {
+            assert!(BuildId::parse(bad).unwrap_err().contains("not an engine build id"), "{bad}");
+        }
+        let id: BuildId = serde_json::from_str("\"metal\"").unwrap();
+        assert_eq!(serde_json::to_string(&id).unwrap(), "\"metal\"");
+        assert!(serde_json::from_str::<BuildId>("\"../x\"").is_err());
     }
 
     #[test]
