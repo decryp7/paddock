@@ -1272,6 +1272,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "spotter-engine"
+version = "0.2.0"
+dependencies = [
+ "spotter-core",
+]
+
+[[package]]
+name = "spotter-render"
+version = "0.2.0"
+dependencies = [
+ "spotter-core",
+]
+
+[[package]]
 name = "spotter-sources"
 version = "0.2.0"
 dependencies = [

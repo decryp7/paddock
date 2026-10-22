@@ -1,0 +1,16 @@
+[package]
+name = "spotter-render"
+description = "Spotter render (see AGENTS.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[dependencies]
+spotter-core.workspace = true
+
+[lints]
+workspace = true
