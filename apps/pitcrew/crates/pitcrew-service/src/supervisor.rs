@@ -463,6 +463,13 @@ impl Supervisor {
     /// Runs until [`Msg::Shutdown`] (or every sender is gone).
     pub fn run(mut self, rx: Receiver<Msg>) {
         let mut last_tick = (self.env.clock)();
+        if cfg!(target_os = "macos") && !crate::launch::disclaim_supported() {
+            self.log_service(
+                last_tick,
+                "this macOS does not offer responsibility_spawnattrs_setdisclaim: runners are started the old way, so macOS may \
+                 blame Pitcrew.app for the protected folders a CI job touches (privacy prompts)",
+            );
+        }
         loop {
             match rx.recv_timeout(Duration::from_millis(250)) {
                 Ok(Msg::Shutdown) => break,

@@ -88,11 +88,107 @@ pub fn read_lines(stream: impl Read + Send + 'static, sink: LineSink) {
 /// A runner started as an ordinary child of the service (service account, or the user's own session when the
 /// service runs as that user: macOS, development).
 pub struct ChildProcess {
-    child: Child,
+    child: Started,
+}
+
+/// How the process was started: `std::process` everywhere, `posix_spawn` with the responsibility disclaim on macOS
+/// (`crate::disclaim`, ADR 0020).
+enum Started {
+    Std(Child),
+    #[cfg(target_os = "macos")]
+    Spawned {
+        pid: u32,
+        reaped: bool,
+    },
+}
+
+impl Started {
+    fn id(&self) -> u32 {
+        match self {
+            Started::Std(c) => c.id(),
+            #[cfg(target_os = "macos")]
+            Started::Spawned { pid, .. } => *pid,
+        }
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<Option<Option<i32>>> {
+        match self {
+            Started::Std(c) => Ok(c.try_wait()?.map(|s| s.code())),
+            #[cfg(target_os = "macos")]
+            Started::Spawned { pid, reaped } => {
+                use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
+                if *reaped {
+                    return Ok(Some(None));
+                }
+                match waitpid(
+                    nix::unistd::Pid::from_raw(i32::try_from(*pid).unwrap_or(0)),
+                    Some(WaitPidFlag::WNOHANG),
+                ) {
+                    Ok(WaitStatus::StillAlive) => Ok(None),
+                    Ok(WaitStatus::Exited(_, code)) => {
+                        *reaped = true;
+                        Ok(Some(Some(code)))
+                    }
+                    // Killed by a signal: no exit code.
+                    Ok(_) | Err(nix::errno::Errno::ECHILD) => {
+                        *reaped = true;
+                        Ok(Some(None))
+                    }
+                    Err(e) => Err(std::io::Error::from_raw_os_error(e as i32)),
+                }
+            }
+        }
+    }
+
+    fn kill(&mut self) {
+        match self {
+            Started::Std(c) => {
+                let _ = c.kill();
+            }
+            #[cfg(target_os = "macos")]
+            Started::Spawned { pid, .. } => {
+                if let Ok(p) = i32::try_from(*pid) {
+                    let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
+                }
+            }
+        }
+    }
+}
+
+/// Whether runners are started as their own responsible processes (macOS: so a job that reads `~/Documents` does not
+/// make macOS ask about Pitcrew.app; always false elsewhere, where nothing like it exists).
+pub fn disclaim_supported() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        crate::disclaim::disclaim_supported()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
 }
 
 /// Starts `spec` as a child with piped output, in its own process group, without a console window.
 pub fn spawn_child(spec: &LaunchSpec, sink: LineSink) -> Result<ChildProcess, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let s = crate::disclaim::spawn(&spec.program, &spec.args, &spec.dir, &spec.env, crate::disclaim::find_disclaim())?;
+        read_lines(s.stdout, sink.clone());
+        read_lines(s.stderr, sink);
+        Ok(ChildProcess {
+            child: Started::Spawned {
+                pid: u32::try_from(s.pid).unwrap_or(0),
+                reaped: false,
+            },
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    spawn_std(spec, sink)
+}
+
+/// The portable start: `std::process`.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn spawn_std(spec: &LaunchSpec, sink: LineSink) -> Result<ChildProcess, String> {
     let mut cmd = quiet_command(&spec.program);
     cmd.args(&spec.args)
         .current_dir(&spec.dir)
@@ -117,7 +213,9 @@ pub fn spawn_child(spec: &LaunchSpec, sink: LineSink) -> Result<ChildProcess, St
     if let Some(err) = child.stderr.take() {
         read_lines(err, sink);
     }
-    Ok(ChildProcess { child })
+    Ok(ChildProcess {
+        child: Started::Std(child),
+    })
 }
 
 impl RunnerProcess for ChildProcess {
@@ -127,7 +225,7 @@ impl RunnerProcess for ChildProcess {
 
     fn try_wait(&mut self) -> Option<Option<i32>> {
         match self.child.try_wait() {
-            Ok(Some(status)) => Some(status.code()),
+            Ok(Some(code)) => Some(code),
             Ok(None) => None,
             // The handle is unusable: treat the process as gone so supervision goes on.
             Err(_) => Some(None),
@@ -140,7 +238,7 @@ impl RunnerProcess for ChildProcess {
 
     fn kill(&mut self) {
         kill_tree(self.child.id());
-        let _ = self.child.kill();
+        self.child.kill();
     }
 }
 

@@ -93,6 +93,21 @@ PATH = "/opt/toolchain/bin:/usr/bin:/bin"   # replaces the login shell's PATH fo
 
 A stopgap `runner.envs: PATH` entry in the runner's `config.yaml` is no longer needed; remove it.
 
+### Privacy prompts from CI jobs
+
+macOS asks "Pitcrew.app would like to access files in your Documents folder" when a *job* reads `~/Documents`,
+`~/Desktop`, `~/Downloads`, iCloud Drive or a removable volume; Pitcrew itself never touches them. macOS blames the
+*responsible process*, by default the app that started the process, and the runner and every job are started by the
+Pitcrew service. Since this version Pitcrew starts each runner with `responsibility_spawnattrs_setdisclaim` (what
+Terminal, iTerm2 and VS Code do, [ADR 0020](adr/0020-macos-responsible-process.md)), so the runner and its jobs are
+their own responsible processes and Pitcrew.app is no longer named. The prompt can still appear, now for the runner
+binary (`gitea-runner`): that is the job's doing. Best fix: **jobs should not use protected folders at all** (check out
+and build under the runner's `work/` folder or `/tmp`, and keep caches outside `~/Documents`). If a job genuinely needs
+one, grant the runner binary access in System Settings ▸ Privacy & Security ▸ Files and Folders / Full Disk Access.
+To clear an old decision made for Pitcrew.app, run `tccutil reset SystemPolicyDocumentsFolder net.decryptology.pitcrew`
+(likewise `SystemPolicyDesktopFolder`, `SystemPolicyDownloadsFolder`); an ad-hoc signed build gets a new identity on
+every reinstall, so a stale decision may also be simply forgotten by macOS.
+
 ## 4. A dedicated build Mac
 
 The agent runs while you are logged in. For a Mac that only builds:

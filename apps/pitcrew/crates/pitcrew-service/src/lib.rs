@@ -5,6 +5,8 @@
 
 pub mod cleanup;
 pub mod cli;
+#[cfg(target_os = "macos")]
+pub mod disclaim;
 pub mod error;
 pub mod host;
 pub mod hygiene;

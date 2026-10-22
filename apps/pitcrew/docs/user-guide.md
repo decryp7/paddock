@@ -196,6 +196,7 @@ skipped with a problem shown in Settings; a file from a newer Pitcrew is read-on
 | Symptom | What to do |
 | --- | --- |
 | "Service unavailable" banner | Settings ▸ Service: install or start it. On macOS approve it under Login Items; on Linux check `systemctl --user status pitcrew.service`. A version mismatch says to install the same Pitcrew version for both parts. |
+| macOS asks "Pitcrew.app would like to access files in your Documents folder" | A CI job touched a protected folder. Pitcrew now starts runners as their own responsible processes so it is no longer blamed ([macOS guide](macos.md#privacy-prompts-from-ci-jobs)); make jobs avoid protected folders. To clear an old decision: `tccutil reset SystemPolicyDocumentsFolder net.decryptology.pitcrew`. |
 | Runner **NotRegistered** | The server forgot it or the token was refused; register it again. |
 | Runner **Degraded** | The server or network is unreachable; Pitcrew keeps trying and restarts the runner if polls time out while it is idle. |
 | Runner **CrashLoop** | Read its log; fix the cause; press Start to clear it. |

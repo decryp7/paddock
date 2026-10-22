@@ -51,6 +51,9 @@ windows = { version = "0.62", features = [
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["signal", "process", "user"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # The fake runner (examples/fake_runner.rs) stops on Ctrl+Break / SIGTERM like the real one.
 ctrlc = { version = "3.5", features = ["termination"] }
