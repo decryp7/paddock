@@ -15,6 +15,7 @@ pub mod native_feel;
 pub mod ops;
 pub mod service_client;
 pub mod service_install;
+pub mod service_repair;
 pub mod tray;
 pub mod updater;
 
@@ -69,6 +70,7 @@ pub fn run() {
             commands::service_install_state,
             commands::install_service,
             commands::uninstall_service,
+            commands::open_login_items,
             commands::app_update_status,
             commands::check_app_update,
             commands::install_app_update,
@@ -103,12 +105,9 @@ pub fn run() {
                 for attempt in 0..service_install::REPAIR_ATTEMPTS {
                     std::thread::sleep(service_install::repair_delay(attempt));
                     match service_install::repair_registration() {
-                        Ok(true) => {
-                            applog::write("registered the service again (launchd refused the old registration)");
-                            break;
-                        }
-                        Ok(false) => {}
-                        Err(e) => applog::write(&format!("the service could not be registered again: {}", e.message)),
+                        Some(service_repair::RepairOutcome::Recovered | service_repair::RepairOutcome::NeedsApproval) => break,
+                        // Failed: the next check tries again (bounded by REPAIR_ATTEMPTS); nothing to repair: keep watching.
+                        Some(service_repair::RepairOutcome::Failed(_)) | None => {}
                     }
                 }
             });

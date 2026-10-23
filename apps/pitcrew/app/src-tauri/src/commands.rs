@@ -603,6 +603,12 @@ pub async fn uninstall_service() -> Result<(), CommandError> {
     blocking(service_install::uninstall).await
 }
 
+/// `open_login_items`: opens System Settings ▸ General ▸ Login Items (macOS).
+#[tauri::command]
+pub async fn open_login_items() -> Result<(), CommandError> {
+    blocking(service_install::open_login_items).await
+}
+
 /// `app_update_status`: whether this build can update itself.
 #[tauri::command]
 pub fn app_update_status<R: Runtime>(app: AppHandle<R>) -> AppUpdateStatusDto {

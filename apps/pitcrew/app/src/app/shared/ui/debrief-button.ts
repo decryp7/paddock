@@ -32,11 +32,11 @@ export class DebriefButton implements OnInit {
   readonly text = input('Debrief');
 
   protected readonly store = inject(DebriefStore);
-  protected readonly tip = computed(() =>
-    this.store.status()?.installed === false
-      ? 'Debrief was not found. The log is still saved so you can open it by hand.'
-      : 'Analyse this log in Debrief',
-  );
+  protected readonly tip = computed(() => {
+    const s = this.store.status();
+    if (s?.needsUpdate) return 'Update Debrief to use Open in Debrief. The log is still saved so you can open it by hand.';
+    return s?.installed === false ? 'Debrief was not found. The log is still saved so you can open it by hand.' : 'Analyse this log in Debrief';
+  });
 
   ngOnInit(): void {
     void this.store.load();

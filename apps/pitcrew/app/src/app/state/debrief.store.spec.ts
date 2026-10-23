@@ -31,7 +31,17 @@ describe('DebriefStore', () => {
     mock = t.mock;
     vi.spyOn(mock, 'debriefStatus').mockRejectedValue(new Error('x'));
     await t.store.load();
-    expect(t.store.status()).toEqual({ installed: false, program: null, cliName: 'debrief' });
+    expect(t.store.status()).toEqual({ installed: false, program: null, needsUpdate: false, cliName: 'debrief' });
+  });
+
+  it('says to update Debrief when only the old program was found', async () => {
+    const s = setup();
+    mock = s.mock;
+    vi.spyOn(mock, 'debriefStatus').mockResolvedValue({ installed: false, program: null, needsUpdate: true, cliName: 'debrief' });
+    vi.spyOn(mock, 'openInDebrief').mockResolvedValue({ result: 'notInstalled', file: '/f.log', message: 'Update Debrief.' });
+    await s.store.load();
+    await s.store.open('build-win', 'x');
+    expect(s.toasts.toasts().at(-1)?.title).toBe('Update Debrief to use Open in Debrief');
   });
 
   it('tells the user what happened: opened, not installed, nothing to open, failure', async () => {

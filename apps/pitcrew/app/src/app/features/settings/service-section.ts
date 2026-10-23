@@ -4,6 +4,7 @@ import { Dialog } from '@angular/cdk/dialog';
 import { ClockService } from '../../core/clock.service';
 import { formatDuration } from '../../shared/format';
 import { confirmAction } from '../../shared/ui/confirm-dialog';
+import { ServiceNotices } from '../../shared/ui/service-notices';
 import { LoadState } from '../../shared/ui/load-state';
 import { ServiceStore } from '../../state/service.store';
 import { StatusStore } from '../../state/status.store';
@@ -11,7 +12,7 @@ import { StatusStore } from '../../state/status.store';
 /** The Pitcrew service: whether it is installed and running, and installing or removing it. */
 @Component({
   selector: 'pc-service-section',
-  imports: [MatIcon, LoadState],
+  imports: [MatIcon, LoadState, ServiceNotices],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card">
@@ -28,6 +29,7 @@ import { StatusStore } from '../../state/status.store';
                 <span class="faint small num">version {{ svc.version }} · up {{ up() }} · data in {{ svc.dataDir }}</span>
               }
             </div>
+            <pc-service-notices />
             @if (s.message) {
               <p class="muted">{{ s.message }}</p>
             }
@@ -36,7 +38,7 @@ import { StatusStore } from '../../state/status.store';
               {{ isMac() ? 'On macOS it is your own launch agent: installing it adds Pitcrew to Login Items, and macOS asks you to approve it in System Settings ▸ General ▸ Login Items.' : 'On Windows it is a service started by Windows; installing or removing it asks for administrator permission (a UAC prompt). Pitcrew never asks for or stores your password.' }}
             </p>
             <div class="btn-row">
-              @if (!s.installed) {
+              @if (!s.installed && !s.disabledInLoginItems) {
                 <button type="button" class="btn primary" (click)="service.install()" [disabled]="!s.canInstall || service.working() !== null">
                   <mat-icon svgIcon="pc:shield" aria-hidden="true" />{{ service.working() === 'install' ? 'Waiting for permission…' : 'Install service' }}
                 </button>
@@ -46,7 +48,7 @@ import { StatusStore } from '../../state/status.store';
                 </button>
               }
             </div>
-            @if (!s.canInstall && !s.installed) {
+            @if (!s.canInstall && !s.installed && !s.disabledInLoginItems) {
               <p class="faint small">Installing is not possible here{{ s.platform === 'browser' ? ' (browser build)' : '' }}.</p>
             }
           }

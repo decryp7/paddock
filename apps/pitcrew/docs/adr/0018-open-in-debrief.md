@@ -12,8 +12,8 @@ one click.
 
 **Command-line hand-off.** Debrief opens the paths it is started with, and a running Debrief takes them over as a second
 instance, so Pitcrew starts `<debrief program> <file>` detached. A deep link would need a registered URL scheme on each
-OS and is not needed. The program's name is one constant, `debrief_link::DEBRIEF_CLI` (`imt` today; `debrief` after the
-rename is the only line to change); it is searched on `PATH` and in the usual install places per OS
+OS and is not needed. The program's name is one constant, `debrief_link::DEBRIEF_CLI` (`debrief`; it was `imt` before the
+rename, and finding only `imt` is reported as "Update Debrief to use Open in Debrief"); it is searched on `PATH` and in the usual install places per OS
 (`install_candidates`), because a GUI app on macOS has a minimal `PATH`.
 
 **The job, not the whole log.** The engine cuts the job's lines out of `runner.log` (and `runner.log.1` when the job is

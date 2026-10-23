@@ -49,6 +49,8 @@ mod imp {
             running: false,
             can_install: true,
             message: None,
+            repair: None,
+            disabled_in_login_items: false,
         };
         let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) else {
             return ServiceInstall {
@@ -141,9 +143,15 @@ mod imp {
     #![allow(unsafe_code, unused_unsafe)]
 
     use super::*;
+    use crate::applog;
     use crate::service_client::ServiceClient;
+    use crate::service_repair::{
+        disabled_in_login_items, parse_print_disabled, run_repair, stale_registration, RegisterError, RegistrationStatus, RepairOps,
+        RepairOutcome, REPAIR,
+    };
     use objc2_foundation::NSString;
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
+    use std::time::{Duration, Instant};
 
     const PLIST: &str = "net.decryptology.pitcrew.service.plist";
 
@@ -153,24 +161,41 @@ mod imp {
         unsafe { SMAppService::agentServiceWithPlistName(&name) }
     }
 
-    /// Whether the service is registered and running.
-    pub fn state() -> ServiceInstall {
+    /// What `SMAppService` says, as the pure mapping's type.
+    fn registration_status() -> RegistrationStatus {
         // SAFETY: a property read on a valid object.
         let status = unsafe { service().status() };
+        if status == SMAppServiceStatus::Enabled {
+            RegistrationStatus::Enabled
+        } else if status == SMAppServiceStatus::RequiresApproval {
+            RegistrationStatus::RequiresApproval
+        } else if status == SMAppServiceStatus::NotFound {
+            RegistrationStatus::NotFound
+        } else {
+            RegistrationStatus::NotRegistered
+        }
+    }
+
+    /// Whether the user switched Pitcrew's background item off in Login Items.
+    fn disabled_by_user() -> bool {
+        disabled_in_login_items(registration_status(), launchd_disabled())
+    }
+
+    /// Whether the service is registered and running.
+    pub fn state() -> ServiceInstall {
+        let status = registration_status();
         let running = crate::service_client::LocalServiceClient
             .request(pitcrew_core::protocol::Request::Status)
             .is_ok();
-        let (installed, message) = if status == SMAppServiceStatus::Enabled {
-            (true, None)
-        } else if status == SMAppServiceStatus::RequiresApproval {
-            (true, Some("allow Pitcrew in System Settings ▸ General ▸ Login Items".to_string()))
-        } else if status == SMAppServiceStatus::NotFound {
-            (
+        let disabled = disabled_in_login_items(status, launchd_disabled());
+        let (installed, message) = match status {
+            RegistrationStatus::Enabled => (true, None),
+            RegistrationStatus::RequiresApproval => (true, Some("allow Pitcrew in System Settings ▸ General ▸ Login Items".to_string())),
+            RegistrationStatus::NotFound => (
                 false,
                 Some("run Pitcrew from /Applications (the launch agent is part of the app bundle)".to_string()),
-            )
-        } else {
-            (false, None)
+            ),
+            RegistrationStatus::NotRegistered => (false, None),
         };
         ServiceInstall {
             platform: "macos",
@@ -178,7 +203,16 @@ mod imp {
             running,
             can_install: true,
             message,
+            repair: REPAIR.current(Instant::now()),
+            disabled_in_login_items: disabled,
         }
+    }
+
+    /// Opens System Settings ▸ General ▸ Login Items. The user switches the item; Pitcrew never does it for them.
+    pub fn open_login_items() -> Result<(), CommandError> {
+        // SAFETY: a class method without arguments.
+        unsafe { SMAppService::openSystemSettingsLoginItems() };
+        Ok(())
     }
 
     /// Registers and starts the service (the OS asks the user).
@@ -212,44 +246,88 @@ mod imp {
             .map_err(|e| CommandError::internal(format!("the launch agent could not be removed: {}", e.localizedDescription())))
     }
 
-    /// After the app was updated, launchd may refuse the registered service (see [`super::stale_registration`]).
-    /// When the service is registered but does not answer and launchd reports a stale registration, registers it
-    /// again. Returns whether it did. macOS may ask for approval again; [`state`] then says so.
-    pub fn repair_registration() -> Result<bool, CommandError> {
-        // SAFETY: a property read on a valid object.
-        let status = unsafe { service().status() };
-        // NotFound: the app is not in a place macOS can register from (e.g. not in /Applications): nothing to repair.
-        // Any other status may be stale: after the app was replaced, macOS can report "not registered" while launchd
-        // still holds the old job and refuses to start the new binary, so launchd's own report decides below.
-        if status == SMAppServiceStatus::NotFound
-            || crate::service_client::LocalServiceClient
-                .request(pitcrew_core::protocol::Request::Status)
-                .is_ok()
+    /// After the app was updated, launchd may refuse the registered service (see [`stale_registration`]). When the
+    /// service is registered but does not answer and launchd reports a stale registration, registers it again
+    /// ([`run_repair`]), publishing progress in [`REPAIR`] and every step in the app log. `None`: nothing to repair
+    /// (including the user having switched the item off: that is their choice and is left alone).
+    pub fn repair_registration() -> Option<RepairOutcome> {
+        if registration_status() == RegistrationStatus::NotFound || disabled_by_user() {
+            return None;
+        }
+        if crate::service_client::LocalServiceClient
+            .request(pitcrew_core::protocol::Request::Status)
+            .is_ok()
         {
-            return Ok(false);
+            return None;
         }
-        let Some(report) = launchctl_print() else { return Ok(false) };
-        if !super::stale_registration(&report) {
-            return Ok(false);
+        // After the app was replaced macOS can report "not registered" while launchd still holds the old job and
+        // refuses to start the new binary, so launchd's own report decides.
+        if !stale_registration(&launchctl(&["print", &target()?])?) {
+            return None;
         }
-        // Unregistering a stale job can fail when launchd already dropped it; registering again is what matters.
-        let _ = uninstall();
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        install().map(|()| true)
+        REPAIR.begin(Instant::now());
+        applog::write("the service is registered but launchd refuses it (stale registration): repairing");
+        let outcome = run_repair(&mut MacOps, &mut |step| applog::write(&format!("repair: {step}")));
+        REPAIR.finish(&outcome, Instant::now());
+        applog::write(&format!("repair finished: {outcome:?}"));
+        Some(outcome)
     }
 
-    /// `launchctl print gui/<uid>/<label>`, bounded to a few seconds; `None` when it cannot be read.
-    fn launchctl_print() -> Option<String> {
+    /// [`RepairOps`] over `SMAppService` and `launchctl`.
+    struct MacOps;
+
+    impl RepairOps for MacOps {
+        fn register(&mut self) -> Result<(), RegisterError> {
+            install().map_err(|e| {
+                if e.code == CommandErrorCode::PermissionDenied {
+                    RegisterError::NeedsApproval
+                } else {
+                    RegisterError::Other(e.message)
+                }
+            })
+        }
+        fn unregister(&mut self) -> Result<(), String> {
+            uninstall().map_err(|e| e.message)
+        }
+        fn registration_stale(&mut self) -> bool {
+            target()
+                .and_then(|t| launchctl(&["print", &t]))
+                .is_some_and(|report| stale_registration(&report))
+        }
+        fn service_answers(&mut self) -> bool {
+            crate::service_client::LocalServiceClient
+                .request(pitcrew_core::protocol::Request::Status)
+                .is_ok()
+        }
+        fn pause(&mut self, how_long: Duration) {
+            std::thread::sleep(how_long);
+        }
+    }
+
+    /// `gui/<uid>/<label>`.
+    fn target() -> Option<String> {
+        Some(format!("{}/{}", gui_domain()?, pitcrew_core::service_spec::LAUNCHD_LABEL))
+    }
+
+    fn gui_domain() -> Option<String> {
         use std::os::unix::fs::MetadataExt;
-        use std::process::{Command, Stdio};
-        use std::time::{Duration, Instant};
         let home = std::env::var_os("HOME")?;
-        let uid = std::fs::metadata(home).ok()?.uid();
-        let target = format!("gui/{uid}/{}", pitcrew_core::service_spec::LAUNCHD_LABEL);
+        Some(format!("gui/{}", std::fs::metadata(home).ok()?.uid()))
+    }
+
+    /// Whether launchd's override database marks the service disabled (`launchctl print-disabled gui/<uid>`).
+    fn launchd_disabled() -> Option<bool> {
+        let report = launchctl(&["print-disabled", &gui_domain()?])?;
+        parse_print_disabled(&report, pitcrew_core::service_spec::LAUNCHD_LABEL)
+    }
+
+    /// `launchctl <args>`, bounded to a few seconds; `None` when it cannot be run or read.
+    fn launchctl(args: &[&str]) -> Option<String> {
+        use std::process::{Command, Stdio};
         // macOS only: no console window to hide, and the wait below is bounded.
         #[allow(clippy::disallowed_methods)]
         let mut child = Command::new("/bin/launchctl")
-            .args(["print", &target])
+            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -312,6 +390,8 @@ mod imp {
             running,
             can_install: true,
             message,
+            repair: None,
+            disabled_in_login_items: false,
         }
     }
 
@@ -373,7 +453,16 @@ mod imp {
 pub use imp::{install, state, uninstall};
 
 #[cfg(target_os = "macos")]
-pub use imp::repair_registration;
+pub use imp::{open_login_items, repair_registration};
+
+/// Opens System Settings ▸ General ▸ Login Items, where the user switches the background item on. Only macOS has one.
+#[cfg(not(target_os = "macos"))]
+pub fn open_login_items() -> Result<(), CommandError> {
+    Err(CommandError::new(
+        CommandErrorCode::NotImplemented,
+        "Login Items exist on macOS only",
+    ))
+}
 
 /// How many times a run of the app checks for a stale service registration (macOS).
 pub const REPAIR_ATTEMPTS: u32 = 8;
@@ -384,34 +473,12 @@ pub fn repair_delay(attempt: u32) -> std::time::Duration {
     std::time::Duration::from_secs(if attempt == 0 { 3 } else { 60 })
 }
 
-/// Whether `launchctl print` of the launch agent shows a registration launchd can no longer start. macOS keeps the
-/// code requirement of the binary that was approved; a rebuilt, ad-hoc signed app has another identity, so launchd
-/// refuses the new service ("needs LWCR update", spawn failed, exit 78 EX_CONFIG) until it is registered again.
-pub fn stale_registration(launchctl_print: &str) -> bool {
-    launchctl_print.contains("needs LWCR update")
-        || launchctl_print.contains("job state = spawn failed")
-        || launchctl_print.contains("last exit code = 78")
-}
-
 #[cfg(test)]
 mod stale_tests {
-    use super::stale_registration;
-
     #[test]
     fn repair_checks_soon_then_every_minute() {
         assert_eq!(super::repair_delay(0).as_secs(), 3);
         assert_eq!(super::repair_delay(1).as_secs(), 60);
         const { assert!(super::REPAIR_ATTEMPTS >= 5) };
-    }
-
-    #[test]
-    fn a_registration_launchd_cannot_start_is_stale() {
-        let failed = "\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n\tjob state = spawn failed\n\tproperties = partial import | keepalive | needs LWCR update | has LWCR\n";
-        assert!(stale_registration(failed));
-        assert!(stale_registration("\tproperties = keepalive | needs LWCR update\n"));
-        let healthy =
-            "\tstate = running\n\tpid = 88412\n\tlast exit code = (never exited)\n\tproperties = keepalive | runatload | has LWCR\n";
-        assert!(!stale_registration(healthy));
-        assert!(!stale_registration(""));
     }
 }

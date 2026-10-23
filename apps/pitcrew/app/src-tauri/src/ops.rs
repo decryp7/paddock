@@ -211,8 +211,14 @@ pub async fn open_in_debrief<R: Runtime>(
     blocking(move || {
         let log = std::path::Path::new(&dir).join("logs").join(pitcrew_core::layout::LOG_FILE);
         let path = std::env::var("PATH").ok();
-        let program = handoff::find(path.as_deref(), &|k| std::env::var(k).ok());
-        handoff::hand_off(&log, n.as_str(), &label, window, &out, program.as_deref(), &handoff::start).map_err(CommandError::internal)
+        let env = |k: &str| std::env::var(k).ok();
+        let found = handoff::find(path.as_deref(), &env);
+        let program = match &found {
+            Some(p) => handoff::Lookup::Found(p),
+            None if handoff::legacy_only(path.as_deref(), &env) => handoff::Lookup::NeedsUpdate,
+            None => handoff::Lookup::Missing,
+        };
+        handoff::hand_off(&log, n.as_str(), &label, window, &out, program, &handoff::start).map_err(CommandError::internal)
     })
     .await
 }

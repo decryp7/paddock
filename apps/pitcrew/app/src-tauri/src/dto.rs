@@ -203,6 +203,10 @@ pub struct ServiceInstall {
     pub can_install: bool,
     /// More, for the user (e.g. "approve Pitcrew in System Settings ▸ Login Items").
     pub message: Option<String>,
+    /// The background repair of a registration macOS refused, while it works and after (macOS only).
+    pub repair: Option<crate::service_repair::RepairNotice>,
+    /// The user switched the background item off in System Settings ▸ General ▸ Login Items (macOS only).
+    pub disabled_in_login_items: bool,
 }
 
 /// `BackendEvent`, emitted as the Tauri event `pitcrew://event`.

@@ -162,10 +162,36 @@ describe('ConnectionBanner', () => {
 
   it('explains Login Items on macOS', async () => {
     configure({ scenario: 'notInstalled' });
-    vi.spyOn(mock, 'serviceInstall').mockResolvedValue({ platform: 'macos', installed: false, running: false, canInstall: true, message: null });
+    vi.spyOn(mock, 'serviceInstall').mockResolvedValue({ platform: 'macos', installed: false, running: false, canInstall: true, message: null, repair: null, disabledInLoginItems: false });
     const f = TestBed.createComponent(ConnectionBanner);
     await settle(f);
     expect(text(f.nativeElement)).toContain('Login Items');
+  });
+
+  const macos = { platform: 'macos', installed: true, running: false, canInstall: true, message: null, repair: null, disabledInLoginItems: false } as const;
+
+  it('says the repair is working and offers no install while it does', async () => {
+    configure({ scenario: 'unavailable' });
+    const repair = { state: 'working', message: 'Re-registering the background service with macOS… (this can take a minute)' } as const;
+    vi.spyOn(mock, 'serviceInstall').mockResolvedValue({ ...macos, installed: false, repair });
+    const f = TestBed.createComponent(ConnectionBanner);
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(text(el.querySelector('[data-testid="service-repair"]'))).toContain('Re-registering the background service with macOS… (this can take a minute)');
+    expect(byText(el, 'button', 'Install service')).toBeNull();
+  });
+
+  it('tells the user the item is off in Login Items and opens that pane, never switching it', async () => {
+    configure({ scenario: 'unavailable' });
+    vi.spyOn(mock, 'serviceInstall').mockResolvedValue({ ...macos, installed: false, disabledInLoginItems: true });
+    const f = TestBed.createComponent(ConnectionBanner);
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(text(el.querySelector('[data-testid="service-disabled"]'))).toContain("Pitcrew's background service is turned off in System Settings ▸ General ▸ Login Items");
+    expect(byText(el, 'button', 'Install service')).toBeNull();
+    byText<HTMLButtonElement>(el, 'button', 'Open Login Items')!.click();
+    await settle(f);
+    expect(mock.loginItemsOpened).toBe(1);
   });
 
   it('shows an installed but stopped service without an install button', async () => {

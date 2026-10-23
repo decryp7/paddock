@@ -307,6 +307,9 @@ export class TauriBackend implements PitcrewBackend {
   uninstallService(): Promise<void> {
     return this.run('uninstall_service');
   }
+  openLoginItems(): Promise<void> {
+    return this.run('open_login_items');
+  }
 
   appUpdateStatus(): Promise<AppUpdateStatus> {
     return this.run('app_update_status');

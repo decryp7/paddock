@@ -10,9 +10,11 @@ use crate::platform::Os;
 use crate::time::{parse_rfc3339, Timestamp};
 use std::path::PathBuf;
 
-/// The name of Debrief's command-line program. It is `imt` until Debrief is renamed; then this is the only line to
-/// change.
-pub const DEBRIEF_CLI: &str = "imt";
+/// The name of Debrief's command-line program.
+pub const DEBRIEF_CLI: &str = "debrief";
+/// What the program was called before Debrief was renamed. Found without [`DEBRIEF_CLI`], it means Debrief is too old
+/// to take part in "Open in Debrief"; Pitcrew only says so, it never starts it.
+pub const LEGACY_DEBRIEF_CLI: &str = "imt";
 /// The name of the application in the places apps are installed.
 pub const DEBRIEF_APP: &str = "Debrief";
 /// Most bytes of a job's log handed over.
@@ -31,7 +33,12 @@ fn exe(name: &str, os: Os) -> String {
 /// The places to look for Debrief's program, best first, after the directories of `PATH` (which the caller searches
 /// first). `env` reads an environment variable.
 pub fn install_candidates(os: Os, env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
-    let program = exe(DEBRIEF_CLI, os);
+    install_candidates_of(DEBRIEF_CLI, os, env)
+}
+
+/// [`install_candidates`] for a program of another name (the legacy one).
+pub fn install_candidates_of(cli: &str, os: Os, env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    let program = exe(cli, os);
     let mut out = Vec::new();
     match os {
         Os::Macos => {
@@ -135,6 +142,15 @@ mod tests {
         let lin = install_candidates(Os::Linux, &|_| None);
         assert!(lin.iter().all(|p| p.file_name().is_some_and(|n| n == DEBRIEF_CLI)));
         assert!(install_candidates(Os::Windows, &|_| None).is_empty());
+    }
+
+    #[test]
+    fn the_cli_is_debrief_and_the_legacy_name_has_its_own_candidates() {
+        assert_eq!(DEBRIEF_CLI, "debrief");
+        let env = |k: &str| (k == "HOME").then(|| "/Users/me".to_string());
+        let old = install_candidates_of(LEGACY_DEBRIEF_CLI, Os::Macos, &env);
+        assert!(old.iter().all(|p| p.file_name().is_some_and(|n| n == "imt")));
+        assert_eq!(old.len(), install_candidates(Os::Macos, &env).len());
     }
 
     #[test]

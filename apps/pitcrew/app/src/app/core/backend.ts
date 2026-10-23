@@ -139,6 +139,8 @@ export interface PitcrewBackend {
   /** Asks the OS for permission (UAC / Login Items) and installs and starts the service. */
   installService(): Promise<void>;
   uninstallService(): Promise<void>;
+  /** macOS: opens System Settings ▸ General ▸ Login Items. Pitcrew never switches the item itself. */
+  openLoginItems(): Promise<void>;
 
   // The app itself.
   appUpdateStatus(): Promise<AppUpdateStatus>;
