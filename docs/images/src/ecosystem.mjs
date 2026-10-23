@@ -10,14 +10,15 @@ const out = join(here, '..');
 const W = 1600, H = 1000;
 
 const apps = [
-  { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', lines: ['Keeps your CI runners alive,', 'updated and clean.'] },
-  { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
-  { id: 'pitwall', name: 'Pitwall', accent: '#6D3FD6', lines: ['The private, local LLM', 'server your apps talk to.'] },
-  { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new releases', 'anywhere, the moment one', 'appears.'] },
+  { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', lines: ['Keeps your CI runners', 'alive, updated and', 'clean.'] },
+  { id: 'sighter', name: 'Sighter', accent: '#00B8D9', tag: 'In design', lines: ['Finds any UI element', 'by sight. Vision models', 'for your UI tests.'] },
+  { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing', 'logs and diagnostic', 'files.'] },
+  { id: 'pitwall', name: 'Pitwall', accent: '#6D3FD6', lines: ['The private, local', 'LLM server your', 'apps talk to.'] },
   { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Measures, explains', 'and tunes your PC.'] },
+  { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new', 'releases anywhere, the', 'moment one appears.'] },
 ];
 
-const CW = 264, GAP = 32, X0 = (W - (5 * CW + 4 * GAP)) / 2, CY = 372, CH = 224;
+const CW = 224, GAP = 24, X0 = (W - (6 * CW + 5 * GAP)) / 2, CY = 372, CH = 224;
 const cx = (i) => X0 + i * (CW + GAP) + CW / 2;
 const idx = Object.fromEntries(apps.map((a, i) => [a.id, i]));
 
@@ -33,12 +34,13 @@ function pill(x, y, text, w) {
     `<text class="lbl" x="${x}" y="${y + 5}" text-anchor="middle">${text}</text></g>`;
 }
 
-// Link between two cards: arc over (up) or under (down) the row, with a label pill at the apex and an arrow head at `to`.
-function link(from, to, dir, depth, label, w, arrow = true) {
-  const a = cx(idx[from]) + (idx[to] > idx[from] ? 10 : -10), b = cx(idx[to]) + (idx[to] > idx[from] ? -10 : 10);
+// Hand-off between two cards: a dotted arc over (up) or under (down) the row with a label pill at its apex and an arrow head at
+// `to` (none when `arrow` is false). ax/bx are x offsets from the card centres; nested arcs keep their ends ordered so none cross.
+function link(from, to, dir, depth, label, w, ax, bx, arrow = true) {
+  const a = cx(idx[from]) + ax, b = cx(idx[to]) + bx;
   const y0 = dir === 'up' ? CY : CY + CH, s = dir === 'up' ? -1 : 1;
-  const ya = y0 + s * 2, top = y0 + s * depth, r = 28;
-  const d = `M${a} ${ya} L${a} ${top - s * r} Q${a} ${top} ${a + Math.sign(b - a) * r} ${top} L${b - Math.sign(b - a) * r} ${top} Q${b} ${top} ${b} ${top - s * r} L${b} ${ya + s * 8}`;
+  const ya = y0 + s * 2, top = y0 + s * depth, r = 24, sg = Math.sign(b - a);
+  const d = `M${a} ${ya} L${a} ${top - s * r} Q${a} ${top} ${a + sg * r} ${top} L${b - sg * r} ${top} Q${b} ${top} ${b} ${top - s * r} L${b} ${ya + s * 8}`;
   const head = arrow ? `<path class="arrow" d="M${b - 5} ${ya + s * 14} L${b} ${ya + s * 6} L${b + 5} ${ya + s * 14}" />` : '';
   return `<path class="link" d="${d}"/>${head}${pill((a + b) / 2, top, label, w)}`;
 }
@@ -46,31 +48,36 @@ function link(from, to, dir, depth, label, w, arrow = true) {
 const cards = apps.map((a, i) => {
   const x = X0 + i * (CW + GAP);
   const text = a.lines.map((l, k) => `<text class="promise" x="${x + 24}" y="${CY + 160 + k * 22}">${l}</text>`).join('');
+  const tag = a.tag ? `<rect class="tag" x="${x + CW - 24 - 76}" y="${CY + 24}" width="76" height="24" rx="12"/><text class="tagt" x="${x + CW - 24 - 38}" y="${CY + 40}" text-anchor="middle">${a.tag}</text>` : '';
   return `<g>
   <rect class="card" x="${x}" y="${CY}" width="${CW}" height="${CH}" rx="16"/>
-  ${icon(a.id, x + 24, CY + 24, 72)}
+  ${icon(a.id, x + 24, CY + 24, 72)}${tag}
   <rect x="${x + 24}" y="${CY + 108}" width="20" height="3" rx="1.5" fill="${a.accent}"/>
-  <text class="name" x="${x + 24}" y="${CY + 136}" ${''}>${a.name}</text>
+  <text class="name" x="${x + 24}" y="${CY + 136}">${a.name}</text>
   ${text}
 </g>`;
 }).join('\n');
 
+// Order Pitcrew, Sighter, Debrief, Pitwall, Dyno, Spotter lets every hand-off sit on one of two planar layers (above / below).
 const links = [
-  link('pitcrew', 'debrief', 'up', 56, 'Open job log in Debrief', 188),
-  link('pitwall', 'debrief', 'up', 56, 'Local AI: Explain, research', 196),
-  link('pitwall', 'spotter', 'up', 56, 'Local AI: &quot;What&#8217;s new&quot;', 196),
-  link('dyno', 'spotter', 'up', 56, 'Watch for updates', 148),
-  link('dyno', 'debrief', 'down', 52, 'Open in Debrief', 132),
-  link('dyno', 'pitcrew', 'down', 92, 'Machine health in Pitcrew', 196),
+  link('sighter', 'pitcrew', 'up', 52, 'Runs on CI', 108, -24, 24, false),
+  link('sighter', 'debrief', 'up', 52, 'Test runs', 100, 44, -24),
+  link('pitwall', 'debrief', 'up', 52, 'Explain, research', 132, -44, 24),
+  link('pitwall', 'spotter', 'up', 52, 'Local AI: &quot;What&#8217;s new&quot;', 204, 24, -24),
+  link('pitwall', 'sighter', 'up', 100, 'Vision', 84, -8, 8),
+  link('pitcrew', 'debrief', 'down', 52, 'Open job log in Debrief', 196, 44, -24),
+  link('dyno', 'debrief', 'down', 52, 'Open in Debrief', 140, -44, 24),
+  link('dyno', 'spotter', 'down', 52, 'Watch for updates', 156, 24, -24),
+  link('dyno', 'pitcrew', 'down', 100, 'Machine health in Pitcrew', 204, -8, 8),
 ].join('\n');
 
 // Paddock foundation
-const PX = X0, PW = 5 * CW + 4 * GAP, PY = 732, PH = 120;
+const PX = X0, PW = 6 * CW + 5 * GAP, PY = 748, PH = 112;
 const provides = ['UI kit', 'Design system', 'Diagram kit', 'CI and release practices'];
 const chips = (() => {
   const widths = [88, 136, 128, 212], gap = 16, total = widths.reduce((s, w) => s + w, 0) + gap * 3;
   let x = PX + PW - 32 - total;
-  return provides.map((t, i) => { const w = widths[i]; const s = `<rect class="chip" x="${x}" y="${PY + 44}" width="${w}" height="32" rx="16"/><text class="lbl" x="${x + w / 2}" y="${PY + 65}" text-anchor="middle">${t}</text>`; x += w + gap; return s; }).join('');
+  return provides.map((t, i) => { const w = widths[i]; const s = `<rect class="chip" x="${x}" y="${PY + 40}" width="${w}" height="32" rx="16"/><text class="lbl" x="${x + w / 2}" y="${PY + 61}" text-anchor="middle">${t}</text>`; x += w + gap; return s; }).join('');
 })();
 
 const values = [
@@ -78,7 +85,7 @@ const values = [
   ['Windows, macOS and Linux', 'One family, native on each.'],
   ['Rust and Angular', 'Fast engines, native feel.'],
 ];
-const VY = 900;
+const VY = 904;
 const valueEls = values.map(([t, s], i) => {
   const x = X0 + i * ((PW) / 3) + 0;
   return `<rect x="${x}" y="${VY - 4}" width="2" height="44" rx="1" class="rule"/><text class="vt" x="${x + 16}" y="${VY + 14}">${t}</text><text class="vs" x="${x + 16}" y="${VY + 36}">${s}</text>`;
@@ -86,7 +93,7 @@ const valueEls = values.map(([t, s], i) => {
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">The Paddock family</title>
-<desc id="d">Pitcrew, Debrief, Pitwall, Spotter and Dyno, five local-first desktop apps, connected by a few hand-offs and built on the shared Paddock foundation.</desc>
+<desc id="d">Pitcrew, Sighter, Debrief, Pitwall, Dyno and Spotter, six local-first desktop apps, connected by a few hand-offs and built on the shared Paddock foundation.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--found:#F1F3F7}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--found:#12151A}}
@@ -94,6 +101,8 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .eyebrow{font-size:14px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
 .h1{font-size:46px;font-weight:600;letter-spacing:-.02em}
 .sub{font-size:18px;fill:var(--muted)}
+.tag{fill:none;stroke:var(--link);stroke-dasharray:3 3}
+.tagt{font-size:12px;font-weight:500;fill:var(--muted)}
 .card{fill:var(--card);stroke:var(--line);stroke-width:1}
 .name{font-size:22px;font-weight:600;letter-spacing:-.01em}
 .promise{font-size:15px;fill:var(--muted)}
@@ -115,7 +124,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <path class="track" d="M-40 330 C 300 150, 520 290, 800 180 S 1300 70, 1660 240"/>
 
 <text class="eyebrow" x="${W / 2}" y="88" text-anchor="middle">PADDOCK</text>
-<text class="h1" x="${W / 2}" y="152" text-anchor="middle">Five local-first tools for people who keep systems running</text>
+<text class="h1" x="${W / 2}" y="152" text-anchor="middle">Six local-first tools for people who keep systems running</text>
 <text class="sub" x="${W / 2}" y="192" text-anchor="middle">Built on one foundation, each good alone, better together.</text>
 
 ${links}
@@ -123,8 +132,8 @@ ${cards}
 
 <g>
 <rect class="found" x="${PX}" y="${PY}" width="${PW}" height="${PH}" rx="20"/>
-<text class="ft" x="${PX + 32}" y="${PY + 52}">Paddock</text>
-<text class="fs" x="${PX + 32}" y="${PY + 80}">The shared foundation under every app.</text>
+<text class="ft" x="${PX + 32}" y="${PY + 48}">Paddock</text>
+<text class="fs" x="${PX + 32}" y="${PY + 76}">The shared foundation under every app.</text>
 ${chips}
 </g>
 

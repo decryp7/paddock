@@ -1,10 +1,10 @@
 # The Paddock family
 
 <picture>
-  <img src="images/paddock-ecosystem.svg" alt="Paddock: Pitcrew, Debrief, Pitwall, Spotter and Dyno, five local-first apps connected by a few hand-offs and built on the shared Paddock foundation" width="100%">
+  <img src="images/paddock-ecosystem.svg" alt="Paddock: Pitcrew, Sighter, Debrief, Pitwall, Dyno and Spotter, six local-first apps connected by a few hand-offs and built on the shared Paddock foundation" width="100%">
 </picture>
 
-Five desktop apps for people who keep systems running, built on one shared foundation. Each is useful alone and better
+Six desktop apps for people who keep systems running, built on one shared foundation. Each is useful alone and better
 with the others. All run on **Windows, macOS and Linux**, are written in Rust with a Tauri shell and an Angular UI, and
 are **local only**: no cloud, no account, no telemetry.
 
@@ -38,6 +38,15 @@ The private, local LLM server your apps talk to. For anyone who wants AI in thei
 
 Repo: <https://dev.decryptology.net/decryp7/pitwall> · Status: in development.
 
+### Sighter
+Finds any UI element by sight. Record, label and train vision models that your UI tests can query. For engineers who test
+or automate desktop apps, including legacy ones with no accessibility tree.
+- Works from pixels alone, so custom-drawn UIs, remote sessions and old tools are covered.
+- A recorder, a labelling and training studio, and a local server your test scripts call.
+- Run bundles (video plus steps) that open next to the app's logs in Debrief.
+
+Repo: <https://dev.decryptology.net/decryp7/sighter> · Status: **in design**.
+
 ### Dyno
 Measures, explains and tunes your PC. For people who want to know why their machine is slow, and to fix it safely.
 - A background agent keeps history while the window is closed.
@@ -60,8 +69,11 @@ Repo: <https://dev.decryptology.net/decryp7/spotter> · Status: in development.
 | From | To | What |
 |---|---|---|
 | Pitwall | Debrief | Local AI for "Explain" and research |
+| Pitwall | Sighter | Vision for finding UI elements |
 | Pitwall | Spotter | Local AI for "What's new" summaries |
 | Pitcrew | Debrief | "Open job log in Debrief" |
+| Sighter | Debrief | Test runs: video plus steps, alongside the app's logs |
+| Sighter | Pitcrew | Runs on CI, on the runners Pitcrew keeps alive |
 | Dyno | Spotter | "Watch for updates" from the software inventory |
 | Dyno | Debrief | "Open in Debrief" for issues |
 | Dyno | Pitcrew | Machine health shown next to the runners |
