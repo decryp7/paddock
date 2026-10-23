@@ -72,7 +72,7 @@ describe('LiveStore', () => {
     expect(toasts.toasts().map((t) => t.message)).toContain('Serving resumed.');
 
     await store.releaseMemory();
-    expect(store.models().map((m) => m.modelId)).toEqual(['llama-3.2-3b-instruct-q5_k_m', 'nomic-embed-text-v1.5-f16']);
+    expect(store.models().map((m) => m.modelId)).toEqual(['qwen3.5-4b-q4_k_m', 'qwen3-embedding-0.6b-q8_0']);
     expect(toasts.toasts().some((t) => t.message.startsWith('Released'))).toBe(true);
     await store.releaseMemory();
     expect(toasts.toasts().some((t) => t.message.startsWith('Nothing to release'))).toBe(true);
@@ -98,13 +98,13 @@ describe('LiveStore', () => {
     expect(store.pairings()).toEqual([]);
 
     store.connect();
-    await store.loadModel('gemma-3-12b-it-q4_k_m');
-    expect(store.models().some((m) => m.modelId === 'gemma-3-12b-it-q4_k_m')).toBe(true);
-    await store.pinModel('gemma-3-12b-it-q4_k_m', true);
-    expect(store.models().find((m) => m.modelId === 'gemma-3-12b-it-q4_k_m')?.pinned).toBe(true);
-    await store.pinModel('gemma-3-12b-it-q4_k_m', false);
-    await store.unloadModel('gemma-3-12b-it-q4_k_m');
-    expect(store.models().some((m) => m.modelId === 'gemma-3-12b-it-q4_k_m')).toBe(false);
+    await store.loadModel('gemma-4-12b-it-q4_k_m');
+    expect(store.models().some((m) => m.modelId === 'gemma-4-12b-it-q4_k_m')).toBe(true);
+    await store.pinModel('gemma-4-12b-it-q4_k_m', true);
+    expect(store.models().find((m) => m.modelId === 'gemma-4-12b-it-q4_k_m')?.pinned).toBe(true);
+    await store.pinModel('gemma-4-12b-it-q4_k_m', false);
+    await store.unloadModel('gemma-4-12b-it-q4_k_m');
+    expect(store.models().some((m) => m.modelId === 'gemma-4-12b-it-q4_k_m')).toBe(false);
     store.disconnect();
   });
 

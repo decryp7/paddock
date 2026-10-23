@@ -48,7 +48,7 @@ describe('UpdatesStore', () => {
     expect(store.loaded()).toBe(true);
     expect(store.count()).toBe(2);
     expect(store.status()?.settings).toEqual({ enabled: false, schedule: 'weekly' });
-    expect(store.noticesFor()('qwen3-8b-instruct-q4_k_m').map((n) => n.kind)).toEqual(['newerRevision']);
+    expect(store.noticesFor()('qwen3.5-9b-q4_k_m').map((n) => n.kind)).toEqual(['newerRevision']);
     expect(store.noticesFor()('nothing')).toEqual([]);
   });
 
@@ -136,10 +136,10 @@ describe('UpdatesStore', () => {
   it('dismisses a notice, or snoozes it, and updates the count in the status', async () => {
     const { store } = setup();
     await store.load();
-    await store.dismiss('qwen3-8b-instruct-q4_k_m#newerRevision', null);
-    expect(store.notices().map((n) => n.id)).toEqual(['llama-3.2-3b-instruct-q5_k_m#betterQuant']);
+    await store.dismiss('qwen3.5-9b-q4_k_m#newerRevision', null);
+    expect(store.notices().map((n) => n.id)).toEqual(['qwen3.5-4b-q4_k_m#betterQuant']);
     expect(store.status()?.notices).toBe(1);
-    await store.dismiss('llama-3.2-3b-instruct-q5_k_m#betterQuant', 7);
+    await store.dismiss('qwen3.5-4b-q4_k_m#betterQuant', 7);
     expect(store.count()).toBe(0);
   });
 
@@ -159,11 +159,11 @@ describe('UpdatesStore', () => {
     const n = store.notices()[0]!;
     expect(await store.get(n)).toBe(true);
     expect(asked).toHaveLength(1);
-    expect(asked[0]!.title).toBe('Download Qwen3-8B-Instruct-Q4_K_M.gguf?');
+    expect(asked[0]!.title).toBe('Download Qwen3.5-9B-Q4_K_M.gguf?');
     expect(asked[0]!.message).toContain('from huggingface.co');
     expect(asked[0]!.message).toContain('replaces the copy you have');
-    expect(spy).toHaveBeenCalledWith('Qwen/Qwen3-8B-Instruct-GGUF', 'Qwen3-8B-Instruct-Q4_K_M.gguf', null);
-    expect(toasts.toasts().at(-1)?.message).toBe('Downloading Qwen3-8B-Instruct-Q4_K_M.gguf.');
+    expect(spy).toHaveBeenCalledWith('unsloth/Qwen3.5-9B-GGUF', 'Qwen3.5-9B-Q4_K_M.gguf', null);
+    expect(toasts.toasts().at(-1)?.message).toBe('Downloading Qwen3.5-9B-Q4_K_M.gguf.');
     expect(store.notices().some((x) => x.id === n.id)).toBe(false);
   });
 

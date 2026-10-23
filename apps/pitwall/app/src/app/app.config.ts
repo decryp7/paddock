@@ -12,7 +12,8 @@ import { provideIcons } from './shared/icons';
 /**
  * Mock options from the browser URL, for UI tests and screenshots: `?mock-fail=overview,history` makes those calls
  * fail, `?mock-empty` starts with nothing, `?mock-static` stops the simulated live updates, `?mock-consent` shows the first-run service question and
- * `?mock-update` offers an app update, `?mock-updates` offers model updates.
+ * `?mock-update` offers an app update, `?mock-updates` offers model updates, `?mock-install` shows llama.cpp installing itself and `?mock-quit`
+ * opens the "Quit Pitwall?" question, `?mock-clean` leaves no old files on disk.
  */
 export function mockOptionsFrom(search: string): MockOptions {
   const q = new URLSearchParams(search);
@@ -26,6 +27,9 @@ export function mockOptionsFrom(search: string): MockOptions {
     updateAvailable: q.has('mock-update'),
     modelUpdates: q.has('mock-updates'),
     crashed: q.has('mock-crash'),
+    installing: q.has('mock-install'),
+    noLeftovers: q.has('mock-clean'),
+    quitAsk: q.has('mock-quit'),
     failing: fail ? (fail.split(',') as (keyof PitwallBackend)[]) : [],
   };
 }

@@ -9,7 +9,7 @@ test.describe('benchmarks', () => {
     await expect(page.getByRole('button', { name: 'Run all' })).toBeVisible();
     const rows = page.locator('tbody tr');
     const before = await rows.count();
-    await page.getByRole('button', { name: 'Run benchmark for Gemma 3 12B' }).click();
+    await page.getByRole('button', { name: 'Run benchmark for Gemma 4 12B' }).click();
     await expect(rows).toHaveCount(before + 1);
   });
 });

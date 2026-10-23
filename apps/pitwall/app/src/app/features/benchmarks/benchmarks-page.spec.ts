@@ -14,14 +14,14 @@ describe('BenchmarksPage', () => {
     const { el } = await render(BenchmarksPage, mock());
     const items = Array.from(el.querySelectorAll('ul[aria-label="Models to benchmark"] li'));
     expect(items.length).toBeGreaterThanOrEqual(3);
-    const qwen = items.find((li) => li.textContent?.includes('Qwen3 8B Instruct'))!;
+    const qwen = items.find((li) => li.textContent?.includes('Qwen3.5 9B'))!;
     expect(qwen.textContent).toContain('last run');
     expect(qwen.textContent).toContain('61.8');
     expect(items.some((li) => li.textContent?.includes('never run'))).toBe(false);
     expect(items.some((li) => li.textContent?.includes('nomic'))).toBe(false);
     const rows = el.querySelectorAll('tbody tr');
     expect(rows).toHaveLength(7);
-    expect(rows[0]!.textContent).toContain('Qwen3 8B Instruct');
+    expect(rows[0]!.textContent).toContain('Qwen3.5 9B');
     expect(el.querySelector('.panel, pw-panel[heading="Results"]')?.textContent).toContain('7 runs');
   });
 
@@ -34,7 +34,7 @@ describe('BenchmarksPage', () => {
     const chart = FakeChart.all.at(-1)!;
     const option = chart.options.at(-1)!.option as any;
     expect(option.series[0].data).toHaveLength(7);
-    expect(option.yAxis[0].data.at(-1)).toContain('Qwen2.5 Coder 1.5B');
+    expect(option.yAxis[0].data.at(-1)).toContain('Qwen3.5 2B');
     expect(el.querySelector('pw-echart')!.getAttribute('style')).toContain('362px');
   });
 
@@ -66,7 +66,7 @@ describe('BenchmarksPage', () => {
     const { fixture, el } = await render(BenchmarksPage, mock({ latencyMs: 15 }));
     await wait(80);
     await settle(fixture);
-    const run = el.querySelector<HTMLButtonElement>('button[aria-label="Run benchmark for Qwen3 8B Instruct"]')!;
+    const run = el.querySelector<HTMLButtonElement>('button[aria-label="Run benchmark for Qwen3.5 9B"]')!;
     run.click();
     fixture.detectChanges();
     expect(run.disabled).toBe(true);
@@ -79,7 +79,7 @@ describe('BenchmarksPage', () => {
     expect(run.disabled).toBe(false);
     expect(run.classList.contains('on')).toBe(false);
     expect(el.querySelectorAll('tbody tr')).toHaveLength(8);
-    expect(el.querySelector('tbody tr')!.textContent).toContain('Qwen3 8B Instruct');
+    expect(el.querySelector('tbody tr')!.textContent).toContain('Qwen3.5 9B');
   });
 
   it('has one primary Run all, calm per-model icons, units in the headers and no repeated build chips', async () => {

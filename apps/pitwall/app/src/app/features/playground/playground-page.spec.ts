@@ -134,7 +134,7 @@ describe('PlaygroundPage', () => {
     expect(el.querySelectorAll('.pane')).toHaveLength(2);
     expect(box(el).placeholder).toBe('Message both models…');
     expect(el.querySelector('select')).toBeNull();
-    for (const [id, name] of [['pg-model-0', 'Qwen3 8B'], ['pg-model-1', 'Llama 3.2 3B']] as const) {
+    for (const [id, name] of [['pg-model-0', 'Qwen3.5 9B'], ['pg-model-1', 'Qwen3.5 4B']] as const) {
       el.querySelector<HTMLButtonElement>(`#${id}`)!.click();
       await settle(fixture);
       const opts = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'));

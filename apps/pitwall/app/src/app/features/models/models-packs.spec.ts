@@ -44,12 +44,12 @@ describe('ModelsStore packs', () => {
     const backend = new MockBackend();
     const { store, toasts } = storeOf(backend);
     await store.loadPacks();
-    const gemma = store.packs()!.recommendations.find((r) => r.id === 'gemma-3-12b')!;
+    const gemma = store.packs()!.recommendations.find((r) => r.id === 'gemma-4-12b')!;
     expect(await store.downloadRecommendation(gemma)).toBe(true);
     const d = (await backend.downloads())[0]!;
     expect(d.name).toBe(gemma.file);
     expect(d.bytesTotal).toBeGreaterThan(gemma.sizeBytes);
-    const qwen = store.packs()!.recommendations.find((r) => r.id === 'qwen3-1.7b')!;
+    const qwen = store.packs()!.recommendations.find((r) => r.id === 'qwen3.5-2b')!;
     await store.downloadRecommendation(qwen);
     expect((await backend.downloads())[0]!.bytesTotal).toBeLessThan(qwen.sizeBytes + 500 * 1024 ** 2);
 
@@ -104,9 +104,9 @@ describe('Models page: recommendations and engines', () => {
     await r.settle();
     expect(rows().length).toBeLessThan(all);
     expect(chip('code').getAttribute('aria-pressed')).toBe('true');
-    (r.el.querySelector('button[aria-label^="Download Qwen2.5 Coder"]') as HTMLButtonElement).click();
+    (r.el.querySelector('button[aria-label^="Download Qwen3.6 35B-A3B"]') as HTMLButtonElement).click();
     await r.settle();
-    expect((await backend.downloads())[0]!.name).toContain('Qwen2.5-Coder-7B');
+    expect((await backend.downloads())[0]!.name).toContain('Qwen3.6-35B-A3B');
   });
 
   it('says so when no recommendation has the tag, and shows an inline error with Retry', async () => {
@@ -117,7 +117,7 @@ describe('Models page: recommendations and engines', () => {
 
   it('has no per-model engine choice any more (llama.cpp serves everything), and shows skipped catalog files', async () => {
     const r = await render(new MockBackend());
-    r.el.querySelector<HTMLElement>('#row-gemma-3-12b-it-q4_k_m')!.click();
+    r.el.querySelector<HTMLElement>('#row-gemma-4-12b-it-q4_k_m')!.click();
     await r.settle();
     expect(r.el.querySelector('[id^="engine-"]')).toBeNull();
     await discover(r);

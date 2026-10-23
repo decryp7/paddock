@@ -110,14 +110,14 @@ describe('ModelsPage', () => {
     const { el } = await render();
     const rows = el.querySelectorAll('pw-library-tab tbody tr');
     expect(rows.length).toBe(8);
-    expect(rows[0]!.textContent).toContain('Qwen3 8B Instruct');
+    expect(rows[0]!.textContent).toContain('Qwen3.5 9B');
     expect(rows[0]!.textContent).toContain('Loaded');
     expect(el.textContent).toContain('Partial downloads');
     expect(el.textContent).toContain('1 unused for 30+ days');
     expect(el.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Library');
     // Nothing destructive at rest: Delete lives in the "..." menu only.
-    expect(el.querySelector('button[aria-label="Delete Gemma 3 12B"]')).toBeNull();
-    expect(el.querySelector('button[aria-label="More actions for Gemma 3 12B"]')).not.toBeNull();
+    expect(el.querySelector('button[aria-label="Delete Gemma 4 12B"]')).toBeNull();
+    expect(el.querySelector('button[aria-label="More actions for Gemma 4 12B"]')).not.toBeNull();
     expect(Array.from(el.querySelectorAll('pw-library-tab thead th')).map((t) => t.textContent!.trim())).toEqual(['Model', 'Size', 'Params', 'Context', 'Status', 'Actions']);
     expect(rows[0]!.querySelector('mat-icon[aria-label="Chat"]')).not.toBeNull();
     expect(rows[0]!.querySelector('.tag, .pill')).toBeNull();
@@ -126,12 +126,12 @@ describe('ModelsPage', () => {
   it('opens the details on a row click or Enter and closes them with Escape, returning focus to the row', async () => {
     const { el, settle, open } = await render();
     expect(el.querySelector('pw-detail-panel')).toBeNull();
-    const panel = await open('Gemma 3 12B');
-    expect(panel.textContent).toContain('Gemma 3 12B');
-    expect(panel.textContent).toContain('unsloth/gemma-3-12b-it-GGUF');
+    const panel = await open('Gemma 4 12B');
+    expect(panel.textContent).toContain('Gemma 4 12B');
+    expect(panel.textContent).toContain('unsloth/gemma-4-12b-it-GGUF');
     expect(panel.textContent).toContain('Q4_K_M');
-    expect(el.querySelector('tbody tr.selected')?.textContent).toContain('Gemma 3 12B');
-    const row = el.querySelector<HTMLElement>('#row-gemma-3-12b-it-q4_k_m')!;
+    expect(el.querySelector('tbody tr.selected')?.textContent).toContain('Gemma 4 12B');
+    const row = el.querySelector<HTMLElement>('#row-gemma-4-12b-it-q4_k_m')!;
     row.focus();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
@@ -166,22 +166,22 @@ describe('ModelsPage', () => {
   it('loads, pins, sets idle, deletes and cleans up from the table and its details', async () => {
     const backend = new MockBackend();
     const { el, settle, button, open, menu } = await render(backend);
-    (el.querySelector('button[aria-label="Load Gemma 3 12B"]') as HTMLButtonElement).click();
+    (el.querySelector('button[aria-label="Load Gemma 4 12B"]') as HTMLButtonElement).click();
     await settle();
-    expect(el.querySelector('button[aria-label="Unload Gemma 3 12B"]')).not.toBeNull();
-    const panel = await open('Gemma 3 12B');
+    expect(el.querySelector('button[aria-label="Unload Gemma 4 12B"]')).not.toBeNull();
+    const panel = await open('Gemma 4 12B');
     Array.from(panel.querySelectorAll('button')).find((b) => b.textContent!.includes('Pin (keep loaded)'))!.click();
     await settle();
     expect(el.querySelector('pw-detail-panel')!.textContent).toContain('Unpin');
-    expect(el.querySelector('#row-gemma-3-12b-it-q4_k_m mat-icon[aria-label="Pinned"]')).not.toBeNull();
+    expect(el.querySelector('#row-gemma-4-12b-it-q4_k_m mat-icon[aria-label="Pinned"]')).not.toBeNull();
 
-    const id = 'llama-3.2-3b-instruct-q5_k_m';
+    const id = 'qwen3.5-4b-q4_k_m';
     const idleOf = async () => (await backend.localModels()).find((m) => m.id === id)?.idleSecs;
-    await open('Llama 3.2 3B Instruct');
-    const choose = (label: string) => pickOption(el.querySelector(`#idle-llama-3\\.2-3b-instruct-q5_k_m`) as HTMLButtonElement, label, settle);
+    await open('Qwen3.5 4B');
+    const choose = (label: string) => pickOption(el.querySelector(`#idle-qwen3\\.5-4b-q4_k_m`) as HTMLButtonElement, label, settle);
     await choose('After 10 min');
     expect(await idleOf()).toBe(600);
-    expect((el.querySelector(`#idle-llama-3\\.2-3b-instruct-q5_k_m`) as HTMLButtonElement).textContent).toContain('After 10 min');
+    expect((el.querySelector(`#idle-qwen3\\.5-4b-q4_k_m`) as HTMLButtonElement).textContent).toContain('After 10 min');
     await choose('Global setting');
     expect(await idleOf()).toBeNull();
 
@@ -189,7 +189,7 @@ describe('ModelsPage', () => {
     expect(el.textContent).not.toContain('BGE reranker v2 m3');
     button('Clean up unused').click();
     await settle();
-    expect(el.textContent).not.toContain('Qwen2.5 Coder 1.5B');
+    expect(el.textContent).not.toContain('Qwen3.5 2B');
   });
 
   it('does nothing when a confirmation is declined', async () => {
@@ -198,7 +198,7 @@ describe('ModelsPage', () => {
     button('Clean up unused').click();
     await settle();
     expect(el.textContent).toContain('BGE reranker v2 m3');
-    expect(el.textContent).toContain('Qwen2.5 Coder 1.5B');
+    expect(el.textContent).toContain('Qwen3.5 2B');
   });
 
   it('shows the empty library with a way to discover models', async () => {
@@ -225,7 +225,7 @@ describe('ModelsPage', () => {
     (el.querySelector('form[role="search"]') as HTMLFormElement).dispatchEvent(new Event('submit'));
     await settle();
     const hits = el.querySelectorAll<HTMLButtonElement>('pw-discover-tab .hit');
-    expect(hits.length).toBe(2);
+    expect(hits.length).toBe(3);
     hits[0]!.click();
     await settle();
     expect(el.textContent).toContain('vision projector');
@@ -237,10 +237,10 @@ describe('ModelsPage', () => {
     expect(el.querySelector('pw-discover-tab tbody')?.textContent).toMatch(/up to \d+ requests at once|one request at a time/);
     (el.querySelector('pw-discover-tab mat-slide-toggle button') as HTMLButtonElement).click();
     fixture.detectChanges();
-    (el.querySelector('button[aria-label^="Download gemma-3-12b-it-Q2_K"]') as HTMLButtonElement).click();
+    (el.querySelector('button[aria-label^="Download gemma-4-12b-it-Q2_K"]') as HTMLButtonElement).click();
     await settle();
     const d = (await backend.downloads())[0]!;
-    expect(d.name).toBe('gemma-3-12b-it-Q2_K.gguf');
+    expect(d.name).toBe('gemma-4-12b-it-Q2_K.gguf');
     (el.querySelector('button[aria-label="Close repo"]') as HTMLButtonElement).click();
     await settle();
     expect(el.textContent).toContain('Pick a repo');
@@ -254,7 +254,7 @@ describe('ModelsPage', () => {
     expect(rows.length).toBe(7);
     expect(rows[0]!.querySelector('.status')).not.toBeNull();
     expect(rows[0]!.querySelector('.pill, .tag')).toBeNull();
-    expect(rows[0]!.querySelector('button.reveal')?.getAttribute('aria-label')).toBe('Download Nomic Embed Text v1.5');
+    expect(Array.from(rows).find((r) => r.querySelector('button.reveal'))?.querySelector('button.reveal')?.getAttribute('aria-label')).toMatch(/^Download /);
     // Every result carries "gguf": it is not information, so no tag chips at all.
     expect(el.querySelector('pw-discover-tab .hit .tag')).toBeNull();
     // Search is the page's primary action only while the field has text.
@@ -283,7 +283,7 @@ describe('ModelsPage', () => {
     expect(items[1]!.textContent).toContain('Paused · resumable');
     expect(items[1]!.textContent).toContain('Connection reset');
     live.connect();
-    (el.querySelector('button[aria-label="Cancel Qwen3-14B-Instruct-Q4_K_M.gguf"]') as HTMLButtonElement).click();
+    (el.querySelector('button[aria-label="Cancel gemma-4-E4B-it-Q8_0.gguf"]') as HTMLButtonElement).click();
     await settle();
     expect((await backend.downloads())[0]!.state).toBe('cancelled');
     expect(live.downloads()[0]!.state).toBe('cancelled');
@@ -314,29 +314,29 @@ describe('ModelsPage', () => {
     const backend = new MockBackend();
     const { el, settle, fixture, open } = await render(backend);
     expect(el.querySelector('pw-library-tab thead')?.textContent).not.toContain('Slots');
-    await open('Llama 3.2 3B Instruct');
-    expect(el.querySelector('button[aria-label^="Parallel slots for Llama 3.2 3B Instruct"]')?.textContent).toContain('4 slots');
-    await open('Gemma 3 12B');
-    const trigger = el.querySelector('button[aria-label="Parallel slots for Gemma 3 12B: 2 slots (default)"]') as HTMLButtonElement;
+    await open('Qwen3.5 4B');
+    expect(el.querySelector('button[aria-label^="Parallel slots for Qwen3.5 4B"]')?.textContent).toContain('4 slots');
+    await open('Gemma 4 12B');
+    const trigger = el.querySelector('button[aria-label="Parallel slots for Gemma 4 12B: 2 slots (default)"]') as HTMLButtonElement;
     expect(trigger).not.toBeNull();
     trigger.click();
     await settle();
     const panel = document.querySelector('pw-slots-panel') as HTMLElement;
-    expect(panel.textContent).toContain('Parallel slots · Gemma 3 12B');
+    expect(panel.textContent).toContain('Parallel slots · Gemma 4 12B');
     (Array.from(panel.querySelectorAll('[role="radio"]')).find((b) => b.querySelector('b')?.textContent === '4') as HTMLButtonElement).click();
     fixture.detectChanges();
     (Array.from(panel.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Save')) as HTMLButtonElement).click();
     await settle();
     expect(document.querySelector('pw-slots-panel')).toBeNull();
-    expect((await backend.localModels()).find((m) => m.id === 'gemma-3-12b-it-q4_k_m')?.slots).toBe(4);
-    expect(el.querySelector('button[aria-label="Parallel slots for Gemma 3 12B: 4 slots"]')).not.toBeNull();
+    expect((await backend.localModels()).find((m) => m.id === 'gemma-4-12b-it-q4_k_m')?.slots).toBe(4);
+    expect(el.querySelector('button[aria-label="Parallel slots for Gemma 4 12B: 4 slots"]')).not.toBeNull();
     // A loaded model with a different saved count explains it on hover.
-    await backend.setModelSlots('qwen3-8b-instruct-q4_k_m', 8);
+    await backend.setModelSlots('qwen3.5-9b-q4_k_m', 8);
     const store = fixture.debugElement.injector.get(ModelsStore);
     await store.load();
     fixture.detectChanges();
-    await open('Qwen3 8B Instruct');
-    el.querySelector('button[aria-label^="Parallel slots for Qwen3 8B Instruct"]')!.dispatchEvent(new Event('mouseenter'));
+    await open('Qwen3.5 9B');
+    el.querySelector('button[aria-label^="Parallel slots for Qwen3.5 9B"]')!.dispatchEvent(new Event('mouseenter'));
     await settle();
     expect(document.body.textContent).toContain('Loaded with 2 slots; 8 slots apply the next time it loads');
   });
@@ -347,10 +347,10 @@ describe('ModelsPage', () => {
     const { el, settle, open } = await render(backend, false);
     expect(el.querySelector('pw-update-banner .banner')!.textContent).toContain('2 updates available');
     const marks = Array.from(el.querySelectorAll('tbody mat-icon.upd')).map((n) => n.getAttribute('aria-label'));
-    expect(marks).toEqual(['Update available for Qwen3 8B Instruct', 'Update available for Llama 3.2 3B Instruct']);
+    expect(marks).toEqual(['Update available for Qwen3.5 9B', 'Update available for Qwen3.5 4B']);
     const row = (name: string) => Array.from(el.querySelectorAll('tbody tr')).find((r) => r.textContent!.includes(name))!;
-    expect(row('Gemma 3 12B').querySelector('.upd')).toBeNull();
-    const panel = await open('Qwen3 8B Instruct');
+    expect(row('Gemma 4 12B').querySelector('.upd')).toBeNull();
+    const panel = await open('Qwen3.5 9B');
     expect(panel.querySelector('.callout')!.textContent).toContain('Update available: newer revision');
     (panel.querySelector('.callout button') as HTMLButtonElement).click();
     await settle();

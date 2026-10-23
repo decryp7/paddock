@@ -120,6 +120,12 @@ export interface MockOptions {
   modelUpdates?: boolean;
   /** Delay between streamed playground words (ms). */
   streamDelayMs?: number;
+  /** llama.cpp is installing itself (progress banner on the dashboard and the llama.cpp page). */
+  installing?: boolean;
+  /** No file from an older version is left on disk (a clean install; the default demo offers a leftover llamafile). */
+  noLeftovers?: boolean;
+  /** The app asked to quit with "Ask each time" set (the question dialog opens). */
+  quitAsk?: boolean;
 }
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -180,9 +186,14 @@ export class MockBackend implements PitwallBackend {
     this.streamDelay = options.streamDelayMs ?? 0;
     this.updateAvailable = options.updateAvailable ?? false;
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
+    if (options.quitAsk) this.quitAskPending = true;
+    if (options.installing) {
+      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (b11669)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 388 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
+      this.engineSetup_ = { state: 'installing', error: null, download };
+    }
     if (options.crashed) {
       this.issues_ = [
-        { modelId: 'gemma-3-12b-it-q4_k_m', state: 'failed', crashes: 6, restartAt: null, message: 'The engine for gemma-3-12b-it-q4_k_m crashed repeatedly and Pitwall stopped restarting it. Check that the model file is complete, then press Retry.' },
+        { modelId: 'gemma-4-12b-it-q4_k_m', state: 'failed', crashes: 6, restartAt: null, message: 'The engine for gemma-4-12b-it-q4_k_m crashed repeatedly and Pitwall stopped restarting it. Check that the model file is complete, then press Retry.' },
       ];
     }
     this.service = {
@@ -199,7 +210,7 @@ export class MockBackend implements PitwallBackend {
     const empty = options.empty ?? false;
     this.settings_ = demoSettings();
     this.server = {
-      version: '0.1.0',
+      version: '1.0.3',
       apiVersion: 1,
       pid: 7412,
       port: this.settings_.server.port,
@@ -214,6 +225,9 @@ export class MockBackend implements PitwallBackend {
     this.pairings_ = empty ? [] : demoPairings(now);
     this.events_ = empty ? [] : demoEvents(now);
     this.engines_ = demoEngines(now);
+    if (options.noLeftovers) this.engines_.forEach((e) => (e.leftovers = []));
+    // First start: no build is installed yet and nothing runs.
+    if (options.installing) this.engines_.forEach((e) => Object.assign(e, { builds: [], processes: [], rollbackTo: null, availability: { state: 'notInstalled', reason: 'llama.cpp is being installed' } }));
     this.requests_ = empty ? [] : demoRequests(now);
     this.presets_ = empty ? [] : demoPresets();
     this.benchmarks_ = empty ? [] : demoBenchmarks(now);
@@ -223,8 +237,8 @@ export class MockBackend implements PitwallBackend {
     if (empty) for (const r of ['1h', '24h', '7d', '30d'] as const) this.histories.set(r, { range: r, stepMs: 60_000, points: [], requestsByApp: [], requestsByModel: [], events: [] });
     if (!empty) {
       this.downloads_ = [
-        { id: 'dl-1', kind: 'model', name: 'Qwen3-14B-Instruct-Q4_K_M.gguf', host: 'huggingface.co', bytesDone: 3.1 * GiB, bytesTotal: 8.38 * GiB, speedBps: 38 * MiB, state: 'downloading', error: null, startedAt: now - 90_000 },
-        { id: 'dl-0', kind: 'model', name: 'gemma-3-27b-it-Q4_K_M.gguf', host: 'huggingface.co', bytesDone: 6.2 * GiB, bytesTotal: 15.4 * GiB, speedBps: 0, state: 'paused', error: 'Connection reset; resumes from 6.2 GB', startedAt: now - 3_600_000 },
+        { id: 'dl-1', kind: 'model', name: 'gemma-4-E4B-it-Q8_0.gguf', host: 'huggingface.co', bytesDone: 3.1 * GiB, bytesTotal: 7.63 * GiB, speedBps: 38 * MiB, state: 'downloading', error: null, startedAt: now - 90_000 },
+        { id: 'dl-0', kind: 'model', name: 'gemma-4-26B-A4B-it-Q4_K_M.gguf', host: 'huggingface.co', bytesDone: 6.2 * GiB, bytesTotal: 15.4 * GiB, speedBps: 0, state: 'paused', error: 'Connection reset; resumes from 6.2 GB', startedAt: now - 3_600_000 },
       ];
     }
   }
@@ -255,12 +269,12 @@ export class MockBackend implements PitwallBackend {
 
   private demoQueue(now: number): QueueSnapshot {
     const running: Job[] = [
-      { id: 'job-41', appId: 'debrief', modelId: 'qwen3-8b-instruct-q4_k_m', priority: 'interactive', kind: 'chat', state: 'running', submittedAt: now - 3_400, startedAt: now - 3_100, progress: null, tokens: 212 },
-      { id: 'job-39', appId: 'spotter', modelId: 'nomic-embed-text-v1.5-f16', priority: 'batch', kind: 'batch', state: 'running', submittedAt: now - 84_000, startedAt: now - 80_000, progress: 0.42, tokens: 182_400 },
+      { id: 'job-41', appId: 'debrief', modelId: 'qwen3.5-9b-q4_k_m', priority: 'interactive', kind: 'chat', state: 'running', submittedAt: now - 3_400, startedAt: now - 3_100, progress: null, tokens: 212 },
+      { id: 'job-39', appId: 'spotter', modelId: 'qwen3-embedding-0.6b-q8_0', priority: 'batch', kind: 'batch', state: 'running', submittedAt: now - 84_000, startedAt: now - 80_000, progress: 0.42, tokens: 182_400 },
     ];
     const waiting: Job[] = [
-      { id: 'job-42', appId: 'nightly-report', modelId: 'llama-3.2-3b-instruct-q5_k_m', priority: 'interactive', kind: 'completion', state: 'queued', submittedAt: now - 600, startedAt: null, progress: null, tokens: 0 },
-      { id: 'job-43', appId: 'pitcrew', modelId: 'qwen3-8b-instruct-q4_k_m', priority: 'background', kind: 'task', state: 'queued', submittedAt: now - 12_000, startedAt: null, progress: null, tokens: 0 },
+      { id: 'job-42', appId: 'nightly-report', modelId: 'qwen3.5-4b-q4_k_m', priority: 'interactive', kind: 'completion', state: 'queued', submittedAt: now - 600, startedAt: null, progress: null, tokens: 0 },
+      { id: 'job-43', appId: 'pitcrew', modelId: 'qwen3.5-9b-q4_k_m', priority: 'background', kind: 'task', state: 'queued', submittedAt: now - 12_000, startedAt: null, progress: null, tokens: 0 },
       { id: 'job-44', appId: 'spotter', modelId: 'bge-reranker-v2-m3-q8_0', priority: 'batch', kind: 'batch', state: 'queued', submittedAt: now - 30_000, startedAt: null, progress: 0, tokens: 0 },
     ];
     return { running, waiting, depth: this.depth(waiting) };
@@ -1118,7 +1132,7 @@ export class MockBackend implements PitwallBackend {
           onEvent({ kind: 'delta', text: words[i++]! });
           timers.push(setTimeout(step, this.streamDelay));
         } else {
-          const fast = request.modelId.includes('llama');
+          const fast = request.modelId.includes('qwen3.5-4b');
           onEvent({ kind: 'done', promptTokens: 18 + request.messages.reduce((s, m) => s + Math.ceil(m.content.length / 4), 0), completionTokens: Math.round(limit * 1.3), ttftMs: fast ? 96 : 214, genTps: fast ? 118.4 : 61.8, coldStartMs: this.loaded.some((m) => m.modelId === request.modelId) ? null : 2100 });
         }
       };

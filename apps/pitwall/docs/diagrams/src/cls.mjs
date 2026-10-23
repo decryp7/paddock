@@ -39,7 +39,7 @@ classes('uml-class-serving', {
 });
 
 classes('uml-class-library', {
-  title: 'Domain model — library and engines', desc: 'Model files with their origin, the update check that only asks, and the engines that run them: one trait, three implementations, pins and a capability matrix.', cols: 3,
+  title: 'Domain model — library and engines', desc: 'Model files with their origin, the update check that only asks, and the engines that run them: one trait with one implementation (llama.cpp), pins and a capability matrix.', cols: 3,
   items: [
     ['lf', 0, 0, { name: 'LocalFile', attrs: ['id: ModelId', 'path, size', 'info: GgufInfo', 'projector: Option<PathBuf>', 'repo: String'], role: 'accent' }],
     ['lb', 1, 0, { name: 'Library', ops: ['local() → Vec<LocalFile>', 'installed() → Vec<Installed>', 'search(query)', 'repo(repo, context, room) → HfRepo', 'download(repo, variant) → id', 'delete(ModelId)'] }],
@@ -47,15 +47,13 @@ classes('uml-class-library', {
     ['rs', 0, 1, { name: 'RepoSource', stereotype: 'trait', attrs: [], ops: ['snapshot(RepoId) → RepoSnapshot'] }],
     ['up', 1, 1, { name: 'Updates', attrs: ['state: UpdateState', 'pace, timeout'], ops: ['check(source, Request) → Report', 'dismiss(id, snooze_days, now)', 'downloaded(repo, file)'] }],
     ['un', 2, 1, { name: 'UpdateNotice', attrs: ['id: <model>#<kind>', 'model_id, repo, file', 'kind: UpdateKind', 'size_bytes, quant, summary', 'installed_file, installed_quant', 'found_at, target_sha256'], ops: ['fingerprint() → String'], role: 'core' }],
-    ['pk', 0, 2, { name: 'PackEngine', attrs: ['pack: EnginePack'], ops: ['install(), remove()', 'start(&Launch) → Running'] }],
     ['en', 1, 2, { name: 'Engine', stereotype: 'trait', attrs: [], ops: ['kind() → EngineKind', 'availability() → Availability', 'start(&Launch) → Running'], role: 'core' }],
-    ['pl', 2, 2, { name: 'Planned', attrs: ['kind: EngineKind', 'reason: String'], ops: ['availability() = NotAvailable'] }],
     ['ep', 0, 3, { name: 'EnginePins', attrs: ['global: Option<BuildId>', 'models: Map<String, BuildId> (max 256)', 'history: Vec<BuildId> (max 8)'], ops: ['set_global, set_model(…, installed)', 'remember(BuildId)', 'pins::select(…) → Selection', 'pins::rollback_target(…) → BuildId'], role: 'core' }],
     ['ll', 1, 3, { name: 'LlamaCpp', attrs: ['pins: EnginePins', 'matrix: Matrix', 'choice: BuildChoice'], ops: ['install(id, …) → BuildInfo', 'select_for(model) → Selection', 'check(model, needed) → Result', 'start(&Launch) → Running'] }],
     ['rn', 2, 3, { name: 'Running', attrs: ['child: Option<Child>', 'client: loopback::Client', 'port: u16', 'props: llama::Props'] }],
     ['mx', 1, 4, { name: 'Matrix', attrs: ['entries: Capability → Requirement', 'min_build, unsupported_backends'], ops: ['gate(needed, BuildFacts) → Gate'], role: 'core' }],
   ],
-  links: [['lb', 'L', 'lf', 'R', '0..*', comp], ['lb', 'R', 'pv', 'L', 'writes', { arrow: 'open' }], ['lb', 'B', 'up', 'T', 'installed()', { arrow: 'open' }], ['up', 'L', 'rs', 'R', 'asks', imp], ['up', 'R', 'un', 'L', 'raises', { arrow: 'open' }], ['pk', 'R', 'en', 'L', 'implements', imp], ['pl', 'L', 'en', 'R', 'implements', imp], ['ll', 'T', 'en', 'B', 'implements', imp], ['ll', 'L', 'ep', 'R', 'holds', comp], ['ll', 'R', 'rn', 'L', 'starts', { arrow: 'open' }], ['ll', 'B', 'mx', 'T', 'holds', comp]],
+  links: [['lb', 'L', 'lf', 'R', '0..*', comp], ['lb', 'R', 'pv', 'L', 'writes', { arrow: 'open' }], ['lb', 'B', 'up', 'T', 'installed()', { arrow: 'open' }], ['up', 'L', 'rs', 'R', 'asks', imp], ['up', 'R', 'un', 'L', 'raises', { arrow: 'open' }], ['ll', 'T', 'en', 'B', 'implements', imp], ['ll', 'L', 'ep', 'R', 'holds', comp], ['ll', 'R', 'rn', 'L', 'starts', { arrow: 'open' }], ['ll', 'B', 'mx', 'T', 'holds', comp]],
 });
 
 classes('uml-class-access', {

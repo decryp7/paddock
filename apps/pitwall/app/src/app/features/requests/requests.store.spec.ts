@@ -17,7 +17,7 @@ const rec = (p: Partial<RequestRecord>): RequestRecord => ({
   alias: null,
   api: 'openai',
   endpoint: '/v1/chat/completions',
-  modelId: 'qwen3-8b',
+  modelId: 'qwen3.5-9b',
   chosenBy: 'explicit',
   priority: 'interactive',
   status: 200,
@@ -36,7 +36,7 @@ const rec = (p: Partial<RequestRecord>): RequestRecord => ({
 });
 
 describe('filterRequests', () => {
-  const list = [rec({ id: 'a' }), rec({ id: 'b', appId: 'spotter', endpoint: '/v1/embeddings', modelId: 'nomic-embed' }), rec({ id: 'c', status: 429 }), rec({ id: 'd', status: 500, modelId: null })];
+  const list = [rec({ id: 'a' }), rec({ id: 'b', appId: 'spotter', endpoint: '/v1/embeddings', modelId: 'bge-m3' }), rec({ id: 'c', status: 429 }), rec({ id: 'd', status: 500, modelId: null })];
 
   it('passes everything without a filter', () => {
     expect(filterRequests(list, NO_FILTER).length).toBe(4);

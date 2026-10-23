@@ -32,11 +32,11 @@ const SCREENS: Screen[] = [
     name: 'models-detail',
     path: '/models',
     prepare: async (p) => {
-      await p.getByRole('row', { name: /Qwen3 8B Instruct/ }).click();
-      const panel = p.getByRole('complementary', { name: 'Qwen3 8B Instruct' });
+      await p.getByRole('row', { name: /Qwen3.5 9B/ }).click();
+      const panel = p.getByRole('complementary', { name: 'Qwen3.5 9B' });
       await expect(panel).toBeVisible();
       // Pin it to the CUDA build, as a user holding one model on a known-good engine would.
-      await panel.getByRole('button', { name: /^Engine build for Qwen3 8B Instruct/ }).click();
+      await panel.getByRole('button', { name: /^Engine build for Qwen3.5 9B/ }).click();
       await p.getByRole('option', { name: /^Pin to CUDA 13/ }).click();
       await expect(panel.locator('.pinned-build')).toBeVisible();
     },
@@ -45,8 +45,8 @@ const SCREENS: Screen[] = [
     name: 'models-slots',
     path: '/models',
     prepare: async (p) => {
-      await p.getByRole('row', { name: /Qwen3 8B Instruct/ }).click();
-      await p.getByRole('button', { name: /^Parallel slots for Qwen3 8B Instruct/ }).click();
+      await p.getByRole('row', { name: /Qwen3.5 9B/ }).click();
+      await p.getByRole('button', { name: /^Parallel slots for Qwen3.5 9B/ }).click();
       await expect(p.locator('pw-slots-panel .fit-table tbody tr').first()).toBeVisible();
     },
   },
@@ -81,11 +81,27 @@ const SCREENS: Screen[] = [
   {
     name: 'engines',
     path: '/engines',
+    query: 'mock-clean',
     prepare: async (p) => {
       // What the old CPU build lacks, in words, and the Vulkan build pinned for all models.
       await p.getByRole('button', { name: 'What CPU (AVX2) b4300 supports' }).click();
       await p.getByRole('button', { name: 'Pin Vulkan b11669 for all models' }).click();
       await expect(p.getByRole('status').filter({ hasText: 'Pinned to Vulkan b11669 for all models' })).toBeVisible();
+    },
+  },
+  {
+    name: 'engines-install',
+    path: '/engines',
+    query: 'mock-install&mock-clean',
+    // First start: llama.cpp installs the build suggested for this machine and models wait for it.
+    prepare: (p) => expect(p.getByRole('status', { name: 'Installing llama.cpp' })).toBeVisible(),
+  },
+  {
+    name: 'quit-dialog',
+    path: '/engines',
+    query: 'mock-quit&mock-clean',
+    prepare: async (p) => {
+      await expect(p.getByRole('alertdialog', { name: 'Quit Pitwall?' })).toBeVisible();
     },
   },
   { name: 'apps', path: '/apps', prepare: (p) => expect(p.locator('h1')).toBeVisible() },
@@ -146,6 +162,15 @@ const SCREENS: Screen[] = [
     },
   },
   { name: 'benchmarks', path: '/benchmarks', prepare: (p) => expect(p.locator('h1')).toBeVisible() },
+  {
+    name: 'settings-quit',
+    path: '/settings',
+    element: '#set-general',
+    prepare: async (p) => {
+      await p.getByRole('radio', { name: 'Ask each time' }).click();
+      await expect(p.getByRole('radio', { name: 'Ask each time' })).toHaveAttribute('aria-checked', 'true');
+    },
+  },
   {
     name: 'settings-cache',
     path: '/settings',

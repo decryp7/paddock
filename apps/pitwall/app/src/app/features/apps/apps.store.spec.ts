@@ -12,7 +12,7 @@ function setup(backend: PitwallBackend = new MockBackend()) {
 }
 
 const PERMS: AppPermissions = {
-  models: ['qwen3-8b-instruct-q4_k_m'],
+  models: ['qwen3.5-9b-q4_k_m'],
   maxPriority: 'batch',
   tools: false,
   extendedApis: false,

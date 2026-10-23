@@ -14,7 +14,7 @@ const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-async function render(id = 'gemma-3-12b-it-q4_k_m', backend = new MockBackend()) {
+async function render(id = 'gemma-4-12b-it-q4_k_m', backend = new MockBackend()) {
   TestBed.configureTestingModule({ providers: [ModelsStore, { provide: BACKEND, useValue: backend }] });
   registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
   const store = TestBed.inject(ModelsStore);
@@ -41,7 +41,7 @@ const pick = (el: HTMLElement, n: number) => Array.from(el.querySelectorAll('[ro
 describe('SlotsPanel', () => {
   it('shows what each step adds and the engine fit table in words', async () => {
     const { el } = await render();
-    expect(el.textContent).toContain('Parallel slots · Gemma 3 12B');
+    expect(el.textContent).toContain('Parallel slots · Gemma 4 12B');
     expect(el.querySelectorAll('[role="radio"]').length).toBe(4);
     expect(pick(el, 1).textContent).toContain('baseline');
     expect(pick(el, 4).textContent).toMatch(/adds ~\d+\.\d GB/);
@@ -71,7 +71,7 @@ describe('SlotsPanel', () => {
       expect(el.textContent).toContain('32,768 tokens');
       vi.advanceTimersByTime(FIT_DELAY_MS + 1);
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy).toHaveBeenCalledWith('gemma-3-12b-it-q4_k_m', 32768, 12);
+      expect(spy).toHaveBeenCalledWith('gemma-4-12b-it-q4_k_m', 32768, 12);
     } finally {
       vi.useRealTimers();
     }
@@ -88,25 +88,25 @@ describe('SlotsPanel', () => {
     save().click();
     await settle();
     expect(closed).toHaveBeenCalled();
-    expect(store.library().find((m) => m.id === 'gemma-3-12b-it-q4_k_m')).toMatchObject({ slots: 4, slotsCustom: true });
+    expect(store.library().find((m) => m.id === 'gemma-4-12b-it-q4_k_m')).toMatchObject({ slots: 4, slotsCustom: true });
   });
 
   it('returns to the default and says a loaded model keeps its count until it loads again', async () => {
     const backend = new MockBackend();
-    await backend.setModelSlots('qwen3-8b-instruct-q4_k_m', 8);
-    const { el, store, settle, closed } = await render('qwen3-8b-instruct-q4_k_m', backend);
+    await backend.setModelSlots('qwen3.5-9b-q4_k_m', 8);
+    const { el, store, settle, closed } = await render('qwen3.5-9b-q4_k_m', backend);
     expect(el.querySelector('.note')?.textContent).toContain('is loaded with 2 slots; the new count applies the next time it loads');
     expect(el.querySelector('.note')?.textContent).toContain('not interrupted');
     const def = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Use the default') as HTMLButtonElement;
     def.click();
     await settle();
     expect(closed).toHaveBeenCalled();
-    expect(store.library().find((m) => m.id === 'qwen3-8b-instruct-q4_k_m')?.slotsCustom).toBe(false);
+    expect(store.library().find((m) => m.id === 'qwen3.5-9b-q4_k_m')?.slotsCustom).toBe(false);
   });
 
   it('shows an error with Retry when the engine cannot answer, and a refused save stays open', async () => {
     const failing = new MockBackend({ failing: ['modelFit', 'setModelSlots'] } as never);
-    const { fixture, el, settle, closed } = await render('gemma-3-12b-it-q4_k_m', failing);
+    const { fixture, el, settle, closed } = await render('gemma-4-12b-it-q4_k_m', failing);
     expect(el.querySelector('.err')?.textContent).toContain('not responding');
     expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Retry')).toBe(true);
     pick(el, 8).click();

@@ -84,8 +84,8 @@ describe('mock cache commands', () => {
 
 describe('the playground demo reply', () => {
   it('is whole sentences, shorter for the small model', () => {
-    const big = demoReplyWords('qwen3-8b').join('');
-    const small = demoReplyWords('llama-3.2-3b').join('');
+    const big = demoReplyWords('qwen3.5-9b').join('');
+    const small = demoReplyWords('qwen3.5-4b').join('');
     expect(big.endsWith('.')).toBe(true);
     expect(small.endsWith('.')).toBe(true);
     expect(small.length).toBeLessThan(big.length);
@@ -93,7 +93,7 @@ describe('the playground demo reply', () => {
   });
 
   it('cuts at a sentence end that fits, or plainly when none does', () => {
-    const words = demoReplyWords('qwen3-8b');
+    const words = demoReplyWords('qwen3.5-9b');
     expect(wordsThatFit(words, 100_000)).toBe(words.length);
     const n = wordsThatFit(words, 60);
     expect(words.slice(0, n).join('').trim().endsWith('.')).toBe(true);

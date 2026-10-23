@@ -22,29 +22,29 @@ test.describe('model updates', () => {
     const banner = page.locator('pw-update-banner .banner');
     await expect(banner).toContainText('2 updates available for models you downloaded');
     await expect(page.locator('pw-library-tab tbody mat-icon.upd')).toHaveCount(2);
-    await expect(page.locator('pw-library-tab tbody mat-icon.upd').first()).toHaveAttribute('aria-label', 'Update available for Qwen3 8B Instruct');
+    await expect(page.locator('pw-library-tab tbody mat-icon.upd').first()).toHaveAttribute('aria-label', 'Update available for Qwen3.5 9B');
 
     // Get it names the host and the size; cancelling downloads nothing.
-    await banner.getByRole('button', { name: 'Get Qwen3-8B-Instruct-Q4_K_M.gguf' }).click();
+    await banner.getByRole('button', { name: 'Get Qwen3.5-9B-Q4_K_M.gguf' }).click();
     const dialog = page.getByRole('alertdialog');
     await expect(dialog).toContainText('from huggingface.co');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(banner).toContainText('2 updates available');
     await page.getByRole('tab', { name: /Downloads/ }).click();
-    await expect(page.locator('pw-downloads-list')).not.toContainText('Qwen3-8B-Instruct-Q4_K_M.gguf');
+    await expect(page.locator('pw-downloads-list')).not.toContainText('Qwen3.5-9B-Q4_K_M.gguf');
     await page.getByRole('tab', { name: /Library/ }).click();
 
     // Confirming starts the normal download and clears that notice.
-    await banner.getByRole('button', { name: 'Get Qwen3-8B-Instruct-Q4_K_M.gguf' }).click();
+    await banner.getByRole('button', { name: 'Get Qwen3.5-9B-Q4_K_M.gguf' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Download' }).click();
-    await expect(page.getByText('Downloading Qwen3-8B-Instruct-Q4_K_M.gguf.')).toBeVisible();
+    await expect(page.getByText('Downloading Qwen3.5-9B-Q4_K_M.gguf.')).toBeVisible();
     await expect(banner).toContainText('1 update available');
     await page.getByRole('tab', { name: /Downloads/ }).click();
-    await expect(page.locator('pw-downloads-list')).toContainText('Qwen3-8B-Instruct-Q4_K_M.gguf');
+    await expect(page.locator('pw-downloads-list')).toContainText('Qwen3.5-9B-Q4_K_M.gguf');
     await page.getByRole('tab', { name: /Library/ }).click();
 
     // Dismissing the last one removes the banner and the row note.
-    await banner.getByRole('button', { name: /^Dismiss the update for llama-3.2-3b/ }).click();
+    await banner.getByRole('button', { name: /^Dismiss the update for qwen3.5-4b/ }).click();
     await expect(page.locator('pw-update-banner .banner')).toHaveCount(0);
     await expect(page.locator('pw-library-tab tbody mat-icon.upd')).toHaveCount(0);
   });

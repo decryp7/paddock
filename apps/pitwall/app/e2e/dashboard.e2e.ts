@@ -58,7 +58,7 @@ test.describe('dashboard', () => {
 test.describe('crashed engines', () => {
   test('a model given up on after a crash loop is shown with Retry, which clears it', async ({ page }) => {
     await openApp(page, '/', 'mock-fast&mock-static&mock-crash');
-    const issue = page.getByRole('alert', { name: /Engine problem: gemma-3-12b-it-q4_k_m/ });
+    const issue = page.getByRole('alert', { name: /Engine problem: gemma-4-12b-it-q4_k_m/ });
     await expect(issue).toBeVisible();
     await expect(issue).toContainText('keeps crashing');
     await issue.getByRole('button', { name: 'Retry' }).click();

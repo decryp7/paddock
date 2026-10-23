@@ -44,7 +44,7 @@ import { P, save, link, hub, hubAt } from './common.mjs';
   const rows = 5, colH = rows * NH + (rows - 1) * G;
   // column 4 (right): apps, engines, hosts, service manager, LAN
   d.node('apps', c4, row(0), w4, 88, 'process', { name: 'Apps and tools', tech: 'Suite apps, pitwall CLI', desc: 'Any OpenAI, Anthropic or Ollama client.' });
-  d.node('eng', c4, row(1), w4, 88, 'process', { name: 'Engine processes', tech: 'llama.cpp, or a pack engine', desc: 'One child per loaded model.' });
+  d.node('eng', c4, row(1), w4, 88, 'process', { name: 'Engine processes', tech: 'llama.cpp', desc: 'One child per loaded model.' });
   const hy = row(2);
   d.group('hosts', c4, hy, w4, 200, 'Download hosts');
   d.node('hf', c4 + 12, hy + 40, w4 - 24, 56, 'external', { name: 'Hugging Face', tech: 'models, updates' });

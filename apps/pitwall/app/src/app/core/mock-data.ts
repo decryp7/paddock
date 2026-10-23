@@ -95,7 +95,7 @@ export function demoApps(now: number): AppInfo[] {
     app('pitcrew', 'Pitcrew', true, true, { requests: 212, promptTokens: 148_220, completionTokens: 31_400, busyMs: 402_000, errors: 0, peakMemoryBytes: 3.6 * GiB, cacheHits: 0, cacheMisses: 0, prefixTokens: 61_000, savedTokens: 0 }, { maxPriority: 'background', tools: false }),
     app('spotter', 'Spotter', true, true, { requests: 3460, promptTokens: 905_000, completionTokens: 12_400, busyMs: 1_120_000, errors: 12, peakMemoryBytes: 0.5 * GiB, cacheHits: 2_310, cacheMisses: 1_150, prefixTokens: 0, savedTokens: 601_000 }, {
       maxPriority: 'batch',
-      models: ['nomic-embed-text-v1.5-f16', 'bge-reranker-v2-m3-q8_0'],
+      models: ['qwen3-embedding-0.6b-q8_0', 'bge-reranker-v2-m3-q8_0'],
       limits: { requestsPerMin: 600, tokensPerDay: 5_000_000, maxConcurrent: 2, requestsPerDay: 20_000, tokensPerMonth: 120_000_000, maxMemoryPercent: null },
     }),
     app('dyno', 'Dyno', true, false, { requests: 48, promptTokens: 61_200, completionTokens: 18_900, busyMs: 96_000, errors: 1, peakMemoryBytes: 3.6 * GiB, cacheHits: 0, cacheMisses: 0, prefixTokens: 18_400, savedTokens: 0 }, { maxPriority: 'background' }),
@@ -206,14 +206,14 @@ export function demoLocalModels(now: number): LocalModel[] {
     ...p,
   });
   return [
-    m({ id: 'qwen3-8b-instruct-q4_k_m', repo: 'Qwen/Qwen3-8B-Instruct-GGUF', file: 'Qwen3-8B-Instruct-Q4_K_M.gguf', name: 'Qwen3 8B Instruct', quant: 'Q4_K_M', sizeBytes: 5.03 * GiB, paramsB: 8.2, contextMax: 32768, architecture: 'qwen3', capabilities: ['chat', 'tools', 'json'], loaded: true, loadedSlots: 2, lastUsedAt: now - 48_000, addedAt: now - 34 * DAY }),
-    m({ id: 'llama-3.2-3b-instruct-q5_k_m', repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF', file: 'Llama-3.2-3B-Instruct-Q5_K_M.gguf', name: 'Llama 3.2 3B Instruct', quant: 'Q5_K_M', sizeBytes: 2.32 * GiB, paramsB: 3.2, contextMax: 131072, architecture: 'llama', capabilities: ['chat', 'tools'], loaded: true, slots: 4, slotsCustom: true, loadedSlots: 4, lastUsedAt: now - 2_000, idleSecs: 300 }),
-    m({ id: 'nomic-embed-text-v1.5-f16', repo: 'nomic-ai/nomic-embed-text-v1.5-GGUF', file: 'nomic-embed-text-v1.5.f16.gguf', name: 'nomic-embed-text v1.5', quant: 'F16', sizeBytes: 262 * MiB, paramsB: 0.14, contextMax: 8192, architecture: 'nomic-bert', capabilities: ['embeddings'], loaded: true, pinned: true, lastUsedAt: now - 9_000 }),
-    m({ id: 'gemma-3-12b-it-q4_k_m', repo: 'unsloth/gemma-3-12b-it-GGUF', file: 'gemma-3-12b-it-Q4_K_M.gguf', name: 'Gemma 3 12B', quant: 'Q4_K_M', sizeBytes: 6.79 * GiB, paramsB: 12.2, contextMax: 131072, architecture: 'gemma3', capabilities: ['chat', 'vision', 'json'], projector: 'mmproj-F16.gguf', lastUsedAt: now - 2 * DAY, idleSecs: 120 }),
-    m({ id: 'mistral-nemo-instruct-2407-q4_k_m', repo: 'bartowski/Mistral-Nemo-Instruct-2407-GGUF', file: 'Mistral-Nemo-Instruct-2407-Q4_K_M.gguf', name: 'Mistral Nemo 12B Instruct', quant: 'Q4_K_M', sizeBytes: 6.96 * GiB, paramsB: 12.2, contextMax: 131072, architecture: 'llama', capabilities: ['chat', 'tools'], lastUsedAt: now - 3 * DAY, addedAt: now - 19 * DAY }),
-    m({ id: 'phi-4-mini-instruct-q8_0', repo: 'unsloth/Phi-4-mini-instruct-GGUF', file: 'Phi-4-mini-instruct-Q8_0.gguf', name: 'Phi-4 mini Instruct', quant: 'Q8_0', sizeBytes: 3.82 * GiB, paramsB: 3.8, contextMax: 131072, architecture: 'phi3', capabilities: ['chat', 'tools', 'json'], lastUsedAt: now - 6 * DAY, addedAt: now - 11 * DAY }),
+    m({ id: 'qwen3.5-9b-q4_k_m', repo: 'unsloth/Qwen3.5-9B-GGUF', file: 'Qwen3.5-9B-Q4_K_M.gguf', name: 'Qwen3.5 9B', quant: 'Q4_K_M', sizeBytes: 5.29 * GiB, paramsB: 8.2, contextMax: 32768, architecture: 'qwen3', capabilities: ['chat', 'tools', 'json'], loaded: true, loadedSlots: 2, lastUsedAt: now - 48_000, addedAt: now - 34 * DAY }),
+    m({ id: 'qwen3.5-4b-q4_k_m', repo: 'unsloth/Qwen3.5-4B-GGUF', file: 'Qwen3.5-4B-Q4_K_M.gguf', name: 'Qwen3.5 4B', quant: 'Q4_K_M', sizeBytes: 2.55 * GiB, paramsB: 4.2, contextMax: 262144, architecture: 'qwen35', capabilities: ['chat', 'tools'], loaded: true, slots: 4, slotsCustom: true, loadedSlots: 4, lastUsedAt: now - 2_000, idleSecs: 300 }),
+    m({ id: 'qwen3-embedding-0.6b-q8_0', repo: 'Qwen/Qwen3-Embedding-0.6B-GGUF', file: 'Qwen3-Embedding-0.6B-Q8_0.gguf', name: 'Qwen3 Embedding 0.6B', quant: 'Q8_0', sizeBytes: 610 * MiB, paramsB: 0.6, contextMax: 32768, architecture: 'qwen3', capabilities: ['embeddings'], loaded: true, pinned: true, lastUsedAt: now - 9_000 }),
+    m({ id: 'gemma-4-12b-it-q4_k_m', repo: 'unsloth/gemma-4-12b-it-GGUF', file: 'gemma-4-12b-it-Q4_K_M.gguf', name: 'Gemma 4 12B', quant: 'Q4_K_M', sizeBytes: 6.63 * GiB, paramsB: 12.2, contextMax: 131072, architecture: 'gemma4', capabilities: ['chat', 'vision', 'json'], projector: 'mmproj-F16.gguf', lastUsedAt: now - 2 * DAY, idleSecs: 120 }),
+    m({ id: 'gemma-4-e4b-it-q4_k_m', repo: 'unsloth/gemma-4-E4B-it-GGUF', file: 'gemma-4-E4B-it-Q4_K_M.gguf', name: 'Gemma 4 E4B', quant: 'Q4_K_M', sizeBytes: 4.64 * GiB, paramsB: 7.5, contextMax: 131072, architecture: 'gemma4', capabilities: ['chat', 'vision', 'json'], lastUsedAt: now - 3 * DAY, addedAt: now - 19 * DAY }),
+    m({ id: 'qwen3.6-35b-a3b-q2_k_xl', repo: 'unsloth/Qwen3.6-35B-A3B-GGUF', file: 'Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf', name: 'Qwen3.6 35B-A3B', quant: 'Q2_K_XL', sizeBytes: 11.45 * GiB, paramsB: 35, contextMax: 262144, architecture: 'qwen35moe', capabilities: ['chat', 'tools', 'json'], lastUsedAt: now - 6 * DAY, addedAt: now - 11 * DAY }),
     m({ id: 'bge-reranker-v2-m3-q8_0', repo: 'gpustack/bge-reranker-v2-m3-GGUF', file: 'bge-reranker-v2-m3-Q8_0.gguf', name: 'BGE reranker v2 m3', quant: 'Q8_0', sizeBytes: 606 * MiB, paramsB: 0.57, contextMax: 8192, architecture: 'xlm-roberta', capabilities: ['rerank'], lastUsedAt: now - 5 * HOUR }),
-    m({ id: 'qwen2.5-coder-1.5b-q8_0', repo: 'Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF', file: 'qwen2.5-coder-1.5b-instruct-q8_0.gguf', name: 'Qwen2.5 Coder 1.5B', quant: 'Q8_0', sizeBytes: 1.76 * GiB, paramsB: 1.5, contextMax: 32768, architecture: 'qwen2', capabilities: ['chat'], lastUsedAt: now - 41 * DAY, addedAt: now - 80 * DAY }),
+    m({ id: 'qwen3.5-2b-q8_0', repo: 'unsloth/Qwen3.5-2B-GGUF', file: 'Qwen3.5-2B-Q8_0.gguf', name: 'Qwen3.5 2B', quant: 'Q8_0', sizeBytes: 1.87 * GiB, paramsB: 2, contextMax: 262144, architecture: 'qwen35', capabilities: ['chat'], lastUsedAt: now - 41 * DAY, addedAt: now - 80 * DAY }),
   ];
 }
 
@@ -221,30 +221,30 @@ export function demoLocalModels(now: number): LocalModel[] {
 export function demoUpdateNotices(now: number): UpdateNotice[] {
   return [
     {
-      id: 'qwen3-8b-instruct-q4_k_m#newerRevision',
-      modelId: 'qwen3-8b-instruct-q4_k_m',
-      repo: 'Qwen/Qwen3-8B-Instruct-GGUF',
+      id: 'qwen3.5-9b-q4_k_m#newerRevision',
+      modelId: 'qwen3.5-9b-q4_k_m',
+      repo: 'unsloth/Qwen3.5-9B-GGUF',
       kind: 'newerRevision',
-      file: 'Qwen3-8B-Instruct-Q4_K_M.gguf',
+      file: 'Qwen3.5-9B-Q4_K_M.gguf',
       quant: 'Q4_K_M',
-      sizeBytes: 5.03 * GiB,
-      installedFile: 'Qwen3-8B-Instruct-Q4_K_M.gguf',
+      sizeBytes: 5.29 * GiB,
+      installedFile: 'Qwen3.5-9B-Q4_K_M.gguf',
       installedQuant: 'Q4_K_M',
-      summary: 'Qwen3-8B-Instruct-Q4_K_M.gguf changed on Hugging Face since you downloaded it (repository revision 3f9a1c2, now b72e04d).',
+      summary: 'Qwen3.5-9B-Q4_K_M.gguf changed on Hugging Face since you downloaded it (repository revision 3f9a1c2, now b72e04d).',
       foundAt: now,
       targetSha256: 'b'.repeat(64),
     },
     {
-      id: 'llama-3.2-3b-instruct-q5_k_m#betterQuant',
-      modelId: 'llama-3.2-3b-instruct-q5_k_m',
-      repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF',
+      id: 'qwen3.5-4b-q4_k_m#betterQuant',
+      modelId: 'qwen3.5-4b-q4_k_m',
+      repo: 'unsloth/Qwen3.5-4B-GGUF',
       kind: 'betterQuant',
-      file: 'Llama-3.2-3B-Instruct-Q6_K.gguf',
-      quant: 'Q6_K',
-      sizeBytes: 2.64 * GiB,
-      installedFile: 'Llama-3.2-3B-Instruct-Q5_K_M.gguf',
-      installedQuant: 'Q5_K_M',
-      summary: 'Q6_K (2.6 GB) is available and fits this machine; you have Q5_K_M.',
+      file: 'Qwen3.5-4B-Q8_0.gguf',
+      quant: 'Q8_0',
+      sizeBytes: 4.17 * GiB,
+      installedFile: 'Qwen3.5-4B-Q4_K_M.gguf',
+      installedQuant: 'Q4_K_M',
+      summary: 'Q8_0 (4.2 GB) is available and fits this machine; you have Q4_K_M.',
       foundAt: now,
       targetSha256: null,
     },
@@ -253,9 +253,9 @@ export function demoUpdateNotices(now: number): UpdateNotice[] {
 
 export function demoLoaded(now: number, idleSecs = 600): LoadedModel[] {
   return [
-    { modelId: 'qwen3-8b-instruct-q4_k_m', name: 'Qwen3 8B Instruct', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: 0.9 * GiB, vramBytes: 6.1 * GiB, contextTokens: 16384, slots: 2, pinned: false, activeRequests: 0, loadedAt: now - 52 * MIN, lastUsedAt: now - 48_000, idleReleaseAt: now - 48_000 + idleSecs * 1000, coldStartMs: 3_420, capabilities: ['chat', 'tools', 'json'] },
-    { modelId: 'llama-3.2-3b-instruct-q5_k_m', name: 'Llama 3.2 3B Instruct', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'busy', ramBytes: 0.4 * GiB, vramBytes: 2.9 * GiB, contextTokens: 8192, slots: 4, pinned: false, activeRequests: 2, loadedAt: now - 14 * MIN, lastUsedAt: now - 2_000, idleReleaseAt: null, coldStartMs: 1_610, capabilities: ['chat', 'tools'] },
-    { modelId: 'nomic-embed-text-v1.5-f16', name: 'nomic-embed-text v1.5', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: 0.12 * GiB, vramBytes: 0.33 * GiB, contextTokens: 8192, slots: 1, pinned: true, activeRequests: 0, loadedAt: now - 5 * HOUR, lastUsedAt: now - 9_000, idleReleaseAt: null, coldStartMs: 420, capabilities: ['embeddings'] },
+    { modelId: 'qwen3.5-9b-q4_k_m', name: 'Qwen3.5 9B', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: 0.9 * GiB, vramBytes: 6.1 * GiB, contextTokens: 16384, slots: 2, pinned: false, activeRequests: 0, loadedAt: now - 52 * MIN, lastUsedAt: now - 48_000, idleReleaseAt: now - 48_000 + idleSecs * 1000, coldStartMs: 3_420, capabilities: ['chat', 'tools', 'json'] },
+    { modelId: 'qwen3.5-4b-q4_k_m', name: 'Qwen3.5 4B', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'busy', ramBytes: 0.4 * GiB, vramBytes: 2.9 * GiB, contextTokens: 8192, slots: 4, pinned: false, activeRequests: 2, loadedAt: now - 14 * MIN, lastUsedAt: now - 2_000, idleReleaseAt: null, coldStartMs: 1_610, capabilities: ['chat', 'tools'] },
+    { modelId: 'qwen3-embedding-0.6b-q8_0', name: 'Qwen3 Embedding 0.6B', engine: 'llama.cpp', build: 'cuda-13 · b11669', state: 'ready', ramBytes: 0.12 * GiB, vramBytes: 0.33 * GiB, contextTokens: 8192, slots: 1, pinned: true, activeRequests: 0, loadedAt: now - 5 * HOUR, lastUsedAt: now - 9_000, idleReleaseAt: null, coldStartMs: 420, capabilities: ['embeddings'] },
   ];
 }
 
@@ -299,9 +299,9 @@ export function demoEngines(now: number): Engine[] {
         { id: 'cpu', label: 'CPU (AVX2)', tag: 'b11702', downloadBytes: 23 * MiB, suggested: false, installed: false },
       ],
       processes: [
-        { pid: 18244, modelId: 'qwen3-8b-instruct-q4_k_m', health: 'healthy', restarts: 0, rssBytes: 1.1 * GiB, startedAt: now - 52 * MIN },
-        { pid: 20112, modelId: 'llama-3.2-3b-instruct-q5_k_m', health: 'healthy', restarts: 1, rssBytes: 0.6 * GiB, startedAt: now - 14 * MIN },
-        { pid: 9960, modelId: 'nomic-embed-text-v1.5-f16', health: 'healthy', restarts: 0, rssBytes: 0.21 * GiB, startedAt: now - 5 * HOUR },
+        { pid: 18244, modelId: 'qwen3.5-9b-q4_k_m', health: 'healthy', restarts: 0, rssBytes: 1.1 * GiB, startedAt: now - 52 * MIN },
+        { pid: 20112, modelId: 'qwen3.5-4b-q4_k_m', health: 'healthy', restarts: 1, rssBytes: 0.6 * GiB, startedAt: now - 14 * MIN },
+        { pid: 9960, modelId: 'qwen3-embedding-0.6b-q8_0', health: 'healthy', restarts: 0, rssBytes: 0.21 * GiB, startedAt: now - 5 * HOUR },
       ],
       rollbackTo: 'vulkan',
       leftovers: [{ id: 'pack-llamafile', label: 'llamafile', sizeBytes: 351 * MiB }],
@@ -357,18 +357,18 @@ export function presetMemory(preset: Settings['memory']['preset'], current: Sett
 }
 
 const HF_MODELS: [string, number, number, string[], string][] = [
-  ['Qwen/Qwen3-8B-Instruct-GGUF', 1_204_311, 1840, ['gguf', 'qwen3', 'conversational'], 'text-generation'],
-  ['Qwen/Qwen3-14B-Instruct-GGUF', 612_004, 990, ['gguf', 'qwen3', 'conversational'], 'text-generation'],
-  ['Qwen/Qwen3-32B-Instruct-GGUF', 288_190, 760, ['gguf', 'qwen3'], 'text-generation'],
-  ['Qwen/Qwen2.5-Coder-7B-Instruct-GGUF', 902_118, 1320, ['gguf', 'code'], 'text-generation'],
-  ['unsloth/gemma-3-12b-it-GGUF', 740_225, 1102, ['gguf', 'gemma3', 'vision'], 'image-text-to-text'],
-  ['unsloth/gemma-3-27b-it-GGUF', 330_910, 840, ['gguf', 'gemma3', 'vision'], 'image-text-to-text'],
-  ['bartowski/Llama-3.2-3B-Instruct-GGUF', 2_210_400, 2210, ['gguf', 'llama'], 'text-generation'],
-  ['bartowski/Meta-Llama-3.1-8B-Instruct-GGUF', 1_840_300, 2040, ['gguf', 'llama'], 'text-generation'],
-  ['bartowski/Mistral-Small-3.2-24B-Instruct-GGUF', 205_300, 480, ['gguf', 'mistral'], 'text-generation'],
-  ['microsoft/Phi-4-mini-instruct-gguf', 410_200, 612, ['gguf', 'phi'], 'text-generation'],
-  ['nomic-ai/nomic-embed-text-v1.5-GGUF', 1_502_990, 610, ['gguf', 'embeddings'], 'feature-extraction'],
+  ['unsloth/Qwen3.8-27B-GGUF', 412_004, 1210, ['gguf', 'qwen3', 'conversational'], 'image-text-to-text'],
+  ['unsloth/Qwen3.6-35B-A3B-GGUF', 688_190, 1460, ['gguf', 'qwen3', 'conversational'], 'image-text-to-text'],
+  ['unsloth/Qwen3.5-9B-GGUF', 1_204_311, 1840, ['gguf', 'qwen3', 'conversational'], 'image-text-to-text'],
+  ['unsloth/Qwen3-Coder-Next-GGUF', 302_118, 920, ['gguf', 'code'], 'text-generation'],
+  ['unsloth/gemma-4-12b-it-GGUF', 740_225, 1102, ['gguf', 'gemma4', 'vision'], 'image-text-to-text'],
+  ['unsloth/gemma-4-26B-A4B-it-GGUF', 530_910, 840, ['gguf', 'gemma4', 'vision'], 'image-text-to-text'],
+  ['google/gemma-4-E4B-it-GGUF', 410_400, 702, ['gguf', 'gemma4', 'vision'], 'image-text-to-text'],
+  ['unsloth/Qwen3.5-4B-GGUF', 1_110_400, 1040, ['gguf', 'qwen3'], 'image-text-to-text'],
+  ['unsloth/Qwen3.5-2B-GGUF', 640_300, 480, ['gguf', 'qwen3'], 'image-text-to-text'],
+  ['Qwen/Qwen3-Embedding-0.6B-GGUF', 1_502_990, 610, ['gguf', 'embeddings'], 'feature-extraction'],
   ['gpustack/bge-reranker-v2-m3-GGUF', 120_400, 88, ['gguf', 'reranker'], 'text-classification'],
+  ['unsloth/Qwen3.5-0.8B-GGUF', 205_300, 212, ['gguf', 'qwen3'], 'image-text-to-text'],
 ];
 
 export function demoSearch(query: string, now: number): HfModel[] {
@@ -409,13 +409,13 @@ export function demoRepo(repo: string, local: LocalModel[]): HfRepo {
     const file = parts > 1 ? `${base}-${quant}-00001-of-0000${parts}.gguf` : `${base}-${quant}.gguf`;
     return { file, quant, sizeBytes: size, parts, sha256: null, fit: demoFit(size), maxSlots: demoMaxSlots(size), downloaded: local.some((l) => l.repo === repo && l.quant === quant) };
   });
-  const vision = /gemma-3|vision|vl/i.test(repo);
+  const vision = /gemma-4|vision|vl/i.test(repo);
   return {
     repo,
     variants,
     projectors: vision ? [{ file: 'mmproj-F16.gguf', quant: 'F16', sizeBytes: 854 * MiB, parts: 1, sha256: null, fit: demoFit(854 * MiB), maxSlots: 0, downloaded: false }] : [],
-    license: /gemma/i.test(repo) ? 'gemma' : /llama/i.test(repo) ? 'llama3.2' : 'apache-2.0',
-    gated: /meta-llama/i.test(repo),
+    license: /gemma/i.test(repo) ? 'gemma' : 'apache-2.0',
+    gated: /^google\//i.test(repo),
   };
 }
 
@@ -429,7 +429,7 @@ const RANGES: Record<HistoryRange, { span: number; points: number }> = {
 };
 
 // Keyed series use ids (app ids, model ids); the UI shows names.
-const MODEL_KEYS = ['qwen3-8b-instruct-q4_k_m', 'llama-3.2-3b-instruct-q5_k_m', 'nomic-embed-text-v1.5-f16', 'gemma-3-12b-it-q4_k_m'];
+const MODEL_KEYS = ['qwen3.5-9b-q4_k_m', 'qwen3.5-4b-q4_k_m', 'qwen3-embedding-0.6b-q8_0', 'gemma-4-12b-it-q4_k_m'];
 const APP_KEYS = ['debrief', 'spotter', 'nightly-report', 'pitcrew', 'dyno'];
 
 export function demoHistory(range: HistoryRange, now: number, seed = 7): History {
@@ -483,8 +483,8 @@ export function demoHistory(range: HistoryRange, now: number, seed = 7): History
 
   // Events at segment boundaries where residency changed.
   const reasons: ReleaseReason[] = ['idle', 'pressure', 'manual', 'evicted', 'deepIdle', 'idle'];
-  const names = ['Qwen3 8B Instruct', 'Llama 3.2 3B Instruct', 'nomic-embed-text v1.5', 'Gemma 3 12B'];
-  const ids = ['qwen3-8b-instruct-q4_k_m', 'llama-3.2-3b-instruct-q5_k_m', 'nomic-embed-text-v1.5-f16', 'gemma-3-12b-it-q4_k_m'];
+  const names = ['Qwen3.5 9B', 'Qwen3.5 4B', 'Qwen3 Embedding 0.6B', 'Gemma 4 12B'];
+  const ids = ['qwen3.5-9b-q4_k_m', 'qwen3.5-4b-q4_k_m', 'qwen3-embedding-0.6b-q8_0', 'gemma-4-12b-it-q4_k_m'];
   for (let s = 1; s < segments; s++) {
     const at = start + (s / segments) * span;
     for (let k = 0; k < 4; k++) {
@@ -504,7 +504,7 @@ export function demoHistory(range: HistoryRange, now: number, seed = 7): History
       });
     }
   }
-  events.push({ id, at: start + span * 0.62, kind: 'engineRestarted', severity: 'warn', message: 'llama.cpp (Llama 3.2 3B) stopped responding and was restarted', modelId: ids[1]!, appId: null, reason: null });
+  events.push({ id, at: start + span * 0.62, kind: 'engineRestarted', severity: 'warn', message: 'llama.cpp (Qwen3.5 4B) stopped responding and was restarted', modelId: ids[1]!, appId: null, reason: null });
   events.sort((a, b) => a.at - b.at);
   return { range, stepMs, points, requestsByApp: byApp, requestsByModel: byModel, events };
 }
@@ -523,16 +523,16 @@ export function demoEvents(now: number): PitwallEvent[] {
   });
   const list = [
     e(0.7, 'pairing', 'info', 'Obsidian Copilot asks to pair (code 482 913)', { appId: 'obsidian-copilot' }),
-    e(3, 'contextReleased', 'info', 'Released the context of Qwen3 8B Instruct after 2 min idle (1.2 GB)', { modelId: 'qwen3-8b-instruct-q4_k_m', reason: 'idle' }),
-    e(14, 'modelLoaded', 'info', 'Loaded Llama 3.2 3B Instruct for Nightly report script (1.6 s cold start)', { modelId: 'llama-3.2-3b-instruct-q5_k_m', appId: 'nightly-report' }),
-    e(22, 'modelUnloaded', 'warn', 'Released Gemma 3 12B: available RAM fell below 15 %', { modelId: 'gemma-3-12b-it-q4_k_m', reason: 'pressure' }),
+    e(3, 'contextReleased', 'info', 'Released the context of Qwen3.5 9B after 2 min idle (1.2 GB)', { modelId: 'qwen3.5-9b-q4_k_m', reason: 'idle' }),
+    e(14, 'modelLoaded', 'info', 'Loaded Qwen3.5 4B for Nightly report script (1.6 s cold start)', { modelId: 'qwen3.5-4b-q4_k_m', appId: 'nightly-report' }),
+    e(22, 'modelUnloaded', 'warn', 'Released Gemma 4 12B: available RAM fell below 15 %', { modelId: 'gemma-4-12b-it-q4_k_m', reason: 'pressure' }),
     e(31, 'requestFailed', 'error', 'Spotter: 429 rate limit (600 requests/min)', { appId: 'spotter' }),
     e(48, 'download', 'info', 'Downloaded bge-reranker-v2-m3 Q8_0 (606 MB, verified)'),
-    e(52, 'modelLoaded', 'info', 'Loaded Qwen3 8B Instruct for Debrief (3.4 s cold start)', { modelId: 'qwen3-8b-instruct-q4_k_m', appId: 'debrief' }),
-    e(67, 'engineRestarted', 'warn', 'llama.cpp (Llama 3.2 3B) stopped responding and was restarted', { modelId: 'llama-3.2-3b-instruct-q5_k_m' }),
-    e(95, 'modelUnloaded', 'info', 'Released Qwen3 8B Instruct: idle for 10 min', { modelId: 'qwen3-8b-instruct-q4_k_m', reason: 'idle' }),
+    e(52, 'modelLoaded', 'info', 'Loaded Qwen3.5 9B for Debrief (3.4 s cold start)', { modelId: 'qwen3.5-9b-q4_k_m', appId: 'debrief' }),
+    e(67, 'engineRestarted', 'warn', 'llama.cpp (Qwen3.5 4B) stopped responding and was restarted', { modelId: 'qwen3.5-4b-q4_k_m' }),
+    e(95, 'modelUnloaded', 'info', 'Released Qwen3.5 9B: idle for 10 min', { modelId: 'qwen3.5-9b-q4_k_m', reason: 'idle' }),
     e(130, 'presetChanged', 'info', 'Memory preset set to Balanced'),
-    e(180, 'modelUnloaded', 'info', 'Released Gemma 3 12B: yielded to a full-screen app', { modelId: 'gemma-3-12b-it-q4_k_m', reason: 'yield' }),
+    e(180, 'modelUnloaded', 'info', 'Released Gemma 4 12B: yielded to a full-screen app', { modelId: 'gemma-4-12b-it-q4_k_m', reason: 'yield' }),
     e(240, 'servingChanged', 'info', 'Serving resumed'),
     e(300, 'engineStarted', 'info', 'llama.cpp cuda-13 b11669 passed its self-test'),
   ];
@@ -556,10 +556,10 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
     const appIdx = Math.floor(rnd() ** 1.4 * 5);
     const appId = APP_IDS[appIdx]!;
     let [api, endpoint] = ENDPOINTS[Math.floor(rnd() * 4)]!;
-    let modelId: string = rnd() > 0.35 ? 'qwen3-8b-instruct-q4_k_m' : 'llama-3.2-3b-instruct-q5_k_m';
+    let modelId: string = rnd() > 0.35 ? 'qwen3.5-9b-q4_k_m' : 'qwen3.5-4b-q4_k_m';
     if (appId === 'spotter') {
       [api, endpoint] = rnd() > 0.3 ? ENDPOINTS[1]! : ENDPOINTS[4]!;
-      modelId = endpoint.includes('rerank') ? 'bge-reranker-v2-m3-q8_0' : 'nomic-embed-text-v1.5-f16';
+      modelId = endpoint.includes('rerank') ? 'bge-reranker-v2-m3-q8_0' : 'qwen3-embedding-0.6b-q8_0';
     }
     if (appId === 'nightly-report') [api, endpoint] = rnd() > 0.5 ? ENDPOINTS[3]! : ENDPOINTS[5]!;
     const embedding = endpoint.includes('embed') || endpoint.includes('rerank');
@@ -613,7 +613,7 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
   // Some apps ask for a preset by name; `modelId` is what it resolved to.
   out.forEach((r, i) => {
     if (r.status === 400 || r.endpoint.includes('embed') || r.endpoint.includes('rerank')) return;
-    if (r.appId === 'debrief' && i % 3 === 0) Object.assign(r, { alias: 'debrief-explain', modelId: 'qwen3-8b-instruct-q4_k_m', chosenBy: 'explicit' });
+    if (r.appId === 'debrief' && i % 3 === 0) Object.assign(r, { alias: 'debrief-explain', modelId: 'qwen3.5-9b-q4_k_m', chosenBy: 'explicit' });
     if (r.appId === 'pitcrew' && i % 2 === 0) Object.assign(r, { alias: 'pitcrew-triage', chosenBy: 'capabilities' });
   });
   return out;
@@ -623,22 +623,22 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
 export function demoPresets(): ModelPreset[] {
   const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, cacheResponses: false, keepWarm: false };
   return [
-    { ...base, alias: 'debrief-explain', target: 'qwen3-8b-instruct-q4_k_m', temperature: 0.3, maxTokens: 800, cacheResponses: true, keepWarm: true, systemPrompt: 'Explain the log excerpt to an engineer in plain language. Be concise and name the likely cause first.' },
+    { ...base, alias: 'debrief-explain', target: 'qwen3.5-9b-q4_k_m', temperature: 0.3, maxTokens: 800, cacheResponses: true, keepWarm: true, systemPrompt: 'Explain the log excerpt to an engineer in plain language. Be concise and name the likely cause first.' },
     { ...base, alias: 'pitcrew-triage', target: 'auto:chat,tools,fast', context: 16384, temperature: 0.1, keepWarm: true },
-    { ...base, alias: 'spotter-summarise', target: 'llama-3.2-3b-instruct-q5_k_m', temperature: 0.2, topP: 0.9, maxTokens: 300, systemPrompt: 'Summarise the text in three short bullet points.' },
+    { ...base, alias: 'spotter-summarise', target: 'qwen3.5-4b-q4_k_m', temperature: 0.2, topP: 0.9, maxTokens: 300, systemPrompt: 'Summarise the text in three short bullet points.' },
     { ...base, alias: 'legacy-explain', target: 'mistral-7b-instruct-v0.3-q4_k_m' },
   ];
 }
 
 export function demoBenchmarks(now: number): BenchmarkResult[] {
   return [
-    { modelId: 'qwen3-8b-instruct-q4_k_m', build: 'cuda-13 · b11669', at: now - 2 * DAY, promptTps: 2140, genTps: 61.8, ttftMs: 212, contextTokens: 4096 },
-    { modelId: 'llama-3.2-3b-instruct-q5_k_m', build: 'cuda-13 · b11669', at: now - 2 * DAY, promptTps: 4380, genTps: 118.4, ttftMs: 96, contextTokens: 4096 },
-    { modelId: 'gemma-3-12b-it-q4_k_m', build: 'cuda-13 · b11669', at: now - 6 * DAY, promptTps: 1210, genTps: 38.9, ttftMs: 384, contextTokens: 4096 },
-    { modelId: 'qwen2.5-coder-1.5b-q8_0', build: 'vulkan · b11669', at: now - 12 * DAY, promptTps: 5120, genTps: 141.2, ttftMs: 71, contextTokens: 4096 },
-    { modelId: 'mistral-nemo-instruct-2407-q4_k_m', build: 'cuda-13 · b11669', at: now - 4 * DAY, promptTps: 1380, genTps: 44.6, ttftMs: 342, contextTokens: 4096 },
-    { modelId: 'phi-4-mini-instruct-q8_0', build: 'cuda-13 · b11669', at: now - 5 * DAY, promptTps: 3210, genTps: 83.7, ttftMs: 128, contextTokens: 4096 },
-    { modelId: 'qwen3-8b-instruct-q4_k_m', build: 'vulkan · b11669', at: now - 3 * DAY, promptTps: 1490, genTps: 52.3, ttftMs: 268, contextTokens: 4096 },
+    { modelId: 'qwen3.5-9b-q4_k_m', build: 'cuda-13 · b11669', at: now - 2 * DAY, promptTps: 2140, genTps: 61.8, ttftMs: 212, contextTokens: 4096 },
+    { modelId: 'qwen3.5-4b-q4_k_m', build: 'cuda-13 · b11669', at: now - 2 * DAY, promptTps: 4380, genTps: 118.4, ttftMs: 96, contextTokens: 4096 },
+    { modelId: 'gemma-4-12b-it-q4_k_m', build: 'cuda-13 · b11669', at: now - 6 * DAY, promptTps: 1210, genTps: 38.9, ttftMs: 384, contextTokens: 4096 },
+    { modelId: 'qwen3.5-2b-q8_0', build: 'vulkan · b11669', at: now - 12 * DAY, promptTps: 5120, genTps: 141.2, ttftMs: 71, contextTokens: 4096 },
+    { modelId: 'gemma-4-e4b-it-q4_k_m', build: 'cuda-13 · b11669', at: now - 4 * DAY, promptTps: 1380, genTps: 44.6, ttftMs: 342, contextTokens: 4096 },
+    { modelId: 'qwen3.6-35b-a3b-q2_k_xl', build: 'cuda-13 · b11669', at: now - 5 * DAY, promptTps: 3210, genTps: 83.7, ttftMs: 128, contextTokens: 4096 },
+    { modelId: 'qwen3.5-9b-q4_k_m', build: 'vulkan · b11669', at: now - 3 * DAY, promptTps: 1490, genTps: 52.3, ttftMs: 268, contextTokens: 4096 },
   ];
 }
 
@@ -648,7 +648,7 @@ export const DEMO_REPLY =
 /** The demo reply as streamed words: the small model says less, always in whole sentences. */
 export function demoReplyWords(modelId: string): string[] {
   const sentences = DEMO_REPLY.match(/[^.]+\.\s*/g) ?? [DEMO_REPLY];
-  const text = modelId.includes('llama') ? sentences.slice(0, 2).join('') : DEMO_REPLY;
+  const text = modelId.includes('qwen3.5-4b') ? sentences.slice(0, 2).join('') : DEMO_REPLY;
   return text.trim().split(/(?<= )/);
 }
 
@@ -673,13 +673,13 @@ interface DemoCatalogModel {
 }
 
 const DEMO_CATALOG: DemoCatalogModel[] = [
-  { id: 'qwen2.5-coder-7b', name: 'Qwen2.5 Coder 7B Instruct', repo: 'bartowski/Qwen2.5-Coder-7B-Instruct-GGUF', base: 'Qwen2.5-Coder-7B-Instruct', quant: 'Q4_K_M', sizeGiB: 4.4, tags: ['code', 'chat'] },
-  { id: 'qwen3-1.7b', name: 'Qwen3 1.7B', repo: 'unsloth/Qwen3-1.7B-GGUF', base: 'Qwen3-1.7B', quant: 'Q8_0', sizeGiB: 1.8, tags: ['small', 'chat'] },
-  { id: 'llama-3.2-3b', name: 'Llama 3.2 3B Instruct', repo: 'bartowski/Llama-3.2-3B-Instruct-GGUF', base: 'Llama-3.2-3B-Instruct', quant: 'Q5_K_M', sizeGiB: 2.3, tags: ['small', 'chat'] },
-  { id: 'gemma-3-12b', name: 'Gemma 3 12B Instruct', repo: 'unsloth/gemma-3-12b-it-GGUF', base: 'gemma-3-12b-it', quant: 'Q4_K_M', sizeGiB: 6.9, tags: ['chat', 'vision'] },
-  { id: 'qwen3-32b', name: 'Qwen3 32B', repo: 'unsloth/Qwen3-32B-GGUF', base: 'Qwen3-32B', quant: 'Q4_K_M', sizeGiB: 19.8, tags: ['chat', 'reasoning'] },
-  { id: 'qwen3-coder-30b', name: 'Qwen3 Coder 30B A3B', repo: 'unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF', base: 'Qwen3-Coder-30B-A3B-Instruct', quant: 'Q4_K_M', sizeGiB: 18.6, tags: ['code'] },
-  { id: 'nomic-embed', name: 'Nomic Embed Text v1.5', repo: 'nomic-ai/nomic-embed-text-v1.5-GGUF', base: 'nomic-embed-text-v1.5', quant: 'F16', sizeGiB: 0.26, tags: ['small', 'embedding'] },
+  { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next', repo: 'unsloth/Qwen3-Coder-Next-GGUF', base: 'Qwen3-Coder-Next-UD', quant: 'Q2_K_XL', sizeGiB: 24.9, tags: ['code'] },
+  { id: 'qwen3.5-2b', name: 'Qwen3.5 2B', repo: 'unsloth/Qwen3.5-2B-GGUF', base: 'Qwen3.5-2B', quant: 'Q8_0', sizeGiB: 1.9, tags: ['small', 'chat'] },
+  { id: 'qwen3.5-4b', name: 'Qwen3.5 4B', repo: 'unsloth/Qwen3.5-4B-GGUF', base: 'Qwen3.5-4B', quant: 'Q4_K_M', sizeGiB: 2.6, tags: ['small', 'chat'] },
+  { id: 'gemma-4-12b', name: 'Gemma 4 12B', repo: 'unsloth/gemma-4-12b-it-GGUF', base: 'gemma-4-12b-it', quant: 'Q4_K_M', sizeGiB: 6.6, tags: ['chat', 'vision'] },
+  { id: 'qwen3.8-27b', name: 'Qwen3.8 27B', repo: 'unsloth/Qwen3.8-27B-GGUF', base: 'Qwen3.8-27B-UD', quant: 'Q4_K_M', sizeGiB: 15.3, tags: ['chat', 'reasoning'] },
+  { id: 'qwen3.6-35b-a3b', name: 'Qwen3.6 35B-A3B', repo: 'unsloth/Qwen3.6-35B-A3B-GGUF', base: 'Qwen3.6-35B-A3B-UD', quant: 'Q3_K_XL', sizeGiB: 15.7, tags: ['code', 'chat'] },
+  { id: 'qwen3-embedding', name: 'Qwen3 Embedding 0.6B', repo: 'Qwen/Qwen3-Embedding-0.6B-GGUF', base: 'Qwen3-Embedding-0.6B', quant: 'Q8_0', sizeGiB: 0.6, tags: ['small', 'embedding'] },
 ];
 
 /** The demo packs (mock only): recommendations sorted fits first, optionally for one tag; one pack with a problem. */

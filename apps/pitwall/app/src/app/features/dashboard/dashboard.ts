@@ -400,7 +400,7 @@ export class Dashboard implements OnInit {
   }
 }
 
-/** A readable name for a model id the library does not know any more (`gemma-3-12b-it-q4_k_m` → `gemma-3-12b-it`). */
+/** A readable name for a model id the library does not know any more (`gemma-4-12b-it-q4_k_m` → `gemma-4-12b-it`). */
 export function shortModel(id: string): string {
   return id.replace(/[-.](q\d\w*|f16|bf16|f32)$/i, '');
 }

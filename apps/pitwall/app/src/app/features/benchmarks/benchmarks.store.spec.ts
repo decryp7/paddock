@@ -6,7 +6,7 @@ import { Toasts } from '../../core/toasts';
 import { BenchmarksStore } from './benchmarks.store';
 
 const NOW = 1_800_000_000_000;
-const QWEN = 'qwen3-8b-instruct-q4_k_m';
+const QWEN = 'qwen3.5-9b-q4_k_m';
 
 describe('BenchmarksStore', () => {
   function setup(backend: PitwallBackend = new MockBackend({ now: () => NOW })) {
@@ -30,8 +30,8 @@ describe('BenchmarksStore', () => {
     const ats = store.sorted().map((r) => r.at);
     expect(ats).toEqual([...ats].sort((a, b) => b - a));
     expect(store.runnable().every((m) => m.capabilities.includes('chat'))).toBe(true);
-    expect(store.runnable().map((m) => m.id)).not.toContain('nomic-embed-text-v1.5-f16');
-    expect(store.names().get(QWEN)).toBe('Qwen3 8B Instruct');
+    expect(store.runnable().map((m) => m.id)).not.toContain('qwen3-embedding-0.6b-q8_0');
+    expect(store.names().get(QWEN)).toBe('Qwen3.5 9B');
     const latest = store.latest().get(QWEN)!;
     expect(latest.build).toBe('cuda-13 · b11669');
     expect(latest.at).toBe(NOW - 2 * 86_400_000);
@@ -64,7 +64,7 @@ describe('BenchmarksStore', () => {
     expect(store.results()[0]).toMatchObject({ modelId: QWEN, at: NOW });
     expect(store.latest().get(QWEN)!.at).toBe(NOW);
     expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'ok' });
-    expect(toasts.toasts().at(-1)!.message).toMatch(/^Qwen3 8B Instruct: [\d.]+ tok\/s\.$/);
+    expect(toasts.toasts().at(-1)!.message).toMatch(/^Qwen3.5 9B: [\d.]+ tok\/s\.$/);
   });
 
   it('ignores a second run of the same model while one is in flight', async () => {

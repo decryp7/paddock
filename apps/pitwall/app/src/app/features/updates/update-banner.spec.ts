@@ -19,21 +19,21 @@ describe('UpdateBanner', () => {
     expect(el.querySelector('header')!.textContent).toContain('2 updates available for models you downloaded');
     expect(el.textContent).toContain('nothing downloads until you choose');
     expect(rows[0]!.textContent).toContain('Update available: newer revision');
-    expect(rows[0]!.textContent).toContain('Qwen3-8B-Instruct-Q4_K_M.gguf');
-    expect(rows[0]!.textContent).toContain('Qwen/Qwen3-8B-Instruct-GGUF');
+    expect(rows[0]!.textContent).toContain('Qwen3.5-9B-Q4_K_M.gguf');
+    expect(rows[0]!.textContent).toContain('unsloth/Qwen3.5-9B-GGUF');
     expect(rows[1]!.textContent).toContain('Update available: better quantisation');
-    expect(button(rows[0] as HTMLElement, 'Get Qwen3-8B-Instruct-Q4_K_M.gguf')).toBeTruthy();
-    expect(button(rows[0] as HTMLElement, 'Remind me about qwen3-8b-instruct-q4_k_m in a week')).toBeTruthy();
-    expect(button(rows[0] as HTMLElement, 'Dismiss the update for qwen3-8b-instruct-q4_k_m')).toBeTruthy();
+    expect(button(rows[0] as HTMLElement, 'Get Qwen3.5-9B-Q4_K_M.gguf')).toBeTruthy();
+    expect(button(rows[0] as HTMLElement, 'Remind me about qwen3.5-9b-q4_k_m in a week')).toBeTruthy();
+    expect(button(rows[0] as HTMLElement, 'Dismiss the update for qwen3.5-9b-q4_k_m')).toBeTruthy();
   });
 
   it('dismisses an update and snoozes another', async () => {
     const { el, fixture } = await render(UpdateBanner, new MockBackend({ modelUpdates: true }));
-    button(el, 'Dismiss the update for qwen3-8b-instruct-q4_k_m').click();
+    button(el, 'Dismiss the update for qwen3.5-9b-q4_k_m').click();
     await settle(fixture);
     expect(el.querySelectorAll('li')).toHaveLength(1);
     expect(el.querySelector('header')!.textContent).toContain('1 update available');
-    button(el, 'Remind me about llama-3.2-3b-instruct-q5_k_m in a week').click();
+    button(el, 'Remind me about qwen3.5-4b-q4_k_m in a week').click();
     await settle(fixture);
     expect(el.querySelector('.banner')).toBeNull();
   });
@@ -44,15 +44,15 @@ describe('UpdateBanner', () => {
     const ask = vi.fn().mockResolvedValue(false);
     TestBed.configureTestingModule({ providers: [{ provide: Confirm, useValue: { ask } }] });
     const { el, fixture } = await render(UpdateBanner, backend);
-    button(el, 'Get Qwen3-8B-Instruct-Q4_K_M.gguf').click();
+    button(el, 'Get Qwen3.5-9B-Q4_K_M.gguf').click();
     await settle(fixture);
     expect(ask).toHaveBeenCalledOnce();
     expect(ask.mock.calls[0]![0].message).toContain('huggingface.co');
     expect(spy).not.toHaveBeenCalled();
     ask.mockResolvedValue(true);
-    button(el, 'Get Qwen3-8B-Instruct-Q4_K_M.gguf').click();
+    button(el, 'Get Qwen3.5-9B-Q4_K_M.gguf').click();
     await settle(fixture);
-    expect(spy).toHaveBeenCalledWith('Qwen/Qwen3-8B-Instruct-GGUF', 'Qwen3-8B-Instruct-Q4_K_M.gguf', null);
+    expect(spy).toHaveBeenCalledWith('unsloth/Qwen3.5-9B-GGUF', 'Qwen3.5-9B-Q4_K_M.gguf', null);
     expect(el.querySelectorAll('li')).toHaveLength(1);
   });
 

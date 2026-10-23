@@ -37,9 +37,9 @@ async function mount(opts: { backend?: MockBackend; load?: boolean; patch?: (o: 
 
 describe('shortModel', () => {
   it('drops a trailing quantisation suffix', () => {
-    expect(shortModel('gemma-3-12b-it-q4_k_m')).toBe('gemma-3-12b-it');
-    expect(shortModel('llama-3.2-3b-instruct-Q5_K_M')).toBe('llama-3.2-3b-instruct');
-    expect(shortModel('nomic-embed-text-v1.5-f16')).toBe('nomic-embed-text-v1.5');
+    expect(shortModel('gemma-4-12b-it-q4_k_m')).toBe('gemma-4-12b-it');
+    expect(shortModel('qwen3.5-4b-Q4_K_M')).toBe('qwen3.5-4b');
+    expect(shortModel('qwen3-embedding-0.6b-q8_0')).toBe('qwen3-embedding-0.6b');
     expect(shortModel('model.bf16')).toBe('model');
     expect(shortModel('model-f32')).toBe('model');
   });
@@ -89,7 +89,7 @@ describe('Dashboard', () => {
   it('shows the server version, uptime and connected apps', async () => {
     const { el, live } = await mount();
     const sub = el.querySelector('.sub')!.textContent!.replace(/\s+/g, ' ');
-    expect(sub).toContain('Pitwall 0.1.0');
+    expect(sub).toContain('Pitwall 1.0.3');
     expect(sub).toMatch(/up 5 h 1\d min/);
     expect(sub).toContain(`${live.apps().filter((a) => a.connected).length} apps connected`);
     expect(sub).not.toContain('Offline mode');
@@ -268,8 +268,8 @@ describe('Dashboard', () => {
     // chart order: memory, requests by app, tokens per second, latency, requests by model
     expect(legend(1)).toContain('Debrief');
     expect(legend(1)).toContain('Spotter');
-    expect(legend(4)).toContain('Qwen3 8B Instruct');
-    expect(legend(4)).toContain('gemma-3-12b-it');
+    expect(legend(4)).toContain('Qwen3.5 9B');
+    expect(legend(4)).toContain('gemma-4-12b-it');
   });
 
   it('renders the legend with theme colours and hides the perf readout by default', async () => {

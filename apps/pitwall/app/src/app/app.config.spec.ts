@@ -2,7 +2,7 @@ import { appConfig, mockOptionsFrom } from './app.config';
 
 describe('mockOptionsFrom', () => {
   it('defaults to simulated latency, live ticks and streaming delay', () => {
-    expect(mockOptionsFrom('')).toEqual({ latencyMs: 120, autoTick: true, streamDelayMs: 28, empty: false, askConsent: false, updateAvailable: false, modelUpdates: false, crashed: false, failing: [] });
+    expect(mockOptionsFrom('')).toEqual({ latencyMs: 120, autoTick: true, streamDelayMs: 28, empty: false, askConsent: false, updateAvailable: false, modelUpdates: false, crashed: false, installing: false, noLeftovers: false, quitAsk: false, failing: [] });
   });
 
   it('mock-fast removes the delays', () => {
@@ -25,6 +25,13 @@ describe('mockOptionsFrom', () => {
     const o = mockOptionsFrom('?mock-consent&mock-update');
     expect(o.askConsent).toBe(true);
     expect(o.updateAvailable).toBe(true);
+  });
+
+  it('mock-install and mock-quit show the llama.cpp install and the quit question', () => {
+    const o = mockOptionsFrom('?mock-install&mock-quit&mock-clean');
+    expect(o.installing).toBe(true);
+    expect(o.quitAsk).toBe(true);
+    expect(o.noLeftovers).toBe(true);
   });
 
   it('mock-fail lists the calls that fail', () => {

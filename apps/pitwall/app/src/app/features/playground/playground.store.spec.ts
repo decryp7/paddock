@@ -8,8 +8,8 @@ import { PlaygroundStore, applyEvent, buildMessages, chatModels, type Pane, type
 
 const turn = (over: Partial<Turn>): Turn => ({ role: 'assistant', content: '', streaming: false, stopped: false, stats: null, error: null, ...over });
 const wait = (ms = 0) => new Promise((r) => setTimeout(r, ms));
-const QWEN = 'qwen3-8b-instruct-q4_k_m';
-const LLAMA = 'llama-3.2-3b-instruct-q5_k_m';
+const QWEN = 'qwen3.5-9b-q4_k_m';
+const LLAMA = 'qwen3.5-4b-q4_k_m';
 
 describe('playground helpers', () => {
   it('builds messages: trimmed system prompt, finished turns, then the new prompt', () => {

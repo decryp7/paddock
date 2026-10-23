@@ -9,7 +9,7 @@ function setup(backend: PitwallBackend = new MockBackend()) {
   return { store: TestBed.inject(SlotsStore), backend };
 }
 
-const MODEL = 'qwen3-8b-instruct-q4_k_m';
+const MODEL = 'qwen3.5-9b-q4_k_m';
 
 describe('context steps', () => {
   it('offers sizes up to the trained maximum and finds the nearest', () => {

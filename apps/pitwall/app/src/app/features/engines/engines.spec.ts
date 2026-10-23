@@ -106,8 +106,8 @@ describe('EnginesPage', () => {
   }
 
   it('names models in the process table', () => {
-    expect(modelLabel('qwen3-8b-instruct-q4_k_m')).toBe('qwen3-8b-instruct');
-    expect(modelLabel('nomic-embed-text-v1.5-f16')).toBe('nomic-embed-text-v1.5');
+    expect(modelLabel('qwen3.5-9b-q4_k_m')).toBe('qwen3.5-9b');
+    expect(modelLabel('qwen3-embedding-0.6b-q8_0')).toBe('qwen3-embedding-0.6b');
   });
 
   it('shows llama.cpp builds, the catalog with the suggested build and processes, and no other engines', async () => {

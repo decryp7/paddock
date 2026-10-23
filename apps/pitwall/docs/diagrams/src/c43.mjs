@@ -20,7 +20,7 @@ function panel(file, { title, kind, desc, group, cols, rows, nodes, links, legen
   d.legend(legend ?? [{ kind: 'core', label: 'Component (pure Rust)' }, { kind: 'line', label: 'Feeds' }]);
   save(file, d, Y + gh);
 }
-const LEGP = [{ kind: 'core', label: 'Component (pure Rust)' }, { kind: 'tag', label: 'Planned' }, { kind: 'line', label: 'Feeds' }];
+const LEGP = [{ kind: 'core', label: 'Component (pure Rust)' }, { kind: 'line', label: 'Feeds' }];
 const SUB = 'C4 · Level 3 — Components of pitwall-core';
 
 panel('c4-3-core-wire', {
@@ -53,22 +53,21 @@ panel('c4-3-core-serving', {
 });
 
 panel('c4-3-core-models', {
-  title: 'pitwall-core — models and engines', kind: SUB, group: 'Models and engines [ADR 0004, 0011, 0017, 0018]', cols: 4, rows: 3, legend: LEGP,
+  title: 'pitwall-core — models and engines', kind: SUB, group: 'Models and engines [ADR 0004, 0011, 0017, 0018, 0020]', cols: 4, rows: 3, legend: LEGP,
   desc: 'What the files and builds are, what is newer, which build serves and what it can do. Server code downloads; these modules only judge.',
   nodes: [
     ['hf', 1, 0, 'hf', 'Hugging Face', 'Parses search, tree and info answers; builds checked URLs (tree_url, info_url, file_url).'],
     ['upd', 0, 0, 'updates', 'update rules', 'Provenance sidecar, Installed::from_disk, evaluate into UpdateNotice (NewerRevision, BetterQuant, Imatrix). Notice only.'],
     ['gguf', 2, 0, 'gguf · quant', 'file headers', 'Reads GGUF headers with limits; quantisation names and sizes.'],
     ['fit', 3, 0, 'fit', 'will it fit?', 'ModelSize, Room, Verdict; slots.rs adds the per-slot cost.'],
-    ['packs', 1, 1, 'packs', 'ADR 0011', 'Engine and model catalog packs parsed once; every problem named.'],
+    ['packs', 1, 1, 'packs', 'ADR 0011', 'Model catalog packs parsed once; every problem named.'],
     ['rt', 2, 1, 'runtimes', 'catalog · builds', 'Pinned llama.cpp catalog, BuildId, BuildChoice and the automatic order.'],
     ['hw', 3, 1, 'hardware', 'probes parsing', '--list-devices and nvidia-smi parsing; RAM and GPU facts.'],
-    ['mlx', 0, 2, 'mlx · vllm · whisper', 'planned engines', 'Engine kinds that report why they are not available yet.', { planned: true }],
     ['ust', 0, 1, 'update_state', 'model-updates.json', 'Schedule (weekly or daily), notices, per-offer dismissals and snoozes; bounded and versioned.'],
     ['pins', 2, 2, 'runtimes::pins', 'engine-pins.json', 'EnginePins: select (model pin, global pin, automatic), rollback_target, moved; strict PinError.'],
     ['caps', 3, 2, 'runtimes::capabilities', 'capabilities.json', 'Matrix::gate(needed, BuildFacts) gives Allowed, NeedsBuild or NotSupported.'],
   ],
-  links: [['hf', 'L', 'upd', 'R', 'Listings'], ['gguf', 'R', 'fit', 'L', 'Sizes'], ['hw', 'T', 'fit', 'B', 'Room'], ['packs', 'R', 'rt', 'L', 'Adds builds'], ['hw', 'L', 'rt', 'R', 'Devices'], ['rt', 'B', 'pins', 'T', 'Builds'], ['pins', 'R', 'caps', 'L', 'Chosen build'], ['upd', 'B', 'ust', 'T', 'Notices']],
+  links: [['hf', 'L', 'upd', 'R', 'Listings'], ['gguf', 'R', 'fit', 'L', 'Sizes'], ['hw', 'T', 'fit', 'B', 'Room'], ['hw', 'L', 'rt', 'R', 'Devices'], ['rt', 'B', 'pins', 'T', 'Builds'], ['pins', 'R', 'caps', 'L', 'Chosen build'], ['upd', 'B', 'ust', 'T', 'Notices']],
 });
 
 panel('c4-3-core-state', {
@@ -104,20 +103,20 @@ panel('c4-3-server-requests', {
 });
 
 panel('c4-3-server-edges', {
-  title: 'pitwall-server — engines and outbound', kind: SUBS, group: 'Engines, library and the edges [ADR 0001, 0004, 0011, 0017, 0018]', cols: 4, rows: 3,
+  title: 'pitwall-server — engines and outbound', kind: SUBS, group: 'Engines, library and the edges [ADR 0001, 0004, 0011, 0017, 0018, 0020]', cols: 4, rows: 3,
   desc: 'Outbound HTTP exists only in egress, and child processes are started only through process. The update check is opt-in and read-only.',
   nodes: [
     ['lib', 0, 0, 'library', 'models', 'Scans GGUF files, Hugging Face search, repo file lists with fit and max slots, resumable verified downloads that write <file>.origin.json, delete.', { role: 'accent' }],
     ['eg', 1, 0, 'egress', 'the only HTTP client', 'Allow-listed HTTPS, redirects re-checked, resume, SHA-256, offline switch.', { role: 'accent' }],
-    ['eng', 2, 0, 'engines', 'Engine trait · LlamaCpp', 'LlamaCpp: install with self-test, remove, start on the pinned or automatic build; also the CapabilityGate.', { role: 'accent' }],
+    ['eng', 2, 0, 'engines', 'Engine trait · LlamaCpp', 'The only engine: install with self-test, remove, start on the pinned or automatic build; also the CapabilityGate.', { role: 'accent' }],
     ['pins', 3, 0, 'engine_pins', 'pin, rollback, capabilities', 'state, set_global, set_model, rollback, capabilities; saves engine-pins.json; reports appliesOnNextLoad.', { role: 'accent' }],
     ['sys', 0, 1, 'system · paths', 'probes and files', 'RAM, GPU, disk, engine memory; Dirs for the data folder, atomic writes with backup.', { role: 'accent' }],
     ['upd', 1, 1, 'updates', 'check only · opt-in', 'HfSource over egress; Updates::check; schedule from 60 s after start, then every 5 min when enabled; writes model-updates.json. Never downloads.', { role: 'accent' }],
     ['proc', 2, 1, 'process', 'only place that spawns', 'Scrubbed environment, no console window, killed on drop.', { role: 'accent' }],
-    ['pack', 3, 1, 'pack_engine', 'ADR 0011', 'Runs any engine pack through the generic launch, health and install path.', { role: 'accent' }],
+    ['setup', 3, 1, 'engine_setup', 'ADR 0020 · automatic install', 'On start, and when a model needs a build and none is installed, installs the suggested one in the background; loads wait for it; Retry after an error.', { role: 'accent' }],
     ['svc', 3, 2, 'service', 'spec · systemd · windows', 'Per-OS names, unit text, Windows wrapper, restart after an update.', { role: 'accent' }],
   ],
-  links: [['lib', 'R', 'eg', 'L', 'Downloads'], ['eng', 'L', 'eg', 'R', 'Installs', { }], ['eng', 'R', 'pins', 'L', 'Holds pins'], ['eng', 'B', 'proc', 'T', 'Spawns via'], ['pack', 'L', 'proc', 'R', 'Spawns via'], ['lib', 'B', 'sys', 'T', 'Disk, RAM'], ['eg', 'B', 'upd', 'T', 'Snapshots via', { rev: true, dash: true }]],
+  links: [['lib', 'R', 'eg', 'L', 'Downloads'], ['eng', 'L', 'eg', 'R', 'Installs', { }], ['eng', 'R', 'pins', 'L', 'Holds pins'], ['eng', 'B', 'proc', 'T', 'Spawns via'], ['lib', 'B', 'sys', 'T', 'Disk, RAM'], ['eg', 'B', 'upd', 'T', 'Snapshots via', { rev: true, dash: true }]],
   legend: [{ kind: 'accent', label: 'Server module' }, { kind: 'line', label: 'Calls' }, { kind: 'dashline', label: 'Check only, opt-in' }],
 });
 
@@ -130,7 +129,7 @@ panel('c4-3-ui-features', {
   nodes: [
     ['dash', 0, 0, 'dashboard', `${FP}dashboard`, 'Stat tiles, loaded models with idle countdown, queue, pairing card, events feed, usage card.', { role: 'ui' }],
     ['models', 1, 0, 'models', `${FP}models`, 'Library, Hugging Face discover with the fit check, presets tab, slots panel with the fit table, build menu per model.', { role: 'ui' }],
-    ['engines', 2, 0, 'engines', `${FP}engines`, 'Builds, install with progress, self-test, version pin, roll back, features per build (supported, needs bNNNN), engine packs.', { role: 'ui' }],
+    ['engines', 2, 0, 'engines', `${FP}engines`, 'Builds, install with progress, self-test, version pin, roll back, features per build (supported, needs bNNNN)', { role: 'ui' }],
     ['apps', 3, 0, 'apps', `${FP}apps`, 'Apps and keys, pairing approval, permissions and limits, per-app usage over time, key shown once.', { role: 'ui' }],
     ['req', 0, 1, 'requests', `${FP}requests`, 'Recent requests with timing, the chosen model and alias; prompts only on demand.', { role: 'ui' }],
     ['play', 1, 1, 'playground', `${FP}playground`, 'Chat with a local model, streamed through the management API.', { role: 'ui' }],

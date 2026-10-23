@@ -293,6 +293,10 @@ host and the verification state, with cancel. Works.
 
 ![llama.cpp](screenshots/engines-light.png)
 
+On a first start llama.cpp installs the build suggested for this machine; models wait until it is ready.
+
+![llama.cpp installing itself](screenshots/engines-install-light.png)
+
 Availability and why, the installed builds with their tag, devices found by the self-test and
 self-test result, the catalog of builds to install (the suggested one first), select, remove, **pin** (a Version pin toggle per
 build, accent plus the word "Pinned"), **Features** (what each build supports in words: Supported, Needs bNNNN, Not supported,
@@ -346,6 +350,12 @@ the window quits the app, but the service keeps running. The shell and the popov
 ## Settings
 
 ![Settings](screenshots/settings-light.png)
+
+When you quit Pitwall: keep serving, stop serving, or ask each time.
+
+![When you quit Pitwall](screenshots/settings-quit-light.png)
+
+![Quit Pitwall? question](screenshots/quit-dialog-light.png)
 
 - **General**: start at login, theme (system, light, dark), **When you quit Pitwall** (keep serving in the background, stop
   serving, or ask each time; [ADR 0021](adr/0021-what-quitting-does-about-serving.md)). Works.

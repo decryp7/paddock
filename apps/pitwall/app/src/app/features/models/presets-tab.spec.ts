@@ -108,7 +108,7 @@ describe('PresetsTab', () => {
     const preview = el.querySelector('[aria-label="What this preset resolves to"]')!.textContent!;
     expect(preview).toContain('Ready');
     expect(preview).toContain('Would serve');
-    expect(preview).toContain('qwen2.5-coder-1.5b-q8_0');
+    expect(preview).toContain('qwen3.5-2b-q8_0');
     await typeAndPreview('#pw-preset-temperature', '0.4');
     await typeAndPreview('#pw-preset-system', 'Be short.');
     expect((button('Create preset') as HTMLButtonElement).disabled).toBe(false);
@@ -125,7 +125,7 @@ describe('PresetsTab', () => {
     button('New preset').click();
     await settle();
     await typeAndPreview('#pw-preset-alias', 'debrief-explain');
-    await typeAndPreview('#pw-preset-target', 'qwen3-8b-instruct-q4_k_m');
+    await typeAndPreview('#pw-preset-target', 'qwen3.5-9b-q4_k_m');
     const preview = el.querySelector('[aria-label="What this preset resolves to"]')!.textContent!;
     expect(preview).toContain('Cannot be saved');
     expect(preview).toContain('already exists');
@@ -142,7 +142,7 @@ describe('PresetsTab', () => {
     button('New preset').click();
     await settle();
     type('#pw-preset-alias', 'a-name');
-    type('#pw-preset-target', 'qwen3-8b-instruct-q4_k_m');
+    type('#pw-preset-target', 'qwen3.5-9b-q4_k_m');
     type('#pw-preset-temperature', 'warm');
     await settle();
     expect(el.querySelector('#pw-preset-temperature')!.getAttribute('aria-invalid')).toBe('true');
@@ -172,7 +172,7 @@ describe('PresetsTab', () => {
     const { el, button, typeAndPreview, settle } = await render();
     button('Edit legacy-explain').click();
     await settle();
-    await typeAndPreview('#pw-preset-target', 'qwen3-8b-instruct-q4_k_m');
+    await typeAndPreview('#pw-preset-target', 'qwen3.5-9b-q4_k_m');
     button('Save preset').click();
     await settle();
     expect(el.textContent).not.toContain('Model removed');
@@ -185,7 +185,7 @@ describe('PresetsTab', () => {
     button('New preset').click();
     await settle();
     await typeAndPreview('#pw-preset-alias', 'fine-name');
-    await typeAndPreview('#pw-preset-target', 'qwen3-8b-instruct-q4_k_m');
+    await typeAndPreview('#pw-preset-target', 'qwen3.5-9b-q4_k_m');
     vi.spyOn(backend, 'createPreset').mockRejectedValueOnce({ code: 'internal', message: 'the presets could not be saved (disk full)' });
     button('Create preset').click();
     await settle();
@@ -200,7 +200,7 @@ describe('PresetsTab', () => {
     button('New preset').click();
     await settle();
     const options = Array.from(el.querySelectorAll('#pw-preset-targets option')).map((o) => o.getAttribute('value'));
-    expect(options).toContain('qwen3-8b-instruct-q4_k_m');
+    expect(options).toContain('qwen3.5-9b-q4_k_m');
     expect(options).toContain('auto:chat,fast');
     expect(el.querySelector('#pw-preset-engine')).toBeNull();
   });
@@ -234,7 +234,7 @@ describe('PresetsTab caching', () => {
     button('New preset').click();
     await settle();
     type('#pw-preset-alias', 'cached-one');
-    type('#pw-preset-target', 'qwen3-8b-instruct-q4_k_m');
+    type('#pw-preset-target', 'qwen3.5-9b-q4_k_m');
     await settle();
     const toggle = (id: string) => el.querySelector<HTMLButtonElement>(`button[aria-labelledby="${id}"]`)!;
     expect(toggle('pw-preset-cache-l').getAttribute('aria-checked')).toBe('false');
