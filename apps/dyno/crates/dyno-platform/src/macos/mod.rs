@@ -30,6 +30,7 @@ pub fn platform(state_file: PathBuf) -> Platform {
         startup: Box::new(startup::LaunchAgents::for_current_user()),
         facts: Box::new(facts::MacFacts::new()),
         activity: Box::new(activity::MacActivity::new()),
+        issues: crate::issues::os_sources(),
     }
 }
 

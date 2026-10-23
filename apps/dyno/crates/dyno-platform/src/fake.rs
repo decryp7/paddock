@@ -153,6 +153,7 @@ impl Fake {
             startup: Box::new(self.clone()),
             facts: Box::new(self.clone()),
             activity: Box::new(self.clone()),
+            issues: Vec::new(),
         }
     }
 }

@@ -13,6 +13,7 @@ pub mod files;
 pub mod handlers;
 pub mod handlers_cleanup;
 pub mod inventory;
+pub mod issues;
 pub mod network;
 pub mod paths;
 pub mod recorder;
@@ -22,6 +23,7 @@ pub mod server;
 pub mod service;
 pub mod store;
 pub mod tuning;
+pub mod unusual;
 
 use agent::Shared;
 use std::sync::Arc;
@@ -70,6 +72,20 @@ impl Running {
                     }
                 })
                 .map_err(|e| format!("could not start the network watcher: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-issues".into())
+                .spawn(move || issues::run(&s))
+                .map_err(|e| format!("could not start the issue reader: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-unusual".into())
+                .spawn(move || unusual::run(&s))
+                .map_err(|e| format!("could not start the program watcher: {e}"))?,
         );
         let s = shared.clone();
         threads.push(

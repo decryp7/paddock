@@ -173,6 +173,8 @@ pub struct Settings {
     pub custom_alerts: Vec<crate::alarms::custom::CustomAlertRule>,
     /// Desktop notifications for new alarms (quiet hours and muted rules still apply).
     pub notifications: bool,
+    /// New and unusual programs: learn a baseline and list what is new (observe-only).
+    pub unusual: crate::unusual::UnusualSettings,
 }
 
 impl Default for Settings {
@@ -195,6 +197,7 @@ impl Default for Settings {
             network_alerts: Default::default(),
             custom_alerts: Vec::new(),
             notifications: true,
+            unusual: Default::default(),
         }
     }
 }
@@ -225,6 +228,7 @@ impl Settings {
         self.alarms = self.alarms.clamped();
         self.ip_lookup = self.ip_lookup.normalised();
         self.custom_alerts = crate::alarms::custom::normalise_rules(self.custom_alerts);
+        self.unusual = self.unusual.clamped();
         self
     }
 }
@@ -327,5 +331,17 @@ mod tests {
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert!(j["dashboard"]["presets"].is_array());
         assert_eq!(j["trayItems"]["items"][0]["metric"], "cpuTotal");
+    }
+
+    #[test]
+    fn unusual_settings_are_optional_and_clamped() {
+        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        assert!(w.is_none());
+        assert_eq!(s.unusual, crate::unusual::UnusualSettings::default());
+        let (s, _) = parse(r#"{"unusual":{"learningDays":500}}"#);
+        assert_eq!(s.unusual.learning_days, 60);
+        assert!(s.unusual.enabled);
+        let j = serde_json::to_value(Settings::default()).unwrap();
+        assert_eq!(j["unusual"]["learningDays"], 7);
     }
 }

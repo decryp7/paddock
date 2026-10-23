@@ -60,6 +60,7 @@ pub fn platform(_state_file: PathBuf) -> Platform {
         startup: Box::new(Unsupported),
         facts: Box::new(Unsupported),
         activity: Box::new(Unsupported),
+        issues: Vec::new(),
     }
 }
 

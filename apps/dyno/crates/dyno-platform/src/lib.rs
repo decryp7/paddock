@@ -12,6 +12,7 @@ pub mod control_state;
 pub mod dev_folders;
 pub mod fake;
 pub mod inventory;
+pub mod issues;
 pub mod network;
 pub mod parse;
 pub mod process;
@@ -53,6 +54,8 @@ pub struct Platform {
     pub facts: Box<dyn FactsSource>,
     /// User activity.
     pub activity: Box<dyn UserActivity>,
+    /// The OS problem logs (crashes, hangs, failing services). Empty where the OS has none Dyno can read.
+    pub issues: Vec<Box<dyn dyno_core::issues::IssueSource>>,
 }
 
 /// The ports for the current OS, with process-control state kept in [`default_state_file`].

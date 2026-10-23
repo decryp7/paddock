@@ -94,6 +94,25 @@ impl NetCentre {
         Ok((rows, events))
     }
 
+    /// Established connections per process id, for the program baseline. A refused read is "none": the baseline then simply
+    /// has no connection counts this time.
+    pub fn connection_counts(&self) -> HashMap<u32, u32> {
+        let rows = match self.sockets.sockets() {
+            Ok(r) => r,
+            Err(_) => return HashMap::new(),
+        };
+        let mut out: HashMap<u32, u32> = HashMap::new();
+        for r in rows
+            .iter()
+            .filter(|r| r.remote.is_some() && r.state == dyno_core::network::SocketState::Established)
+        {
+            if let Some(pid) = r.pid {
+                *out.entry(pid).or_default() += 1;
+            }
+        }
+        out
+    }
+
     /// Bytes per second per program, or why there are none. The OS tool can take seconds (macOS `nettop`), so this
     /// never waits for it: it returns the last read and starts a refresh in the background when that is stale.
     fn traffic(&self) -> (Vec<TrafficRow>, Option<String>) {
