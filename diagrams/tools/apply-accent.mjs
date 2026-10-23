@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Turns kit templates into an app's colours: node diagrams/tools/apply-accent.mjs <app> <template.drawio> [out.drawio]
-// <app>: debrief | pitcrew | pitwall | dyno | spotter. Replaces the accent, core and UI role colours (stroke and tint, light and
+// <app>: debrief | pitcrew | pitwall | dyno | sighter | spotter. Replaces the accent, core and UI role colours (stroke and tint, light and
 // dark) and the footer name; with no out file the result goes to stdout.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { theme } from './themes.mjs';

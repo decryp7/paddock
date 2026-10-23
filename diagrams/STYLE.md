@@ -33,6 +33,7 @@ One accent role per diagram family; everything else is neutral, so the accent re
 | Pitcrew | #BF3A0C on #F9EBE7 / #FF7A45 on #3A2722 | #007A5E on #E6F2EF / #2EC4A0 on #193330 | #4C5BD4 on #EDEFFB / #8FA3FF on #292D3F |
 | Pitwall | #6D3FD6 on #F0ECFB / #A58BFA on #2C2A3F | #007A5E on #E6F2EF / #2EC4A0 on #193330 | #0072B2 on #E6F1F7 / #56B4E9 on #1F303C |
 | Dyno | #B01E6E on #F7E9F1 / #F063A8 on #382332 | #007A5E on #E6F2EF / #2EC4A0 on #193330 | #4C5BD4 on #EDEFFB / #8FA3FF on #292D3F |
+| Sighter | #0A8CA8 on #E7F4F6 / #00B8D9 on #123139 | #007A5E on #E6F2EF / #2EC4A0 on #193330 | #4C5BD4 on #EDEFFB / #8FA3FF on #292D3F |
 | Spotter | #0B7A6E on #E7F2F1 / #2CC4B0 on #193333 | #4C5BD4 on #EDEFFB / #8FA3FF on #292D3F | #0072B2 on #E6F1F7 / #56B4E9 on #1F303C |
 
 The table is generated from `tools/themes.mjs`, which is the source. The kit itself uses a teal placeholder accent (#0E7490);
