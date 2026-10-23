@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "pitwall-app"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "keyring",
  "objc2",
@@ -3154,7 +3154,7 @@ dependencies = [
 
 [[package]]
 name = "pitwall-cli"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "keyring",
  "pitwall-core",
@@ -3168,7 +3168,7 @@ dependencies = [
 
 [[package]]
 name = "pitwall-core"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "base64 0.22.1",
  "proptest",
@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "pitwall-loopback"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "bytes",
  "http-body-util",
@@ -3195,7 +3195,7 @@ dependencies = [
 
 [[package]]
 name = "pitwall-server"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "axum",
  "bytes",

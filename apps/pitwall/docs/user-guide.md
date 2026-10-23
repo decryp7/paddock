@@ -43,7 +43,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
    ```
 
    ```json
-   {"ok":true,"name":"pitwall","version":"1.0.2","apiVersion":1,"serving":"serving","offline":false,"loadedModels":0}
+   {"ok":true,"name":"pitwall","version":"1.0.3","apiVersion":1,"serving":"serving","offline":false,"loadedModels":0}
    ```
 
    The port is 11435 (next to Ollama's 11434). If another program uses it, Pitwall says "Pitwall cannot listen on ... Is
