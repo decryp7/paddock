@@ -793,7 +793,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - FlaUI-style object models for C#/Java/C++ on top of the generated clients (7.9): 2 to 3 weeks, partly inside the 2 to 3 weeks for clients above.
 - **AI-assisted recovery (7.10)** (my estimate, not the user's): `sighter-recover` preset and Pitwall contract extension 1 week; trigger detection, closed-vocabulary plan parser and guarded executor 2 to 3 weeks; "passed with recovery" state, reports, Debrief transcript and `RecoveryPolicy` in the clients 1 to 2 weeks; proposals UI in the studio 1 to 2 weeks. About 5 to 8 weeks, partly parallel; adds roughly 1 month to the total.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
-- Total about 10 to 14 months of one team (was 8 to 11 before the Sighter-authored tests and the extra clients), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
+- Total about 11 to 15 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients and AI recovery), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
 ## 17. Sources
 - RT-DETRv2: https://arxiv.org/pdf/2407.17140 ; DEIMv2 (DINOv3): https://arxiv.org/pdf/2509.20787 ; DEIM repo: https://github.com/Intellindust-AI-Lab/DEIM
