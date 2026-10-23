@@ -98,3 +98,4 @@ This repo holds what the apps share:
 - **Diagram kit**, the style spec, shapes and templates for every app's diagrams ([`diagrams/`](../diagrams/README.md)).
 - **Design guide**, [principles, type, colour, layout and motion](design-guide.md).
 - **Lessons**, [what building Debrief and Pitcrew taught](lessons.md).
+- **Icons**, [the family icon set and how to build it](../icons/README.md).

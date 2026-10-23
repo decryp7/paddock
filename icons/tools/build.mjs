@@ -1,0 +1,98 @@
+// Regenerates every deliverable from tools/design.mjs:
+//   node tools/build.mjs            (SVGs, PNGs, tray sets, Tauri sets, hand-tuned .ico)
+// Then: node tools/preview.mjs && node tools/shoot.mjs
+import { Resvg } from '@resvg/resvg-js';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { APPS, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { writeIco } from './ico.mjs';
+
+const ROOT = resolve(import.meta.dirname, '..');
+const TAURI = join(ROOT, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+const dir = (...p) => {
+  const d = join(ROOT, ...p);
+  mkdirSync(d, { recursive: true });
+  return d;
+};
+/** Render an SVG string to PNG at `px` wide (resvg: accurate, no browser needed). */
+const png = (svg, px) => new Resvg(svg, { fitTo: { mode: 'width', value: px }, shapeRendering: 2, textRendering: 0 }).render().asPng();
+const save = (path, data) => writeFileSync(path, data);
+
+const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : APPS;
+for (const app of ONLY) {
+  const out = dir(app);
+  rmSync(out, { recursive: true, force: true });
+  dir(app);
+
+  // 1. Masters
+  const mac = masterSvg(app, { platform: 'macos' });
+  const win = masterSvg(app, { platform: 'windows' });
+  save(join(out, `${app}-macos.svg`), mac);
+  save(join(out, `${app}-windows.svg`), win);
+  save(join(out, `${app}-macos-1024.png`), png(mac, 1024));
+  save(join(out, `${app}-windows-1024.png`), png(win, 1024));
+
+  // 2. Hand-tuned small variants
+  const small = dir(app, 'small');
+  const smallPng = {};
+  for (const s of [16, 24, 32, 48]) {
+    const svg = smallSvg(app, s);
+    save(join(small, `${app}-${s}.svg`), svg);
+    smallPng[s] = png(svg, s);
+    save(join(small, `${app}-${s}.png`), smallPng[s]);
+  }
+
+  // 3. Tray / menu bar
+  const traySrc = dir(app, 'tray', 'svg'), macTray = dir(app, 'tray', 'macos'), winTray = dir(app, 'tray', 'windows');
+  for (const st of STATUSES[app]) {
+    const name = st === 'default' ? `${app}-tray` : `${app}-tray-${st}`;
+    const tpl = traySvg(app, st, 'template');
+    save(join(traySrc, `${name}-template.svg`), tpl);
+    for (const pt of [16, 18]) {
+      save(join(macTray, `${name}-${pt}ptTemplate.png`), png(tpl, pt));
+      save(join(macTray, `${name}-${pt}ptTemplate@2x.png`), png(tpl, pt * 2));
+    }
+    for (const theme of ['light', 'dark']) {
+      const svg = traySvg(app, st, theme);
+      save(join(traySrc, `${name}-${theme}.svg`), svg);
+      const frames = [16, 20, 24, 32].map(px => ({ size: px, png: png(svg, px) }));
+      frames.forEach(fr => save(join(winTray, `${name}-${theme}-${fr.size}.png`), fr.png));
+      save(join(winTray, `${name}-${theme}.ico`), writeIco(frames));
+    }
+  }
+
+  // 4. Tauri set: icns + PNGs from the macOS master, Windows Store logos from the Windows master,
+  //    then icon.ico rebuilt with the hand-tuned 16/24/32/48 frames.
+  const tauri = dir(app, 'tauri');
+  execFileSync(process.execPath, [TAURI, 'icon', join(out, `${app}-macos-1024.png`), '-o', tauri], { stdio: 'ignore' });
+  const tmp = join(ROOT, '.tmp', app);
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  execFileSync(process.execPath, [TAURI, 'icon', join(out, `${app}-windows-1024.png`), '-o', tmp], { stdio: 'ignore' });
+  for (const f of readdirSync(tmp)) if (/^(Square\d+x\d+Logo|StoreLogo)\.png$/.test(f)) copyFileSync(join(tmp, f), join(tauri, f));
+  for (const extra of ['android', 'ios']) rmSync(join(tauri, extra), { recursive: true, force: true });
+  const scaled = (svg, px) => ({ size: px, png: png(svg, px) });
+  const ico = [
+    { size: 16, png: smallPng[16] },
+    scaled(smallSvg(app, 16), 20),
+    { size: 24, png: smallPng[24] },
+    { size: 32, png: smallPng[32] },
+    scaled(smallSvg(app, 32), 40),
+    { size: 48, png: smallPng[48] },
+    scaled(win, 64),
+    scaled(win, 256),
+  ];
+  save(join(tauri, 'icon.ico'), writeIco(ico));
+  console.log(`built ${app}`);
+}
+
+// 5. Alternative concept (Carbon), kept for comparison
+const alt = dir('alternative');
+for (const app of ONLY) {
+  const svg = masterSvg(app, { concept: 'carbon' });
+  save(join(alt, `${app}-carbon.svg`), svg);
+  save(join(alt, `${app}-carbon-512.png`), png(svg, 512));
+}
+rmSync(join(ROOT, '.tmp'), { recursive: true, force: true });
+console.log('done');

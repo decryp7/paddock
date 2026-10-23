@@ -9,3 +9,6 @@
 /ui/projects/paddock-ui/css/
 /crates/target/
 .DS_Store
+
+# Icon set build deps
+/icons/node_modules/

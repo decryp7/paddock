@@ -4,7 +4,7 @@
   <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg" alt="Paddock: Pitcrew, Sighter, Debrief, Pitwall, Dyno and Spotter, six local-first apps built on one shared foundation" width="100%"></a>
 </p>
 
-<p align="center"><a href="docs/ecosystem.md">Meet the family</a></p>
+<p align="center"><a href="docs/ecosystem.md">Meet the family</a> · <a href="icons/README.md">Icons</a></p>
 
 Everything the Paddock app family shares: **Debrief, Pitcrew, Pitwall, Dyno, Spotter, Sighter**. One repo, one semver tag
 (`v0.1.0`, ...) that versions every part together.

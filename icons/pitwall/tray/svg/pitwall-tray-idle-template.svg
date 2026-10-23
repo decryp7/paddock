@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Pitwall tray (idle)</title>
+  <defs><mask id="t1fm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M5 6.75V6.75M8 6.75V6.75M11 6.75V6.75" fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></mask></defs>
+  <g><g opacity="0.45"><path d="M4.5 2H11.5A3 3 0 0 1 14.5 5V8.5A3 3 0 0 1 11.5 11.5H4.5A3 3 0 0 1 1.5 8.5V5A3 3 0 0 1 4.5 2ZM3.5 10L8 11L3 14.5Z" fill="#000000" mask="url(#t1fm0)"/></g></g>
+  
+</svg>

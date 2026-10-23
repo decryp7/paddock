@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Pitcrew tray (busy)</title>
+  <defs><mask id="tlm2" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M6.8 8a1.2 1.2 0 1 1 2.4 0a1.2 1.2 0 1 1 -2.4 0Z" fill="#000"/></mask><mask id="tlk" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#fff"/><path d="M8 12.25a4.25 4.25 0 1 1 8.5 0a4.25 4.25 0 1 1 -8.5 0Z" fill="#000"/></mask></defs>
+  <g mask="url(#tlk)"><g opacity="0.45"><path d="M12.6 4.14A6 6 0 1 1 3.4 4.14" fill="none" stroke="#1C1C1E" stroke-width="1.75" stroke-linecap="butt" stroke-linejoin="round"/><path d="M5.2 2L1.41 2.47L5.39 5.81Z" fill="#1C1C1E"/></g><path d="M11.03 9.75L8 11.5L4.97 9.75L4.97 6.25L8 4.5L11.03 6.25Z" fill="#1C1C1E" mask="url(#tlm2)"/></g>
+  <circle cx="12.25" cy="12.25" r="2.5" fill="none" stroke="#2F8FFF" stroke-width="1.5"/>
+</svg>

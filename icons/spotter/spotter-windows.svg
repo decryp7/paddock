@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Spotter</title>
+  <defs>
+    <linearGradient id="swbg" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD257"/><stop offset="0.55" stop-color="#F4B315"/><stop offset="1" stop-color="#E59600"/>
+    </linearGradient>
+    <radialGradient id="swsheen" cx="304.32000000000005" cy="40" r="802.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="swedge" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="swclip"><path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z"/></clipPath>
+    <filter id="swgs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="11.46" stdDeviation="13.75" flood-color="#7A4E00" flood-opacity="0.18"/></filter>
+    
+    <mask id="swm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M310 604a62 62 0 1 1 124 0a62 62 0 1 1 -124 0Z" fill="#000"/><path d="M590 604a62 62 0 1 1 124 0a62 62 0 1 1 -124 0Z" fill="#000"/></mask>
+  </defs>
+  <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="url(#swbg)"/>
+  <g clip-path="url(#swclip)">
+    <path d="M0 965.12L965.12 0L1097.2800000000002 0L0 1097.2800000000002Z" fill="#FFFFFF" opacity="0.16"/>
+    <path d="M0 1163.36L1163.36 0L1201.12 0L0 1201.12Z" fill="#FFFFFF" opacity="0.17600000000000002"/>
+    <rect x="40" y="40" width="944" height="944" fill="url(#swsheen)"/>
+    <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="none" stroke="url(#swedge)" stroke-width="6.87"/>
+    
+  </g>
+  <g filter="url(#swgs)" transform="translate(512 512) scale(1.15) translate(-512 -512)"><path d="M248 604a124 124 0 1 1 248 0a124 124 0 1 1 -248 0ZM528 604a124 124 0 1 1 248 0a124 124 0 1 1 -248 0ZM336 372H408A36 36 0 0 1 444 408V568A36 36 0 0 1 408 604H336A36 36 0 0 1 300 568V408A36 36 0 0 1 336 372ZM616 372H688A36 36 0 0 1 724 408V568A36 36 0 0 1 688 604H616A36 36 0 0 1 580 568V408A36 36 0 0 1 616 372ZM466 432H558A30 30 0 0 1 588 462V498A30 30 0 0 1 558 528H466A30 30 0 0 1 436 498V462A30 30 0 0 1 466 432Z" fill="#3A2600" mask="url(#swm0)"/><g opacity="0.55"><path d="M336 300H408A20 20 0 0 1 428 320V336A20 20 0 0 1 408 356H336A20 20 0 0 1 316 336V320A20 20 0 0 1 336 300ZM616 300H688A20 20 0 0 1 708 320V336A20 20 0 0 1 688 356H616A20 20 0 0 1 596 336V320A20 20 0 0 1 616 300Z" fill="#3A2600"/></g><path d="M792 236C796.5 282 810 295.5 856 300C810 304.5 796.5 318 792 364C787.5 318 774 304.5 728 300C774 295.5 787.5 282 792 236Z" fill="#3A2600"/></g>
+</svg>
