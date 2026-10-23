@@ -10,6 +10,7 @@ import type {
   Dashboard,
   DashboardRange,
   DiscoveredFeed,
+  JobEvent,
   ImportFormat,
   ImportResult,
   OpenTarget,
@@ -41,6 +42,8 @@ export type EventListen = <T>(event: string, handler: (event: { payload: T }) =>
 
 /** The event the shell pushes `StatePush` on. */
 export const STATE_EVENT = 'spotter://state';
+/** The event the shell pushes `JobEvent` on while a long operation runs and when it ends. */
+export const JOB_EVENT = 'spotter://job';
 /** The event the shell asks the main window to show a route on (payload: the route string). */
 export const NAVIGATE_EVENT = 'spotter://navigate';
 
@@ -74,8 +77,8 @@ export class TauriBackend implements SpotterBackend {
   sourceKinds(): Promise<SourceKind[]> {
     return this.run('source_kinds');
   }
-  testSource(draft: WatchDraft, secrets: Record<string, string>): Promise<SourcePreview> {
-    return this.run('test_source', { draft, secrets });
+  testSource(draft: WatchDraft, secrets: Record<string, string>, jobId: string): Promise<SourcePreview> {
+    return this.run('test_source', { draft, secrets, jobId });
   }
   saveWatch(draft: WatchDraft, secrets: Record<string, string>): Promise<WatchSummary> {
     return this.run('save_watch', { draft, secrets });
@@ -86,8 +89,8 @@ export class TauriBackend implements SpotterBackend {
   setPaused(id: string, paused: boolean): Promise<void> {
     return this.run('set_paused', { id, paused });
   }
-  checkNow(id: string | null): Promise<void> {
-    return this.run('check_now', { id });
+  checkNow(id: string | null, jobId: string): Promise<void> {
+    return this.run('check_now', { id, jobId });
   }
   acknowledge(id: string, version: string | null): Promise<void> {
     return this.run('acknowledge', { id, version });
@@ -104,8 +107,8 @@ export class TauriBackend implements SpotterBackend {
   openRelease(id: string, version: string, target?: ReleaseTarget): Promise<void> {
     return this.run('open_release', { id, version, product: target?.product ?? null, artifact: target?.artifact ?? null });
   }
-  downloadRelease(id: string, version: string, target?: ReleaseTarget): Promise<string> {
-    return this.run('download_release', { id, version, product: target?.product ?? null, artifact: target?.artifact ?? null });
+  downloadRelease(id: string, version: string, jobId: string, target?: ReleaseTarget): Promise<string> {
+    return this.run('download_release', { id, version, jobId, product: target?.product ?? null, artifact: target?.artifact ?? null });
   }
   suggestPattern(example: string, selections: PatternSelection[]): Promise<string> {
     return this.run('suggest_pattern', { example, selections });
@@ -158,8 +161,8 @@ export class TauriBackend implements SpotterBackend {
   rendererStatus(): Promise<RendererStatus> {
     return this.run('renderer_status');
   }
-  installRenderer(): Promise<RendererStatus> {
-    return this.run('install_renderer');
+  installRenderer(jobId: string): Promise<RendererStatus> {
+    return this.run('install_renderer', { jobId });
   }
   importList(format: ImportFormat, text: string): Promise<ImportResult> {
     return this.run('import_list', { format, text });
@@ -201,6 +204,12 @@ export class TauriBackend implements SpotterBackend {
     return this.run('fit_tray', { height });
   }
 
+  cancelJob(jobId: string): Promise<void> {
+    return this.run('cancel_job', { jobId });
+  }
+  onJob(handler: (event: JobEvent) => void): Promise<() => void> {
+    return this.listenTo<JobEvent>(JOB_EVENT, (e) => handler(e.payload));
+  }
   onState(handler: (push: StatePush) => void): Promise<() => void> {
     return this.listenTo<StatePush>(STATE_EVENT, (e) => handler(e.payload));
   }
@@ -210,7 +219,10 @@ export class TauriBackend implements SpotterBackend {
 
   private async run<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     try {
-      return await withTimeout(args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args), timeoutFor(cmd));
+      const work = args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args);
+      const limit = timeoutFor(cmd);
+      // A job has no limit: the engine ends it, and the UI shows what it is doing meanwhile.
+      return await (limit === null ? work : withTimeout(work, limit));
     } catch (e) {
       throw toCommandError(e);
     }

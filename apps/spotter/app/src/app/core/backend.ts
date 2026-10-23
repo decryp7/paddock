@@ -12,6 +12,7 @@ import type {
   PatternSelection,
   PatternTest,
   DiscoveredFeed,
+  JobEvent,
   ImportFormat,
   ImportResult,
   Preset,
@@ -49,14 +50,20 @@ export interface SpotterBackend {
   listWatches(): Promise<WatchSummary[]>;
   getWatch(id: string): Promise<WatchDetail>;
   sourceKinds(): Promise<SourceKind[]>;
-  /** Checks a draft without saving it. `secrets` are values typed into secret fields (not stored). */
-  testSource(draft: WatchDraft, secrets: Record<string, string>): Promise<SourcePreview>;
+  /**
+   * Checks a draft without saving it. `secrets` are values typed into secret fields (not stored). A job: it reports
+   * on `onJob` under `jobId` and `cancelJob` stops it; there is no time limit.
+   */
+  testSource(draft: WatchDraft, secrets: Record<string, string>, jobId: string): Promise<SourcePreview>;
   /** Saves a draft. `secrets`: a value stores it in the credential store, an empty string deletes it, a missing key keeps it. */
   saveWatch(draft: WatchDraft, secrets: Record<string, string>): Promise<WatchSummary>;
   deleteWatch(id: string): Promise<void>;
   setPaused(id: string, paused: boolean): Promise<void>;
-  /** Checks one watch now, or every watch when `id` is null. */
-  checkNow(id: string | null): Promise<void>;
+  /**
+   * Checks one watch now (resolves when it is done, however long that takes), or every watch when `id` is null
+   * (resolves at once; progress "n of m" and the end arrive on `onJob`). A job under `jobId`.
+   */
+  checkNow(id: string | null, jobId: string): Promise<void>;
   /** Marks a version (the latest when null) as seen. */
   acknowledge(id: string, version: string | null): Promise<void>;
   resetAcknowledgement(id: string): Promise<void>;
@@ -65,8 +72,11 @@ export interface SpotterBackend {
   acknowledgeProduct(id: string, product: string): Promise<void>;
   /** Opens a release's location with the system's handler (a chosen file of the release, or the primary one). */
   openRelease(id: string, version: string, target?: ReleaseTarget): Promise<void>;
-  /** Downloads (or copies) a release into the downloads folder, verifying its checksum; resolves with the file path. */
-  downloadRelease(id: string, version: string, target?: ReleaseTarget): Promise<string>;
+  /**
+   * Downloads (or copies) a release into the downloads folder, verifying its checksum; resolves with the file path.
+   * A job under `jobId` (phases, bytes, Cancel); rejects with code `cancelled` when stopped.
+   */
+  downloadRelease(id: string, version: string, jobId: string, target?: ReleaseTarget): Promise<string>;
   /** Writes a regular expression from an example name and the parts the user selected (computed in Rust). */
   suggestPattern(example: string, selections: PatternSelection[]): Promise<string>;
   /** Tries a version scheme on one name (computed in Rust). */
@@ -98,8 +108,8 @@ export interface SpotterBackend {
   /** Finds feeds a page advertises (blog and release feeds). */
   discoverFeeds(url: string): Promise<DiscoveredFeed[]>;
   rendererStatus(): Promise<RendererStatus>;
-  /** Downloads the pinned, checksum-verified Chromium (on request only). */
-  installRenderer(): Promise<RendererStatus>;
+  /** Downloads the pinned, checksum-verified Chromium (on request only). A job under `jobId`: Downloading, Unpacking, Testing. */
+  installRenderer(jobId: string): Promise<RendererStatus>;
   /** Builds drafts from a winget export, Brewfile or OPML text. */
   importList(format: ImportFormat, text: string): Promise<ImportResult>;
 
@@ -120,6 +130,11 @@ export interface SpotterBackend {
   appUpdateStatus(): Promise<AppUpdateStatus>;
   checkAppUpdate(): Promise<AppUpdateCheck>;
   installAppUpdate(): Promise<void>;
+
+  /** Asks a running job to stop (a no-op when it already ended). */
+  cancelJob(jobId: string): Promise<void>;
+  /** Subscribes to the progress and the end of long operations; returns the unsubscribe function. */
+  onJob(handler: (event: JobEvent) => void): Promise<() => void>;
 
   /** Subscribes to pushed state; returns the unsubscribe function. */
   onState(handler: (push: StatePush) => void): Promise<() => void>;

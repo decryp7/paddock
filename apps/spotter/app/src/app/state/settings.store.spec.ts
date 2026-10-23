@@ -185,4 +185,12 @@ describe('SettingsStore', () => {
     expect(store.updateBusy()).toBe(false);
     expect(toasts.toasts().map((t) => t.title)).toEqual(['Could not check for updates', 'The update was not installed']);
   });
+
+  it('a cancelled installation says nothing was installed instead of failing', async () => {
+    const { backend, store, toasts } = setup();
+    vi.spyOn(backend, 'installRenderer').mockRejectedValue({ code: 'cancelled', message: 'Cancelled.', problems: [] });
+    await store.installRenderer();
+    expect(store.rendererBusy()).toBe(false);
+    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'info', title: 'Installation cancelled' });
+  });
 });

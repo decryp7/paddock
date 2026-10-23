@@ -1,10 +1,18 @@
-import { DEFAULT_TIMEOUT_MS, timeoutError, timeoutFor, withTimeout } from './call-timeout';
+import { DEFAULT_TIMEOUT_MS, isJobCommand, timeoutError, timeoutFor, withTimeout } from './call-timeout';
 
 describe('call timeouts', () => {
-  it('gives network commands longer than reads', () => {
+  it('gives updates and imports longer than reads', () => {
     expect(timeoutFor('list_watches')).toBe(DEFAULT_TIMEOUT_MS);
-    expect(timeoutFor('test_source')).toBeGreaterThan(DEFAULT_TIMEOUT_MS);
-    expect(timeoutFor('download_release')).toBeGreaterThan(timeoutFor('test_source'));
+    expect(timeoutFor('discover_feeds')).toBeGreaterThan(DEFAULT_TIMEOUT_MS);
+    expect(timeoutFor('install_app_update')).toBeGreaterThan(timeoutFor('discover_feeds') as number);
+  });
+
+  it('never times out a long operation: the engine ends it and the UI shows what it is doing', () => {
+    for (const cmd of ['download_release', 'install_renderer', 'check_now', 'test_source']) {
+      expect(timeoutFor(cmd), cmd).toBeNull();
+      expect(isJobCommand(cmd), cmd).toBe(true);
+    }
+    expect(isJobCommand('list_watches')).toBe(false);
   });
 
   it('names the wait in the error', () => {

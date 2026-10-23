@@ -1,4 +1,5 @@
 import type {
+  JobEvent,
   Avatar,
   MailStatus,
   AppEvent,
@@ -38,6 +39,7 @@ import type { ReleaseTarget, SpotterBackend } from './backend';
 import { blankDraft } from './draft';
 import { DAY, HOUR, MINUTE, PRESETS, SOURCE_KINDS, makeReleases, rng } from './mock/mock-data';
 import { mockDescribe, mockSchedulePreview, mockScheduleProblems } from './mock/mock-schedule';
+import { MockJobs } from './mock/mock-jobs';
 import { MOCK_SCHEMES, mockExtraction, mockSuggest, mockTest, patternProblem } from './mock/mock-extraction';
 
 export type MockScenario = 'demo' | 'empty' | 'broken' | 'products';
@@ -48,6 +50,8 @@ export interface MockOptions {
   latencyMs?: number;
   now?: () => number;
   platform?: AppInfo['platform'];
+  /** Milliseconds between the steps of a long operation (0 in tests; the browser build slows them so progress can be seen). */
+  jobStepMs?: number;
 }
 
 interface MockWatch {
@@ -244,12 +248,16 @@ export class MockBackend implements SpotterBackend {
   private readonly navigateHandlers = new Set<(r: string) => void>();
   /** Calls made, for tests. */
   readonly calls: string[] = [];
+  private readonly jobs: MockJobs;
+  private readonly jobStepMs: number;
 
   constructor(options: MockOptions = {}) {
     this.now = options.now ?? Date.now;
     this.latency = options.latencyMs ?? 0;
     this.scenario = options.scenario ?? 'demo';
     this.platform = options.platform ?? 'macos';
+    this.jobStepMs = options.jobStepMs ?? 0;
+    this.jobs = new MockJobs(this.jobStepMs);
     this.watches = this.scenario === 'empty' ? [] : this.scenario === 'products' ? [...demoWatches(this.now()).filter((w) => w.spec.id !== 'w-7'), productWatch(this.now())] : demoWatches(this.now());
   }
 
@@ -266,7 +274,7 @@ export class MockBackend implements SpotterBackend {
 
   // --- helpers -------------------------------------------------------------------------------------------------
 
-  private async call<T>(name: string, work: () => T): Promise<T> {
+  private async call<T>(name: string, work: () => T | PromiseLike<T>): Promise<T> {
     this.calls.push(name);
     if (this.latency > 0) await new Promise((r) => setTimeout(r, this.latency));
     if (this.scenario === 'broken') throw problem('unavailable', 'The engine is not answering (mock "broken" scenario).');
@@ -367,9 +375,20 @@ export class MockBackend implements SpotterBackend {
     return this.call('sourceKinds', () => SOURCE_KINDS);
   }
 
-  testSource(draft: WatchDraft, secrets: Record<string, string>): Promise<SourcePreview> {
-    return this.call('testSource', () => {
-      void secrets;
+  testSource(draft: WatchDraft, secrets: Record<string, string>, jobId: string): Promise<SourcePreview> {
+    void secrets;
+    return this.call('testSource', () =>
+      this.jobs.run(jobId, 'testSource', async (tick) => {
+        if (draft.source.kind === 'folder') {
+          for (const found of [0, 1_240, 5_870, 12_366]) await tick('finding', 'Finding files', 'count', found, null);
+        }
+        return this.previewOf(draft);
+      }),
+    );
+  }
+
+  private previewOf(draft: WatchDraft): SourcePreview {
+    {
       const kind = SOURCE_KINDS.find((k) => k.id === draft.source.kind);
       const problems: string[] = [];
       if (!kind) problems.push(`Unknown source kind "${draft.source.kind}".`);
@@ -403,7 +422,7 @@ export class MockBackend implements SpotterBackend {
         return true;
       });
       return { ...empty, releases: releases.slice(0, 20), withoutVersion: ['README.txt', 'checksums.sha256'], prereleasesSkipped, namesSkipped, tookMs: 380 };
-    });
+    }
   }
 
   saveWatch(draft: WatchDraft, secrets: Record<string, string>): Promise<WatchSummary> {
@@ -458,15 +477,26 @@ export class MockBackend implements SpotterBackend {
     });
   }
 
-  checkNow(id: string | null): Promise<void> {
-    return this.call('checkNow', () => {
+  checkNow(id: string | null, jobId: string): Promise<void> {
+    return this.call('checkNow', async () => {
       const targets = id === null ? this.watches.filter((w) => !w.spec.paused) : [this.find(id)];
-      for (const w of targets) {
-        w.lastCheckMs = this.now();
-        if (w.status.kind === 'pending') w.status = OK;
-        w.checks = [...w.checks, { atMs: this.now(), tookMs: 640, error: null, found: w.releases.length }].slice(-30);
+      const run = this.jobs.run(jobId, id === null ? 'checkAll' : 'check', async (tick) => {
+        for (const [i, w] of targets.entries()) {
+          await tick('checking', 'Checking', 'count', id === null ? i : 0, id === null ? targets.length : null);
+          w.lastCheckMs = this.now();
+          if (w.status.kind === 'pending') w.status = OK;
+          w.checks = [...w.checks, { atMs: this.now(), tookMs: 640, error: null, found: w.releases.length }].slice(-30);
+          this.emit();
+        }
+        if (id === null) await tick('checking', 'Checking', 'count', targets.length, targets.length);
+      });
+      // Checking everything runs on in the background (like the shell); one watch is awaited.
+      if (id === null) {
+        const background = run.catch(() => undefined);
+        if (this.jobStepMs === 0) await background;
+        return;
       }
-      this.emit();
+      await run;
     });
   }
 
@@ -507,11 +537,15 @@ export class MockBackend implements SpotterBackend {
     });
   }
 
-  downloadRelease(id: string, version: string, target?: ReleaseTarget): Promise<string> {
+  downloadRelease(id: string, version: string, jobId: string, target?: ReleaseTarget): Promise<string> {
     return this.call('downloadRelease', () => {
       const r = this.release(id, version, target);
       const file = target?.artifact ?? r.name;
-      return `/Users/demo/Downloads/Spotter/${file}`;
+      const total = 184_549_376;
+      return this.jobs.run(jobId, 'download', async (tick) => {
+        for (let i = 0; i <= 10; i++) await tick('downloading', 'Downloading', 'bytes', Math.round((total * i) / 10), total);
+        return `/Users/demo/Downloads/Spotter/${file}`;
+      });
     });
   }
 
@@ -684,11 +718,18 @@ export class MockBackend implements SpotterBackend {
     return this.call('rendererStatus', () => this.renderer);
   }
 
-  installRenderer(): Promise<RendererStatus> {
-    return this.call('installRenderer', () => {
-      this.renderer = { kind: 'chromium-downloaded', detail: 'Chromium 130.0 (downloaded, checksum verified)', canDownload: false };
-      return this.renderer;
-    });
+  installRenderer(jobId: string): Promise<RendererStatus> {
+    return this.call('installRenderer', () =>
+      this.jobs.run(jobId, 'installRenderer', async (tick) => {
+        const archive = 156_237_824;
+        for (let i = 0; i <= 6; i++) await tick('downloading', 'Downloading', 'bytes', Math.round((archive * i) / 6), archive);
+        const expanded = 612_368_384;
+        for (let i = 0; i <= 6; i++) await tick('unpacking', 'Unpacking', 'bytes', Math.round((expanded * i) / 6), expanded);
+        for (let i = 0; i < 4; i++) await tick('selfTest', 'Testing', 'count', 0, null);
+        this.renderer = { kind: 'chromium-downloaded', detail: 'Chromium 130.0 (downloaded, checksum verified)', canDownload: false };
+        return this.renderer;
+      }),
+    );
   }
 
   importList(format: ImportFormat, text: string): Promise<ImportResult> {
@@ -776,6 +817,14 @@ export class MockBackend implements SpotterBackend {
 
   fitTray(_height: number): Promise<void> {
     return this.call('fitTray', () => undefined);
+  }
+
+  cancelJob(jobId: string): Promise<void> {
+    return this.call('cancelJob', () => this.jobs.cancel(jobId));
+  }
+
+  async onJob(handler: (event: JobEvent) => void): Promise<() => void> {
+    return this.jobs.on(handler);
   }
 
   async onState(handler: (push: StatePush) => void): Promise<() => void> {

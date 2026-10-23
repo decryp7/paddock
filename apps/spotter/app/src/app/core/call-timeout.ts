@@ -4,16 +4,26 @@ import type { CommandError } from './api.types';
 export const DEFAULT_TIMEOUT_MS = 15_000;
 const LONG_TIMEOUT_MS = 120_000;
 const MEDIUM_TIMEOUT_MS = 45_000;
-/** Looking through a big share (the wizard's test) may use the whole scan limit. */
-const SCAN_TIMEOUT_MS = 90_000;
 
-/** Network checks, downloads and installs legitimately take longer than reads. */
-const LONG = new Set(['download_release', 'install_renderer', 'install_app_update', 'check_app_update']);
-const MEDIUM = new Set(['save_watch', 'discover_feeds', 'check_now', 'import_list']);
+/** Updates are plain calls that legitimately take longer than reads. */
+const LONG = new Set(['install_app_update', 'check_app_update']);
+const MEDIUM = new Set(['save_watch', 'discover_feeds', 'import_list']);
 
-/** The time one command gets (pure). */
-export function timeoutFor(cmd: string): number {
-  return LONG.has(cmd) ? LONG_TIMEOUT_MS : cmd === 'test_source' ? SCAN_TIMEOUT_MS : MEDIUM.has(cmd) ? MEDIUM_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+/**
+ * Commands that run as a job (`spotter://job` events with their phase and progress, and Cancel). The UI never gives
+ * up on these: the engine ends them, and while they run the UI shows what they are doing.
+ */
+const JOBS = new Set(['download_release', 'install_renderer', 'check_now', 'test_source']);
+
+/** Whether a command is a long-running job the UI waits for without a limit. */
+export function isJobCommand(cmd: string): boolean {
+  return JOBS.has(cmd);
+}
+
+/** The time one command gets (pure); `null` for a job, which has no UI timeout. */
+export function timeoutFor(cmd: string): number | null {
+  if (JOBS.has(cmd)) return null;
+  return LONG.has(cmd) ? LONG_TIMEOUT_MS : MEDIUM.has(cmd) ? MEDIUM_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
 }
 
 /** The error a call that did not answer in time becomes. */

@@ -1,10 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
 import { flush, makeMock } from '../../testing/test-helpers';
+import { JobsStore } from './jobs.store';
 import { ToastStore } from './toast.store';
 import { WatchesStore } from './watches.store';
 
-function setup(backend = makeMock()) {
+function setup(options: Parameters<typeof makeMock>[0] = {}, backend = makeMock(options)) {
   TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
   return { backend, store: TestBed.inject(WatchesStore), toasts: TestBed.inject(ToastStore) };
 }
@@ -140,5 +141,64 @@ describe('WatchesStore', () => {
     expect(toasts.toasts().at(-1)?.body).toContain(v.name);
     await store.download('w-1', 'gone');
     expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'danger', title: 'Download failed', body: 'That release is gone.' });
+  });
+
+  it('a download that is cancelled is an info message and keeps the part, not a failure', async () => {
+    const { backend, store, toasts } = setup({ jobStepMs: 20 });
+    const v = (await backend.getWatch('w-1')).history[0]!;
+    const jobs = TestBed.inject(JobsStore);
+    const run = store.download('w-1', v.version);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(jobs.jobs()[0]).toMatchObject({ kind: 'download' });
+    expect(jobs.jobs()[0]?.title).toContain(v.version);
+    await jobs.cancel(jobs.jobs()[0]!.id);
+    await run;
+    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'info', title: 'Download cancelled' });
+    expect(toasts.toasts().some((t) => t.title === 'Download failed')).toBe(false);
+  });
+
+  it('a long download is never given up on: it ends when the engine says so', async () => {
+    const { backend, store, toasts } = setup();
+    const v = (await backend.getWatch('w-1')).history[0]!;
+    let finish: (path: string) => void = () => undefined;
+    vi.spyOn(backend, 'downloadRelease').mockReturnValue(new Promise<string>((r) => (finish = r)));
+    const run = store.download('w-1', v.version);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(TestBed.inject(JobsStore).jobs()).toHaveLength(1);
+    expect(toasts.toasts().some((t) => t.tone === 'danger')).toBe(false);
+    finish('/d/file.zip');
+    await run;
+    expect(toasts.toasts().at(-1)).toMatchObject({ title: 'Download finished', body: '/d/file.zip' });
+    expect(TestBed.inject(JobsStore).jobs()).toHaveLength(0);
+  });
+
+  it('checking every watch starts a job whose n of m and cancel are in the jobs store', async () => {
+    const { backend, store, toasts } = setup({ jobStepMs: 15 });
+    await store.load();
+    const jobs = TestBed.inject(JobsStore);
+    expect(await store.checkNow(null)).toBe(true);
+    expect(toasts.toasts().at(-1)?.title).toBe('Checking every watch');
+    expect(jobs.jobs()[0]).toMatchObject({ kind: 'checkAll', title: 'Checking every watch' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(jobs.jobs()[0]?.progress?.total).toBe(store.watches().filter((w) => !w.paused).length);
+    await jobs.cancel(jobs.jobs()[0]!.id);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(toasts.toasts().at(-1)?.title).toBe('Check cancelled');
+    void backend;
+  });
+
+  it('a single check that is cancelled says so, and one that fails is an error', async () => {
+    const { backend, store, toasts } = setup({ jobStepMs: 100 });
+    await store.load();
+    const jobs = TestBed.inject(JobsStore);
+    const run = store.checkNow('w-1');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(jobs.jobs()[0]).toMatchObject({ kind: 'check', title: expect.stringMatching(/^Checking .+/) });
+    await jobs.cancel(jobs.jobs()[0]!.id);
+    expect(await run).toBe(false);
+    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'info', title: 'Check cancelled' });
+    vi.spyOn(backend, 'checkNow').mockRejectedValue({ code: 'unavailable', message: 'down', problems: [] });
+    expect(await store.checkNow('w-1')).toBe(false);
+    expect(toasts.toasts().at(-1)).toMatchObject({ tone: 'danger', body: 'down' });
   });
 });

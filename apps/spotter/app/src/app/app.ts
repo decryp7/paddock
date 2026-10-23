@@ -3,6 +3,7 @@ import { Router, RouterOutlet } from '@angular/router';
 import { BACKEND } from './core/backend';
 import { ThemeService } from './core/theme.service';
 import { ConnectionBanner } from './layout/connection-banner';
+import { Operations } from './layout/operations';
 import { Sidebar } from './layout/sidebar';
 import { Toasts } from './layout/toasts';
 import { CopyMenuHost } from './shared/ui/copy-menu';
@@ -17,7 +18,7 @@ export function isTrayWindow(hash: string): boolean {
 /** The main window (sidebar, banner, routed page, toasts) or, for the tray window, just the routed popup. */
 @Component({
   selector: 'sp-root',
-  imports: [RouterOutlet, Sidebar, ConnectionBanner, Toasts, CopyMenuHost],
+  imports: [RouterOutlet, Sidebar, ConnectionBanner, Operations, Toasts, CopyMenuHost],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (tray) {
@@ -34,6 +35,7 @@ export function isTrayWindow(hash: string): boolean {
           </main>
         </div>
       </div>
+      <sp-operations />
       <sp-toasts />
     }
     <sp-copy-menu />

@@ -46,7 +46,7 @@ test.describe('Spotter against the mock backend', () => {
     await expect(row.getByText('Paused')).toHaveCount(0);
     await row.hover();
     await row.getByRole('button', { name: 'Check Lumen CLI now' }).click();
-    await expect(page.getByText('Check started')).toBeVisible();
+    await expect(page.getByText('Check finished')).toBeVisible();
   });
 
   test('acknowledges a release', async ({ page }) => {

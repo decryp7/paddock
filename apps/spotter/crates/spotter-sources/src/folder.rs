@@ -435,7 +435,7 @@ impl Walk<'_> {
                 self.fail(Stop::TooMany);
                 return Vec::new();
             }
-            if scanned % 256 == 0 {
+            if scanned.is_multiple_of(256) {
                 self.report();
                 if Instant::now() > self.deadline {
                     self.fail(Stop::TooSlow);

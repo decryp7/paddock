@@ -1,6 +1,6 @@
 import type { CommandError } from './api.types';
 
-const CODES: ReadonlySet<CommandError['code']> = new Set(['badRequest', 'notFound', 'invalid', 'unavailable', 'internal']);
+const CODES: ReadonlySet<CommandError['code']> = new Set(['badRequest', 'notFound', 'invalid', 'unavailable', 'internal', 'cancelled']);
 
 /** Any rejection from a command as a typed error (unknown shapes become `internal` with their text). */
 export function toCommandError(e: unknown): CommandError {
@@ -13,4 +13,9 @@ export function toCommandError(e: unknown): CommandError {
   }
   const message = e instanceof Error ? e.message : typeof e === 'string' ? e : 'Something went wrong.';
   return { code: 'internal', message, problems: [] };
+}
+
+/** Whether a rejection is the user's own Cancel (not a failure to report). */
+export function isCancelled(e: unknown): boolean {
+  return toCommandError(e).code === 'cancelled';
 }

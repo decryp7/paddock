@@ -547,7 +547,7 @@ export type OpenTarget = 'config' | 'logs' | 'downloads';
 
 /** A command error (`app/src-tauri/src/dto.rs` `CommandError`). */
 export interface CommandError {
-  code: 'badRequest' | 'notFound' | 'invalid' | 'unavailable' | 'internal';
+  code: 'badRequest' | 'notFound' | 'invalid' | 'unavailable' | 'internal' | 'cancelled';
   message: string;
   /** For `invalid`: every problem with the input. */
   problems: string[];
@@ -556,4 +556,41 @@ export interface CommandError {
 /** Pushed by the backend (Tauri event `spotter://state`) whenever watches change, checks start or end. */
 export interface StatePush {
   watches: WatchSummary[];
+}
+
+/** What a long operation is (`app/src-tauri/src/jobs.rs` `JobKind`). */
+export type JobKind = 'download' | 'installRenderer' | 'check' | 'checkAll' | 'testSource';
+
+/** How a long operation stands (`JobState`). */
+export type JobState = 'running' | 'finished' | 'cancelled' | 'failed';
+
+/** What a phase counts: bytes, or items (entries, files, watches, seconds). */
+export type JobUnit = 'bytes' | 'count';
+
+/** One phase of a long operation on its own scale (`spotter_core::job::Progress`). `total: null` is indeterminate: show the growing `done`. */
+export interface JobProgress {
+  phase:
+    | 'fetchingChecksum'
+    | 'checkingExisting'
+    | 'downloading'
+    | 'copying'
+    | 'unpacking'
+    | 'selfTest'
+    | 'finding'
+    | 'settling'
+    | 'checking';
+  /** The phase in words ("Downloading", "Finding files"). */
+  label: string;
+  unit: JobUnit;
+  done: number;
+  total: number | null;
+}
+
+/** Pushed on the Tauri event `spotter://job` while a long operation runs and once when it ends (`JobEventDto`). */
+export interface JobEvent {
+  jobId: string;
+  kind: JobKind;
+  state: JobState;
+  /** The phase it is in; null once it ended. */
+  progress: JobProgress | null;
 }

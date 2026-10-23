@@ -14,7 +14,7 @@ const SCENARIOS: MockScenario[] = ['demo', 'empty', 'broken', 'products'];
 function browserBackend(): SpotterBackend {
   const params = new URLSearchParams(globalThis.location?.search ?? '');
   const scenario = params.get('mock') as MockScenario | null;
-  return new MockBackend({ scenario: scenario && SCENARIOS.includes(scenario) ? scenario : 'demo', latencyMs: 80 });
+  return new MockBackend({ scenario: scenario && SCENARIOS.includes(scenario) ? scenario : 'demo', latencyMs: 80, jobStepMs: 350 });
 }
 
 export const appConfig: ApplicationConfig = {

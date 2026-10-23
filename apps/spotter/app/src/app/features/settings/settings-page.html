@@ -94,7 +94,7 @@
                 <div class="help detail pd-selectable">{{ r.detail }}</div>
               </div>
               @if (r.canDownload) {
-                <button type="button" class="btn sm" (click)="store.installRenderer()" [disabled]="store.rendererBusy()">{{ store.rendererBusy() ? 'Downloading…' : 'Download Chromium' }}</button>
+                <button type="button" class="btn sm" (click)="store.installRenderer()" [disabled]="store.rendererBusy()">{{ store.rendererBusy() ? 'Installing…' : 'Download Chromium' }}</button>
               }
             </div>
             <div class="row">

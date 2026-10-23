@@ -108,10 +108,10 @@ describe('EditorStore', () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     let n = 0;
-    vi.spyOn(backend, 'testSource').mockImplementation(async (d, s) => {
+    vi.spyOn(backend, 'testSource').mockImplementation(async (d, s, jobId) => {
       const mine = ++n;
       if (mine === 1) await gate;
-      return { ...(await real(d, s)), tookMs: mine };
+      return { ...(await real(d, s, jobId)), tookMs: mine };
     });
     store.setStep('versions');
     const second = store.runPreview();

@@ -142,7 +142,7 @@ async fn a_single_check_shows_the_growing_count_and_is_not_marked_failed_when_ca
     assert_eq!(e, EngineError::Cancelled);
     assert!(began.elapsed() < Duration::from_secs(10));
     let seen = seen.lock().unwrap();
-    let found = seen.iter().filter(|p| p.phase == Phase::Finding).last().unwrap();
+    let found = seen.iter().rfind(|p| p.phase == Phase::Finding).unwrap();
     assert_eq!((found.done, found.total), (40, Some(40)));
     let after = f.engine.list_watches().into_iter().find(|w| w.id == saved.id).unwrap();
     assert!(!after.checking);

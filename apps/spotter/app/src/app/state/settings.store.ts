@@ -2,7 +2,8 @@ import { inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
 import type { AppInfo, AppUpdateCheck, AppUpdateStatus, CommandError, MailStatus, OpenTarget, RendererStatus, Settings, SmtpSettings } from '../core/api.types';
 import { BACKEND } from '../core/backend';
-import { toCommandError } from '../core/command-error';
+import { isCancelled, toCommandError } from '../core/command-error';
+import { JobsStore } from './jobs.store';
 import { ThemeService } from '../core/theme.service';
 import { idle, pending, settle, type Loadable } from './loadable';
 import { ToastStore } from './toast.store';
@@ -49,6 +50,7 @@ export const SettingsStore = signalStore(
     const backend = inject(BACKEND);
     const theme = inject(ThemeService);
     const toast = inject(ToastStore);
+    const jobs = inject(JobsStore);
 
     const fail = (title: string, e: unknown): CommandError => {
       const err = toCommandError(e);
@@ -177,10 +179,12 @@ export const SettingsStore = signalStore(
       async installRenderer(): Promise<void> {
         patchState(store, { rendererBusy: true });
         try {
-          patchState(store, { renderer: { value: await backend.installRenderer(), loading: false, error: null } });
+          const status = await jobs.run('installRenderer', 'Installing the browser', (jobId) => backend.installRenderer(jobId));
+          patchState(store, { renderer: { value: status, loading: false, error: null } });
           toast.success('Browser installed');
         } catch (e) {
-          fail('The browser could not be installed', e);
+          if (isCancelled(e)) toast.show({ tone: 'info', icon: 'info', title: 'Installation cancelled', body: 'Nothing was installed.' });
+          else fail('The browser could not be installed', e);
         } finally {
           patchState(store, { rendererBusy: false });
         }

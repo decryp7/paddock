@@ -72,27 +72,27 @@ describe('MockBackend', () => {
   describe('testSource', () => {
     it('lists problems for an unknown kind, missing fields and a custom scheme without pattern', async () => {
       const b = make();
-      const unknown = await b.testSource(blankDraft({ source: { kind: 'nope', values: {} } }), {});
+      const unknown = await b.testSource(blankDraft({ source: { kind: 'nope', values: {} } }), {}, 'j');
       expect(unknown.problems[0]).toContain('Unknown source kind');
-      const missing = await b.testSource(blankDraft({ source: { kind: 'github', values: { repo: '  ' } }, versions: 'custom' }), {});
+      const missing = await b.testSource(blankDraft({ source: { kind: 'github', values: { repo: '  ' } }, versions: 'custom' }), {}, 'j');
       expect(missing.problems.some((p) => p.endsWith('is required.'))).toBe(true);
       expect(missing.problems).toContain('A custom version scheme needs a pattern.');
       expect(missing.releases).toEqual([]);
     });
 
     it('reports an unreachable target as an error, not as problems', async () => {
-      const p = await make().testSource(githubDraft({ source: { kind: 'github', values: { repo: 'offline/x' } } }), {});
+      const p = await make().testSource(githubDraft({ source: { kind: 'github', values: { repo: 'offline/x' } } }), {}, 'j');
       expect(p.problems).toEqual([]);
       expect(p.error?.kind).toBe('unreachable');
     });
 
     it('filters prereleases and by prefix, counting what it skipped', async () => {
       const b = make();
-      const all = await b.testSource(githubDraft({ includePrereleases: true }), {});
-      const none = await b.testSource(githubDraft({ includePrereleases: false }), {});
+      const all = await b.testSource(githubDraft({ includePrereleases: true }), {}, 'j');
+      const none = await b.testSource(githubDraft({ includePrereleases: false }), {}, 'j');
       expect(all.releases.length).toBeGreaterThanOrEqual(none.releases.length);
       expect(none.prereleasesSkipped).toBe(all.releases.length - none.releases.length);
-      const pre = await b.testSource(githubDraft({ filter: { prefix: 'zzz-', soakHours: 0 } }), {});
+      const pre = await b.testSource(githubDraft({ filter: { prefix: 'zzz-', soakHours: 0 } }), {}, 'j');
       expect(pre.releases).toEqual([]);
       expect(pre.namesSkipped).toBeGreaterThan(0);
       expect(pre.withoutVersion).toContain('README.txt');
@@ -165,19 +165,19 @@ describe('MockBackend', () => {
   it('checkNow checks one watch or every unpaused one, resolving pending status', async () => {
     const b = make();
     const saved = await b.saveWatch(githubDraft(), {});
-    await b.checkNow(saved.id);
+    await b.checkNow(saved.id, 'j');
     const after = await b.getWatch(saved.id);
     expect(after.summary.status.kind).toBe('ok');
     expect(after.checks).toHaveLength(1);
     expect(after.summary.lastCheckMs).toBe(NOW);
-    await b.checkNow(null);
+    await b.checkNow(null, 'j');
     const paused = await b.getWatch('w-8');
     expect(paused.checks).toHaveLength(30); // paused: untouched
     expect(paused.checks.at(-1)?.atMs).toBeLessThan(NOW);
     const checked = await b.getWatch('w-1');
     expect(checked.checks).toHaveLength(30); // the history keeps the last 30 checks
     expect(checked.checks.at(-1)?.atMs).toBe(NOW);
-    expect((await rejection(b.checkNow('nope'))).code).toBe('notFound');
+    expect((await rejection(b.checkNow('nope', 'j'))).code).toBe('notFound');
   });
 
   it('acknowledges the latest or a given version, resets, and records the installed version', async () => {
@@ -201,9 +201,9 @@ describe('MockBackend', () => {
     const b = make();
     const v = (await b.getWatch('w-1')).history[0]!;
     await expect(b.openRelease('w-1', v.version)).resolves.toBeUndefined();
-    expect(await b.downloadRelease('w-1', v.version)).toContain(v.name);
+    expect(await b.downloadRelease('w-1', v.version, 'j')).toContain(v.name);
     expect((await rejection(b.openRelease('w-1', 'x'))).code).toBe('notFound');
-    expect((await rejection(b.downloadRelease('w-1', 'x'))).code).toBe('notFound');
+    expect((await rejection(b.downloadRelease('w-1', 'x', 'j'))).code).toBe('notFound');
   });
 
   describe('dashboard and events', () => {
@@ -275,7 +275,7 @@ describe('MockBackend', () => {
   it('installs the renderer once', async () => {
     const b = make();
     expect((await b.rendererStatus()).kind).toBe('none');
-    const r = await b.installRenderer();
+    const r = await b.installRenderer('j');
     expect(r.canDownload).toBe(false);
     expect((await b.rendererStatus()).kind).toBe('chromium-downloaded');
   });
