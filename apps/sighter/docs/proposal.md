@@ -256,7 +256,7 @@ TEST(Editor, SavesDocument) {
 }
 ```
 
-(Method names are illustrative; the generated surface follows the OpenAPI operation names.) Python and TypeScript clients mirror these.
+(Method names are illustrative; the generated surface follows the OpenAPI operation names.) Python and TypeScript clients mirror these. C#, Java and C++ also offer a FlaUI-style object model over the same API (7.9).
 
 **Performance targets** (goals to confirm in the spike; p50, 1080p screenshot in memory): cache under 5 ms; template under 30 ms; OCR
 anchor under 100 ms with a region, 150 to 500 ms full screen on CPU (cache OCR by fingerprint); detector under 50 ms on a discrete/Apple
@@ -389,6 +389,68 @@ Besides the API for engineers' code, Sighter can author and run test cases itsel
 - Traceability back to requirement ids (Pacenotes) through the plan's requirement links.
 
 **Two ways to test, one engine**: engineers' own code tests via the API (C#, Java, C++, Python, TypeScript) and Sighter-authored tests both go through `sighter-server`, the same pinned models and the same resolver, so results are comparable and a flagged failure feeds the same labelling queue.
+
+### 7.9 FlaUI-style client API
+The C#, Java and C++ clients expose an object model **similar to FlaUI** ([FlaUI](https://github.com/FlaUI/FlaUI), MIT, the .NET UIA library many Windows testers know), backed by vision instead of UIA. The HTTP/OpenAPI API stays the wire contract underneath; these object models are client-side layers over it. The raw verbs (`locate`, `wait_for`, `assert_screen`) remain available in every client.
+
+**Familiarity, not compatibility**: not a drop-in FlaUI replacement (different namespaces and types), but familiar enough that a FlaUI user is productive at once. **Licence**: FlaUI is MIT; this is an API style, not code reuse.
+
+| FlaUI | Sighter client | Notes |
+|---|---|---|
+| `Application.Launch(path)` / `Attach(process or title)` | `Sighter.Launch(...)` / `Sighter.Attach(...)` | Session options carry the model pin (`app@3`) and the act permission |
+| `app.GetMainWindow(automation)` | `app.MainWindow` | The OS window APIs give the window and its capture region |
+| `FindFirstDescendant(cf => ...)` / `FindAllDescendants(...)` | `window.FindFirst(cf => ...)` / `FindAll(...)` | Same `ConditionFactory`-style builder |
+| `cf.ByControlType(ControlType.Button)` | `cf.ByControlType(...)` | The detector class |
+| `cf.ByText("Save")` / `ByName` | `cf.ByText(...)` / `ByName(...)` | OCR text (and the label's stable name) |
+| (no equivalent) | `Near("Name")`, `RightOf`, `Below`, `Inside(region)`, `Index(n)`, `ByImage(template)`, `MinConfidence(0.8)` | Vision-only conditions, combined with `.And(...)` |
+| `Retry.WhileNull(...)` | `window.WaitFor(cond, timeout)`, `WaitUntilGone(cond, timeout)` | Server-side polling with frame-diff |
+| `AsButton().Invoke()` | `AsButton().Click()` | |
+| `AsTextBox().Enter(text)` | `AsTextBox().Enter(text)` | Focus click plus typing |
+| `AsCheckBox().IsChecked` / `Toggle()` | same | State from the detector's checked/unchecked classes |
+| `AsComboBox().Select("Item")` | same | Open, find the item by OCR, click, verify |
+| `AsListBox` / `AsGrid` rows and cells | same | Rows and cells by layout |
+| `BoundingRectangle`, `Name`, `ControlType`, `IsEnabled` | same, plus `Confidence`, `ResolvedBy`, `ModelVersion` | `Name` is OCR text, `ControlType` the class, `IsEnabled` inferred from a disabled class; `ResolvedBy` is cache, template, OCR, detector or VLM |
+| `Mouse` / `Keyboard` statics | `Sighter.Mouse` / `Sighter.Keyboard` | Through the guarded input driver (`act`), or the engineer's own |
+| `Capture.Element` / `Capture.Screen` | `element.Capture()` / `window.Capture()` | |
+
+```csharp
+// C# (NUnit)
+using var app = Sighter.Launch(@"C:\Tools\Editor.exe", new SessionOptions { Model = "editor@3" });
+var win = app.MainWindow;
+var save = win.FindFirst(cf => cf.ByText("Save").And(cf.ByControlType(ControlType.Button)).MinConfidence(0.8));
+Assert.That(save.IsEnabled);
+save.AsButton().Click();
+win.WaitFor(cf => cf.ByText("Saved"), TimeSpan.FromSeconds(5));
+win.FindFirst(cf => cf.ByControlType(ControlType.TextBox).Near("File name")).AsTextBox().Enter("report.txt");
+Console.WriteLine($"{save.Confidence:F2} via {save.ResolvedBy} on {save.ModelVersion}");
+```
+
+```java
+// Java (JUnit 5)
+try (var app = Sighter.launch("/opt/editor", SessionOptions.model("editor@3"))) {
+    var win = app.mainWindow();
+    win.findFirst(cf -> cf.byText("Save").and(cf.byControlType(ControlType.BUTTON))).asButton().click();
+    win.waitFor(cf -> cf.byText("Saved"), Duration.ofSeconds(5));
+}
+```
+
+```cpp
+// C++ (GoogleTest)
+auto app = sighter::Sighter::launch("/opt/editor", {.model = "editor@3"});
+auto win = app.main_window();
+win.find_first([](auto& cf) { return cf.by_text("Save").and_(cf.by_control_type(ControlType::Button)); }).as_button().click();
+win.wait_for([](auto& cf) { return cf.by_text("Saved"); }, std::chrono::seconds(5));
+```
+
+**Patterns, approximated visually**: Value via OCR, Toggle via a state class, ExpandCollapse via `act` plus verify. **What vision cannot do, stated plainly**:
+- No element tree: `Parent`, `Children` and tree walks do not exist; use layout conditions instead.
+- No hidden or off-screen elements: scroll-to-find helpers (`ScrollIntoView(cond)`) replace them.
+- No `AutomationId`: stable names come from Sighter's labels instead.
+- `IsEnabled` and checked state are inferred from classes and can be wrong where the app draws states unusually; confidence is exposed so tests can assert on it.
+
+**Failures** throw typed exceptions (`ElementNotFound`, `Ambiguous`, `NeedsLabelling`, `LowConfidence`) carrying the screenshot path, the candidates and the review-queue link (`/v1/flag`); **never a blind click**: an action on an ambiguous or below-threshold match is refused, not guessed.
+
+A thin shim package mapping common FlaUI calls, to migrate existing suites, is a Later idea.
 
 ## 8. The resolver and models
 
@@ -624,6 +686,8 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Script & test | Self-healing: re-resolve through later layers, propose a label/template update (explicit, never silent) | v1 proposal only | Eggplant, Tosca, TestComplete, Testim/mabl |
 | Script & test | **Sighter-authored tests**: record a flow into steps, visual step editor (target, action, assertion, wait), data tables, sub-flows (7.8) | v1 | Eggplant, Airtest, Playwright codegen |
 | Script & test | **Run Sighter's own tests**: studio watch mode with overlay, headless `sighter run`, parallel-safe per screen, retries/waits from the resolver, plans as TOML in git (`paddock-testplan`) (7.8) | v1 | Eggplant, Airtest |
+| Script & test | **FlaUI-style object model** in the C#/Java/C++ clients: sessions/windows, `FindFirst`/`FindAll` condition builder with vision-only conditions, `WaitFor`, typed wrappers (Button, TextBox, CheckBox, ComboBox, ListBox, Grid), element properties with `Confidence`/`ResolvedBy`/`ModelVersion`, typed failures (7.9) | v1 | FlaUI (MIT, style only) |
+| Script & test | FlaUI migration shim package (map common FlaUI calls) | Later | FlaUI |
 | Script & test | Natural-language steps | Later | Eggplant, Functionize |
 | Plans & model | **`.sighterplan` import** (requirements, screens, cases, steps), dry-run report, diff on re-import, unknown elements to record tasks (7.2) | v1 | (family: codebase tool) |
 | Plans & model | **App state graph** from recordings/runs/plans, screen merge and naming (7.1) | v1 | Eggplant DAI |
@@ -667,7 +731,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 
 ## 15. Open questions for the user (12; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
 1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
-2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client?
+2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? Is the FlaUI-style object model (7.9) the right default surface, with raw verbs underneath?
 3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
 4. First OS pair and targets: Windows + macOS, then Linux X11, then Wayland; desktop + browsers + **remote-session client windows (Citrix/RDP/Horizon/VNC) in v1**, mobile Later?
 5. How important is unattended CI (interactive logged-in session on runners; implications for Pitcrew)? Is recording on CI runners wanted, or studio-only recording?
@@ -687,6 +751,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - Server, resolver, OpenAPI, CLI, clients, integrations, docs: 5 to 7 weeks.
 - **Test layer (new)**: plan import and task backlog 2 to 3 weeks; app state graph, coverage, path generation 3 to 4 weeks; traceability, run sets, JUnit/TRX/Allure 2 to 3 weeks; data tables and matrices 1 to 2 weeks; visual regression completion (regions, levels, baselines UI) 2 to 3 weeks; `paddock-pitwall` crate and batch-priority jobs 1 to 2 weeks. About 11 to 17 weeks, partly parallel.
 - **Sighter-authored tests (new in v1, 7.8)**: step model and TOML (de)serialisation in `paddock-testplan` 1 to 2 weeks; flow-to-steps conversion from the recorder 1 to 2 weeks; visual step editor, data tables and sub-flows in the studio 4 to 6 weeks; runner (`sighter run`, watch mode with overlay, parallel-safe scheduling, retries) 3 to 4 weeks; guarded `act` driver hardening on two OSes 2 to 3 weeks (moved from optional to required); C#/Java/C++ clients, examples and CI 2 to 3 weeks. About 10 to 15 weeks, partly parallel.
+- FlaUI-style object models for C#/Java/C++ on top of the generated clients (7.9): 2 to 3 weeks, partly inside the 2 to 3 weeks for clients above.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
 - Total about 10 to 14 months of one team (was 8 to 11 before the Sighter-authored tests and the extra clients), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
