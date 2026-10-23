@@ -22,6 +22,7 @@ export const NAV: NavItem[] = [
   { path: '/reports', label: 'Reports', icon: 'reports', keywords: 'weekly report summary week trend export markdown html' },
   { path: '/recorder', label: 'Flight recorder', icon: 'camera', keywords: 'timeline capture snapshot last ten minutes' },
   { path: '/cleanup', label: 'Cleanup', icon: 'cleanup', keywords: 'temp caches disk space free up quarantine trash recycle bin developer build output' },
+  { path: '/watched', label: 'Watched folders', icon: 'folder', keywords: 'downloads screenshots keep for old files expire quarantine automatic cleanup sweep' },
   { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
   { path: '/tuning', label: 'Tuning', icon: 'sparkle', keywords: 'power plan sleep hibernation battery charge limit indexing visual effects background apps suggestions undo' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },

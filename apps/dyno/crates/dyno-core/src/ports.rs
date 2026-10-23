@@ -43,6 +43,12 @@ pub trait NetworkSockets: Send + Sync {
     fn sockets(&self) -> Result<Vec<crate::network::SocketRow>, PlatformError>;
 }
 
+/// The network interfaces and the Wi-Fi network joined, for the timeline's network change events (WP-35).
+pub trait NetworkLinks: Send + Sync {
+    /// One cheap look. Where the OS hides the Wi-Fi name, `ssid` is `None`; a refused read is an error with what would help.
+    fn links(&self) -> Result<crate::netchange::NetState, PlatformError>;
+}
+
 /// Reverse DNS through the OS resolver (so the user's resolver and hosts file apply). Blocking: the agent calls it off
 /// the request thread with a deadline. Observe-only, and only for addresses the user asked about.
 pub trait ReverseDns: Send + Sync {

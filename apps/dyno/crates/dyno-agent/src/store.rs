@@ -84,6 +84,7 @@ fn kind_text(k: TimelineEventKind) -> &'static str {
         TimelineEventKind::Tuning => "tuning",
         TimelineEventKind::Alert => "alert",
         TimelineEventKind::Boot => "boot",
+        TimelineEventKind::Network => "network",
     }
 }
 
@@ -96,6 +97,7 @@ fn kind_from(s: &str) -> Option<TimelineEventKind> {
         "tuning" => TimelineEventKind::Tuning,
         "alert" => TimelineEventKind::Alert,
         "boot" => TimelineEventKind::Boot,
+        "network" => TimelineEventKind::Network,
         _ => return None,
     })
 }

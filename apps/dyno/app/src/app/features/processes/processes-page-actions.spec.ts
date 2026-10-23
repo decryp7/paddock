@@ -5,6 +5,7 @@ import { MockBackend } from '../../core/mock-backend';
 import { Dialogs } from '../../shared/dialog';
 import { provideIcons } from '../../shared/icons';
 import { LiveStore } from '../../state/live.store';
+import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
 import { AffinityDialog, CapDialog, LockersDialog } from './process-dialogs';
 import type { Row } from './process-rows';
@@ -244,6 +245,22 @@ describe('ProcessesPage actions', () => {
       press(c, el, 'Delete');
       expect(confirm).toHaveBeenCalledTimes(1);
       press(c, el, 'x');
+    });
+  });
+
+  describe('right-click search', () => {
+    it('searches the web for the name, and the file hash only for a real process', async () => {
+      const { c, processRow } = await make();
+      const lookups = TestBed.inject(Lookups);
+      const web = vi.spyOn(lookups, 'searchWeb').mockResolvedValue(false);
+      const hash = vi.spyOn(lookups, 'searchHash').mockResolvedValue(false);
+      const row = processRow();
+      c.searchWeb(row);
+      expect(web).toHaveBeenCalledWith(row.name, row.name);
+      c.searchHash(row);
+      expect(hash).toHaveBeenCalledWith({ process: row.ref }, row.name);
+      c.searchHash({ ...row, ref: null });
+      expect(hash).toHaveBeenCalledTimes(1);
     });
   });
 });

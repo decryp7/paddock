@@ -40,9 +40,22 @@ describe('HealthStore', () => {
     await store.loadStartup();
     expect(store.startupLoaded()).toBe(true);
     expect(store.startup().length).toBeGreaterThan(0);
-    vi.spyOn(mock, 'startupEntries').mockRejectedValue({ code: 'busy', message: 's' });
+    vi.spyOn(mock, 'startupOverview').mockRejectedValue({ code: 'busy', message: 's' });
     await store.loadStartup();
     expect(store.startupError()?.message).toBe('s');
+  });
+  it('asks the engine to filter the startup list and keeps the counts', async () => {
+    const { store } = setup();
+    await store.loadStartup();
+    const all = store.startup().length;
+    expect(store.startupCounts().total).toBe(all);
+    const { os, signed } = store.startupCounts();
+    expect(os).toBeGreaterThan(0);
+    await store.loadStartup({ hideOs: true, hideSigned: false });
+    expect(store.startup().length).toBe(all - os);
+    expect(store.startupCounts()).toEqual({ total: all, os, signed });
+    await store.loadStartup({ hideOs: true, hideSigned: true });
+    expect(store.startup().length).toBe(all - os - signed);
   });
   it('changes a startup entry in place', async () => {
     const { store, notifier, activity } = setup();

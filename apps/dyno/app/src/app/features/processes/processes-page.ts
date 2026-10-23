@@ -11,6 +11,7 @@ import { bar } from '../../shared/heat';
 import { Icon } from '../../shared/icon';
 import { PRIORITIES, PRIORITY_LABEL } from '../../shared/labels';
 import { LiveStore } from '../../state/live.store';
+import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
 import { AffinityDialog, CapDialog, LockersDialog } from './process-dialogs';
 import { ProcessDetailsPanel } from './process-details';
@@ -149,9 +150,13 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
         <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" (cdkMenuItemTriggered)="store.act(row, { setEfficiencyMode: false })"><dy-icon name="bolt" /> Efficiency mode off</button>
         <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" (cdkMenuItemTriggered)="cap(row)"><dy-icon name="gauge" /> Cap CPU…</button>
         <button type="button" class="menu-item" cdkMenuItem [cdkMenuItemDisabled]="!!row.protectedReason" (cdkMenuItemTriggered)="store.act(row, { setCpuCap: null })"><dy-icon name="undo" /> Remove CPU cap</button>
+        <div class="menu-sep"></div>
         @if (row.ref) {
-          <div class="menu-sep"></div>
           <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="store.openLocation(row.ref)"><dy-icon name="folder" /> Open file location</button>
+        }
+        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(row)"><dy-icon name="search" /> Search the web…</button>
+        @if (row.ref) {
+          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(row)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button>
         }
       </div>
     </ng-template>
@@ -210,6 +215,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
   protected readonly store = inject(ProcessesStore);
   private readonly dialogs = inject(Dialogs);
   private readonly live = inject(LiveStore);
+  private readonly lookups = inject(Lookups);
   /** `?q=` filters on open (from the dashboard's top apps and the command palette). */
   readonly q = input<string>();
 
@@ -293,6 +299,14 @@ export class ProcessesPage implements OnInit, OnDestroy {
     const ref = this.dialogs.open<number>(CapDialog, r.name);
     const result = await firstValueFrom(ref.closed);
     if (typeof result === 'number') await this.store.act(r, { setCpuCap: result });
+  }
+
+  protected searchWeb(r: Row): void {
+    void this.lookups.searchWeb(r.name, r.name);
+  }
+
+  protected searchHash(r: Row): void {
+    if (r.ref) void this.lookups.searchHash({ process: r.ref }, r.name);
   }
 
   protected lockers(): void {

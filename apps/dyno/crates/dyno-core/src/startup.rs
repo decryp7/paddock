@@ -147,6 +147,106 @@ pub fn source_of<'a>(exe: &str, entries: &'a [StartupEntry]) -> Option<&'a Start
         .find(|e| e.exe.as_deref().map(norm).as_deref() == Some(target.as_str()))
 }
 
+/// Who an entry belongs to, for the startup manager's filter (WP-34).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StartupOrigin {
+    /// Part of the operating system (Apple's agents, Windows' own tasks, system services).
+    Os,
+    /// Not the OS's, but the program names a publisher (signed).
+    Signed,
+    /// Everything else: unsigned or unknown.
+    Other,
+}
+
+fn norm_path(s: &str) -> String {
+    s.replace('\\', "/").to_lowercase()
+}
+
+/// Whether the entry is part of the operating system `os` (by its label or the folder it runs from).
+pub fn is_os_owned(entry: &StartupEntry, os: crate::cleanup::Os) -> bool {
+    use crate::cleanup::Os;
+    let exe = entry.exe.as_deref().map(norm_path).unwrap_or_default();
+    let name = norm_path(&entry.name);
+    let under = |prefixes: &[&str]| prefixes.iter().any(|p| exe.starts_with(p));
+    match os {
+        Os::Macos => {
+            name.starts_with("com.apple.")
+                || under(&["/system/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/", "/library/apple/"])
+        }
+        Os::Windows => {
+            let after_drive = exe.get(2..).unwrap_or("");
+            let in_windows = exe.as_bytes().get(1) == Some(&b':') && after_drive.starts_with("/windows/");
+            in_windows
+                || name.starts_with("/microsoft/windows/")
+                || norm_path(&entry.id).contains(":/microsoft/windows/")
+                || entry.publisher.as_deref().is_some_and(|p| p.eq_ignore_ascii_case("Microsoft Windows"))
+        }
+        Os::Linux => under(&["/usr/lib/", "/usr/lib64/", "/usr/libexec/", "/usr/sbin/", "/lib/", "/sbin/"]),
+    }
+}
+
+/// Classifies an entry: the OS's own first, then signed (a publisher is known), else other.
+pub fn origin(entry: &StartupEntry, os: crate::cleanup::Os) -> StartupOrigin {
+    if is_os_owned(entry, os) {
+        StartupOrigin::Os
+    } else if entry.publisher.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+        StartupOrigin::Signed
+    } else {
+        StartupOrigin::Other
+    }
+}
+
+/// What the startup manager hides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupFilter {
+    /// Hide the operating system's own entries.
+    pub hide_os: bool,
+    /// Hide entries with a known publisher (the OS's are counted separately).
+    pub hide_signed: bool,
+}
+
+/// The startup list after the filter, with the counts the toggles show.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupOverview {
+    /// The entries left after filtering.
+    pub entries: Vec<StartupEntry>,
+    /// Every entry before filtering.
+    pub total: u32,
+    /// How many are the operating system's.
+    pub os_count: u32,
+    /// How many are signed and not the OS's.
+    pub signed_count: u32,
+}
+
+/// Applies `filter` to `entries`.
+pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::cleanup::Os) -> StartupOverview {
+    let total = entries.len() as u32;
+    let (mut os_count, mut signed_count) = (0, 0);
+    let kept = entries
+        .into_iter()
+        .filter(|e| match origin(e, os) {
+            StartupOrigin::Os => {
+                os_count += 1;
+                !filter.hide_os
+            }
+            StartupOrigin::Signed => {
+                signed_count += 1;
+                !filter.hide_signed
+            }
+            StartupOrigin::Other => true,
+        })
+        .collect();
+    StartupOverview {
+        entries: kept,
+        total,
+        os_count,
+        signed_count,
+    }
+}
+
 /// The most seconds a delayed start may wait.
 pub const MAX_DELAY_SECS: u32 = 600;
 
@@ -247,5 +347,62 @@ mod tests {
         assert!(validate_change(&e, StartupState::Delayed(MAX_DELAY_SECS + 1)).is_err());
         assert_eq!(state_label(StartupState::Disabled), "disabled");
         assert_eq!(state_label(StartupState::Delayed(3)), "delayed");
+    }
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::fixtures::entry;
+    use super::*;
+    use crate::cleanup::Os;
+
+    fn signed(name: &str, exe: &str, publisher: &str) -> StartupEntry {
+        let mut e = entry(name, exe, ImpactRating::Low);
+        e.publisher = Some(publisher.into());
+        e
+    }
+
+    #[test]
+    fn the_os_owns_its_labels_and_folders() {
+        let apple = entry("com.apple.Spotlight", "/System/Library/CoreServices/x", ImpactRating::Low);
+        assert!(is_os_owned(&apple, Os::Macos));
+        assert!(is_os_owned(&entry("Other", "/usr/libexec/foo", ImpactRating::Low), Os::Macos));
+        assert!(!is_os_owned(&entry("com.slack", "/Applications/Slack.app/x", ImpactRating::Low), Os::Macos));
+        // Windows paths use either separator and any case; only the drive's Windows folder counts.
+        assert!(is_os_owned(&entry("SecurityHealth", "C:\\WINDOWS\\system32\\SecurityHealthSystray.exe", ImpactRating::Low), Os::Windows));
+        assert!(!is_os_owned(&entry("Slack", "C:\\Users\\me\\windows\\slack.exe", ImpactRating::Low), Os::Windows));
+        let mut task = entry("\\Microsoft\\Windows\\Defrag\\ScheduledDefrag", "", ImpactRating::Low);
+        task.exe = None;
+        assert!(is_os_owned(&task, Os::Windows));
+        assert!(is_os_owned(&signed("x", "D:\\a.exe", "Microsoft Windows"), Os::Windows));
+        assert!(is_os_owned(&entry("gnome-keyring", "/usr/libexec/gnome-keyring-daemon", ImpactRating::Low), Os::Linux));
+        assert!(!is_os_owned(&entry("syncthing", "/home/me/bin/syncthing", ImpactRating::Low), Os::Linux));
+    }
+
+    #[test]
+    fn origin_puts_the_os_before_signed() {
+        assert_eq!(origin(&signed("a", "/Applications/a", "Acme"), Os::Macos), StartupOrigin::Signed);
+        assert_eq!(origin(&signed("b", "/usr/bin/b", "Apple"), Os::Macos), StartupOrigin::Os);
+        assert_eq!(origin(&entry("c", "/opt/c", ImpactRating::Low), Os::Macos), StartupOrigin::Other);
+        assert_eq!(origin(&signed("d", "/opt/d", "  "), Os::Macos), StartupOrigin::Other);
+    }
+
+    #[test]
+    fn the_filter_hides_and_counts() {
+        let list = vec![
+            entry("com.apple.a", "/System/a", ImpactRating::Low),
+            signed("Slack", "/Applications/Slack", "Slack Technologies"),
+            entry("mystery", "/tmp/mystery", ImpactRating::High),
+        ];
+        let all = overview(list.clone(), StartupFilter::default(), Os::Macos);
+        assert_eq!((all.entries.len(), all.total, all.os_count, all.signed_count), (3, 3, 1, 1));
+        let no_os = overview(list.clone(), StartupFilter { hide_os: true, hide_signed: false }, Os::Macos);
+        assert_eq!(no_os.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["Slack", "mystery"]);
+        let both = overview(list.clone(), StartupFilter { hide_os: true, hide_signed: true }, Os::Macos);
+        assert_eq!(both.entries.len(), 1);
+        assert_eq!(both.entries[0].name, "mystery");
+        // The counts do not depend on the filter, so the toggles can always show them.
+        assert_eq!((both.total, both.os_count, both.signed_count), (3, 1, 1));
+        assert!(overview(vec![], StartupFilter::default(), Os::Linux).entries.is_empty());
     }
 }

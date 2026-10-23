@@ -7,6 +7,8 @@ import { provideIcons } from '../../shared/icons';
 import { Chart } from '../../shared/chart';
 import { IssuesPage } from './issues-page';
 import { IssuesView } from './issues-view';
+import { Lookups } from '../lookup/lookups';
+import { UnusualView } from './unusual-view';
 
 /** ECharts needs a real canvas; the chart's own spec covers drawing. */
 @Component({ selector: 'dy-chart', template: '' })
@@ -164,5 +166,32 @@ describe('dy-issues-page', () => {
     btn(el, 'Show hidden').click();
     await settle(f);
     expect(el.textContent).toContain('Dyno is learning what is normal here');
+  });
+});
+
+describe('right-click search from the issues page', () => {
+  it('an issue searches for its app and title; an unusual program for its name and, with a path, its file hash', async () => {
+    const { f, el } = render();
+    await settle(f);
+    const lookups = TestBed.inject(Lookups);
+    const web = vi.spyOn(lookups, 'searchWeb').mockResolvedValue(false);
+    const hash = vi.spyOn(lookups, 'searchHash').mockResolvedValue(false);
+    const view = f.debugElement.query((d) => d.componentInstance instanceof IssuesView).componentInstance as { searchWeb(i: unknown): void };
+    view.searchWeb({ app: 'Mail', title: 'Mail quit unexpectedly', evidence: 'Exception EXC_CRASH' });
+    expect(web).toHaveBeenLastCalledWith('Mail quit unexpectedly. Exception EXC_CRASH', 'Mail');
+    view.searchWeb({ app: '', title: 'Disk error', evidence: 'disk3s1: I/O error.' });
+    expect(web).toHaveBeenLastCalledWith('Disk error. disk3s1: I/O error.', 'Disk error');
+    btn(el, 'New and unusual').click();
+    await settle(f);
+    const unusual = f.debugElement.query((d) => d.componentInstance instanceof UnusualView).componentInstance as {
+      searchWeb(i: unknown): void;
+      searchHash(i: unknown): void;
+    };
+    unusual.searchWeb({ name: 'helper' });
+    expect(web).toHaveBeenLastCalledWith('helper', 'helper');
+    unusual.searchHash({ name: 'helper', exe: '/tmp/helper' });
+    expect(hash).toHaveBeenCalledWith({ path: '/tmp/helper' }, 'helper');
+    unusual.searchHash({ name: 'noexe', exe: null });
+    expect(hash).toHaveBeenCalledTimes(1);
   });
 });

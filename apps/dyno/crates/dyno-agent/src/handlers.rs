@@ -291,6 +291,17 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::Quarantine
         | Request::RestoreQuarantine { .. }
         | Request::DiskUsage { .. }) => crate::handlers_cleanup::handle(shared, r),
+        r @ (Request::SearchSeed { .. }
+        | Request::WebSearch { .. }
+        | Request::FileHash { .. }
+        | Request::VirusTotalUrl { .. }
+        | Request::StartupOverview { .. }) => crate::handlers_search::handle(shared, r),
+        r @ (Request::WatchedFolders
+        | Request::AddWatchedFolder { .. }
+        | Request::SetWatchedFolder { .. }
+        | Request::RemoveWatchedFolder { .. }
+        | Request::PreviewWatchedFolder { .. }
+        | Request::SweepWatchedFolder { .. }) => crate::handlers_watch::handle(shared, r),
         Request::Tuning => crate::tuning::list(shared).map(Reply::Tuning),
         Request::ApplyTuning { id } => crate::tuning::apply(shared, &id).map(Reply::Activity),
         Request::RevertTuning { id, force } => crate::tuning::revert(shared, &id, force).map(Reply::Activity),

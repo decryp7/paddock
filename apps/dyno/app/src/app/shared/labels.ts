@@ -83,6 +83,7 @@ export const EVENT_LABEL: Record<TimelineEventKind, string> = {
   tuning: 'Tuning',
   alert: 'Alert',
   boot: 'Restart',
+  network: 'Network',
 };
 
 export const ACTIVITY_ICON: Record<ActivityKind, IconName> = {

@@ -28,6 +28,7 @@ pub fn platform(state_file: PathBuf) -> Platform {
         processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails))),
         activity: Box::new(activity::WinActivity),
         issues: crate::issues::os_sources(),
+        links: Box::new(crate::links::OsLinks::new()),
         ..f
     }
 }

@@ -18,7 +18,7 @@ export const RANGES: { id: HistoryRange; label: string; long: string }[] = [
 ];
 
 /** The glyph that stands for an event shape in the legend (the chart uses the same shapes). */
-const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '●', diamond: '◆', pin: '◉', roundRect: '▬', arrow: '➤' };
+const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '●', diamond: '◆', pin: '◉', roundRect: '▬', arrow: '➤', emptyCircle: '○' };
 
 /** CPU and memory history with the events of the range marked on it, a range switch and a legend that filters the events. */
 @Component({

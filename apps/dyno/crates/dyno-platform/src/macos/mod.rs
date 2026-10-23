@@ -31,6 +31,7 @@ pub fn platform(state_file: PathBuf) -> Platform {
         facts: Box::new(facts::MacFacts::new()),
         activity: Box::new(activity::MacActivity::new()),
         issues: crate::issues::os_sources(),
+        links: Box::new(crate::links::OsLinks::new()),
     }
 }
 

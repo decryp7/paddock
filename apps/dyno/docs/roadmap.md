@@ -28,8 +28,8 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-06 | Issues with statistics | built: macOS crash reports and unified log, Windows Event Log (`wevtutil`), Linux journal and `coredumpctl`; stored in SQLite; stability score, leaderboards, trend, JSON-lines export for Debrief; crashes chart, health reason and weekly report filled (G4); crash-loop alert and serious-issue alarms. Linux and Windows readers are verified by fixtures only (see Status) |
 | WP-07 | New and unusual processes | built: baseline with silent learning, scoring (first seen, location, system-name lookalikes, signature, many children or connections, new startup entry), "New and unusual" view with protect, hide and restore. Windows signatures wait for G8 |
 | WP-08 | Alerts and the weekly report | built: weekly report from stored data (health trend, apps, disk forecast, issues, changes), Reports page with week selector, Markdown/HTML export; Why slow page (G10). Planned: alert history on the page, weekly OS notification (superseded in part by WP-26) |
-| WP-09 | Right-click search | planned |
-| WP-10 | Watched folders with keep-for times | planned |
+| WP-09 | Right-click search | built: redacted editable text (`dyno_core::weblinks`), the dialog from the Processes, Network, Issues and New and unusual menus, nothing sent until Search |
+| WP-10 | Watched folders with keep-for times | built: Watched folders page, templates, preview before on, quarantine with undo per sweep, periodic sweep ([ADR 0018](adr/0018-watched-folders-and-browser-lookups.md)); no file-change notifications |
 | WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
 | WP-12 | Performance counters browser | planned |
 | WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Linux `sock_diag` byte counters + `/proc/<pid>/fd`, no admin; Windows per-connection TCP statistics, which need administrator rights, so it says so until the helper), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
@@ -51,9 +51,9 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-29 | Diagnostics bundle | built: redaction (IPv4 and IPv6), preview, zip, a redacted sockets file, the page and the OS save dialog |
 | WP-30 | Suite tie-ins (Spotter, Debrief, Pitcrew, Pitwall) | planned |
 | WP-31 | Session recording to CSV/Parquet with a built-in viewer | planned |
-| WP-33 | Right-click "search this file's hash on VirusTotal" (opens the browser only; nothing is uploaded) | planned |
-| WP-34 | Startup manager filter: hide OS and signed entries | planned |
-| WP-35 | Network change events (Wi-Fi joins, VPN up/down, IP changes) on the timeline | planned |
+| WP-33 | Right-click "search this file's hash on VirusTotal" (opens the browser only; nothing is uploaded) | built: SHA-256 computed locally and shown first, then the browser opens the VirusTotal page |
+| WP-34 | Startup manager filter: hide OS and signed entries | built: engine-side filter with counts, remembered; "signed" needs a publisher, which macOS launch agents do not report yet |
+| WP-35 | Network change events (Wi-Fi joins, VPN up/down, IP changes) on the timeline | built: `dyno_core::netchange`, per-OS Wi-Fi readers, slow polling; macOS may hide the Wi-Fi name; Windows and Linux readers are fixture-tested only |
 | WP-36 | Taming acceptance rules: temporary, foreground-aware, self-restoring, with measured proof | planned |
 
 Suggested order: foundation gaps; WP-01 to WP-05; WP-06 to WP-08 and WP-26; the in-progress items as their agents report;
@@ -65,9 +65,9 @@ Built this round: WP-02, WP-03, WP-04, WP-05, WP-06, WP-07, WP-08 (Why slow and 
 `sock_diag`; Windows says it needs administrator rights). **Not built and still in v1**, so the release waits for them:
 
 - WP-01 is built; what is left of it is verification on real machines (testing-manual H1-H15: install, prompt, kill, remove on each OS), a code-signature check of the caller once there is a Developer ID / Authenticode certificate, SMAppService registration on macOS, on-demand start (the helper stays resident and idle), a Windows installer hook that offers to remove the helper, and a Linux entry for all-users startup (system units).
-- WP-09 right-click search, WP-10 watched folders, WP-12 counters browser, WP-13 extras,
+- WP-12 counters browser, WP-13 extras,
   WP-14 backup checks, WP-15 pack data beyond the cleanup packs, WP-16 web API, WP-17 Explain via Pitwall, WP-23 to WP-25,
-  WP-27 CLI, WP-30 suite tie-ins, WP-31 session recording, WP-33 to WP-36.
+  WP-27 CLI, WP-30 suite tie-ins, WP-31 session recording, WP-36.
 - Parts of built packages: scheduled cleanups, a disk-map screen, Docker image removal, the weekly OS notification (needs an
   agent-to-shell push), score recording in the sampler (the trend only fills while the app asks for health), engine-stored
   diagnosis history, TRIM and network tuning items, Windows IPv6 traffic.
@@ -495,7 +495,9 @@ feature needs its images; a row is done when both exist and show the built scree
 | Reports and alerts | `reports-*.png` | real screen built; capture pending |
 | Issues with statistics | `issues-*.png` | built |
 | Unusual processes | `unusual-*.png` | built |
-| Watched folders | `watched-folders-*.png` | not started (WP-10) |
+| Watched folders | `watched-folders-*.png`, `watched-folders-preview-*.png`, `watched-folders-add-*.png` | built |
+| Web and hash search | `web-search-*.png`, `hash-search-*.png` | built |
+| Startup filter | `health-startup-filter-*.png` | built |
 | Benchmarks | `benchmarks-*.png`, `benchmarks-running-*.png`, `benchmarks-compare-*.png` | built |
 | Network | `network-*.png`, `network-connections-*.png` | built |
 | Performance counters | `counters-*.png` | not started (WP-12) |

@@ -18,6 +18,7 @@ export const EVENT_STYLE: Record<TimelineEventKind, EventStyle> = {
   tuning: { symbol: 'roundRect', color: (t) => t.chart[5]! },
   alert: { symbol: 'pin', color: (t) => t.bad },
   boot: { symbol: 'arrow', color: (t) => t.chart[3]! },
+  network: { symbol: 'emptyCircle', color: (t) => t.chart[6]! },
 };
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';

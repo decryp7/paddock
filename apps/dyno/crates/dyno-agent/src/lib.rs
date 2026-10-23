@@ -15,7 +15,11 @@ pub mod handlers_cleanup;
 pub mod helper_centre;
 pub mod helper_link;
 pub mod inventory;
+pub mod filehash;
+pub mod handlers_search;
+pub mod handlers_watch;
 pub mod issues;
+pub mod netwatch;
 pub mod network;
 pub mod paths;
 pub mod recorder;
@@ -26,6 +30,7 @@ pub mod service;
 pub mod store;
 pub mod tuning;
 pub mod unusual;
+pub mod watch;
 
 use agent::Shared;
 use std::sync::Arc;
@@ -88,6 +93,20 @@ impl Running {
                 .name("dyno-unusual".into())
                 .spawn(move || unusual::run(&s))
                 .map_err(|e| format!("could not start the program watcher: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-netwatch".into())
+                .spawn(move || netwatch::run(&s))
+                .map_err(|e| format!("could not start the network change watcher: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-watched".into())
+                .spawn(move || handlers_watch::run(&s))
+                .map_err(|e| format!("could not start the watched folders sweeper: {e}"))?,
         );
         let s = shared.clone();
         threads.push(

@@ -75,6 +75,16 @@ Each program says why it is listed; a program that runs from a temporary folder 
 which is a reason to look, not a verdict. **Protect** adds it to the list rules never touch, **Hide** removes it from the list,
 and **Forget** in the menu starts learning again. Dyno never ends or removes a program because of this list.
 
+## Searching, hashes and watched folders
+
+Right-click a process, a connection, an issue or a program and choose **Search the web…**: the text is shown with private details
+removed; edit it, then **Search** opens your browser. **Search file hash on VirusTotal…** shows the file's SHA-256 (computed on your
+computer) and opens VirusTotal's page for it; the file is never uploaded.
+
+**Watched folders** moves old files to the quarantine. Click **Add folder**, choose what to watch and for how long, then pick the folder
+in the system dialog. It starts off: open **See what would move** and use **Turn on**. A shorter keep time or adding subfolders needs a
+new preview. Undo a sweep from Activity; stopping a watch leaves the files alone. **Health** can hide system and signed startup entries.
+
 ## Undo
 
 Everything Dyno does to a process, a startup entry or (later) a file or setting is logged in **Activity** with an **Undo**

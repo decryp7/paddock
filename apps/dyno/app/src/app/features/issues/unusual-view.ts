@@ -8,6 +8,7 @@ import { formatDate, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { UnusualStore } from '../../state/unusual.store';
+import { Lookups } from '../lookup/lookups';
 import { hue, initial, learningText, whyText } from './issues-model';
 
 /**
@@ -113,6 +114,8 @@ import { hue, initial, learningText, whyText } from './issues-model';
           <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="act(item, 'restore')"><dy-icon name="undo" /> Show again</button>
         }
         @if (item.exe) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(item.exe)"><dy-icon name="copy" /> Copy path</button> }
+        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(item)"><dy-icon name="search" /> Search the web…</button>
+        @if (item.exe) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(item)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button> }
       </div>
     </ng-template>
     <ng-template #more>
@@ -179,6 +182,7 @@ export class UnusualView {
   protected readonly store = inject(UnusualStore);
   private readonly notifier = inject(Notifier);
   private readonly dialogs = inject(Dialogs);
+  private readonly lookups = inject(Lookups);
   protected readonly selectedKey = signal<string | null>(null);
   protected readonly ini = initial;
   protected readonly why = whyText;
@@ -188,6 +192,14 @@ export class UnusualView {
     const o = this.store.overview();
     return o ? learningText(o.learning, o.known, this.now()) : '';
   });
+
+  protected searchWeb(i: UnusualItem): void {
+    void this.lookups.searchWeb(i.name, i.name);
+  }
+
+  protected searchHash(i: UnusualItem): void {
+    if (i.exe) void this.lookups.searchHash({ path: i.exe }, i.name);
+  }
 
   protected tile(name: string): string {
     return `hsl(${hue(name)} 42% 38%)`;

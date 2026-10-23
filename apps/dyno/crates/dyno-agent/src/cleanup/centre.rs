@@ -183,6 +183,11 @@ impl CleanupCentre {
         self.quarantine.list()
     }
 
+    /// The quarantine (watched folders move expired files into it too).
+    pub fn quarantine(&self) -> &Quarantine {
+        &self.quarantine
+    }
+
     /// Records which activity entry describes a quarantine.
     pub fn link_activity(&self, quarantine_id: &str, activity_id: &str) {
         self.quarantine.link_activity(quarantine_id, activity_id);

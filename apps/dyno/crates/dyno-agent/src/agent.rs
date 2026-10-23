@@ -184,6 +184,8 @@ pub struct Ports {
     pub startup: Mutex<Box<dyn StartupItems>>,
     /// The few system settings tuning may change (observe-only until a click).
     pub tuning: Mutex<Box<dyn dyno_core::ports::TuningSystem>>,
+    /// The network interfaces and Wi-Fi network (network change events).
+    pub links: Mutex<Box<dyn dyno_core::ports::NetworkLinks>>,
     /// The privileged helper's lifecycle: its state, and installing it on a click (WP-01, ADR 0016).
     pub helper: Mutex<Box<dyn crate::helper_centre::HelperControl>>,
 }
@@ -218,6 +220,12 @@ pub struct Shared {
     pub bench: crate::bench::BenchCentre,
     /// Cleanup: categories, scans and the quarantine (deletes only on the user's confirmed click).
     pub cleanup: crate::cleanup::centre::CleanupCentre,
+    /// Watched folders with keep-for times (WP-10): files move to the quarantine only in folders the user set up.
+    pub watch: crate::watch::WatchCentre,
+    /// Network change events on the timeline (WP-35).
+    pub netwatch: crate::netwatch::NetWatchCentre,
+    /// SHA-256 of program files for the VirusTotal search (WP-33); nothing is uploaded.
+    pub hasher: crate::filehash::FileHasher,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -316,6 +324,10 @@ impl Shared {
                 None,
             );
         }
+        let (watch, watch_note) = crate::watch::WatchCentre::load(dirs.watched_folders());
+        if let Some(n) = watch_note {
+            core.log(t, ActivityKind::System, "Watched folders were reset".into(), n, UndoRecord::None, None);
+        }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         // One link to the helper (if it is installed) serves the tuning, startup and traffic wrappers and the lifecycle.
@@ -348,6 +360,7 @@ impl Shared {
             facts,
             activity,
             issues,
+            links,
         } = platform;
         let shared = Shared {
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
@@ -361,12 +374,16 @@ impl Shared {
                 activity: Mutex::new(activity),
                 startup: Mutex::new(Box::new(ElevatedStartup::new(startup, link.clone()))),
                 tuning: Mutex::new(Box::new(ElevatedTuning::new(dyno_platform::tuning::os_tuner(), link.clone()))),
+                links: Mutex::new(links),
                 helper: Mutex::new(Box::new(helper_centre)),
             },
             subs: Mutex::new(Vec::new()),
             reveal,
             bench,
             cleanup,
+            watch,
+            netwatch: crate::netwatch::NetWatchCentre::new(),
+            hasher: crate::filehash::FileHasher::new(),
             issues: crate::issues::IssueCentre::new(issues),
             unusual,
             network: crate::network::NetCentre::new(
