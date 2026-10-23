@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="t d">
-<title id="t">Sighter: Find any UI element by sight.</title><desc id="d">Vision-based UI automation that works alongside your FlaUI tests. Everything runs on your machine.</desc>
+<title id="t">Sighter: Find any UI element by sight.</title><desc id="d">Vision-based UI automation that works alongside your existing UI tests (FlaUI, pywinauto, Appium and more). Everything runs on your machine.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#F1F3F7;--bar:#ECEEF2;--link:#8A93A3;--codebg:#F7F8FA;--acc:#00788F;--acct:#00788F;--accf:#00788F;--glow:.20;--shadow:.22;--wbg:#FFFFFF}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#1B1E24;--bar:#20242C;--link:#667085;--codebg:#12151A;--acc:#00B8D9;--acct:#00B8D9;--glow:.26;--shadow:.55;--wbg:#0E0F12}}
@@ -66,6 +66,6 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
   <g filter="url(#s0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M727.6 607.99A236 236 0 0 1 607.99 727.6M416.01 727.6A236 236 0 0 1 296.4 607.99M296.4 416.01A236 236 0 0 1 416.01 296.4M607.99 296.4A236 236 0 0 1 727.6 416.01" fill="none" stroke="#00303B" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><path d="M728 512L812 512M512 728L512 812M296 512L212 512M512 296L512 212" fill="none" stroke="#00303B" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M436 392L436 620L498.32 562.24L543.92 661.04L598.64 638.24L553.04 540.96L639.68 540.96Z" fill="#00303B" stroke="#00303B" stroke-width="20" stroke-linejoin="round"/></g>
 </svg>
 <text class="name" x="186 " y="242">Sighter</text>
-<text class="h1" x="96" y="372">Find any UI</text><text class="h1" x="96" y="438">element by sight.</text><text class="sub" x="96" y="496">Vision-based UI automation that works alongside your</text><text class="sub" x="96" y="530">FlaUI tests. Everything runs on your machine.</text><rect x="96" y="559" width="246" height="38" rx="19" class="accfill"/><circle cx="114" cy="578" r="4" class="accline"/><text class="pilltxt" x="128" y="584">Planned · coming soon</text>
-<text class="small" x="96" y="644">Windows, macOS and Linux. Local only.</text>
+<text class="h1" x="96" y="372">Find any UI</text><text class="h1" x="96" y="438">element by sight.</text><text class="sub" x="96" y="496">Vision-based UI automation that works alongside</text><text class="sub" x="96" y="530">your existing UI tests (FlaUI, pywinauto, Appium</text><text class="sub" x="96" y="564">and more). Everything runs on your machine.</text><rect x="96" y="593" width="246" height="38" rx="19" class="accfill"/><circle cx="114" cy="612" r="4" class="accline"/><text class="pilltxt" x="128" y="618">Planned · coming soon</text>
+<text class="small" x="96" y="678">Windows, macOS and Linux. Local only.</text>
 </svg>

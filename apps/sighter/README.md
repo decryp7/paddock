@@ -9,7 +9,7 @@ tested like any other. Everything runs on your machine.
 
 </div>
 
-![Sighter: Find any UI element by sight](docs/images/sighter-hero.svg?v=b73862d0)
+![Sighter: Find any UI element by sight](docs/images/sighter-hero.svg?v=697a4097)
 
 
 > **Status: in design; not usable yet.** There is no product code in this repository. The design is in
