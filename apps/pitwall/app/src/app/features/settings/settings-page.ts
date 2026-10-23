@@ -12,7 +12,7 @@ import { Panel } from '../../shared/ui/panel';
 import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { bytes, date, int } from '../../shared/format';
 import { expiryText, oldestText, sizeText, ttlOptions } from './cache-text';
-import { consentDetail } from '../service/service-consent';
+import { ServicePanel } from '../service/service-panel';
 import { ServiceStore } from '../service/service.store';
 import { checkSummary } from '../updates/update-text';
 import { UpdatesStore } from '../updates/updates.store';
@@ -46,7 +46,7 @@ export function parseNumber(value: string, min = -Infinity, max = Infinity): num
 /** Everything Pitwall can be told: general, server, memory, network, privacy and updates. */
 @Component({
   selector: 'pw-settings-page',
-  imports: [MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PwSelect],
+  imports: [MatIconModule, MatSlideToggleModule, MatTooltipModule, Panel, PwSelect, ServicePanel],
   providers: [SettingsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
@@ -132,14 +132,6 @@ export class SettingsPage implements OnInit {
     this.store.discard();
     const t = this.store.saved()?.general.theme;
     if (t) this.theme.set(t);
-  }
-
-  protected platformLabel(platform: string): string {
-    return platform === 'windows' ? 'Windows service' : platform === 'macos' ? 'Login item (launch agent)' : 'systemd user service';
-  }
-
-  protected serviceHint(platform: string): string {
-    return consentDetail(platform);
   }
 
   protected value(e: Event): string {

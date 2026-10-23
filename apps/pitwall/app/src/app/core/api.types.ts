@@ -936,6 +936,10 @@ export interface ServiceInstall {
   repair: RepairNotice | null;
   /** macOS: the user switched Pitwall's background item off in System Settings > General > Login Items. */
   disabledInLoginItems: boolean;
+  /** macOS: launchd has the service but cannot start it (typically after an update) and the server is down: offer Repair. */
+  startFailed: boolean;
+  /** macOS: launchd still has the job but Login Items does not list Pitwall: offer Repair. */
+  notInLoginItems: boolean;
 }
 
 /** Progress of the background repair of the service's registration (macOS). */

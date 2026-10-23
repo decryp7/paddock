@@ -57,6 +57,19 @@ pub async fn uninstall_service(client: State<'_, SharedClient>) -> Result<Servic
     Ok(compose_state(client.inner()).await)
 }
 
+/// Repairs the background service (macOS): removes the registration launchd refuses, waits until launchd dropped it and
+/// registers again. Runs in the background; the state it returns shows the progress. This is the app's own business and
+/// does not need the server.
+#[tauri::command]
+pub async fn repair_service(client: State<'_, SharedClient>) -> Result<ServiceInstall, CommandError> {
+    let c = client.inner().clone();
+    let answers = move || tauri::async_runtime::block_on(forward(c.as_ref(), "overview", Value::Null)).is_ok();
+    tauri::async_runtime::spawn_blocking(move || service_install::request_repair(answers))
+        .await
+        .map_err(|e| internal(format!("repairing the service stopped unexpectedly: {e}")))??;
+    Ok(compose_state(client.inner()).await)
+}
+
 /// Opens System Settings > General > Login Items (macOS); the user switches the item, Pitwall never does.
 #[tauri::command]
 pub async fn open_login_items() -> Result<(), CommandError> {

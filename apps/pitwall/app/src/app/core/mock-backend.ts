@@ -94,6 +94,12 @@ import {
 const DEFAULT_SLOTS = 2;
 const DEFAULT_CONTEXT = 8192;
 
+/** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
+const APP_METHODS: ReadonlySet<string> = new Set([
+  'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
+  'autostart', 'setAutostart', 'appUpdateStatus', 'checkAppUpdate', 'installAppUpdate', 'quitApp', 'takeQuitAsk',
+]);
+
 export interface MockOptions {
   /** Reference time for all demo data (default: now). */
   now?: () => number;
@@ -110,6 +116,10 @@ export interface MockOptions {
   askConsent?: boolean;
   /** macOS: the background item is switched off in Login Items (notice with an "Open Login Items" button). */
   loginItemOff?: boolean;
+  /** The server is down: every call except the app's own (service, log-in, updates) fails with `serverUnavailable`. */
+  serverDown?: boolean;
+  /** macOS: launchd refuses the service after an update (the "could not start" state with Repair). */
+  startFailed?: boolean;
   /** macOS: a repair of a refused registration is under way (notice with its progress). */
   repairing?: boolean;
   /** A newer release is available and the build can update itself. */
@@ -142,6 +152,7 @@ export class MockBackend implements PitwallBackend {
   private readonly latency: number;
   private readonly autoTick: boolean;
   private readonly failing: ReadonlySet<string>;
+  private serverDown = false;
   private readonly rnd: () => number;
   private readonly streamDelay: number;
 
@@ -199,13 +210,16 @@ export class MockBackend implements PitwallBackend {
     this.service = {
       platform: 'macos',
       installed: !options.askConsent,
-      running: true,
+      running: !(options.serverDown || options.startFailed),
       canInstall: true,
       askConsent: options.askConsent ?? false,
-      message: null,
-      repair: options.repairing ? { state: 'working', message: 'Re-registering the background service with macOS… (this can take a minute)' } : null,
+      message: options.startFailed ? 'launchd refused to start the service (error 78, bad configuration): the app was updated and macOS still holds the previous signature.' : null,
+      repair: options.repairing ? { state: 'working', message: 'Repairing the background service: re-registering it with macOS… (this can take a minute)' } : null,
       disabledInLoginItems: options.loginItemOff ?? false,
+      startFailed: options.startFailed ?? false,
+      notInLoginItems: options.startFailed ?? false,
     };
+    this.serverDown = options.serverDown ?? false;
     const now = this.now();
     const empty = options.empty ?? false;
     this.settings_ = demoSettings();
@@ -381,7 +395,7 @@ export class MockBackend implements PitwallBackend {
 
   private async reply<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
     if (this.latency) await new Promise((r) => setTimeout(r, this.latency));
-    if (this.failing.has(method)) {
+    if (this.failing.has(method) || (this.serverDown && !APP_METHODS.has(method))) {
       const error: CommandError = { code: 'serverUnavailable', message: 'The Pitwall server is not responding. It may still be starting.' };
       throw error;
     }
@@ -1207,6 +1221,25 @@ export class MockBackend implements PitwallBackend {
   installService(): Promise<ServiceInstall> {
     return this.reply('installService', () => {
       this.service = { ...this.service, installed: true, running: true, askConsent: false, message: null };
+      return this.service;
+    });
+  }
+
+  /** How often Repair was pressed (tests). */
+  repairs = 0;
+
+  repairService(): Promise<ServiceInstall> {
+    return this.reply('repairService', () => {
+      this.repairs += 1;
+      this.serverDown = false;
+      this.service = {
+        ...this.service,
+        running: true,
+        startFailed: false,
+        notInLoginItems: false,
+        message: null,
+        repair: { state: 'succeeded', message: 'Service is running again' },
+      };
       return this.service;
     });
   }

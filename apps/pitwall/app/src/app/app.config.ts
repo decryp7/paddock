@@ -11,7 +11,7 @@ import { provideIcons } from './shared/icons';
 
 /**
  * Mock options from the browser URL, for UI tests and screenshots: `?mock-fail=overview,history` makes those calls
- * fail, `?mock-empty` starts with nothing, `?mock-static` stops the simulated live updates, `?mock-consent` shows the first-run service question and
+ * fail, `?mock-empty` starts with nothing, `?mock-static` stops the simulated live updates, `?mock-down` takes the server down (the service controls keep working), `?mock-startfailed` shows launchd refusing the service after an update, `?mock-consent` shows the first-run service question and
  * `?mock-update` offers an app update, `?mock-updates` offers model updates, `?mock-install` shows llama.cpp installing itself and `?mock-quit`
  * opens the "Quit Pitwall?" question, `?mock-clean` leaves no old files on disk.
  */
@@ -24,6 +24,8 @@ export function mockOptionsFrom(search: string): MockOptions {
     streamDelayMs: q.has('mock-fast') ? 0 : 28,
     empty: q.has('mock-empty'),
     askConsent: q.has('mock-consent'),
+    serverDown: q.has('mock-down'),
+    startFailed: q.has('mock-startfailed'),
     updateAvailable: q.has('mock-update'),
     modelUpdates: q.has('mock-updates'),
     crashed: q.has('mock-crash'),

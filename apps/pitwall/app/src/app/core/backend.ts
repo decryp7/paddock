@@ -167,6 +167,8 @@ export interface PitwallBackend {
   serviceState(): Promise<ServiceInstall>;
   installService(): Promise<ServiceInstall>;
   uninstallService(): Promise<ServiceInstall>;
+  /** macOS: replaces the registration launchd refuses (unregister, wait, register). Runs in the background; the state shows the progress. Does not need the server. */
+  repairService(): Promise<ServiceInstall>;
   /** The user said no to the service; do not ask again. */
   declineService(): Promise<void>;
   /** macOS: opens System Settings > General > Login Items. Pitwall never switches the item itself. */

@@ -2,7 +2,7 @@ import { appConfig, mockOptionsFrom } from './app.config';
 
 describe('mockOptionsFrom', () => {
   it('defaults to simulated latency, live ticks and streaming delay', () => {
-    expect(mockOptionsFrom('')).toEqual({ latencyMs: 120, autoTick: true, streamDelayMs: 28, empty: false, askConsent: false, updateAvailable: false, modelUpdates: false, crashed: false, installing: false, noLeftovers: false, quitAsk: false, failing: [] });
+    expect(mockOptionsFrom('')).toEqual({ latencyMs: 120, autoTick: true, streamDelayMs: 28, empty: false, askConsent: false, serverDown: false, startFailed: false, updateAvailable: false, modelUpdates: false, crashed: false, installing: false, noLeftovers: false, quitAsk: false, failing: [] });
   });
 
   it('mock-fast removes the delays', () => {
@@ -24,6 +24,7 @@ describe('mockOptionsFrom', () => {
   it('mock-consent and mock-update switch on the first-run question and an available update', () => {
     const o = mockOptionsFrom('?mock-consent&mock-update');
     expect(o.askConsent).toBe(true);
+    expect(mockOptionsFrom('?mock-down&mock-startfailed')).toMatchObject({ serverDown: true, startFailed: true });
     expect(o.updateAvailable).toBe(true);
   });
 

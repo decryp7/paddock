@@ -122,6 +122,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['serviceState', (b) => b.serviceState(), 'service_state', undefined],
   ['installService', (b) => b.installService(), 'install_service', undefined],
   ['uninstallService', (b) => b.uninstallService(), 'uninstall_service', undefined],
+  ['repairService', (b) => b.repairService(), 'repair_service', undefined],
   ['declineService', (b) => b.declineService(), 'decline_service', undefined],
   ['openLoginItems', (b) => b.openLoginItems(), 'open_login_items', undefined],
   ['autostart', (b) => b.autostart(), 'get_autostart', undefined],

@@ -73,11 +73,27 @@ describe('SettingsPage', () => {
   it('offers Open Login Items instead of Install when the item is switched off, and shows the repair', async () => {
     const backend = new MockBackend({ loginItemOff: true, repairing: true });
     const { fixture, el } = await setup(backend);
-    expect(el.querySelector('[data-testid="service-repair-row"]')?.textContent).toContain('Re-registering');
+    expect(el.querySelector('[data-testid="service-repair-row"]')?.textContent).toContain('re-registering');
     expect(el.querySelector('[data-testid="service-login-items-row"]')).not.toBeNull();
     await button(el, 'Open Login Items').click();
     await settle(fixture);
     expect(backend.loginItemsOpened).toBe(1);
+  });
+
+  it('renders the Service section and repairs it while the server is down', async () => {
+    const backend = new MockBackend({ serverDown: true, startFailed: true });
+    const { fixture, el } = await setup(backend);
+    // Nothing else of the settings loads, but the service card does.
+    expect(el.querySelector('#set-general')).toBeNull();
+    expect(el.querySelector('#set-service')).not.toBeNull();
+    expect(el.querySelector('[data-testid="service-pill"]')?.textContent).toContain('Could not start');
+    expect(el.querySelector('[data-testid="service-hint"]')?.textContent).toContain('could not start after the update');
+    // The server-not-running error on the page carries the same Repair.
+    expect(el.querySelectorAll('[data-testid="repair-service"]').length).toBeGreaterThan(0);
+    el.querySelector<HTMLButtonElement>('#set-service [data-testid="repair-service"]')!.click();
+    await settle(fixture);
+    expect(backend.repairs).toBe(1);
+    expect(el.querySelector('[data-testid="service-pill"]')?.textContent).toContain('Running');
   });
 
   it('switches start at log-in', async () => {

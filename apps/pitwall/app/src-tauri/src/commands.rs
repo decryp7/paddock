@@ -552,7 +552,7 @@ mod tests {
         f.reply("overview", Reply::Err(crate::server_client::unavailable()));
         let e = forward(&f, "overview", Value::Null).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
-        assert!(e.message.contains("Start the service"));
+        assert!(e.message.contains("Repair service"));
     }
 
     #[tokio::test(start_paused = true)]

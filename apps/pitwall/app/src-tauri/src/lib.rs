@@ -199,6 +199,7 @@ pub fn run() {
             app_commands::uninstall_service,
             app_commands::decline_service,
             app_commands::open_login_items,
+            app_commands::repair_service,
             app_commands::get_autostart,
             app_commands::set_autostart,
         ])

@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, output } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import type { CommandError } from '../../core/api.types';
+import { ServiceStore } from '../../features/service/service.store';
 import { Skeleton } from './skeleton';
 
 /**
@@ -34,6 +35,9 @@ import { Skeleton } from './skeleton';
       <div class="error" role="alert">
         <mat-icon svgIcon="pw:alert" aria-hidden="true" />
         <span class="msg">{{ e.message }}</span>
+        @if (e.code === 'serverUnavailable' && service.canRepair()) {
+          <button type="button" class="btn sm primary" data-testid="repair-service" [disabled]="service.isBusy()('repair')" (click)="service.repair()">Repair service</button>
+        }
         <button type="button" class="btn sm" (click)="retry.emit()">Retry</button>
       </div>
     }
@@ -130,6 +134,7 @@ import { Skeleton } from './skeleton';
   `,
 })
 export class Panel {
+  protected readonly service = inject(ServiceStore);
   readonly heading = input<string>('');
   readonly sub = input<string>('');
   readonly icon = input<string>('');

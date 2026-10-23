@@ -103,6 +103,9 @@ pub struct AppState {
     pub version: u32,
     /// The user has answered the "run Pitwall's service?" question (either way); it is not asked again.
     pub service_offered: bool,
+    /// The app version that last registered the macOS background service (every ad-hoc build has a new code identity,
+    /// so the registration is replaced once per version).
+    pub service_registered_version: Option<String>,
 }
 
 impl Default for AppState {
@@ -110,6 +113,7 @@ impl Default for AppState {
         AppState {
             version: VERSION,
             service_offered: false,
+            service_registered_version: None,
         }
     }
 }

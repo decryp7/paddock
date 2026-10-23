@@ -23,6 +23,10 @@
       @if (store.loading() && !d()) {
         <pw-panel heading="General" icon="sliders" [loading]="true" [ready]="false" [skeletonLines]="6" />
       }
+      @if (!d()) {
+        <!-- The service is the app's own business: it renders without the server, so it can be repaired when the server is down. -->
+        <pw-service-panel />
+      }
       @if (d(); as s) {
         <!-- General -->
         <pw-panel id="set-general" heading="General" icon="sliders">
@@ -331,38 +335,7 @@
         </pw-panel>
 
         <!-- Service -->
-        <pw-panel id="set-service" heading="Background service" icon="server" sub="So apps can use Pitwall without this window">
-          @if (service.service(); as sv) {
-            <div class="row">
-              <div class="lbl">
-                <span class="name">{{ platformLabel(sv.platform) }}</span>
-                <p class="hint">{{ sv.message ?? (sv.installed ? 'Pitwall\'s server starts by itself and keeps running when this window is closed.' : 'Pitwall\'s server only runs while this app is open.') }}</p>
-              </div>
-              <span class="status" data-testid="service-pill" [attr.data-tone]="sv.installed ? (sv.running ? 'ok' : 'warn') : 'muted'">{{ sv.installed ? (sv.running ? 'Running' : 'Installed, not running') : 'Not installed' }}</span>
-            </div>
-            <div class="row">
-              <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint">{{ serviceHint(sv.platform) }}</p></div>
-              @if (sv.installed) {
-                <button type="button" class="btn" [disabled]="service.isBusy()('uninstall')" (click)="service.uninstall()">{{ service.isBusy()('uninstall') ? 'Removing…' : 'Remove service' }}</button>
-              } @else if (!sv.disabledInLoginItems) {
-                <button type="button" class="btn primary" [disabled]="!sv.canInstall || service.isBusy()('install')" (click)="service.install()">{{ service.isBusy()('install') ? 'Installing…' : 'Install service' }}</button>
-              }
-            </div>
-            @if (sv.repair; as r) {
-              <div class="row" data-testid="service-repair-row">
-                <div class="lbl"><span class="name">{{ r.state === 'working' ? 'Repairing the registration' : r.state === 'succeeded' ? 'Registration repaired' : 'Registration could not be repaired' }}</span><p class="hint">{{ r.message }}</p></div>
-              </div>
-            }
-            @if (sv.disabledInLoginItems) {
-              <div class="row" data-testid="service-login-items-row">
-                <div class="lbl"><span class="name">Switched off in Login Items</span><p class="hint">Switch Pitwall on in System Settings > General > Login Items. Pitwall never does it for you.</p></div>
-                <button type="button" class="btn primary" [disabled]="service.isBusy()('loginItems')" (click)="service.openLoginItems()">Open Login Items</button>
-              </div>
-            }
-          } @else {
-            <p class="faint pad">Could not ask the operating system about the service.</p>
-          }
-        </pw-panel>
+        <pw-service-panel />
 
         <!-- Updates -->
         <pw-panel id="set-updates" heading="Updates" icon="download">

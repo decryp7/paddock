@@ -19,7 +19,7 @@ describe('ServiceNotices', () => {
 
   it('shows the repair while it works', async () => {
     const { el } = await setup(new MockBackend({ repairing: true }));
-    expect(el.querySelector('[data-testid="service-repair"]')?.textContent).toContain('Re-registering');
+    expect(el.querySelector('[data-testid="service-repair"]')?.textContent).toContain('re-registering');
     expect(el.querySelector('[data-testid="service-disabled"]')).toBeNull();
   });
 
@@ -30,5 +30,15 @@ describe('ServiceNotices', () => {
     await button(el, 'Open Login Items').click();
     await settle(fixture);
     expect(backend.loginItemsOpened).toBe(1);
+  });
+
+  it('says the service could not start after the update and repairs it on the button', async () => {
+    const backend = new MockBackend({ serverDown: true, startFailed: true });
+    const { el, fixture } = await setup(backend);
+    expect(el.querySelector('[data-testid="service-start-failed"]')?.textContent).toContain('could not start after the update');
+    await button(el, 'Repair').click();
+    await settle(fixture);
+    expect(backend.repairs).toBe(1);
+    expect(el.querySelector('[data-testid="service-start-failed"]')).toBeNull();
   });
 });

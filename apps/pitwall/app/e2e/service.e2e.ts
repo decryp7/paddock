@@ -53,4 +53,21 @@ test.describe('service, start at login and updates', () => {
     await expect(page.getByText('Not configured', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Check for updates' })).toHaveCount(0);
   });
+
+  test('with the server down, Settings still shows the service and Repair brings it back', async ({ page }) => {
+    await openApp(page, '/settings', 'mock-fast&mock-static&mock-down&mock-startfailed');
+    await expect(page.getByTestId('service-pill')).toHaveText(/Could not start/);
+    await expect(page.getByText(/could not start after the update/).first()).toBeVisible();
+    await page.locator('#set-service').getByRole('button', { name: 'Repair service' }).click();
+    await expect(page.getByTestId('service-pill')).toHaveText(/Running/);
+    await expect(page.getByText('Registration repaired')).toBeVisible();
+  });
+
+  test('the dashboard banner repairs the service when it could not start after the update', async ({ page }) => {
+    await openApp(page, '/', 'mock-fast&mock-static&mock-down&mock-startfailed');
+    const banner = page.getByTestId('service-start-failed');
+    await expect(banner).toContainText('could not start after the update');
+    await banner.getByRole('button', { name: 'Repair' }).click();
+    await expect(banner).toHaveCount(0);
+  });
 });

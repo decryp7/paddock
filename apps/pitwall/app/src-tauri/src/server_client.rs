@@ -23,7 +23,7 @@ use std::time::Duration;
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// What to do when the server is not running (shown with every `ServerUnavailable`).
-pub const START_HINT: &str = "Start the service: open Pitwall's Settings, Service, and turn it on (or run pitwall-server).";
+pub const START_HINT: &str = "Use Repair service (Settings, Background service) to start it again, or run pitwall-server.";
 
 /// One request/response call per management method.
 pub trait ServerClient: Send + Sync {
@@ -379,7 +379,7 @@ mod tests {
         let t = Duration::from_secs(15);
         let e = map_loopback_error(&LoopbackError::Connect(11435, "refused".into()), t);
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
-        assert!(e.message.contains("Start the service"), "{}", e.message);
+        assert!(e.message.contains("Repair service"), "{}", e.message);
         let e = map_loopback_error(&LoopbackError::Timeout(t), t);
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
         assert!(e.message.contains("15s") && e.message.contains("Retry"), "{}", e.message);
@@ -496,7 +496,7 @@ mod tests {
         let c = c.discovery_port_only();
         let e = c.call("overview", Value::Null, Duration::from_secs(5)).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
-        assert!(e.message.contains("Start the service"));
+        assert!(e.message.contains("Repair service"));
         let e = c.open_stream("/mgmt/v1/live", None, Duration::from_secs(5)).await.err().unwrap();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
     }

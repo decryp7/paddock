@@ -3,7 +3,7 @@ import type { PitwallBackend } from '../../core/backend';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
-import { REPAIR_POLL_MS, ServiceStore } from './service.store';
+import { DOWN_POLL_MS, MAX_DOWN_CHECKS, REPAIR_POLL_MS, ServiceStore } from './service.store';
 
 describe('ServiceStore', () => {
   function setup(options: ConstructorParameters<typeof MockBackend>[0] = {}, backend?: PitwallBackend) {
@@ -65,7 +65,7 @@ describe('ServiceStore', () => {
 
   it('install that leaves the server not yet answering says it is starting', async () => {
     const backend = new MockBackend({ askConsent: true });
-    vi.spyOn(backend, 'installService').mockResolvedValue({ platform: 'linux', installed: true, running: false, canInstall: true, askConsent: false, message: null, repair: null, disabledInLoginItems: false });
+    vi.spyOn(backend, 'installService').mockResolvedValue({ platform: 'linux', installed: true, running: false, canInstall: true, askConsent: false, message: null, repair: null, disabledInLoginItems: false, startFailed: false, notInLoginItems: false });
     const { store, toasts } = setup({}, backend);
     await store.install();
     expect(toasts.toasts().at(-1)?.message).toBe('The service is installed; it is starting.');
@@ -202,6 +202,45 @@ describe('ServiceStore', () => {
         const calls = spy.mock.calls.length;
         await vi.advanceTimersByTimeAsync(REPAIR_POLL_MS * 3);
         expect(spy.mock.calls.length).toBe(calls);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('Repair works with the server down, through the backend, and the state then shows the service running', async () => {
+      const backend = new MockBackend({ serverDown: true, startFailed: true });
+      const { store } = setup({}, backend);
+      await store.refresh();
+      expect(store.service()).toMatchObject({ running: false, startFailed: true });
+      expect(store.canRepair()).toBe(true);
+      await store.repair();
+      expect(backend.repairs).toBe(1);
+      expect(store.service()).toMatchObject({ running: true, startFailed: false });
+      expect(store.canRepair()).toBe(false);
+    });
+
+    it('a failed repair is toasted, not thrown', async () => {
+      const { store, toasts } = setup({ failing: ['repairService'], startFailed: true });
+      await store.refresh();
+      await store.repair();
+      expect(toasts.toasts().at(-1)?.tone).toBe('bad');
+    });
+
+    it('nothing repairs what the user switched off in Login Items', async () => {
+      const { store } = setup({ loginItemOff: true, serverDown: true });
+      await store.refresh();
+      expect(store.canRepair()).toBe(false);
+    });
+
+    it('keeps looking while macOS has the service down, a bounded number of times', async () => {
+      vi.useFakeTimers();
+      try {
+        const backend = new MockBackend({ serverDown: true, startFailed: true, latencyMs: 0 });
+        const { store } = setup({}, backend);
+        const spy = vi.spyOn(backend, 'serviceState');
+        await store.refresh();
+        await vi.advanceTimersByTimeAsync(DOWN_POLL_MS * (MAX_DOWN_CHECKS + 5));
+        expect(spy.mock.calls.length).toBe(MAX_DOWN_CHECKS + 1);
       } finally {
         vi.useRealTimers();
       }

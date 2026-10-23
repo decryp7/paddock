@@ -343,6 +343,9 @@ export class TauriBackend implements PitwallBackend {
   uninstallService(): Promise<ServiceInstall> {
     return this.run('uninstall_service');
   }
+  repairService(): Promise<ServiceInstall> {
+    return this.run('repair_service');
+  }
   declineService(): Promise<void> {
     return this.run('decline_service');
   }

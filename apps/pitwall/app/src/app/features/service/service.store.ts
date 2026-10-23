@@ -23,6 +23,10 @@ interface ServiceState {
 /** How often the state is read again while the repair works. */
 export const REPAIR_POLL_MS = 3000;
 
+/** How often the state is read again while the server is down on macOS, and how many times. */
+export const DOWN_POLL_MS = 5000;
+export const MAX_DOWN_CHECKS = 24;
+
 const initial: ServiceState = { service: null, autostart: null, updateStatus: null, update: null, upToDate: false, busy: {}, error: null };
 
 /**
@@ -35,10 +39,16 @@ export const ServiceStore = signalStore(
   withComputed(({ service, busy }) => ({
     /** Show the first-run "run Pitwall's service?" question. */
     askConsent: computed(() => service()?.askConsent === true),
+    /** The Repair button works (macOS, not switched off in Login Items, the server is not up). */
+    canRepair: computed(() => {
+      const s = service();
+      return s !== null && s.platform === 'macos' && !s.disabledInLoginItems && !s.running && s.repair?.state !== 'working';
+    }),
     isBusy: computed(() => (key: string) => key in busy()),
   })),
   withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => {
     let poll: ReturnType<typeof setTimeout> | null = null;
+    let downChecks = 0;
     const setBusy = (key: string, on: boolean) => {
       const next = { ...store.busy() };
       if (on) next[key] = true;
@@ -79,6 +89,10 @@ export const ServiceStore = signalStore(
       if (repair?.state === 'working') {
         // The repair runs in the background and can take a minute: look again until it ends.
         poll = setTimeout(() => void refresh(), REPAIR_POLL_MS);
+      } else if (store.service()?.platform === 'macos' && store.service()?.running === false && !store.service()?.disabledInLoginItems && downChecks < MAX_DOWN_CHECKS) {
+        // Down on macOS: the app's own repair may start any moment (version change, launchd refusing the job), so look again.
+        downChecks += 1;
+        poll = setTimeout(() => void refresh(), DOWN_POLL_MS);
       } else if (before === 'working' && repair) {
         if (repair.state === 'succeeded') toasts.ok(repair.message);
         else toasts.show(`The background service could not be re-registered. ${repair.message}`, 'bad', 10000);
@@ -90,6 +104,16 @@ export const ServiceStore = signalStore(
       /** Opens System Settings > General > Login Items; the user switches the item (Pitwall never does). */
       async openLoginItems(): Promise<void> {
         await act('loginItems', () => backend.openLoginItems());
+      },
+
+      /** Repairs the background service (macOS): the app re-registers it with macOS in the background; progress shows in the state. Needs no server. */
+      async repair(): Promise<void> {
+        const s = await act('repair', () => backend.repairService());
+        if (s) {
+          patchState(store, { service: s });
+          downChecks = 0;
+          void refresh();
+        }
       },
 
       /** The user said yes to the service. */
