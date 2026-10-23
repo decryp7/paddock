@@ -4,7 +4,7 @@
 
 mod support;
 
-use spotter_render::discover::{find_for_tests, Browser};
+use spotter_render::discover::{find_for_tests, test_browser_flags, Browser};
 use spotter_render::launch::{Chromium, EndedBy, LaunchOptions, Mode};
 use spotter_render::process::processes_mentioning;
 use spotter_render::{ChromiumRenderer, PageRenderer, RenderError};
@@ -56,7 +56,10 @@ async fn site() -> u16 {
 }
 
 fn renderer(b: Browser, base: &Path) -> ChromiumRenderer {
-    ChromiumRenderer::new(base, base).with_browser(b).with_mode(Mode::Headless)
+    ChromiumRenderer::new(base, base)
+        .with_browser(b)
+        .with_mode(Mode::Headless)
+        .with_extra_args(test_browser_flags())
 }
 
 /// No browser process mentions the folder any more (allowing a moment for the OS to reap).
@@ -97,7 +100,9 @@ async fn off_screen_headful_mode_and_redirects() {
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let r = ChromiumRenderer::new(base.path(), base.path()).with_browser(b);
+    let r = ChromiumRenderer::new(base.path(), base.path())
+        .with_browser(b)
+        .with_extra_args(test_browser_flags());
     let page = r
         .render(&format!("http://127.0.0.1:{port}/redirect"), Some("#done"), Duration::from_secs(40))
         .await
@@ -172,6 +177,7 @@ fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
     let Some(b) = browser() else { return };
     let base = tempfile::tempdir().unwrap();
     let mut opts = LaunchOptions::new(base.path());
+    opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
     // The limit runs from the spawn, so it has to leave room for a slow start on a loaded runner (which is not what is tested).
     opts.max_lifetime = spotter_render::launch::START_LIMIT + Duration::from_secs(4);
@@ -197,6 +203,7 @@ fn the_memory_cap_kills_the_tree() {
     let Some(b) = browser() else { return };
     let base = tempfile::tempdir().unwrap();
     let mut opts = LaunchOptions::new(base.path());
+    opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
     opts.memory_cap = Some(1);
     let marker = base.path().to_string_lossy().to_string();
@@ -218,6 +225,7 @@ fn dropping_a_running_browser_kills_it_and_removes_the_profile() {
     let Some(b) = browser() else { return };
     let base = tempfile::tempdir().unwrap();
     let mut opts = LaunchOptions::new(base.path());
+    opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
     let c = Chromium::launch(&b, &opts).unwrap();
     let dir = c.profile_dir().to_path_buf();
@@ -233,6 +241,7 @@ fn closing_quits_the_browser_by_itself_before_any_kill() {
     let Some(b) = browser() else { return };
     let base = tempfile::tempdir().unwrap();
     let mut opts = LaunchOptions::new(base.path());
+    opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let marker = c.profile_dir().to_string_lossy().to_string();

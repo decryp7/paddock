@@ -33,6 +33,9 @@ pub struct LaunchOptions {
     pub max_lifetime: Duration,
     /// The browser tree is killed when its resident memory exceeds this many bytes.
     pub memory_cap: Option<u64>,
+    /// Extra command-line flags. Empty in the product; tests use it for the root-in-a-container switches
+    /// (see `discover::test_browser_flags_with`).
+    pub extra_args: Vec<String>,
 }
 
 impl LaunchOptions {
@@ -43,7 +46,34 @@ impl LaunchOptions {
             mode: Mode::OffScreen,
             max_lifetime: Duration::from_secs(120),
             memory_cap: Some(2 << 30),
+            extra_args: Vec::new(),
         }
+    }
+}
+
+/// The browser's stderr is kept in this file inside the throwaway profile, so a failed start can say why.
+const STDERR_FILE: &str = "browser-stderr.log";
+/// At most this many bytes from the end of the browser's stderr go into an error message.
+const STDERR_TAIL: usize = 600;
+
+/// The last part of the browser's stderr as one bounded, printable line (empty when there is none).
+pub fn stderr_tail(bytes: &[u8]) -> String {
+    let start = bytes.len().saturating_sub(STDERR_TAIL);
+    let text = String::from_utf8_lossy(&bytes[start..]);
+    let lines: Vec<String> = text
+        .lines()
+        .map(|l| l.chars().filter(|c| !c.is_control()).collect::<String>().trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    lines.join(" | ")
+}
+
+fn with_stderr(message: &str, dir: &Path) -> String {
+    let tail = std::fs::read(dir.join(STDERR_FILE)).map(|b| stderr_tail(&b)).unwrap_or_default();
+    if tail.is_empty() {
+        message.to_string()
+    } else {
+        format!("{message} (browser output: {tail})")
     }
 }
 
@@ -149,10 +179,12 @@ impl Chromium {
         let dir = unique_dir(&opts.profile_base);
         std::fs::create_dir_all(&dir).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
         let mut cmd = std::process::Command::new(&exe.path);
+        let stderr = std::fs::File::create(dir.join(STDERR_FILE)).map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
         cmd.args(args(&dir, opts.mode))
+            .args(&opts.extra_args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
+            .stderr(stderr);
         let mut process = match Supervised::spawn(cmd) {
             Ok(p) => p,
             Err(e) => {
@@ -288,7 +320,7 @@ fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
             }
         }
         if !process.is_running() {
-            return Err(Error::Launch("the browser exited right after it started".into()));
+            return Err(Error::Launch(with_stderr("the browser exited right after it started", dir)));
         }
         if Instant::now() > end {
             return Err(Error::Timeout("the browser start"));
@@ -336,6 +368,44 @@ mod tests {
     fn the_wall_clock_cap_covers_start_and_page() {
         assert_eq!(lifetime_for(Duration::from_secs(40)), Duration::from_secs(70));
         assert!(lifetime_for(Duration::ZERO) > START_LIMIT);
+    }
+
+    #[test]
+    fn stderr_tail_is_bounded_single_line_and_printable() {
+        assert_eq!(stderr_tail(b""), "");
+        assert_eq!(stderr_tail(b"one\n\n  two \x07\n"), "one | two");
+        let long = "x".repeat(5000);
+        assert!(stderr_tail(long.as_bytes()).len() <= STDERR_TAIL);
+        assert_eq!(stderr_tail(&[0xff, b'a']), "\u{fffd}a");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_start_reports_the_browsers_stderr() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let exe_path = base.path().join("fake-chrome.sh");
+        std::fs::write(
+            &exe_path,
+            "#!/bin/sh\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let e = Chromium::launch(&exe, &LaunchOptions::new(base.path())).err().unwrap().to_string();
+        assert!(
+            e.contains("exited right after it started") && e.contains("without --no-sandbox"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn extra_arguments_are_not_part_of_the_default_command_line() {
+        assert!(LaunchOptions::new("/p").extra_args.is_empty());
+        assert!(!args(Path::new("/p"), Mode::Headless).iter().any(|a| a.contains("no-sandbox")));
     }
 
     #[test]

@@ -166,6 +166,25 @@ pub fn downloaded_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("chromium")
 }
 
+/// Environment variable that makes the test launch paths start the test browser without its sandbox. Only for a CI
+/// job that runs as root in a container (Chrome refuses to start as root otherwise). The product never reads it.
+pub const TEST_NO_SANDBOX_ENV: &str = "SPOTTER_TEST_BROWSER_NO_SANDBOX";
+
+/// Extra flags the tests pass to the test browser: `--no-sandbox` and `--disable-dev-shm-usage` when
+/// [`TEST_NO_SANDBOX_ENV`] is `1`, otherwise none.
+pub fn test_browser_flags_with(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    if env(TEST_NO_SANDBOX_ENV).as_deref() == Some("1") {
+        vec!["--no-sandbox".into(), "--disable-dev-shm-usage".into()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// [`test_browser_flags_with`] for the process environment.
+pub fn test_browser_flags() -> Vec<String> {
+    test_browser_flags_with(&|k| std::env::var(k).ok())
+}
+
 /// The executable of a downloaded Chromium, if one was installed completely.
 pub fn find_downloaded(data_dir: &Path) -> Option<Browser> {
     crate::install::locate_executable(&downloaded_dir(data_dir), Os::CURRENT)
@@ -250,6 +269,16 @@ mod tests {
         let over = |k: &str| (k == TEST_BROWSER_DIR_ENV).then(|| "/t".to_string());
         assert_eq!(test_browser_dir(&over), Some(PathBuf::from("/t")));
         assert_eq!(test_browser_dir(&|_| None), None);
+    }
+
+    #[test]
+    fn the_no_sandbox_switch_is_only_honoured_when_exactly_one() {
+        let with = |v: &'static str| move |k: &str| (k == TEST_NO_SANDBOX_ENV).then(|| v.to_string());
+        assert_eq!(test_browser_flags_with(&with("1")), ["--no-sandbox", "--disable-dev-shm-usage"]);
+        for v in ["", "0", "true", "yes"] {
+            assert!(test_browser_flags_with(&with(v)).is_empty(), "{v}");
+        }
+        assert!(test_browser_flags_with(&|_| None).is_empty());
     }
 
     #[test]

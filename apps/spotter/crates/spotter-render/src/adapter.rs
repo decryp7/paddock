@@ -18,6 +18,7 @@ pub struct ChromiumRenderer {
     mode: Mode,
     memory_cap: Option<u64>,
     browser: Option<Browser>,
+    extra_args: Vec<String>,
 }
 
 impl ChromiumRenderer {
@@ -30,12 +31,19 @@ impl ChromiumRenderer {
             mode: Mode::OffScreen,
             memory_cap: Some(2 << 30),
             browser: None,
+            extra_args: Vec::new(),
         }
     }
 
     /// Uses this executable instead of looking one up.
     pub fn with_browser(mut self, browser: Browser) -> Self {
         self.browser = Some(browser);
+        self
+    }
+
+    /// Extra browser flags (none by default; tests use this for a root container, see `discover::test_browser_flags`).
+    pub fn with_extra_args(mut self, args: Vec<String>) -> Self {
+        self.extra_args = args;
         self
     }
 
@@ -125,6 +133,7 @@ impl ChromiumRenderer {
         };
         let mut opts = LaunchOptions::new(&self.profile_base);
         opts.mode = self.mode;
+        opts.extra_args = self.extra_args.clone();
         opts.memory_cap = self.memory_cap;
         // The watchdog is the backstop behind the page's own deadline.
         opts.max_lifetime = launch::lifetime_for(timeout);

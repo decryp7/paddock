@@ -96,6 +96,8 @@ jobs:
       SCCACHE_CACHE_SIZE: 5G
       # The real-browser tests run in CI; a skipped one fails the job.
       SPOTTER_REQUIRE_TEST_BROWSER: "1"
+      # The Linux container runs as root, where Chrome refuses to start with its sandbox: tests only (the product keeps it).
+      SPOTTER_TEST_BROWSER_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
 
