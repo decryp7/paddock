@@ -64,11 +64,13 @@ function column(d, x, w, y0, H, list) {
   d.node('plugins', rx, r(g2, 0), aw, NH, 'plugin', { name: 'Plugins', tech: 'Rust, out of process', desc: 'Vendor sensors. Depend on dyno-plugin-api only; guarded by dyno-plugin-host.' });
   d.node('bench', rx, r(g2, 1), aw, NH, 'process', { name: 'dyno-bench', tech: 'Rust binary, child process', desc: 'CPU, memory and disk benchmarks, one at a time, killed on timeout.' });
   d.node('helper', rx, r(g2, 2), aw, NH, 'process', { name: 'dyno-helper', tech: 'Rust binary, system service', desc: 'Installed on a click. A closed set of HelperActions, one authorised caller, audit log.' });
+  d.node('cli', bx, g2 + h2 + 56, bw, 96, 'accent', { name: 'dyno', tech: 'Rust binary, command line', desc: 'Status, top, why-slow, alarms, counters; changes only with --yes (ADR 0014).' });
   link(d, 'person', 'R', 'ui', 'L', { label: 'Uses' });
   link(d, 'ui', 'R', 'shell', 'L', { label: 'Commands' });
   link(d, 'shell', 'R', 'upd', 'L', { label: 'Checks', dash: true });
   link(d, 'shell', 'B', 'agent', 'T', { label: 'Requests, pushes' });
   hub(d, 'agent', 'L', 'core', 'R', { label: 'Decisions' });
+  link(d, 'cli', 'T', 'agent', 'B', { label: 'Requests' });
   link(d, 'core', 'B', 'platform', 'T', { label: 'Ports', dash: true, arrow: 'open' });
   link(d, 'platform', 'L', 'os', 'R', { label: 'Reads, acts' });
   hub(d, 'agent', 'L', 'db', 'R', { label: 'Reads, writes' });
@@ -76,5 +78,5 @@ function column(d, x, w, y0, H, list) {
   hub(d, 'agent', 'R', 'bench', 'L', { label: 'Spawns' });
   hub(d, 'agent', 'R', 'helper', 'L', { label: 'Actions', dash: true });
   d.legend([{ kind: 'ui', label: 'Angular UI' }, { kind: 'accent', label: 'Dyno container' }, { kind: 'core', label: 'Pure core' }, { kind: 'plugin', label: 'Plugin' }, { kind: 'process', label: 'Process · OS · data' }, { kind: 'external', label: 'External' }, { kind: 'planned', label: 'Planned' }, { kind: 'line', label: 'Uses' }]);
-  save('c4-2-containers', d, g2 + h2);
+  save('c4-2-containers', d, g2 + h2 + 56 + 96);
 }

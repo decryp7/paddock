@@ -21,7 +21,7 @@ function deployment(file, os, o) {
 
 deployment('uml-deployment-macos', { name: 'macOS', ver: 'macOS 13 or newer, Apple Silicon and Intel' }, {
   desc: 'The app and the agent are separate processes of the same user; a launch agent starts the agent. The helper would be a third, elevated on demand.',
-  app: { name: 'Dyno.app', tech: 'ad-hoc signed bundle, .dmg', desc: 'Tauri shell and Angular UI on WKWebView; dyno-agent bundled inside.' },
+  app: { name: 'Dyno.app', tech: 'ad-hoc signed bundle, .dmg', desc: 'Tauri shell and Angular UI on WKWebView; dyno-agent, dyno-helper and the dyno command bundled inside.' },
   sm: { name: 'launchd', tech: 'gui/<uid> domain', desc: 'net.decryptology.dyno.agent.plist in ~/Library/LaunchAgents runs dyno-agent run; KeepAlive.' },
   agent: { name: 'dyno-agent', tech: 'user process', desc: 'Samples, keeps history, runs rules. Log in ~/Library/Logs/Dyno/agent.log.' },
   data: { name: 'Data folder', tech: '~/Library/Application Support/Dyno', desc: 'dyno.db, settings.json, rules.json, process-control.json, agent.json.' },
@@ -29,7 +29,7 @@ deployment('uml-deployment-macos', { name: 'macOS', ver: 'macOS 13 or newer, App
 });
 deployment('uml-deployment-windows', { name: 'Windows', ver: 'Windows 10 / 11, x64' }, {
   desc: 'No SCM service on purpose: the agent runs in the user\'s own session, started by a Run entry at logon or by the app.',
-  app: { name: 'Dyno', tech: 'NSIS installer, per-user', desc: 'Tauri shell and Angular UI on WebView2; dyno-agent.exe beside it.' },
+  app: { name: 'Dyno', tech: 'NSIS installer, per-user', desc: 'Tauri shell and Angular UI on WebView2; dyno-agent.exe, dyno-helper.exe and dyno.exe beside it.' },
   sm: { name: 'HKCU Run entry', tech: 'value "Dyno"', desc: 'Starts dyno-agent.exe run at logon, in the user\'s session.' },
   agent: { name: 'dyno-agent.exe', tech: 'user process', desc: 'Samples, keeps history, runs rules; named job objects for CPU caps.' },
   data: { name: 'Data folder', tech: '%LOCALAPPDATA%\\Dyno', desc: 'dyno.db, settings.json, rules.json, process-control.json, agent.json.' },
@@ -37,7 +37,7 @@ deployment('uml-deployment-windows', { name: 'Windows', ver: 'Windows 10 / 11, x
 });
 deployment('uml-deployment-linux', { name: 'Linux', ver: 'x86_64 and aarch64 desktops' }, {
   desc: 'A systemd user unit keeps the agent running; the app is the user\'s window. The helper would run through pkexec when needed.',
-  app: { name: 'Dyno', tech: '.deb or AppImage, WebKitGTK', desc: 'Tauri shell and Angular UI; dyno-agent beside it.' },
+  app: { name: 'Dyno', tech: '.deb or AppImage, WebKitGTK', desc: 'Tauri shell and Angular UI; dyno-agent, dyno-helper and dyno beside it; the .deb puts dyno on PATH.' },
   sm: { name: 'systemd --user', tech: 'dyno-agent.service', desc: '~/.config/systemd/user; Restart=always, Nice=10, MemoryHigh=256M.' },
   agent: { name: 'dyno-agent', tech: 'user process', desc: 'Samples from /proc and /sys, keeps history, runs rules.' },
   data: { name: 'Data folder', tech: '~/.local/share/dyno', desc: 'dyno.db, settings.json, rules.json, agent.json; state in ~/.local/state/dyno.' },
