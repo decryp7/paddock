@@ -5,6 +5,7 @@ use crate::discover::{self, Browser, Flavor, Os};
 use crate::manifest::{Manifest, Pinned};
 use crate::{Error, Result};
 use sha2::{Digest, Sha256};
+use spotter_core::job::{Job, Phase, Unit};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -38,12 +39,20 @@ fn hex(b: &[u8]) -> String {
 }
 
 /// Verifies the archive against `expected` (hex, any case) and extracts it into `dest`; paths that would leave
-/// `dest` and archives that expand beyond [`MAX_EXPANDED`] are refused.
+/// `dest` and archives that expand beyond [`MAX_EXPANDED`] are refused. This reads the archive once more to hash it;
+/// the installer does not (it takes the digest computed while downloading and calls [`extract`]).
 pub fn extract_verified(archive: &Path, expected_sha256: &str, dest: &Path) -> Result<()> {
     let got = sha256_file(archive)?;
     if !got.eq_ignore_ascii_case(expected_sha256.trim()) {
         return Err(err("the download does not match its pinned checksum and was discarded"));
     }
+    extract(archive, dest, &Job::none())
+}
+
+/// Extracts a zip into `dest` without hashing it, reporting [`Phase::Unpacking`] in bytes of the expanded size and
+/// stopping with [`Error::Cancelled`] when `job` is cancelled. The size and path checks are the same as
+/// [`extract_verified`]'s.
+pub fn extract(archive: &Path, dest: &Path, job: &Job) -> Result<()> {
     let mut zip = zip::ZipArchive::new(std::fs::File::open(archive).map_err(|e| err(e.to_string()))?)
         .map_err(|e| err(format!("the download is not a valid archive: {e}")))?;
     let mut total = 0u64;
@@ -56,7 +65,13 @@ pub fn extract_verified(archive: &Path, expected_sha256: &str, dest: &Path) -> R
         }
     }
     std::fs::create_dir_all(dest).map_err(|e| err(e.to_string()))?;
+    job.report(Phase::Unpacking, Unit::Bytes, 0, Some(total));
+    let mut done = 0u64;
+    let mut buf = vec![0u8; 256 << 10];
     for i in 0..zip.len() {
+        if job.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         let mut f = zip.by_index(i).map_err(|e| err(e.to_string()))?;
         let rel = f.enclosed_name().ok_or_else(|| err("the archive contains an unsafe path"))?;
         let out = dest.join(rel);
@@ -75,13 +90,25 @@ pub fn extract_verified(archive: &Path, expected_sha256: &str, dest: &Path) -> R
             continue;
         }
         let mut o = std::fs::File::create(&out).map_err(|e| err(e.to_string()))?;
-        std::io::copy(&mut f, &mut o).map_err(|e| err(e.to_string()))?;
+        loop {
+            let n = f.read(&mut buf).map_err(|e| err(e.to_string()))?;
+            if n == 0 {
+                break;
+            }
+            std::io::Write::write_all(&mut o, &buf[..n]).map_err(|e| err(e.to_string()))?;
+            done += n as u64;
+            job.report(Phase::Unpacking, Unit::Bytes, done, Some(total));
+            if job.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+        }
         #[cfg(unix)]
         if let Some(mode) = f.unix_mode() {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode));
         }
     }
+    job.report_done(Phase::Unpacking, Unit::Bytes, total, Some(total));
     Ok(())
 }
 
@@ -173,19 +200,34 @@ pub fn self_test(exe: &Path) -> Result<String> {
     Ok(s.trim().to_string())
 }
 
-/// Downloads `url` to `dest`, hashing as it goes. Redirects are not followed off the original scheme rules of
-/// reqwest's default policy (limited); the size is capped by [`MAX_DOWNLOAD`]. `progress(done, total)` is called per chunk.
-pub async fn download(url: &str, dest: &Path, progress: &(dyn Fn(u64, Option<u64>) + Sync)) -> Result<String> {
+/// Awaits `work`, giving up with [`Error::Cancelled`] soon after the job is cancelled (a stalled connection must not hold Cancel).
+async fn or_cancel<T>(job: &Job, work: impl std::future::Future<Output = T>) -> Result<T> {
+    tokio::pin!(work);
+    loop {
+        tokio::select! {
+            out = &mut work => return Ok(out),
+            () = tokio::time::sleep(Duration::from_millis(50)) => {
+                if job.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+            }
+        }
+    }
+}
+
+/// Downloads `url` to `dest`, hashing as it goes (the one and only pass over the data) and reporting
+/// [`Phase::Downloading`] in bytes from the first moment. Redirects are not followed off the original scheme rules of
+/// reqwest's default policy (limited); the size is capped by [`MAX_DOWNLOAD`].
+pub async fn download(url: &str, dest: &Path, job: &Job) -> Result<String> {
     use tokio::io::AsyncWriteExt;
+    job.report(Phase::Downloading, Unit::Bytes, 0, None);
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(60 * 30))
         .build()
         .map_err(|e| err(e.to_string()))?;
-    let mut resp = client
-        .get(url)
-        .send()
-        .await
+    let mut resp = or_cancel(job, client.get(url).send())
+        .await?
         .map_err(|e| err(format!("the download failed: {e}")))?
         .error_for_status()
         .map_err(|e| err(format!("the download failed: {e}")))?;
@@ -193,36 +235,45 @@ pub async fn download(url: &str, dest: &Path, progress: &(dyn Fn(u64, Option<u64
     if total.is_some_and(|t| t > MAX_DOWNLOAD) {
         return Err(err("the download is larger than the allowed size"));
     }
+    job.report_done(Phase::Downloading, Unit::Bytes, 0, total);
     let mut file = tokio::fs::File::create(dest).await.map_err(|e| err(e.to_string()))?;
     let mut hash = Sha256::new();
     let mut done = 0u64;
-    while let Some(chunk) = resp.chunk().await.map_err(|e| err(format!("the download failed: {e}")))? {
+    while let Some(chunk) = or_cancel(job, resp.chunk())
+        .await?
+        .map_err(|e| err(format!("the download failed: {e}")))?
+    {
+        if job.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         done += chunk.len() as u64;
         if done > MAX_DOWNLOAD {
             return Err(err("the download is larger than the allowed size"));
         }
         hash.update(&chunk);
         file.write_all(&chunk).await.map_err(|e| err(e.to_string()))?;
-        progress(done, total);
+        job.report(Phase::Downloading, Unit::Bytes, done, total);
     }
     file.flush().await.map_err(|e| err(e.to_string()))?;
+    job.report_done(Phase::Downloading, Unit::Bytes, done, Some(done));
     Ok(hex(&hash.finalize()))
 }
 
 /// Downloads the pinned build for this platform from the embedded manifest into `data_dir` and returns the browser.
-pub async fn install(data_dir: &Path, progress: &(dyn Fn(u64, Option<u64>) + Sync)) -> Result<Browser> {
+pub async fn install(data_dir: &Path, job: &Job) -> Result<Browser> {
     let pinned = Manifest::embedded().pinned(&crate::manifest::platform_key())?;
-    install_pinned(&pinned, Os::CURRENT, data_dir, &self_test, progress).await
+    install_pinned(&pinned, Os::CURRENT, data_dir, &self_test, job).await
 }
 
-/// [`install`] for an explicit pinned entry, OS and self-test (tests use a local server and a fake archive).
-/// The old install stays until the new one verified, then it is replaced.
+/// [`install`] for an explicit pinned entry, OS and self-test (tests use a local server and a fake archive). Three
+/// phases, each on its own scale: Downloading (bytes, hashed while written), Unpacking (bytes of the expanded size,
+/// no second hash) and Testing. The old install stays until the new one verified, then it is replaced.
 pub async fn install_pinned(
     pinned: &Pinned,
     os: Os,
     data_dir: &Path,
     verify: &(dyn Fn(&Path) -> Result<String> + Sync),
-    progress: &(dyn Fn(u64, Option<u64>) + Sync),
+    job: &Job,
 ) -> Result<Browser> {
     let final_dir = discover::downloaded_dir(data_dir);
     let work = data_dir.join("chromium.work");
@@ -230,16 +281,24 @@ pub async fn install_pinned(
     std::fs::create_dir_all(&work).map_err(|e| err(format!("the install folder could not be created: {e}")))?;
     let result = async {
         let archive = work.join("download.zip");
-        let got = download(&pinned.url, &archive, progress).await?;
+        let got = download(&pinned.url, &archive, job).await?;
         if !got.eq_ignore_ascii_case(&pinned.sha256) {
             return Err(err("the download does not match its pinned checksum and was discarded"));
         }
-        let (a, s, w) = (archive.clone(), pinned.sha256.clone(), work.join("tree"));
-        tokio::task::spawn_blocking(move || extract_verified(&a, &s, &w))
+        let (a, w, j) = (archive.clone(), work.join("tree"), job.clone());
+        tokio::task::spawn_blocking(move || extract(&a, &w, &j))
             .await
             .map_err(|e| err(e.to_string()))??;
         let exe = locate_executable(&work.join("tree"), os).ok_or_else(|| err("the archive does not contain a browser"))?;
+        job.report(Phase::SelfTest, Unit::Count, 0, None);
+        if job.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         verify(&exe.path)?;
+        job.report_done(Phase::SelfTest, Unit::Count, 1, Some(1));
+        if job.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         let _ = std::fs::remove_file(&archive);
         let rel = exe.path.strip_prefix(work.join("tree")).map(Path::to_path_buf).unwrap_or_default();
         let _ = std::fs::remove_dir_all(&final_dir);

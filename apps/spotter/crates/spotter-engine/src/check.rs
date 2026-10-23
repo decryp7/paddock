@@ -1,13 +1,14 @@
 //! One check of one watch, end to end: plan -> fetch -> select -> compare with the state -> soak -> events ->
 //! notification decisions. Also "check now", what is due, and the digest.
-use crate::engine::{lock, Change, Engine};
-use crate::error::Result;
+use crate::engine::{lock, unless_cancelled, Change, Engine};
+use crate::error::{EngineError, Result};
 use crate::fetch::Validators;
 use crate::notifier::{self, ActionRequest, Notification, NotificationKind};
 use crate::pipeline::{Gathered, PageBaseline};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use spotter_core::filter;
+use spotter_core::job::{Job, Phase, Unit};
 use spotter_core::journal::{Event, EventKind};
 use spotter_core::limits::MAX_HISTORY;
 use spotter_core::notify::{digest_due, ChannelKind, DigestMode};
@@ -82,6 +83,12 @@ impl Drop for Running {
 impl Engine {
     /// Checks one watch now (a paused watch too, when asked for by id). Returns when the check is done.
     pub async fn check_one(&self, id: &str) -> Result<CheckReport> {
+        self.check_one_job(id, &Job::none()).await
+    }
+
+    /// [`Engine::check_one`] reporting to `job` (a folder's growing count, the settle wait) and stopped by it:
+    /// a cancelled check ends with [`EngineError::Cancelled`] and leaves the watch's status as it was.
+    pub async fn check_one_job(&self, id: &str, job: &Job) -> Result<CheckReport> {
         let spec = self.find_spec(id)?;
         let wid = self.watch_id(id)?;
         let skipped = |status| CheckReport {
@@ -98,13 +105,23 @@ impl Engine {
             id: wid.clone(),
         };
         self.emit(Change::Watches);
-        self.run_check(&spec, &wid).await
+        job.report(Phase::Checking, Unit::Count, 0, None);
+        unless_cancelled(job, self.run_check(&spec, &wid, job))
+            .await
+            .unwrap_or(Err(EngineError::Cancelled))
     }
 
     /// Checks one watch, or every watch that is not paused when `id` is `None`.
     pub async fn check_now(&self, id: Option<&str>) -> Result<Vec<CheckReport>> {
+        self.check_now_job(id, &Job::none()).await
+    }
+
+    /// [`Engine::check_now`] reporting to `job` and stopped by it. Checking everything reports
+    /// [`Phase::Checking`] as `done` of `total` watches; a cancelled run lets the checks that are running stop and
+    /// starts no more, and ends with [`EngineError::Cancelled`].
+    pub async fn check_now_job(&self, id: Option<&str>, job: &Job) -> Result<Vec<CheckReport>> {
         match id {
-            Some(id) => Ok(vec![self.check_one(id).await?]),
+            Some(id) => Ok(vec![self.check_one_job(id, job).await?]),
             None => {
                 let ids: Vec<String> = lock(&self.inner.doc)
                     .watches
@@ -112,30 +129,50 @@ impl Engine {
                     .filter(|w| !w.paused)
                     .map(|w| w.id.clone())
                     .collect();
-                Ok(self.check_many(ids).await)
+                let reports = self.check_many_job(ids, job).await;
+                if job.is_cancelled() {
+                    return Err(EngineError::Cancelled);
+                }
+                Ok(reports)
             }
         }
     }
 
     /// Runs the checks with at most `max_concurrent` at once.
     pub(crate) async fn check_many(&self, ids: Vec<String>) -> Vec<CheckReport> {
+        self.check_many_job(ids, &Job::none()).await
+    }
+
+    /// [`Engine::check_many`] with progress (`done` of `total` watches) and cancel.
+    pub(crate) async fn check_many_job(&self, ids: Vec<String>, job: &Job) -> Vec<CheckReport> {
+        let total = ids.len() as u64;
+        job.report_done(Phase::Checking, Unit::Count, 0, Some(total));
+        // The checks inside report nowhere: their own counts would fight over the one "n of m".
+        let inner = job.muted();
         let gate = Arc::new(Semaphore::new(self.inner.cfg.max_concurrent.max(1)));
         let mut set = JoinSet::new();
         for id in ids {
             let engine = self.clone();
             let gate = gate.clone();
+            let inner = inner.clone();
             set.spawn(async move {
                 let _permit = gate.acquire_owned().await.ok();
-                engine.check_one(&id).await
+                if inner.is_cancelled() {
+                    return Err(EngineError::Cancelled);
+                }
+                engine.check_one_job(&id, &inner).await
             });
         }
-        let mut out = Vec::new();
+        let (mut out, mut finished) = (Vec::new(), 0u64);
         while let Some(done) = set.join_next().await {
+            finished += 1;
+            job.report(Phase::Checking, Unit::Count, finished, Some(total));
             // A check that panicked is contained here: the other checks and the engine carry on.
             if let Ok(Ok(report)) = done {
                 out.push(report);
             }
         }
+        job.report_done(Phase::Checking, Unit::Count, finished, Some(total));
         out
     }
 
@@ -158,7 +195,7 @@ impl Engine {
             .collect()
     }
 
-    async fn run_check(&self, spec: &WatchSpec, id: &WatchId) -> Result<CheckReport> {
+    async fn run_check(&self, spec: &WatchSpec, id: &WatchId, job: &Job) -> Result<CheckReport> {
         let now = self.now();
         let watch = match self.parse_spec(spec) {
             Ok(w) => w,
@@ -186,8 +223,12 @@ impl Engine {
         let gathered = self
             .inner
             .checker
-            .gather(&watch, &secrets, validators, baseline.as_ref(), snapshot.as_ref(), now)
+            .gather_job(&watch, &secrets, validators, baseline.as_ref(), snapshot.as_ref(), now, job)
             .await;
+        if job.is_cancelled() {
+            // Stopped by the user: not a failure of the watch, so nothing is recorded.
+            return Err(EngineError::Cancelled);
+        }
         let took_ms = started.elapsed().as_millis() as u64;
         if let Ok(Gathered::Fresh { folder: Some(found), .. }) = &gathered {
             let mut snap = found.0.clone();

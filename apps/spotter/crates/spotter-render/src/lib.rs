@@ -49,6 +49,9 @@ pub enum Error {
     /// Download or install problem.
     #[error("{0}")]
     Install(String),
+    /// The user cancelled the installation.
+    #[error("Cancelled.")]
+    Cancelled,
 }
 
 /// Driver result.

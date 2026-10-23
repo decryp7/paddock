@@ -121,6 +121,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
         data_dir,
         default_downloads,
         http,
+        jobs: Arc::default(),
         stop,
     });
 

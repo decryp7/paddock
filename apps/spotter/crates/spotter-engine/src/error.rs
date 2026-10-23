@@ -19,6 +19,9 @@ pub enum EngineError {
     /// A bug or an I/O failure on Spotter's own files.
     #[error("{0}")]
     Internal(String),
+    /// The user cancelled the operation.
+    #[error("Cancelled.")]
+    Cancelled,
 }
 
 impl EngineError {
@@ -30,6 +33,7 @@ impl EngineError {
             EngineError::Invalid(_) => "invalid",
             EngineError::Unavailable(_) => "unavailable",
             EngineError::Internal(_) => "internal",
+            EngineError::Cancelled => "cancelled",
         }
     }
 

@@ -21,6 +21,7 @@ pub mod dashboard;
 pub mod extract;
 pub mod filter;
 pub mod import;
+pub mod job;
 pub mod journal;
 pub mod limits;
 pub mod notify;

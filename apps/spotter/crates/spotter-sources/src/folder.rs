@@ -10,14 +10,17 @@
 //! - a new or changed file is not reported until its size and time stay the same for the settle time.
 
 use spotter_core::checksum::Hasher;
+use spotter_core::job::{Cancel, Job, Phase, Unit, CANCELLED};
 use spotter_core::release::{Candidate, Skip};
 use spotter_core::source::folder::{ScanStats, SnapEntry, Snapshot, Verdict, SNAPSHOT_SCHEMA};
 use spotter_core::source::{FolderEntry, FolderSource, SourceError};
 use spotter_core::time::Timestamp;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// How long listing a folder may take when nothing else is said.
@@ -64,6 +67,7 @@ enum Stop {
     TooMany,
     TooManyMatches,
     TooSlow,
+    Cancelled,
 }
 
 impl From<std::io::Error> for Stop {
@@ -82,17 +86,47 @@ pub fn is_network_path(path: &str) -> bool {
             .any(|p| path.starts_with(p))
 }
 
-/// Scans a folder (see the module documentation).
+/// Scans a folder (see the module documentation), with nobody watching or cancelling.
 pub async fn scan(req: ScanRequest) -> Result<Scan, SourceError> {
+    scan_job(req, &Job::none()).await
+}
+
+/// [`scan`] reporting to `job`: [`Phase::Finding`] with the count of entries seen so far from the first moment on,
+/// then [`Phase::Settling`]. Cancelling the job (or dropping this future, or the wait running out) stops the walk.
+pub async fn scan_job(req: ScanRequest, job: &Job) -> Result<Scan, SourceError> {
     let path = req.source.path.clone();
     let limits = req.source.limits;
     let wait = Duration::from_secs(u64::from(limits.timeout_secs) + if req.settle { u64::from(limits.settle_secs) } else { 0 } + 5);
     let (tx, rx) = tokio::sync::oneshot::channel();
+    // Raised when the wait gives up or the caller drops this future, so the walk does not go on for nobody.
+    let abandon = Cancel::new();
+    let _guard = AbandonOnDrop(abandon.clone());
+    let halt = Halt { job: job.clone(), abandon };
     // A plain thread rather than the blocking pool: a hung share must not hold a pool thread the app needs.
     std::thread::spawn(move || {
-        let _ = tx.send(scan_now(&req));
+        let _ = tx.send(scan_now(&req, &halt));
     });
     await_scan(rx, wait, &path, limits.max_entries, limits.timeout_secs).await
+}
+
+struct AbandonOnDrop(Cancel);
+
+impl Drop for AbandonOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+/// Why a walk should stop: the job was cancelled or nobody waits for the answer any more.
+struct Halt {
+    job: Job,
+    abandon: Cancel,
+}
+
+impl Halt {
+    fn stopped(&self) -> bool {
+        self.job.is_cancelled() || self.abandon.is_cancelled()
+    }
 }
 
 /// The result of the listing thread, or a message when it ended without one or took longer than `wait`.
@@ -158,7 +192,7 @@ fn join_rel(rel: &str, name: &str) -> String {
     }
 }
 
-fn scan_now(req: &ScanRequest) -> Result<Scan, Stop> {
+fn scan_now(req: &ScanRequest, halt: &Halt) -> Result<Scan, Stop> {
     let started = Instant::now();
     let src = &req.source;
     let root = PathBuf::from(&src.path);
@@ -169,16 +203,22 @@ fn scan_now(req: &ScanRequest) -> Result<Scan, Stop> {
     let (mut entries, dirs, mut stats, ignored, reused) = match reuse(req, &root) {
         // A reused listing judged nothing, so there is nothing to sample.
         Some((entries, dirs, stats)) => (entries, dirs, stats, Vec::new(), true),
-        None => walk(req, &root, started)?,
+        None => walk(req, &root, started, halt)?,
     };
     let known = req.previous.as_ref();
     let mut settling = 0;
     if req.settle && src.limits.settle_secs > 0 {
-        settling = settle(&root, &mut entries, known, Duration::from_secs(u64::from(src.limits.settle_secs)));
+        settling = settle(
+            &root,
+            &mut entries,
+            known,
+            Duration::from_secs(u64::from(src.limits.settle_secs)),
+            halt,
+        )?;
     }
     stats.settling = settling;
     if src.limits.hash_below_mib > 0 {
-        hash_small(src, &mut entries, known);
+        hash_small(src, &mut entries, known, halt)?;
     }
     let mut snapshot_entries: Vec<SnapEntry> = entries
         .iter()
@@ -256,47 +296,163 @@ fn reuse(req: &ScanRequest, root: &Path) -> Option<(Matched, Dirs, ScanStats)> {
     Some((out, now_dirs, ScanStats::default()))
 }
 
-type Walked = (Matched, Dirs, ScanStats, Vec<(String, Skip)>, bool);
+/// How many folders are listed at once. A share is latency-bound, so a handful of folders in flight is several times
+/// faster than one; more would only queue up at the server.
+const WALK_THREADS: usize = 8;
 
-fn walk(req: &ScanRequest, root: &Path, started: Instant) -> Result<Walked, Stop> {
-    let src = &req.source;
-    let deadline = started + Duration::from_secs(u64::from(src.limits.timeout_secs));
-    let max = u64::from(src.limits.max_entries);
-    let mut stack = vec![(root.to_path_buf(), String::new(), 0u32)];
-    let (mut dirs, mut matched) = (Dirs::new(), Matched::new());
-    let (mut scanned, mut folders) = (0u64, 0u64);
-    let mut ignored_seen = Vec::new();
-    while let Some((dir, rel, level)) = stack.pop() {
-        let dir_md = std::fs::metadata(&dir);
-        let read = std::fs::read_dir(&dir);
-        let read = match (read, level) {
-            (Ok(r), _) => r,
-            (Err(e), 0) => return Err(e.into()),
-            // A sub-folder that cannot be read is skipped; the rest of the share still counts.
-            (Err(_), _) => continue,
-        };
-        folders += 1;
-        dirs.insert(rel.clone(), dir_md.ok().and_then(|m| m.modified().ok()).and_then(millis));
-        for item in read {
-            let Ok(item) = item else { continue };
-            scanned += 1;
-            if scanned > max {
-                return Err(Stop::TooMany);
+/// A folder waiting to be listed: its path, its path under the root, and its depth.
+type Item = (PathBuf, String, u32);
+
+#[derive(Default)]
+struct Queue {
+    items: VecDeque<Item>,
+    /// Folders being listed right now; the walk is over when none are and nothing waits.
+    active: usize,
+}
+
+/// What the workers have found so far.
+#[derive(Default)]
+struct Found {
+    dirs: Dirs,
+    matched: Matched,
+    ignored: Vec<(String, Skip)>,
+}
+
+/// Everything the walking threads share.
+struct Walk<'a> {
+    req: &'a ScanRequest,
+    halt: &'a Halt,
+    deadline: Instant,
+    max: u64,
+    queue: Mutex<Queue>,
+    wake: Condvar,
+    scanned: AtomicU64,
+    folders: AtomicU64,
+    found: Mutex<Found>,
+    failure: Mutex<Option<Stop>>,
+    failed: AtomicBool,
+}
+
+fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Keeps the `cap` ignored names that sort first, so the sample does not depend on which thread got there first.
+fn keep_first(ignored: &mut Vec<(String, Skip)>, cap: usize) {
+    ignored.sort_by(|a, b| a.0.cmp(&b.0));
+    ignored.truncate(cap);
+}
+
+impl Walk<'_> {
+    fn fail(&self, stop: Stop) {
+        let mut failure = locked(&self.failure);
+        if failure.is_none() {
+            *failure = Some(stop);
+        }
+        self.failed.store(true, Ordering::Release);
+        self.wake.notify_all();
+    }
+
+    /// Whether the walk should end now (a failure, a cancel); a cancel is recorded as the failure.
+    fn halted(&self) -> bool {
+        if self.failed.load(Ordering::Acquire) {
+            return true;
+        }
+        if self.halt.stopped() {
+            self.fail(Stop::Cancelled);
+            return true;
+        }
+        false
+    }
+
+    fn report(&self) {
+        self.halt
+            .job
+            .report(Phase::Finding, Unit::Count, self.scanned.load(Ordering::Relaxed), None);
+    }
+
+    /// Takes the next folder, waiting while others may still add some; `None` when the walk is over.
+    fn next(&self) -> Option<Item> {
+        let mut q = locked(&self.queue);
+        loop {
+            if self.halted() {
+                return None;
             }
-            if scanned % 256 == 0 && Instant::now() > deadline {
-                return Err(Stop::TooSlow);
+            if let Some(item) = q.items.pop_front() {
+                q.active += 1;
+                return Some(item);
+            }
+            if q.active == 0 {
+                self.wake.notify_all();
+                return None;
+            }
+            // A timeout, so a cancel is noticed even when no folder finishes.
+            q = self
+                .wake
+                .wait_timeout(q, Duration::from_millis(50))
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+    }
+
+    fn done(&self, children: Vec<Item>) {
+        let mut q = locked(&self.queue);
+        q.items.extend(children);
+        q.active -= 1;
+        drop(q);
+        self.wake.notify_all();
+    }
+
+    fn worker(&self) {
+        while let Some(item) = self.next() {
+            let children = self.list(&item);
+            self.done(children);
+        }
+    }
+
+    /// Lists one folder, judging its entries; returns the sub-folders to list next.
+    fn list(&self, (dir, rel, level): &Item) -> Vec<Item> {
+        let (req, src) = (self.req, &self.req.source);
+        let dir_md = std::fs::metadata(dir);
+        let read = match (std::fs::read_dir(dir), level) {
+            (Ok(r), _) => r,
+            (Err(e), 0) => {
+                self.fail(Stop::Io(e));
+                return Vec::new();
+            }
+            // A sub-folder that cannot be read is skipped; the rest of the share still counts.
+            (Err(_), _) => return Vec::new(),
+        };
+        self.folders.fetch_add(1, Ordering::Relaxed);
+        let (mut children, mut matched, mut ignored) = (Vec::new(), Matched::new(), Vec::new());
+        for item in read {
+            if self.halted() {
+                return Vec::new();
+            }
+            let Ok(item) = item else { continue };
+            let scanned = self.scanned.fetch_add(1, Ordering::Relaxed) + 1;
+            if scanned > self.max {
+                self.fail(Stop::TooMany);
+                return Vec::new();
+            }
+            if scanned % 256 == 0 {
+                self.report();
+                if Instant::now() > self.deadline {
+                    self.fail(Stop::TooSlow);
+                    return Vec::new();
+                }
             }
             // Names that are not valid Unicode cannot hold a version Spotter can show; skip them.
             let Ok(name) = item.file_name().into_string() else { continue };
             let Ok(ft) = item.file_type() else { continue };
             let is_dir = ft.is_dir();
-            if is_dir && level < src.depth {
-                stack.push((item.path(), join_rel(&rel, &name), level + 1));
+            if is_dir && *level < src.depth {
+                children.push((item.path(), join_rel(rel, &name), level + 1));
             }
             let is_dir_entry = is_dir || (ft.is_symlink() && std::fs::metadata(item.path()).is_ok_and(|m| m.is_dir()));
             match src.judge(
                 &name,
-                &rel,
+                rel,
                 is_dir_entry,
                 req.readable.as_deref().map(|f| f as &dyn Fn(&str) -> bool),
             ) {
@@ -309,37 +465,105 @@ fn walk(req: &ScanRequest, root: &Path, started: Instant) -> Result<Walked, Stop
                     };
                     // An entry that vanished since it was listed is simply not there any more.
                     let Ok(md) = md else { continue };
-                    if matched.len() >= spotter_core::limits::MAX_FOLDER_MATCHES {
-                        return Err(Stop::TooManyMatches);
-                    }
-                    matched.push((entry_of(&item.path(), name, &rel, &md), None));
+                    matched.push((entry_of(&item.path(), name, rel, &md), None));
                 }
-                Verdict::Skip(why) if ignored_seen.len() < req.sample_ignored => ignored_seen.push((join_rel(&rel, &name), why)),
+                Verdict::Skip(why) if req.sample_ignored > 0 => {
+                    ignored.push((join_rel(rel, &name), why));
+                    if ignored.len() >= req.sample_ignored.max(32) * 2 {
+                        keep_first(&mut ignored, req.sample_ignored);
+                    }
+                }
                 Verdict::Skip(_) | Verdict::NotThisKind => {}
             }
         }
+        keep_first(&mut ignored, req.sample_ignored);
+        let mut found = locked(&self.found);
+        found
+            .dirs
+            .insert(rel.clone(), dir_md.ok().and_then(|m| m.modified().ok()).and_then(millis));
+        found.matched.append(&mut matched);
+        found.ignored.append(&mut ignored);
+        keep_first(&mut found.ignored, req.sample_ignored);
+        let too_many = found.matched.len() > spotter_core::limits::MAX_FOLDER_MATCHES;
+        drop(found);
+        if too_many {
+            self.fail(Stop::TooManyMatches);
+        }
+        self.report();
+        children
     }
-    matched.sort_by(|a, b| (&a.0.rel_dir, &a.0.name).cmp(&(&b.0.rel_dir, &b.0.name)));
-    let stats = ScanStats {
-        scanned,
-        folders,
-        ..ScanStats::default()
-    };
-    Ok((matched, dirs, stats, ignored_seen, false))
 }
 
-/// Waits `settle`, looks at the new and changed files again and drops those that changed meanwhile.
-/// Returns how many were dropped.
-fn settle(root: &Path, entries: &mut Matched, previous: Option<&Snapshot>, settle: Duration) -> u64 {
+type Walked = (Matched, Dirs, ScanStats, Vec<(String, Skip)>, bool);
+
+/// Lists the share with [`WALK_THREADS`] folders in flight. The result does not depend on which thread got where:
+/// matches are sorted, folders are keyed, the ignored sample is the first names in sorted order, and the counts are
+/// totals.
+fn walk(req: &ScanRequest, root: &Path, started: Instant, halt: &Halt) -> Result<Walked, Stop> {
+    let src = &req.source;
+    halt.job.report(Phase::Finding, Unit::Count, 0, None);
+    let walk = Walk {
+        req,
+        halt,
+        deadline: started + Duration::from_secs(u64::from(src.limits.timeout_secs)),
+        max: u64::from(src.limits.max_entries),
+        queue: Mutex::new(Queue {
+            items: VecDeque::from([(root.to_path_buf(), String::new(), 0u32)]),
+            active: 0,
+        }),
+        wake: Condvar::new(),
+        scanned: AtomicU64::new(0),
+        folders: AtomicU64::new(0),
+        found: Mutex::default(),
+        failure: Mutex::new(None),
+        failed: AtomicBool::new(false),
+    };
+    std::thread::scope(|scope| {
+        for _ in 1..WALK_THREADS {
+            // A thread that cannot start only means fewer in flight; the calling thread always works too.
+            let _ = std::thread::Builder::new().spawn_scoped(scope, || walk.worker());
+        }
+        walk.worker();
+    });
+    if let Some(stop) = locked(&walk.failure).take() {
+        return Err(stop);
+    }
+    let scanned = walk.scanned.load(Ordering::Relaxed);
+    halt.job.report_done(Phase::Finding, Unit::Count, scanned, Some(scanned));
+    let mut found = std::mem::take(&mut *locked(&walk.found));
+    found
+        .matched
+        .sort_by(|a, b| (&a.0.rel_dir, &a.0.name).cmp(&(&b.0.rel_dir, &b.0.name)));
+    let stats = ScanStats {
+        scanned,
+        folders: walk.folders.load(Ordering::Relaxed),
+        ..ScanStats::default()
+    };
+    Ok((found.matched, found.dirs, stats, found.ignored, false))
+}
+
+/// Waits `settle` (in slices, so Cancel is heard), looks at the new and changed files again and drops those that
+/// changed meanwhile. Returns how many were dropped.
+fn settle(root: &Path, entries: &mut Matched, previous: Option<&Snapshot>, settle: Duration, halt: &Halt) -> Result<u64, Stop> {
     let unsettled = |e: &FolderEntry| {
         previous
             .and_then(|p| p.entry(&join_rel(&e.rel_dir, &e.name)))
             .is_none_or(|k| k.size != e.size || k.modified != e.modified.map(|t| t.0))
     };
     if !entries.iter().any(|(e, _)| unsettled(e)) {
-        return 0;
+        return Ok(0);
     }
-    std::thread::sleep(settle);
+    let total = settle.as_secs().max(1);
+    let begun = Instant::now();
+    while begun.elapsed() < settle {
+        if halt.stopped() {
+            return Err(Stop::Cancelled);
+        }
+        halt.job
+            .report(Phase::Settling, Unit::Count, begun.elapsed().as_secs().min(total), Some(total));
+        std::thread::sleep((settle - begun.elapsed()).min(Duration::from_millis(50)));
+    }
+    halt.job.report_done(Phase::Settling, Unit::Count, total, Some(total));
     let before = entries.len();
     entries.retain(|(e, _)| {
         if !unsettled(e) {
@@ -354,14 +578,17 @@ fn settle(root: &Path, entries: &mut Matched, previous: Option<&Snapshot>, settl
             md.len() == e.size.unwrap_or(md.len()) && millis(md.modified().unwrap_or(std::time::UNIX_EPOCH)) == e.modified.map(|t| t.0)
         })
     });
-    (before - entries.len()) as u64
+    Ok((before - entries.len()) as u64)
 }
 
 /// Hashes small files that changed. A file whose size and hash are as before but whose time moved was only touched:
 /// it keeps its old time so it is not taken for a new release.
-fn hash_small(src: &FolderSource, entries: &mut Matched, previous: Option<&Snapshot>) {
+fn hash_small(src: &FolderSource, entries: &mut Matched, previous: Option<&Snapshot>, halt: &Halt) -> Result<(), Stop> {
     let limit = u64::from(src.limits.hash_below_mib) << 20;
     for (e, hash) in entries.iter_mut() {
+        if halt.stopped() {
+            return Err(Stop::Cancelled);
+        }
         let key = join_rel(&e.rel_dir, &e.name);
         let before = previous.and_then(|p| p.entry(&key));
         let unchanged = before.is_some_and(|k| k.size == e.size && k.modified == e.modified.map(|t| t.0));
@@ -379,6 +606,7 @@ fn hash_small(src: &FolderSource, entries: &mut Matched, previous: Option<&Snaps
             }
         }
     }
+    Ok(())
 }
 
 fn hash_file(path: &Path) -> Option<String> {
@@ -405,6 +633,7 @@ fn explain_stop(path: &str, stop: Stop, max_entries: u32, timeout_secs: u32) -> 
             "Too many matches: more than {} files in {path} match. Narrow the name pattern, the file types or the folder levels.",
             spotter_core::limits::MAX_FOLDER_MATCHES
         )),
+        Stop::Cancelled => SourceError::Failed(CANCELLED.to_string()),
         Stop::TooSlow => SourceError::Unreachable(format!(
             "Listing {path} took longer than {timeout_secs} seconds. The share is slow or very large: narrow the folder or the folder levels. Spotter will try again."
         )),
@@ -939,5 +1168,174 @@ mod tests {
         let r = scan(request(source(d.path(), &[]))).await;
         std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(!denied || matches!(r, Err(SourceError::Unauthorized(_))), "{r:?}");
+    }
+
+    /// A tree of `folders` sub-folders (two levels) with `files` files in each.
+    fn tree(d: &Path, folders: usize, files: usize) {
+        for f in 0..folders {
+            for g in 0..3 {
+                for i in 0..files {
+                    let ext = if i % 2 == 0 { "iso" } else { "txt" };
+                    touch(d, &format!("dir{f:02}/sub{g}/Acme-R{f}.{g}.{i:02}T01.{ext}"), "x");
+                }
+            }
+        }
+    }
+
+    fn recording_job(interval: Duration) -> (Job, Arc<Mutex<Vec<spotter_core::job::Progress>>>, Cancel) {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let cancel = Cancel::new();
+        let sink = seen.clone();
+        let job = Job::new(cancel.clone(), move |p| sink.lock().unwrap().push(p.clone())).with_interval(interval);
+        (job, seen, cancel)
+    }
+
+    #[tokio::test]
+    async fn the_parallel_walk_gives_the_same_answer_every_time() {
+        let d = tempfile::tempdir().unwrap();
+        tree(d.path(), 24, 8);
+        let src = source(d.path(), &[("depth", "2"), ("extensions", "iso")]);
+        let mut first_request = request(src.clone());
+        first_request.sample_ignored = 7;
+        let first = scan(first_request).await.unwrap();
+        assert_eq!(first.candidates.len(), 24 * 3 * 4);
+        assert_eq!(first.stats.scanned, 24 + 24 * 3 + 24 * 3 * 8);
+        assert_eq!(first.stats.folders, 1 + 24 + 24 * 3);
+        let mut sorted = names(&first);
+        sorted.sort();
+        let by_dir: Vec<_> = first.entries.iter().map(|e| (e.rel_dir.clone(), e.name.clone())).collect();
+        assert!(by_dir.windows(2).all(|w| w[0] <= w[1]), "matches are sorted by folder then name");
+        for _ in 0..8 {
+            let mut again = request(src.clone());
+            again.sample_ignored = 7;
+            let again = scan(again).await.unwrap();
+            assert_eq!(names(&again), names(&first));
+            assert_eq!(
+                again.entries.iter().map(|e| &e.rel_dir).collect::<Vec<_>>(),
+                first.entries.iter().map(|e| &e.rel_dir).collect::<Vec<_>>()
+            );
+            assert_eq!(again.stats.scanned, first.stats.scanned);
+            assert_eq!(
+                again.snapshot.dirs.keys().collect::<Vec<_>>(),
+                first.snapshot.dirs.keys().collect::<Vec<_>>()
+            );
+            let ignored: Vec<_> = again.ignored.iter().map(|(n, _)| n.clone()).collect();
+            assert_eq!(ignored, first.ignored.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>());
+        }
+        assert_eq!(first.ignored.len(), 7);
+        assert!(
+            first.ignored.windows(2).all(|w| w[0].0 < w[1].0),
+            "the sample is the first names in order"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_found_count_is_live_from_the_start_and_only_grows() {
+        let d = tempfile::tempdir().unwrap();
+        tree(d.path(), 12, 20);
+        let (job, seen, _) = recording_job(Duration::ZERO);
+        let mut req = request(source(d.path(), &[("depth", "2")]));
+        req.settle = false;
+        let s = scan_job(req, &job).await.unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            (seen[0].phase, seen[0].done, seen[0].total),
+            (Phase::Finding, 0, None),
+            "counting before the first entry"
+        );
+        assert!(seen.iter().all(|p| p.phase == Phase::Finding && p.unit == Unit::Count));
+        assert!(
+            seen.windows(2).all(|w| w[0].done <= w[1].done || w[1].total.is_some()),
+            "the count never goes back"
+        );
+        assert!(seen.len() > 3, "several reports on the way, got {}", seen.len());
+        let last = seen.last().unwrap();
+        assert_eq!((last.done, last.total), (s.stats.scanned, Some(s.stats.scanned)));
+    }
+
+    #[tokio::test]
+    async fn cancelling_stops_the_walk() {
+        let d = tempfile::tempdir().unwrap();
+        tree(d.path(), 24, 20);
+        let (job, seen, cancel) = recording_job(Duration::ZERO);
+        // Cancel from the first report that has counted something.
+        let watcher = {
+            let (seen, cancel) = (seen.clone(), cancel.clone());
+            tokio::spawn(async move {
+                loop {
+                    if seen.lock().unwrap().iter().any(|p| p.done > 0) {
+                        cancel.cancel();
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+        };
+        let mut req = request(source(d.path(), &[("depth", "2")]));
+        req.settle = false;
+        let e = scan_job(req, &job).await.unwrap_err();
+        watcher.await.unwrap();
+        assert_eq!(e.message(), CANCELLED);
+        assert!(
+            seen.lock().unwrap().last().unwrap().total.is_none(),
+            "no finished report after a cancel"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_settle_wait_is_labelled_counts_up_and_can_be_cancelled() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "a-1.zip", "one");
+        let src = source(d.path(), &[("settleSeconds", "30")]);
+        let (job, seen, cancel) = recording_job(Duration::ZERO);
+        let began = Instant::now();
+        let watcher = {
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                loop {
+                    if seen.lock().unwrap().iter().any(|p| p.phase == Phase::Settling) {
+                        cancel.cancel();
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+        };
+        let e = scan_job(request(src), &job).await.unwrap_err();
+        watcher.await.unwrap();
+        assert_eq!(e.message(), CANCELLED);
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "the 30 s wait did not run out: {:?}",
+            began.elapsed()
+        );
+        let settling = seen.lock().unwrap().iter().find(|p| p.phase == Phase::Settling).cloned().unwrap();
+        assert_eq!((settling.unit, settling.total), (Unit::Count, Some(30)));
+    }
+
+    #[tokio::test]
+    async fn a_settle_that_runs_out_reports_its_end() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "a-1.zip", "one");
+        let (job, seen, _) = recording_job(Duration::ZERO);
+        let s = scan_job(request(source(d.path(), &[("settleSeconds", "1")])), &job).await.unwrap();
+        assert_eq!(s.candidates.len(), 1);
+        let last = seen.lock().unwrap().last().unwrap().clone();
+        assert_eq!((last.phase, last.done, last.total), (Phase::Settling, 1, Some(1)));
+    }
+
+    #[tokio::test]
+    async fn dropping_the_scan_stops_the_walk_instead_of_leaving_it_running() {
+        let d = tempfile::tempdir().unwrap();
+        tree(d.path(), 24, 20);
+        let (job, seen, _) = recording_job(Duration::ZERO);
+        let mut req = request(source(d.path(), &[("depth", "2")]));
+        req.settle = false;
+        // The caller gives up straight away.
+        let _ = tokio::time::timeout(Duration::ZERO, scan_job(req, &job)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let after = seen.lock().unwrap().len();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(seen.lock().unwrap().len(), after, "no reports once the walk stopped");
     }
 }

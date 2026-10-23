@@ -20,6 +20,8 @@ pub struct AppState {
     pub default_downloads: PathBuf,
     /// HTTP for downloads and the renderer install.
     pub http: Http,
+    /// The long operations running now, by the id the UI gave them.
+    pub jobs: Arc<crate::jobs::Jobs>,
     /// Tells the background tasks to stop.
     pub stop: tokio::sync::watch::Sender<bool>,
 }

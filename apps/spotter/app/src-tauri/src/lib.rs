@@ -7,6 +7,7 @@ pub mod applog;
 pub mod commands;
 pub mod credentials;
 pub mod dto;
+pub mod jobs;
 pub mod lifecycle;
 pub mod native_feel;
 pub mod notifier;
@@ -42,6 +43,7 @@ pub fn run() {
             commands::delete_watch,
             commands::set_paused,
             commands::check_now,
+            commands::cancel_job,
             commands::acknowledge,
             commands::acknowledge_product,
             commands::suggest_pattern,

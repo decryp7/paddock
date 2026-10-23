@@ -4,11 +4,14 @@
 //! browser) goes to `spawn_blocking`. The command names are the snake_case of the TypeScript method names.
 
 use crate::dto::*;
+use crate::jobs::{Emit, JobGuard, JobKind, JOB_EVENT};
 use crate::state::Shared;
 use crate::{applog, lifecycle, tray, updater};
+use spotter_core::job::Job;
 use spotter_core::limits::MAX_WATCHES;
 use std::path::PathBuf;
-use tauri::{AppHandle, Runtime, State};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Runtime, State};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -49,6 +52,19 @@ fn spec_of(state: &Shared, draft: WatchDraftDto) -> Out<spotter_core::watch::Wat
         None => false,
     };
     Ok(draft.into_spec(allow_local))
+}
+
+/// The jobs registry's way to the windows.
+fn emitter<R: Runtime>(app: &AppHandle<R>) -> Emit {
+    let app = app.clone();
+    Arc::new(move |event| {
+        let _ = app.emit(JOB_EVENT, event);
+    })
+}
+
+/// Registers the operation the webview named `job_id` and returns what to run it with.
+fn begin_job<R: Runtime>(app: &AppHandle<R>, state: &Shared, job_id: &str, kind: JobKind) -> Out<(Job, JobGuard)> {
+    state.jobs.begin(emitter(app), job_id, kind)
 }
 
 // ---- app ----
@@ -99,10 +115,19 @@ pub async fn source_kinds(state: State<'_, Shared>) -> Out<Vec<SourceKindDto>> {
 
 /// `test_source`: checks a draft without saving it.
 #[tauri::command]
-pub async fn test_source(state: State<'_, Shared>, draft: WatchDraftDto, secrets: Secrets) -> Out<SourcePreviewDto> {
+pub async fn test_source<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Shared>,
+    draft: WatchDraftDto,
+    secrets: Secrets,
+    job_id: String,
+) -> Out<SourcePreviewDto> {
     secrets_ok(&secrets)?;
     let spec = spec_of(&state, draft)?;
-    Ok((&state.engine.test_source(&spec, &secrets).await).into())
+    let (job, guard) = begin_job(&app, &state, &job_id, JobKind::TestSource)?;
+    let preview = state.engine.test_source_job(&spec, &secrets, &job).await;
+    guard.end_with(&job, preview.error.is_none());
+    Ok((&preview).into())
 }
 
 /// `save_watch`. The credential store is touched by the engine, so this runs off the async threads.
@@ -135,19 +160,33 @@ pub async fn set_paused(state: State<'_, Shared>, id: String, paused: bool) -> O
     Ok(state.engine.set_paused(&id, paused)?)
 }
 
-/// `check_now`: one watch now (the answer comes when it is done), or every watch in the background (the watches
-/// report through the pushed state, so a long run never trips the UI's timeout).
+/// `cancel_job`: asks a running operation to stop (a no-op when it already ended).
 #[tauri::command]
-pub async fn check_now(state: State<'_, Shared>, id: Option<String>) -> Out<()> {
+pub async fn cancel_job(state: State<'_, Shared>, job_id: String) -> Out<()> {
+    text_ok("job id", &job_id)?;
+    state.jobs.cancel(&job_id);
+    Ok(())
+}
+
+/// `check_now`: one watch now (the answer comes when it is done, however long that takes: the UI does not time it
+/// out), or every watch in the background (progress "n of m" arrives as job events and the watches report through
+/// the pushed state).
+#[tauri::command]
+pub async fn check_now<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>, id: Option<String>, job_id: String) -> Out<()> {
     match id {
         Some(id) => {
             text_ok("watch id", &id)?;
-            state.engine.check_now(Some(&id)).await?;
+            let (job, guard) = begin_job(&app, &state, &job_id, JobKind::Check)?;
+            let result = state.engine.check_now_job(Some(&id), &job).await;
+            guard.end_with(&job, result.is_ok());
+            result?;
         }
         None => {
+            let (job, guard) = begin_job(&app, &state, &job_id, JobKind::CheckAll)?;
             let engine = state.engine.clone();
             tauri::async_runtime::spawn(async move {
-                let _ = engine.check_now(None).await;
+                let result = engine.check_now_job(None, &job).await;
+                guard.end_with(&job, result.is_ok());
             });
         }
     }
@@ -250,18 +289,26 @@ pub async fn open_release<R: Runtime>(
 
 /// `download_release`: downloads or copies the release into the downloads folder, verifying its checksum.
 #[tauri::command]
-pub async fn download_release(
+pub async fn download_release<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, Shared>,
     id: String,
     version: String,
     product: Option<String>,
     artifact: Option<String>,
+    job_id: String,
 ) -> Out<String> {
     text_ok("watch id", &id)?;
     text_ok("version", &version)?;
     let release = chosen_release(&state, &id, &version, product.as_deref(), artifact.as_deref())?;
     let folder = downloads_dir(&state);
-    let result = spotter_sources::download::download(&state.http, &release, &folder, true).await;
+    let (job, guard) = begin_job(&app, &state, &job_id, JobKind::Download)?;
+    let result = spotter_sources::download::download_job(&state.http, &release, &folder, true, &job).await;
+    guard.end_with(&job, result.is_ok());
+    if job.is_cancelled() && result.is_err() {
+        // The user stopped it: not a failed download to put in the history; the part stays to resume.
+        return Err(CommandError::cancelled());
+    }
     let outcome = result
         .as_ref()
         .map(|d| (d.path.display().to_string(), d.size, d.verified))
@@ -460,10 +507,14 @@ pub async fn renderer_status(state: State<'_, Shared>) -> Out<RendererStatusDto>
 
 /// `install_renderer`: downloads the pinned, checksum-verified Chromium. Only ever runs because the user asked.
 #[tauri::command]
-pub async fn install_renderer(state: State<'_, Shared>) -> Out<RendererStatusDto> {
-    spotter_render::install::install(&state.data_dir, &|_, _| {})
-        .await
-        .map_err(|e| CommandError::unavailable(e.to_string()))?;
+pub async fn install_renderer<R: Runtime>(app: AppHandle<R>, state: State<'_, Shared>, job_id: String) -> Out<RendererStatusDto> {
+    let (job, guard) = begin_job(&app, &state, &job_id, JobKind::InstallRenderer)?;
+    let installed = spotter_render::install::install(&state.data_dir, &job).await;
+    guard.end_with(&job, installed.is_ok());
+    installed.map_err(|e| match e {
+        spotter_render::Error::Cancelled => CommandError::cancelled(),
+        e => CommandError::unavailable(e.to_string()),
+    })?;
     let dir = state.data_dir.clone();
     blocking(move || Ok(spotter_render::renderer_status(&dir))).await
 }

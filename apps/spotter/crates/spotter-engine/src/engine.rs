@@ -14,6 +14,7 @@ use spotter_core::calendar::LocalZone;
 use spotter_core::config::ConfigDoc;
 use spotter_core::dashboard::{self, Range, WatchInput};
 use spotter_core::import::{self, ImportFormat, Imported};
+use spotter_core::job::Job;
 use spotter_core::limits::MAX_WATCHES;
 use spotter_core::pack::{Pack, Preset};
 use spotter_core::render::PageRenderer;
@@ -110,6 +111,24 @@ pub(crate) struct Inner {
     pub(crate) warnings: Mutex<Vec<String>>,
     pub(crate) migrated: bool,
     pub(crate) changes: broadcast::Sender<Change>,
+}
+
+/// How often a running operation looks at the cancel flag while it waits on something slow.
+const CANCEL_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Awaits `work`, or returns `None` soon after `job` is cancelled (dropping the work).
+pub(crate) async fn unless_cancelled<T>(job: &Job, work: impl std::future::Future<Output = T>) -> Option<T> {
+    tokio::pin!(work);
+    loop {
+        tokio::select! {
+            out = &mut work => return Some(out),
+            () = tokio::time::sleep(CANCEL_POLL) => {
+                if job.is_cancelled() {
+                    return None;
+                }
+            }
+        }
+    }
 }
 
 /// The engine. Cheap to clone; clones share everything.
@@ -384,6 +403,12 @@ impl Engine {
     /// Checks a draft without saving it. `secrets` are values typed into secret fields (not stored); a missing key
     /// falls back to the stored secret of an existing watch.
     pub async fn test_source(&self, draft: &WatchSpec, secrets: &BTreeMap<String, String>) -> SourcePreview {
+        self.test_source_job(draft, secrets, &Job::none()).await
+    }
+
+    /// [`Engine::test_source`] reporting to `job` (the folder's growing count of entries) and stopped by it; a
+    /// cancelled look comes back as an error status saying so.
+    pub async fn test_source_job(&self, draft: &WatchSpec, secrets: &BTreeMap<String, String>, job: &Job) -> SourcePreview {
         let mut spec = draft.clone();
         if spec.id.is_empty() {
             spec.id = "preview".into();
@@ -401,7 +426,9 @@ impl Engine {
         typed.extend(secrets.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k.clone(), v.clone())));
         let started = Instant::now();
         let now = self.now();
-        let gathered = self.preview_candidates(&watch, &typed, now).await;
+        let gathered = unless_cancelled(job, self.preview_candidates(&watch, &typed, now, job))
+            .await
+            .unwrap_or_else(|| Err(spotter_core::source::SourceError::Failed(spotter_core::job::CANCELLED.to_string())));
         let took_ms = started.elapsed().as_millis() as u64;
         match gathered {
             Err(e) => SourcePreview {
@@ -441,18 +468,22 @@ impl Engine {
         watch: &Watch,
         secrets: &Secrets,
         now: Timestamp,
+        job: &Job,
     ) -> std::result::Result<(Vec<spotter_core::release::Candidate>, Option<crate::preview::ScanFacts>), spotter_core::source::SourceError>
     {
         use spotter_core::source::Plan;
         match watch.source.plan(secrets) {
             Plan::Folder(f) => {
-                let scan = spotter_sources::folder::scan(spotter_sources::folder::ScanRequest {
-                    source: f,
-                    readable: crate::pipeline::readable_for(watch),
-                    previous: None,
-                    sample_ignored: 200,
-                    settle: false,
-                })
+                let scan = spotter_sources::folder::scan_job(
+                    spotter_sources::folder::ScanRequest {
+                        source: f,
+                        readable: crate::pipeline::readable_for(watch),
+                        previous: None,
+                        sample_ignored: 200,
+                        settle: false,
+                    },
+                    job,
+                )
                 .await?;
                 let facts = crate::preview::ScanFacts {
                     stats: scan.stats,
@@ -464,7 +495,7 @@ impl Engine {
             _ => Ok((
                 self.inner
                     .checker
-                    .gather(watch, secrets, None, None, None, now)
+                    .gather_job(watch, secrets, None, None, None, now, job)
                     .await?
                     .into_candidates(),
                 None,

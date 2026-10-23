@@ -1354,6 +1354,8 @@ pub enum CommandErrorCode {
     Unavailable,
     /// A bug or an I/O failure.
     Internal,
+    /// The user cancelled the operation.
+    Cancelled,
 }
 
 /// `CommandError`: what every rejected command carries.
@@ -1387,6 +1389,15 @@ impl CommandError {
         }
     }
 
+    /// The user stopped the operation.
+    pub fn cancelled() -> Self {
+        CommandError {
+            code: CommandErrorCode::Cancelled,
+            message: spotter_core::job::CANCELLED.to_string(),
+            problems: Vec::new(),
+        }
+    }
+
     /// A bug or failure on Spotter's own files.
     pub fn internal(message: impl Into<String>) -> Self {
         CommandError {
@@ -1405,6 +1416,7 @@ impl From<EngineError> for CommandError {
             EngineError::Invalid(_) => CommandErrorCode::Invalid,
             EngineError::Unavailable(_) => CommandErrorCode::Unavailable,
             EngineError::Internal(_) => CommandErrorCode::Internal,
+            EngineError::Cancelled => CommandErrorCode::Cancelled,
         };
         CommandError {
             code,

@@ -2,6 +2,7 @@
 //! Selecting, soaking and comparing with the watch's state is the engine's job; this module only reads the source.
 use crate::fetch::{FetchOptions, Fetched, PoliteFetcher, Validators};
 use serde::{Deserialize, Serialize};
+use spotter_core::job::Job;
 use spotter_core::limits::MAX_CANDIDATES;
 use spotter_core::release::{Candidate, LatestBy};
 use spotter_core::render::{PageRenderer, RenderError};
@@ -82,19 +83,38 @@ impl Checker {
         folder: Option<&Snapshot>,
         now: Timestamp,
     ) -> Result<Gathered, SourceError> {
+        self.gather_job(watch, secrets, conditional, baseline, folder, now, &Job::none())
+            .await
+    }
+
+    /// [`Checker::gather`] reporting to `job` (a folder's growing count of entries) and stopping when it is cancelled.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn gather_job(
+        &self,
+        watch: &Watch,
+        secrets: &Secrets,
+        conditional: Option<Validators>,
+        baseline: Option<&PageBaseline>,
+        folder: Option<&Snapshot>,
+        now: Timestamp,
+        job: &Job,
+    ) -> Result<Gathered, SourceError> {
         let page = match &watch.source {
             Source::WebPage(p) => Some(p),
             _ => None,
         };
         let (body, validators) = match watch.source.plan(secrets) {
             Plan::Folder(f) => {
-                let scan = spotter_sources::folder::scan(ScanRequest {
-                    source: f,
-                    readable: readable_for(watch),
-                    previous: folder.cloned(),
-                    sample_ignored: 0,
-                    settle: true,
-                })
+                let scan = spotter_sources::folder::scan_job(
+                    ScanRequest {
+                        source: f,
+                        readable: readable_for(watch),
+                        previous: folder.cloned(),
+                        sample_ignored: 0,
+                        settle: true,
+                    },
+                    job,
+                )
                 .await?;
                 return Ok(Gathered::Fresh {
                     candidates: scan.candidates,
