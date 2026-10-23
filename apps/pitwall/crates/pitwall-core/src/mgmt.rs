@@ -212,18 +212,6 @@ pub enum EngineKind {
     /// llama.cpp's llama-server.
     #[serde(rename = "llama.cpp")]
     LlamaCpp,
-    /// Apple MLX.
-    #[serde(rename = "mlx")]
-    Mlx,
-    /// vLLM.
-    #[serde(rename = "vllm")]
-    Vllm,
-    /// whisper.cpp.
-    #[serde(rename = "whisper.cpp")]
-    WhisperCpp,
-    /// A declarative engine pack (ADR 0011).
-    #[serde(rename = "pack")]
-    Pack,
 }
 
 /// A loaded model (`LoadedModel`).
@@ -398,6 +386,21 @@ pub struct Engine {
     pub processes: Vec<EngineProcess>,
     /// The build a roll back returns to.
     pub rollback_to: Option<String>,
+    /// Files of features Pitwall no longer has (an older install's llamafile), offered for removal, never deleted by
+    /// themselves.
+    pub leftovers: Vec<Leftover>,
+}
+
+/// Something an older version left on disk that nothing uses any more (`Leftover`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Leftover {
+    /// What to pass to `remove_leftover` (`pack-llamafile`).
+    pub id: String,
+    /// Its name (`llamafile`).
+    pub label: String,
+    /// Size on disk.
+    pub size_bytes: u64,
 }
 
 /// One model's engine pin (`ModelEnginePin`, ADR 0018).
@@ -740,6 +743,7 @@ pub struct Overview {
     /// Models whose engine crashed and is being restarted or was given up on.
     pub issues: Vec<EngineIssue>,
     /// The automatic llama.cpp install.
+    #[serde(default)]
     pub engine_setup: EngineSetup,
 }
 
@@ -875,9 +879,6 @@ pub struct LocalModel {
     pub pinned: bool,
     /// Own idle time.
     pub idle_secs: Option<u64>,
-    /// The engine pack that serves it (`None`: llama.cpp).
-    #[serde(default)]
-    pub engine: Option<String>,
     /// Parallel slots it loads with (its own preference or the default).
     #[serde(default = "one")]
     pub slots: u32,
@@ -1122,9 +1123,6 @@ pub struct PresetDraft {
     /// System prompt used when the request has none.
     #[serde(default)]
     pub system_prompt: Option<String>,
-    /// Engine override.
-    #[serde(default)]
-    pub engine: Option<String>,
     /// Use the response cache.
     #[serde(default)]
     pub cache_responses: bool,
@@ -1145,7 +1143,6 @@ impl PresetDraft {
             top_p: self.top_p,
             max_tokens: self.max_tokens,
             system_prompt: self.system_prompt,
-            engine: self.engine,
             cache_responses: self.cache_responses,
             keep_warm: self.keep_warm,
         }
@@ -1390,7 +1387,6 @@ mod tests {
     #[test]
     fn shapes_match_api_types_ts() {
         assert_eq!(serde_json::to_value(EngineKind::LlamaCpp).unwrap(), "llama.cpp");
-        assert_eq!(serde_json::to_value(EngineKind::WhisperCpp).unwrap(), "whisper.cpp");
         assert_eq!(
             serde_json::to_value(Availability::Available).unwrap(),
             json!({"state": "available"})
@@ -1597,6 +1593,5 @@ mod tests {
         assert_eq!(m.slots, 1);
         assert!(!m.slots_custom);
         assert_eq!(m.loaded_slots, None);
-        assert_eq!(m.engine, None);
     }
 }

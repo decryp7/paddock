@@ -18,7 +18,7 @@ export function modelLabel(id: string): string {
   return id.replace(/[-.](q\d\w*|f16|bf16|f32)$/i, '');
 }
 
-/** Engine downloads are named `<engine> <build>` (llama.cpp builds and pack engines alike): each card shows only its own. */
+/** Engine downloads are named `<engine> <build>`: the card shows only llama.cpp's. */
 export function ownsDownload(engineName: string, downloadName: string): boolean {
   return downloadName.startsWith(`${engineName} `);
 }
@@ -33,22 +33,14 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let e = engine();
-    <section class="engine" [attr.aria-labelledby]="'eng-' + e.kind">
-      <header class="head">
-        <div class="logo" aria-hidden="true"><mat-icon svgIcon="pw:engines" /></div>
-        <div class="title">
-          <h2 [id]="'eng-' + e.kind">{{ e.name }}</h2>
-          <p class="muted" [matTooltip]="e.description" matTooltipShowDelay="600">{{ e.description }}</p>
-        </div>
-        <span class="status" [attr.data-tone]="look().tone">{{ look().label }}</span>
-      </header>
-
+    <section class="engine" aria-label="llama.cpp">
       <div class="choice">
         <div class="field">
           <label for="build-choice">Build</label>
           <pw-select inputId="build-choice" label="Build" [options]="buildOptions()" [value]="e.buildChoice" [disabled]="store.isBusy()('select') || e.builds.length === 0" (changed)="store.select($event)" />
         </div>
         <p class="hint">Automatic picks the fastest installed build that passed its self-test on this hardware.</p>
+        <span class="status" [attr.data-tone]="look().tone">{{ look().label }}</span>
         @if (rollbackTarget(); as t) {
           <button type="button" class="btn" [disabled]="store.isBusy()('rollback')" (click)="rollback()"><mat-icon svgIcon="pw:rollback" aria-hidden="true" />Roll back to {{ t.label }} {{ t.tag }}</button>
         } @else if (rollbackBlocked(); as why) {
@@ -70,7 +62,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         }
       </div>
       @if (e.builds.length === 0) {
-        <pw-empty-state icon="engines" heading="No build installed" text="Install one from the catalog below; the suggested one suits this machine." />
+        <pw-empty-state icon="engines" heading="No build installed" text="Pitwall installs the build suggested for this machine by itself. You can also install another from the catalog below." />
       } @else {
         <div class="surface">
           <table class="table">
@@ -167,7 +159,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
           </ul>
         }
         <ul class="catalog surface" aria-label="Catalog">
-          @for (c of e.catalog; track c.id + c.tag) {
+          @for (c of catalogRows(); track c.id + c.tag) {
             <li>
               <span class="bname">{{ c.label }}</span>
               <span class="faint num"><span class="mono">{{ c.tag }}</span> · {{ size(c.downloadBytes) }} download</span>
@@ -183,6 +175,19 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
                   <mat-icon svgIcon="pw:download" aria-hidden="true" />Install
                 </button>
               }
+            </li>
+          }
+        </ul>
+      }
+
+      @if (e.leftovers.length) {
+        <div class="section-head"><h3>Left over from an older version</h3></div>
+        <ul class="leftovers surface" aria-label="Left over files">
+          @for (l of e.leftovers; track l.id) {
+            <li>
+              <span class="bname">{{ l.label }}</span>
+              <span class="faint">Pitwall no longer uses it. Nothing is deleted until you remove it.</span>
+              <button type="button" class="btn sm" [disabled]="store.isBusy()('leftover:' + l.id)" (click)="store.removeLeftover(l)">Remove {{ l.label }} ({{ size(l.sizeBytes) }})</button>
             </li>
           }
         </ul>
@@ -228,35 +233,6 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     .engine {
       display: grid;
       gap: var(--sp-3);
-    }
-    .head {
-      display: flex;
-      align-items: flex-start;
-      gap: var(--sp-3);
-    }
-    .logo {
-      display: grid;
-      place-items: center;
-      width: 32px;
-      height: 32px;
-      border-radius: var(--r-md);
-      background: var(--accent-soft);
-      color: var(--accent);
-      flex: none;
-    }
-    .title {
-      flex: 1;
-      min-width: 0;
-      h2 {
-        font-size: var(--fs-lg);
-      }
-      p {
-        margin-top: 2px;
-        overflow: hidden;
-        font-size: var(--fs-sm);
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
     }
     .surface {
       overflow-x: auto;
@@ -364,6 +340,23 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     .warn {
       color: var(--warn);
       font-weight: var(--fw-medium);
+    }
+    .leftovers {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      li {
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--sp-3);
+        min-height: 44px;
+        padding: 0 var(--sp-4);
+        border-top: 1px solid var(--border-soft);
+        &:first-child {
+          border-top: none;
+        }
+      }
     }
     .catalog {
       margin: 0;
@@ -476,7 +469,9 @@ export class EngineCard {
 
   protected readonly capLook = capabilityLook;
   /** Pin controls exist for llama.cpp only (pack engines have a single build), and once the engine reported its pins. */
-  protected readonly canPin = computed(() => this.engine().kind === 'llama.cpp' && this.store.pins() !== null);
+  protected readonly canPin = computed(() => this.store.pins() !== null);
+  /** The catalog with the build suggested for this machine first. */
+  protected readonly catalogRows = computed(() => [...this.engine().catalog].sort((a, b) => Number(b.suggested) - Number(a.suggested)));
   protected readonly capsOpen = signal<ReadonlySet<string>>(new Set());
   protected readonly problems = computed(() => (this.canPin() ? (this.store.pins()?.problems ?? []) : []));
   protected readonly rollbackTarget = computed(() => {

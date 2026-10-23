@@ -40,7 +40,7 @@ describe('Engine pins in the store', () => {
   it('pins a build and unpins it again, toasting what happens to loaded models', async () => {
     const { store, toasts } = setup();
     await store.load();
-    const vulkan = store.available()[0]!.builds.find((b) => b.id === 'vulkan')!;
+    const vulkan = store.llama()!.builds.find((b) => b.id === 'vulkan')!;
     expect(await store.togglePin(vulkan)).toBe(true);
     expect(store.pinnedGlobal()).toBe('vulkan');
     expect(toasts.toasts().at(-1)?.message).toContain('vulkan is pinned for all models');
@@ -52,7 +52,7 @@ describe('Engine pins in the store', () => {
   it('toasts the typed reason when a pin is refused and keeps the last good state', async () => {
     const { store, toasts } = setup();
     await store.load();
-    const cpu = store.available()[0]!.builds.find((b) => b.id === 'cpu')!;
+    const cpu = store.llama()!.builds.find((b) => b.id === 'cpu')!;
     expect(await store.togglePin(cpu)).toBe(false);
     expect(toasts.toasts().at(-1)?.message).toContain('self-test');
     expect(store.pinnedGlobal()).toBeNull();
@@ -124,7 +124,7 @@ describe('Engine pins on the Engines page', () => {
     expect(list.getAttribute('aria-label')).toBe('Features of CPU (AVX2) b4300');
     expect(list.textContent).toContain('Needs b5600');
     expect(list.textContent).toContain('Image input');
-    expect(list.textContent).toContain('Install llama.cpp b5600 or newer in Engines');
+    expect(list.textContent).toContain('Install llama.cpp b5600 or newer on the llama.cpp page');
     expect(list.textContent).toContain('Supported');
     toggle.click();
     await settle();
@@ -160,11 +160,11 @@ describe('Engine pins on the Engines page', () => {
     const backend = new Proxy(mock, {
       get: (t, k) =>
         k === 'enginePins'
-          ? async () => ({ ...(await mock.enginePins()), problems: ['The engine build metal is pinned for all models but is not installed. Install it in Engines, or remove the pin.'] })
+          ? async () => ({ ...(await mock.enginePins()), problems: ['The engine build metal is pinned for all models but is not installed. Install it on the llama.cpp page, or remove the pin.'] })
           : Reflect.get(t, k, t),
     }) as PitwallBackend;
     const { el } = await render(backend);
-    expect(el.querySelector('.pin-problem')?.textContent).toContain('Install it in Engines');
+    expect(el.querySelector('.pin-problem')?.textContent).toContain('Install it on the llama.cpp page');
   });
 
   it('has no pin controls when the engine cannot report pins', async () => {

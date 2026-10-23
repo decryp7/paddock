@@ -125,7 +125,7 @@ impl Supervisor {
         let e = self.entries.get(id).filter(|e| e.state == State::Failed)?;
         Some(format!(
             "the engine for {id} crashed repeatedly ({} times in ten minutes) and Pitwall stopped restarting it. \
-             Check that the model file is complete and the engine build suits this computer (Engines), then press Retry on the Dashboard.",
+             Check that the model file is complete and the engine build suits this computer (the llama.cpp page), then press Retry on the Dashboard.",
             e.backoff.recent_crashes().max(e.crashes as usize)
         ))
     }

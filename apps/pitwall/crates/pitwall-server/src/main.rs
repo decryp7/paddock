@@ -17,7 +17,7 @@ async fn main() {
         match a.as_str() {
             "--port" => port = args.next().and_then(|p| p.parse().ok()),
             "--data-dir" => dir = args.next(),
-            // Test fixture: act as an OpenAI-compatible engine with canned answers (used by engine pack tests).
+            // Test fixture: act as an OpenAI-compatible engine with canned answers (used by the crash and restart tests).
             "--fake-engine" => fake = true,
             "--die-after-ms" => die_after = args.next().and_then(|p| p.parse().ok()),
             "--host" | "--model" => {

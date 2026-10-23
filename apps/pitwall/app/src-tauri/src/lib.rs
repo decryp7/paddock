@@ -163,7 +163,7 @@ pub fn run() {
             commands::set_model_pin,
             commands::build_capabilities,
             commands::packs,
-            commands::set_model_engine,
+            commands::remove_leftover,
             commands::apps,
             commands::create_app,
             commands::delete_app,

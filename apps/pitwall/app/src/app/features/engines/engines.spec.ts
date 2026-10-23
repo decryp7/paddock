@@ -22,13 +22,13 @@ describe('EnginesStore', () => {
     return { store: TestBed.inject(EnginesStore), toasts: TestBed.inject(Toasts) };
   }
 
-  it('loads engines and splits available from planned ones', async () => {
+  it('loads llama.cpp, the only engine', async () => {
     const { store } = setup();
     const p = store.load();
     expect(store.loading()).toBe(true);
     await p;
-    expect(store.available().map((e) => e.kind)).toEqual(['llama.cpp', 'pack']);
-    expect(store.planned().map((e) => e.kind)).toEqual(['whisper.cpp', 'mlx', 'vllm']);
+    expect(store.engines().map((e) => e.kind)).toEqual(['llama.cpp']);
+    expect(store.llama()?.name).toBe('llama.cpp');
   });
 
   it('reports a load error', async () => {
@@ -43,13 +43,13 @@ describe('EnginesStore', () => {
     const { store, toasts } = setup(backend);
     await store.load();
     expect(await store.select('vulkan')).toBe(true);
-    expect(store.available()[0]!.builds.find((b) => b.active)?.id).toBe('vulkan');
+    expect(store.llama()!.builds.find((b) => b.active)?.id).toBe('vulkan');
     expect(await store.select('auto')).toBe(true);
-    expect(store.available()[0]!.buildChoice).toBe('auto');
-    const cpu = store.available()[0]!.builds.find((b) => b.id === 'cpu')!;
+    expect(store.llama()!.buildChoice).toBe('auto');
+    const cpu = store.llama()!.builds.find((b) => b.id === 'cpu')!;
     expect(await store.remove(cpu)).toBe(true);
-    expect(store.available()[0]!.builds.some((b) => b.id === 'cpu')).toBe(false);
-    expect(await store.install(store.available()[0]!.catalog[0]!)).toBe(true);
+    expect(store.llama()!.builds.some((b) => b.id === 'cpu')).toBe(false);
+    expect(await store.install(store.llama()!.catalog[0]!)).toBe(true);
     expect((await backend.downloads())[0]!.kind).toBe('engine');
     expect(await store.rollback()).toBe(true);
     expect(store.pins()?.global).toBe('vulkan');
@@ -60,7 +60,7 @@ describe('EnginesStore', () => {
   it('keeps the data and toasts the reason when an action fails, ignoring repeats in flight', async () => {
     const { store, toasts } = setup();
     await store.load();
-    const active = store.available()[0]!.builds.find((b) => b.active)!;
+    const active = store.llama()!.builds.find((b) => b.active)!;
     expect(await store.remove(active)).toBe(false);
     expect(toasts.toasts().at(-1)?.message).toContain('in use');
     const first = store.rollback();
@@ -110,9 +110,9 @@ describe('EnginesPage', () => {
     expect(modelLabel('nomic-embed-text-v1.5-f16')).toBe('nomic-embed-text-v1.5');
   });
 
-  it('shows llama.cpp builds, the catalog with the suggested build, processes and planned engines', async () => {
+  it('shows llama.cpp builds, the catalog with the suggested build and processes, and no other engines', async () => {
     const { el } = await render();
-    expect(el.querySelector('h2#eng-llama\\.cpp')?.textContent).toContain('llama.cpp');
+    expect(el.querySelector('h1')?.textContent).toContain('llama.cpp');
     expect(el.textContent).toContain('CUDA 13 (NVIDIA)');
     expect(el.textContent).toContain('Self-test passed');
     expect(el.textContent).toContain('Not tested');
@@ -123,9 +123,9 @@ describe('EnginesPage', () => {
     expect(el.querySelector('.tag.upd')).toBeNull();
     expect(el.querySelector('.section-head .link')?.textContent).toContain('Update available');
     expect(el.textContent).toContain('Roll back to Vulkan b11669');
-    const planned = el.querySelectorAll('.planned li');
-    expect(planned.length).toBe(3);
-    expect(planned[1]!.textContent).toContain('MLX runs on Apple silicon only');
+    expect(el.querySelector('.planned')).toBeNull();
+    expect(el.textContent).not.toContain('MLX');
+    expect(el.textContent).not.toContain('Planned');
     // Remove is only in the row menu: nothing destructive at rest.
     expect(el.querySelector('button[aria-label="Remove CUDA 13 (NVIDIA) b11669"]')).toBeNull();
   });
@@ -201,12 +201,28 @@ describe('EnginesPage', () => {
     llama.catalog.forEach((c) => (c.installed = false));
     backend.engines = () => Promise.resolve([llama]);
     const { el } = await render(backend);
-    expect(el.querySelector('h2#eng-llama\\.cpp')?.textContent).toContain('llama.cpp');
+    expect(el.querySelector('h1')?.textContent).toContain('llama.cpp');
     expect(el.querySelector('.planned')).toBeNull();
     const rows = Array.from(el.querySelectorAll('.catalog li'));
     expect(rows.length).toBe(llama.catalog.length);
     expect(rows[0]!.querySelector('.rec')?.textContent).toContain('Suggested');
     expect(rows[0]!.querySelector('button')?.textContent).toContain('Install');
-    expect(el.textContent).not.toContain('in Engines');
+    expect(el.textContent).not.toContain('Open the llama.cpp page');
+    expect(el.textContent).toContain('installs the build suggested');
+  });
+
+  it('offers the leftover llamafile for one-click removal and never removes it by itself', async () => {
+    const backend = new MockBackend();
+    const { el, settle } = await render(backend);
+    const row = el.querySelector('.leftovers li')!;
+    expect(row.textContent).toContain('llamafile');
+    expect(row.textContent).toContain('Nothing is deleted until you remove it');
+    expect((await backend.engines())[0]!.leftovers.length).toBe(1);
+    const btn = row.querySelector('button')!;
+    expect(btn.textContent).toContain('Remove llamafile (351 MB)');
+    btn.click();
+    await settle();
+    expect((await backend.engines())[0]!.leftovers).toEqual([]);
+    expect(el.querySelector('.leftovers')).toBeNull();
   });
 });

@@ -94,7 +94,6 @@ impl Validate for PresetDraft {
     fn validate(&self, field: &str) -> Result<(), CommandError> {
         self.alias.validate(field)?;
         self.target.validate(field)?;
-        self.engine.validate(field)?;
         // The server re-validates (and refuses over its own limit); this only stops absurd sizes being relayed.
         if self
             .system_prompt
@@ -298,8 +297,8 @@ rpc!(
     /// Engine packs.
     packs => "packs");
 rpc!(
-    /// Chooses the engine a model runs on.
-    set_model_engine => "set_model_engine", id: String = "id", engine: Option<String> = "engine");
+    /// Removes something an older version left on disk (a llamafile download), on the user's request.
+    remove_leftover => "remove_leftover", id: String = "id");
 rpc!(
     /// Registered apps.
     apps => "apps");
@@ -504,7 +503,6 @@ mod tests {
             top_p: None,
             max_tokens: None,
             system_prompt: None,
-            engine: None,
             cache_responses: false,
             keep_warm: false,
         };

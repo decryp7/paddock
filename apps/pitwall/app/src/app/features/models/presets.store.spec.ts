@@ -12,7 +12,7 @@ function setup(backend: PitwallBackend = new MockBackend()) {
 }
 
 const failing = (...methods: (keyof PitwallBackend)[]) => new MockBackend({ failing: methods } as MockOptions);
-const draft = (alias: string, target = 'qwen3-8b-instruct-q4_k_m'): PresetDraft => ({ alias, target, context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null, cacheResponses: false, keepWarm: false });
+const draft = (alias: string, target = 'qwen3-8b-instruct-q4_k_m'): PresetDraft => ({ alias, target, context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, cacheResponses: false, keepWarm: false });
 
 describe('PresetsStore', () => {
   afterEach(() => vi.useRealTimers());

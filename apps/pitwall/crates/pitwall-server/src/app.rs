@@ -4,7 +4,7 @@
 use crate::auth::{Auth, Principal};
 use crate::caches::Caches;
 use crate::egress::Egress;
-use crate::engines::{Engine, LlamaCpp, Planned};
+use crate::engines::{Engine, LlamaCpp};
 use crate::library::Library;
 use crate::paths::{self, now_ms, Dirs};
 use crate::serving::{EngineFail, Resolved, Serving};
@@ -17,7 +17,7 @@ use pitwall_core::hardware::Hardware;
 use pitwall_core::ids::{AppId, ModelId};
 use pitwall_core::limits;
 use pitwall_core::metrics::{Metrics, Sample};
-use pitwall_core::mgmt::{self, ChosenBy, EngineKind, LiveUpdate, RequestRecord, Throughput};
+use pitwall_core::mgmt::{self, ChosenBy, LiveUpdate, RequestRecord, Throughput};
 use pitwall_core::runtimes::BuildChoice;
 use pitwall_core::scheduler::{JobKind, Priority};
 use pitwall_core::select::Capability;
@@ -50,12 +50,10 @@ pub struct AppState {
     pub egress: Egress,
     /// llama.cpp installs.
     pub llama: LlamaCpp,
-    /// All engines (llama.cpp first).
-    pub engines: Vec<Arc<dyn Engine>>,
-    /// Declarative packs (ADR 0011).
+    /// The engine that serves models (llama.cpp; tests substitute a fake).
+    pub engine: Arc<dyn Engine>,
+    /// Model catalog packs (ADR 0011, ADR 0020).
     pub packs: pitwall_core::packs::Packs,
-    /// Engines declared by engine packs.
-    pub pack_engines: Vec<crate::pack_engine::PackEngine>,
     /// Models.
     pub library: Library,
     /// Loading, queue and release.
@@ -128,41 +126,11 @@ impl AppState {
         };
         let overridden = engine_override.is_some();
         let engine: Arc<dyn Engine> = engine_override.unwrap_or_else(|| Arc::new(llama.clone()));
-        let mut engines: Vec<Arc<dyn Engine>> = vec![engine.clone()];
-        let planned = |kind, reason: &str| {
-            Arc::new(Planned {
-                kind,
-                reason: reason.into(),
-            }) as Arc<dyn Engine>
-        };
-        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            engines.push(planned(
-                EngineKind::Mlx,
-                "MLX (Apple Silicon) is planned; llama.cpp with Metal serves models today.",
-            ));
-        } else {
-            engines.push(planned(EngineKind::Mlx, "MLX needs an Apple Silicon Mac."));
-        }
-        engines.push(planned(
-            EngineKind::Vllm,
-            if cfg!(target_os = "linux") {
-                "vLLM is planned for Linux machines with an NVIDIA GPU."
-            } else {
-                "vLLM runs on Linux with an NVIDIA GPU only."
-            },
-        ));
-        engines.push(planned(EngineKind::WhisperCpp, "whisper.cpp speech-to-text is planned."));
         let packs = load_packs(&dirs);
-        let pack_engines: Vec<crate::pack_engine::PackEngine> = packs
-            .engines
-            .iter()
-            .map(|p| crate::pack_engine::PackEngine::new(p.clone(), dirs.clone(), egress.clone()))
-            .collect();
         let library = Library::new(dirs.clone(), egress.clone());
         let events = Arc::new(Mutex::new(EventLog::default()));
         let settings = Arc::new(RwLock::new(settings));
-        let serving = Serving::new(engine, library.clone(), settings.clone(), hardware.clone(), events.clone());
-        serving.set_pack_engines(pack_engines.iter().cloned().map(|p| Arc::new(p) as Arc<dyn Engine>).collect());
+        let serving = Serving::new(engine.clone(), library.clone(), settings.clone(), hardware.clone(), events.clone());
         let auth = Auth::open(dirs.clone());
         let metrics = std::fs::read_to_string(dirs.metrics())
             .ok()
@@ -194,9 +162,8 @@ impl AppState {
             offline,
             egress,
             llama,
-            engines,
+            engine,
             packs,
-            pack_engines,
             library,
             serving,
             auth,
@@ -260,7 +227,7 @@ impl AppState {
                 EventKind::RequestFailed,
                 Severity::Warn,
                 format!(
-                    "The engine pins file was damaged: {} pin(s) were left out. Check Engines.",
+                    "The engine pins file was damaged: {} pin(s) were left out. Check the llama.cpp page.",
                     stored_pins.skipped
                 ),
             );
@@ -424,13 +391,6 @@ impl AppState {
     /// Writes the engine pins (atomic, with a backup).
     pub fn save_pins(&self, pins: &pitwall_core::runtimes::pins::EnginePins) -> std::io::Result<()> {
         paths::write_atomic(&self.dirs.engine_pins(), pins.to_json().as_bytes())
-    }
-
-    /// The engine ids a preset may name: llama.cpp and the loaded engine packs.
-    pub fn preset_engines(&self) -> Vec<String> {
-        std::iter::once("llama.cpp".to_string())
-            .chain(self.pack_engines.iter().map(|p| p.id()))
-            .collect()
     }
 
     /// Writes the per-app usage (atomic, with a backup). Failures are ignored: usage is rebuilt as requests arrive.
@@ -1070,16 +1030,10 @@ pub fn load_packs(dirs: &Dirs) -> pitwall_core::packs::Packs {
             }
         }
     }
-    let builtin = [
-        (
-            "llamafile.engine.toml",
-            include_str!("../../pitwall-core/src/packs/llamafile.engine.toml"),
-        ),
-        (
-            "starter.models.toml",
-            include_str!("../../pitwall-core/src/packs/starter.models.toml"),
-        ),
-    ];
+    let builtin = [(
+        "starter.models.toml",
+        include_str!("../../pitwall-core/src/packs/starter.models.toml"),
+    )];
     let all: Vec<(&str, &str)> = builtin
         .iter()
         .copied()

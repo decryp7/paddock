@@ -1,17 +1,10 @@
-//! Declarative packs (ADR 0011): TOML files that extend Pitwall without code.
-//!
-//! - **Engine packs** describe any local engine that serves an OpenAI-compatible API (llamafile, KoboldCpp,
-//!   `mlx_lm.server`, vLLM, ...): how to launch it, its health endpoint, capabilities, the pinned and checksummed
-//!   download per platform and memory hints.
-//! - **Model catalog packs** list curated models (Hugging Face repo, quantisation variants, context, capabilities,
-//!   tags) for the library's "will this fit?" and recommendations.
+//! Model catalog packs (ADR 0011, narrowed by ADR 0020): TOML files that list curated models for the library's
+//! "will this fit?" and the recommendations. Engine packs no longer exist: llama.cpp is the only engine.
 //!
 //! Packs are parsed once, here, into typed values. Unknown keys are warnings; an invalid pack is skipped with a
-//! message that says what to fix; one bad pack never stops the others. Downloads can only name hosts on the
-//! privacy allow-list, so a pack cannot add an outbound destination.
+//! message that says what to fix; one bad pack never stops the others.
 
 use crate::fit::{self, Fit, ModelSize, Room, Verdict};
-use crate::privacy::DownloadUrl;
 use crate::select::Capability;
 use serde::{Deserialize, Serialize};
 
@@ -19,22 +12,8 @@ use serde::{Deserialize, Serialize};
 pub const FORMAT: u32 = 1;
 /// Largest pack file accepted.
 pub const MAX_PACK_BYTES: usize = 256 * 1024;
-const MAX_ARGS: usize = 64;
 const MAX_MODELS: usize = 500;
 const MAX_VARIANTS: usize = 32;
-
-/// The placeholders an argument template may use.
-pub const PLACEHOLDERS: &[&str] = &[
-    "host",
-    "port",
-    "model",
-    "mmproj",
-    "context",
-    "alias",
-    "threads",
-    "engine_dir",
-    "binary",
-];
 
 /// A problem with a pack, attributed to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,77 +22,6 @@ pub struct Problem {
     pub file: String,
     /// What to fix.
     pub message: String,
-}
-
-/// How a download is unpacked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Archive {
-    /// The download is the executable itself.
-    None,
-    /// A zip archive.
-    Zip,
-    /// A gzip-compressed tar archive.
-    TarGz,
-}
-
-/// One pinned download for a platform.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Download {
-    /// `windows-x64`, `macos-arm64`, `linux-x64`, ...
-    pub platform: String,
-    /// The checked URL.
-    pub url: DownloadUrl,
-    /// SHA-256, lowercase hex.
-    pub sha256: String,
-    /// Size in bytes.
-    pub size: u64,
-    /// How to unpack it.
-    pub archive: Archive,
-    /// The executable's file name inside the install folder.
-    pub binary: String,
-}
-
-/// What an engine can do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct EngineCaps {
-    /// Chat completions.
-    pub chat: bool,
-    /// Embeddings.
-    pub embeddings: bool,
-    /// Image input.
-    pub vision: bool,
-    /// Tool calls.
-    pub tools: bool,
-}
-
-/// A validated engine pack.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnginePack {
-    /// Its id (`llamafile`).
-    pub id: String,
-    /// Display name.
-    pub name: String,
-    /// One sentence.
-    pub description: String,
-    /// The pinned engine version.
-    pub version: String,
-    /// What it can do.
-    pub caps: EngineCaps,
-    /// Command template (placeholders in braces).
-    pub command: String,
-    /// Argument templates.
-    pub args: Vec<String>,
-    /// Environment variable that receives a private API key, when the engine supports one.
-    pub api_key_env: Option<String>,
-    /// Health check path.
-    pub health_path: String,
-    /// Extra memory the engine needs on top of the model.
-    pub overhead_bytes: u64,
-    /// Seconds to wait for the engine to become healthy.
-    pub start_timeout_secs: u64,
-    /// Downloads per platform.
-    pub downloads: Vec<Download>,
 }
 
 /// One quantisation of a catalog model.
@@ -160,8 +68,6 @@ pub struct Recommendation {
 /// Everything loaded from a set of pack files.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Packs {
-    /// Engine packs.
-    pub engines: Vec<EnginePack>,
     /// Catalog models (later packs replace earlier ones with the same model id).
     pub models: Vec<CatalogModel>,
     /// Packs that were skipped.
@@ -175,61 +81,6 @@ fn is_slug(s: &str) -> bool {
         && s.len() <= 64
         && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         && s.starts_with(|c: char| c.is_ascii_alphanumeric())
-}
-
-fn is_sha256(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-}
-
-fn is_platform(s: &str) -> bool {
-    matches!(
-        s,
-        "windows-x64" | "windows-arm64" | "macos-arm64" | "macos-x64" | "linux-x64" | "linux-arm64"
-    )
-}
-
-fn is_file_name(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 200
-        && !s.starts_with('.')
-        && !s.contains("..")
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
-}
-
-/// The placeholders used in a template, or the first malformed one.
-pub fn placeholders(template: &str) -> Result<Vec<&str>, String> {
-    let mut out = vec![];
-    let mut rest = template;
-    while let Some(i) = rest.find(['{', '}']) {
-        if rest.as_bytes()[i] == b'}' {
-            return Err(format!("a stray \"}}\" in \"{template}\""));
-        }
-        let after = &rest[i + 1..];
-        let j = after.find('}').ok_or_else(|| format!("an unclosed \"{{\" in \"{template}\""))?;
-        out.push(&after[..j]);
-        rest = &after[j + 1..];
-    }
-    Ok(out)
-}
-
-/// Fill a template; every placeholder must be in `values`.
-pub fn fill(template: &str, values: &[(&str, String)]) -> Result<String, String> {
-    let mut out = String::new();
-    let mut rest = template;
-    while let Some(i) = rest.find('{') {
-        out.push_str(&rest[..i]);
-        let after = &rest[i + 1..];
-        let j = after.find('}').ok_or("unclosed placeholder")?;
-        let name = &after[..j];
-        let v = values
-            .iter()
-            .find(|(k, _)| *k == name)
-            .ok_or_else(|| format!("no value for {{{name}}}"))?;
-        out.push_str(&v.1);
-        rest = &after[j + 1..];
-    }
-    out.push_str(rest);
-    Ok(out)
 }
 
 type Table = toml::map::Map<String, toml::Value>;
@@ -250,197 +101,6 @@ fn s(t: &Table, k: &str) -> Option<String> {
 
 fn u(t: &Table, k: &str) -> Option<u64> {
     t.get(k).and_then(toml::Value::as_integer).and_then(|n| u64::try_from(n).ok())
-}
-
-fn b(t: &Table, k: &str) -> bool {
-    t.get(k).and_then(toml::Value::as_bool).unwrap_or(false)
-}
-
-fn sub<'a>(t: &'a Table, k: &str) -> Option<&'a Table> {
-    t.get(k).and_then(toml::Value::as_table)
-}
-
-/// Parse an engine pack.
-pub fn parse_engine(text: &str, file: &str, warnings: &mut Vec<Problem>) -> Result<EnginePack, String> {
-    if text.len() > MAX_PACK_BYTES {
-        return Err("the pack file is too large".into());
-    }
-    let t: Table = toml::from_str(text).map_err(|e| format!("not valid TOML: {}", e.message()))?;
-    if u(&t, "format") != Some(u64::from(FORMAT)) {
-        return Err(format!("\"format\" must be {FORMAT}"));
-    }
-    warn_unknown(
-        &t,
-        &[
-            "format",
-            "id",
-            "name",
-            "description",
-            "version",
-            "capabilities",
-            "launch",
-            "health",
-            "memory",
-            "download",
-        ],
-        "",
-        file,
-        warnings,
-    );
-    let id = s(&t, "id")
-        .filter(|i| is_slug(i))
-        .ok_or("\"id\" must be 1 to 64 letters, digits, - _ . ")?;
-    if id == "llama.cpp" || id == "llamacpp" {
-        return Err("\"id\" clashes with the built-in llama.cpp engine".into());
-    }
-    let name = s(&t, "name")
-        .filter(|n| !n.trim().is_empty() && n.len() <= 80)
-        .ok_or("\"name\" is required (at most 80 characters)")?;
-    let version = s(&t, "version")
-        .filter(|v| is_file_name(v))
-        .ok_or("\"version\" is required: pin the engine version")?;
-    let c = sub(&t, "capabilities").ok_or("[capabilities] is required")?;
-    warn_unknown(c, &["chat", "embeddings", "vision", "tools"], "capabilities.", file, warnings);
-    let caps = EngineCaps {
-        chat: b(c, "chat"),
-        embeddings: b(c, "embeddings"),
-        vision: b(c, "vision"),
-        tools: b(c, "tools"),
-    };
-    if !caps.chat && !caps.embeddings {
-        return Err("[capabilities] must enable chat or embeddings".into());
-    }
-    let l = sub(&t, "launch").ok_or("[launch] is required")?;
-    warn_unknown(
-        l,
-        &["command", "args", "api_key_env", "start_timeout_secs"],
-        "launch.",
-        file,
-        warnings,
-    );
-    let command = s(l, "command")
-        .filter(|c| !c.is_empty() && c.len() <= 300)
-        .ok_or("launch.command is required")?;
-    let args: Vec<String> = l
-        .get("args")
-        .and_then(toml::Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-        .unwrap_or_default();
-    if args.len() > MAX_ARGS || args.iter().any(|a| a.len() > 300 || a.chars().any(char::is_control)) {
-        return Err(format!(
-            "launch.args must have at most {MAX_ARGS} entries without control characters"
-        ));
-    }
-    let mut used: Vec<String> = vec![];
-    for tpl in std::iter::once(&command).chain(args.iter()) {
-        for p in placeholders(tpl)? {
-            if !PLACEHOLDERS.contains(&p) {
-                return Err(format!(
-                    "unknown placeholder {{{p}}}; use one of {}",
-                    PLACEHOLDERS.iter().map(|p| format!("{{{p}}}")).collect::<Vec<_>>().join(", ")
-                ));
-            }
-            used.push(p.to_string());
-        }
-    }
-    for need in ["host", "port", "model"] {
-        if !used.iter().any(|p| p == need) {
-            return Err(format!("launch.args must use {{{need}}}: the engine has to bind 127.0.0.1 on the port Pitwall picks and load the model it is given"));
-        }
-    }
-    if args.iter().any(|a| a == "0.0.0.0" || a == "::" || a.starts_with("--host=0")) {
-        return Err("launch.args must not bind all interfaces; use {host}".into());
-    }
-    let api_key_env = s(l, "api_key_env");
-    if api_key_env
-        .as_deref()
-        .is_some_and(|e| e.is_empty() || !e.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
-    {
-        return Err("launch.api_key_env must be an UPPER_CASE variable name".into());
-    }
-    let start_timeout_secs = u(l, "start_timeout_secs").unwrap_or(300).clamp(5, 1800);
-    let h = sub(&t, "health").ok_or("[health] is required")?;
-    warn_unknown(h, &["path"], "health.", file, warnings);
-    let health_path = s(h, "path")
-        .filter(|p| p.starts_with('/') && !p.contains(' ') && p.len() <= 100)
-        .ok_or("health.path must start with /")?;
-    let overhead_bytes = sub(&t, "memory").and_then(|m| u(m, "overhead_mib")).unwrap_or(512).min(1 << 20) << 20;
-    if let Some(m) = sub(&t, "memory") {
-        warn_unknown(m, &["overhead_mib"], "memory.", file, warnings);
-    }
-    let mut downloads = vec![];
-    for (i, d) in t
-        .get("download")
-        .and_then(toml::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-    {
-        let d = d.as_table().ok_or_else(|| format!("download #{} is not a table", i + 1))?;
-        warn_unknown(
-            d,
-            &["platform", "url", "sha256", "size", "archive", "binary"],
-            "download.",
-            file,
-            warnings,
-        );
-        let platform = s(d, "platform").filter(|p| is_platform(p)).ok_or_else(|| {
-            format!(
-                "download #{}: \"platform\" must be windows-x64, windows-arm64, macos-arm64, macos-x64, linux-x64 or linux-arm64",
-                i + 1
-            )
-        })?;
-        let url = s(d, "url")
-            .ok_or_else(|| format!("download #{}: \"url\" is required", i + 1))
-            .and_then(|u| DownloadUrl::parse(&u).map_err(|e| format!("download #{}: {e}", i + 1)))?;
-        let sha256 = s(d, "sha256")
-            .map(|h| h.to_ascii_lowercase())
-            .filter(|h| is_sha256(h))
-            .ok_or_else(|| {
-                format!(
-                    "download #{}: \"sha256\" must be 64 hex characters: downloads are always verified",
-                    i + 1
-                )
-            })?;
-        let size = u(d, "size")
-            .filter(|n| *n > 0)
-            .ok_or_else(|| format!("download #{}: \"size\" is required", i + 1))?;
-        let archive: Archive = d
-            .get("archive")
-            .cloned()
-            .unwrap_or_else(|| toml::Value::String("none".into()))
-            .try_into()
-            .map_err(|_| format!("download #{}: \"archive\" must be none, zip or tar-gz", i + 1))?;
-        let binary = s(d, "binary")
-            .filter(|b| is_file_name(b))
-            .ok_or_else(|| format!("download #{}: \"binary\" must be a plain file name", i + 1))?;
-        if downloads.iter().any(|x: &Download| x.platform == platform) {
-            return Err(format!("download #{}: platform {platform} is listed twice", i + 1));
-        }
-        downloads.push(Download {
-            platform,
-            url,
-            sha256,
-            size,
-            archive,
-            binary,
-        });
-    }
-    Ok(EnginePack {
-        id,
-        name,
-        description: s(&t, "description").unwrap_or_default(),
-        version,
-        caps,
-        command,
-        args,
-        api_key_env,
-        health_path,
-        overhead_bytes,
-        start_timeout_secs,
-        downloads,
-    })
 }
 
 /// Parse a model catalog pack.
@@ -541,24 +201,13 @@ pub fn parse_models(text: &str, file: &str, warnings: &mut Vec<Problem>) -> Resu
 }
 
 impl Packs {
-    /// Load packs from `(file name, text)` pairs; files named `*.engine.toml` are engine packs, `*.models.toml`
-    /// catalog packs, anything else is reported. Later files win on a clashing id (user packs after built-ins).
+    /// Load packs from `(file name, text)` pairs; files named `*.models.toml` are catalog packs, anything else is
+    /// reported. Later files win on a clashing id (user packs after built-ins).
     pub fn load<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Packs {
         let mut p = Packs::default();
         for (name, text) in files {
             let mut w = vec![];
-            if name.ends_with(".engine.toml") {
-                match parse_engine(text, name, &mut w) {
-                    Ok(e) => {
-                        p.engines.retain(|x| x.id != e.id);
-                        p.engines.push(e);
-                    }
-                    Err(m) => p.problems.push(Problem {
-                        file: name.into(),
-                        message: m,
-                    }),
-                }
-            } else if name.ends_with(".models.toml") {
+            if name.ends_with(".models.toml") {
                 match parse_models(text, name, &mut w) {
                     Ok(ms) => {
                         for m in ms {
@@ -574,7 +223,7 @@ impl Packs {
             } else {
                 p.problems.push(Problem {
                     file: name.into(),
-                    message: "pack files are named *.engine.toml or *.models.toml".into(),
+                    message: "pack files are named *.models.toml".into(),
                 });
             }
             p.warnings.extend(w);
@@ -584,10 +233,7 @@ impl Packs {
 
     /// The built-in packs.
     pub fn builtin() -> Packs {
-        Packs::load([
-            ("llamafile.engine.toml", include_str!("packs/llamafile.engine.toml")),
-            ("starter.models.toml", include_str!("packs/starter.models.toml")),
-        ])
+        Packs::load([("starter.models.toml", include_str!("packs/starter.models.toml"))])
     }
 }
 
@@ -628,88 +274,6 @@ pub fn recommend(models: &[CatalogModel], tag: Option<&str>, room: &Room) -> Vec
 mod tests {
     use super::*;
     use crate::GIB;
-
-    fn engine(extra: &str) -> String {
-        format!(
-            r#"format = 1
-id = "kobold"
-name = "KoboldCpp"
-version = "1.2.3"
-[capabilities]
-chat = true
-[launch]
-command = "{{engine_dir}}/{{binary}}"
-args = ["--host", "{{host}}", "--port", "{{port}}", "-m", "{{model}}"]
-[health]
-path = "/health"
-{extra}"#
-        )
-    }
-
-    const DL: &str = r#"[[download]]
-platform = "linux-x64"
-url = "https://github.com/x/y/releases/download/1/k.tar.gz"
-sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-size = 10
-archive = "tar-gz"
-binary = "kobold"
-"#;
-
-    fn err(text: &str) -> String {
-        parse_engine(text, "t.engine.toml", &mut vec![]).unwrap_err()
-    }
-
-    #[test]
-    fn a_good_engine_pack_parses() {
-        let mut w = vec![];
-        let e = parse_engine(&engine(&format!("{DL}\n[memory]\noverhead_mib = 100\n")), "k.engine.toml", &mut w).unwrap();
-        assert_eq!(
-            (e.id.as_str(), e.version.as_str(), e.overhead_bytes, e.downloads[0].archive),
-            ("kobold", "1.2.3", 100 << 20, Archive::TarGz)
-        );
-        assert_eq!(e.downloads[0].url.host(), "github.com");
-        assert!(w.is_empty());
-    }
-
-    #[test]
-    fn unknown_keys_are_warnings() {
-        let mut w = vec![];
-        parse_engine(&engine("mystery = 1\n"), "k.engine.toml", &mut w).unwrap();
-        assert!(w[0].message.contains("mystery"));
-    }
-
-    #[test]
-    fn invalid_engine_packs_say_what_to_fix() {
-        assert!(err("not toml [").contains("not valid TOML"));
-        assert!(err(&engine("").replace("format = 1", "format = 2")).contains("format"));
-        assert!(err(&engine("").replace("id = \"kobold\"", "id = \"llama.cpp\"")).contains("clashes"));
-        assert!(err(&engine("").replace("version = \"1.2.3\"\n", "")).contains("pin"));
-        assert!(err(&engine("").replace("chat = true", "chat = false")).contains("chat or embeddings"));
-        assert!(err(&engine("").replace("\"{host}\"", "\"0.0.0.0\"")).contains("{host}"));
-        assert!(err(&engine("").replace("{port}", "{nope}")).contains("unknown placeholder"));
-        assert!(err(&engine("").replace("\"-m\", \"{model}\"", "\"-m\", \"{model\"")).contains("unclosed"));
-        assert!(err(&engine("").replace("path = \"/health\"", "path = \"health\"")).contains("health.path"));
-        let bad_url = DL.replace("https://github.com/x/y", "https://evil.example/x");
-        assert!(err(&engine(&bad_url)).contains("only downloads from"));
-        let no_sha = DL.replace("0000000000000000000000000000000000000000000000000000000000000000", "abc");
-        assert!(err(&engine(&no_sha)).contains("sha256"));
-        assert!(err(&engine(&DL.replace("linux-x64", "plan9"))).contains("platform"));
-        assert!(err(&engine(&DL.replace("tar-gz", "rar"))).contains("archive"));
-        assert!(err(&engine(&format!("{DL}{DL}"))).contains("twice"));
-        assert!(err(&engine(&DL.replace("\"kobold\"", "\"../x\""))).contains("binary"));
-        assert!(err(&engine("").replace("[launch]", "[launch]\napi_key_env = \"lower\"")).contains("UPPER_CASE"));
-        assert!(err(&"x".repeat(MAX_PACK_BYTES + 1)).contains("too large"));
-    }
-
-    #[test]
-    fn templates_are_filled_or_refused() {
-        assert_eq!(placeholders("{a} x {b}").unwrap(), ["a", "b"]);
-        assert!(placeholders("a}").is_err());
-        let v = [("port", "1234".to_string())];
-        assert_eq!(fill("--port={port}", &v).unwrap(), "--port=1234");
-        assert!(fill("{model}", &v).is_err());
-        assert!(fill("{port", &v).is_err());
-    }
 
     const MODELS: &str = r#"format = 1
 id = "mine"
@@ -776,14 +340,13 @@ variants = [{ quant = "Q4_K_M", file = "huge-q4.gguf", size_bytes = 90000000000 
     #[test]
     fn loading_isolates_bad_packs_and_later_packs_win() {
         let p = Packs::load([
-            ("a.engine.toml", engine("").as_str()),
-            ("bad.engine.toml", "nope ["),
+            ("bad.models.toml", "nope ["),
             ("readme.txt", "x"),
+            ("old.engine.toml", "format = 1"),
             ("m.models.toml", MODELS),
             ("n.models.toml", &MODELS.replace("o/tiny", "o/tiny2")),
         ]);
-        assert_eq!(p.engines.len(), 1);
-        assert_eq!(p.problems.len(), 2);
+        assert_eq!(p.problems.len(), 3);
         assert_eq!(p.models.iter().find(|m| m.id == "tiny").map(|m| m.repo.as_str()), Some("o/tiny2"));
     }
 
@@ -792,25 +355,11 @@ variants = [{ quant = "Q4_K_M", file = "huge-q4.gguf", size_bytes = 90000000000 
         let p = Packs::builtin();
         assert!(p.problems.is_empty(), "{:?}", p.problems);
         assert!(p.warnings.is_empty(), "{:?}", p.warnings);
-        assert_eq!(p.engines[0].id, "llamafile");
-        assert!(p.engines[0].downloads.len() >= 5);
         assert!(p.models.iter().any(|m| m.tags.iter().any(|t| t == "code")));
     }
 
     #[test]
     fn structural_mistakes_are_named() {
-        let base = engine("");
-        let e = |t: &str| err(t);
-        assert!(e(&base.replace("[capabilities]\nchat = true\n", "")).contains("[capabilities]"));
-        assert!(e(&base.replace("[launch]", "[xlaunch]")).contains("[launch]"));
-        assert!(e(&base.replace("[health]\npath = \"/health\"\n", "")).contains("[health]"));
-        assert!(e(&base.replace("command = \"{engine_dir}/{binary}\"", "")).contains("launch.command"));
-        assert!(e(&base.replace("name = \"KoboldCpp\"\n", "")).contains("name"));
-        assert!(e(&base.replace("id = \"kobold\"", "id = \"-bad\"")).contains("id"));
-        assert!(e(&base.replace("args = [", "args = [\"a\\u0001\", ")).contains("control"));
-        assert!(e(&base.replace("[capabilities]", "download = [1]\n[capabilities]")).contains("not a table"));
-        let many: Vec<String> = (0..70).map(|i| format!("\"{{host}}{{port}}{{model}}{i}\"")).collect();
-        assert!(e(&base.replace("args = [", &format!("args = [{}, ", many.join(", ")))).contains("at most"));
         let ok = |t: &str| parse_models(t, "m", &mut vec![]).unwrap_err();
         assert!(ok("format = 2").contains("format"));
         assert!(ok("not toml [").contains("TOML"));

@@ -83,19 +83,19 @@ describe('Per-model engine pins in the library', () => {
   it('toasts the reason and keeps the state when a pin is refused', async () => {
     const mock = new MockBackend();
     const backend = new Proxy(mock, {
-      get: (t, k) => (k === 'setModelPin' ? () => Promise.reject({ code: 'notFound', message: 'The engine build metal is pinned for x but is not installed. Install it in Engines, or remove the pin.' }) : Reflect.get(t, k, t)),
+      get: (t, k) => (k === 'setModelPin' ? () => Promise.reject({ code: 'notFound', message: 'The engine build metal is pinned for x but is not installed. Install it on the llama.cpp page, or remove the pin.' }) : Reflect.get(t, k, t)),
     }) as PitwallBackend;
     const { el, settle, toasts, open } = await render(backend);
     await open();
     await pickOption(el.querySelector<HTMLButtonElement>('pw-select button[id^="pin-"]')!, 'Pin to Vulkan b11669', settle);
-    expect(toasts.toasts().at(-1)?.message).toContain('Install it in Engines');
+    expect(toasts.toasts().at(-1)?.message).toContain('Install it on the llama.cpp page');
     expect(el.querySelector('.pinned-build')).toBeNull();
   });
 
   it('exposes the pinnable builds and a model\'s pin from the store', async () => {
     TestBed.configureTestingModule({ providers: [ModelsStore, { provide: BACKEND, useValue: new MockBackend() }] });
     const store = TestBed.inject(ModelsStore);
-    await store.loadInstalledPacks();
+    await store.loadBuilds();
     expect(store.pinnableBuilds().map((b) => b.id)).toEqual(['cuda-13', 'vulkan']);
     expect(store.pinOf()('anything')).toBeNull();
   });

@@ -144,7 +144,11 @@ impl TrayModel {
             LiveUpdate::Throughput { throughput } => self.gen_tps = throughput.gen_tps,
             LiveUpdate::Server { server } => self.paused = server.serving == ServingState::Paused,
             LiveUpdate::Pairing { pairings } => self.pairings = pairings.len(),
-            LiveUpdate::Memory { .. } | LiveUpdate::Event { .. } | LiveUpdate::Download { .. } | LiveUpdate::Issues { .. } => {}
+            LiveUpdate::Memory { .. }
+            | LiveUpdate::Event { .. }
+            | LiveUpdate::Download { .. }
+            | LiveUpdate::EngineSetup { .. }
+            | LiveUpdate::Issues { .. } => {}
         }
     }
 

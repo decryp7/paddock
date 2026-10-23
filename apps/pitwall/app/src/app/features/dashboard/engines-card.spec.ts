@@ -36,15 +36,15 @@ describe('EnginesCard', () => {
   });
 
   it('shows the reason an engine is unavailable and dims it', async () => {
-    const { el } = await mount();
+    const { el } = await mount((o) => ({ ...o, engines: [tile({ availability: { state: 'notInstalled', reason: 'No llama.cpp build is installed yet.' }, activeBuild: null, processes: 0 })] }));
     const off = Array.from(el.querySelectorAll('li')).filter((l) => l.classList.contains('off'));
-    expect(off.length).toBeGreaterThan(0);
-    expect(off[0]!.querySelector('.sub')!.textContent!.trim().length).toBeGreaterThan(5);
+    expect(off.length).toBe(1);
+    expect(off[0]!.querySelector('.sub')!.textContent).toContain('No llama.cpp build is installed yet.');
     expect(off[0]!.querySelector('.status')!.textContent).toMatch(/Not installed|Not available/);
   });
 
   it('uses the singular for one process and a placeholder for no build', async () => {
-    const { el } = await mount((o) => ({ ...o, engines: [tile({ processes: 1 }), tile({ kind: 'pack', name: 'Pack', activeBuild: null, processes: 0 })] }));
+    const { el } = await mount((o) => ({ ...o, engines: [tile({ processes: 1 }), tile({ name: 'Second', activeBuild: null, processes: 0 })] }));
     const subs = Array.from(el.querySelectorAll('.sub')).map((s) => s.textContent!.replace(/\s+/g, ' ').trim());
     expect(subs).toEqual(['cuda-13 · b1 · 1 process', 'no build · 0 processes']);
   });

@@ -382,66 +382,31 @@ async fn embeddings_need_an_embedding_model() {
 }
 
 #[tokio::test]
-async fn an_engine_pack_serves_a_model_through_a_real_child_process() {
-    // The pack launches this very binary as an OpenAI-compatible engine (`--fake-engine`).
+async fn the_llama_cpp_page_lists_only_llama_cpp_and_offers_to_remove_a_leftover_llamafile() {
     let dir = tempfile::tempdir().unwrap();
-    let exe = common::runnable_server(dir.path());
-    let packs = dir.path().join("packs");
-    std::fs::create_dir_all(&packs).unwrap();
-    std::fs::write(
-        packs.join("fake.engine.toml"),
-        format!(
-            "format = 1\nid = \"fakeoai\"\nname = \"Fake OpenAI engine\"\nversion = \"1\"\n[capabilities]\nchat = true\n[launch]\ncommand = {exe:?}\nargs = [\"--fake-engine\", \"--host\", \"{{host}}\", \"--port\", \"{{port}}\", \"--model\", \"{{model}}\"]\n[health]\npath = \"/health\"\n"
-        ),
-    )
-    .unwrap();
-    std::fs::write(packs.join("broken.engine.toml"), "format = 1\nid = \"broken\"\n").unwrap();
-    let m = dir.path().join("models/o/r");
-    std::fs::create_dir_all(&m).unwrap();
-    std::fs::write(m.join("tiny-Q4_K_M.gguf"), common::gguf("llama")).unwrap();
+    let old = dir.path().join("engines/pack-llamafile");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("llamafile"), vec![0u8; 2048]).unwrap();
     let h = common::harness_in(dir, false).await;
-    let key = h.make_key("Pack User").await;
-
-    // The bad pack is reported, the good one listed, the built-in one too.
-    let p = h.rpc("packs", json!({})).await.json();
-    assert!(p["problems"][0]["file"] == "broken.engine.toml" && p["problems"][0]["message"].as_str().unwrap().contains("name"));
-    let ids: Vec<&str> = p["engines"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
-    assert!(ids.contains(&"fakeoai") && ids.contains(&"llamafile"));
     let engines = h.rpc("engines", json!({})).await.json();
-    let fake = engines
+    let list = engines.as_array().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0]["kind"], "llama.cpp");
+    assert_eq!(list[0]["leftovers"][0]["id"], "pack-llamafile");
+    assert_eq!(list[0]["leftovers"][0]["sizeBytes"], 2048);
+    assert!(old.exists(), "never deleted by itself");
+    assert!(h.rpc("packs", json!({})).await.json().get("engines").is_none());
+    assert_eq!(h.rpc("remove_leftover", json!({"id": "metal"})).await.status, 404);
+    assert_eq!(h.rpc("remove_leftover", json!({"id": "pack-llamafile"})).await.status, 200);
+    assert!(!old.exists());
+    assert!(h.rpc("engines", json!({})).await.json()[0]["leftovers"]
         .as_array()
         .unwrap()
-        .iter()
-        .find(|e| e["name"] == "Fake OpenAI engine")
-        .unwrap();
-    assert_eq!(fake["availability"]["state"], "available");
-
-    // Route the model to the pack and chat through the real child process.
+        .is_empty());
     assert_eq!(
-        h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "nope"}))
-            .await
-            .status,
-        404
-    );
-    assert_eq!(
-        h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "fakeoai"}))
-            .await
-            .status,
-        200
-    );
-    let r = h
-        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
-        .await;
-    assert_eq!(r.status, 200, "{}", r.body);
-    assert_eq!(r.json()["choices"][0]["message"]["content"], "Hello world");
-    assert_eq!(h.starts.load(Ordering::SeqCst), 0, "the built-in fake engine was not used");
-    let loaded = h.rpc("overview", json!({})).await.json()["models"][0].clone();
-    assert_eq!(loaded["engine"], "pack");
-    assert_eq!(loaded["build"], "fakeoai");
-    assert_eq!(r.header("x-pitwall-engine"), Some("fakeoai"), "the header names the pack engine");
-    assert!(
-        h.rpc("unload_model", json!({"id": "tiny-q4_k_m"})).await.status == 200,
-        "dropping the engine ends the child"
+        h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "x"})).await.status,
+        501,
+        "no per-model engine"
     );
 }
 
@@ -574,25 +539,6 @@ async fn benchmarks_are_kept_and_models_report_their_engine() {
     assert_eq!(b.status, 200, "{}", b.body);
     assert!(b.json()["genTps"].as_f64().unwrap() > 0.0);
     assert_eq!(h.rpc("benchmarks", json!({})).await.json().as_array().unwrap().len(), 1);
-    let m = h.rpc("local_models", json!({})).await.json();
-    assert!(m[0]["engine"].is_null());
-}
-
-/// A pack whose engine process exits shortly after it starts serving: a crashing engine, as a real child process.
-fn crashy_pack(dir: &std::path::Path, die_after_ms: u64) {
-    let exe = common::runnable_server(dir);
-    let packs = dir.join("packs");
-    std::fs::create_dir_all(&packs).unwrap();
-    std::fs::write(
-        packs.join("crashy.engine.toml"),
-        format!(
-            "format = 1\nid = \"crashy\"\nname = \"Crashing engine\"\nversion = \"1\"\n[capabilities]\nchat = true\n[launch]\ncommand = {exe:?}\nargs = [\"--fake-engine\", \"--die-after-ms\", \"{die_after_ms}\", \"--host\", \"{{host}}\", \"--port\", \"{{port}}\", \"--model\", \"{{model}}\"]\n[health]\npath = \"/health\"\n"
-        ),
-    )
-    .unwrap();
-    let m = dir.join("models/o/r");
-    std::fs::create_dir_all(&m).unwrap();
-    std::fs::write(m.join("tiny-Q4_K_M.gguf"), common::gguf("llama")).unwrap();
 }
 
 async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&common::Harness) -> bool) {
@@ -610,8 +556,13 @@ async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&commo
 #[tokio::test]
 async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry() {
     let dir = tempfile::tempdir().unwrap();
-    crashy_pack(dir.path(), 900);
-    let h = common::harness_in(dir, false).await;
+    let exe = common::runnable_server(dir.path());
+    let h = common::harness_with(
+        dir,
+        false,
+        Some(std::sync::Arc::new(common::ChildEngine { exe, die_after_ms: 900 })),
+    )
+    .await;
     h.st.serving.set_restart_limits(pitwall_core::backoff::Limits {
         initial: 50,
         max: 100,
@@ -620,12 +571,6 @@ async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retr
         window: 600_000,
     });
     let key = h.make_key("Crash Test").await;
-    assert_eq!(
-        h.rpc("set_model_engine", json!({"id": "tiny-q4_k_m", "engine": "crashy"}))
-            .await
-            .status,
-        200
-    );
     let r = h
         .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
         .await;

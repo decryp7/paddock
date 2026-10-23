@@ -1,5 +1,4 @@
 import { TestBed } from '@angular/core/testing';
-import { pickOption } from '../../../testing/render';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import type { PitwallBackend } from '../../core/backend';
@@ -41,24 +40,6 @@ describe('ModelsStore packs', () => {
     expect(store.packs()).toBeNull();
   });
 
-  it('only offers installed pack engines as per-model choices', async () => {
-    const backend = new MockBackend();
-    const { store } = storeOf(backend);
-    await store.loadPacks();
-    await store.loadInstalledPacks();
-    expect(store.engineChoices()).toEqual([]);
-    await backend.installBuild('ik-llama-cpu');
-    for (let i = 0; i < 400; i++) (backend as MockBackend).tick();
-    await store.loadInstalledPacks();
-    expect(store.engineChoices().map((e) => e.id)).toEqual(['ik-llama-cpu']);
-  });
-
-  it('tolerates a failing engines call while loading installed packs', async () => {
-    const { store } = storeOf(new MockBackend({ failing: ['engines'] }));
-    await store.loadInstalledPacks();
-    expect(store.installedPacks()).toEqual([]);
-  });
-
   it('downloads a recommendation (with the projector of a vision model) and reports failures', async () => {
     const backend = new MockBackend();
     const { store, toasts } = storeOf(backend);
@@ -77,19 +58,6 @@ describe('ModelsStore packs', () => {
     const failing = storeOf(new MockBackend({ failing: ['repoFiles'] }));
     expect(await failing.store.downloadRecommendation(qwen)).toBe(false);
     expect(failing.toasts.toasts().map((t) => t.tone)).toEqual(['bad']);
-  });
-
-  it('sets and clears a model engine, remembering the choice', async () => {
-    const backend = new MockBackend();
-    const { store } = storeOf(backend);
-    await store.load();
-    const id = store.library()[0]!.id;
-    await store.setEngine(id, 'ik-llama-cpu');
-    expect(store.library()[0]!.engine).toBe('ik-llama-cpu');
-    await store.setEngine(id, null);
-    expect(store.library()[0]!.engine).toBeNull();
-    await store.setEngine('nope', 'ik-llama-cpu');
-    expect(store.library().some((m) => m.engine === 'ik-llama-cpu')).toBe(false);
   });
 });
 
@@ -147,20 +115,15 @@ describe('Models page: recommendations and engines', () => {
     expect(r.el.querySelector('pw-discover-tab .recs [role=alert]')?.textContent).toContain('not responding');
   });
 
-  it('offers a per-model engine select only once a pack engine is installed', async () => {
-    const backend = new MockBackend();
-    let r = await render(backend);
-    expect(r.el.querySelector('[id^="engine-"]')).toBeNull();
-    TestBed.resetTestingModule();
-    await backend.installBuild('ik-llama-cpu');
-    for (let i = 0; i < 400; i++) backend.tick();
-    r = await render(backend);
+  it('has no per-model engine choice any more (llama.cpp serves everything), and shows skipped catalog files', async () => {
+    const r = await render(new MockBackend());
     r.el.querySelector<HTMLElement>('#row-gemma-3-12b-it-q4_k_m')!.click();
     await r.settle();
-    const select = r.el.querySelector<HTMLButtonElement>('pw-select button[id^="engine-"]')!;
-    expect(select).not.toBeNull();
-    await pickOption(select, 'ik_llama.cpp (pack)', r.settle);
-    const id = select.id.replace('engine-', '');
-    expect((await backend.localModels()).find((m) => m.id === id)?.engine).toBe('ik-llama-cpu');
+    expect(r.el.querySelector('[id^="engine-"]')).toBeNull();
+    await discover(r);
+    const notice = r.el.querySelector('pw-discover-tab .pack-notice')!;
+    expect(notice.textContent).toContain('1 catalog file was skipped');
+    expect(notice.textContent).toContain('packs/old.models.toml');
+    expect(notice.textContent).toContain('unknown key');
   });
 });

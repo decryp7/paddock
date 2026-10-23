@@ -517,7 +517,6 @@ pub fn to_dto(
         loaded,
         pinned: prefs.pinned,
         idle_secs: prefs.idle_secs,
-        engine: prefs.engine.clone(),
         slots: slots.get(),
         slots_custom: prefs.slots.is_some(),
         loaded_slots: loaded_slots.map(Slots::get),

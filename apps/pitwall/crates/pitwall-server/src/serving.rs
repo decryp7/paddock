@@ -183,7 +183,6 @@ impl Drop for Permit {
 
 struct Inner {
     engine: Arc<dyn Engine>,
-    packs: RwLock<HashMap<String, Arc<dyn Engine>>>,
     library: Library,
     settings: Arc<RwLock<Settings>>,
     hardware: RwLock<Hardware>,
@@ -223,11 +222,10 @@ pub struct Resolved {
     pub preset: Option<ModelPreset>,
 }
 
-/// What a preset changes about loading a model (the context and the engine).
+/// What a preset changes about loading a model (the context).
 #[derive(Debug, Clone, Default)]
 struct LoadOverrides {
     context: Option<u32>,
-    engine: Option<String>,
 }
 
 /// The installed model a request's `model` text names (id, repository or `repository:quant`).
@@ -260,7 +258,6 @@ impl Serving {
         Serving {
             inner: Arc::new(Inner {
                 engine,
-                packs: RwLock::new(HashMap::new()),
                 library,
                 settings,
                 hardware: RwLock::new(hardware),
@@ -277,25 +274,6 @@ impl Serving {
                 presets: RwLock::new(Presets::default()),
                 gate: RwLock::new(None),
                 slots_dir: RwLock::new(None),
-            }),
-        }
-    }
-
-    /// Register the engines declared by packs (models choose one through their preferences).
-    pub fn set_pack_engines(&self, engines: Vec<Arc<dyn Engine>>) {
-        if let Ok(mut g) = self.inner.packs.write() {
-            *g = engines.into_iter().map(|e| (e.id(), e)).collect();
-        }
-    }
-
-    fn engine_for(&self, id: Option<&str>) -> Result<Arc<dyn Engine>, ApiError> {
-        match id {
-            None | Some("llama.cpp") => Ok(self.inner.engine.clone()),
-            Some(i) => self.inner.packs.read().ok().and_then(|g| g.get(i).cloned()).ok_or_else(|| {
-                api(
-                    ErrorKind::NotAvailable,
-                    format!("the engine pack \"{i}\" is not loaded; fix or remove the model's engine choice in Models"),
-                )
             }),
         }
     }
@@ -368,15 +346,9 @@ impl Serving {
         }
     }
 
-    /// The gate, when the model is served by llama.cpp (a pack engine, chosen by the preset or the model's
-    /// preferences, is not gated).
-    fn gate_for(&self, id: &ModelId, preset_engine: Option<&str>) -> Option<Arc<dyn CapabilityGate>> {
-        let s = self.settings();
-        let engine = preset_engine.map(str::to_string).or_else(|| s.prefs(id).engine);
-        match engine.as_deref() {
-            None | Some("llama.cpp") => self.inner.gate.read().ok().and_then(|g| g.clone()),
-            Some(_) => None,
-        }
+    /// The gate: what the llama.cpp build in use supports.
+    fn gate_for(&self) -> Option<Arc<dyn CapabilityGate>> {
+        self.inner.gate.read().ok().and_then(|g| g.clone())
     }
 
     /// Refuses a request that needs what the engine build serving the resolved model lacks: a 503 that names the
@@ -385,7 +357,7 @@ impl Serving {
         if needed.is_empty() {
             return Ok(());
         }
-        match self.gate_for(&r.id, r.preset.as_ref().and_then(|p| p.engine.as_deref())) {
+        match self.gate_for() {
             Some(g) => g.check(r.id.as_str(), needed),
             None => Ok(()),
         }
@@ -393,7 +365,7 @@ impl Serving {
 
     /// The capabilities among `caps` that the build serving `id` cannot provide.
     pub fn blocked(&self, id: &ModelId, caps: &[select::Capability]) -> Vec<Blocked> {
-        self.gate_for(id, None).map_or_else(Vec::new, |g| g.blocked(id.as_str(), caps))
+        self.gate_for().map_or_else(Vec::new, |g| g.blocked(id.as_str(), caps))
     }
 
     /// Replaces the presets (after they were validated and saved).
@@ -642,12 +614,11 @@ impl Serving {
         self.ensure_as(id, false, &LoadOverrides::default()).await
     }
 
-    /// [`Serving::ensure`] for a resolved request: when it came through a preset, the preset's context and engine
-    /// apply if the model has to be loaded (a model that is already loaded keeps what it was loaded with).
+    /// [`Serving::ensure`] for a resolved request: when it came through a preset, the preset's context
+    /// applies if the model has to be loaded (a model that is already loaded keeps what it was loaded with).
     pub async fn ensure_for(&self, r: &Resolved) -> Result<(Busy, Option<u64>), ApiError> {
         let o = LoadOverrides {
             context: r.preset.as_ref().and_then(|p| p.context),
-            engine: r.preset.as_ref().and_then(|p| p.engine.clone()),
         };
         let (busy, cold) = self.ensure_as(&r.id, false, &o).await?;
         if cold.is_some() {
@@ -682,14 +653,7 @@ impl Serving {
             .into_iter()
             .find(|f| f.id == r.id)
             .map_or_else(String::new, |f| format!("{}-{}", f.size, f.modified));
-        let wanted = r
-            .preset
-            .as_ref()
-            .and_then(|p| p.engine.clone())
-            .or_else(|| self.settings().prefs(&r.id).engine);
-        let (engine, build) = self
-            .engine_for(wanted.as_deref())
-            .map_or_else(|_| (String::new(), String::new()), |e| (e.id(), e.build_tag(r.id.as_str())));
+        let (engine, build) = (self.inner.engine.id(), self.inner.engine.build_tag(r.id.as_str()));
         pitwall_core::cache::fingerprint(r.id.as_str(), &version, &engine, &build)
     }
 
@@ -830,7 +794,7 @@ impl Serving {
             }
         }
         self.event(EventKind::EngineStarted, Severity::Info, format!("Loading {id}"));
-        let engine = self.engine_for(o.engine.as_deref().or(prefs.engine.as_deref()))?;
+        let engine = self.inner.engine.clone();
         // llama.cpp installs itself when no build is installed: the load waits for it (or fails with its reason).
         engine.ready().await.map_err(|e| match e {
             EngineError::Install(m) => api(ErrorKind::Engine, m),
@@ -1134,7 +1098,7 @@ impl Serving {
         let claim = hint
             .app
             .as_deref()
-            .filter(|_| busy.model().engine.1 == pitwall_core::mgmt::EngineKind::LlamaCpp && self.settings().cache.prefix_affinity)
+            .filter(|_| self.settings().cache.prefix_affinity)
             .and_then(|app| lock(&busy.model().slot_table).claim(affinity::prefix_key(app, &req)));
         let slot_guard = claim.map(|c| SlotGuard {
             model: busy.0.clone(),

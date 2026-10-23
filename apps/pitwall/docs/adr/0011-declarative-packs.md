@@ -1,6 +1,6 @@
 # 11. Extend through declarative packs, not code
 
-- Status: accepted (2026-10-22)
+- Status: accepted (2026-10-22). Engine packs, the generic adapter and the per-model engine choice are superseded by [ADR 0020](0020-llama-cpp-is-the-only-engine.md); model catalog packs stay as described.
 - Related: ADR 0001 (local only), ADR 0010 (no plugin system); code: `pitwall_core::packs`, `pitwall_server::pack_engine`
 
 ## Context

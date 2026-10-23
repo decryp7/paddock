@@ -193,16 +193,7 @@ export function contextText(tokens: number | null): string {
               }
             </div>
 
-            <div class="field">
-              <span>Engine</span>
-              @if (store.engineChoices().length) {
-                <pw-select [inputId]="'engine-' + m.id" [options]="engineChoicesFor()" [value]="m.engine ?? ''" [disabled]="m.loaded || store.isBusy()('model:' + m.id)" [matTooltip]="m.loaded ? 'Unload the model to change its engine' : ''" [label]="'Engine for ' + m.name" (changed)="setEngine(m, $event)" />
-              } @else {
-                <span class="plain">llama.cpp</span>
-              }
-            </div>
-
-            @if (!m.engine && store.enginePins() && store.pinnableBuilds().length) {
+            @if (store.enginePins() && store.pinnableBuilds().length) {
               <div class="field">
                 <span>Engine build</span>
                 <pw-select [inputId]="'pin-' + m.id" [options]="pinChoices()" [value]="store.pinOf()(m.id)?.buildId ?? ''" [disabled]="store.isBusy()('pin:' + m.id)" [label]="'Engine build for ' + m.name" (changed)="setPin(m, $event)" />
@@ -488,9 +479,6 @@ export class LibraryTab {
   protected idleChoices(m: LocalModel): SelectOption[] {
     return [{ value: '', label: 'Global setting' }, ...idleOptions(m.idleSecs).map((s) => ({ value: '' + s, label: `After ${seconds(s)}` }))];
   }
-  protected engineChoicesFor(): SelectOption[] {
-    return [{ value: '', label: 'llama.cpp' }, ...this.store.engineChoices().map((e) => ({ value: e.id, label: e.name }))];
-  }
   protected pinChoices(): SelectOption[] {
     return [{ value: '', label: 'Follows global choice' }, ...this.store.pinnableBuilds().map((b) => ({ value: b.id, label: `Pin to ${b.label} ${b.tag}` }))];
   }
@@ -618,10 +606,6 @@ export class LibraryTab {
 
   protected setPin(m: LocalModel, value: string): void {
     void this.store.setPin(m.id, value === '' ? null : value);
-  }
-
-  protected setEngine(m: LocalModel, value: string): void {
-    void this.store.setEngine(m.id, value === '' ? null : value);
   }
 
   protected async remove(m: LocalModel): Promise<void> {

@@ -179,12 +179,11 @@ async fn a_capability_target_chooses_the_model_per_request() {
 }
 
 #[tokio::test]
-async fn context_and_engine_apply_when_the_model_loads() {
+async fn context_applies_when_the_model_loads() {
     let h = two_models().await;
     let key = h.make_key("Context Probe").await;
     let mut d = draft("small-context", "tiny-q4_k_m");
     d["context"] = json!(2048);
-    d["engine"] = json!("llama.cpp");
     assert_eq!(create(&h, d).await.status, 200);
     let r = h
         .call("POST", "/v1/chat/completions", Some(&key), Some(chat("small-context")), &[])
@@ -215,9 +214,6 @@ async fn invalid_presets_are_refused_with_what_to_fix() {
     refused(create(&h, draft("bad name", "tiny-q4_k_m")).await, 400, "valid preset name");
     refused(create(&h, draft("auto", "tiny-q4_k_m")).await, 400, "reserved");
     refused(create(&h, draft("new-one", "auto:telepathy")).await, 400, "capability");
-    let mut d = draft("new-one", "tiny-q4_k_m");
-    d["engine"] = json!("mlx");
-    refused(create(&h, d).await, 400, "engine");
     for (field, value, word) in [
         ("temperature", json!(3.5), "temperature"),
         ("topP", json!(2.0), "top-p"),

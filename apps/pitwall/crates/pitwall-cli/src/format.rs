@@ -272,7 +272,6 @@ pub fn preset_detail(e: &PresetEntry) -> String {
     add("Temperature:", p.temperature.map(|t| t.to_string()));
     add("Top-p:", p.top_p.map(|t| t.to_string()));
     add("Max tokens:", p.max_tokens.map(|t| t.to_string()));
-    add("Engine:", p.engine.clone());
     add(
         "System prompt:",
         p.system_prompt.as_ref().map(|s| format!("{} characters", s.chars().count())),
@@ -457,7 +456,7 @@ mod tests {
     fn entry(status: serde_json::Value) -> PresetEntry {
         from_json(
             serde_json::json!({"preset": {"alias": "fast", "target": "auto:chat,fast", "context": 8192, "temperature": 0.2, "topP": 0.9,
-            "maxTokens": 256, "systemPrompt": "Be brief.", "engine": "llama.cpp"}, "status": status}),
+            "maxTokens": 256, "systemPrompt": "Be brief."}, "status": status}),
         )
     }
 
@@ -466,17 +465,7 @@ mod tests {
         let ready = entry(serde_json::json!({"state": "ready", "modelId": "m", "chosenBy": "capabilities", "reason": "r", "loaded": true}));
         assert!(presets(std::slice::from_ref(&ready)).contains("ready: m (capabilities, loaded)"));
         let d = preset_detail(&ready);
-        for want in [
-            "fast",
-            "Context:",
-            "8192",
-            "Top-p:",
-            "0.9",
-            "Max tokens:",
-            "256",
-            "Engine:",
-            "9 characters",
-        ] {
+        for want in ["fast", "Context:", "8192", "Top-p:", "0.9", "Max tokens:", "256", "9 characters"] {
             assert!(d.contains(want), "{want} in {d}");
         }
         for (state, word) in [("stale", "stale"), ("noMatch", "noMatch"), ("shadowed", "shadowed")] {

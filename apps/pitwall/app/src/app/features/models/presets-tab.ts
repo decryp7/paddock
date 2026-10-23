@@ -10,7 +10,7 @@ import { RowMenu } from '../../shared/ui/row-menu';
 import { isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Panel } from '../../shared/ui/panel';
-import { PwSelect, type SelectOption } from '../../shared/ui/select';
+import { PwSelect } from '../../shared/ui/select';
 import { defaultsSummary, EMPTY_FORM, formOf, parseForm, type PresetField, type PresetForm } from './preset-form';
 import { PresetsStore } from './presets.store';
 import { ModelsStore } from './models.store';
@@ -130,11 +130,7 @@ export function statusDetail(s: PresetStatus): string {
             <textarea class="input" id="pw-preset-system" rows="4" [attr.maxlength]="promptMax" placeholder="Added in front of the conversation only when the request has no system message of its own." [value]="form().systemPrompt" (input)="set('systemPrompt', $any($event.target).value)"></textarea>
           </div>
 
-          <div class="field engine">
-            <label for="pw-preset-engine">Engine</label>
-            <pw-select inputId="pw-preset-engine" [options]="engineOptions()" [value]="form().engine" label="Engine" (changed)="set('engine', $event)" />
-          </div>
-          <p class="hint faint">Context and engine apply when the model is loaded for a request. A model that is already loaded keeps what it was loaded with until it is released. Values a request carries win over the defaults here.</p>
+          <p class="hint faint">The context applies when the model is loaded for a request. A model that is already loaded keeps what it was loaded with until it is released. Values a request carries win over the defaults here.</p>
 
           <div class="toggle-row">
             <div>
@@ -263,9 +259,6 @@ export function statusDetail(s: PresetStatus): string {
         font-weight: var(--fw-medium);
         color: var(--text-2);
       }
-      &.engine pw-select {
-        max-width: 280px;
-      }
     }
     .toggle-row {
       display: flex;
@@ -388,10 +381,6 @@ export class PresetsTab {
 
   protected bad(field: PresetField): boolean {
     return this.parsed().invalid.has(field);
-  }
-
-  protected engineOptions(): SelectOption[] {
-    return [{ value: '', label: 'llama.cpp' }, ...this.models.engineChoices().map((e) => ({ value: e.id, label: e.name }))];
   }
 
   protected setFlag(field: 'cacheResponses' | 'keepWarm', on: boolean): void {

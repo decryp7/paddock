@@ -4,7 +4,6 @@
 
 use crate::app::{lock, AppState, Meta};
 use crate::auth::Principal;
-use crate::engines::Engine as _;
 use crate::http::gate;
 use crate::paths::now_ms;
 use axum::body::{Body, Bytes};
@@ -19,7 +18,7 @@ use pitwall_core::config::UiSettings;
 use pitwall_core::events::{EventKind, Severity};
 use pitwall_core::ids::ModelId;
 use pitwall_core::mgmt::{
-    self, CommandError, DiskUsage, Download, DownloadKind, DownloadState, EngineKind, LiveUpdate, PlaygroundEvent, PlaygroundRequest,
+    self, CommandError, DiskUsage, Download, DownloadState, EngineKind, LiveUpdate, PlaygroundEvent, PlaygroundRequest,
 };
 use pitwall_core::presets::{Known, PresetError, Presets};
 use pitwall_core::runtimes::builds;
@@ -368,7 +367,6 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let tag: Option<String> = arg(a, "tag").unwrap_or(None);
             let rec = pitwall_core::packs::recommend(&st.packs.models, tag.as_deref(), &room);
             ok(json!({
-                "engines": st.packs.engines.iter().map(|e| json!({"id": e.id, "name": e.name, "version": e.version})).collect::<Vec<_>>(),
                 "problems": st.packs.problems,
                 "warnings": st.packs.warnings,
                 "recommendations": rec.iter().map(|r| json!({
@@ -377,16 +375,9 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                 })).collect::<Vec<_>>(),
             }))
         }
-        "set_model_engine" => {
-            let id = model(a, "id")?;
-            let engine: Option<String> = arg(a, "engine")?;
-            if let Some(e) = &engine {
-                if e != "llama.cpp" && !st.pack_engines.iter().any(|p| &p.pack.id == e) {
-                    return Err(err(mgmt::ErrorCode::NotFound, format!("there is no engine pack \"{e}\"")));
-                }
-            }
-            update_prefs(st, &id, |p| p.engine = engine.filter(|e| e != "llama.cpp"))?;
-            st.invalidate_model(&id);
+        "remove_leftover" => {
+            let id: String = arg(a, "id")?;
+            crate::leftovers::remove(&st.dirs, &id).map_err(|e| err(mgmt::ErrorCode::NotFound, e))?;
             ok(())
         }
         "apps" => ok(apps(st)),
@@ -616,7 +607,7 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
         let st2 = st.clone();
         let (repo_name, file_name) = (repo.to_string(), v.file.clone());
         // Models wait for llama.cpp while it installs itself ("Queued"); the engine in use says when it is ready.
-        let engine = st.engines[0].clone();
+        let engine = st.engine.clone();
         let gate: crate::engines::BoxFuture<'static, Result<(), String>> =
             Box::pin(async move { engine.ready().await.map_err(|e| e.to_string()) });
         let id = st
@@ -661,137 +652,64 @@ fn disk_usage(st: &AppState) -> DiskUsage {
     }
 }
 
+/// The llama.cpp page: its builds, the pinned catalog, running processes and leftovers of removed features.
 fn engines(st: &AppState) -> Vec<mgmt::Engine> {
     let platform = st.llama.platform();
     let installed = st.llama.installed();
     let active = st.llama.active().map(|b| b.id);
     let suggested = st.llama.suggested();
-    let cfg = st.cfg();
-    let mut list: Vec<mgmt::Engine> = st
-        .engines
+    let loaded = st.serving.loaded();
+    let mut catalog: Vec<mgmt::CatalogBuild> = st
+        .llama
+        .catalog()
+        .builds(&platform)
         .iter()
-        .map(|e| {
-            let llama = e.kind() == EngineKind::LlamaCpp;
-            let (name, description) = match e.kind() {
-                EngineKind::LlamaCpp => (
-                    "llama.cpp",
-                    "The default engine: CPU, Vulkan, CUDA and Metal builds chosen for this machine.",
-                ),
-                EngineKind::Mlx => ("MLX", "Apple's array framework for Apple Silicon."),
-                EngineKind::Vllm => ("vLLM", "High-throughput serving on Linux with NVIDIA GPUs."),
-                EngineKind::WhisperCpp => ("whisper.cpp", "Speech-to-text."),
-                EngineKind::Pack => ("Engine pack", "An engine declared by a pack."),
-            };
-            mgmt::Engine {
-                kind: e.kind(),
-                name: name.into(),
-                description: description.into(),
-                availability: e.availability(),
-                build_choice: if llama { cfg.engines.build_choice.clone() } else { "auto".into() },
-                builds: if llama {
-                    installed
-                        .iter()
-                        .map(|b| mgmt::InstalledBuild {
-                            id: b.id.clone(),
-                            tag: b.tag.clone(),
-                            label: builds::label(&b.id),
-                            size_bytes: b.size,
-                            self_test: crate::engines::self_test_state(b),
-                            self_test_message: b.message.clone(),
-                            devices: b.devices.clone(),
-                            active: active.as_deref() == Some(b.id.as_str()),
-                            outdated: b.tag != st.llama.catalog().tag,
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                },
-                catalog: if llama {
-                    st.llama
-                        .catalog()
-                        .builds(&platform)
-                        .iter()
-                        .map(|b| mgmt::CatalogBuild {
-                            id: b.id.clone(),
-                            label: builds::label(&b.id),
-                            tag: st.llama.catalog().tag.clone(),
-                            download_bytes: b.download_bytes(),
-                            suggested: suggested.as_deref() == Some(b.id.as_str()),
-                            installed: installed.iter().any(|i| i.id == b.id),
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                },
-                processes: if llama {
-                    st.serving
-                        .loaded()
-                        .iter()
-                        .map(|m| mgmt::EngineProcess {
-                            pid: 0,
-                            model_id: m.model_id.clone(),
-                            health: mgmt::ProcessHealth::Healthy,
-                            restarts: 0,
-                            rss_bytes: m.ram_bytes,
-                            started_at: m.loaded_at,
-                        })
-                        .collect()
-                } else {
-                    vec![]
-                },
-                rollback_to: if llama {
-                    crate::engine_pins::state(st).rollback_to.map(|r| r.build_id)
-                } else {
-                    None
-                },
-            }
+        .map(|b| mgmt::CatalogBuild {
+            id: b.id.clone(),
+            label: builds::label(&b.id),
+            tag: st.llama.catalog().tag.clone(),
+            download_bytes: b.download_bytes(),
+            suggested: suggested.as_deref() == Some(b.id.as_str()),
+            installed: installed.iter().any(|i| i.id == b.id),
         })
         .collect();
-    list.extend(st.pack_engines.iter().map(|pe| {
-        let installed = pe.binary().is_some();
-        let dl = pe.pack.downloads.iter().find(|d| d.platform == platform);
-        mgmt::Engine {
-            kind: EngineKind::Pack,
-            name: pe.pack.name.clone(),
-            description: if pe.pack.description.is_empty() {
-                "An engine pack.".into()
-            } else {
-                pe.pack.description.clone()
-            },
-            availability: pe.availability(),
-            build_choice: "auto".into(),
-            builds: if installed {
-                vec![mgmt::InstalledBuild {
-                    id: pe.pack.id.clone(),
-                    tag: pe.pack.version.clone(),
-                    label: pe.pack.name.clone(),
-                    size_bytes: dl.map_or(0, |d| d.size),
-                    self_test: mgmt::SelfTest::NotRun,
-                    self_test_message: None,
-                    devices: vec![],
-                    active: true,
-                    outdated: false,
-                }]
-            } else {
-                vec![]
-            },
-            catalog: dl
-                .map(|d| {
-                    vec![mgmt::CatalogBuild {
-                        id: pe.pack.id.clone(),
-                        label: pe.pack.name.clone(),
-                        tag: pe.pack.version.clone(),
-                        download_bytes: d.size,
-                        suggested: false,
-                        installed,
-                    }]
-                })
-                .unwrap_or_default(),
-            processes: vec![],
-            rollback_to: None,
-        }
-    }));
-    list
+    // The suggested build first (stable for the rest).
+    catalog.sort_by_key(|c| !c.suggested);
+    vec![mgmt::Engine {
+        kind: EngineKind::LlamaCpp,
+        name: "llama.cpp".into(),
+        description: "Serves every model: CPU, Vulkan, CUDA and Metal builds chosen for this machine.".into(),
+        availability: st.engine.availability(),
+        build_choice: st.cfg().engines.build_choice.clone(),
+        builds: installed
+            .iter()
+            .map(|b| mgmt::InstalledBuild {
+                id: b.id.clone(),
+                tag: b.tag.clone(),
+                label: builds::label(&b.id),
+                size_bytes: b.size,
+                self_test: crate::engines::self_test_state(b),
+                self_test_message: b.message.clone(),
+                devices: b.devices.clone(),
+                active: active.as_deref() == Some(b.id.as_str()),
+                outdated: b.tag != st.llama.catalog().tag,
+            })
+            .collect(),
+        catalog,
+        processes: loaded
+            .iter()
+            .map(|m| mgmt::EngineProcess {
+                pid: 0,
+                model_id: m.model_id.clone(),
+                health: mgmt::ProcessHealth::Healthy,
+                restarts: 0,
+                rss_bytes: m.ram_bytes,
+                started_at: m.loaded_at,
+            })
+            .collect(),
+        rollback_to: crate::engine_pins::state(st).rollback_to.map(|r| r.build_id),
+        leftovers: crate::leftovers::find(&st.dirs),
+    }]
 }
 
 fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
@@ -801,74 +719,11 @@ fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
             pitwall_core::privacy::EgressError::Offline.to_string(),
         ));
     }
-    if let Some(pe) = st.pack_engines.iter().find(|p| p.pack.id == id).cloned() {
-        return install_pack(st, pe);
-    }
     let platform = st.llama.platform();
     if st.llama.catalog().find(&platform, id).is_none() {
         return Err(err(mgmt::ErrorCode::NotFound, format!("there is no build \"{id}\" for {platform}")));
     }
     ok(crate::engine_setup::start_install(st, Arc::new(st.llama.clone()), id, false))
-}
-
-fn install_pack(st: &Arc<AppState>, pe: crate::pack_engine::PackEngine) -> R<Value> {
-    let dl = pe
-        .pack
-        .downloads
-        .iter()
-        .find(|d| d.platform == st.llama.platform())
-        .ok_or_else(|| {
-            err(
-                mgmt::ErrorCode::NotAvailable,
-                format!("the {} pack has no build for this platform", pe.pack.name),
-            )
-        })?;
-    let dl_id = format!("eng-{}", lock(&st.installs).len());
-    let cancel = crate::egress::CancelFlag::default();
-    let entry = Download {
-        id: dl_id.clone(),
-        kind: DownloadKind::Engine,
-        name: format!("{} {}", pe.pack.name, pe.pack.version),
-        host: dl.url.host().to_string(),
-        bytes_done: 0,
-        bytes_total: dl.size,
-        speed_bps: 0,
-        state: DownloadState::Downloading,
-        error: None,
-        started_at: now_ms(),
-    };
-    lock(&st.installs).insert(dl_id.clone(), entry.clone());
-    lock(&st.install_cancel).insert(dl_id.clone(), cancel.clone());
-    let st2 = st.clone();
-    tokio::spawn(async move {
-        let res = pe
-            .install(&cancel, |done, _| {
-                if let Some(d) = lock(&st2.installs).get_mut(&dl_id) {
-                    d.bytes_done = done;
-                }
-            })
-            .await;
-        let mut g = lock(&st2.installs);
-        if let Some(d) = g.get_mut(&dl_id) {
-            match &res {
-                Ok(()) => {
-                    d.state = DownloadState::Done;
-                    d.bytes_done = d.bytes_total;
-                }
-                Err(e) => {
-                    d.state = if matches!(e, crate::engines::EngineError::Download(crate::egress::DownloadError::Cancelled)) {
-                        DownloadState::Cancelled
-                    } else {
-                        DownloadState::Failed
-                    };
-                    d.error = Some(e.to_string());
-                }
-            }
-            st2.push(&LiveUpdate::Download { download: d.clone() });
-        }
-        lock(&st2.install_cancel).remove(&dl_id);
-    });
-    ok(entry)
 }
 
 fn apps(st: &AppState) -> Vec<mgmt::AppInfo> {
@@ -908,7 +763,7 @@ fn overview(st: &Arc<AppState>) -> mgmt::Overview {
                 name: e.name.clone(),
                 availability: e.availability.clone(),
                 active_build: e.builds.iter().find(|b| b.active).map(|b| b.id.clone()),
-                processes: if e.kind == EngineKind::LlamaCpp { loaded.len() as u32 } else { 0 },
+                processes: loaded.len() as u32,
                 unhealthy: 0,
             })
             .collect(),
@@ -1139,16 +994,8 @@ fn edit_presets(st: &AppState, change: impl FnOnce(&mut Presets, &Known) -> Resu
     let _gate = lock(&st.presets_gate);
     let before = st.serving.presets().list().to_vec();
     let models: Vec<ModelId> = st.library.local().iter().map(|f| f.id.clone()).collect();
-    let engines = st.preset_engines();
     let mut next = st.serving.presets();
-    let saved = change(
-        &mut next,
-        &Known {
-            models: &models,
-            engines: &engines,
-        },
-    )
-    .map_err(preset_error)?;
+    let saved = change(&mut next, &Known { models: &models }).map_err(preset_error)?;
     st.save_presets(&next).map_err(|e| {
         err(
             mgmt::ErrorCode::Internal,
@@ -1181,7 +1028,6 @@ fn preview_preset(st: &AppState, draft: mgmt::PresetDraft, editing: Option<&str>
     };
     if problem.is_none() {
         let models: Vec<ModelId> = st.library.local().iter().map(|f| f.id.clone()).collect();
-        let engines = st.preset_engines();
         let mut scratch = st.serving.presets();
         // The preset being edited is replaced by the draft, so it is not a duplicate of itself.
         if let Some(e) = editing {
@@ -1189,15 +1035,7 @@ fn preview_preset(st: &AppState, draft: mgmt::PresetDraft, editing: Option<&str>
         }
         problem = draft
             .parse()
-            .and_then(|p| {
-                scratch.create(
-                    p,
-                    &Known {
-                        models: &models,
-                        engines: &engines,
-                    },
-                )
-            })
+            .and_then(|p| scratch.create(p, &Known { models: &models }))
             .err()
             .map(|e| e.to_string());
     }

@@ -38,7 +38,6 @@ describe('MockBackend', () => {
     const o = await mock.overview();
     expect(o.memory.ramTotal).toBe(32 * GiB);
     expect(o.engines[0]!.activeBuild).toBe('cuda-13 · b11669');
-    expect(o.engines[1]!.activeBuild).toBeNull();
     for (const r of ['1h', '24h', '7d', '30d'] as const) {
       const h = await mock.history(r);
       expect(h.points.length).toBeGreaterThan(100);
@@ -49,7 +48,7 @@ describe('MockBackend', () => {
     expect((await mock.events(3)).length).toBe(3);
     expect((await mock.searchModels('qwen')).every((m) => m.repo.toLowerCase().includes('qwen'))).toBe(true);
     expect((await mock.repoFiles('unsloth/gemma-3-12b-it-GGUF')).projectors.length).toBe(1);
-    expect((await mock.engines()).length).toBe(5);
+    expect((await mock.engines()).length).toBe(1);
     expect((await mock.apps()).length).toBe(5);
     expect((await mock.pairings()).length).toBe(1);
     expect((await mock.requests(10)).length).toBe(10);
@@ -216,7 +215,7 @@ describe('MockBackend', () => {
   it('pins builds, rolls back to the previous good one and says which loaded models switch later', async () => {
     const mock = new MockBackend({ now: clock });
     expect((await mock.enginePins()).rollbackTo).toEqual({ buildId: 'vulkan', tag: 'b11669' });
-    await expect(mock.setGlobalPin('metal')).rejects.toMatchObject({ code: 'notFound', message: expect.stringContaining('Install it in Engines') });
+    await expect(mock.setGlobalPin('metal')).rejects.toMatchObject({ code: 'notFound', message: expect.stringContaining('Install it on the llama.cpp page') });
     await expect(mock.setGlobalPin('cpu')).rejects.toMatchObject({ code: 'conflict', message: expect.stringContaining('self-test') });
     const pinned = await mock.setGlobalPin('vulkan');
     expect(pinned.state).toMatchObject({ global: 'vulkan', active: 'vulkan', activeSource: 'pinned for all models' });
@@ -394,12 +393,11 @@ describe('mock data', () => {
     expect(code.recommendations.every((r) => r.tags.includes('code'))).toBe(true);
     expect(all.recommendations[0]!.fit.verdict).toBe('fits');
     expect((await mock.packs('nope')).recommendations).toEqual([]);
-    await expect(mock.setModelEngine('nope', null)).rejects.toMatchObject({ code: 'notFound' });
-    await expect(mock.setModelEngine('qwen3-8b-instruct-q4_k_m', 'missing-pack')).rejects.toMatchObject({ code: 'notFound' });
-    await mock.setModelEngine('qwen3-8b-instruct-q4_k_m', 'ik-llama-cpu');
-    expect((await mock.localModels()).find((m) => m.id === 'qwen3-8b-instruct-q4_k_m')?.engine).toBe('ik-llama-cpu');
-    await mock.setModelEngine('qwen3-8b-instruct-q4_k_m', 'llama.cpp');
-    expect((await mock.localModels()).find((m) => m.id === 'qwen3-8b-instruct-q4_k_m')?.engine).toBeNull();
+    // Leftovers of removed features are listed and removed only on request.
+    expect((await mock.engines())[0]!.leftovers.map((l) => l.id)).toEqual(['pack-llamafile']);
+    await expect(mock.removeLeftover('metal')).rejects.toMatchObject({ code: 'notFound' });
+    await mock.removeLeftover('pack-llamafile');
+    expect((await mock.engines())[0]!.leftovers).toEqual([]);
   });
 });
 
@@ -465,8 +463,8 @@ describe('MockBackend usage', () => {
 
     it('creates, updates (rename), and deletes', async () => {
       const mock = new MockBackend({ now: clock });
-      const made = await mock.createPreset({ ...draft(' Dyno-Notes '), systemPrompt: '  ', engine: ' ' });
-      expect(made).toMatchObject({ alias: 'dyno-notes', systemPrompt: null, engine: null });
+      const made = await mock.createPreset({ ...draft(' Dyno-Notes '), systemPrompt: '  ' });
+      expect(made).toMatchObject({ alias: 'dyno-notes', systemPrompt: null });
       const renamed = await mock.updatePreset('dyno-notes', { ...draft('dyno-short', 'auto:chat,small'), temperature: 0.2 });
       expect(renamed.alias).toBe('dyno-short');
       expect((await mock.presets()).map((e) => e.preset.alias)).toContain('dyno-short');
@@ -488,7 +486,6 @@ describe('MockBackend usage', () => {
         [{ topP: 3 }, 'top-p'],
         [{ maxTokens: 0 }, 'max tokens'],
         [{ systemPrompt: 'x'.repeat(9000) }, 'system prompt'],
-        [{ engine: 'mlx' }, 'engine'],
       ] as const) {
         expect(await message(mock.createPreset({ ...draft('x'), ...patch }))).toContain(word);
       }

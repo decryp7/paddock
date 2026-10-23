@@ -203,6 +203,11 @@ pub async fn harness(fail: bool) -> Harness {
 }
 
 pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
+    harness_with(dir, fail, None).await
+}
+
+/// [`harness_in`] with another engine than the in-process fake (for example [`ChildEngine`]).
+pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<dyn Engine>>) -> Harness {
     let dirs = Dirs::at(dir.path());
     let m = dirs.models().join("o/r");
     std::fs::create_dir_all(&m).unwrap();
@@ -219,19 +224,21 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
     let cache_n = Arc::new(AtomicU64::new(0));
     let embeds = Arc::new(std::sync::Mutex::new(vec![]));
     let slot_calls = Arc::new(std::sync::Mutex::new(vec![]));
-    let engine: Arc<dyn Engine> = Arc::new(FakeEngine {
-        starts: starts.clone(),
-        erases: erases.clone(),
-        fail,
-        bodies: bodies.clone(),
-        contexts: contexts.clone(),
-        parallels: parallels.clone(),
-        delay_ms: delay_ms.clone(),
-        live: Arc::new(AtomicUsize::new(0)),
-        peak: peak.clone(),
-        cache_n: cache_n.clone(),
-        embeds: embeds.clone(),
-        slot_calls: slot_calls.clone(),
+    let engine: Arc<dyn Engine> = other.unwrap_or_else(|| {
+        Arc::new(FakeEngine {
+            starts: starts.clone(),
+            erases: erases.clone(),
+            fail,
+            bodies: bodies.clone(),
+            contexts: contexts.clone(),
+            parallels: parallels.clone(),
+            delay_ms: delay_ms.clone(),
+            live: Arc::new(AtomicUsize::new(0)),
+            peak: peak.clone(),
+            cache_n: cache_n.clone(),
+            embeds: embeds.clone(),
+            slot_calls: slot_calls.clone(),
+        })
     });
     let st = AppState::open(dirs.clone(), Some(engine)).await;
     let _ = Hardware::default();
@@ -360,4 +367,52 @@ pub fn runnable_server(_dir: &std::path::Path) -> String {
         "{exe} is {len} bytes: the Tauri shell was built first and replaced it with its placeholder sidecar; run these tests before building pitwall-app"
     );
     exe.to_string()
+}
+
+/// An engine that is a real child process: `pitwall-server --fake-engine`, which exits `die_after_ms` after it starts
+/// serving (a crashing engine). Used to test restarts and crash-loop detection against a real process.
+pub struct ChildEngine {
+    pub exe: String,
+    pub die_after_ms: u64,
+}
+
+impl Engine for ChildEngine {
+    fn kind(&self) -> EngineKind {
+        EngineKind::LlamaCpp
+    }
+    fn availability(&self) -> Availability {
+        Availability::Available
+    }
+    #[allow(clippy::disallowed_methods)] // a test starting its own helper binary
+    fn start<'a>(&'a self, l: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
+        Box::pin(async move {
+            let child = tokio::process::Command::new(&self.exe)
+                .args([
+                    "--fake-engine",
+                    "--die-after-ms",
+                    &self.die_after_ms.to_string(),
+                    "--port",
+                    &l.port.to_string(),
+                ])
+                .stdin(std::process::Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| EngineError::Start(e.to_string()))?;
+            let port = LoopbackPort::new(l.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
+            let client = Client::new(port, None);
+            for _ in 0..200 {
+                if client.json("GET", "/health", None, Duration::from_secs(2)).await.is_ok() {
+                    return Ok(Running {
+                        child: Some(child),
+                        guard: None,
+                        client,
+                        port: l.port,
+                        props: pitwall_core::llama::Props::default(),
+                    });
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(EngineError::Start("the child engine did not become healthy".into()))
+        })
+    }
 }

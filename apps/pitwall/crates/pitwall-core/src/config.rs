@@ -283,8 +283,6 @@ pub struct ModelPrefs {
     pub idle_secs: Option<u64>,
     /// Its own context length.
     pub context: Option<u32>,
-    /// The engine pack that serves it (`None`: llama.cpp).
-    pub engine: Option<String>,
     /// Its own number of parallel slots (`None`: [`ModelSettings::default_slots`]). A value that is out of range in
     /// the file is read as unset. Applies the next time the model loads.
     #[serde(deserialize_with = "crate::slots::lenient")]
@@ -892,6 +890,11 @@ mod tests {
             assert!(s.prefs(&id).pinned && s.prefs(&id).slots.is_none(), "{bad}");
             assert_eq!((s.models.default_context, s.slots_for(&id)), (4096, Slots::DEFAULT));
         }
+        // An older file's per-model engine choice (engine packs are gone) is ignored: nothing else is lost.
+        let text = "[models.prefs.m]\npinned = true\nengine = \"fakeoai\"\n";
+        let (s, how) = load(Some(text), None);
+        assert_eq!(how, Loaded::File);
+        assert!(s.prefs(&id).pinned);
         // A damaged default falls back through the backup like any other invalid setting.
         let (s, how) = load(Some("[models]\ndefaultSlots = 99\n"), Some(&Settings::default().to_toml()));
         assert_eq!(s.models.default_slots, Slots::DEFAULT);
@@ -919,7 +922,6 @@ mod tests {
                 pinned: true,
                 idle_secs: Some(30),
                 context: None,
-                engine: None,
                 slots: None,
             },
         );

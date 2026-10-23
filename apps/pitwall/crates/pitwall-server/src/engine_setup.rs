@@ -48,7 +48,7 @@ pub fn auto_install(st: &Arc<AppState>, installer: Arc<dyn BuildInstaller>) {
     }
     let Some(id) = installer.suggested() else {
         let m = format!(
-            "llama.cpp has no build for this machine ({}). Pick one in Engines if you know one works.",
+            "llama.cpp has no build for this machine ({}). Pick one on the llama.cpp page if you know one works.",
             st.llama.platform()
         );
         publish(st, Setup::Failed(m));

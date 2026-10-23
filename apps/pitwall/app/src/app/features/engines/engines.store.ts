@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { BuildCapability, CatalogBuild, CommandError, Engine, EnginePinState, InstalledBuild, PackNote, PinChange } from '../../core/api.types';
+import type { BuildCapability, CatalogBuild, CommandError, Engine, EnginePinState, InstalledBuild, Leftover, PinChange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
@@ -9,9 +9,6 @@ interface EnginesState {
   engines: Engine[];
   loading: boolean;
   loaded: boolean;
-  /** Pack files that were skipped, and non-fatal notes about loaded ones. */
-  packProblems: PackNote[];
-  packWarnings: PackNote[];
   /** Engine pins and roll back (ADR 0018); null until loaded, and when the call fails the Engines page still works. */
   pins: EnginePinState | null;
   /** What each installed build supports, by build id. */
@@ -21,16 +18,14 @@ interface EnginesState {
   busy: Record<string, true>;
 }
 
-const initial: EnginesState = { engines: [], loading: false, loaded: false, packProblems: [], packWarnings: [], pins: null, capabilities: {}, error: null, busy: {} };
+const initial: EnginesState = { engines: [], loading: false, loaded: false, pins: null, capabilities: {}, error: null, busy: {} };
 
-/** The Engines screen: llama.cpp builds (installed, catalog, choice, rollback), processes and planned engines. */
+/** The llama.cpp page (the only engine, ADR 0020): builds (installed, catalog, choice, rollback), pins, processes, leftovers. */
 export const EnginesStore = signalStore(
   withState(initial),
   withComputed(({ engines, busy, pins }) => ({
-    /** The engines that can serve today (llama.cpp first). */
-    available: computed(() => engines().filter((e) => e.availability.state === 'available' || e.builds.length > 0 || e.kind === 'pack' || e.kind === 'llama.cpp')),
-    /** Planned or unsupported engines, shown with their honest reason. */
-    planned: computed(() => engines().filter((e) => e.availability.state !== 'available' && e.builds.length === 0 && e.kind !== 'pack' && e.kind !== 'llama.cpp')),
+    /** llama.cpp, the only engine. */
+    llama: computed(() => engines()[0] ?? null),
     /** The build pinned for all models. */
     pinnedGlobal: computed(() => pins()?.global ?? null),
     isBusy: computed(() => (key: string) => key in busy()),
@@ -48,13 +43,6 @@ export const EnginesStore = signalStore(
       try {
         const engines = await backend.engines();
         patchState(store, { engines, loading: false, loaded: true });
-        // Pack notes are secondary: a failure here must not hide the engines.
-        try {
-          const packs = await backend.packs();
-          patchState(store, { packProblems: packs.problems, packWarnings: packs.warnings });
-        } catch {
-          patchState(store, { packProblems: [], packWarnings: [] });
-        }
         // Pins and capabilities are secondary too: without them the page shows builds, just no pin controls.
         try {
           const [pins, caps] = await Promise.all([backend.enginePins(), backend.buildCapabilities()]);
@@ -90,6 +78,11 @@ export const EnginesStore = signalStore(
       /** Downloads, verifies and self-tests a catalog build; progress arrives as live download updates. */
       install(build: CatalogBuild): Promise<boolean> {
         return act(`install:${build.id}`, () => backend.installBuild(build.id), `Installing ${build.label} ${build.tag}.`);
+      },
+
+      /** Removes a file an older version left behind (the llamafile download); asked for by the user, never automatic. */
+      removeLeftover(item: Leftover): Promise<boolean> {
+        return act(`leftover:${item.id}`, () => backend.removeLeftover(item.id), `Removed ${item.label}.`);
       },
 
       remove(build: InstalledBuild): Promise<boolean> {

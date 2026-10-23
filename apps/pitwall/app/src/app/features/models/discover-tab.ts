@@ -58,6 +58,32 @@ export function fitDetail(f: Fit): string {
       }
     </pw-panel>
 
+    @if (store.packs(); as p) {
+      @if (p.problems.length || p.warnings.length) {
+        <section class="pack-notice callout" data-tone="warn" role="status" aria-label="Catalog pack problems">
+          <mat-icon svgIcon="pw:alert" aria-hidden="true" />
+          <div>
+            <p class="head">
+              @if (p.problems.length) {
+                {{ p.problems.length }} catalog {{ p.problems.length === 1 ? 'file was' : 'files were' }} skipped.
+              } @else {
+                Catalog files loaded with notes.
+              }
+              Fix the file in your packs folder and reopen this page.
+            </p>
+            <ul>
+              @for (n of p.problems; track n.file + n.message) {
+                <li><span class="mono">{{ n.file }}</span> {{ n.message }}</li>
+              }
+              @for (n of p.warnings; track n.file + n.message) {
+                <li><span class="mono">{{ n.file }}</span> {{ n.message }}</li>
+              }
+            </ul>
+          </div>
+        </section>
+      }
+    }
+
     <form class="search" role="search" (submit)="$event.preventDefault(); store.search(q.value)">
       <mat-icon svgIcon="pw:search" aria-hidden="true" />
       <label class="sr-only" for="hf-q">Search Hugging Face for GGUF models</label>
@@ -152,6 +178,23 @@ export function fitDetail(f: Fit): string {
     </div>
   `,
   styles: `
+    .pack-notice {
+      p {
+        margin: 0;
+      }
+      .head {
+        font-weight: var(--fw-semibold);
+      }
+      ul {
+        margin: var(--sp-1) 0 0;
+        padding: 0;
+        list-style: none;
+        color: var(--text-2);
+      }
+      .mono {
+        font-size: var(--fs-sm);
+      }
+    }
     :host {
       display: grid;
       gap: var(--sp-3);

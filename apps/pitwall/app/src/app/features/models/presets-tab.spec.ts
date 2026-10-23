@@ -195,25 +195,14 @@ describe('PresetsTab', () => {
     expect(el.querySelector('form')).toBeNull();
   });
 
-  it('offers installed engines and installed models as choices', async () => {
+  it('offers installed models and capability selections as choices', async () => {
     const { el, button, settle } = await render();
     button('New preset').click();
     await settle();
     const options = Array.from(el.querySelectorAll('#pw-preset-targets option')).map((o) => o.getAttribute('value'));
     expect(options).toContain('qwen3-8b-instruct-q4_k_m');
     expect(options).toContain('auto:chat,fast');
-    expect(el.querySelector('#pw-preset-engine')!.textContent).toContain('llama.cpp');
-  });
-
-  it('keeps the chosen engine in the draft', async () => {
-    const { el, button, settle, fixture } = await render();
-    button('New preset').click();
-    await settle();
-    const select = el.querySelector('#pw-preset-engine') as HTMLSelectElement;
-    select.value = '';
-    select.dispatchEvent(new Event('change'));
-    fixture.detectChanges();
-    expect(select.value).toBe('');
+    expect(el.querySelector('#pw-preset-engine')).toBeNull();
   });
 
   it('asks before deleting, and deletes only when confirmed', async () => {
@@ -260,14 +249,6 @@ describe('PresetsTab caching', () => {
     await settle();
     const saved = (await backend.presets()).find((e) => e.preset.alias === 'cached-one')!.preset;
     expect(saved).toMatchObject({ cacheResponses: true, keepWarm: true });
-  });
-
-  it('picks the engine in the themed select', async () => {
-    const { el, settle } = await render();
-    Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim().startsWith('New preset'))!.click();
-    await settle();
-    expect(el.querySelector('select')).toBeNull();
-    expect(el.querySelector('pw-select button')!.textContent).toContain('llama.cpp');
   });
 });
 });

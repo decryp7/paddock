@@ -340,8 +340,7 @@ export class MockBackend implements PitwallBackend {
       if (engine && cat) {
         cat.installed = true;
         engine.builds = engine.builds.filter((b) => b.id !== cat.id);
-        engine.builds.push({ id: cat.id, tag: cat.tag, label: cat.label, sizeBytes: cat.downloadBytes * 1.05, selfTest: 'passed', selfTestMessage: 'Self-test passed', devices: [engine.kind === 'pack' ? 'CPU' : GPU_NAME], active: engine.kind === 'pack', outdated: false });
-        if (engine.kind === 'pack') engine.availability = { state: 'available' };
+        engine.builds.push({ id: cat.id, tag: cat.tag, label: cat.label, sizeBytes: cat.downloadBytes * 1.05, selfTest: 'passed', selfTestMessage: 'Self-test passed', devices: [GPU_NAME], active: false, outdated: false });
       }
     }
     this.pushEvent({ kind: 'download', severity: 'info', message: `Downloaded ${d.name} (${(d.bytesTotal / GiB).toFixed(1)} GB, verified)`, modelId: null, appId: null, reason: null });
@@ -676,13 +675,11 @@ export class MockBackend implements PitwallBackend {
     return this.reply('packs', () => demoPacks(tag));
   }
 
-  setModelEngine(id: string, engine: string | null): Promise<void> {
-    return this.reply('setModelEngine', () => {
-      const m = this.library.find((x) => x.id === id) ?? this.fail('notFound', `No model ${id}.`);
-      if (engine !== null && engine !== 'llama.cpp' && !this.engines_.some((e) => e.kind === 'pack' && e.catalog.some((c) => c.id === engine))) {
-        this.fail('notFound', `There is no engine pack "${engine}".`);
-      }
-      m.engine = engine === 'llama.cpp' ? null : engine;
+  removeLeftover(id: string): Promise<void> {
+    return this.reply('removeLeftover', () => {
+      const e = this.engines_[0]!;
+      if (!e.leftovers.some((l) => l.id === id)) this.fail('notFound', `"${id}" is not something Pitwall left on disk.`);
+      e.leftovers = e.leftovers.filter((l) => l.id !== id);
     });
   }
 
@@ -780,8 +777,8 @@ export class MockBackend implements PitwallBackend {
   /** A pin only goes to a build that is installed and passed its self-test (the engine's rule). */
   private checkPinnable(buildId: string, scope: string): void {
     const b = this.engines_[0]!.builds.find((x) => x.id === buildId);
-    if (!b) this.fail('notFound', `The engine build ${buildId} is ${scope} but is not installed. Install it in Engines, or remove the pin.`);
-    if (b.selfTest !== 'passed') this.fail('conflict', `The engine build ${buildId} is ${scope} but failed its self-test. Reinstall it in Engines, or remove the pin.`);
+    if (!b) this.fail('notFound', `The engine build ${buildId} is ${scope} but is not installed. Install it on the llama.cpp page, or remove the pin.`);
+    if (b.selfTest !== 'passed') this.fail('conflict', `The engine build ${buildId} is ${scope} but failed its self-test. Reinstall it on the llama.cpp page, or remove the pin.`);
   }
 
   /** Recomputes which build serves models in general, remembers the one it replaced, and where roll back goes. */
@@ -808,8 +805,8 @@ export class MockBackend implements PitwallBackend {
       if (b) failed.push(id);
       else gone = true;
     }
-    if (failed.length) return { target: null, blocked: `The earlier engine build(s) ${failed.join(', ')} failed their self-test, so Pitwall will not go back to them. Reinstall one in Engines.` };
-    return { target: null, blocked: gone ? 'The earlier engine builds are no longer installed. Install one in Engines.' : 'There is no earlier engine build to go back to.' };
+    if (failed.length) return { target: null, blocked: `The earlier engine build(s) ${failed.join(', ')} failed their self-test, so Pitwall will not go back to them. Reinstall one on the llama.cpp page.` };
+    return { target: null, blocked: gone ? 'The earlier engine builds are no longer installed. Install one on the llama.cpp page.' : 'There is no earlier engine build to go back to.' };
   }
 
   private pinState(): EnginePinState {
@@ -871,13 +868,12 @@ export class MockBackend implements PitwallBackend {
     if (d.topP !== null && (d.topP < 0 || d.topP > 1)) return 'top-p: use a value between 0 and 1';
     if (d.maxTokens !== null && (d.maxTokens < 1 || d.maxTokens > 1_048_576)) return 'max tokens: use between 1 and 1048576';
     if (d.systemPrompt !== null && d.systemPrompt.length > 8192) return 'system prompt: use at most 8 KB of text';
-    if (d.engine !== null && d.engine.trim() !== '' && d.engine.trim() !== 'llama.cpp') return `the engine "${d.engine}" is not available; pick llama.cpp or an installed engine pack, or leave it empty`;
     if (alias !== editing && this.presets_.some((p) => p.alias === alias)) return `a preset named "${alias}" already exists`;
     return null;
   }
 
   private presetFrom(d: PresetDraft): ModelPreset {
-    return { ...d, alias: d.alias.trim().toLowerCase(), target: d.target.trim().toLowerCase(), systemPrompt: d.systemPrompt?.trim() ? d.systemPrompt : null, engine: d.engine?.trim() ? d.engine.trim() : null };
+    return { ...d, alias: d.alias.trim().toLowerCase(), target: d.target.trim().toLowerCase(), systemPrompt: d.systemPrompt?.trim() ? d.systemPrompt : null };
   }
 
   presets(): Promise<PresetEntry[]> {

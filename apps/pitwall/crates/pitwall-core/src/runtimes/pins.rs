@@ -7,7 +7,7 @@
 //! 3. automatic: the build `inference_build` prefers, else the best for this machine (Metal, CUDA, Vulkan, CPU).
 //!
 //! A pin is strict: a pin to a build that is not installed, or whose self-test did not pass, is a typed error that says
-//! to install it in Engines or remove the pin; it never silently falls back, because someone pinned it on purpose.
+//! to install it on the llama.cpp page or remove the pin; it never silently falls back, because someone pinned it on purpose.
 //! Automatic selection only ever picks builds that passed their self-test, and so does rollback.
 
 use super::builds::{tag_number, try_order, BuildChoice, BuildId};
@@ -76,7 +76,7 @@ pub struct Selection {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PinError {
     /// The pinned build is not installed.
-    #[error("The engine build {build} is {scope} but is not installed. Install it in Engines, or remove the pin.")]
+    #[error("The engine build {build} is {scope} but is not installed. Install it on the llama.cpp page, or remove the pin.")]
     NotInstalled {
         /// The pinned build.
         build: BuildId,
@@ -84,7 +84,7 @@ pub enum PinError {
         scope: String,
     },
     /// The pinned build is installed but did not pass its self-test.
-    #[error("The engine build {build} is {scope} but failed its self-test. Reinstall it in Engines, or remove the pin.")]
+    #[error("The engine build {build} is {scope} but failed its self-test. Reinstall it on the llama.cpp page, or remove the pin.")]
     FailedSelfTest {
         /// The pinned build.
         build: BuildId,
@@ -92,7 +92,7 @@ pub enum PinError {
         scope: String,
     },
     /// No installed build passed its self-test.
-    #[error("No llama.cpp engine is installed. Open Engines and install one.")]
+    #[error("No llama.cpp engine is installed. Open the llama.cpp page and install one.")]
     NoGoodBuild,
     /// Too many per-model pins.
     #[error("There are already {MAX_MODEL_PINS} per-model pins. Remove some in Models first.")]
@@ -106,10 +106,10 @@ pub enum RollbackError {
     #[error("There is no earlier engine build to go back to.")]
     NothingToRollBackTo,
     /// The earlier builds are gone or failed their self-test.
-    #[error("The earlier engine build(s) {} failed their self-test, so Pitwall will not go back to them. Reinstall one in Engines.", join(.0))]
+    #[error("The earlier engine build(s) {} failed their self-test, so Pitwall will not go back to them. Reinstall one on the llama.cpp page.", join(.0))]
     OnlyFailedBuilds(Vec<BuildId>),
     /// The earlier builds were uninstalled.
-    #[error("The earlier engine builds are no longer installed. Install one in Engines.")]
+    #[error("The earlier engine builds are no longer installed. Install one on the llama.cpp page.")]
     NotInstalled,
 }
 
@@ -424,7 +424,7 @@ mod tests {
         let mut p = EnginePins::default();
         let e = p.set_global(Some(id("metal")), &all()).unwrap_err();
         assert!(matches!(&e, PinError::NotInstalled { build, .. } if build.as_str() == "metal"));
-        assert!(e.to_string().contains("Install it in Engines"), "{e}");
+        assert!(e.to_string().contains("Install it on the llama.cpp page"), "{e}");
         let e = p.set_model("m", Some(id("rocm")), &all()).unwrap_err();
         assert!(
             matches!(&e, PinError::FailedSelfTest { .. }) && e.to_string().contains("pinned for m"),

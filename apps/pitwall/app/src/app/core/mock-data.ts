@@ -275,7 +275,7 @@ export function demoBuildCapabilities(tag: string): BuildCapability[] {
   return CAPABILITY_FLOORS.map(([capability, label, min]) =>
     have >= min
       ? { capability, label, status: 'supported', minBuild: null, hint: null }
-      : { capability, label, status: 'needsBuild', minBuild: min, hint: `Install llama.cpp b${min} or newer in Engines, or unpin the old build.` },
+      : { capability, label, status: 'needsBuild', minBuild: min, hint: `Install llama.cpp b${min} or newer on the llama.cpp page, or unpin the old build.` },
   );
 }
 
@@ -304,21 +304,8 @@ export function demoEngines(now: number): Engine[] {
         { pid: 9960, modelId: 'nomic-embed-text-v1.5-f16', health: 'healthy', restarts: 0, rssBytes: 0.21 * GiB, startedAt: now - 5 * HOUR },
       ],
       rollbackTo: 'vulkan',
+      leftovers: [{ id: 'pack-llamafile', label: 'llamafile', sizeBytes: 351 * MiB }],
     },
-    {
-      kind: 'pack',
-      name: 'ik_llama.cpp (pack)',
-      description: 'A community fork with faster CPU and hybrid inference, added as a declarative engine pack (ADR 0011).',
-      availability: { state: 'notInstalled', reason: 'Install a build to serve models with this engine.' },
-      buildChoice: 'auto',
-      builds: [],
-      catalog: [{ id: 'ik-llama-cpu', label: 'CPU (AVX2)', tag: 'v0.9.2', downloadBytes: 29 * MiB, suggested: true, installed: false }],
-      processes: [],
-      rollbackTo: null,
-    },
-    { kind: 'whisper.cpp', name: 'whisper.cpp', description: 'Speech to text (OpenAI-compatible /v1/audio/transcriptions).', availability: { state: 'notInstalled', reason: 'Planned for a later version: transcription is not wired to the router yet.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
-    { kind: 'mlx', name: 'MLX', description: "Apple's array framework for Apple silicon.", availability: { state: 'notAvailable', reason: 'MLX runs on Apple silicon only; this is a Windows PC.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
-    { kind: 'vllm', name: 'vLLM', description: 'High-throughput serving with paged attention.', availability: { state: 'notAvailable', reason: 'vLLM needs Linux with a CUDA GPU; Windows is not supported.' }, buildChoice: 'auto', builds: [], catalog: [], processes: [], rollbackTo: null },
   ];
 }
 
@@ -634,7 +621,7 @@ export function demoRequests(now: number, count = 400, seed = 3): RequestRecord[
 
 /** Presets an engineer might have set up. `legacy-explain` points at a model that was removed. */
 export function demoPresets(): ModelPreset[] {
-  const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, engine: null, cacheResponses: false, keepWarm: false };
+  const base = { context: null, temperature: null, topP: null, maxTokens: null, systemPrompt: null, cacheResponses: false, keepWarm: false };
   return [
     { ...base, alias: 'debrief-explain', target: 'qwen3-8b-instruct-q4_k_m', temperature: 0.3, maxTokens: 800, cacheResponses: true, keepWarm: true, systemPrompt: 'Explain the log excerpt to an engineer in plain language. Be concise and name the likely cause first.' },
     { ...base, alias: 'pitcrew-triage', target: 'auto:chat,tools,fast', context: 16384, temperature: 0.1, keepWarm: true },
@@ -705,9 +692,8 @@ export function demoPacks(tag: string | null): PacksInfo {
     })
     .sort((a, b) => rank[a.fit.verdict] - rank[b.fit.verdict] || a.sizeBytes - b.sizeBytes);
   return {
-    engines: [{ id: 'ik-llama-cpu', name: 'ik_llama.cpp (pack)', version: '0.9.2' }],
-    problems: [{ file: 'packs/old-vllm.toml', message: 'skipped: unknown key `launch.cmd`; engine packs need `[launch] args`.' }],
-    warnings: [{ file: 'packs/ik-llama.toml', message: 'unknown key `notes` ignored.' }],
+    problems: [{ file: 'packs/old.models.toml', message: 'skipped: "format" must be 1.' }],
+    warnings: [{ file: 'packs/mine.models.toml', message: 'unknown key "notes" is ignored.' }],
     recommendations,
   };
 }

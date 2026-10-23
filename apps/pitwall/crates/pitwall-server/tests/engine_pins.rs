@@ -67,7 +67,7 @@ async fn an_old_build_refuses_tools_in_every_api_family_naming_the_build_needed(
     );
     let m = e["message"].as_str().unwrap();
     assert!(
-        m.contains("b4599") && m.contains("vulkan b4000") && m.contains("Engines") && m.contains(TINY),
+        m.contains("b4599") && m.contains("vulkan b4000") && m.contains("llama.cpp page") && m.contains(TINY),
         "{m}"
     );
 
@@ -179,7 +179,7 @@ async fn the_model_list_and_capability_selection_leave_out_what_the_build_cannot
     assert_eq!(e["capabilities"], json!([]));
     assert_eq!(e["unavailable"][0]["capability"], "embeddings");
     assert_eq!(e["unavailable"][0]["minBuild"], 2004);
-    assert!(e["unavailable"][0]["reason"].as_str().unwrap().contains("Engines"));
+    assert!(e["unavailable"][0]["reason"].as_str().unwrap().contains("llama.cpp page"));
     // Selection by capability finds nothing for embeddings on this build...
     let r = h
         .call(
@@ -260,11 +260,17 @@ async fn a_pin_to_a_build_that_is_gone_is_a_typed_error_in_every_family() {
     assert_eq!(h.rpc("set_global_pin", json!({"buildId": "cpu"})).await.status, 200);
     std::fs::remove_dir_all(h.dir.path().join("engines/cpu")).unwrap();
     let s = state(&h).await;
-    assert!(s["problems"][0].as_str().unwrap().contains("Install it in Engines"), "{s}");
+    assert!(
+        s["problems"][0].as_str().unwrap().contains("Install it on the llama.cpp page"),
+        "{s}"
+    );
     let r = h.call("POST", "/v1/chat/completions", Some(&key), Some(tool_chat()), &[]).await;
     assert_eq!(r.status, 503, "{}", r.body);
     assert_eq!(r.json()["error"]["code"], "engine_pin_unavailable");
-    assert!(r.json()["error"]["message"].as_str().unwrap().contains("Install it in Engines"));
+    assert!(r.json()["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Install it on the llama.cpp page"));
     let r = h
         .call("POST", "/v1/messages", Some(&key), Some(json!({"model": TINY, "max_tokens": 8, "messages": [{"role": "user", "content": "hi"}, ], "tools": [{"name": "f", "input_schema": {"type": "object"}}]})), &[])
         .await;
@@ -290,7 +296,7 @@ async fn pinning_validates_the_build_and_reports_the_state() {
     install(&h, "cpu", "b11000", "failed");
     let r = h.rpc("set_global_pin", json!({"buildId": "metal"})).await;
     assert_eq!(r.status, 404, "{}", r.body);
-    assert!(r.body.contains("Install it in Engines"));
+    assert!(r.body.contains("Install it on the llama.cpp page"));
     let r = h.rpc("set_global_pin", json!({"buildId": "cpu"})).await;
     assert_eq!(r.status, 409, "{}", r.body);
     assert!(r.body.contains("failed its self-test"));
@@ -468,7 +474,7 @@ async fn pins_survive_a_restart_and_a_damaged_file_degrades_to_none() {
     assert!(s["problems"][0].as_str().unwrap().contains("not installed"), "{s}");
     let events = fifth.rpc("events", json!({"limit": 50})).await.json().to_string();
     assert!(
-        events.contains("2 pin(s) were left out") && events.contains("Install it in Engines"),
+        events.contains("2 pin(s) were left out") && events.contains("Install it on the llama.cpp page"),
         "{events}"
     );
 }

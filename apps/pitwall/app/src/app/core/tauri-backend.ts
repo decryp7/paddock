@@ -176,8 +176,8 @@ export class TauriBackend implements PitwallBackend {
   packs(tag: string | null = null): Promise<PacksInfo> {
     return this.run('packs', { tag });
   }
-  setModelEngine(id: string, engine: string | null): Promise<void> {
-    return this.run('set_model_engine', { id, engine });
+  removeLeftover(id: string): Promise<void> {
+    return this.run('remove_leftover', { id });
   }
 
   // Engines

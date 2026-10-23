@@ -9,7 +9,6 @@ export interface PresetForm {
   topP: string;
   maxTokens: string;
   systemPrompt: string;
-  engine: string;
   cacheResponses: boolean;
   keepWarm: boolean;
 }
@@ -17,7 +16,7 @@ export interface PresetForm {
 /** The text fields; the two flags are set directly. */
 export type PresetField = Exclude<keyof PresetForm, 'cacheResponses' | 'keepWarm'>;
 
-export const EMPTY_FORM: PresetForm = { alias: '', target: '', context: '', temperature: '', topP: '', maxTokens: '', systemPrompt: '', engine: '', cacheResponses: false, keepWarm: false };
+export const EMPTY_FORM: PresetForm = { alias: '', target: '', context: '', temperature: '', topP: '', maxTokens: '', systemPrompt: '', cacheResponses: false, keepWarm: false };
 
 /** A preset as form text. */
 export function formOf(p: ModelPreset): PresetForm {
@@ -30,7 +29,6 @@ export function formOf(p: ModelPreset): PresetForm {
     topP: text(p.topP),
     maxTokens: text(p.maxTokens),
     systemPrompt: p.systemPrompt ?? '',
-    engine: p.engine ?? '',
     cacheResponses: p.cacheResponses,
     keepWarm: p.keepWarm,
   };
@@ -70,7 +68,6 @@ export function parseForm(f: PresetForm): ParsedForm {
     topP: num('topP', false),
     maxTokens: num('maxTokens', true),
     systemPrompt: f.systemPrompt.trim() === '' ? null : f.systemPrompt,
-    engine: f.engine === '' ? null : f.engine,
     cacheResponses: f.cacheResponses,
     keepWarm: f.keepWarm,
   };
@@ -84,6 +81,5 @@ export function defaultsSummary(p: ModelPreset): string[] {
   if (p.temperature !== null) out.push(`temperature ${p.temperature}`);
   if (p.topP !== null) out.push(`top-p ${p.topP}`);
   if (p.maxTokens !== null) out.push(`max ${p.maxTokens} tokens`);
-  if (p.engine !== null) out.push(`engine ${p.engine}`);
   return out;
 }

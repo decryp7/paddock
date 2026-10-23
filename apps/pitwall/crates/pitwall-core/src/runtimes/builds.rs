@@ -99,7 +99,7 @@ pub const MIN_ENGINE_BUILD: u64 = 5501;
 pub fn too_old_message(tag: &str) -> Option<String> {
     let n = tag_number(tag).filter(|n| *n < MIN_ENGINE_BUILD)?;
     Some(format!(
-        "This llama.cpp build (b{n}) is older than b{MIN_ENGINE_BUILD}, which Pitwall needs. Update it in Engines."
+        "This llama.cpp build (b{n}) is older than b{MIN_ENGINE_BUILD}, which Pitwall needs. Update it on the llama.cpp page."
     ))
 }
 

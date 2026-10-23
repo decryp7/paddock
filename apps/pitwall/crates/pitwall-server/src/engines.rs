@@ -89,28 +89,6 @@ pub trait Engine: Send + Sync {
     fn start<'a>(&'a self, launch: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>>;
 }
 
-/// Engines planned but not built yet: they report why, so the UI can say so.
-pub struct Planned {
-    /// The kind.
-    pub kind: EngineKind,
-    /// Why it is unavailable.
-    pub reason: String,
-}
-
-impl Engine for Planned {
-    fn kind(&self) -> EngineKind {
-        self.kind
-    }
-    fn availability(&self) -> Availability {
-        Availability::NotAvailable {
-            reason: self.reason.clone(),
-        }
-    }
-    fn start<'a>(&'a self, _: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
-        Box::pin(async move { Err(EngineError::NotAvailable(self.reason.clone())) })
-    }
-}
-
 /// The metadata saved next to an installed build.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildInfo {
@@ -174,7 +152,7 @@ impl BuildInstaller for LlamaCpp {
         cancel: &'a CancelFlag,
         progress: &'a mut (dyn FnMut(u64, u64) + Send),
     ) -> BoxFuture<'a, Result<BuildInfo, EngineError>> {
-        Box::pin(async move { LlamaCpp::install(self, id, cancel, |d, t| progress(d, t)).await })
+        Box::pin(async move { LlamaCpp::install(self, id, cancel, progress).await })
     }
 }
 
@@ -922,30 +900,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn planned_engines_say_why() {
-        let p = Planned {
-            kind: EngineKind::Mlx,
-            reason: "MLX is planned".into(),
-        };
-        assert!(matches!(p.availability(), Availability::NotAvailable { .. }));
-        let launch = Launch {
-            model: "m".into(),
-            mmproj: None,
-            alias: "m".into(),
-            port: 4100,
-            context: 1024,
-            gpu_layers: None,
-            threads: 0,
-            parallel: 1,
-            kind: llama::ServeKind::Chat,
-            cache_ram_mib: 0,
-            slot_save_path: None,
-        };
-        assert!(p.start(&launch).await.is_err());
-        assert_eq!(p.kind(), EngineKind::Mlx);
-    }
-
-    #[tokio::test]
     async fn self_test_failure_and_rollback_metadata() {
         let (d, dirs) = dirs();
         let m = mgr(&dirs);
@@ -1014,11 +968,11 @@ mod tests {
         m.remove("cpu").unwrap();
         let e = m.binary_for(Some("other")).unwrap_err();
         assert!(
-            matches!(e, EngineError::Pin(PinError::NotInstalled { .. })) && e.to_string().contains("Install it in Engines"),
+            matches!(e, EngineError::Pin(PinError::NotInstalled { .. })) && e.to_string().contains("Install it on the llama.cpp page"),
             "{e}"
         );
         assert!(m.binary().is_none() && m.active().is_none());
-        assert!(matches!(m.availability(), Availability::NotInstalled { reason } if reason.contains("Install it in Engines")));
+        assert!(matches!(m.availability(), Availability::NotInstalled { reason } if reason.contains("Install it on the llama.cpp page")));
         // A pin does not apply to a model that has its own.
         assert_eq!(m.binary_for(Some("m")).unwrap().1.as_str(), "vulkan");
     }
@@ -1077,7 +1031,7 @@ mod tests {
         let Availability::NotInstalled { reason } = m.availability() else {
             panic!("expected NotInstalled");
         };
-        assert!(!reason.contains("in Engines"), "{reason}");
+        assert!(!reason.contains("on the llama.cpp page"), "{reason}");
         assert!(reason.contains("suggested"), "{reason}");
     }
 
@@ -1090,7 +1044,7 @@ mod tests {
         assert!(matches!(e, EngineError::TooOld(_)));
         assert_eq!(
             e.to_string(),
-            "This llama.cpp build (b5500) is older than b5501, which Pitwall needs. Update it in Engines."
+            "This llama.cpp build (b5500) is older than b5501, which Pitwall needs. Update it on the llama.cpp page."
         );
         assert!(m.binary().is_none());
         assert!(matches!(m.availability(), Availability::NotInstalled { reason } if reason.contains("b5500")));

@@ -1,6 +1,6 @@
 # 4. Engines: one trait, one process per model
 
-- Status: accepted (2026-10-22); llama.cpp verified on macOS only
+- Status: accepted (2026-10-22); llama.cpp verified on macOS only. The `PackEngine` and `Planned` adapters described below were removed by [ADR 0020](0020-llama-cpp-is-the-only-engine.md): llama.cpp is the only engine, and it installs itself.
 - Related: ADR 0001, ADR 0002, ADR 0010, ADR 0011; code: [`engines.rs`](../../crates/pitwall-server/src/engines.rs),
   [`pack_engine.rs`](../../crates/pitwall-server/src/pack_engine.rs), [`process.rs`](../../crates/pitwall-server/src/process.rs),
   [`pitwall_core::{llama, runtimes, backoff}`](../../crates/pitwall-core/src/runtimes/mod.rs)

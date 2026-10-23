@@ -155,7 +155,7 @@ export class ModelsPage implements OnInit {
 
   ngOnInit(): void {
     void this.store.load();
-    void this.store.loadInstalledPacks();
+    void this.store.loadBuilds();
   }
 
   protected onKey(e: KeyboardEvent): void {

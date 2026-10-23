@@ -40,7 +40,7 @@ const PERMS: AppPermissions = {
 };
 const SETTINGS = { general: { theme: 'dark' } } as unknown as Settings;
 
-const DRAFT: PresetDraft = { alias: 'debrief-explain', target: 'auto:chat', context: null, temperature: 0.3, topP: null, maxTokens: null, systemPrompt: null, engine: null, cacheResponses: false, keepWarm: false };
+const DRAFT: PresetDraft = { alias: 'debrief-explain', target: 'auto:chat', context: null, temperature: 0.3, topP: null, maxTokens: null, systemPrompt: null, cacheResponses: false, keepWarm: false };
 
 /**
  * The command table the Rust side implements (`app/src-tauri/src/commands.rs`). Each row: the call, the command
@@ -76,7 +76,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['engines', (b) => b.engines(), 'engines', undefined],
   ['packs', (b) => b.packs('code'), 'packs', { tag: 'code' }],
   ['packs without a tag', (b) => b.packs(), 'packs', { tag: null }],
-  ['setModelEngine', (b) => b.setModelEngine('m1', 'vllm-pack'), 'set_model_engine', { id: 'm1', engine: 'vllm-pack' }],
+  ['removeLeftover', (b) => b.removeLeftover('pack-llamafile'), 'remove_leftover', { id: 'pack-llamafile' }],
   ['retryEngineSetup', (b) => b.retryEngineSetup(), 'retry_engine_setup', undefined],
   ['installBuild', (b) => b.installBuild('cuda-13'), 'install_build', { buildId: 'cuda-13' }],
   ['removeBuild', (b) => b.removeBuild('cpu', 'b1'), 'remove_build', { buildId: 'cpu', tag: 'b1' }],

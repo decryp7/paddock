@@ -1,6 +1,6 @@
 //! Model presets and aliases (ADR 0014). An app asks for a name such as `debrief-explain`; the user decides which model
 //! and which parameters serve it. A preset names a target (one installed model, or a capability selection such as
-//! `auto:chat,fast`) and optional defaults: context, temperature, top-p, max tokens, a system prompt and an engine.
+//! `auto:chat,fast`) and optional defaults: context, temperature, top-p, max tokens, a system prompt.
 //!
 //! Everything here is pure: parsing, validation, the pure part of resolution, applying defaults to a request, and the
 //! versioned file format. The server supplies the installed models, carries out the selection and writes the file.
@@ -10,8 +10,8 @@
 //!   later that takes an alias's name wins (the preset is then listed as shadowed).
 //! - Parameters the request carries win over the preset's defaults.
 //! - The system prompt is added in front only when the request has no system message of its own.
-//! - `context` and `engine` apply when the model is loaded for the request; a model that is already loaded keeps the
-//!   context and engine it was loaded with until it is released.
+//! - `context` applies when the model is loaded for the request; a model that is already loaded keeps the context it
+//!   was loaded with until it is released. (An `engine` key from an older file is ignored: llama.cpp serves everything.)
 
 use crate::api::{ApiError, ErrorKind};
 use crate::chat::{ChatRequest, Message, Role};
@@ -75,9 +75,6 @@ pub enum PresetError {
     /// The target model is not installed.
     #[error("the model \"{0}\" is not installed; pick an installed model or a capability selection such as auto:chat")]
     UnknownModel(String),
-    /// The engine is not one Pitwall knows.
-    #[error("the engine \"{0}\" is not available; pick llama.cpp or an installed engine pack, or leave it empty")]
-    UnknownEngine(String),
     /// The preset points to a model that was removed.
     #[error("the preset \"{alias}\" points to the model \"{model}\", which is no longer installed; edit the preset in Models > Presets")]
     StaleTarget {
@@ -251,9 +248,6 @@ pub struct ModelPreset {
     /// A system prompt added when the request has none.
     #[serde(default)]
     pub system_prompt: Option<String>,
-    /// The engine that serves it (`llama.cpp` or an engine pack's id).
-    #[serde(default)]
-    pub engine: Option<String>,
     /// Answer identical deterministic requests from the response cache (ADR 0019).
     #[serde(default)]
     pub cache_responses: bool,
@@ -271,7 +265,7 @@ fn invalid(field: &'static str, message: impl Into<String>) -> PresetError {
 
 impl ModelPreset {
     /// Checks everything that needs no knowledge of the installed models, and tidies the value (an empty system
-    /// prompt or engine is none).
+    /// prompt is none).
     pub fn checked(mut self) -> Result<ModelPreset, PresetError> {
         if self.context.is_some_and(|c| !(MIN_CONTEXT..=MAX_CONTEXT).contains(&c)) {
             return Err(invalid("context", format!("use between {MIN_CONTEXT} and {MAX_CONTEXT} tokens")));
@@ -292,15 +286,6 @@ impl ModelPreset {
                 format!("use at most {} KB of text", MAX_SYSTEM_PROMPT_BYTES / 1024),
             ));
         }
-        self.engine = self.engine.map(|e| e.trim().to_ascii_lowercase()).filter(|e| !e.is_empty());
-        if self.engine.as_ref().is_some_and(|e| {
-            e.len() > MAX_ALIAS_LEN
-                || !e
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
-        }) {
-            return Err(invalid("engine", "use an engine id such as llama.cpp"));
-        }
         Ok(self)
     }
 }
@@ -310,8 +295,6 @@ impl ModelPreset {
 pub struct Known<'a> {
     /// Installed model ids.
     pub models: &'a [ModelId],
-    /// Engine ids that can serve (`llama.cpp` and the loaded packs).
-    pub engines: &'a [String],
 }
 
 impl Known<'_> {
@@ -324,11 +307,6 @@ impl Known<'_> {
         if let Target::Model(id) = &p.target {
             if !self.models.contains(id) {
                 return Err(PresetError::UnknownModel(id.to_string()));
-            }
-        }
-        if let Some(e) = &p.engine {
-            if !self.engines.iter().any(|k| k == e) {
-                return Err(PresetError::UnknownEngine(e.clone()));
             }
         }
         Ok(())
@@ -537,14 +515,9 @@ mod tests {
             top_p: None,
             max_tokens: None,
             system_prompt: None,
-            engine: None,
             cache_responses: false,
             keep_warm: false,
         }
-    }
-
-    fn engines() -> Vec<String> {
-        vec!["llama.cpp".into(), "fakeoai".into()]
     }
 
     #[test]
@@ -628,8 +601,6 @@ mod tests {
                 "system prompt",
                 ok(&|p| p.system_prompt = Some("x".repeat(MAX_SYSTEM_PROMPT_BYTES + 1))),
             ),
-            ("engine", ok(&|p| p.engine = Some("bad engine!".into()))),
-            ("engine", ok(&|p| p.engine = Some("e".repeat(MAX_ALIAS_LEN + 1)))),
         ] {
             match r {
                 Err(PresetError::Invalid { field, .. }) => assert_eq!(field, name),
@@ -638,12 +609,9 @@ mod tests {
         }
         let p = ok(&|p| {
             p.system_prompt = Some("   \n".into());
-            p.engine = Some("  ".into());
         })
         .unwrap();
-        assert_eq!((p.system_prompt, p.engine), (None, None), "blank means none");
-        let p = ok(&|p| p.engine = Some(" FakeOAI ".into())).unwrap();
-        assert_eq!(p.engine.as_deref(), Some("fakeoai"));
+        assert_eq!(p.system_prompt, None, "blank means none");
         let e = ok(&|p| p.temperature = Some(9.0)).unwrap_err();
         assert!(e.to_string().starts_with("temperature:"), "{e}");
     }
@@ -651,18 +619,12 @@ mod tests {
     #[test]
     fn create_update_delete_with_the_library_checks() {
         let models = vec![mid("tiny-q4"), mid("big-q4")];
-        let engines = engines();
-        let known = Known {
-            models: &models,
-            engines: &engines,
-        };
+        let known = Known { models: &models };
         let mut ps = Presets::default();
         assert!(ps.is_empty());
         ps.create(preset("zeta", "tiny-q4"), &known).unwrap();
         ps.create(preset("alpha", "auto:chat,fast"), &known).unwrap();
-        let mut with_engine = preset("mid", "big-q4");
-        with_engine.engine = Some("fakeoai".into());
-        ps.create(with_engine, &known).unwrap();
+        ps.create(preset("mid", "big-q4"), &known).unwrap();
         assert_eq!(ps.len(), 3);
         let order: Vec<&str> = ps.list().iter().map(|p| p.alias.as_str()).collect();
         assert_eq!(order, ["alpha", "mid", "zeta"], "sorted by alias");
@@ -682,9 +644,6 @@ mod tests {
             ps.create(preset("new", "gone-q4"), &known),
             Err(PresetError::UnknownModel("gone-q4".into()))
         );
-        let mut e = preset("new", "tiny-q4");
-        e.engine = Some("mlx".into());
-        assert_eq!(ps.create(e, &known), Err(PresetError::UnknownEngine("mlx".into())));
         let mut bad = preset("new", "tiny-q4");
         bad.temperature = Some(7.0);
         assert!(matches!(ps.create(bad, &known), Err(PresetError::Invalid { .. })));
@@ -716,11 +675,7 @@ mod tests {
     #[test]
     fn the_count_is_capped() {
         let models = vec![mid("m")];
-        let engines = engines();
-        let known = Known {
-            models: &models,
-            engines: &engines,
-        };
+        let known = Known { models: &models };
         let mut ps = Presets::default();
         for i in 0..MAX_PRESETS {
             ps.create(preset(&format!("p{i}"), "m"), &known).unwrap();
@@ -733,11 +688,7 @@ mod tests {
     #[test]
     fn persistence_round_trips_and_survives_damage() {
         let models = vec![mid("m")];
-        let engines = engines();
-        let known = Known {
-            models: &models,
-            engines: &engines,
-        };
+        let known = Known { models: &models };
         let mut ps = Presets::default();
         let mut p = preset("debrief-explain", "m");
         p.system_prompt = Some("Explain plainly.".into());
@@ -773,7 +724,7 @@ mod tests {
             {"alias":"hot","target":"m","temperature":50},
             {"alias":"notarget"},
             42,
-            {"alias":"fine","target":"auto:chat","maxTokens":256,"engine":"llama.cpp"}]}"#;
+            {"alias":"fine","target":"auto:chat","maxTokens":256,"engine":"fakeoai"}]}"#;
         let l = load(Some(text), None);
         let names: Vec<&str> = l.presets.list().iter().map(|p| p.alias.as_str()).collect();
         assert_eq!(names, ["fine", "good"]);

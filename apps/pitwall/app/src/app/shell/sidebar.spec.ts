@@ -24,7 +24,7 @@ describe('Sidebar', () => {
 
   it('lists the screens in groups', async () => {
     const { el } = await setup();
-    expect(links(el).map((a) => a.querySelector('.label')?.textContent)).toEqual(['Dashboard', 'Models', 'Engines', 'Apps & keys', 'Requests', 'Playground', 'Benchmarks']);
+    expect(links(el).map((a) => a.querySelector('.label')?.textContent)).toEqual(['Dashboard', 'Models', 'llama.cpp', 'Apps & keys', 'Requests', 'Playground', 'Benchmarks']);
     expect(Array.from(el.querySelectorAll('.group')).map((g) => g.textContent)).toEqual(['Serve', 'Try']);
     expect(links(el).map((a) => a.getAttribute('href'))).toEqual(['/', '/models', '/engines', '/apps', '/requests', '/playground', '/benchmarks']);
     expect(el.querySelector('a.settings')?.getAttribute('href')).toBe('/settings');

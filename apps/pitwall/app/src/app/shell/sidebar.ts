@@ -21,7 +21,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     label: 'Serve',
     items: [
       { path: '/models', label: 'Models', icon: 'models' },
-      { path: '/engines', label: 'Engines', icon: 'engines' },
+      { path: '/engines', label: 'llama.cpp', icon: 'engines' },
       { path: '/apps', label: 'Apps & keys', icon: 'apps' },
       { path: '/requests', label: 'Requests', icon: 'requests' },
     ],

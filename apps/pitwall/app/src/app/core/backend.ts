@@ -90,14 +90,14 @@ export interface PitwallBackend {
   /** How much context and concurrency fit for a model; unset arguments use its current context and slots. */
   modelFit(id: string, context: number | null, slots: number | null): Promise<SlotFit>;
   diskUsage(): Promise<DiskUsage>;
-  /** Engine packs, pack problems and the catalog's recommendations for this machine, optionally for one tag. */
+  /** Catalog pack problems and the catalog's recommendations for this machine, optionally for one tag. */
   packs(tag?: string | null): Promise<PacksInfo>;
-  /** The engine for one model: an installed pack engine id, or null for llama.cpp. */
-  setModelEngine(id: string, engine: string | null): Promise<void>;
 
   // Engines
   engines(): Promise<Engine[]>;
   installBuild(buildId: string): Promise<Download>;
+  /** Removes something an older version left on disk (the llamafile download); only on the user's request. */
+  removeLeftover(id: string): Promise<void>;
   /** Tries the automatic llama.cpp install again after it failed. */
   retryEngineSetup(): Promise<EngineSetup>;
   removeBuild(buildId: string, tag: string): Promise<void>;

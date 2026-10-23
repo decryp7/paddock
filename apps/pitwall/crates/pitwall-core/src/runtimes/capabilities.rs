@@ -68,7 +68,7 @@ impl BuildFacts {
 pub enum Gate {
     /// The build can serve everything asked.
     Allowed,
-    /// A newer build can; install it in Engines.
+    /// A newer build can; install it on the llama.cpp page.
     NeedsBuild {
         /// The capability that needs the newest build.
         capability: Capability,
@@ -169,7 +169,7 @@ impl Matrix {
 
 /// What to tell the user when a build is too old.
 pub fn upgrade_hint(min_build: u64) -> String {
-    format!("Install llama.cpp b{min_build} or newer in Engines, or unpin the old build.")
+    format!("Install llama.cpp b{min_build} or newer on the llama.cpp page, or unpin the old build.")
 }
 
 impl Gate {
@@ -193,7 +193,7 @@ impl Gate {
             Gate::NotSupported { capability, reason } => Some(ApiError::new(
                 ErrorKind::CapabilityUnsupported,
                 format!(
-                    "{model} needs {}, which the engine build in use ({build}) cannot serve: {reason}. Use another build in Engines or a model that does not need it.",
+                    "{model} needs {}, which the engine build in use ({build}) cannot serve: {reason}. Use another build on the llama.cpp page or a model that does not need it.",
                     matrix.label(capability).to_lowercase()
                 ),
             )),
@@ -349,7 +349,7 @@ mod tests {
             old.message.contains("llava")
                 && old.message.contains("b5600")
                 && old.message.contains("b4000")
-                && old.message.contains("Engines"),
+                && old.message.contains("llama.cpp page"),
             "{}",
             old.message
         );

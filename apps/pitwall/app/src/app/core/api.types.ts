@@ -119,7 +119,8 @@ export interface LoadedModel {
   capabilities: Capability[];
 }
 
-export type EngineKind = 'llama.cpp' | 'mlx' | 'vllm' | 'whisper.cpp' | 'pack';
+/** llama.cpp is the only engine (ADR 0020). */
+export type EngineKind = 'llama.cpp';
 
 export type Availability =
   | { state: 'available' }
@@ -177,6 +178,17 @@ export interface Engine {
   processes: EngineProcess[];
   /** A previous build to roll back to after an update. */
   rollbackTo: string | null;
+  /** Files of removed features an older version left on disk (llamafile): offered for removal, never deleted silently. */
+  leftovers: Leftover[];
+}
+
+/** Something an older version left on disk that nothing uses any more. */
+export interface Leftover {
+  /** What `removeLeftover` takes (`pack-llamafile`). */
+  id: string;
+  /** `llamafile`. */
+  label: string;
+  sizeBytes: number;
 }
 
 /** One model's engine pin (ADR 0018). */
@@ -555,11 +567,6 @@ export interface LocalModel {
   /** Per-model idle release in seconds; null: the global setting. */
   idleSecs: number | null;
   fit: Fit;
-  /**
-   * The engine chosen for this model: an installed pack engine id, or null/absent for llama.cpp. Optional because the
-   * server's `local_models` does not report it yet (the UI then remembers the choice it sent).
-   */
-  engine?: string | null;
   /** Parallel slots it loads with: its own choice or the default. */
   slots: number;
   /** The slots are this model's own choice (false: the default from the settings). */
@@ -716,8 +723,6 @@ export interface ModelPreset {
   maxTokens: number | null;
   /** Added in front only when the request has no system message of its own. */
   systemPrompt: string | null;
-  /** `llama.cpp` or an engine pack's id. */
-  engine: string | null;
   /** Answer identical deterministic requests from the response cache (ADR 0019). */
   cacheResponses: boolean;
   /** Keep the system prompt's prefix warm: saved when the model unloads, restored on load. */
@@ -937,19 +942,12 @@ export interface RepairNotice {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Declarative packs (ADR 0011)
+// Model catalog packs (ADR 0011, ADR 0020)
 
 /** A pack file that was skipped (problem) or loaded with a note (warning). */
 export interface PackNote {
   file: string;
   message: string;
-}
-
-/** An engine pack that is loaded. */
-export interface PackEngine {
-  id: string;
-  name: string;
-  version: string;
 }
 
 /** A catalog model and the variant that fits this machine best, with its verdict. */
@@ -966,7 +964,6 @@ export interface Recommendation {
 }
 
 export interface PacksInfo {
-  engines: PackEngine[];
   problems: PackNote[];
   warnings: PackNote[];
   recommendations: Recommendation[];

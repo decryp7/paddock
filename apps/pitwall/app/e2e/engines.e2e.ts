@@ -8,12 +8,14 @@ test.describe('engines', () => {
     await expect(page.getByRole('progressbar', { name: /Installing/ })).toBeVisible();
   });
 
-  test('shows skipped packs as an inline notice and installs a pack engine like any other', async ({ page }) => {
+  test('is the llama.cpp page only, and offers a leftover llamafile for removal', async ({ page }) => {
     await openApp(page, '/engines');
-    await expect(page.getByRole('status', { name: 'Pack problems' })).toContainText('packs/old-vllm.toml');
-    await expect(page.getByText('ik_llama.cpp (pack)').first()).toBeVisible();
-    await page.getByRole('button', { name: /^Install CPU \(AVX2\) v0\.9\.2/ }).click();
-    await expect(page.getByRole('progressbar', { name: /Installing/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'llama.cpp', level: 1 })).toBeVisible();
+    await expect(page.getByText('MLX')).toHaveCount(0);
+    await expect(page.getByText('Planned and other engines')).toHaveCount(0);
+    await expect(page.getByText('Nothing is deleted until you remove it')).toBeVisible();
+    await page.getByRole('button', { name: /^Remove llamafile/ }).click();
+    await expect(page.getByText('Nothing is deleted until you remove it')).toHaveCount(0);
   });
 
   test('pins a build for all models, reads what it supports, and rolls back with the target named', async ({ page }) => {
@@ -22,7 +24,7 @@ test.describe('engines', () => {
     await page.getByRole('button', { name: 'What CPU (AVX2) b4300 supports' }).click();
     const features = page.getByRole('list', { name: 'Features of CPU (AVX2) b4300' });
     await expect(features).toContainText('Needs b5600');
-    await expect(features).toContainText('Install llama.cpp b5600 or newer in Engines');
+    await expect(features).toContainText('Install llama.cpp b5600 or newer on the llama.cpp page');
     // Pin: accent and words, and the page says automatic choice is off.
     await page.getByRole('button', { name: 'Pin Vulkan b11669 for all models' }).click();
     const pinned = page.getByRole('button', { name: 'Unpin Vulkan b11669 for all models' });
