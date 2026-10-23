@@ -1,6 +1,6 @@
 //! Runs a real Chromium-family browser when one is installed (skipped cleanly otherwise) against a local server.
 //! Profiles live in temp folders; nothing touches a user profile or a real host.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::await_holding_lock)] // the lock is what serialises the tests
 
 mod support;
 
@@ -15,6 +15,13 @@ use support::{serve, Reply};
 const PAGE: &str = "<!doctype html><html><head><title>Rendered</title></head><body><div id=v>loading</div><ul id=r></ul>\
 <script>setTimeout(()=>{document.getElementById('v').textContent='version 1.2.3';\
 for(let i=1;i<=3;i++){const l=document.createElement('li');l.className='rel';l.textContent='item '+i;r.appendChild(l);}},400)</script></body></html>";
+
+/// Real browsers are heavy: started side by side on a small CI runner they starve each other (a DevTools call then
+/// times out and the render is reported as a slow page), so the tests in this file take turns.
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn browser() -> Option<Browser> {
     let b = find_installed();
@@ -56,6 +63,7 @@ fn assert_no_leftovers(marker: &str) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn renders_a_scripted_page_and_leaves_nothing_behind() {
+    let _turn = serial();
     let Some(b) = browser() else { return };
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
@@ -74,6 +82,7 @@ async fn renders_a_scripted_page_and_leaves_nothing_behind() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn off_screen_headful_mode_and_redirects() {
+    let _turn = serial();
     let Some(b) = browser() else { return };
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
@@ -90,6 +99,7 @@ async fn off_screen_headful_mode_and_redirects() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn challenges_become_needs_you() {
+    let _turn = serial();
     let Some(b) = browser() else { return };
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
@@ -105,6 +115,7 @@ async fn challenges_become_needs_you() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_element_times_out_as_failed() {
+    let _turn = serial();
     let Some(b) = browser() else { return };
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
@@ -123,6 +134,7 @@ async fn a_missing_element_times_out_as_failed() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
+    let _turn = serial();
     let Some(b) = browser() else { return };
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
@@ -146,17 +158,19 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
 
 #[test]
 fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
+    let _turn = serial();
     let Some(b) = browser() else { return };
     let base = tempfile::tempdir().unwrap();
     let mut opts = LaunchOptions::new(base.path());
     opts.mode = Mode::Headless;
-    opts.max_lifetime = Duration::from_secs(4);
+    // The limit runs from the spawn, so it has to leave room for a slow start on a loaded runner (which is not what is tested).
+    opts.max_lifetime = spotter_render::launch::START_LIMIT + Duration::from_secs(4);
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let dir = c.profile_dir().to_path_buf();
     assert!(c.is_running());
     let marker = dir.to_string_lossy().to_string();
     assert!(!processes_mentioning(&marker).is_empty());
-    let end = Instant::now() + Duration::from_secs(20);
+    let end = Instant::now() + spotter_render::launch::START_LIMIT + Duration::from_secs(30);
     while c.is_running() && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -169,6 +183,7 @@ fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
 
 #[test]
 fn the_memory_cap_kills_the_tree() {
+    let _turn = serial();
     let Some(b) = browser() else { return };
     let base = tempfile::tempdir().unwrap();
     let mut opts = LaunchOptions::new(base.path());
@@ -189,6 +204,7 @@ fn the_memory_cap_kills_the_tree() {
 
 #[test]
 fn dropping_a_running_browser_kills_it_and_removes_the_profile() {
+    let _turn = serial();
     let Some(b) = browser() else { return };
     let base = tempfile::tempdir().unwrap();
     let mut opts = LaunchOptions::new(base.path());
