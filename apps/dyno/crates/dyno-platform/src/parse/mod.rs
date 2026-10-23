@@ -4,6 +4,7 @@
 pub mod cpu_topology;
 pub mod desktop_entry;
 pub mod gpu;
+pub mod hardware;
 pub mod ioreg;
 pub mod launchd;
 pub mod linux_hw;

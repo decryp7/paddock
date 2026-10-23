@@ -11,6 +11,7 @@ pub mod battery;
 pub mod control_state;
 pub mod dev_folders;
 pub mod fake;
+pub mod hardware;
 pub mod inventory;
 pub mod network;
 pub mod parse;

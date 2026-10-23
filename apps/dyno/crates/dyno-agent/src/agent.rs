@@ -207,6 +207,10 @@ pub struct Shared {
     pub bench: crate::bench::BenchCentre,
     /// Cleanup: categories, scans and the quarantine (deletes only on the user's confirmed click).
     pub cleanup: crate::cleanup::centre::CleanupCentre,
+    /// Throttling and hardware life: the OS's speed limit, SSD wear and battery capacity (observe-only).
+    pub hardware: crate::hardware::HardwareCentre,
+    /// "Is this normal?" baselines learned from history.
+    pub baselines: crate::baselines::BaselineCentre,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -336,6 +340,8 @@ impl Shared {
                 Arc::new(dyno_platform::network::OsReverseDns),
                 Box::new(dyno_platform::network::OsTraffic),
             ),
+            hardware: crate::hardware::HardwareCentre::os(),
+            baselines: crate::baselines::BaselineCentre::new(),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

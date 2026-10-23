@@ -273,6 +273,12 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             shared.request_stop();
             Ok(Reply::Ok)
         }
+        Request::Throttling => Ok(Reply::Throttling(Box::new(throttling(shared)))),
+        Request::Lifespan => {
+            let core = lock(&shared.core);
+            Ok(Reply::Lifespan(Box::new(shared.hardware.lifespan_overview(&core.store, now()))))
+        }
+        Request::Baselines => Ok(Reply::Baselines(Box::new(shared.baselines.overview(shared)))),
         r @ (Request::CleanupCategories
         | Request::ScanCleanup { .. }
         | Request::RunCleanup { .. }
@@ -635,7 +641,13 @@ fn why_slow(shared: &Shared) -> dyno_core::diagnosis::Diagnosis {
         processes: &core.latest.processes,
         protection: &protection,
         system_disk: &disk,
+        throttle: shared.hardware.context(),
     })
+}
+
+fn throttling(shared: &Shared) -> dyno_core::throttle::ThrottleOverview {
+    let core = lock(&shared.core);
+    shared.hardware.throttle_overview(&core.store, core.recent.back(), now())
 }
 
 fn anomalies(shared: &Shared) -> Vec<dyno_core::anomaly::Anomaly> {
@@ -683,6 +695,7 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
         .map(|(disk, _, pts)| (disk, disk_full(&pts)))
         .collect();
     let system_disk = sample.disks.first().map(|d| d.id.clone()).unwrap_or_default();
+    let lifespans = shared.hardware.lifespan_overview(&core.store, t).forecasts;
     let report = assess(&HealthInput {
         now: t,
         sample: &sample,
@@ -693,6 +706,7 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
         anomalies: &anomalies,
         crashes_7d: 0,
         tuning: &tuning,
+        lifespans: &lifespans,
     });
     // Bookkeeping for the weekly report's trend (one row per hour; a failed write loses one point, nothing else).
     let _ = core.store.put_score(t, report.score);
@@ -799,8 +813,17 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
         disks,
         issues,
         changes,
+        hardware: dyno_core::report::hardware_lines(
+            &s.throttle_episodes(from, MAX_HARDWARE_EPISODES).map_err(internal)?,
+            from,
+            to,
+            &shared.hardware.lifespan_overview(s, to.min(now())).forecasts,
+        ),
     }))
 }
+
+/// Most throttling episodes read for one report.
+const MAX_HARDWARE_EPISODES: u32 = 500;
 
 /// Writes the report to the path the user chose in the save dialog (Markdown or HTML).
 fn save_report(shared: &Shared, path: &str, format: ReportFormat, weeks_ago: u32) -> Result<SavedReport, AgentError> {

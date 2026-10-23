@@ -1,0 +1,534 @@
+//! Readers for the hardware's own reports (WP-23, WP-24): the OS's CPU speed limit, SSD wear and battery capacity, each
+//! behind a small port from `dyno_core::ports`. Observe-only: they read, never change a setting. External tools run
+//! through [`crate::process`] with timeouts; anything missing or refused is an unavailable reading that says why and
+//! what would help. The `Fake*` readers are for tests and for the other OSes' tests.
+
+use crate::parse::hardware::{parse_smartctl_scan, parse_smartctl_ssd, smartctl_refusal};
+use dyno_core::hardware::{BatteryCapacity, DiskWear, OsThrottle};
+use dyno_core::metrics::Reading;
+use dyno_core::ports::{BatteryCapacitySource, DiskWearSource, ThrottleSignals};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+const TOOL_TIMEOUT: Duration = Duration::from_secs(10);
+use dyno_core::hardware::NO_BATTERY;
+
+/// The reader of the OS's CPU speed limit for this OS.
+pub fn throttle_signals() -> Box<dyn ThrottleSignals> {
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(PmsetTherm)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(LinuxThrottle::new(PathBuf::from("/sys")))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        Box::new(NoThrottleSignals(
+            "Windows does not report why the CPU slows down; Dyno infers it from the clock, the heat and the power mode.",
+        ))
+    }
+}
+
+/// The reader of SSD wear for this OS.
+pub fn disk_wear() -> Box<dyn DiskWearSource> {
+    Box::new(SmartctlWear::new(smartctl_candidates()))
+}
+
+/// The reader of the battery's capacity for this OS.
+pub fn battery_capacity() -> Box<dyn BatteryCapacitySource> {
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(MacBattery)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(SysfsBattery::new(PathBuf::from("/sys/class/power_supply")))
+    }
+    #[cfg(windows)]
+    {
+        Box::new(WindowsBattery)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    {
+        Box::new(FakeBattery(Reading::unavailable("Battery capacity is not read on this OS yet.")))
+    }
+}
+
+fn smartctl_candidates() -> Vec<PathBuf> {
+    [
+        "/opt/homebrew/sbin/smartctl",
+        "/opt/homebrew/bin/smartctl",
+        "/usr/local/sbin/smartctl",
+        "/usr/local/bin/smartctl",
+        "/usr/sbin/smartctl",
+        "/usr/bin/smartctl",
+        r"C:\Program Files\smartmontools\bin\smartctl.exe",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+// ------------------------------------------------------------------------------------------------ CPU speed limit
+
+/// macOS: `pmset -g therm` (read-only; it only prints).
+#[cfg(target_os = "macos")]
+pub struct PmsetTherm;
+
+#[cfg(target_os = "macos")]
+impl ThrottleSignals for PmsetTherm {
+    fn read(&mut self) -> Reading<OsThrottle> {
+        let mut cmd = crate::process::command("/usr/bin/pmset");
+        cmd.args(["-g", "therm"]);
+        match crate::process::output_text(cmd, TOOL_TIMEOUT) {
+            Ok(text) => match crate::parse::hardware::parse_pmset_therm(&text) {
+                Some(t) => Reading::Available(t),
+                None => Reading::unavailable("macOS did not say whether it limits the CPU's speed."),
+            },
+            Err(e) => Reading::unavailable(e.to_string()),
+        }
+    }
+}
+
+/// Linux: the kernel's thermal-throttle counters and the cpufreq limits under `<root>` (normally `/sys`). A counter that
+/// rose since the previous read means the CPU throttled for heat in between.
+pub struct LinuxThrottle {
+    root: PathBuf,
+    last_count: Option<u64>,
+}
+
+impl LinuxThrottle {
+    /// A reader over a sysfs root.
+    pub fn new(root: PathBuf) -> LinuxThrottle {
+        LinuxThrottle { root, last_count: None }
+    }
+}
+
+fn read_u64(path: &Path) -> Option<u64> {
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+fn cpu_dirs(root: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(root.join("devices/system/cpu")) else {
+        return Vec::new();
+    };
+    let mut v: Vec<PathBuf> = rd
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                n.strip_prefix("cpu")
+                    .is_some_and(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit()))
+            })
+        })
+        .collect();
+    v.sort();
+    v.truncate(1024);
+    v
+}
+
+impl ThrottleSignals for LinuxThrottle {
+    fn read(&mut self) -> Reading<OsThrottle> {
+        let cpus = cpu_dirs(&self.root);
+        let counters: Vec<u64> = cpus
+            .iter()
+            .flat_map(|c| ["core_throttle_count", "package_throttle_count"].map(|f| c.join("thermal_throttle").join(f)))
+            .filter_map(|p| read_u64(&p))
+            .collect();
+        let limits: Vec<u8> = cpus
+            .iter()
+            .filter_map(|c| {
+                let max = read_u64(&c.join("cpufreq/cpuinfo_max_freq"))?;
+                let cap = read_u64(&c.join("cpufreq/scaling_max_freq"))?;
+                (max > 0).then(|| (cap.min(max) * 100 / max) as u8)
+            })
+            .collect();
+        if counters.is_empty() && limits.is_empty() {
+            return Reading::unavailable(
+                "This kernel exposes no CPU throttling counters or frequency limits (common in virtual machines).",
+            );
+        }
+        let total: u64 = counters.iter().sum();
+        let thermal = if counters.is_empty() {
+            None
+        } else {
+            let rose = self.last_count.map(|prev| total > prev);
+            self.last_count = Some(total);
+            rose
+        };
+        let speed = limits.iter().copied().min();
+        Reading::Available(OsThrottle {
+            speed_limit_percent: speed,
+            thermal,
+            power: speed.map(|s| s < 95),
+        })
+    }
+}
+
+/// A system that does not say.
+pub struct NoThrottleSignals(pub &'static str);
+
+impl ThrottleSignals for NoThrottleSignals {
+    fn read(&mut self) -> Reading<OsThrottle> {
+        Reading::unavailable(self.0)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------- SSD wear
+
+/// SSD wear through smartmontools (`smartctl -a -j`, read-only). Without it, or without the rights, it says what would
+/// help; the privileged helper (WP-01) will read it for the user later.
+pub struct SmartctlWear {
+    candidates: Vec<PathBuf>,
+}
+
+impl SmartctlWear {
+    /// A reader that looks for `smartctl` at these paths.
+    pub fn new(candidates: Vec<PathBuf>) -> SmartctlWear {
+        SmartctlWear { candidates }
+    }
+
+    fn run(&self, program: &Path, args: &[&str]) -> Result<String, String> {
+        let mut cmd = crate::process::command(program);
+        cmd.args(args);
+        // smartctl's exit status is a bit mask of findings, not a failure flag: judge the JSON.
+        crate::process::run_with_timeout(cmd, TOOL_TIMEOUT)
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .map_err(|e| e.to_string())
+    }
+}
+
+impl DiskWearSource for SmartctlWear {
+    fn read(&mut self) -> Reading<Vec<DiskWear>> {
+        let Some(program) = self.candidates.iter().find(|p| p.is_file()) else {
+            return Reading::unavailable(
+                "Dyno reads SSD wear through smartmontools, which is not installed. Install it (on macOS: brew install smartmontools) \
+                 or wait for Dyno's privileged helper.",
+            );
+        };
+        let scan = match self.run(program, &["--scan", "-j"]) {
+            Ok(t) => t,
+            Err(e) => return Reading::unavailable(e),
+        };
+        let devices = parse_smartctl_scan(&scan);
+        if devices.is_empty() {
+            return Reading::unavailable("smartctl found no drives it can read.");
+        }
+        let (mut found, mut refusal) = (Vec::new(), None);
+        for d in devices {
+            let Ok(out) = self.run(program, &["-a", "-j", &d]) else { continue };
+            match parse_smartctl_ssd(&out) {
+                Some(w) => found.push(w),
+                None => refusal = refusal.or_else(|| smartctl_refusal(&out)),
+            }
+        }
+        if found.is_empty() {
+            Reading::unavailable(refusal.unwrap_or_else(|| "No SSD reports wear counters to apps.".into()))
+        } else {
+            Reading::Available(found)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------- battery
+
+/// macOS: `ioreg -rn AppleSmartBattery` (read-only).
+#[cfg(target_os = "macos")]
+pub struct MacBattery;
+
+#[cfg(target_os = "macos")]
+impl BatteryCapacitySource for MacBattery {
+    fn read(&mut self) -> Reading<BatteryCapacity> {
+        let mut cmd = crate::process::command("/usr/sbin/ioreg");
+        cmd.args(["-rn", "AppleSmartBattery"]);
+        match crate::process::output_text(cmd, TOOL_TIMEOUT) {
+            Ok(text) => {
+                crate::parse::hardware::parse_mac_battery(&text).map_or_else(|| Reading::unavailable(NO_BATTERY), Reading::Available)
+            }
+            Err(e) => Reading::unavailable(e.to_string()),
+        }
+    }
+}
+
+/// Linux (and anything with `/sys/class/power_supply`): the first battery's energy or charge figures.
+pub struct SysfsBattery {
+    dir: PathBuf,
+}
+
+impl SysfsBattery {
+    /// A reader over a `power_supply` directory.
+    pub fn new(dir: PathBuf) -> SysfsBattery {
+        SysfsBattery { dir }
+    }
+}
+
+impl BatteryCapacitySource for SysfsBattery {
+    fn read(&mut self) -> Reading<BatteryCapacity> {
+        let Ok(rd) = std::fs::read_dir(&self.dir) else {
+            return Reading::unavailable(NO_BATTERY);
+        };
+        let mut dirs: Vec<PathBuf> = rd.filter_map(Result::ok).map(|e| e.path()).collect();
+        dirs.sort();
+        for d in dirs {
+            let is_battery = std::fs::read_to_string(d.join("type")).is_ok_and(|t| t.trim().eq_ignore_ascii_case("battery"));
+            if !is_battery {
+                continue;
+            }
+            let pair = |full: &str, design: &str| Some((read_u64(&d.join(full))?, read_u64(&d.join(design))?));
+            let Some((full, design)) = pair("energy_full", "energy_full_design").or_else(|| pair("charge_full", "charge_full_design"))
+            else {
+                continue;
+            };
+            let (Ok(full), Ok(design)) = (u32::try_from(full), u32::try_from(design)) else {
+                continue;
+            };
+            if design == 0 {
+                continue;
+            }
+            let id = std::fs::read_to_string(d.join("serial_number"))
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .or_else(|| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| "battery".into());
+            return Reading::Available(BatteryCapacity {
+                id,
+                design,
+                full,
+                cycles: read_u64(&d.join("cycle_count"))
+                    .filter(|c| *c > 0)
+                    .and_then(|c| u32::try_from(c).ok()),
+                rated_cycles: None,
+            });
+        }
+        Reading::unavailable(NO_BATTERY)
+    }
+}
+
+/// Windows: `powercfg /batteryreport /xml` into a folder only Dyno writes to.
+#[cfg(windows)]
+pub struct WindowsBattery;
+
+#[cfg(windows)]
+impl BatteryCapacitySource for WindowsBattery {
+    fn read(&mut self) -> Reading<BatteryCapacity> {
+        let windir = std::env::var_os("WINDIR").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+        let dir = std::env::temp_dir().join("Dyno");
+        if std::fs::create_dir_all(&dir).is_err() {
+            return Reading::unavailable("Dyno could not create a temporary folder for the battery report.");
+        }
+        let file = dir.join("battery-report.xml");
+        let _ = std::fs::remove_file(&file);
+        let mut cmd = crate::process::command(windir.join("System32").join("powercfg.exe"));
+        cmd.arg("/batteryreport").arg("/xml").arg("/output").arg(&file);
+        let ran = crate::process::run_with_timeout(cmd, TOOL_TIMEOUT);
+        let text = std::fs::read_to_string(&file);
+        let _ = std::fs::remove_file(&file);
+        match (ran, text) {
+            (Err(e), _) => Reading::unavailable(e.to_string()),
+            (Ok(_), Ok(xml)) => {
+                crate::parse::hardware::parse_powercfg_battery(&xml).map_or_else(|| Reading::unavailable(NO_BATTERY), Reading::Available)
+            }
+            (Ok(_), Err(_)) => Reading::unavailable(NO_BATTERY),
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------------------------------- fakes
+
+/// A throttle reader that answers what it was given, then repeats the last answer.
+pub struct FakeThrottle(pub Vec<Reading<OsThrottle>>);
+
+impl ThrottleSignals for FakeThrottle {
+    fn read(&mut self) -> Reading<OsThrottle> {
+        if self.0.len() > 1 {
+            self.0.remove(0)
+        } else {
+            self.0.first().cloned().unwrap_or_else(|| Reading::unavailable("no reading"))
+        }
+    }
+}
+
+/// An SSD wear reader that answers what it was given.
+pub struct FakeWear(pub Reading<Vec<DiskWear>>);
+
+impl DiskWearSource for FakeWear {
+    fn read(&mut self) -> Reading<Vec<DiskWear>> {
+        self.0.clone()
+    }
+}
+
+/// A battery reader that answers what it was given.
+pub struct FakeBattery(pub Reading<BatteryCapacity>);
+
+impl BatteryCapacitySource for FakeBattery {
+    fn read(&mut self) -> Reading<BatteryCapacity> {
+        self.0.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("dyno-hw-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn write(path: &Path, text: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn linux_throttle_counters_rise_between_reads() {
+        let root = temp("throttle");
+        let cpu0 = root.join("devices/system/cpu/cpu0");
+        write(&cpu0.join("thermal_throttle/core_throttle_count"), "4\n");
+        write(&cpu0.join("thermal_throttle/package_throttle_count"), "4\n");
+        write(&cpu0.join("cpufreq/cpuinfo_max_freq"), "4000000\n");
+        write(&cpu0.join("cpufreq/scaling_max_freq"), "4000000\n");
+        write(&root.join("devices/system/cpu/cpufreq/ignored"), "x");
+        let mut t = LinuxThrottle::new(root.clone());
+        let first = t.read();
+        let first = first.value().unwrap();
+        assert_eq!(
+            (first.thermal, first.speed_limit_percent, first.power),
+            (None, Some(100), Some(false)),
+            "no baseline yet"
+        );
+        let same = t.read();
+        assert_eq!(same.value().unwrap().thermal, Some(false));
+        write(&cpu0.join("thermal_throttle/core_throttle_count"), "9\n");
+        assert_eq!(t.read().value().unwrap().thermal, Some(true));
+        assert_eq!(t.read().value().unwrap().thermal, Some(false), "the count did not move since");
+        // A frequency cap reads as a power limit.
+        write(&cpu0.join("cpufreq/scaling_max_freq"), "1200000\n");
+        let capped = t.read();
+        let capped = capped.value().unwrap();
+        assert_eq!((capped.speed_limit_percent, capped.power), (Some(30), Some(true)));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn linux_without_counters_says_so() {
+        let root = temp("novm");
+        let mut t = LinuxThrottle::new(root.clone());
+        assert!(matches!(t.read(), Reading::Unavailable(m) if m.contains("virtual machines")));
+        write(&root.join("devices/system/cpu/cpu0/other"), "1");
+        assert!(t.read().value().is_none());
+        assert!(LinuxThrottle::new(PathBuf::from("/dyno/no/such/root")).read().value().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sysfs_battery_energy_and_charge_forms() {
+        let dir = temp("bat");
+        write(&dir.join("AC/type"), "Mains\n");
+        write(&dir.join("BAT0/type"), "Battery\n");
+        write(&dir.join("BAT0/energy_full_design"), "57000000\n");
+        write(&dir.join("BAT0/energy_full"), "51000000\n");
+        write(&dir.join("BAT0/cycle_count"), "212\n");
+        write(&dir.join("BAT0/serial_number"), "SN42\n");
+        let b = SysfsBattery::new(dir.clone()).read();
+        let b = b.value().unwrap();
+        assert_eq!(
+            (b.id.as_str(), b.design, b.full, b.cycles),
+            ("SN42", 57_000_000, 51_000_000, Some(212))
+        );
+        std::fs::remove_file(dir.join("BAT0/energy_full")).unwrap();
+        std::fs::remove_file(dir.join("BAT0/energy_full_design")).unwrap();
+        std::fs::remove_file(dir.join("BAT0/serial_number")).unwrap();
+        write(&dir.join("BAT0/charge_full_design"), "4000000\n");
+        write(&dir.join("BAT0/charge_full"), "3500000\n");
+        write(&dir.join("BAT0/cycle_count"), "0\n");
+        let b = SysfsBattery::new(dir.clone()).read();
+        let b = b.value().unwrap();
+        assert_eq!((b.id.as_str(), b.full, b.cycles), ("BAT0", 3_500_000, None));
+        write(&dir.join("BAT0/charge_full_design"), "0\n");
+        assert_eq!(SysfsBattery::new(dir.clone()).read(), Reading::unavailable(NO_BATTERY));
+        assert_eq!(
+            SysfsBattery::new(PathBuf::from("/dyno/none")).read(),
+            Reading::unavailable(NO_BATTERY)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    fn fake_smartctl(dir: &Path, scan: &str, drive: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(dir.join("scan.json"), scan).unwrap();
+        std::fs::write(dir.join("drive.json"), drive).unwrap();
+        let script = dir.join("smartctl");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}/scan.json'; else cat '{0}/drive.json'; fi\nexit 4\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn smartctl_output_is_read_even_though_its_exit_status_is_a_bit_mask() {
+        let dir = temp("smart");
+        let tool = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/nvme0"}]}"#, crate::parse::hardware::tests_nvme());
+        let r = SmartctlWear::new(vec![PathBuf::from("/dyno/missing"), tool]).read();
+        let w = &r.value().unwrap()[0];
+        assert_eq!(w.percent_used, Some(3.0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn smartctl_refusals_name_the_next_step() {
+        let dir = temp("smartdeny");
+        let denied = r#"{"smartctl":{"messages":[{"string":"open device failed: Permission denied"}]}}"#;
+        let tool = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/disk0"}]}"#, denied);
+        assert!(matches!(SmartctlWear::new(vec![tool.clone()]).read(), Reading::Unavailable(m) if m.contains("administrator")));
+        let blank = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/disk0"}]}"#, "{}");
+        assert!(matches!(SmartctlWear::new(vec![blank]).read(), Reading::Unavailable(m) if m.contains("No SSD")));
+        let none = fake_smartctl(&dir, "{}", "{}");
+        assert!(matches!(SmartctlWear::new(vec![none]).read(), Reading::Unavailable(m) if m.contains("no drives")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_missing_smartctl_is_explained() {
+        let r = SmartctlWear::new(vec![PathBuf::from("/dyno/missing/smartctl")]).read();
+        assert!(matches!(r, Reading::Unavailable(m) if m.contains("smartmontools") && m.contains("helper")));
+    }
+
+    #[test]
+    fn fakes_answer_what_they_were_given() {
+        let t = OsThrottle {
+            thermal: Some(true),
+            ..Default::default()
+        };
+        let mut f = FakeThrottle(vec![Reading::unavailable("first"), Reading::Available(t)]);
+        assert!(f.read().value().is_none());
+        assert_eq!(f.read().value(), Some(&t));
+        assert_eq!(f.read().value(), Some(&t), "the last answer repeats");
+        assert!(FakeThrottle(vec![]).read().value().is_none());
+        assert!(NoThrottleSignals("x").read().value().is_none());
+        assert!(FakeWear(Reading::Available(vec![])).read().value().is_some());
+        assert!(FakeBattery(Reading::unavailable("n")).read().value().is_none());
+    }
+
+    #[test]
+    fn this_machines_readers_never_panic_or_hang() {
+        // Read-only calls against the real machine: any answer is fine, a panic or hang is not.
+        let _ = throttle_signals().read();
+        let _ = battery_capacity().read();
+        let _ = disk_wear().read();
+    }
+}

@@ -330,6 +330,14 @@ pub enum Request {
         /// Which week, as for `WeeklyReport`.
         weeks_ago: u32,
     },
+
+    // ---- throttling, lifespan and baselines (WP-23, WP-24, WP-25) ----
+    /// Is the CPU throttled, why, and the recent episodes. Appended.
+    Throttling,
+    /// Life forecasts for SSDs and the battery. Appended.
+    Lifespan,
+    /// What is usual for this time of the week, and how the current values compare. Appended.
+    Baselines,
 }
 
 /// Dyno's own cost.
@@ -573,6 +581,14 @@ pub enum Reply {
     // ---- weekly report export (WP-08) ----
     /// The report file was written. Appended.
     ReportSaved(crate::report::SavedReport),
+
+    // ---- throttling, lifespan and baselines (WP-23, WP-24, WP-25) ----
+    /// The throttling overview. Appended.
+    Throttling(Box<crate::throttle::ThrottleOverview>),
+    /// The life forecasts. Appended.
+    Lifespan(Box<crate::lifespan::LifespanOverview>),
+    /// The baseline comparison. Appended.
+    Baselines(Box<crate::baseline::BaselineOverview>),
 }
 
 impl Reply {
@@ -619,6 +635,9 @@ impl Reply {
             Reply::BenchComparison(x) => v(x),
             Reply::HostNames(x) => v(x),
             Reply::ReportSaved(x) => v(x),
+            Reply::Throttling(x) => v(x),
+            Reply::Lifespan(x) => v(x),
+            Reply::Baselines(x) => v(x),
         }
     }
 }
@@ -873,5 +892,39 @@ mod tests {
             serde_json::to_value(AgentError::new(ErrorCode::BadRequest, "x")).unwrap(),
             serde_json::json!({"code": "badRequest", "message": "x"})
         );
+    }
+
+    #[test]
+    fn hardware_requests_and_replies_have_the_json_shape_of_api_types() {
+        for (r, name) in [
+            (Request::Throttling, "throttling"),
+            (Request::Lifespan, "lifespan"),
+            (Request::Baselines, "baselines"),
+        ] {
+            assert_eq!(serde_json::to_value(&r).unwrap(), name);
+            assert_eq!(serde_json::from_value::<Request>(serde_json::json!(name)).unwrap(), r);
+            let bytes = postcard::to_stdvec(&Message::Request(Box::new(r.clone()))).unwrap();
+            assert_eq!(postcard::from_bytes::<Message>(&bytes).unwrap(), Message::Request(Box::new(r)));
+        }
+        let life = Reply::Lifespan(Box::new(crate::lifespan::LifespanOverview {
+            at: Timestamp(5),
+            forecasts: vec![crate::lifespan::unavailable(
+                crate::lifespan::LifeSubject::Battery,
+                "Battery",
+                "No battery",
+            )],
+        }));
+        let j = life.into_json().unwrap();
+        assert_eq!(j["forecasts"][0]["outcome"]["unavailable"]["reason"], "No battery");
+        assert_eq!(j["forecasts"][0]["subject"], "battery");
+        let base = Reply::Baselines(Box::new(crate::baseline::BaselineOverview {
+            at: Timestamp(5),
+            learning: crate::baseline::Learning::Learning {
+                days_done: 2,
+                days_needed: 7,
+            },
+            items: vec![],
+        }));
+        assert_eq!(base.into_json().unwrap()["learning"]["learning"]["daysNeeded"], 7);
     }
 }
