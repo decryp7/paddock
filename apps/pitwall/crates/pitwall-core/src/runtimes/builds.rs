@@ -91,6 +91,18 @@ pub fn tag_number(tag: &str) -> Option<u64> {
     tag.strip_prefix('b').filter(|n| !n.is_empty()).and_then(|n| n.parse().ok())
 }
 
+/// The oldest llama.cpp release Pitwall can run: it always passes `--jinja` (b4524+) and `--offline` (b5501+).
+pub const MIN_ENGINE_BUILD: u64 = 5501;
+
+/// The message for a release tag older than [`MIN_ENGINE_BUILD`]; `None` when it is new enough or its number is
+/// unknown (a custom build is trusted).
+pub fn too_old_message(tag: &str) -> Option<String> {
+    let n = tag_number(tag).filter(|n| *n < MIN_ENGINE_BUILD)?;
+    Some(format!(
+        "This llama.cpp build (b{n}) is older than b{MIN_ENGINE_BUILD}, which Pitwall needs. Update it in Engines."
+    ))
+}
+
 /// What a build accelerates with, for the UI.
 pub fn label(id: &str) -> String {
     match id {
@@ -203,6 +215,10 @@ mod tests {
         assert_eq!(tag_number("b"), None);
         assert_eq!(tag_number("v1"), None);
         assert_eq!(tag_number("bx"), None);
+        assert!(too_old_message("b5500").is_some_and(|m| m.contains("(b5500)") && m.contains("older than b5501")));
+        assert_eq!(too_old_message("b5501"), None);
+        assert_eq!(too_old_message("b11669"), None);
+        assert_eq!(too_old_message("custom"), None);
     }
 
     #[test]

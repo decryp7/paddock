@@ -64,6 +64,11 @@ An engine is the program that runs a model. Pitwall's own is **llama.cpp**.
 3. If the self-test fails, the new build is **discarded** and the previous one stays active; the message says why. You can
    also switch back to the previous build later with **Roll back**.
 
+**Minimum build.** Pitwall always starts llama.cpp with `--jinja` (b4524 and newer) and `--offline` (b5501 and newer), so
+**b5501 is the oldest build it runs**. An older build is refused at install and at engine start with "This llama.cpp build
+(bNNNN) is older than b5501, which Pitwall needs. Update it in Engines." Builds whose number is unknown (a custom
+`llama-server`) are trusted.
+
 ### Pin a build, roll back, and what a build supports
 
 - **Pin.** In the installed builds table, **Pin** makes a build the one every model uses, even when a better one is installed;

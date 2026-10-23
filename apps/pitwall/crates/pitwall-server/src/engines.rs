@@ -40,6 +40,9 @@ pub enum EngineError {
     /// The archive or build was unusable.
     #[error("{0}")]
     Install(String),
+    /// The build is older than the minimum Pitwall can run (`--jinja`, `--offline`).
+    #[error("{0}")]
+    TooOld(String),
     /// The build pinned for the model cannot be used (ADR 0018).
     #[error(transparent)]
     Pin(#[from] PinError),
@@ -276,6 +279,15 @@ impl LlamaCpp {
             PinError::NoGoodBuild => EngineError::NotInstalled,
             e => EngineError::Pin(e),
         })?;
+        let tag = self
+            .facts()
+            .into_iter()
+            .find(|i| i.id == sel.build)
+            .map(|i| i.tag)
+            .unwrap_or_default();
+        if let Some(m) = builds::too_old_message(&tag) {
+            return Err(EngineError::TooOld(m));
+        }
         let p = self.build_dir(sel.build.as_str()).join(server_name());
         if p.is_file() {
             Ok((p, sel.build))
@@ -311,6 +323,9 @@ impl LlamaCpp {
             .find(&platform, id)
             .cloned()
             .ok_or_else(|| EngineError::NotAvailable(format!("there is no build \"{id}\" for {platform}")))?;
+        if let Some(m) = builds::too_old_message(&self.catalog.tag) {
+            return Err(EngineError::TooOld(m));
+        }
         let total = build.download_bytes();
         let stage = self.dirs.engines().join(format!("{id}.new"));
         let _ = tokio::fs::remove_dir_all(&stage).await;
@@ -522,7 +537,7 @@ impl Engine for LlamaCpp {
     fn availability(&self) -> Availability {
         if self.binary().is_some() {
             Availability::Available
-        } else if let Err(EngineError::Pin(e)) = self.binary_for(None) {
+        } else if let Err(e @ (EngineError::Pin(_) | EngineError::TooOld(_))) = self.binary_for(None) {
             Availability::NotInstalled { reason: e.to_string() }
         } else if self.catalog.builds(&self.platform()).is_empty() {
             Availability::NotAvailable {
@@ -897,6 +912,36 @@ mod tests {
         assert!(matches!(m.availability(), Availability::NotInstalled { reason } if reason.contains("Install it in Engines")));
         // A pin does not apply to a model that has its own.
         assert_eq!(m.binary_for(Some("m")).unwrap().1.as_str(), "vulkan");
+    }
+
+    #[tokio::test]
+    async fn a_build_older_than_b5501_is_refused_at_start_with_a_message_that_says_what_to_do() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        put(&dirs, "cpu", "b5500", "passed", true);
+        let e = m.binary_for(None).unwrap_err();
+        assert!(matches!(e, EngineError::TooOld(_)));
+        assert_eq!(
+            e.to_string(),
+            "This llama.cpp build (b5500) is older than b5501, which Pitwall needs. Update it in Engines."
+        );
+        assert!(m.binary().is_none());
+        assert!(matches!(m.availability(), Availability::NotInstalled { reason } if reason.contains("b5500")));
+        put(&dirs, "cpu", "b5501", "passed", true);
+        assert!(m.binary_for(None).is_ok());
+    }
+
+    #[tokio::test]
+    async fn installing_a_catalog_older_than_b5501_is_refused_before_downloading() {
+        let (_d, dirs) = dirs();
+        let mut m = mgr(&dirs);
+        let mut c = (*m.catalog).clone();
+        c.tag = "b5000".into();
+        m.catalog = std::sync::Arc::new(c);
+        let id = m.suggested().unwrap_or_else(|| "cpu".into());
+        let e = m.install(&id, &CancelFlag::default(), |_, _| {}).await.unwrap_err();
+        assert!(matches!(e, EngineError::TooOld(_)), "{e}");
+        assert!(!dirs.engines().join(format!("{id}.new")).exists());
     }
 
     #[test]

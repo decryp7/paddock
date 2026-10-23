@@ -310,7 +310,7 @@ The events feed (2000 entries) and the request list (500 entries) live in memory
   calls need the admin key. Only loopback `Host` names are answered (DNS rebinding); browser pages from other origins
   are refused.
 - **Engines are contained.** Each model runs in its own process with an empty environment plus an allow-list, a private
-  API key, `--offline`, loopback only, killed when the handle is dropped. A crashing engine produces an error for that
+  API key, `--offline` (so llama.cpp b5501 or newer; older builds are refused at install and start), loopback only, killed when the handle is dropped. A crashing engine produces an error for that
   request, is noticed by the next tick and reloaded on demand; it never takes the server down.
 - **Never unload a busy model**, never push the machine into swap: a load that cannot fit is queued or answered with a
   typed `insufficient_memory` error.
