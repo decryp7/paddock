@@ -53,18 +53,17 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await expect(page.getByText('Draining ui-tests')).toBeVisible();
     await expect(page.locator('.title').getByText('Paused')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Resume' }).first().click();
+    await page.getByRole('button', { name: 'Actions for ui-tests' }).click();
+    await page.getByRole('menuitem', { name: 'Resume' }).click();
     await expect(page.locator('.title').getByText('Idle')).toBeVisible();
   });
 
   test('updates a runner and shows the progress through the phases', async ({ page }) => {
     await page.goto(`${APP}/updates`);
-    const card = page.locator('article', { has: page.getByRole('link', { name: 'ui-tests' }) });
-    await card.getByRole('button', { name: 'Update now' }).click();
-    await expect(card.getByLabel(/Update progress/)).toBeVisible();
-    await expect(card.getByText('5.3.0').first()).toBeVisible();
-    // The mock walks through the phases in ~11 s and then reports the new version.
-    await expect(card.locator('dd').first()).toHaveText('5.3.0', { timeout: 20_000 });
+    const row = page.getByRole('row', { name: /ui-tests/ });
+    await row.getByRole('button', { name: 'Update ui-tests to 5.3.0' }).click();
+    // The mock walks through the phases in ~11 s and then reports the new version as installed.
+    await expect(row.getByRole('cell').nth(1)).toHaveText('5.3.0', { timeout: 20_000 });
   });
 
   test('switches the theme and remembers it', async ({ page }) => {
@@ -102,7 +101,7 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await dialog.getByRole('button', { name: 'Register' }).click();
 
     await expect(dialog).toBeHidden();
-    await expect(page.getByRole('link', { name: 'nightly' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'nightly', exact: true })).toBeVisible();
   });
 
   test('shows the banner and a way out when the service is not installed', async ({ page }) => {
