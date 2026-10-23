@@ -2,7 +2,7 @@
 //! its command line (and a running Debrief takes them over). If Debrief is not installed the caller gets a plain
 //! "not installed" answer and the extract is still written, so the owner can open it by hand.
 
-use pitcrew_core::debrief_link::{self, DEBRIEF_CLI};
+use pitcrew_core::debrief_link::{self, DEBRIEF_CLI, LEGACY_DEBRIEF_CLI};
 use pitcrew_core::platform::Os;
 use pitcrew_core::time::Timestamp;
 use serde::Serialize;
@@ -20,6 +20,8 @@ pub struct DebriefStatus {
     pub installed: bool,
     /// Where.
     pub program: Option<String>,
+    /// Only the pre-rename program (`imt`) was found: Debrief must be updated before "Open in Debrief" works.
+    pub needs_update: bool,
     /// The command-line name Pitcrew looks for (for the "not installed" message).
     pub cli_name: String,
 }
@@ -59,17 +61,51 @@ fn os() -> Os {
 
 /// Finds Debrief's program on `path` (a `PATH` list), then in the usual install places.
 pub fn find(path: Option<&str>, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let file = format!("{DEBRIEF_CLI}{}", std::env::consts::EXE_SUFFIX);
+    find_cli(DEBRIEF_CLI, path, env)
+}
+
+fn find_cli(cli: &str, path: Option<&str>, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let file = format!("{cli}{}", std::env::consts::EXE_SUFFIX);
     let on_path = path.into_iter().flat_map(std::env::split_paths).map(|d| d.join(&file));
-    on_path.chain(debrief_link::install_candidates(os(), env)).find(|p| p.is_file())
+    on_path
+        .chain(debrief_link::install_candidates_of(cli, os(), env))
+        .find(|p| p.is_file())
+}
+
+/// Whether the pre-rename program is there (and the current one is not): see [`DebriefStatus::needs_update`].
+pub fn legacy_only(path: Option<&str>, env: &dyn Fn(&str) -> Option<String>) -> bool {
+    find(path, env).is_none() && find_cli(LEGACY_DEBRIEF_CLI, path, env).is_some()
+}
+
+/// What the search for Debrief's program found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lookup<'a> {
+    /// The program is here.
+    Found(&'a Path),
+    /// Only the pre-rename `imt` program is installed.
+    NeedsUpdate,
+    /// Nothing.
+    Missing,
+}
+
+/// What to tell the user when Debrief was not found.
+pub fn not_found_message(legacy: bool) -> String {
+    if legacy {
+        "Update Debrief to use Open in Debrief (the installed version still has the old `imt` program). The log is saved so you can open it by hand."
+            .to_string()
+    } else {
+        format!("Debrief was not found (looked for `{DEBRIEF_CLI}`). Install Debrief, or open this file in it by hand.")
+    }
 }
 
 /// Debrief's status on this machine.
 pub fn status() -> DebriefStatus {
     let path = std::env::var("PATH").ok();
     let found = find(path.as_deref(), &|k| std::env::var(k).ok());
+    let needs_update = found.is_none() && legacy_only(path.as_deref(), &|k| std::env::var(k).ok());
     DebriefStatus {
         installed: found.is_some(),
+        needs_update,
         program: found.map(|p| p.display().to_string()),
         cli_name: DEBRIEF_CLI.to_string(),
     }
@@ -95,7 +131,7 @@ pub fn hand_off(
     label: &str,
     window: Option<(Timestamp, Timestamp)>,
     out_dir: &Path,
-    program: Option<&Path>,
+    program: Lookup<'_>,
     start: &dyn Fn(&Path, &Path) -> Result<(), String>,
 ) -> Result<Handoff, String> {
     let mut text = read_tail(log).map_err(|e| format!("the runner's log could not be read: {e}"))?;
@@ -120,13 +156,13 @@ pub fn hand_off(
     std::fs::write(&file, text).map_err(|e| format!("the log could not be written for Debrief: {e}"))?;
     let shown = file.display().to_string();
     match program {
-        Some(p) => {
+        Lookup::Found(p) => {
             start(p, &file)?;
             Ok(Handoff::Opened { file: shown })
         }
-        None => Ok(Handoff::NotInstalled {
+        missing => Ok(Handoff::NotInstalled {
             file: shown,
-            message: format!("Debrief was not found (looked for `{DEBRIEF_CLI}`). Install Debrief, or open this file in it by hand."),
+            message: not_found_message(missing == Lookup::NeedsUpdate),
         }),
     }
 }
@@ -181,7 +217,7 @@ mod tests {
             "build 7",
             Some((ts("2026-10-22T12:10:00Z"), ts("2026-10-22T12:11:00Z"))),
             &d.join("out"),
-            Some(fake),
+            Lookup::Found(fake),
             &|p, f| {
                 started.borrow_mut().push((p.to_path_buf(), f.to_path_buf()));
                 Ok(())
@@ -200,7 +236,10 @@ mod tests {
         let d = temp("missing");
         let log = d.join("runner.log");
         std::fs::write(&log, LOG).unwrap();
-        let r = hand_off(&log, "mac", "all", None, &d.join("out"), None, &|_, _| panic!("must not start")).unwrap();
+        let r = hand_off(&log, "mac", "all", None, &d.join("out"), Lookup::Missing, &|_, _| {
+            panic!("must not start")
+        })
+        .unwrap();
         let Handoff::NotInstalled { file, message } = r else {
             panic!("{r:?}")
         };
@@ -212,13 +251,18 @@ mod tests {
             "x",
             Some((ts("2020-01-01T00:00:00Z"), ts("2020-01-01T01:00:00Z"))),
             &d.join("out"),
-            None,
+            Lookup::Missing,
             &|_, _| Ok(()),
         )
         .unwrap();
         assert!(matches!(none, Handoff::NoLines { .. }));
-        assert!(hand_off(&d.join("nope.log"), "mac", "x", None, &d.join("out"), None, &|_, _| Ok(())).is_err());
-        let failing = hand_off(&log, "mac", "y", None, &d.join("out"), Some(Path::new("/x")), &|_, _| {
+        assert!(
+            hand_off(&d.join("nope.log"), "mac", "x", None, &d.join("out"), Lookup::Missing, &|_, _| Ok(
+                ()
+            ))
+            .is_err()
+        );
+        let failing = hand_off(&log, "mac", "y", None, &d.join("out"), Lookup::Found(Path::new("/x")), &|_, _| {
             Err("boom".into())
         });
         assert_eq!(failing.unwrap_err(), "boom");
@@ -237,7 +281,7 @@ mod tests {
             "old",
             Some((ts("2026-10-22T12:10:00Z"), ts("2026-10-22T12:11:00Z"))),
             &d.join("out"),
-            None,
+            Lookup::Missing,
             &|_, _| Ok(()),
         )
         .unwrap();
@@ -258,6 +302,34 @@ mod tests {
         );
         let s = status();
         assert_eq!(s.cli_name, DEBRIEF_CLI);
+        assert!(!s.needs_update || !s.installed);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn only_the_old_imt_program_means_debrief_needs_an_update() {
+        let d = temp("legacy");
+        let path = std::env::join_paths([&d]).unwrap().to_string_lossy().into_owned();
+        let none = |_: &str| None;
+        assert!(!legacy_only(Some(&path), &none));
+        std::fs::write(d.join(format!("{LEGACY_DEBRIEF_CLI}{}", std::env::consts::EXE_SUFFIX)), "x").unwrap();
+        assert!(legacy_only(Some(&path), &none));
+        // The current program wins: nothing to update.
+        std::fs::write(d.join(format!("{DEBRIEF_CLI}{}", std::env::consts::EXE_SUFFIX)), "x").unwrap();
+        assert!(!legacy_only(Some(&path), &none));
+        // The hand-off says so too, and still writes the extract.
+        let log = d.join("runner.log");
+        std::fs::write(&log, "time=\"2026-10-22T12:00:00+00:00\" msg=x\n").unwrap();
+        let r = hand_off(&log, "m", "all", None, &d.join("out"), Lookup::NeedsUpdate, &|_, _| {
+            panic!("must not start")
+        })
+        .unwrap();
+        let Handoff::NotInstalled { message, .. } = r else {
+            panic!("{r:?}")
+        };
+        assert!(message.starts_with("Update Debrief"));
+        assert!(not_found_message(true).starts_with("Update Debrief to use Open in Debrief"));
+        assert!(not_found_message(false).contains(DEBRIEF_CLI));
         let _ = std::fs::remove_dir_all(d);
     }
 

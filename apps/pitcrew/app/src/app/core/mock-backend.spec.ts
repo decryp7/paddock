@@ -660,7 +660,7 @@ describe('MockBackend insights, storage, Debrief and channels', () => {
   });
 
   it('hands a job to Debrief and says so when it is not installed', async () => {
-    expect((await mock.debriefStatus()).cliName).toBe('imt');
+    expect((await mock.debriefStatus()).cliName).toBe('debrief');
     expect(await mock.openInDebrief('build-win', 'run 7', 1, 2)).toMatchObject({ result: 'opened' });
     expect((await rejection(mock.openInDebrief('build-win', 'x', 1, null))).code).toBe('badRequest');
     (mock as unknown as { debrief: boolean }).debrief = false;

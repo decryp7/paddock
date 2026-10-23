@@ -24,7 +24,7 @@ export const DebriefStore = signalStore(
       try {
         patchState(store, { status: await backend.debriefStatus() });
       } catch {
-        patchState(store, { status: { installed: false, program: null, cliName: 'debrief' } });
+        patchState(store, { status: { installed: false, program: null, needsUpdate: false, cliName: 'debrief' } });
       }
     },
     /** Opens the runner's log (the whole file, or one job's part when both times are given) in Debrief. */
@@ -33,7 +33,7 @@ export const DebriefStore = signalStore(
       try {
         const r = await backend.openInDebrief(runner, label, startedAt, finishedAt);
         if (r.result === 'opened') toasts.show({ tone: 'success', icon: 'check-circle', title: 'Sent to Debrief', body: r.file });
-        else if (r.result === 'notInstalled') toasts.show({ tone: 'warning', icon: 'info', title: 'Debrief is not installed', body: `${r.message} The log is saved at ${r.file}.` });
+        else if (r.result === 'notInstalled') toasts.show({ tone: 'warning', icon: 'info', title: store.status()?.needsUpdate ? 'Update Debrief to use Open in Debrief' : 'Debrief is not installed', body: `${r.message} The log is saved at ${r.file}.` });
         else toasts.show({ tone: 'warning', icon: 'info', title: 'Nothing to open', body: r.message });
       } catch (e) {
         toasts.show({ tone: 'danger', icon: 'alert', title: 'Could not open Debrief', body: toCommandError(e).message });
