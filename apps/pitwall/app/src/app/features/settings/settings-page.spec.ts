@@ -264,7 +264,7 @@ describe('SettingsPage', () => {
       const { el } = await setup();
       const p = panel(el);
       expect(switchOf(el, 'lbl-model-updates').getAttribute('aria-checked')).toBe('false');
-      expect(p.querySelector<HTMLSelectElement>('#model-updates-schedule')!.disabled).toBe(true);
+      expect(p.querySelector<HTMLButtonElement>('#model-updates-schedule')!.disabled).toBe(true);
       expect(p.textContent).toContain('Off until you turn it on');
       expect(p.textContent).toContain('never downloads anything by itself');
       expect(p.textContent).toContain('only the repository ids');
@@ -278,10 +278,13 @@ describe('SettingsPage', () => {
       switchOf(el, 'lbl-model-updates').click();
       await settle(fixture);
       expect(spy).toHaveBeenLastCalledWith(true, 'weekly');
-      const select = panel(el).querySelector<HTMLSelectElement>('#model-updates-schedule')!;
-      expect(select.disabled).toBe(false);
-      select.value = 'daily';
-      select.dispatchEvent(new Event('change'));
+      const trigger = panel(el).querySelector<HTMLButtonElement>('#model-updates-schedule')!;
+      expect(trigger.disabled).toBe(false);
+      trigger.click();
+      await settle(fixture);
+      Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'))
+        .find((o) => o.textContent!.trim() === 'Every day')!
+        .click();
       await settle(fixture);
       expect(spy).toHaveBeenLastCalledWith(true, 'daily');
       expect(panel(el).textContent).toContain('The next check runs');

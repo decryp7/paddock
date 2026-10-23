@@ -62,4 +62,18 @@ describe('PwSelect', () => {
     await settle(fixture);
     expect(el.querySelector('button')!.disabled).toBe(true);
   });
+
+  it('shows a disabled option but does not let it be picked', async () => {
+    const { fixture, el } = await render(Host);
+    fixture.componentInstance.options = [...OPTIONS, { value: 'bad', label: 'Failed build', disabled: true }];
+    fixture.componentInstance.value.set('');
+    await settle(fixture);
+    el.querySelector('button')!.click();
+    await settle(fixture);
+    const bad = Array.from(overlay().querySelectorAll<HTMLElement>('.pw-select-list .opt')).find((o) => o.textContent!.includes('Failed build'))!;
+    expect(bad.getAttribute('aria-disabled')).toBe('true');
+    bad.click();
+    await settle(fixture);
+    expect(fixture.componentInstance.picked).toEqual([]);
+  });
 });

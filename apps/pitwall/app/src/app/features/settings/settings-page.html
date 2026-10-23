@@ -289,10 +289,7 @@
             </div>
             <div class="row">
               <div class="lbl"><label class="name" for="model-updates-schedule">How often</label><p class="hint">Once a day or once a week. The first check runs as soon as you turn it on.</p></div>
-              <select id="model-updates-schedule" class="select" [disabled]="!u.settings.enabled || updates.saving()" (change)="updates.setCheck(true, $any($event.target).value)">
-                <option value="weekly" [selected]="u.settings.schedule === 'weekly'">Every week</option>
-                <option value="daily" [selected]="u.settings.schedule === 'daily'">Every day</option>
-              </select>
+              <pw-select inputId="model-updates-schedule" label="How often" [options]="scheduleOptions" [value]="u.settings.schedule" [disabled]="!u.settings.enabled || updates.saving()" (changed)="setSchedule($event)" />
             </div>
             <div class="row">
               <div class="lbl"><span class="name">Status</span><p class="hint" aria-live="polite">{{ updateSummary() }}</p></div>

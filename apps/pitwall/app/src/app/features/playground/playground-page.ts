@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, OnInit, afterRenderEffect, computed, inject, signal, viewChildren } from '@angular/core';
+import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
@@ -18,7 +19,7 @@ export function statsText(s: TurnStats): string {
 /** Chat with a local model, or two side by side with the same prompt. */
 @Component({
   selector: 'pw-playground-page',
-  imports: [MatIconModule, MatTooltipModule, Panel],
+  imports: [MatIconModule, MatTooltipModule, Panel, PwSelect],
   providers: [PlaygroundStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './playground-page.html',
@@ -31,6 +32,9 @@ export class PlaygroundPage implements OnInit {
   protected readonly stats = statsText;
   protected readonly size = bytes;
   private readonly lists = viewChildren<ElementRef<HTMLElement>>('msgs');
+  protected readonly modelOptions = computed<SelectOption[]>(() =>
+    this.store.chatModels().map((m) => ({ value: m.id, label: m.name + (m.quant ? ' · ' + m.quant : '') })),
+  );
   protected readonly byId = computed(() => new Map(this.store.models().map((m) => [m.id, m])));
 
   constructor() {

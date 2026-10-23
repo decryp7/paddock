@@ -1,4 +1,5 @@
 import { CdkConnectedOverlay, CdkOverlayOrigin } from '@angular/cdk/overlay';
+import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
@@ -70,7 +71,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
 /** The request log: every recent request on one line; the facts that are the same on every row live in the detail panel. */
 @Component({
   selector: 'pw-requests-page',
-  imports: [ScrollingModule, CdkConnectedOverlay, CdkOverlayOrigin, MatIconModule, MatTooltipModule, Panel, EmptyState, RequestDetail, AppAvatar, RowMenu],
+  imports: [ScrollingModule, CdkConnectedOverlay, CdkOverlayOrigin, MatIconModule, MatTooltipModule, Panel, EmptyState, RequestDetail, AppAvatar, RowMenu, PwSelect],
   providers: [RequestsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -91,13 +92,7 @@ export const TINY_SHOWN: ReadonlySet<Column['id']> = new Set(['time', 'app', 'st
           <label class="sr-only" for="pw-req-search">Search endpoint or model</label>
           <input id="pw-req-search" class="input" type="search" placeholder="Search endpoint or model" autocomplete="off" [value]="store.filter().text" (input)="store.setFilter({ text: $any($event.target).value })" />
         </div>
-        <label class="sr-only" for="pw-req-app">App</label>
-        <select id="pw-req-app" class="select" [value]="store.filter().app" (change)="store.setFilter({ app: $any($event.target).value })">
-          <option value="all">All apps</option>
-          @for (a of appOptions(); track a.id) {
-            <option [value]="a.id">{{ a.name }}</option>
-          }
-        </select>
+        <pw-select class="select" inputId="pw-req-app" label="App" [options]="appSelectOptions()" [value]="store.filter().app" (changed)="store.setFilter({ app: $event })" />
         <div class="seg" role="radiogroup" aria-label="Status">
           @for (s of statuses; track s.value) {
             <button type="button" role="radio" [attr.aria-checked]="store.filter().status === s.value" (click)="store.setFilter({ status: s.value })">
@@ -513,6 +508,11 @@ export class RequestsPage implements OnInit {
     const ids = [...new Set(this.store.records().map((r) => r.appId))];
     return ids.map((id) => ({ id, name: this.appName(id) })).sort((a, b) => a.name.localeCompare(b.name));
   });
+
+  protected readonly appSelectOptions = computed<SelectOption[]>(() => [
+    { value: 'all', label: 'All apps' },
+    ...this.appOptions().map((a) => ({ value: a.id, label: a.name })),
+  ]);
 
   ngOnInit(): void {
     void this.store.load();

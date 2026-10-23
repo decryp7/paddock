@@ -6,6 +6,8 @@ import { MatIconModule } from '@angular/material/icon';
 export interface SelectOption {
   value: string;
   label: string;
+  /** Shown but not choosable. */
+  disabled?: boolean;
 }
 
 /** A themed single-choice dropdown (CDK listbox in an overlay) that replaces the OS's native select popup. */
@@ -31,7 +33,7 @@ export interface SelectOption {
     <ng-template cdkConnectedOverlay [cdkConnectedOverlayOrigin]="origin" [cdkConnectedOverlayOpen]="open()" [cdkConnectedOverlayMinWidth]="minWidth()" [cdkConnectedOverlayPush]="true" [cdkConnectedOverlayViewportMargin]="12" (overlayOutsideClick)="open.set(false)" (detach)="open.set(false)">
       <ul class="pw-select-list" [tabindex]="0" cdkListbox [attr.aria-label]="label()" [cdkListboxValue]="[value()]" (cdkListboxValueChange)="pick($event)" (click)="open.set(false)" (keydown.escape)="open.set(false)">
         @for (o of options(); track o.value) {
-          <li class="opt" [cdkOption]="o.value" cdkOptionTypeaheadLabel="{{ o.label }}"><mat-icon svgIcon="pw:check" aria-hidden="true" class="tick" />{{ o.label }}</li>
+          <li class="opt" [cdkOption]="o.value" [cdkOptionDisabled]="!!o.disabled" cdkOptionTypeaheadLabel="{{ o.label }}"><mat-icon svgIcon="pw:check" aria-hidden="true" class="tick" />{{ o.label }}</li>
         }
       </ul>
     </ng-template>

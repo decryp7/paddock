@@ -133,12 +133,14 @@ describe('PlaygroundPage', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     expect(el.querySelectorAll('.pane')).toHaveLength(2);
     expect(box(el).placeholder).toBe('Message both models…');
-    const selects = el.querySelectorAll<HTMLSelectElement>('select.model');
-    selects[0]!.value = 'qwen3-8b-instruct-q4_k_m';
-    selects[0]!.dispatchEvent(new Event('change'));
-    selects[1]!.value = 'llama-3.2-3b-instruct-q5_k_m';
-    selects[1]!.dispatchEvent(new Event('change'));
-    await settle(fixture);
+    expect(el.querySelector('select')).toBeNull();
+    for (const [id, name] of [['pg-model-0', 'Qwen3 8B'], ['pg-model-1', 'Llama 3.2 3B']] as const) {
+      el.querySelector<HTMLButtonElement>(`#${id}`)!.click();
+      await settle(fixture);
+      const opts = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'));
+      opts.find((o) => o.textContent!.includes(name))!.click();
+      await settle(fixture);
+    }
     type(el, 'both');
     await settle(fixture);
     button(el, 'Send').click();

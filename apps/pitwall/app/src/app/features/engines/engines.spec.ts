@@ -134,9 +134,12 @@ describe('EnginesPage', () => {
     const backend = new MockBackend();
     const { el, settle, live } = await render(backend);
     await live.load();
-    const select = el.querySelector('#build-choice') as HTMLSelectElement;
-    select.value = 'vulkan';
-    select.dispatchEvent(new Event('change'));
+    expect(el.querySelector('select')).toBeNull();
+    (el.querySelector('#build-choice') as HTMLButtonElement).click();
+    await settle();
+    const opts = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'));
+    expect(opts[0]!.textContent).toContain('Automatic');
+    opts.find((o) => o.textContent!.includes('Vulkan'))!.click();
     await settle();
     expect((await backend.engines())[0]!.buildChoice).toBe('vulkan');
 

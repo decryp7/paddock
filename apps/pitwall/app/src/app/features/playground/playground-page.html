@@ -24,11 +24,7 @@
           <section class="pane" [attr.aria-label]="store.compare() ? 'Conversation ' + (i + 1) : 'Conversation'">
             <header class="pane-head">
               <label class="sr-only" [for]="'pg-model-' + i">Model{{ store.compare() ? ' ' + (i + 1) : '' }}</label>
-              <select class="select model" [id]="'pg-model-' + i" [value]="pane.modelId ?? ''" [disabled]="store.streaming()" (change)="store.setModel(i, value($event))">
-                @for (m of store.chatModels(); track m.id) {
-                  <option [value]="m.id" [selected]="m.id === pane.modelId">{{ m.name }}{{ m.quant ? ' · ' + m.quant : '' }}</option>
-                }
-              </select>
+              <pw-select class="model" [inputId]="'pg-model-' + i" [label]="'Model' + (store.compare() ? ' ' + (i + 1) : '')" [options]="modelOptions()" [value]="pane.modelId ?? ''" [disabled]="store.streaming()" (changed)="store.setModel(i, $event)" />
               @if (model(pane.modelId); as m) {
                 <span class="status" [attr.data-tone]="m.loaded ? 'ok' : 'muted'" [matTooltip]="m.loaded ? 'Loaded: answers start at once' : 'Not loaded: the first answer includes a cold start'">{{ m.loaded ? 'Hot' : 'Cold' }}</span>
                 <span class="faint meta">{{ size(m.sizeBytes) }}{{ m.paramsB ? ' · ' + m.paramsB + 'B' : '' }}</span>

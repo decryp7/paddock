@@ -111,12 +111,15 @@ describe('RequestsPage', () => {
   });
 
   it('renders the filter row and the table header', async () => {
-    const { el, store } = await render();
+    const { fixture, el, store } = await render();
     expect(el.querySelector('[role="search"]')).not.toBeNull();
     // Calm by default: the columns that repeat on every row (API, chosen by, queued, cold start) are off.
     expect(Array.from(el.querySelectorAll('[role="columnheader"]')).map((h) => h.textContent!.trim())).toEqual(['Time', 'App', 'Model', 'Endpoint', 'TTFT ms', 'Total s', 'Tokens in / out', 'Status', 'Actions']);
     expect(el.querySelector('.shown')?.textContent).toContain(`${store.records().length} requests`);
-    const options = Array.from(el.querySelectorAll('#pw-req-app option')).map((o) => o.textContent?.trim());
+    expect(el.querySelector('select')).toBeNull();
+    el.querySelector<HTMLButtonElement>('#pw-req-app')!.click();
+    await settle(fixture);
+    const options = Array.from(document.querySelectorAll('.cdk-overlay-container .pw-select-list .opt')).map((o) => o.textContent?.trim());
     expect(options[0]).toBe('All apps');
     expect(options.length).toBeGreaterThan(2);
   });
@@ -126,9 +129,11 @@ describe('RequestsPage', () => {
     const search = el.querySelector('#pw-req-search') as HTMLInputElement;
     search.value = 'embeddings';
     search.dispatchEvent(new Event('input'));
-    const app = el.querySelector('#pw-req-app') as HTMLSelectElement;
-    app.value = 'spotter';
-    app.dispatchEvent(new Event('change'));
+    el.querySelector<HTMLButtonElement>('#pw-req-app')!.click();
+    await settle(fixture);
+    Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'))
+      .find((o) => o.textContent!.trim().toLowerCase() === 'spotter')!
+      .click();
     (Array.from(el.querySelectorAll('[role="radio"]')).find((b) => b.textContent?.includes('Errors')) as HTMLButtonElement).click();
     await settle(fixture);
     expect(store.filter()).toEqual({ app: 'spotter', status: 'errors', text: 'embeddings' });

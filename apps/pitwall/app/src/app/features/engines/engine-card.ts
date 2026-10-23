@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { BuildCapability, Engine, InstalledBuild } from '../../core/api.types';
@@ -28,7 +29,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
  */
 @Component({
   selector: 'pw-engine-card',
-  imports: [MatIconModule, MatTooltipModule, EmptyState, RowMenu],
+  imports: [MatIconModule, MatTooltipModule, EmptyState, RowMenu, PwSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let e = engine();
@@ -45,12 +46,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       <div class="choice">
         <div class="field">
           <label for="build-choice">Build</label>
-          <select id="build-choice" class="select" [disabled]="store.isBusy()('select') || e.builds.length === 0" (change)="store.select($any($event.target).value)">
-            <option value="auto" [selected]="e.buildChoice === 'auto'">Automatic{{ activeBuild() ? ' — uses ' + activeBuild()!.label : '' }}</option>
-            @for (b of e.builds; track b.id + b.tag) {
-              <option [value]="b.id" [selected]="e.buildChoice === b.id" [disabled]="b.selfTest === 'failed'">{{ b.label }} · {{ b.tag }}</option>
-            }
-          </select>
+          <pw-select inputId="build-choice" label="Build" [options]="buildOptions()" [value]="e.buildChoice" [disabled]="store.isBusy()('select') || e.builds.length === 0" (changed)="store.select($event)" />
         </div>
         <p class="hint">Automatic picks the fastest installed build that passed its self-test on this hardware.</p>
         @if (rollbackTarget(); as t) {
@@ -282,7 +278,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
           font-weight: var(--fw-medium);
           color: var(--text-2);
         }
-        .select {
+        pw-select {
           min-width: 300px;
         }
       }
@@ -466,6 +462,10 @@ export class EngineCard {
   protected readonly model = modelLabel;
   protected readonly test = (b: InstalledBuild) => selfTestLook(b.selfTest);
   protected readonly health = healthLook;
+  protected readonly buildOptions = computed<SelectOption[]>(() => [
+    { value: 'auto', label: 'Automatic' + (this.activeBuild() ? ' — uses ' + this.activeBuild()!.label : '') },
+    ...this.engine().builds.map((b) => ({ value: b.id, label: `${b.label} · ${b.tag}`, disabled: b.selfTest === 'failed' })),
+  ]);
   protected readonly look = computed(() => {
     const e = this.engine();
     const unhealthy = e.processes.filter((p) => p.health === 'unhealthy').length;

@@ -9,7 +9,7 @@ import { Toasts } from '../../core/toasts';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
 import { Panel } from '../../shared/ui/panel';
-import { PwSelect } from '../../shared/ui/select';
+import { PwSelect, type SelectOption } from '../../shared/ui/select';
 import { bytes, date, int } from '../../shared/format';
 import { expiryText, oldestText, sizeText, ttlOptions } from './cache-text';
 import { consentDetail } from '../service/service-consent';
@@ -215,6 +215,13 @@ export class SettingsPage implements OnInit {
     const c = this.store.draft()?.cache;
     return c ? (k === 'embeddings' ? c.embeddingsTtlSecs : c.responsesTtlSecs) : 0;
   }
+  protected setSchedule(v: string): void {
+    if (v === 'daily' || v === 'weekly') void this.updates.setCheck(true, v);
+  }
+  protected readonly scheduleOptions: SelectOption[] = [
+    { value: 'weekly', label: 'Every week' },
+    { value: 'daily', label: 'Every day' },
+  ];
   protected ttlChoices(k: 'embeddings' | 'responses') {
     return ttlOptions(this.ttl(k), k === 'embeddings');
   }
