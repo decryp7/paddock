@@ -446,9 +446,12 @@ mod tests {
         s.put(Kind::Response, [2; 32], b"b".to_vec(), meta("a", "m"), 5000);
         assert!(s.get(Kind::Response, &[2; 32], 9000).is_none());
         s.flush();
-        // No expiry at all.
+        // No expiry at all. A fresh entry: the late read above may already have removed [2; 32], depending on
+        // whether its store had been written when the read ran.
         s.configure(Kind::Response, lim(1000, None, false));
-        assert!(s.get(Kind::Response, &[2; 32], u64::MAX / 4).is_some());
+        s.put(Kind::Response, [3; 32], b"c".to_vec(), meta("a", "m"), 0);
+        s.flush();
+        assert!(s.get(Kind::Response, &[3; 32], u64::MAX / 4).is_some());
     }
 
     #[test]
