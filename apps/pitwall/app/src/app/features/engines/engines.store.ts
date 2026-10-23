@@ -28,9 +28,9 @@ export const EnginesStore = signalStore(
   withState(initial),
   withComputed(({ engines, busy, pins }) => ({
     /** The engines that can serve today (llama.cpp first). */
-    available: computed(() => engines().filter((e) => e.availability.state === 'available' || e.builds.length > 0 || e.kind === 'pack')),
+    available: computed(() => engines().filter((e) => e.availability.state === 'available' || e.builds.length > 0 || e.kind === 'pack' || e.kind === 'llama.cpp')),
     /** Planned or unsupported engines, shown with their honest reason. */
-    planned: computed(() => engines().filter((e) => e.availability.state !== 'available' && e.builds.length === 0 && e.kind !== 'pack')),
+    planned: computed(() => engines().filter((e) => e.availability.state !== 'available' && e.builds.length === 0 && e.kind !== 'pack' && e.kind !== 'llama.cpp')),
     /** The build pinned for all models. */
     pinnedGlobal: computed(() => pins()?.global ?? null),
     isBusy: computed(() => (key: string) => key in busy()),

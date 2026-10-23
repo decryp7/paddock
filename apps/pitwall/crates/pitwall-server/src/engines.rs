@@ -545,7 +545,7 @@ impl Engine for LlamaCpp {
             }
         } else {
             Availability::NotInstalled {
-                reason: "Install a llama.cpp build in Engines".into(),
+                reason: "No llama.cpp build is installed yet. Install the suggested one from the catalog.".into(),
             }
         }
     }
@@ -912,6 +912,17 @@ mod tests {
         assert!(matches!(m.availability(), Availability::NotInstalled { reason } if reason.contains("Install it in Engines")));
         // A pin does not apply to a model that has its own.
         assert_eq!(m.binary_for(Some("m")).unwrap().1.as_str(), "vulkan");
+    }
+
+    #[tokio::test]
+    async fn with_no_build_installed_the_message_does_not_point_at_the_page_that_shows_it() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        let Availability::NotInstalled { reason } = m.availability() else {
+            panic!("expected NotInstalled");
+        };
+        assert!(!reason.contains("in Engines"), "{reason}");
+        assert!(reason.contains("catalog"), "{reason}");
     }
 
     #[tokio::test]

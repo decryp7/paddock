@@ -191,4 +191,22 @@ describe('EnginesPage', () => {
     expect(el.querySelector('[role="alert"]')).toBeNull();
     expect(el.textContent).toContain('CUDA 13 (NVIDIA)');
   });
+
+  it('offers the catalog with Install, suggested build first, when no llama.cpp build is installed', async () => {
+    const backend = new MockBackend();
+    const real = await backend.engines();
+    const llama = structuredClone(real[0]!);
+    llama.builds = [];
+    llama.availability = { state: 'notInstalled', reason: 'No llama.cpp build is installed yet.' };
+    llama.catalog.forEach((c) => (c.installed = false));
+    backend.engines = () => Promise.resolve([llama]);
+    const { el } = await render(backend);
+    expect(el.querySelector('h2#eng-llama\\.cpp')?.textContent).toContain('llama.cpp');
+    expect(el.querySelector('.planned')).toBeNull();
+    const rows = Array.from(el.querySelectorAll('.catalog li'));
+    expect(rows.length).toBe(llama.catalog.length);
+    expect(rows[0]!.querySelector('.rec')?.textContent).toContain('Suggested');
+    expect(rows[0]!.querySelector('button')?.textContent).toContain('Install');
+    expect(el.textContent).not.toContain('in Engines');
+  });
 });
