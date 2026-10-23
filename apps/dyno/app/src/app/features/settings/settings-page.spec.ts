@@ -171,6 +171,7 @@ describe('SettingsPage', () => {
     discardButton()!.click();
     await settle(f);
     expect(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Duplicati folders"]')!.value).toBe('');
+  });
   it('shows the hardware and baselines section with the defaults when the settings hold none', async () => {
     const { el } = await make();
     const section = el.querySelector('section[aria-label="Hardware and baselines"]')!;

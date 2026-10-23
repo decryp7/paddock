@@ -856,6 +856,9 @@ describe('mock extras and backup health', () => {
     expect(b.liveUpdate('summary').activeActions[0]).toMatchObject({ cpuBefore: 78, cpuAfter: 31 });
     const act = (await b.activity(50)).find((a) => a.detail.startsWith('Measured:'))!;
     expect(act.detail).toBe('Measured: Chrome used 78 % CPU before and 31 % 21 s after.');
+  });
+});
+
 describe('hardware: throttling, lifespan and baselines', () => {
   it('answers the throttling overview: fine now, a few episodes in the last 30 days', async () => {
     const t = await make().throttling();
