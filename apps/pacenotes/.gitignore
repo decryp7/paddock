@@ -38,3 +38,4 @@ app/src-tauri/binaries/
 
 # Exported diagram PNGs (2x, for local review); the SVGs are the committed exports
 docs/diagrams/png/
+docs/diagrams/png/

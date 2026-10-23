@@ -1,6 +1,6 @@
 # Pacenotes — engineering rules for coding agents and contributors
 
-Pacenotes understands code: it indexes a repository, navigates and reviews it, draws and traces it, and serves all of
+Pacenotes understands code (main use case: understand any new codebase, in any language, in tiers: text, syntax, semantic): it indexes a repository, navigates and reviews it, draws and traces it, and serves all of
 that to local AI over MCP. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI.
 **No product code exists yet**; the design is `docs/proposal.md` (open questions pending) and the structure is in
 `docs/architecture-direction.md`. Read both and `docs/suite-lessons.md` before building.
@@ -29,7 +29,8 @@ Apply these deliberately. They are not decoration:
 
 - **Never execute repository code.** No build scripts, no tests, no language servers, no package managers, no
   generators against the analysed repository, unless the user explicitly opts in for that workspace. The only
-  subprocesses are our own workers, git (in-process), the optional draw.io export (with a timeout) and the user's editor.
+  subprocesses are our own workers, git (in-process), the optional draw.io export (with a timeout), the user's editor and, only after "trust this repository", the supervised language
+  server of a tier 3 language pack (proposal section 20.4).
 - **Read-only towards repositories.** Pacenotes writes only inside its own data folder and to destinations the user
   picks (a diagram file, an export). Only workspaces on the user's allow-list are readable; paths are canonicalized and
   symlinks cannot escape the workspace. Tools that write are never exposed over MCP.
@@ -37,8 +38,9 @@ Apply these deliberately. They are not decoration:
   index, and anything that looks like a credential is masked before it reaches an MCP reply, a log or the UI.
 - **Local only.** No telemetry, no cloud. MCP is served over loopback (or stdio) with per-client keys, bounded request
   sizes and per-key grants and budgets. Logs contain no source text by default.
-- **No vector search or embeddings.** This is the user's decision (2026-10-22/23). Retrieval is symbols, references,
-  text and identifier search, and the repo map. Do not add them or propose them again without being asked.
+- **Vector search is for Pacenotes only, and hybrid.** Decision of 2026-10-23: Pacenotes keeps a local, per-repository, opt-in vector index for semantic code
+  search, fused with text and structural search and behind a `VectorIndex` port; embeddings come from Pitwall, a small local model, or not at all. Debrief
+  deliberately has no vector search. Everything stays local.
 - **Plugin architecture.** The functions (Understand, Review, Diagrams, Requirements, Tests & coverage, Debrief bridge,
   language packs) are out-of-process Rust plugins that follow Debrief's ADR 0017 model: a plugin depends on the plugin
   API crate alone, talks to the core over the one versioned IPC (length-prefixed postcard frames on a private local

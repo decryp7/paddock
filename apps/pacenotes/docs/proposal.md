@@ -10,7 +10,9 @@ What changed since rev 1: the user's objectives are now (1) understand a codebas
 Pitwall, (5) let Debrief query and check code; plus requirements traceability (Word/Excel/PPT/ReqIF), tests and coverage (with Sighter for UI
 tests), language packs, and round-trip-safe hand-editable diagrams. The product is no longer "a code search MCP server"; it is a **read-only
 code intelligence workbench**. Sections 1-3 reframe; 4-5 are the survey and the licence findings; 6 is the full catalogue; 7-13 the designs; 14-15
-architecture and integrations; 16-19 safety, risks, questions and size.
+architecture and integrations; 16-19 safety, risks, questions and size. **Update 2026-10-23** (sections 20-26): the main use case (understand any
+new codebase, tiers), a vector index for semantic search (Pacenotes only), views, the dependency graph, the expanded Review rule sources and further
+proposals; where these change earlier text (sections 3, 6.2, 11, 18, 19) it is edited in place.
 
 ## 1. Product pitch and the one hard rule
 
@@ -22,7 +24,7 @@ to code and tests, **measures** test coverage by importing reports, and **drafts
 engine, and at the same time a **read-only MCP server** for Pitwall.
 
 **Hard rule (kept from rev 1, now covers every new feature): Pacenotes never executes repository code.** No build, no tests, no coverage runs, no
-language servers by default, no rule that runs a script from the repo, no proc macros. Anything that needs execution (running a generated test,
+language servers unless the user trusts the repository (tier 3, section 20.4), no rule that runs a script from the repo, no proc macros. Anything that needs execution (running a generated test,
 producing a coverage report, building a SCIP index) is done by the user or by **Pitcrew on the user's runner**, and the results come back as
 **imported files** (coverage, JUnit/TRX, SCIP). Pacenotes writes only: its own index/app data, files the user explicitly exports, diagram files in
 `docs/diagrams` after a previewed diff, and (optionally, with consent) Gitea review comments through the user's token.
@@ -50,8 +52,10 @@ Pitcrew, Spotter, Debrief, Dyno, Sighter.
 
 ## 3. What works for LLM grounding (research summary, from rev 1)
 
-- Agentic lexical search beats a one-shot vector index for coding agents (secondhand reports on Claude Code; Cursor still embeds). Consistent with the
-  user's no-vector-search decision: structure + exact search + an LLM that iterates. This also governs traceability (section 11): no vector DB.
+- Agentic lexical search beats a one-shot vector index for coding agents (secondhand reports on Claude Code; Cursor still embeds). Decision of
+  2026-10-23: Pacenotes **does** add a local vector index, but as one leg of **hybrid** retrieval next to exact text and structural search, never
+  instead of them (section 21). Debrief keeps its no-vector-search decision. Traceability (section 11) keeps candidates + judge; the vector index may
+  later supply one more candidate source (question 22).
 - Repo map = tree-sitter definitions + reference graph + ranking cut to a token budget (Aider, default 1k tokens): ideal for small local models.
 - Symbol-level tools (find definition, references) save most tokens (Serena). Serena's licence, checked in this run: **SolidLSP MIT, the Serena
   application GPL-3.0-or-later** (rev 1 said MIT; corrected). Reference design only; it is Python.
@@ -219,6 +223,11 @@ The v1 set is large and is staged in milestones (section 19).
 | Dead-code candidates, API diff between tags, layer-violation rules | Later | dependency-cruiser, Understand |
 | Cross-repo links (OpenAPI/proto), DB schema to usage | Later | Sourcegraph |
 | Optional SCIP import for exact references | Later (v1.1) | Sourcegraph/SCIP |
+| **Tier model** (text / syntax / semantic per language) and orientation page for a new codebase (section 20) | v1 (tiers 1-2; LSP client with the 8 built-in language packs, opt-in per repository), v1.1 (more packs, SCIP import) | Sourcegraph, Understand |
+| Language packs: declarative TOML for language servers (detect/install on click, build-config discovery, LSP features, optional SCIP command) and out-of-process code plugins for framework edges, indexers, review rules (section 20.4) | v1 (8 packs: C, C++, C#, Java, TypeScript/JavaScript, Rust, Python, Go), Later (more, community) | Serena (SolidLSP), Sourcegraph |
+| Server diagnostics as review findings | v1.1 | Qodana |
+| Views catalogue (architecture map, entry points, change impact, inventories, tours...) (section 22) | v1 / Later per view | Understand, CodeScene, Swimm |
+| Dependency analyzer: one graph, zoom levels, paths, cycles, layer rules, diff mode, offline advisory data (section 23) | v1 (graph, cycles, rules, diff), v1.1 (advisories, Spotter versions) | Understand, Structurizr, dependency-cruiser |
 
 ### 6.2 Ask & navigate
 
@@ -230,7 +239,7 @@ The v1 set is large and is staged in milestones (section 19).
 | Stack-trace explainer (Java, .NET, Python, Rust, Node, C++) | v1 | Debrief, Sentry |
 | Ask box via Pitwall with visible tool calls and citations | v1 (needs Pitwall) | Cursor, DeepWiki chat |
 | Open in editor by file:line; code viewer read-only | v1 | all |
-| Embeddings / concept search | Later, not queued (user decision) | Cursor |
+| Semantic (concept) search: local vector index fused with text and structural search, re-ranked, per-repository opt-in (section 21) | v1 (M2b) | Cursor, Sourcegraph |
 
 ### 6.3 Review
 
@@ -248,6 +257,12 @@ The v1 set is large and is staged in milestones (section 19).
 | "Not an issue" feedback that writes suppressions (per rule, path, symbol, with expiry) | v1 | CodeRabbit learnings, Sonar |
 | Markdown and SARIF export; CI mode via Pitcrew with exit codes | v1 | Qodana, reviewdog |
 | Import external linter results (clippy, eslint, Sonar/Qodana SARIF) and merge them into one list, deduplicated | v1 (SARIF, rdjson), Later (more) | reviewdog |
+| Review a whole repository (index-based, budgeted, paged), not only a diff | v1 | SonarQube, Qodana |
+| Rule sets in the repo (`.pacenotes/rules/*.md|*.yml`) and per user; scope globs, severity, good/bad examples; **tests for rules** (`pacenotes rules test`) | v1 | Semgrep, ast-grep, CodeRabbit |
+| Findings with evidence, explanation and a suggested fix as a diff (never applied) | v1 | CodeRabbit, PR-Agent |
+| Suppressions with a required reason; **baseline for legacy code** so only new findings fail | v1 | SonarQube, Qodana |
+| Learn from accepted/dismissed findings, local only (few-shot examples, hygiene report) | v1.1 | CodeRabbit learnings |
+| Architecture/layer-rule violations from the dependency graph as findings (section 23) | v1 | dependency-cruiser, ArchUnit |
 | Post comments/summary to a Gitea PR with the user's token and explicit consent per post | Later (v1.1) | reviewdog, CodeRabbit |
 | Diagram-stale and requirement-touched checks in a review | v1 | Swimm, Jama suspect links |
 | Test-gap check on changed lines (patch coverage, from imported coverage) | v1 | Codecov |
@@ -324,6 +339,8 @@ The v1 set is large and is staged in milestones (section 19).
 |---|---|---|
 | Stdio MCP server (`pacenotes serve --stdio`) and loopback Streamable HTTP with bearer token | v1 | MCP spec |
 | Tools listed in section 13; resources and prompts | v1 | Serena, Sourcegraph MCP |
+| New read-only tools for orientation, semantic search, views and the dependency graph (sections 20-23); `orient` toolset | v1 | Serena, Sourcegraph MCP |
+| Pacenotes as MCP **host** for deterministic flows (for example handing a drafted plan to Sighter), only to granted servers, non-read-only calls on a click (section 22.1) | v1.1 | MCP spec |
 | Per-client grants (workspaces, tools), budgets, call log | v1 | Pitwall grants |
 | Managed loop in Pitwall, toolsets, presets | v1 (Pitwall side) | Pitwall roadmap |
 | Subscriptions and tasks extension for long jobs | Later | MCP 2026-07-28 |
@@ -356,7 +373,8 @@ The v1 set is large and is staged in milestones (section 19).
 
 ## 7. Language packs
 
-Decision: **core languages compiled in; every other language is a declarative language pack (data, not code).** Plugins are not used.
+Decision: **core languages compiled in; every other language is a declarative language pack (data, not code).** Plugins are not used for grammars.
+(Update 2026-10-23: **tier 3 language packs** for language servers and the optional code plugins for framework edges are described in section 20.4.)
 
 ### 7.1 Core (compiled in, v1)
 
@@ -674,7 +692,7 @@ never leave the machine.
 
 - **Link candidates** from (a) explicit tags: configurable patterns (`REQ-\d+`, `[A-Z]+-\d+`, `@req(..)`) in code comments, test names/attributes,
   commit messages and PR text (Gitea API); (b) structural/lexical candidates from the index: identifiers and strings matching requirement terms,
-  files touched by commits that mention the ID, tests in the same module; (c) **Pitwall judge** (no vector DB): for each requirement with weak or no
+  files touched by commits that mention the ID, tests in the same module; (c) **Pitwall judge** (no vector DB in v1; see question 22): for each requirement with weak or no
   links, pass the requirement plus a small set of candidate symbols (retrieved by FTS5 identifier search and call-graph neighbourhood) and ask for
   a verdict with a quoted reason. Research reports modest recall for LLM-only traceability, so candidates are shown as **suggested, with evidence,
   never auto-confirmed**; confirmed links are stored (and may live in a committable `requirements/links.toml`).
@@ -877,6 +895,14 @@ cached. Local-only: requirement documents and code never leave the machine. This
   grammar/crate; re-check on adding dependencies.
 - **MCP spec churn** (rev 1): rmcp 3.x stateless support unverified; thin protocol layer behind a trait.
 - **Name**: only a web-search sanity check; trademark search pending.
+- **Language servers on big repositories** (added 2026-10-23): memory use of a server can reach several GB and first indexing can take many minutes (rust-analyzer,
+  clangd, jdtls, Roslyn all load the whole project). Mitigation: scopes ("only these folders"), limits and idle shutdown (section 20.4), results cached in
+  the index, throttled and resumable initial indexing with progress, tier 2 shown meanwhile; some packs will be unusable on the largest monorepos.
+- **Server licences and distribution**: jdtls is EPL-2.0 and Microsoft's distributed Roslyn server binary terms are unconfirmed; servers are never bundled
+  and are shown with their licence in the pack manager. A server update can change behaviour: packs pin a tested version range.
+- **Vector index** (added 2026-10-23): embedding CPU time and index size on large repositories, quality on code-specific queries with small models, a
+  model change forcing a full re-embed; mitigated by per-repository opt-in, caps, incremental hashes, a benchmark before choosing the small model, and
+  hybrid retrieval that never depends on vectors alone.
 - Index size/time, symbol history across renames approximate (rev 1).
 
 ## 18. Open questions for the user
@@ -889,7 +915,7 @@ cached. Local-only: requirement documents and code never leave the machine. This
 5. Standalone app (recommended) or panes inside Pitwall/Debrief?
 6. Hard rule "never execute anything" confirmed, including no language servers by default and no coverage/test runs (everything via Pitcrew and imports)?
 7. Managed agent loop in Pitwall (recommended) vs Debrief orchestrating?
-8. Embeddings stay out of roadmap (also for traceability), or keep an opt-in hook?
+8. ~~Embeddings stay out of roadmap?~~ **Decided 2026-10-23: Pacenotes uses a vector index** (section 21); the remaining question is whether it also feeds traceability candidates (question 22).
 9. Priority relative to the queue: needs Pitwall's MCP client and structured output; start after Pitwall? And relation to Sighter timing (UI test drafts wait for it).
 10. Version mapping for `rev` in Debrief: does the log carry app version/build id so profile rules can pick the revision?
 11. Which requirement documents do you actually have (Word headings? Excel columns? PPT slides? DOORS/Polarion ReqIF exports?) and may I get **anonymised
@@ -907,6 +933,29 @@ cached. Local-only: requirement documents and code never leave the machine. This
 20. Markdown review rules: file names and locations. `AGENTS.md` (root + nested) is read as-is; do we add `REVIEW.md` (repo root) and `review/*.md` for review-only rules, and **standardise `REVIEW.md` across the Paddock family repos** (with a shared starter in `paddock/docs`)? Should user-level rules live in the app only, or also in a `~/.config` Markdown file?
 21. Should the review also honour other vendors' files (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/*.mdc`) as read-only rule sources when present (default off, one toggle per source)?
 
+Added 2026-10-23 (sections 20-26):
+
+22. **Vector store**: confirm `usearch` behind a `VectorIndex` port with chunks and FTS5 in SQLite (section 21.3), after a two-day spike; LanceDB is the fallback.
+    Should the vector index later also supply candidates for requirement traceability, or stay code-search only?
+23. **Tier 3 and the hard rule**: is an opt-in, per-repository "trust this repository" that starts language servers (which may run build scripts and proc
+    macros) acceptable, with SCIP import as the no-execution alternative? Or tier 3 by SCIP import only?
+24. **Embeddings source**: Pitwall first (Qwen3-Embedding), then a small local model Pacenotes runs itself and downloads on the user's click (not in the
+    installer), then none; which small model after a benchmark (`CodeRankEmbed` MIT or `jina-embeddings-v2-base-code` Apache-2.0)? Acceptable defaults for the
+    per-repository cap (500k chunks / 2 GB)? Semantic search off by default?
+25. **MCP host**: should Pacenotes also be an MCP client for deterministic flows (Sighter run after a drafted plan), with every non-read-only call behind a click?
+26. **Dependency graph**: which node and edge kinds are in v1 (internal modules, packages, files, symbols, imports, calls first; services, tables,
+    topics, endpoints as recognisers grow)? Which advisory source for the offline mirror (OSV), and is a user-triggered refresh enough?
+27. **Spotter integration**: is "newer version available" as a read-only call to Spotter right, and what does Spotter expose for it?
+28. **Further proposals** (section 25): which of upgrade-impact planner, API change detection, test-gap finder, explain-this-diff, documentation views,
+    onboarding notes and history views do you want, and in which version?
+29. **Views cut**: is the v1 / Later split in section 22 right (v1 has 14 of the 18 views)?
+31. **Language packs in v1**: **decided 2026-10-23** (user, final): C, C++, C#, Java, TypeScript and JavaScript, Rust, Python and Go; others Later or community packs. Still to
+    confirm: csharp-ls as the C# default (Roslyn LSP once its binary terms are confirmed), no server ever bundled (Java's EPL-2.0 jdtls, unconfirmed Roslyn terms),
+    a pinned SHA-256-checked download on click (or only detection of what is installed), which generator provides `compile_commands.json` for MSBuild/vcxproj,
+    pyright or basedpyright as the Python default, and the framework plugins marked v1 (ASP.NET, Spring, Express, Django/FastAPI/Flask, Go net/http and gin routes) or Later.
+30. **Rule files**: confirm `.pacenotes/rules/*.md|*.yml` and `.pacenotes/architecture.toml` in the repo and a user-level folder; are Markdown rules (model-checked) allowed
+    in CI only when a Pitwall is reachable, or must CI run only deterministic rules?
+
 ## 19. Size and phasing
 
 Rev 1 estimate was about 35-45k LOC Rust (about 70k with tests) and about 12-18k LOC Angular for the code intelligence core alone. Additions:
@@ -920,8 +969,15 @@ Rev 1 estimate was about 35-45k LOC Rust (about 70k with tests) and about 12-18k
 | Language packs (wasm loader, validator, test kit) | 3-4k | |
 | Check (verdicts) | 2k | |
 | MCP additions | +2k | |
+| Vector index and embeddings (chunker, `Embedder`/`VectorIndex` ports, hybrid fusion and re-rank, embed worker, incremental update) | 3-4k | section 21 |
+| Tiers and orientation (language/build-system detection, orientation page, reading order) | 3-4k | section 20 |
+| LSP client and language packs (LSP client, pack loader/validator, supervision, caching, SCIP import, 8 built-in packs with interpreter and build-config discovery) | 4-6k | section 20.4; packs are TOML plus small tests |
+| Views (entry-point recognisers, inventories, impact, duplicates, metrics, test map) | 6-8k | section 22; recognisers are data packs |
+| Dependency graph (model, aggregation, layout service, rules, diff, advisory mirror reader) | 4-6k | section 23 |
+| Review additions (repo-level rule files, rule tests, baseline, whole-repo mode) | 2-3k | section 24 |
+| Further proposals, if all accepted | 5-7k | section 25 |
 
-Total v1 as catalogued: roughly **70-85k LOC Rust code, about 130-150k with tests**, Angular about 25-30k LOC with tests (review panel, diagram
+Total v1 as catalogued before 2026-10-23: roughly **70-85k LOC Rust code, about 130-150k with tests**, Angular about 25-30k LOC with tests (review panel, diagram
 preview/diff, requirements matrix and mapping editor, coverage views, pack manager), about 12 ADRs (add: rule packs, diagram round-trip, canonical
 draw.io form, requirement links/suspect model, coverage import, wasm packs, no-execution contract, Forge port).
 
@@ -933,14 +989,385 @@ draw.io form, requirement links/suspect model, coverage import, wasm packs, no-e
 - M4 (about 3 weeks): review (rule engine, agents-md pack, LLM pass, suppressions, SARIF, CI mode); coverage import and patch coverage; test inventory.
 - M5 (about 3 weeks): requirements (xlsx/docx/csv/md, mappings, tags, matrix, reports, impact, review integration); language packs; UI polish;
   hardening, screenshots, docs.
+- M2b (about 3-4 weeks, after M2): tier model and orientation page, the LSP client and the first language packs (Rust, C/C++, C#, TypeScript, Python; Java and Go follow in M3), vector index and hybrid retrieval (after the store spike), the views marked v1 and the
+  dependency graph (core), with the matching MCP tools; Angular adds the graph view (progressive, engine-laid-out), the orientation page and the
+  ask box. Review additions land in M4 with the rest of Review.
 - v1.1 items (Pitwall extraction/semantic links, pptx/pdf/ReqIF, xlsx write-back, Gitea posting, test drafts, JUnit results, Pitcrew triggers,
   state/deployment diagrams, SCIP) follow without being on the critical path.
 
-That is roughly **15-18 weeks elapsed** with parallel agents at the current pace (rev 1 said 8-10 weeks for the smaller scope), plus about 2 weeks of
+**Update 2026-10-23:** the additions above (tiers, vector index, views, dependency graph, review sources) add about **+28-39k LOC Rust code** (about +50-70k with
+tests; plus 5-7k with the optional proposals in section 25), so v1 is roughly **100-125k LOC Rust code, about 185-225k with tests**, Angular about 35-45k LOC with tests,
+about 16 ADRs (add: tiers and tier 3 trust, vector store and embedder, hybrid retrieval, dependency graph model, rule files), and **about 22-26 weeks elapsed**.
+The earlier figure was roughly **15-18 weeks elapsed** with parallel agents at the current pace (rev 1 said 8-10 weeks for the smaller scope), plus about 2 weeks of
 Pitwall-side work (MCP client, toolsets, managed loop, grants, structured output). The two biggest uncertainty drivers are diagram round-trip
 fidelity and per-language reference quality.
 
-## 20. Sources
+## 20. Understand a new codebase (the main use case)
+
+Decided 2026-10-23: the main use case is **"understand any new codebase, in any language"**. Everything else (review, diagrams, requirements, tests)
+builds on the same index. The design principle is graceful tiers: every language gets something useful, and better tooling for a language only
+adds precision, never changes how the product is used.
+
+![Understand a new codebase: indexing tiers and hybrid retrieval](diagrams/svg/understand-tiers-retrieval.svg)
+
+### 20.1 The tier model
+
+| Tier | Source of facts | Works for | What you get |
+|---|---|---|---|
+| 1. Text | files, ripgrep-style search, FTS5, git | **every** language and file type | Full-text and regex search, file tree, git history and hot spots, docs and READMEs, build-file detection |
+| 2. Syntax | tree-sitter grammars (compiled in, or signed language packs) | languages with a grammar (the v1 languages and many more as packs) | Symbols, outline, imports, approximate call graph (confidence-labelled), where defined and where used, structure diagrams, syntax-aware chunks for semantic search |
+| 3. Semantic | the language's own language server (rust-analyzer, clangd, Roslyn, pyright, gopls, jdtls…) **or SCIP indexers**, when the toolchain is present | languages that have such a server or indexer | Exact references and types, resolved calls, cross-file renames, macro and generics awareness. Added by a **language pack** that runs the server as an LSP client (section 20.4) |
+
+A repository is indexed per language and per file: a Rust crate with a Python script folder has tier 3 for Rust and tier 2 for Python, and
+every view shows the tier and a confidence label for what it displays. Tier 3 is never required: if it is missing or fails, the tier 2 answer is
+shown with its label, and the UI says what installing the toolchain would add.
+
+**Tier 3 and the hard rule** (detail in 20.4). Language servers can run build scripts and procedural macros, which is executing repository code. So tier 3 is
+**opt-in per repository** ("trust this repository"), runs out of process under the plugin host's timeouts and memory caps, never starts without
+the user's click (CLI: an explicit flag), and has a safe alternative that needs no trust: **import a SCIP index** produced elsewhere (for example
+by Pitcrew on the user's runner). This is the one deliberate, opt-in exception to the no-execution rule and is recorded as a decision to confirm
+(question 23).
+
+### 20.2 The walkthrough
+
+1. **Open a folder.** Pacenotes builds a local, incremental index (tier 1 immediately, tier 2 in the background, in worker processes) and
+   detects languages and build systems: Cargo, CMake and `compile_commands.json`, MSBuild/.sln, Gradle/Maven, npm/pnpm, pyproject, go.mod and
+   others. Detection only reads manifests; nothing is built.
+2. **Orientation.** One page, generated from the index: entry points, modules and their dependencies, external libraries, git hot spots, where
+   the tests are, configuration keys and environment variables, and a **generated, editable draw.io architecture diagram** (round-trip safe,
+   section 9). Each line links to code.
+3. **Questions.** The local model in Pitwall answers questions ("where is authentication decided?", "what happens when a job fails?") **grounded
+   in the index**: hybrid retrieval (section 21) finds candidates, the tools read symbols and ranges, and every claim carries a `path:line`
+   citation. Answers without a resolvable citation are marked unverified.
+4. **Guided reading.** A suggested reading order (entry points first, then the most depended-on modules, then the hot spots), with call-graph
+   traces ("follow this request from the route to the database") and, where useful, a sequence diagram generated from the trace.
+5. **The same view over MCP.** Claude Code, Debrief, Sighter and Pitwall's agents get the same orientation, search and trace as read-only tools
+   (section 13), so an agent starts from the map instead of grepping blindly.
+
+### 20.3 Limits (stated in the UI as well)
+
+- **Dynamic languages** (Python, JavaScript, Ruby…) get "likely" call edges at tier 2; the confidence label says so, and tier 3 (pyright, tsserver)
+  improves it.
+- **Macro-heavy C/C++ and generated code** need the real build configuration (`compile_commands.json`, include paths, generated sources) to be
+  understood; without it tier 2 is approximate and the index flags the affected files.
+- **Large monorepos** are indexed once and then incrementally (watcher plus git change detection); the first index is the slow step, so it
+  reports progress, can be paused, and honours scopes ("index only these folders").
+- **Niche languages** get tiers 1 and 2 (a grammar pack) and often only tier 1.
+- **Answer quality depends on retrieval and on the local model's size.** Small models need smaller, better-ranked context; the product shows the
+  evidence it used so a wrong answer can be spotted, and never states more certainty than the index has.
+
+### 20.4 Tier 3 as language packs: Pacenotes is an LSP client
+
+Tier 3 is delivered by **language packs**. Pacenotes is a **Language Server Protocol client**: it starts the language's own server **headless as a child
+process**, asks it questions, and **caches the answers in the index**, so browsing, search and MCP queries never need the server to be running.
+
+**A language pack is mostly declarative** (one TOML file, in the style of the family's former declarative packs, here for language servers):
+
+```toml
+[pack]
+id = "rust"
+languages = ["rust"]
+globs = ["**/*.rs"]
+
+[server]
+command = "rust-analyzer"            # args = [...], env = {...}
+detect = ["path:rust-analyzer", "rustup:component=rust-analyzer"]   # installed server found on PATH or in the toolchain
+install = { offer = "rustup component add rust-analyzer" }          # or a pinned download, shown and run only on the user's click
+# download = { url = "...", sha256 = "..." }                       # pinned, SHA-256-checked, never automatic
+init_options = { cargo = { buildScripts = { enable = false } } }    # least-execution defaults, see the trust note below
+
+[workspace]
+discover = ["Cargo.toml"]            # build-config discovery: Cargo.toml, compile_commands.json, *.sln/*.csproj, pyproject.toml, go.mod, build.gradle, tsconfig.json
+
+[features]                           # the LSP requests Pacenotes uses
+use = ["definition", "references", "callHierarchy", "typeHierarchy", "documentSymbol", "workspaceSymbol", "semanticTokens", "diagnostics"]
+
+[scip]                               # optional: whole-repo batch indexing instead of live queries
+command = "rust-analyzer scip ."
+```
+
+Fields: language id and file globs; server command and arguments; **how to detect an installed server** (on `PATH`, in a toolchain such as a rustup
+component or a dotnet tool) or a **pinned, SHA-256-checked download offered on the user's click**; initialisation options; **workspace and build-config
+discovery**; the **LSP features used**; and an **optional SCIP indexer command** for batch indexing. Packs are validated when loaded (unknown keys, a
+command that is not an absolute path or a bare name, a download without a hash are rejected with a message that says what to fix) and are signed like
+other packs (section 7.3).
+
+**Code plugins only where declarative is not enough.** Out-of-process Rust plugins on the Paddock plugin platform (ADR 0001 there; the model of Debrief's
+ADR 0017: they depend on the plugin API crate only, talk over the one IPC, run under timeouts and caps, are quarantined after repeated faults) cover
+what a server cannot give: **custom indexers**, **framework-aware edges** for the dependency graph (HTTP routes, DI containers, ORM table
+mappings, message topics: section 23), and **extra review rules** (section 24). A pack can ship a code plugin next to its TOML.
+
+**Decision (user, 2026-10-23, final): the built-in v1 language packs are C, C++, C#, Java, TypeScript (and JavaScript, which the same server covers), Rust, Python
+and Go** (eight packs on seven servers). Every other language is a Later or community pack and still gets tiers 1 and 2. Servers per language (licences checked
+2026-10-23 from repository LICENSE files and metadata; items marked (unverified) were not confirmed from a primary source in this run). **None is bundled in
+the installer**: each is installed by the user or the toolchain, or downloaded (pinned, hash-checked) on a click, and runs as a separate program, which also settles any
+copyleft question (we neither link nor modify them):
+
+| Language | Server (chosen) | Licence | Notes |
+|---|---|---|---|
+| Rust | rust-analyzer | Apache-2.0 (GitHub metadata; also described as MIT/Apache, unverified) | from rustup (`rustup component add rust-analyzer`); build scripts and proc-macro expansion are switchable and **off by default**; discovery from `Cargo.toml` |
+| C and C++ (two packs, one server) | clangd | Apache-2.0 (repository `clangd/clangd`; the LLVM exception wording is unverified) | **needs `compile_commands.json`**; without it the pack says so and tier 2 stays. The pack discovers or offers to obtain it: **CMake** (`CMAKE_EXPORT_COMPILE_COMMANDS=ON`, Makefile and Ninja generators), **Make** (Bear or compiledb, run by the user or Pitcrew), **MSBuild/vcxproj** through a generator tool (several community generators exist; which one is unverified, to pick in the spike). Generating it runs the build system's configure step, so it is a trust case |
+| C# | **csharp-ls** by default; the Roslyn language server (`roslyn-language-server`) as an alternative | csharp-ls MIT (verified); Roslyn repository MIT, but the terms of Microsoft's *distributed* server binary were **not confirmed** (secondary sources only), which is why csharp-ls is the default until they are; the proprietary **C# Dev Kit is never used or required** | both are .NET tools that need the **.NET SDK, not Visual Studio** (unverified in this run; to confirm on a machine without Visual Studio); `.sln`/`.csproj` discovery; MSBuild project loading runs build logic, so this is a trust case |
+| TypeScript and JavaScript | typescript-language-server over TypeScript's tsserver | TypeScript Apache-2.0 (verified); typescript-language-server Apache-2.0 with some MIT parts copied from vscode (file header, exact terms unverified) | needs Node and the project's TypeScript; `tsconfig.json`/`jsconfig.json` discovery. TypeScript's own `tsserver` speaks its own protocol, not LSP, so the wrapper is needed; a native LSP server from the TypeScript team may replace it (unverified, to check in the spike) |
+| Python | pyright by default; basedpyright (a fork with extra checks) as an option | MIT both (verified from the repositories' LICENSE files); Microsoft's Pylance is proprietary and **not used** | needs Node for pyright (the `pyright` PyPI wrapper installs it) or the basedpyright wheel (unverified); **interpreter discovery** for imports and stubs: `VIRTUAL_ENV`/`.venv`/`venv`, `pyproject.toml` and its tool sections, **uv** (`uv.lock`, `.venv`), **poetry** (`poetry env info`-style discovery without installing), **conda** (`CONDA_PREFIX`, named environments), pipenv and pyenv shims; the user can pin an interpreter per repository. Reading an environment's `site-packages` is read-only; the chosen interpreter is only inspected, not run, unless the user trusts the repository |
+| Go | gopls | BSD-3-Clause style (`golang/tools` LICENSE, verified) | needs the Go toolchain; `go.mod`/`go.work` discovery; module download is the toolchain's job, so missing modules are reported with a next step instead of fetched; build tags and `GOFLAGS` are read from the project settings |
+| Java | Eclipse JDT Language Server (jdtls) | **EPL-2.0** (weak copyleft, verified from the LICENSE header) | the one non-permissive server: run strictly as a **separately installed tool, never bundled or linked**, shown with its licence in the pack manager; needs a JDK; **Maven and Gradle projects are imported by the server** (it runs the build tool's model resolution, so a trust case; first import is slow and needs the dependency cache) |
+
+**Later / community packs:** Kotlin, PHP, Ruby, Swift, Dart, Scala and others; the pack format is public so they can be written without changing Pacenotes.
+
+**Framework-aware code plugins worth doing first** (proposals, for the user to confirm; they feed the dependency graph, entry-point inventory and
+review rules, and each is a small out-of-process Rust plugin plus recognisers):
+
+| Plugin | Adds | Proposed |
+|---|---|---|
+| ASP.NET Core | routes (controllers, minimal APIs), DI registrations and resolutions, config binding | v1 for routes and DI, Later for the rest |
+| Spring (Boot) | `@RequestMapping` routes, bean wiring (`@Autowired`, `@Bean`), `@Value`/properties use, scheduled jobs | v1 for routes and beans |
+| EF Core / Hibernate-JPA | entity to table mappings, reads/writes of tables and columns for the graph | Later (v1.1) |
+| Express / NestJS | routes and handlers, Nest modules and providers (DI) | v1 for Express routes, Later for Nest DI |
+| Django / FastAPI / Flask | routes and views, Django models and ORM table mappings, FastAPI dependency injection | v1 for routes, Later for ORM mappings |
+| Go `net/http`, gin, chi | routes and handlers, middleware chains | v1 for `net/http` and gin routes |
+| Rust web and CLI (axum/actix routes, clap commands, tauri commands) | entry points | Later |
+| C/C++ build graph | targets and include dependencies from CMake/compile commands | v1 (feeds the module graph) |
+
+SCIP indexers for the batch path (`scip-java`, `scip-typescript`, `scip-clang`: Apache-2.0 per repository LICENSE; `scip-python`'s licence unverified) are
+named in the packs' `[scip]` section and are normally run by Pitcrew or the user, with the result imported.
+
+**Trust and the hard rule.** A server may execute repository code (build scripts, proc macros, MSBuild targets, Gradle). So a pack's server starts only
+after **"trust this repository"** (per repository, remembered, revocable), with the pack's least-execution `init_options`, and the UI states what the
+server may run. Without trust, tier 2 plus any imported SCIP index still work. Pacenotes' own code still never runs repository code; the server does,
+under the user's explicit consent (question 23).
+
+**Robustness (each has a test that triggers the failure).** Per-request and startup **timeouts**; **memory and CPU limits** on the child (job objects
+on Windows, rlimits/cgroups elsewhere, best effort); **restart with exponential backoff**, then **quarantine** of a server that keeps crashing, with the
+failure attributed to the pack and tier 2 shown meanwhile; a malformed or oversized reply is an error, never a panic; servers are **stopped when idle**
+and started on demand; answers are **cached by index revision** so a stopped or quarantined server never blocks browsing; initial indexing is
+throttled, resumable and shows progress. **Server diagnostics can feed Review** as findings labelled with the server and the diagnostic code
+(section 24), alongside SARIF imports.
+
+## 21. Semantic code search (vector index)
+
+Decided 2026-10-23: **Pacenotes uses a vector index for semantic code search**. This **replaces** the earlier "no vector search" rule for
+Pacenotes only (rev 2 sections 3, 6.2 and the open question 8 are updated). **Debrief deliberately does not use vector search** (user decision) and
+is unaffected; the two apps share no index.
+
+### 21.1 Design
+
+- **Hybrid retrieval.** A query runs three searches: text (ripgrep and FTS5 over identifiers and comments), structural (symbols, tree-sitter
+  queries) and vector (nearest chunks by embedding). The ranked lists are fused with reciprocal rank fusion (RRF), then a **re-ranking** step
+  orders the top candidates (a cross-encoder or small reranker when available, otherwise a deterministic score: exact identifier hits, symbol kind,
+  path proximity, recency, hot-spot weight). Every result carries `path:line`, its tier and which searches found it. Semantic search never
+  replaces exact search: it widens recall for concept queries ("where do we retry network calls?").
+- **Chunking along syntax.** Chunks are the functions, methods, classes and top-level items that tree-sitter finds (tier 2), with a header of
+  file path, enclosing type and signature, plus docs and comments; oversized items are split at statement boundaries, and files without a grammar
+  fall back to overlapping line windows. Generated, vendored and secret-denylisted files are skipped.
+- **Incremental re-embedding.** Each chunk has a content hash. On change (watcher or git), only chunks whose hash changed are re-embedded and
+  deleted chunks are removed; a model or chunker version change triggers a full, resumable re-embed in the background with progress.
+- **Per-repository on/off.** Off by default until the user enables it for a repository (it costs CPU and disk); a repository can also be
+  excluded by path globs. Off means text and structural search only, never an error.
+- **Everything local.** Chunks, vectors and the model stay on the machine; nothing is sent anywhere. The index lives with the app data, is
+  derived data (safe to delete and rebuild), and contains no more than the source it indexes, so it is covered by the same secret denylist and
+  redaction as the rest of the index.
+- **Index size and limits.** A default per-repository cap (for example 500k chunks and 2 GB, configurable) with a clear message and an
+  "index these folders only" next step when exceeded. Vectors are stored at reduced precision (float16 or int8) and, with Qwen3-Embedding's
+  flexible output dimension, optionally truncated (for example 1024 to 512). Rough size: 1M lines of code is about 40-60k chunks, so about 80-120 MB
+  of float16 vectors at 1024 dimensions plus graph overhead (estimate, to be measured). Embedding throughput on CPU is the main time cost and is
+  unmeasured (open question 24).
+
+### 21.2 Where the embeddings come from (decision to confirm)
+
+An `Embedder` port with three implementations, chosen in this order:
+
+1. **Pitwall** (optional, preferred when present): its embedding endpoint with **Qwen3-Embedding** (Apache-2.0, 0.6B for modest machines, larger
+   sizes for better recall). Pitwall already manages local model files and hardware, so Pacenotes does not duplicate that.
+2. **A small local model run by Pacenotes itself**, so semantic search works without Pitwall: an embedding worker process (a plugin on the usual
+   isolation model) running a small code-aware model through `candle` or ONNX Runtime (`ort`); candidates are `CodeRankEmbed` (MIT) and
+   `jina-embeddings-v2-base-code` (Apache-2.0), to be benchmarked on real repositories before choosing. **It is not bundled in the installer** (size,
+   licence notices): it is downloaded once, on the user's click, with a hash check, and cached. Until then, and for users who decline, option 3
+   applies.
+3. **No embeddings**: hybrid search degrades to text and structural search. This is always available and is the default state.
+
+The vectors record the model id and dimension; vectors from different models are never mixed, and changing the embedder rebuilds the index. This
+keeps "Pitwall is optional" true for every function.
+
+### 21.3 Choosing the vector store (decision to confirm)
+
+Requirements: embedded in a Rust app (no server), permissive licence, maintained, on-disk with low memory, incremental insert and delete, metadata
+or a clean way to keep it beside the vectors, fits a repository-sized index (up to a few hundred thousand chunks), builds on Windows, macOS and
+Linux. Checked 2026-10-23 (licences from the crates.io and GitHub metadata; items marked (unverified) come from documentation or memory and were
+not confirmed from source in this run):
+
+| Store | Licence | Maintenance (checked 2026-10-23) | Fit |
+|---|---|---|---|
+| **LanceDB** (embedded Rust crate `lancedb` on the Lance format) | Apache-2.0 | very active: `lancedb` 0.40.0 on crates.io, repository pushed the same day, `lance` 13.0.0 (2026-10-07) | Full embedded database: columnar on-disk tables, ANN indexes (IVF-based, (unverified) product quantisation), full-text and hybrid search (unverified), versioned data. Heaviest dependency set (Arrow, DataFusion), long compile times and a larger binary, a second storage engine beside SQLite |
+| **sqlite-vec** (SQLite extension, Rust crate `sqlite-vec`) | MIT/Apache-2.0 (crate), Apache-2.0 (repository) | pre-v1: crate `0.1.10-alpha.4` (2026-05-18), repository last pushed 2026-05-18, five months before this check; upstream warns of breaking changes | Smallest and simplest: vectors live in the same SQLite file as the chunks and FTS5, one transaction, hybrid by SQL. Brute-force scan only (unverified), so cost grows linearly with chunks; fine for tens of thousands, slow at a few hundred thousand. Loading an extension into SQLite also needs care with the bundled SQLite build |
+| **Qdrant Edge** (`qdrant-edge` crate, the embedded Qdrant shard) | Apache-2.0 | active but young: `qdrant-edge` 0.9.0 (2026-10-22), about 20k downloads, announced as a beta in July 2025 | In-process engine with HNSW and payload filtering, small footprint, no background service; the Rust API is still moving (0.x) |
+| **usearch** (`usearch` crate, HNSW) | Apache-2.0 | very active: 2.26.5 (2026-10-18), repository pushed 2026-10-18, 1.5M downloads | A vector index only, no payloads: a small, fast, on-disk (memory-mappable, (unverified)) HNSW with f16/int8 quantisation (unverified); a C++ core built by the crate, so a C++ compiler is needed at build time (the app's own code stays Rust) |
+
+**Recommendation: `usearch` behind a `VectorIndex` port, with chunks, metadata and FTS5 staying in the existing SQLite store.** Reasons: Pacenotes
+already has SQLite for everything else and the vectors are **derived, rebuildable data**, so a database that duplicates storage, transactions and
+schema is more than needed; usearch gives approximate search that scales past what brute force handles, in a small dependency with a permissive
+licence and a very active project; the port keeps the choice reversible (AGENTS.md: depend on abstractions). Fusion (RRF) and re-ranking are our own
+pure functions, tested in the core. **Fallbacks:** LanceDB if we later want filtered ANN and hybrid search inside one engine and accept its weight;
+sqlite-vec only as a zero-dependency prototype for small repositories. A two-day spike on a 500k-chunk corpus (build time, query latency at k=50,
+recall against brute force, binary size, Windows build) decides before M2b; the recommendation is **to confirm** (question 22). Not chosen:
+Qdrant Edge for being young and still 0.x, which is a revisit later, not a rejection.
+
+## 22. Views (what to look at while analysing code)
+
+Every view is computed from the index (never by running the code), shows its tier and confidence labels, links each element back to code (open at
+`file:line`), and is available over MCP as a read-only tool (section 13). Diagram views export as editable draw.io files (section 9); tables export as
+CSV or Markdown. "Needs" is the lowest tier that gives a useful result; a higher tier makes it exact.
+
+| View | Purpose | Needs | v1 / Later |
+|---|---|---|---|
+| Architecture map | Auto C4-style containers and components from manifests, folders and the import graph, as an editable draw.io diagram | tier 2 | v1 (diagram kinds in section 9) |
+| Module and package dependency graph | Layers, fan-in/fan-out, **dependency cycles** highlighted | tier 2 (manifests: tier 1) | v1 |
+| Call graph and call-path trace | Who calls what; "follow this path from A to B" with confidence per edge | tier 2 approximate, tier 3 exact | v1 |
+| Sequence diagram from a trace | The traced path as a UML sequence, editable | tier 2/3 | v1.1 (after Diagrams) |
+| Symbol outline and API surface | Per-file outline; public API of a module or package; what is exported | tier 2 | v1 |
+| Entry-point inventory | HTTP routes, CLI commands, UI events, scheduled jobs, message handlers (framework recognisers shipped as packs) | tier 2, framework patterns | v1 (common frameworks), more as packs |
+| Data flow for a value or field | Where a field is written, read, passed, persisted ("who sets `status`?") | tier 3 where possible; tier 2 gives name-based "likely" flow | v1.1 |
+| Change impact | "What does this change affect": callers, dependent modules, tests, configs, requirements, with the reason for each | tier 2 approximate, tier 3 exact | v1 |
+| Hot spots | Git churn x complexity ranking | tier 1 + 2 | v1 |
+| Ownership and knowledge map | Who knows which area from git history, CODEOWNERS, bus-factor warnings | tier 1 | v1 (owners), Later (bus factor) |
+| Test map and coverage overlay | Which tests touch which code; imported lcov/Cobertura/JaCoCo overlay on files and symbols | tier 2 + imported coverage | v1 |
+| Complexity and size metrics | Cyclomatic complexity, nesting, length, parameters per function and file | tier 2 | v1 |
+| Duplicates and dead-code candidates | Near-duplicate blocks (token/AST based); unreferenced symbols, labelled "candidate" (reflection, dynamic dispatch and public API excluded or flagged) | duplicates tier 2; dead code tier 2 candidates, tier 3 stronger | v1.1 |
+| TODO / FIXME / HACK inventory | All markers with age (blame), author, area | tier 1 | v1 |
+| Dependency and licence inventory (SBOM) | External libraries from manifests and lock files with versions and licences; CycloneDX/SPDX export | tier 1 (manifests) | v1 (inventory), v1.1 (licence resolution, SBOM export) |
+| Configuration and environment-variable inventory | Every config key, env var and feature flag read in code, where, defaults, where it is documented | tier 2 | v1 |
+| Domain glossary | Terms from identifiers, docs and log text with where they are used | tier 2 (+ optional model captions) | Later |
+| Guided reading tour | Ordered, code-anchored reading steps from entry points and dependencies; stored as Markdown | tier 2 | v1 (generated), v1.1 (editable tours, section 6.1) |
+
+New MCP tools (read-only, same arguments as section 13: `workspace`, `rev`, `budget_tokens`; outputs deterministic with `path:line` citations):
+`orient` (the orientation page), `index_tiers` (what tier each language has, and what would add more), `semantic_search` (hybrid retrieval;
+`search` also takes `mode: text|structural|semantic|hybrid`), `reading_order`, `call_path`, `entry_points`, `impact_of_change`, `dependency_cycles`,
+`config_inventory`, `dependency_inventory`, `marker_inventory`, `duplicates`, `dead_code_candidates`, `knowledge_map`, `test_map`, `glossary`. That
+would be about 55 tools in total, which is too many for small models, so the Pitwall toolsets stay the unit of exposure: a new **`orient`** toolset
+(`orient`, `repo_map`, `search`, `semantic_search`, `reading_order`, `entry_points`, `call_path`) is the default for "understand this codebase", and
+the inventories sit in a `inventories` toolset.
+
+### 22.1 MCP server and MCP host
+
+- **Pacenotes is an MCP server.** The code-index tools above and in section 13, read-only (`readOnlyHint`), over stdio or loopback with
+  per-client keys, grants, budgets and a call log, local only. Nothing that writes (diagram files, comments, suppressions, accepting drafts) is
+  exposed, as in the rest of the family.
+- **Pacenotes can also be an MCP host** (an MCP client of its own, for deterministic flows, not an open agent loop): for example to hand a
+  `.sighterplan` it drafted to **Sighter** and read back results. As a host it connects only to servers the user added and granted, over
+  loopback or stdio, calls only the tools on that grant, shows every call in the call log, and runs any tool that is **not** read-only
+  (such as starting a Sighter run) only after a click. Models still reach tools through Pitwall; Pacenotes-as-host is not a second router. Decision
+  to confirm (question 25).
+
+## 23. Dependency analyzer: one graph that shows all links
+
+![Dependency graph](diagrams/svg/dependency-graph.svg)
+
+One interactive graph for "what is linked to what", at every scale. It is a view over the index (section 22 has the simpler per-purpose views; this
+is the general one behind several of them).
+
+**Zoom levels** (progressive disclosure; each level aggregates the one below): repositories and services → packages and modules → files → symbols.
+Zooming in expands a node; zooming out collapses it and sums its edges.
+
+**Node kinds:** internal module, external package (with version and licence), service, database table, config key, API endpoint, message topic.
+**Edge kinds:** imports, calls, inherits/implements, reads/writes table, HTTP/gRPC/IPC calls between services, FFI, config use, test-covers. Each edge
+has a source (which tier or manifest produced it) and a confidence label; cross-service edges come from recognisers for OpenAPI/proto files, route
+and client declarations, and queue/topic names, and are marked "likely" when only names match.
+
+**What you can do:** filter by node and edge kind, language, path and tier; collapse and expand; **focus on a node with N hops**; **shortest path**
+between two nodes (with the edges explained); **cycles highlighted** (strongly connected components, with the smallest cycle to cut); a **diff mode**
+(links a branch or commit range adds and removes, so a reviewer sees new coupling at a glance); **export** the current view to draw.io (editable,
+section 9) or SVG; and the same queries (`graph_focus`, `graph_path`, `graph_cycles`, `graph_diff`, `graph_rules`, `graph_export`) as **read-only MCP
+tools**.
+
+**Layer and architecture rules**, written in the repo (`.pacenotes/architecture.toml`): layers and allowed directions, forbidden edges ("UI must not
+depend on the database"; "domain must not import adapters"), with globs and an allow-list for known exceptions. Violations are computed from the graph
+and **fed to Review** as findings with the offending edge and a path as evidence (section 24), so CI can fail on new violations only (baseline).
+
+**External packages.** Versions and licences come from manifests and lock files. **Known vulnerabilities come from a local, offline-mirrored advisory
+database** (for example OSV, whose per-ecosystem data is published as downloadable dumps; licence terms per source to be checked before shipping, unverified
+in this run). The mirror is refreshed **only on the user's action** (or an explicit scheduled setting), never by a live lookup while browsing the graph;
+queries run against the local copy and show its age. "Newer version available" comes from **Spotter** (family integration: Pacenotes asks Spotter,
+read-only, and shows the answer; without Spotter the column is empty with a next step). Package nodes show vulnerability and licence badges.
+
+**Scale.** Thousands of nodes must stay interactive: layout and aggregation run **in the engine** (a worker process), not in the webview; the UI asks for
+a viewport and a zoom level and gets a bounded, pre-laid-out subgraph (a few hundred nodes at most) plus counts of what is hidden; large views page
+and cache by index revision. The UI only renders and animates what it is given.
+
+## 24. Review: rule sources, rule sets and workflow
+
+This expands section 8 (design) and the Review rows of section 6.3. A review checks a **diff, a branch, a commit range or a whole repository**
+(whole-repo mode runs on the index, with a budget and paging).
+
+![Review pipeline](diagrams/svg/review-pipeline.svg)
+
+### 24.1 Three rule sources
+
+| Source | What it is | Needs Pitwall | Licence note (checked 2026-10-23) |
+|---|---|---|---|
+| (a) **Markdown rules** | User-defined natural-language rules ("handlers must validate the request body before using it"), checked by the local model in Pitwall, which **must cite the evidence** (file and line); a finding without a resolvable citation is dropped or shown as "unverified". Good and bad examples in the rule steer the model and test it | yes (the rule is skipped with a "needs local AI" note without it) | our own format |
+| (b) **Structural pattern rules** | tree-sitter queries and ast-grep-style patterns with metavariables and relations, with fix hints; deterministic and fast | no | tree-sitter is MIT and ast-grep is MIT (verified on GitHub, `ast-grep-core` 0.51.0 on crates.io), so using it as a library is possible after the spike in section 8. **Semgrep's engine is LGPL-2.1, but its rule sets are under separate terms (the Semgrep Rules License v1.0 is not an open-source licence, other rule sources vary)**: we do not import Semgrep rules |
+| (c) **Existing linters and analyzers via SARIF** | Results of clippy, ESLint, Roslyn analyzers, SpotBugs, CodeQL and others, imported as SARIF 2.1.0 (and rdjson) and merged with ours; Pacenotes never runs them (Pitcrew or the user's CI does) | no | SARIF is an OASIS standard; each tool keeps its own licence |
+
+### 24.2 Rule sets, scope and tests
+
+- **Where rules live.** In the repository, committable and reviewable: `.pacenotes/rules/*.md` and `.pacenotes/rules/*.yml` (the existing
+  `AGENTS.md` / `REVIEW.md` Markdown sources of section 8.1 remain read as-is and are listed in the same rule view); and **per user** in the app's
+  data folder (or an optional `~/.config/pacenotes/rules/`). Precedence: nearest rule file wins, repo before user, with a visible "why this rule
+  applies" explanation. Rule packs (Rust, Angular, C#, Java…) are ordinary rule files.
+- **A rule has**: an id, a title, **severity** (`blocker`…`info`, section 8), **scope globs** (`include`/`exclude`, languages), the check (Markdown
+  text or a pattern), an optional **fix** hint, and **examples**: `good` and `bad` snippets.
+- **Tests for rules.** A rule's examples are its tests: `pacenotes rules test` runs every structural rule against its good/bad snippets and
+  fails if a bad one is missed or a good one is flagged; for Markdown rules the model-check examples are run on demand against Pitwall (never in
+  offline CI) and recorded. Rule files are validated when loaded (unknown keys, bad globs, patterns that do not compile) with a message that says
+  what to fix.
+- **Rule hygiene** (conflicts, never-triggered, vague rules) and **conversion** of a Markdown rule to a structural one stay as in section 8.1.
+
+### 24.3 Findings and workflow
+
+- **Evidence and explanation.** A finding has the rule, severity, `file:line` evidence (with excerpts), an explanation of why it matters and a
+  **suggested fix as a diff** (never applied by Pacenotes; the user copies or applies it).
+- **Suppressions with a reason.** In code (an annotation comment) or in `.pacenotes/suppressions.toml`, scoped (line, file, path, rule) with an
+  optional expiry; a reason is required.
+- **Baseline for legacy code.** `pacenotes review --baseline` records current findings by fingerprint (rule, path, normalised snippet hash) so
+  that later runs, and CI, **fail only on new findings**; the baseline file is committable and shrinks as legacy findings are fixed.
+- **Learning, local only.** Accepted and dismissed findings adjust how Markdown rules are worded for the model (few-shot examples from the user's
+  own decisions) and feed the rule hygiene report; nothing is uploaded and no model is trained (section 8, item 6).
+- **Outputs.** The in-app review panel; Markdown and SARIF export; **CLI exit codes for CI** (0 clean, 1 findings at or above the threshold,
+  2 error, 3 partial or budget exhausted); and an optional **"post comments to the Gitea PR"** that happens only on the user's click, after a
+  preview, with the user's token.
+- **Without Pitwall.** Structural and SARIF rules work fully; Markdown rules show "needs local AI" with a next step, and the review reports which
+  rules were skipped, so a green result is never read as "all rules passed".
+
+
+## 25. Further proposals (for the user to confirm)
+
+These came out of the same discussion. They are **proposals**: each is a candidate for the catalogue and none is queued until confirmed (question 28).
+All are read-only and local, and each also becomes an MCP tool where it makes sense.
+
+| Proposal | What it does | Needs | v1 / Later (proposed) |
+|---|---|---|---|
+| Upgrade-impact planner | "What breaks if dependency X goes from version A to B": the call sites of the APIs that changed (from the two versions' public surfaces), tests touching them, and the licence and vulnerability delta; Spotter supplies new releases | tier 2 (tier 3 exact), package sources in a local cache | Later (v1.1) |
+| API change detection between two revisions | Public API diff of a package or module, classified breaking / additive / internal, with a semver recommendation | tier 2 | v1.1 |
+| Test-gap finder | Changed or risky code (hot spots, high complexity, many callers) without tests or coverage, ranked; builds on the test map and patch coverage | tier 2 + imported coverage | v1 (changed code), v1.1 (risk ranking) |
+| "Explain this diff / PR" | A reviewer's summary: what changed, why it may matter (callers, config, schema), what to look at first; deterministic grounding, optional model wording | tier 2; Pitwall for prose | v1 (grounding), v1.1 (prose) |
+| Debrief bridge, deepened | Stack trace or log line to code, **owners and recent commits** for the frames (extends section 10) | tier 1-2 | v1 |
+| Documentation views | ADRs and docs linked to the code they describe (by path, symbol and link mentions); **stale-doc detection** when the code a doc names changed or vanished | tier 2 | v1.1 |
+| Onboarding notes | Personal or shared **annotations pinned to code** (stored as Markdown in the repo for shared ones, in app data for personal), re-anchored after edits | tier 2 anchors | v1.1 |
+| History views | How a file or symbol evolved (renames, moves, size over time), who knows it | tier 1-2 + git | v1 (file), v1.1 (symbol across renames) |
+
+## 26. Sources (additions, 2026-10-23)
+
+Vector stores and models
+- LanceDB: https://github.com/lancedb/lancedb (Apache-2.0), https://crates.io/crates/lancedb , https://crates.io/crates/lance , Lance format: https://github.com/lance-format/lance
+- sqlite-vec: https://github.com/asg017/sqlite-vec , https://crates.io/crates/sqlite-vec ; release state and the pre-v1 warning (secondary): https://depscope.dev/pkg/npm/sqlite-vec
+- Qdrant Edge: https://qdrant.tech/documentation/edge/ , https://crates.io/crates/qdrant-edge , https://github.com/qdrant/qdrant ; launch (secondary): https://www.blocksandfiles.com/ai-ml/2025/07/29/qdrant-launches-lightweight-vector-database-for-edge-devices/1615914
+- usearch: https://github.com/unum-cloud/usearch , https://crates.io/crates/usearch
+- Models: https://huggingface.co/Qwen/Qwen3-Embedding-0.6B (Apache-2.0), https://huggingface.co/nomic-ai/CodeRankEmbed (MIT), https://huggingface.co/jinaai/jina-embeddings-v2-base-code (Apache-2.0); runtimes: https://crates.io/crates/candle-core (MIT or Apache-2.0), https://crates.io/crates/ort (MIT or Apache-2.0)
+- Rule engines: https://github.com/ast-grep/ast-grep (MIT), https://github.com/tree-sitter/tree-sitter (MIT), https://github.com/semgrep/semgrep (LGPL-2.1)
+- OSV (offline advisory data and licence terms, to be verified per source): https://google.github.io/osv.dev/data/
+- OASIS SARIF 2.1.0: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
+
+## 27. Sources (rev 2)
 
 Code review and quality tools
 - Qodo PR-Agent relicensing and community move: https://github.com/The-PR-Agent/pr-agent , https://futurumgroup.com/insights/qodo-hands-pr-agent-to-the-community-will-open-governance-accelerate-ai-code-review/
