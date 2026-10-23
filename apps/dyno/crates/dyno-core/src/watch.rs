@@ -1,4 +1,4 @@
-//! Watched folders with keep-for times (WP-10, ADR 0018). The user picks a folder and how long files may stay in it;
+//! Watched folders with keep-for times (WP-10, ADR 0019). The user picks a folder and how long files may stay in it;
 //! Dyno moves what has stayed longer to the 7-day quarantine (restorable from Activity), never anywhere else.
 //!
 //! Everything here is pure: what may be watched ([`validate_root`]), what a sweep would remove ([`plan`], admitted through

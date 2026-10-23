@@ -112,4 +112,46 @@ describe('SettingsPage', () => {
     expect([...el.querySelectorAll('button')].some((b) => /retry/i.test(b.textContent ?? ''))).toBe(true);
     expect(el.querySelector('section[aria-label="Appearance"]')).toBeNull();
   });
+  it('shows the hardware and baselines section with the defaults when the settings hold none', async () => {
+    const { el } = await make();
+    const section = el.querySelector('section[aria-label="Hardware and baselines"]')!;
+    expect(section).not.toBeNull();
+    expect(toggle(el, 'Learn what is normal').getAttribute('aria-checked')).toBe('true');
+    expect(toggle(el, 'Alarm when far above usual').getAttribute('aria-checked')).toBe('false');
+    expect(toggle(el, 'Alarm for throttling').getAttribute('aria-checked')).toBe('true');
+    expect(toggle(el, 'Alarm for disks and batteries near end of life').getAttribute('aria-checked')).toBe('true');
+    expect(section.querySelector<HTMLInputElement>('input[aria-label="Days of learning"]')!.value).toBe('7');
+  });
+  it('changes and saves the baselines and the hardware alarms', async () => {
+    const { f, mock, el, saveButton } = await make();
+    toggle(el, 'Alarm when far above usual').click();
+    toggle(el, 'Alarm for throttling').click();
+    toggle(el, 'Alarm for disks and batteries near end of life').click();
+    f.detectChanges();
+    const input = el.querySelector<HTMLInputElement>('input[aria-label="Days of learning"]')!;
+    input.value = '14';
+    input.dispatchEvent(new Event('input'));
+    f.detectChanges();
+    const spy = vi.spyOn(mock, 'saveSettings');
+    saveButton()!.click();
+    await settle(f);
+    const sent = spy.mock.calls[0]![0];
+    expect(sent.baselines).toEqual({ enabled: true, learningDays: 14, alarms: true });
+    expect(sent.hardwareAlarms).toEqual({ throttling: false, lifespan: false });
+  });
+  it('ignores a learning period outside 1 to 30 and dims its rows when learning is off', async () => {
+    const { f, el, saveButton } = await make();
+    const input = el.querySelector<HTMLInputElement>('input[aria-label="Days of learning"]')!;
+    for (const bad of ['0', '31', '']) {
+      input.value = bad;
+      input.dispatchEvent(new Event('input'));
+      f.detectChanges();
+    }
+    expect(saveButton()).toBeUndefined();
+    toggle(el, 'Learn what is normal').click();
+    await settle(f);
+    expect(input.disabled).toBe(true);
+    expect(input.closest('.row')!.classList.contains('off')).toBe(true);
+    expect(saveButton()).toBeDefined();
+  });
 });

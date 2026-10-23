@@ -45,6 +45,10 @@ pub struct WeeklyReport {
     pub issues: Vec<ReportIssue>,
     /// What changed on the machine (rule actions, cleanups, startup and tuning changes), newest first (at most [`MAX_LISTED`]).
     pub changes: Vec<ReportChange>,
+    /// Hardware notes: time throttled and disks or batteries that need attention, as plain sentences (empty when there
+    /// is nothing to say).
+    #[serde(default)]
+    pub hardware: Vec<String>,
     /// True when the week holds no history, issues, changes or crashes: a valid report that says so.
     pub nothing_to_report: bool,
 }
@@ -132,6 +136,8 @@ pub struct ReportInput<'a> {
     pub issues: Vec<ReportIssue>,
     /// Changes of the week, newest first.
     pub changes: Vec<ReportChange>,
+    /// Hardware notes (see [`hardware_lines`]).
+    pub hardware: Vec<String>,
 }
 
 /// Builds the report.
@@ -191,6 +197,9 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         let n = i.issues.len();
         highlights.push(format!("{n} thing{} needed attention.", if n == 1 { "" } else { "s" }));
     }
+    for h in i.hardware.iter().take(3) {
+        highlights.push(h.clone());
+    }
     let nothing_to_report = i.points.is_empty()
         && i.issues.is_empty()
         && i.changes.is_empty()
@@ -220,8 +229,56 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         disks: i.disks,
         issues,
         changes,
+        hardware: i.hardware,
         nothing_to_report,
     }
+}
+
+/// The week's hardware sentences: minutes spent throttled (by cause) and every disk or battery that needs attention or
+/// whose forecast is worth knowing. Nothing alarming without evidence: a forecast with low confidence is mentioned as
+/// a hint, never as a warning.
+pub fn hardware_lines(
+    episodes: &[crate::throttle::ThrottleEpisode],
+    from: Timestamp,
+    to: Timestamp,
+    forecasts: &[crate::lifespan::LifeForecast],
+) -> Vec<String> {
+    use crate::lifespan::LifeOutcome;
+    use crate::time::MINUTE;
+    let mut lines = Vec::new();
+    let mut by_cause: Vec<(crate::throttle::ThrottleCause, i64)> = Vec::new();
+    for e in episodes.iter().filter(|e| e.end.unwrap_or(to) > from && e.start < to) {
+        let ms = e.end.unwrap_or(to).min(to).since(e.start.max(from)).max(0);
+        match by_cause.iter_mut().find(|(c, _)| *c == e.cause) {
+            Some(x) => x.1 += ms,
+            None => by_cause.push((e.cause, ms)),
+        }
+    }
+    let total: i64 = by_cause.iter().map(|x| x.1).sum();
+    if total >= MINUTE {
+        let parts: Vec<String> = by_cause
+            .iter()
+            .map(|(c, ms)| format!("{} min of {}", ms / MINUTE, c.label().to_lowercase()))
+            .collect();
+        lines.push(format!(
+            "The CPU ran slower than it should for {} min this week ({}).",
+            total / MINUTE,
+            parts.join(", ")
+        ));
+    }
+    for f in forecasts {
+        let name = &f.name;
+        match &f.outcome {
+            LifeOutcome::AlreadyPastLimit => lines.push(format!("{name}: {}", f.headline)),
+            LifeOutcome::Remaining { .. } => lines.push(format!(
+                "{name}: {} (confidence {}).",
+                f.headline.to_lowercase(),
+                f.confidence.word()
+            )),
+            _ => {}
+        }
+    }
+    lines
 }
 
 /// A date as "2026-10-16" in UTC (the engine does not know the user's time zone; the app shows local times).
@@ -316,6 +373,12 @@ pub fn to_markdown(r: &WeeklyReport) -> String {
                 bytes(d.total),
                 forecast_text(d.forecast)
             ));
+        }
+    }
+    if !r.hardware.is_empty() {
+        o.push_str("\n## Hardware\n\n");
+        for h in &r.hardware {
+            o.push_str(&format!("- {h}\n"));
         }
     }
     if !r.issues.is_empty() {
@@ -419,6 +482,13 @@ pub fn to_html(r: &WeeklyReport) -> String {
                 bytes(d.total),
                 forecast_text(d.forecast)
             ));
+        }
+        o.push_str("</ul>\n");
+    }
+    if !r.hardware.is_empty() {
+        o.push_str("<h2>Hardware</h2>\n<ul>\n");
+        for h in &r.hardware {
+            o.push_str(&format!("<li>{}</li>\n", e(h)));
         }
         o.push_str("</ul>\n");
     }
@@ -530,6 +600,7 @@ mod tests {
             disks: vec![],
             issues: vec![],
             changes: vec![],
+            hardware: vec![],
         }
     }
 
@@ -752,5 +823,65 @@ mod tests {
         assert!(r.highlights.iter().any(|h| h.contains("fell by 10")));
         assert!(r.highlights.iter().any(|h| h.contains("3 times")));
         assert!(r.highlights.iter().any(|h| h.contains("1 app crash was")));
+    }
+
+    #[test]
+    fn hardware_lines_total_the_week_and_never_overstate() {
+        use crate::hardware::Confidence;
+        use crate::lifespan::{unavailable, LifeOutcome, LifeSubject};
+        use crate::throttle::{ThrottleCause, ThrottleEpisode};
+        use crate::time::MINUTE;
+        let ep = |s: i64, e: Option<i64>, cause| ThrottleEpisode {
+            id: ThrottleEpisode::id_for(Timestamp(s * MINUTE)),
+            start: Timestamp(s * MINUTE),
+            end: e.map(|m| Timestamp(m * MINUTE)),
+            cause,
+            avg_lost_percent: 30.0,
+            peak_lost_percent: 40.0,
+            peak_temperature_c: None,
+        };
+        let (from, to) = (Timestamp(100 * MINUTE), Timestamp(1_000 * MINUTE));
+        let eps = [
+            ep(0, Some(110), ThrottleCause::Thermal),     // 10 minutes fall inside the week
+            ep(200, Some(220), ThrottleCause::Thermal),   // 20
+            ep(990, None, ThrottleCause::Power),          // still running at the end: 10
+            ep(2_000, Some(2_100), ThrottleCause::Power), // after the week
+        ];
+        let mut ssd = unavailable(LifeSubject::Ssd, "Samsung", "x");
+        ssd.outcome = LifeOutcome::Remaining {
+            low_days: 100.0,
+            mid_days: 200.0,
+            high_days: 300.0,
+        };
+        ssd.headline = "About 7 months of writes left".into();
+        ssd.confidence = Confidence::Medium;
+        let mut bat = unavailable(LifeSubject::Battery, "Battery", "x");
+        bat.outcome = LifeOutcome::AlreadyPastLimit;
+        bat.headline = "Time to think about a new battery".into();
+        let none = unavailable(LifeSubject::Ssd, "Other", "unreadable");
+        let lines = hardware_lines(&eps, from, to, &[ssd, bat, none]);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(
+            lines[0].contains("40 min") && lines[0].contains("30 min of heat") && lines[0].contains("10 min of power limit"),
+            "{}",
+            lines[0]
+        );
+        assert!(
+            lines[1].starts_with("Samsung: about 7 months") && lines[1].contains("confidence medium"),
+            "{}",
+            lines[1]
+        );
+        assert_eq!(lines[2], "Battery: Time to think about a new battery");
+        assert!(hardware_lines(&[], from, to, &[]).is_empty());
+        assert!(hardware_lines(&[ep(0, Some(0), ThrottleCause::Power)], from, to, &[]).is_empty());
+
+        let mut i = input(&[]);
+        i.hardware = lines.clone();
+        i.crashes = 1;
+        let r = weekly(i);
+        assert!(r.highlights.iter().any(|h| h.starts_with("The CPU ran slower")));
+        assert!(to_markdown(&r).contains("## Hardware\n\n- The CPU ran slower"));
+        assert!(to_html(&r).contains("<h2>Hardware</h2>"));
+        assert!(!to_markdown(&weekly(input(&[]))).contains("## Hardware"));
     }
 }

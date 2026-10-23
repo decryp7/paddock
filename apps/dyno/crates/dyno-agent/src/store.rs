@@ -2,6 +2,9 @@
 //! the activity log, alerts, snapshots, boots and health scores (crashes come from the `issues` table).
 //!
 //! Tables added after v1 (all `IF NOT EXISTS`, so the schema number stays 1): `alarms` and `alarm_events`
+//! (`store/alarms.rs`), `recorder_snapshots` (`store/recorder.rs`), `hardware_readings` and `throttle_episodes`
+//! (`store/hardware.rs`: SSD wear and battery capacity over time, finished throttling episodes). Baselines are learned from
+//! the history tiers on demand and not stored.
 //! (`store/alarms.rs`), `recorder_snapshots` (`store/recorder.rs`), `issues`, `baseline` and `baseline_startup`
 //! (`store/issues.rs`). Names reserved for later work, not created yet: `baselines`
 //! (per-metric time-of-week learned statistics), `ssd_wear` and `battery_trend` (slow health trends).
@@ -22,8 +25,11 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 mod alarms;
+mod hardware;
 mod issues;
 mod recorder;
+
+pub use hardware::kind as hardware_kind;
 
 /// The schema version.
 pub const SCHEMA: i64 = 1;
@@ -133,6 +139,7 @@ impl Store {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA_SQL)?;
         conn.execute_batch(alarms::SCHEMA_SQL)?;
+        conn.execute_batch(hardware::SCHEMA_SQL)?;
         conn.execute_batch(recorder::SCHEMA_SQL)?;
         conn.execute_batch(issues::SCHEMA_SQL)?;
         Ok(Store { conn })
@@ -142,6 +149,7 @@ impl Store {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA_SQL)?;
         conn.execute_batch(alarms::SCHEMA_SQL)?;
+        conn.execute_batch(hardware::SCHEMA_SQL)?;
         conn.execute_batch(recorder::SCHEMA_SQL)?;
         conn.execute_batch(issues::SCHEMA_SQL)?;
         let version: Option<String> = conn
@@ -224,6 +232,29 @@ impl Store {
             .conn
             .prepare_cached("SELECT at, app, cpu, memory FROM app_minutes WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
         let rows = st.query_map(params![from.millis(), to.millis()], |r| {
+            Ok(AppMinute {
+                at: Timestamp(r.get(0)?),
+                app: r.get(1)?,
+                cpu: r.get::<_, f64>(2)? as f32,
+                memory: r.get::<_, i64>(3)?.max(0) as u64,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// The minute rows of these apps only (at most 32 names), for learning per-app baselines.
+    pub fn app_minutes_named(&self, apps: &[String], from: Timestamp, to: Timestamp) -> Result<Vec<AppMinute>> {
+        let apps = &apps[..apps.len().min(32)];
+        if apps.is_empty() {
+            return Ok(Vec::new());
+        }
+        let marks = vec!["?"; apps.len()].join(",");
+        let mut st = self.conn.prepare(&format!(
+            "SELECT at, app, cpu, memory FROM app_minutes WHERE at >= ? AND at < ? AND app IN ({marks}) ORDER BY at"
+        ))?;
+        let mut args: Vec<rusqlite::types::Value> = vec![from.millis().into(), to.millis().into()];
+        args.extend(apps.iter().map(|a| rusqlite::types::Value::from(a.clone())));
+        let rows = st.query_map(rusqlite::params_from_iter(args), |r| {
             Ok(AppMinute {
                 at: Timestamp(r.get(0)?),
                 app: r.get(1)?,
@@ -523,6 +554,7 @@ impl Store {
         self.conn
             .execute("DELETE FROM activity WHERE at < ?1", [now.minus(400 * DAY).millis()])?;
         self.prune_alarm_events(now)?;
+        self.prune_hardware(now)?;
         Ok(())
     }
 }

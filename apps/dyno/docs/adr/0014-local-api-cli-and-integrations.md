@@ -1,6 +1,6 @@
 # 14. The local API, the `dyno` CLI and integrations: one versioned, local-only, authenticated protocol
 
-- Status: accepted (2026-10-22); not built yet
+- Status: accepted (2026-10-22); the CLI (item 4) is built: `crates/dyno-cli`, see docs/cli.md; the HTTP API and the integrations are not
 - Related: ADR 0001, 0002 (`agent.json` discovery, per-launch token), `dyno_core::protocol`, docs/plugins.md
 
 ## Context

@@ -9,9 +9,11 @@
 
 pub mod battery;
 pub mod control_state;
+pub mod counters;
 pub mod dev_folders;
 pub mod elevate;
 pub mod fake;
+pub mod hardware;
 pub mod inventory;
 pub mod issues;
 pub mod links;

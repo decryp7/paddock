@@ -34,7 +34,7 @@ function useCases(file, { title, desc, owner, rows, ext }) {
 }
 useCases('uml-use-cases-observe', {
   title: 'Use cases — see and understand', desc: 'What the PC owner learns about the machine. Nothing here changes it. Dashed ellipses are planned.', owner: 'PC owner',
-  rows: [['Watch live performance'], ['Browse and sort processes'], ['Ask "why is my PC slow?"'], ['Review history and spikes'], ['Check health and read the reasons'], ['Receive alerts and anomalies'], ['Browse Issues and unusual processes', 1], ['Watched folders with keep-for times', 1], ['Read the weekly report', 1]],
+  rows: [['Watch live performance'], ['Browse and sort processes'], ['Ask "why is my PC slow?"'], ['Review history and spikes'], ['Check health and read the reasons'], ['Receive alerts and anomalies'], ['Browse Issues and unusual processes', 1], ['Watched folders with keep-for times', 1], ['Read the weekly report', 1], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Ask "is this normal?"']],
 });
 useCases('uml-use-cases-act', {
   title: 'Use cases — change and tune', desc: 'Everything that changes the machine needs an enabled rule or an explicit click, and is undoable where the OS allows. Dashed ellipses are planned.', owner: 'PC owner',

@@ -86,6 +86,7 @@ export const ICONS = {
   edit: line('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>'),
   user: line('<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/>'),
   calendar: line('<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'),
+  pin: line('<path d="M9 4h6l-.8 5.5 3 3.2H6.8l3-3.2z"/><path d="M12 12.7V20"/>'),
   trend: line('<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>'),
   globe: line('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'),
   layers: line('<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>'),

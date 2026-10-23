@@ -1,4 +1,4 @@
-//! Watched folders (WP-10, ADR 0018). Queries (`WatchedFolders`, `PreviewWatchedFolder`) move nothing; `SweepWatchedFolder`
+//! Watched folders (WP-10, ADR 0019). Queries (`WatchedFolders`, `PreviewWatchedFolder`) move nothing; `SweepWatchedFolder`
 //! and the background sweep are the only code that moves files, and only in a folder the person chose, set up, previewed and
 //! turned on. Every sweep that moves something is one activity entry that can be undone (the quarantine).
 

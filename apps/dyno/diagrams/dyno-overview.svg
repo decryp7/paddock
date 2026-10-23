@@ -29,7 +29,8 @@
 <rect x="72" y="208" width="256" height="88" rx="6" class="n ui"/>
 <text x="88" y="236" class="h">Window</text>
 <text x="88" y="258" class="t">Angular 22: widgets, processes,</text>
-<text x="88" y="274" class="t">history, settings; light and dark.</text>
+<text x="88" y="274" class="t">history, counters, throttling,</text>
+<text x="88" y="290" class="t">lifespan, settings; light and dark.</text>
 <rect x="72" y="328" width="256" height="88" rx="6" class="n acc"/>
 <text x="88" y="356" class="h">Tauri shell</text>
 <text x="88" y="378" class="t">Commands; validates every request</text>
@@ -52,8 +53,8 @@
 <text x="512" y="274" class="t">diagnosis; measures its own overhead.</text>
 <rect x="496" y="328" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="356" class="h">IPC server and handlers</text>
-<text x="512" y="378" class="t">One thread per connection, bounded push queue;</text>
-<text x="512" y="394" class="t">protection check and undo record on every action.</text>
+<text x="512" y="378" class="t">One thread per connection, bounded push queue; the</text>
+<text x="512" y="394" class="t">app and the dyno command are its clients.</text>
 <rect x="496" y="448" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="476" class="h">Plugin host</text>
 <text x="512" y="498" class="t">Starts plugins on first use; a plugin that crashes is</text>

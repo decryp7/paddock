@@ -39,7 +39,12 @@ a budget of about 1 % of one machine's CPU. The UI is a webview; it must never p
    permissions into the user's data directory and removes it on exit. The app reads it, connects, and treats a stale
    file (dead pid, refused connection) as "agent not running". A newer app than agent (protocol or build mismatch)
    asks the agent to restart (`Shutdown`); the service manager brings it back.
-7. **Failure containment.** A panic in one tick is caught (`guard::catch`-style), counted, and the loop continues; a
+7. **Pinned counters get history in the background.** The sampler asks the counters centre to read the pinned performance
+   counters (at most 8) every 15 s, never waiting for the OS (a detached read under the centre's two-in-flight cap), and
+   the pause stretches up to four times when the measured own CPU is over budget (`counters::pinned_period`, like point
+   3). The readings go to the counters' in-memory history ring (one hour, 48 counters) that the Counters page already
+   charts; nothing more is stored. Counters that are not pinned are read only while the page is open.
+8. **Failure containment.** A panic in one tick is caught (`guard::catch`-style), counted, and the loop continues; a
    failing sensor becomes an `Unavailable` reading, never an error for the whole sample.
 
 ## Consequences

@@ -23,7 +23,7 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
   linker-signed bundle. It is not notarised: users open it once with right-click > Open. Developer ID signing and
   notarisation are future work.
 - **Linux:** `Dyno_<version>_amd64.deb` and an AppImage.
-- Every bundle carries the `dyno-agent` and `dyno-helper` sidecars (`externalBin`, built by `app/src-tauri/scripts/sidecar.mjs` with the `dist`
+- Every bundle carries the `dyno-agent`, `dyno-helper` and `dyno` (command line, docs/cli.md) sidecars (`externalBin`, built by `app/src-tauri/scripts/sidecar.mjs` with the `dist`
   profile). On macOS the bundle also carries `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`.
 
 `scripts/check-bundle.sh` runs after the Linux and macOS bundles: every executable's run paths must be relative or system

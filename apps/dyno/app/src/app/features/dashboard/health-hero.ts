@@ -141,6 +141,7 @@ export class HealthHero implements OnInit {
     else if (kind === 'openCleanup') void this.router.navigateByUrl('/cleanup');
     else if (kind === 'openStartup') void this.router.navigateByUrl('/health');
     else if (kind === 'openTaskManager') void this.router.navigateByUrl('/processes');
+    else if (kind === 'openLifespan') void this.router.navigateByUrl('/lifespan');
     else this.notifier.show('Restart when it suits you. Dyno never restarts your PC for you.');
   }
 }

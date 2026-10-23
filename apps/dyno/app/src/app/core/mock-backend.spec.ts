@@ -712,3 +712,40 @@ describe('mock CPU layout', () => {
     expect(b.liveUpdate('summary').activeActions).toHaveLength(0);
   });
 });
+
+describe('hardware: throttling, lifespan and baselines', () => {
+  it('answers the throttling overview: fine now, a few episodes in the last 30 days', async () => {
+    const t = await make().throttling();
+    expect(t.reading.verdict).toBe('fine');
+    expect(t.current).toBeNull();
+    expect(t.episodes.length).toBeGreaterThan(0);
+    expect(t.episodes.every((e) => e.start > NOW - 30 * 86_400_000)).toBe(true);
+    expect(t.minutes30d).toBeGreaterThan(0);
+    expect(t.inputs.length).toBeGreaterThan(0);
+  });
+  it('a laptop has a disk and a battery forecast, a desktop only the disk', async () => {
+    const laptop = await make().lifespan();
+    expect(laptop.forecasts.map((f) => f.subject)).toEqual(['ssd', 'battery']);
+    expect(laptop.forecasts.every((f) => 'remaining' in (f.outcome as object))).toBe(true);
+    expect((await make({ machine: 'desktop' }).lifespan()).forecasts.map((f) => f.subject)).toEqual(['ssd']);
+  });
+  it('answers the baselines with unusual items first and says what is usual', async () => {
+    const b = await make().baselines();
+    expect(b.learning).toEqual({ ready: { days: 34 } });
+    expect(b.items[0]!.judgement.state).toEqual({ higher: 'strong' });
+    expect(b.items[0]!.current).toBe('71%');
+    expect(b.items[0]!.judgement.usual).toBe('14%');
+    expect(b.items.some((i) => i.judgement.state === 'usual')).toBe(true);
+  });
+  it('fails when asked to', async () => {
+    const b = make({ fail: new Set(['throttling', 'lifespan', 'baselines']) });
+    await expect(b.throttling()).rejects.toBeDefined();
+    await expect(b.lifespan()).rejects.toBeDefined();
+    await expect(b.baselines()).rejects.toBeDefined();
+  });
+  it('the weekly report carries the hardware sentences, and an empty week has none', async () => {
+    const b = make();
+    expect((await b.weeklyReport(0)).hardware.length).toBe(2);
+    expect((await b.weeklyReport(5)).hardware).toEqual([]);
+  });
+});

@@ -10,12 +10,14 @@ test.describe('screens', () => {
     const nav = page.getByRole('navigation', { name: /./ }).or(page.locator('aside nav'));
     for (const [label, heading] of [
       ['Processes', 'Processes'],
+      ['Throttling', 'Throttling'],
       ['Inventory', 'Inventory'],
       ['CPU taming', 'CPU taming'],
       ['Alarms', 'Alarms'],
       ['Flight recorder', 'Flight recorder'],
       ['Health', 'Health'],
       ['Watched folders', 'Watched folders'],
+      ['Lifespan', 'Disk and battery life'],
       ['Tuning', 'Tuning'],
       ['Diagnostics', 'Diagnostics bundle'],
       ['Settings', 'Settings'],
@@ -328,6 +330,42 @@ test.describe('widgets', () => {
   });
 });
 
+test.describe('counters', () => {
+  test('browse an object, chart a counter with the events marked, pin it and put it on the dashboard', async ({ page }) => {
+    await page.goto(url('/counters'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Counters' })).toBeVisible();
+    await expect(page.getByText('Nothing charted yet')).toBeVisible();
+    const objects = page.getByRole('list', { name: 'Objects' });
+    await objects.getByRole('button', { name: /^Network Interface/ }).click();
+    await page.getByLabel('Instance').selectOption('en0');
+    await page.getByRole('button', { name: 'Chart Bytes Sent' }).click();
+    const table = page.getByRole('table', { name: 'Charted counters' });
+    await expect(table.getByRole('row', { name: /Bytes Sent \(en0\)/ })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Events on the timeline' })).toContainText('Cleanup');
+    await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Pin Bytes Sent (en0)' }).click();
+    await expect(page.getByText('Counter pinned')).toBeVisible();
+    await page.getByRole('button', { name: 'More actions for Bytes Sent (en0)' }).click();
+    await page.getByRole('menuitem', { name: 'Add to the dashboard' }).click();
+    await expect(page.getByText('Added to the dashboard')).toBeVisible();
+    await page.getByRole('link', { name: 'Dashboard' }).first().click();
+    await expect(page.getByRole('group', { name: 'Bytes Sent (en0)' })).toBeVisible();
+  });
+
+  test('search finds counters by words, a set charts several at once and an empty search is explained', async ({ page }) => {
+    await page.goto(url('/counters'));
+    await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes received');
+    const results = page.getByRole('list', { name: 'Search results' });
+    await expect(results.getByRole('listitem')).toHaveCount(2);
+    await results.getByRole('button', { name: /Chart Bytes Received \(en0\)/ }).click();
+    await page.getByRole('button', { name: /Sets/ }).click();
+    await page.getByRole('menuitem', { name: /^Disk and network \d/ }).click();
+    await expect(page.getByRole('table', { name: 'Charted counters' }).getByRole('row')).toHaveCount(4);
+    await page.getByRole('searchbox', { name: 'Search counters' }).fill('zzzz');
+    await expect(page.getByText('No counter matches')).toBeVisible();
+  });
+});
+
 test.describe('network', () => {
   test('one dense table: grouped by program with collapsible group rows, loopback hidden, Look up IP only for public peers', async ({ page }) => {
     await page.goto(url('/network'));
@@ -365,6 +403,79 @@ test.describe('network', () => {
     await page.getByLabel('Lookup address', { exact: true }).fill('http://nope/{ip}');
     await expect(page.getByText('must start with https://')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Test with 8.8.8.8' })).toBeDisabled();
+  });
+
+  test('throttling: runs at full speed, lists the last 30 days in one table, and the machine inputs open on demand', async ({ page }) => {
+    await page.goto(url('/throttling'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Throttling' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Running at full speed' })).toBeVisible();
+    await expect(page.getByText('Confidence: high')).toBeVisible();
+    const table = page.getByRole('table', { name: /slowed down in the last 30 days/ });
+    await expect(table.getByRole('row')).toHaveCount(6);
+    await expect(table.getByRole('columnheader', { name: /Speed lost/ })).toBeVisible();
+    await table.getByRole('button', { name: /Started/ }).click();
+    await expect(table.getByRole('columnheader', { name: /Started/ })).toHaveAttribute('aria-sort', 'ascending');
+    const inputs = page.getByRole('button', { name: 'What Dyno can see on this machine' });
+    await expect(inputs).toHaveAttribute('aria-expanded', 'false');
+    await inputs.click();
+    await expect(page.getByText('CPU clock speed')).toBeVisible();
+  });
+
+  test('throttling: ?hw=hot shows the heat slowdown and how long it has lasted', async ({ page }) => {
+    await page.goto(url('/throttling', '&hw=hot'));
+    await expect(page.getByRole('heading', { name: 'Slowed down by heat: 44% slower' })).toBeVisible();
+    await expect(page.getByText(/Slowed for 7 min, since/)).toBeVisible();
+    await expect(page.getByText(/throttled in the last 30 days/)).toBeVisible();
+  });
+
+  test('throttling: ?hw=blind explains what this machine does not report', async ({ page }) => {
+    await page.goto(url('/throttling', '&hw=blind'));
+    await expect(page.getByRole('heading', { name: /Cannot tell/ })).toBeVisible();
+    await expect(page.getByText('No throttling in the last 30 days')).toBeVisible();
+    await expect(page.getByText('This machine does not report a CPU temperature to apps.')).toBeVisible();
+  });
+
+  test('lifespan: a disk and a battery forecast with ranges, confidence and what they stand on', async ({ page }) => {
+    await page.goto(url('/lifespan'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Disk and battery life' })).toBeVisible();
+    await expect(page.getByText('Replace in about 23 months (17 to 31 months)')).toBeVisible();
+    await expect(page.getByText('Confidence: medium')).toHaveCount(2);
+    await expect(page.getByRole('img', { name: /Soonest 17 months, expected 23 months/ })).toBeVisible();
+    await expect(page.getByLabel('What this stands on for Battery')).toBeVisible();
+  });
+
+  test('lifespan: ?hw=learning shows the history collected so far', async ({ page }) => {
+    await page.goto(url('/lifespan', '&hw=learning'));
+    await expect(page.getByText('Have 6 of 14 days')).toBeVisible();
+    await expect(page.getByRole('progressbar', { name: 'History collected' }).first()).toBeVisible();
+  });
+
+  test('dashboard: "Is this normal?" lists only what is unusual, with the current and the usual value', async ({ page }) => {
+    await page.goto(url('/'));
+    const card = page.getByRole('region', { name: 'Is this normal?' });
+    await expect(card.getByText('Higher than usual for Tuesday mornings').first()).toBeVisible();
+    await expect(card.getByText('71% now · usually 14%')).toBeVisible();
+    await expect(card.getByText(/^Usual for/)).toHaveCount(0);
+  });
+
+  test('dashboard: ?hw=learning shows one quiet line while Dyno learns', async ({ page }) => {
+    await page.goto(url('/', '&hw=learning'));
+    await expect(page.getByText('Learning what is normal for this PC: day 3 of 7')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Is this normal?' }).getByRole('listitem')).toHaveCount(0);
+  });
+
+  test('settings: the hardware and baselines toggles change the draft and bring up Save', async ({ page }) => {
+    await page.goto(url('/settings'));
+    const section = page.getByRole('region', { name: 'Hardware and baselines' });
+    await expect(section.getByRole('switch', { name: 'Alarm for throttling' })).toHaveAttribute('aria-checked', 'true');
+    await expect(section.getByRole('switch', { name: 'Alarm when far above usual' })).toHaveAttribute('aria-checked', 'false');
+    await section.getByRole('switch', { name: 'Alarm when far above usual' }).click();
+    await section.getByRole('switch', { name: 'Alarm for throttling' }).click();
+    await section.getByLabel('Days of learning').fill('14');
+    await expect(section.getByRole('switch', { name: 'Alarm when far above usual' })).toHaveAttribute('aria-checked', 'true');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Settings saved')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
   });
 });
 

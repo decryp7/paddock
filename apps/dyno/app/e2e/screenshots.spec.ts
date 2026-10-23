@@ -19,7 +19,7 @@ async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Pro
   void mock;
 }
 
-const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
+const SCREENS: { name: string; path: string; mock?: string; query?: string; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
   {
     name: 'dashboard',
     path: '/#/',
@@ -47,6 +47,32 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     ready: async (page) => {
       await expect(page.getByRole('region', { name: 'Per-core history' }).locator('canvas').first()).toBeVisible();
       await page.clock.runFor(1_000);
+    },
+  },
+  {
+    name: 'counters',
+    path: '/#/counters',
+    ready: async (page) => {
+      await page.getByRole('button', { name: /Sets/ }).click();
+      await page.getByRole('menuitem', { name: /^Disk and network \d/ }).click();
+      await page.getByRole('list', { name: 'Objects' }).getByRole('button', { name: /^Network Interface/ }).click();
+      await expect(page.getByRole('table', { name: 'Charted counters' })).toBeVisible();
+      await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+      await page.clock.runFor(2_500);
+    },
+  },
+  {
+    name: 'counters-search',
+    path: '/#/counters',
+    ready: async (page) => {
+      await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes');
+      await page.clock.runFor(300);
+      await expect(page.getByRole('list', { name: 'Search results' })).toBeVisible();
+      await page.getByRole('button', { name: /Chart Bytes Received \(en0\)/ }).click();
+      await page.getByRole('button', { name: /Chart Bytes Sent \(en0\)/ }).click();
+      await page.getByRole('button', { name: /Chart Bytes Transferred \(disk0\)/ }).click();
+      await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+      await page.clock.runFor(2_500);
     },
   },
   {
@@ -263,6 +289,41 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
   },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my PC slow?' })).toBeVisible()) },
   {
+    name: 'throttling',
+    path: '/#/throttling',
+    ready: async (page) => {
+      await expect(page.getByRole('heading', { name: 'Running at full speed' })).toBeVisible();
+      await expect(page.getByRole('table')).toBeVisible();
+    },
+  },
+  {
+    name: 'throttling-hot',
+    path: '/#/throttling',
+    query: '&hw=hot',
+    ready: async (page) => {
+      await expect(page.getByRole('heading', { name: 'Slowed down by heat: 44% slower' })).toBeVisible();
+      await expect(page.getByRole('table')).toBeVisible();
+    },
+  },
+  {
+    name: 'forecasts',
+    path: '/#/lifespan',
+    ready: async (page) => {
+      await expect(page.getByText('Replace in about 23 months (17 to 31 months)')).toBeVisible();
+      await expect(page.getByRole('img', { name: /Soonest/ }).first()).toBeVisible();
+    },
+  },
+  {
+    // The "Is this normal?" card sits at the top of the dashboard, so the 1440x900 view shows it whole.
+    name: 'baselines',
+    path: '/#/',
+    ready: async (page) => {
+      const card = page.getByRole('region', { name: 'Is this normal?' });
+      await expect(card.getByText('Higher than usual for Tuesday mornings').first()).toBeVisible();
+      await card.scrollIntoViewIfNeeded();
+    },
+  },
+  {
     name: 'issues',
     path: '/#/issues',
     size: { width: 1440, height: 1100 },
@@ -299,7 +360,7 @@ for (const theme of ['dark', 'light'] as const) {
     test(`${screen.name} (${theme})`, async ({ page }) => {
       if (screen.size) await page.setViewportSize(screen.size);
       await prepare(page, theme);
-      await page.goto(`${screen.path.replace('/#/', `/?latency=0&chrome=macos${screen.mock ? `&mock=${screen.mock}` : ''}#/`)}`);
+      await page.goto(`${screen.path.replace('/#/', `/?latency=0&chrome=macos${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
       await expect(page.locator('dy-shell, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);
       await screen.ready(page);

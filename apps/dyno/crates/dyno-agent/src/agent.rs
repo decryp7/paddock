@@ -212,6 +212,8 @@ pub struct Shared {
     pub reveal: Reveal,
     /// Open ports and connections (observe-only).
     pub network: crate::network::NetCentre,
+    /// The performance counters browser (observe-only).
+    pub counters: crate::counters::CounterCentre,
     /// The OS problem logs (observe-only).
     pub issues: crate::issues::IssueCentre,
     /// The baseline of programs seen on this machine (observe-only).
@@ -226,6 +228,10 @@ pub struct Shared {
     pub netwatch: crate::netwatch::NetWatchCentre,
     /// SHA-256 of program files for the VirusTotal search (WP-33); nothing is uploaded.
     pub hasher: crate::filehash::FileHasher,
+    /// Throttling and hardware life: the OS's speed limit, SSD wear and battery capacity (observe-only).
+    pub hardware: crate::hardware::HardwareCentre,
+    /// "Is this normal?" baselines learned from history.
+    pub baselines: crate::baselines::BaselineCentre,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -384,6 +390,7 @@ impl Shared {
             watch,
             netwatch: crate::netwatch::NetWatchCentre::new(),
             hasher: crate::filehash::FileHasher::new(),
+            counters: crate::counters::CounterCentre::new(Arc::new(dyno_platform::counters::OsCounters)),
             issues: crate::issues::IssueCentre::new(issues),
             unusual,
             network: crate::network::NetCentre::new(
@@ -391,6 +398,8 @@ impl Shared {
                 Arc::new(dyno_platform::network::OsReverseDns),
                 Box::new(ElevatedTraffic::new(dyno_platform::network::OsTraffic, link)),
             ),
+            hardware: crate::hardware::HardwareCentre::os(),
+            baselines: crate::baselines::BaselineCentre::new(),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

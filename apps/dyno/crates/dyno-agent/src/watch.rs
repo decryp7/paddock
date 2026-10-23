@@ -1,10 +1,10 @@
-//! Watched folders with keep-for times (WP-10, ADR 0018). The core decides what may be watched and what is due
+//! Watched folders with keep-for times (WP-10, ADR 0019). The core decides what may be watched and what is due
 //! ([`dyno_core::watch`]); this module lists folders, re-checks every file just before it moves, moves it into the
 //! quarantine (restorable for seven days) and remembers the list in `watched-folders.json`.
 //!
 //! Deletion only ever happens to a folder the person chose in the OS dialog, configured (keep-for time), previewed and
 //! turned on; only files directly or (when asked) below it, never links, never in use, never changed since they were listed.
-//! A periodic sweep catches everything; file-change notifications are deliberately not used (ADR 0018).
+//! A periodic sweep catches everything; file-change notifications are deliberately not used (ADR 0019).
 
 use crate::cleanup::quarantine::Quarantine;
 use crate::files;

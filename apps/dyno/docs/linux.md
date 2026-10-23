@@ -9,7 +9,7 @@ platform next to Windows and macOS.
 sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf file xdg-utils
 cd app && npm ci
 npx tauri build --bundles deb,appimage -- --profile dist
-bash ../scripts/check-bundle.sh ../target/dist/bundle      # run paths and that dyno-agent is packaged
+bash ../scripts/check-bundle.sh ../target/dist/bundle      # run paths and that dyno-agent, dyno-helper and dyno are packaged
 ```
 
 The `.deb` depends on `libwebkit2gtk-4.1-0`, `libgtk-3-0` and `libayatana-appindicator3-1`. The AppImage bundler needs FUSE or

@@ -4,6 +4,7 @@
 pub mod cpu_topology;
 pub mod desktop_entry;
 pub mod gpu;
+pub mod hardware;
 pub mod ioreg;
 pub mod launchd;
 pub mod linux_hw;
@@ -13,6 +14,7 @@ pub mod linux_tools;
 pub mod lnk;
 pub mod lsof;
 pub mod mac_tools;
+pub mod pdh_list;
 pub mod powercfg;
 pub mod sock_diag;
 pub mod startup_approved;

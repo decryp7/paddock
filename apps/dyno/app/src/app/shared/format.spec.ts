@@ -201,3 +201,32 @@ describe('formatMetric', () => {
     expect(formatMetric(null)).toBe('—');
   });
 });
+
+describe('formatSpan', () => {
+  it('reads a span of days as days, weeks, months or years', async () => {
+    const { formatSpan } = await import('./format');
+    expect(formatSpan(1)).toBe('1 day');
+    expect(formatSpan(9)).toBe('9 days');
+    expect(formatSpan(30)).toBe('4 weeks');
+    expect(formatSpan(520)).toBe('17 months');
+    expect(formatSpan(690)).toBe('23 months');
+    expect(formatSpan(940)).toBe('31 months');
+    expect(formatSpan(2700)).toBe('7.4 years');
+    expect(formatSpan(3650)).toBe('10 years');
+    expect(formatSpan(1100)).toBe('3 years');
+    expect(formatSpan(1000)).toBe('33 months');
+    expect(formatSpan(-1)).toBe('—');
+    expect(formatSpan(NaN)).toBe('—');
+    expect(formatSpan(null)).toBe('—');
+  });
+});
+
+describe('formatStamp', () => {
+  it('drops the year only when it is the current one', async () => {
+    const { formatStamp } = await import('./format');
+    const now = Date.UTC(2026, 9, 22, 14, 30);
+    expect(formatStamp(Date.UTC(2026, 9, 20, 12, 0), now)).not.toContain('2026');
+    expect(formatStamp(Date.UTC(2025, 9, 20, 12, 0), now)).toContain('2025');
+    expect(formatStamp(now)).not.toContain('2026');
+  });
+});

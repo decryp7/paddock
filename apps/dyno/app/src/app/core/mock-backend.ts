@@ -43,7 +43,15 @@ import type {
   StartupEntry,
   StartupState,
   SystemInventory,
+  ThrottleOverview,
+  LifespanOverview,
+  BaselineOverview,
   BenchComparison,
+  CounterHistory,
+  CounterHit,
+  CounterObject,
+  CounterObjectList,
+  CounterReading,
   NetworkQuery,
   NetworkSnapshot,
   BenchOverview,
@@ -91,11 +99,13 @@ import {
   healthReasons,
 } from './mock/data';
 import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
+import { MockCounters, demoCounterSettings } from './mock/counters';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { MockWatch, mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/extras';
 import { mockHistory } from './mock/history';
+import { mockBaselines, mockLifespan, mockThrottling } from './mock/hardware';
 import { mockInventory } from './mock/inventory';
 import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
@@ -180,6 +190,7 @@ export class MockBackend implements DynoBackend {
   private activityLog: ActivityEntry[];
   private alertLog: Alert[];
   private settingsValue: Settings = demoSettings();
+  private counters!: MockCounters;
   private tuningList: TuningSuggestion[] = demoTuning();
   private helperValue: HelperStatus = mockHelper('notInstalled');
   private startup: StartupEntry[] = demoStartup();
@@ -211,6 +222,8 @@ export class MockBackend implements DynoBackend {
     this.profile =
       options.cpu === 'uniform' ? { ...base, hybrid: null } : options.cpu === 'hybrid' && !base.hybrid ? { ...base, hybrid: { efficiency: 8, performance: 8, efficiencyFirst: false } } : base;
     this.kinds = coreKindsOf(this.profile.hybrid);
+    this.counters = new MockCounters(this.profile.os);
+    this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
@@ -939,6 +952,38 @@ export class MockBackend implements DynoBackend {
     return this.reply('inventory', () => mockInventory(this.profile.os));
   }
 
+  counterObjects(): Promise<CounterObjectList> {
+    return this.reply('counterObjects', () => this.counters.objects());
+  }
+
+  counterObject(name: string): Promise<CounterObject> {
+    return this.reply('counterObject', () => this.counters.object(name));
+  }
+
+  counterSearch(query: string, limit: number): Promise<CounterHit[]> {
+    return this.reply('counterSearch', () => this.counters.search(query, limit));
+  }
+
+  counterValues(paths: string[]): Promise<CounterReading[]> {
+    return this.reply('counterValues', () => this.counters.values(paths, this.now()));
+  }
+
+  counterHistory(paths: string[], minutes: number): Promise<CounterHistory> {
+    return this.reply('counterHistory', () => this.counters.history(paths, minutes, this.now()));
+  }
+
+  throttling(): Promise<ThrottleOverview> {
+    return this.reply('throttling', () => mockThrottling(this.profile.os, this.now()));
+  }
+
+  lifespan(): Promise<LifespanOverview> {
+    return this.reply('lifespan', () => mockLifespan(this.profile.os, this.machine));
+  }
+
+  baselines(): Promise<BaselineOverview> {
+    return this.reply('baselines', () => mockBaselines(this.now()));
+  }
+
   network(query: NetworkQuery): Promise<NetworkSnapshot> {
     return this.reply('network', () => mockNetwork(query, this.now()));
   }
@@ -1237,7 +1282,7 @@ export class MockBackend implements DynoBackend {
       const from = to - 7 * DAY;
       // Dyno has been collecting for about five weeks: older weeks are empty and say so.
       if (weeksAgo >= 5) {
-        return { from, to, score: null, scoreChange: 0, avgCpu: 0, peakCpu: 0, avgMemory: 0, topApps: [], ruleActions: 0, cleanedBytes: 0, crashes: 0, alerts: 0, highlights: ['Dyno has no history for this week yet.'], scoreTrend: [], disks: [], issues: [], changes: [], nothingToReport: true };
+        return { from, to, score: null, scoreChange: 0, avgCpu: 0, peakCpu: 0, avgMemory: 0, topApps: [], ruleActions: 0, cleanedBytes: 0, crashes: 0, alerts: 0, highlights: ['Dyno has no history for this week yet.'], scoreTrend: [], disks: [], issues: [], changes: [], hardware: [], nothingToReport: true };
       }
       const issueAt = (h: number): number => to - h * 60 * MIN;
       return {
@@ -1272,6 +1317,7 @@ export class MockBackend implements DynoBackend {
           { at: issueAt(4 * 60), title: 'Cleanup removed temp files', detail: '10.7 GB freed; you can undo this from Activity.' },
           { at: issueAt(20 * 60), title: 'Turned off Updater at login', detail: 'You changed this in the startup manager.' },
         ],
+        hardware: ['The CPU ran slower than it should for 52 min this week (52 min of heat).', 'Battery: replace in about 23 months (17 to 31 months) (confidence medium).'],
         nothingToReport: false,
       };
     });

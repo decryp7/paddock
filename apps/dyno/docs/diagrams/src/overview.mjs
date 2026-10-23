@@ -59,7 +59,7 @@ group(BX, top, BW, gh(6), 'Dyno agent [one per user, started at login]');
 group(CX, top, CW, gh(6), 'Around the agent');
 
 // app
-box(AX + 24, y(0), AW - 48, BH, 'ui', 'Window', 'Angular 22: widgets, processes, history, settings; light and dark.');
+box(AX + 24, y(0), AW - 48, BH, 'ui', 'Window', 'Angular 22: widgets, processes, history, counters, throttling, lifespan, settings; light and dark.');
 box(AX + 24, y(1), AW - 48, BH, 'accent', 'Tauri shell', 'Commands; validates every request and speaks to the agent.');
 box(AX + 24, y(2), AW - 48, BH, 'accent', 'Tray', 'A live metric and a compact menu; stays when the window closes.');
 box(AX + 24, y(3), AW - 48, BH, 'process', 'Close it, crash it', 'The agent goes on sampling and keeps rules applied.');
@@ -68,7 +68,7 @@ varrow(AX + 48, y(1) + BH, y(2), 'status');
 // agent
 const bx = BX + 24, bw = BW - 48;
 box(bx, y(0), bw, BH, 'accent', 'Sampler', 'Adaptive intervals: sensors, processes, grouping, diagnosis; measures its own overhead.');
-box(bx, y(1), bw, BH, 'accent', 'IPC server and handlers', 'One thread per connection, bounded push queue; protection check and undo record on every action.');
+box(bx, y(1), bw, BH, 'accent', 'IPC server and handlers', 'One thread per connection, bounded push queue; the app and the dyno command are its clients.');
 box(bx, y(2), bw, BH, 'accent', 'Plugin host', 'Starts plugins on first use; a plugin that crashes is quarantined.');
 box(bx, y(3), bw, BH, 'accent', 'Rules and protection', 'Rules ship disabled; a protected list nothing can override; steps are undone in reverse.');
 box(bx, y(4), bw, BH, 'accent', 'Benchmarks', 'Only on a click, one kind at a time, in a child process with a timeout.');

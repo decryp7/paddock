@@ -6,6 +6,7 @@ members = [
     "crates/dyno-plugin-host",
     "crates/dyno-platform",
     "crates/dyno-agent",
+    "crates/dyno-cli",
     "crates/dyno-bench",
     "crates/dyno-helper",
     "plugins/dyno-plugin-example",
@@ -29,6 +30,7 @@ dyno-plugin-api = { path = "crates/dyno-plugin-api" }
 dyno-plugin-host = { path = "crates/dyno-plugin-host" }
 dyno-platform = { path = "crates/dyno-platform" }
 dyno-agent = { path = "crates/dyno-agent" }
+dyno-cli = { path = "crates/dyno-cli" }
 dyno-bench = { path = "crates/dyno-bench" }
 dyno-helper = { path = "crates/dyno-helper" }
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
