@@ -319,7 +319,9 @@ pub fn parse(args: &[String]) -> Result<Parsed, UsageError> {
 pub fn split_pull(target: &str) -> Result<(String, String), UsageError> {
     let parts: Vec<&str> = target.splitn(3, '/').collect();
     match parts.as_slice() {
-        [owner, name, file] if !owner.is_empty() && !name.is_empty() && !file.is_empty() => Ok((format!("{owner}/{name}"), (*file).to_string())),
+        [owner, name, file] if !owner.is_empty() && !name.is_empty() && !file.is_empty() => {
+            Ok((format!("{owner}/{name}"), (*file).to_string()))
+        }
         _ => Err(usage(format!(
             "\"{target}\" is not <owner>/<repo>/<file>: for example pitwall pull unsloth/Qwen3.5-2B-GGUF/Qwen3.5-2B-Q4_K_M.gguf"
         ))),
