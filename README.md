@@ -66,6 +66,7 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 | Icon set | [`icons/`](icons/README.md) | the family app icons per platform and the tooling that builds them | copy the app's folder |
 | Release practices | [`docs/lessons.md`](docs/lessons.md), [`CHANGELOG.md`](CHANGELOG.md) | tag workflow, signed updates, `latest.json`, the release script | follow the lessons |
 | Rust crates | [`crates/`](crates/README.md) | shared Rust code. Planned: `paddock-mcp` (MCP servers across the family, ADR 0007), the plugin platform (host, IPC and API, extracted from Debrief's ADR 0017 model), `paddock-pitwall` (the Pitwall client) and `paddock-testplan` (the `.sighterplan` format) | git dependency on a tag |
+| Rules | [`docs/rules.md`](docs/rules.md) | the binding rules for every app and agent | follow them; each app's AGENTS.md carries them |
 | Lessons | [`docs/lessons.md`](docs/lessons.md) | what building Debrief and Pitcrew taught | read before starting an app |
 
 ### Use the UI package
