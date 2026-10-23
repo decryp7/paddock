@@ -6,7 +6,7 @@ in a local database on your machine.
 
 **Status: v1.0.0.** Releases are built and published by the tag workflow; the roadmap lists what is still open ([docs/roadmap.md](docs/roadmap.md)).
 
-![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=10df0435)
+![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=7947a55b)
 
 
 ![Spotter architecture: release places and a supervised Chromium outside; the engine schedules checks, fetches politely, renders JavaScript pages, decides and notifies; the app shows and controls it; a pure Rust core holds the rules](docs/diagrams/spotter-overview.svg)
@@ -14,9 +14,9 @@ in a local database on your machine.
 
 ## What it does
 
-![Spotter features](docs/images/spotter-features.svg?v=8aac1722)
+![Spotter features](docs/images/spotter-features.svg?v=568acb7a)
 
-![How Spotter works](docs/images/spotter-how-it-works.svg?v=24cda21a)
+![How Spotter works](docs/images/spotter-how-it-works.svg?v=f925ddcf)
 
 ## What it watches
 
