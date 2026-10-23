@@ -16,9 +16,9 @@ anywhere.
 
 | | App | What it does | Status |
 |---|---|---|---|
-| <img src="icons/debrief/debrief-macos.svg" width="40" alt=""> | **[Debrief](https://dev.decryptology.net/decryp7/debrief)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | Release in progress (the code still says IMT while the rename lands) |
+| <img src="icons/debrief/debrief-macos.svg" width="40" alt=""> | **[Debrief](https://dev.decryptology.net/decryp7/debrief)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | Releasing (the code still says IMT while the rename lands) |
 | <img src="icons/pitcrew/pitcrew-macos.svg" width="40" alt=""> | **[Pitcrew](https://dev.decryptology.net/decryp7/pitcrew)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.0 released** |
-| <img src="icons/pitwall/pitwall-macos.svg" width="40" alt=""> | **[Pitwall](https://dev.decryptology.net/decryp7/pitwall)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | Feature-complete, release next |
+| <img src="icons/pitwall/pitwall-macos.svg" width="40" alt=""> | **[Pitwall](https://dev.decryptology.net/decryp7/pitwall)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | Release next (feature-complete) |
 | <img src="icons/dyno/dyno-macos.svg" width="40" alt=""> | **[Dyno](https://dev.decryptology.net/decryp7/dyno)** | Measures, explains and tunes your PC, observe first. | In development |
 | <img src="icons/spotter/spotter-macos.svg" width="40" alt=""> | **[Spotter](https://dev.decryptology.net/decryp7/spotter)** | Watches for new releases anywhere and tells you the moment one appears. | In development |
 | <img src="icons/sighter/sighter-macos.svg" width="40" alt=""> | **[Sighter](https://dev.decryptology.net/decryp7/sighter)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | In design |

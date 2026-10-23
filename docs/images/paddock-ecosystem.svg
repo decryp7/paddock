@@ -2,16 +2,20 @@
 <title id="t">The Paddock family</title>
 <desc id="d">Seven local-first desktop apps. Pacenotes, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: Pacenotes and Debrief exchange stack traces and log checks, Pacenotes sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Pitcrew sends job logs, Dyno sends issues, installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later.</desc>
 <style>
-:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6}
-@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA}}
+:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E}
+@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0}}
 text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;fill:var(--ink)}
 .eyebrow{font-size:15px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
 .h1{font-size:44px;font-weight:600;letter-spacing:-.02em}
 .sub{font-size:19px;fill:var(--muted)}
-.tag{fill:none;stroke:var(--link);stroke-dasharray:3 3}
-.tagt{font-size:14px;font-weight:500;fill:var(--muted)}
-.badge{fill:var(--soft);stroke:var(--line)}
-.badget{font-size:14px;font-weight:600;fill:var(--ink)}
+.chip-design{fill:none;stroke:var(--link);stroke-dasharray:3 3}
+.chip-dev{fill:var(--soft);stroke:var(--line)}
+.chip-soon{fill:var(--hubf);stroke:var(--hubs)}
+.chip-ok{fill:var(--okf);stroke:var(--oks)}
+.chipt-design,.chipt-dev{font-size:14px;font-weight:500;fill:var(--muted)}
+.chipt-soon{font-size:14px;font-weight:600;fill:var(--hubs)}
+.chipt-ok{font-size:14px;font-weight:600;fill:var(--oks)}
+.cinote{font-size:15px;font-weight:500;fill:var(--muted)}
 .card{fill:var(--card);stroke:var(--line);stroke-width:1}
 .name{font-size:25px;font-weight:600;letter-spacing:-.01em}
 .hubname{font-size:30px}
@@ -22,7 +26,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .stub{fill:none;stroke:var(--hubs);stroke-width:2;stroke-linecap:round;stroke-dasharray:1 6}
 .ahp{fill:var(--hubs)}
 .pill{fill:var(--card);stroke:var(--line)}
-.lbl{font-size:20px;font-weight:500;fill:var(--ink)}
+.lbl{font-size:21.5px;font-weight:500;fill:var(--ink)}
 .hub{fill:var(--hubf);stroke:var(--hubs);stroke-width:1.5}
 .found{fill:var(--found);stroke:var(--line)}
 .chip{fill:var(--card);stroke:var(--line)}
@@ -41,8 +45,8 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <text class="h1" x="800" y="136" text-anchor="middle">Seven local-first tools for people who keep systems running</text>
 <text class="sub" x="800" y="176" text-anchor="middle">One private AI hub, one shared foundation. Each app is good alone and better together.</text>
 
-<g><rect class="hub" x="100" y="650" width="1400" height="160" rx="24"/>
-<svg x="128" y="690" width="80" height="80" viewBox="60 60 904 904" overflow="visible">
+<g><rect class="hub" x="75" y="650" width="1450" height="160" rx="24"/>
+<svg x="103" y="690" width="80" height="80" viewBox="60 60 904 904" overflow="visible">
   
   <defs>
     <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
@@ -70,17 +74,17 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
   </g>
   <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
 </svg>
-<rect x="230" y="694" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
-<text class="name hubname" x="230" y="730">Pitwall</text>
-<text class="promise" x="230" y="756">The local AI hub.</text>
-<text class="promise" x="230" y="779">Optional for every app.</text>
-<text class="vt" x="560" y="712">One local API</text><text class="vs" x="560" y="740">OpenAI, Anthropic and Ollama</text><text class="vs" x="560" y="763">compatible, plus /x/v1.</text><text class="vt" x="930" y="712">Tools over MCP</text><text class="vs" x="930" y="740">MCP client and tool</text><text class="vs" x="930" y="763">router.</text><text class="vt" x="1172" y="712">Yours alone</text><text class="vs" x="1172" y="740">Keys, priorities, caching.</text><text class="vs" x="1172" y="763">No cloud, no telemetry.</text></g>
-<path class="stub" d="M270 514 L270 646"/><polygon class="ahp" points="270,646 264,635 276,635"/><polygon class="ahp" points="270,514 264,525 276,525"/><g><rect class="pill" x="192.5" y="551" width="155" height="58" rx="20"/><text class="lbl" x="270" y="575" text-anchor="middle">MCP, review,</text><text class="lbl" x="270" y="599" text-anchor="middle">Q&amp;A</text></g>
-<path class="stub" d="M720 514 L720 646"/><polygon class="ahp" points="720,646 714,635 726,635"/><g><rect class="pill" x="663.5" y="551" width="113" height="58" rx="20"/><text class="lbl" x="720" y="575" text-anchor="middle">Explain,</text><text class="lbl" x="720" y="599" text-anchor="middle">research</text></g>
-<path class="stub" d="M1240 514 L1240 646"/><polygon class="ahp" points="1240,646 1234,635 1246,635"/><g><rect class="pill" x="1194" y="563" width="92" height="34" rx="17"/><text class="lbl" x="1240" y="587" text-anchor="middle">Vision</text></g>
-<path class="stub" d="M720 946 L720 814"/><polygon class="ahp" points="720,814 714,825 726,825"/><g><rect class="pill" x="658.5" y="863" width="123" height="34" rx="17"/><text class="lbl" x="720" y="887" text-anchor="middle">Diagnosis</text></g>
-<path class="stub" d="M1240 946 L1240 814"/><polygon class="ahp" points="1240,814 1234,825 1246,825"/><g><rect class="pill" x="1173" y="863" width="134" height="34" rx="17"/><text class="lbl" x="1240" y="887" text-anchor="middle">What’s new</text></g>
-<g><rect class="card" x="100" y="340" width="340" height="170" rx="16"/><svg x="122" y="364" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
+<rect x="205" y="694" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
+<text class="name hubname" x="205" y="730">Pitwall</text>
+<text class="promise" x="205" y="756">The local AI hub.</text>
+<text class="promise" x="205" y="779">Optional for every app.</text>
+<text class="vt" x="580" y="712">One local API</text><text class="vs" x="580" y="740">OpenAI, Anthropic and Ollama</text><text class="vs" x="580" y="763">compatible, plus /x/v1.</text><text class="vt" x="930" y="712">Tools over MCP</text><text class="vs" x="930" y="740">MCP client and tool</text><text class="vs" x="930" y="763">router.</text><text class="vt" x="1172" y="712">Yours alone</text><text class="vs" x="1172" y="740">Keys, priorities, caching.</text><text class="vs" x="1172" y="763">No cloud, no telemetry.</text></g>
+<path class="stub" d="M245 514 L245 646"/><polygon class="ahp" points="245,646 239,635 251,635"/><polygon class="ahp" points="245,514 239,525 251,525"/><g><rect class="pill" x="167.5" y="551" width="155" height="58" rx="22"/><text class="lbl" x="245" y="575" text-anchor="middle">MCP, review,</text><text class="lbl" x="245" y="601" text-anchor="middle">Q&amp;A</text></g>
+<path class="stub" d="M720 514 L720 646"/><polygon class="ahp" points="720,646 714,635 726,635"/><g><rect class="pill" x="663.5" y="551" width="113" height="58" rx="22"/><text class="lbl" x="720" y="575" text-anchor="middle">Explain,</text><text class="lbl" x="720" y="601" text-anchor="middle">research</text></g>
+<path class="stub" d="M1265 514 L1265 646"/><polygon class="ahp" points="1265,646 1259,635 1271,635"/><g><rect class="pill" x="1219" y="563" width="92" height="34" rx="22"/><text class="lbl" x="1265" y="588" text-anchor="middle">Vision</text></g>
+<path class="stub" d="M720 946 L720 814"/><polygon class="ahp" points="720,814 714,825 726,825"/><g><rect class="pill" x="658.5" y="863" width="123" height="34" rx="22"/><text class="lbl" x="720" y="888" text-anchor="middle">Diagnosis</text></g>
+<path class="stub" d="M1265 946 L1265 814"/><polygon class="ahp" points="1265,814 1259,825 1271,825"/><g><rect class="pill" x="1198" y="863" width="134" height="34" rx="22"/><text class="lbl" x="1265" y="888" text-anchor="middle">What’s new</text></g>
+<g><rect class="card" x="75" y="340" width="340" height="170" rx="16"/><svg x="97" y="364" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
   
   <defs>
     <linearGradient id="p0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
@@ -107,7 +111,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
     
   </g>
   <g filter="url(#p0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M406 276H706A40 40 0 0 1 746 316V732A40 40 0 0 1 706 772H406A40 40 0 0 1 366 732V316A40 40 0 0 1 406 276Z" fill="#FFFFFF" mask="url(#p0m0)"/></g><path d="M374 246H674A40 40 0 0 1 714 286V702A40 40 0 0 1 674 742H374A40 40 0 0 1 334 702V286A40 40 0 0 1 374 246Z" fill="#FFFFFF" mask="url(#p0m1)"/><path d="M300 330H388M300 494H388M300 658H388" fill="none" stroke="#FFFFFF" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/></g>
-</svg><rect x="204" y="368" width="20" height="3" rx="1.5" fill="#831826"/><rect class="tag" x="340" y="358" width="80" height="26" rx="13"/><text class="tagt" x="380" y="376" text-anchor="middle">In design</text><text class="name" x="204" y="404">Pacenotes</text><text class="promise" x="204" y="436">Everything code-related:</text><text class="promise" x="204" y="459">index, review, diagrams,</text><text class="promise" x="204" y="482">requirements, tests.</text></g>
+</svg><rect x="179" y="368" width="20" height="3" rx="1.5" fill="#831826"/><rect class="chip-design" x="295" y="358" width="100" height="26" rx="13"/><text class="chipt-design" x="345" y="376" text-anchor="middle">In design</text><text class="name" x="179" y="404">Pacenotes</text><text class="promise" x="179" y="436">Everything code-related:</text><text class="promise" x="179" y="459">index, review, diagrams,</text><text class="promise" x="179" y="482">requirements, tests.</text></g>
 <g><rect class="card" x="630" y="340" width="340" height="170" rx="16"/><svg x="652" y="364" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
   
   <defs>
@@ -135,8 +139,8 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
     
   </g>
   <g filter="url(#d0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M300 340H600" fill="none" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/><path d="M300 684H552" fill="none" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M300 512H426L480 424L568 604L620 512H724" fill="none" stroke="#FFFFFF" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/><path d="M668 340a46 46 0 1 1 92 0a46 46 0 1 1 -92 0Z" fill="#FFFFFF"/></g>
-</svg><rect x="734" y="368" width="20" height="3" rx="1.5" fill="#2F6FE0"/><text class="name" x="734" y="404">Debrief</text><text class="promise" x="734" y="436">An IDE for analysing logs</text><text class="promise" x="734" y="459">and diagnostic files.</text></g>
-<g><rect class="card" x="1160" y="340" width="340" height="170" rx="16"/><svg x="1182" y="364" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
+</svg><rect x="734" y="368" width="20" height="3" rx="1.5" fill="#2F6FE0"/><rect class="chip-soon" x="850" y="358" width="100" height="26" rx="13"/><text class="chipt-soon" x="900" y="376" text-anchor="middle">Releasing</text><text class="name" x="734" y="404">Debrief</text><text class="promise" x="734" y="436">An IDE for analysing logs</text><text class="promise" x="734" y="459">and diagnostic files.</text></g>
+<g><rect class="card" x="1185" y="340" width="340" height="170" rx="16"/><svg x="1207" y="364" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
   
   <defs>
     <linearGradient id="s0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
@@ -163,8 +167,8 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
     
   </g>
   <g filter="url(#s0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M727.6 607.99A236 236 0 0 1 607.99 727.6M416.01 727.6A236 236 0 0 1 296.4 607.99M296.4 416.01A236 236 0 0 1 416.01 296.4M607.99 296.4A236 236 0 0 1 727.6 416.01" fill="none" stroke="#00303B" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><path d="M728 512L812 512M512 728L512 812M296 512L212 512M512 296L512 212" fill="none" stroke="#00303B" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M436 392L436 620L498.32 562.24L543.92 661.04L598.64 638.24L553.04 540.96L639.68 540.96Z" fill="#00303B" stroke="#00303B" stroke-width="20" stroke-linejoin="round"/></g>
-</svg><rect x="1264" y="368" width="20" height="3" rx="1.5" fill="#00B8D9"/><rect class="tag" x="1400" y="358" width="80" height="26" rx="13"/><text class="tagt" x="1440" y="376" text-anchor="middle">In design</text><text class="name" x="1264" y="404">Sighter</text><text class="promise" x="1264" y="436">Finds any UI element by</text><text class="promise" x="1264" y="459">sight, for UI tests.</text></g>
-<g><rect class="card" x="100" y="950" width="340" height="170" rx="16"/><svg x="122" y="974" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
+</svg><rect x="1289" y="368" width="20" height="3" rx="1.5" fill="#00B8D9"/><rect class="chip-design" x="1405" y="358" width="100" height="26" rx="13"/><text class="chipt-design" x="1455" y="376" text-anchor="middle">In design</text><text class="name" x="1289" y="404">Sighter</text><text class="promise" x="1289" y="436">Finds any UI element by</text><text class="promise" x="1289" y="459">sight, for UI tests.</text></g>
+<g><rect class="card" x="75" y="950" width="340" height="170" rx="16"/><svg x="97" y="974" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
   
   <defs>
     <linearGradient id="pbbg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
@@ -191,7 +195,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
     
   </g>
   <g filter="url(#pbgs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M687.31 317.3A262 262 0 1 1 336.69 317.3" fill="none" stroke="#FFFFFF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/><path d="M405.06 255.74L277.81 251.9L395.57 382.7Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="28" stroke-linejoin="round"/></g><path d="M647.1 590L512 668L376.9 590L376.9 434L512 356L647.1 434Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="52" stroke-linejoin="round" mask="url(#pbm2)"/></g>
-</svg><rect x="204" y="978" width="20" height="3" rx="1.5" fill="#D2420F"/><rect class="badge" x="292" y="968" width="128" height="26" rx="13"/><text class="badget" x="356" y="986" text-anchor="middle">Runs CI for all</text><text class="name" x="204" y="1014">Pitcrew</text><text class="promise" x="204" y="1046">Keeps CI runners alive,</text><text class="promise" x="204" y="1069">updated and clean.</text></g>
+</svg><rect x="179" y="978" width="20" height="3" rx="1.5" fill="#D2420F"/><rect class="chip-ok" x="334" y="968" width="61" height="26" rx="13"/><text class="chipt-ok" x="364.5" y="986" text-anchor="middle">v1.0</text><circle cx="185" cy="1097" r="4" fill="#D2420F"/><text class="cinote" x="197" y="1103">Runs CI for all apps</text><text class="name" x="179" y="1014">Pitcrew</text><text class="promise" x="179" y="1046">Keeps CI runners alive,</text><text class="promise" x="179" y="1069">updated and clean.</text></g>
 <g><rect class="card" x="630" y="950" width="340" height="170" rx="16"/><svg x="652" y="974" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
   
   <defs>
@@ -219,8 +223,8 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
     
   </g>
   <g filter="url(#d1qgs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M297.23 672A248 248 0 1 1 726.77 672" fill="none" stroke="#FFFFFF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M297.23 672A248 248 0 0 1 696.3 382.06" fill="none" stroke="#FFFFFF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/><path d="M512 548L624.96 446.29" fill="none" stroke="#FFFFFF" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/><path d="M448 548a64 64 0 1 1 128 0a64 64 0 1 1 -128 0Z" fill="#FFFFFF" mask="url(#d1qm3)"/></g>
-</svg><rect x="734" y="978" width="20" height="3" rx="1.5" fill="#C2287C"/><text class="name" x="734" y="1014">Dyno</text><text class="promise" x="734" y="1046">Measures, explains and</text><text class="promise" x="734" y="1069">tunes your PC.</text></g>
-<g><rect class="card" x="1160" y="950" width="340" height="170" rx="16"/><svg x="1182" y="974" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
+</svg><rect x="734" y="978" width="20" height="3" rx="1.5" fill="#C2287C"/><rect class="chip-dev" x="811" y="968" width="139" height="26" rx="13"/><text class="chipt-dev" x="880.5" y="986" text-anchor="middle">In development</text><text class="name" x="734" y="1014">Dyno</text><text class="promise" x="734" y="1046">Measures, explains and</text><text class="promise" x="734" y="1069">tunes your PC.</text></g>
+<g><rect class="card" x="1185" y="950" width="340" height="170" rx="16"/><svg x="1207" y="974" width="64" height="64" viewBox="60 60 904 904" overflow="visible">
   
   <defs>
     <linearGradient id="svbg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
@@ -247,29 +251,29 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
     
   </g>
   <g filter="url(#svgs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M248 604a124 124 0 1 1 248 0a124 124 0 1 1 -248 0ZM528 604a124 124 0 1 1 248 0a124 124 0 1 1 -248 0ZM336 372H408A36 36 0 0 1 444 408V568A36 36 0 0 1 408 604H336A36 36 0 0 1 300 568V408A36 36 0 0 1 336 372ZM616 372H688A36 36 0 0 1 724 408V568A36 36 0 0 1 688 604H616A36 36 0 0 1 580 568V408A36 36 0 0 1 616 372ZM466 432H558A30 30 0 0 1 588 462V498A30 30 0 0 1 558 528H466A30 30 0 0 1 436 498V462A30 30 0 0 1 466 432Z" fill="#3A2600" mask="url(#svm0)"/><g opacity="0.55"><path d="M336 300H408A20 20 0 0 1 428 320V336A20 20 0 0 1 408 356H336A20 20 0 0 1 316 336V320A20 20 0 0 1 336 300ZM616 300H688A20 20 0 0 1 708 320V336A20 20 0 0 1 688 356H616A20 20 0 0 1 596 336V320A20 20 0 0 1 616 300Z" fill="#3A2600"/></g><path d="M792 236C796.5 282 810 295.5 856 300C810 304.5 796.5 318 792 364C787.5 318 774 304.5 728 300C774 295.5 787.5 282 792 236Z" fill="#3A2600"/></g>
-</svg><rect x="1264" y="978" width="20" height="3" rx="1.5" fill="#0E8577"/><text class="name" x="1264" y="1014">Spotter</text><text class="promise" x="1264" y="1046">Watches for new releases</text><text class="promise" x="1264" y="1069">anywhere, the moment</text><text class="promise" x="1264" y="1092">one appears.</text></g>
-<path class="hand" d="M628 395 L442 395"/><polygon class="ah" points="442,395 453,389 453,401"/><g><rect class="pill" x="457.5" y="378" width="155" height="34" rx="17"/><text class="lbl" x="535" y="402" text-anchor="middle">Trace → code</text></g>
-<path class="hand" d="M442 455 L628 455"/><polygon class="ah" points="628,455 617,449 617,461"/><g><rect class="pill" x="468" y="438" width="134" height="34" rx="17"/><text class="lbl" x="535" y="462" text-anchor="middle">Log checks</text></g>
-<path class="hand" d="M1158 425 L972 425"/><polygon class="ah" points="972,425 983,419 983,431"/><g><rect class="pill" x="992.5" y="408" width="145" height="34" rx="17"/><text class="lbl" x="1065" y="432" text-anchor="middle">Run bundles</text></g>
-<path class="hand" d="M628 1035 L442 1035"/><polygon class="ah" points="442,1035 453,1029 453,1041"/><g><rect class="pill" x="484" y="1006" width="102" height="58" rx="20"/><text class="lbl" x="535" y="1030" text-anchor="middle">Machine</text><text class="lbl" x="535" y="1054" text-anchor="middle">health</text></g>
-<path class="hand" d="M972 1035 L1158 1035"/><polygon class="ah" points="1158,1035 1147,1029 1147,1041"/><g><rect class="pill" x="1003.5" y="1006" width="123" height="58" rx="20"/><text class="lbl" x="1065" y="1030" text-anchor="middle">Installed</text><text class="lbl" x="1065" y="1054" text-anchor="middle">software</text></g>
-<path class="hand" d="M360 338 L360 319 Q360 300 379 300 L1221 300 Q1240 300 1240 319 L1240 338"/><polygon class="ah" points="1240,338 1234,327 1246,327"/><g><rect class="pill" x="733" y="283" width="134" height="34" rx="17"/><text class="lbl" x="800" y="307" text-anchor="middle">Test plans</text></g>
-<path class="hand" d="M1340 338 L1340 262 Q1340 240 1318 240 L322 240 Q300 240 300 262 L300 338"/><polygon class="ah" points="300,338 294,327 306,327"/><g><rect class="pill" x="749" y="223" width="102" height="34" rx="17"/><text class="lbl" x="800" y="247" text-anchor="middle">Results</text></g>
-<path class="hand" d="M400 948 L400 931 Q400 914 417 914 L513 914 Q535 914 535 892 L535 562 Q535 540 557 540 L646 540 Q660 540 660 526 L660 512"/><polygon class="ah" points="660,512 654,523 666,523"/><g><rect class="pill" x="478.5" y="863" width="113" height="34" rx="17"/><text class="lbl" x="535" y="887" text-anchor="middle">Job logs</text></g>
-<path class="hand" d="M900 948 L900 512"/><polygon class="ah" points="900,512 894,523 906,523"/><g><rect class="pill" x="854" y="563" width="92" height="34" rx="17"/><text class="lbl" x="900" y="587" text-anchor="middle">Issues</text></g>
-<path class="hand later" d="M1420 948 L1420 512"/><polygon class="ah" points="1420,512 1414,523 1426,523"/><g><rect class="pill" x="1347.5" y="563" width="145" height="34" rx="17"/><text class="lbl" x="1420" y="587" text-anchor="middle">Smoke tests</text></g>
+</svg><rect x="1289" y="978" width="20" height="3" rx="1.5" fill="#0E8577"/><rect class="chip-dev" x="1366" y="968" width="139" height="26" rx="13"/><text class="chipt-dev" x="1435.5" y="986" text-anchor="middle">In development</text><text class="name" x="1289" y="1014">Spotter</text><text class="promise" x="1289" y="1046">Watches for new releases</text><text class="promise" x="1289" y="1069">anywhere, the moment</text><text class="promise" x="1289" y="1092">one appears.</text></g>
+<path class="hand" d="M628 395 L417 395"/><polygon class="ah" points="417,395 428,389 428,401"/><g><rect class="pill" x="445" y="378" width="155" height="34" rx="22"/><text class="lbl" x="522.5" y="403" text-anchor="middle">Trace → code</text></g>
+<path class="hand" d="M417 455 L628 455"/><polygon class="ah" points="628,455 617,449 617,461"/><g><rect class="pill" x="455.5" y="438" width="134" height="34" rx="22"/><text class="lbl" x="522.5" y="463" text-anchor="middle">Log checks</text></g>
+<path class="hand" d="M1183 425 L972 425"/><polygon class="ah" points="972,425 983,419 983,431"/><g><rect class="pill" x="1005" y="408" width="145" height="34" rx="22"/><text class="lbl" x="1077.5" y="433" text-anchor="middle">Run bundles</text></g>
+<path class="hand" d="M628 1035 L417 1035"/><polygon class="ah" points="417,1035 428,1029 428,1041"/><g><rect class="pill" x="471.5" y="1006" width="102" height="58" rx="22"/><text class="lbl" x="522.5" y="1030" text-anchor="middle">Machine</text><text class="lbl" x="522.5" y="1056" text-anchor="middle">health</text></g>
+<path class="hand" d="M972 1035 L1183 1035"/><polygon class="ah" points="1183,1035 1172,1029 1172,1041"/><g><rect class="pill" x="1016" y="1006" width="123" height="58" rx="22"/><text class="lbl" x="1077.5" y="1030" text-anchor="middle">Installed</text><text class="lbl" x="1077.5" y="1056" text-anchor="middle">software</text></g>
+<path class="hand" d="M335 338 L335 319 Q335 300 354 300 L1246 300 Q1265 300 1265 319 L1265 338"/><polygon class="ah" points="1265,338 1259,327 1271,327"/><g><rect class="pill" x="733" y="283" width="134" height="34" rx="22"/><text class="lbl" x="800" y="308" text-anchor="middle">Test plans</text></g>
+<path class="hand" d="M1385 338 L1385 262 Q1385 240 1363 240 L297 240 Q275 240 275 262 L275 338"/><polygon class="ah" points="275,338 269,327 281,327"/><g><rect class="pill" x="749" y="223" width="102" height="34" rx="22"/><text class="lbl" x="800" y="248" text-anchor="middle">Results</text></g>
+<path class="hand" d="M380 948 L380 931 Q380 914 397 914 L501 914 Q523 914 523 892 L523 562 Q523 540 545 540 L646 540 Q660 540 660 526 L660 512"/><polygon class="ah" points="660,512 654,523 666,523"/><g><rect class="pill" x="466.5" y="863" width="113" height="34" rx="22"/><text class="lbl" x="523" y="888" text-anchor="middle">Job logs</text></g>
+<path class="hand" d="M900 948 L900 512"/><polygon class="ah" points="900,512 894,523 906,523"/><g><rect class="pill" x="854" y="563" width="92" height="34" rx="22"/><text class="lbl" x="900" y="588" text-anchor="middle">Issues</text></g>
+<path class="hand later" d="M1450 948 L1450 512"/><polygon class="ah" points="1450,512 1444,523 1456,523"/><g><rect class="pill" x="1377.5" y="563" width="145" height="34" rx="22"/><text class="lbl" x="1450" y="588" text-anchor="middle">Smoke tests</text></g>
 
 <g>
-<rect class="found" x="100" y="1180" width="1400" height="100" rx="20"/>
-<text class="ft" x="132" y="1226">Paddock</text>
-<text class="fs" x="132" y="1254">The shared foundation under every app.</text>
-<rect class="chip" x="724" y="1214" width="80" height="32" rx="16"/><text class="chiplbl" x="764" y="1235" text-anchor="middle">UI kit</text><rect class="chip" x="818" y="1214" width="132" height="32" rx="16"/><text class="chiplbl" x="884" y="1235" text-anchor="middle">Design system</text><rect class="chip" x="964" y="1214" width="117" height="32" rx="16"/><text class="chiplbl" x="1022.5" y="1235" text-anchor="middle">Diagram kit</text><rect class="chip" x="1095" y="1214" width="95" height="32" rx="16"/><text class="chiplbl" x="1142.5" y="1235" text-anchor="middle">Icon set</text><rect class="chip" x="1204" y="1214" width="162" height="32" rx="16"/><text class="chiplbl" x="1285" y="1235" text-anchor="middle">Release practices</text><rect class="chip" x="1380" y="1214" width="88" height="32" rx="16"/><text class="chiplbl" x="1424" y="1235" text-anchor="middle">Lessons</text>
+<rect class="found" x="75" y="1180" width="1450" height="100" rx="20"/>
+<text class="ft" x="107" y="1226">Paddock</text>
+<text class="fs" x="107" y="1254">The shared foundation under every app.</text>
+<rect class="chip" x="749" y="1214" width="80" height="32" rx="16"/><text class="chiplbl" x="789" y="1235" text-anchor="middle">UI kit</text><rect class="chip" x="843" y="1214" width="132" height="32" rx="16"/><text class="chiplbl" x="909" y="1235" text-anchor="middle">Design system</text><rect class="chip" x="989" y="1214" width="117" height="32" rx="16"/><text class="chiplbl" x="1047.5" y="1235" text-anchor="middle">Diagram kit</text><rect class="chip" x="1120" y="1214" width="95" height="32" rx="16"/><text class="chiplbl" x="1167.5" y="1235" text-anchor="middle">Icon set</text><rect class="chip" x="1229" y="1214" width="162" height="32" rx="16"/><text class="chiplbl" x="1310" y="1235" text-anchor="middle">Release practices</text><rect class="chip" x="1405" y="1214" width="88" height="32" rx="16"/><text class="chiplbl" x="1449" y="1235" text-anchor="middle">Lessons</text>
 </g>
 
-<rect x="100" y="1320" width="2" height="44" rx="1" class="rule"/><text class="vt" x="116" y="1338">Local only, private by design</text><text class="vs" x="116" y="1360">No cloud. No telemetry.</text><rect x="566.6666666666667" y="1320" width="2" height="44" rx="1" class="rule"/><text class="vt" x="582.6666666666667" y="1338">Windows, macOS and Linux</text><text class="vs" x="582.6666666666667" y="1360">One family, native on each.</text><rect x="1033.3333333333335" y="1320" width="2" height="44" rx="1" class="rule"/><text class="vt" x="1049.3333333333335" y="1338">Rust, Tauri and Angular</text><text class="vs" x="1049.3333333333335" y="1360">Fast engines, native feel.</text>
+<rect x="75" y="1320" width="2" height="44" rx="1" class="rule"/><text class="vt" x="91" y="1338">Local only, private by design</text><text class="vs" x="91" y="1360">No cloud. No telemetry.</text><rect x="558.3333333333333" y="1320" width="2" height="44" rx="1" class="rule"/><text class="vt" x="574.3333333333333" y="1338">Windows, macOS and Linux</text><text class="vs" x="574.3333333333333" y="1360">One family, native on each.</text><rect x="1041.6666666666665" y="1320" width="2" height="44" rx="1" class="rule"/><text class="vt" x="1057.6666666666665" y="1338">Rust, Tauri and Angular</text><text class="vs" x="1057.6666666666665" y="1360">Fast engines, native feel.</text>
 <g>
-<path class="hand" d="M100 1414 L144 1414"/><polygon class="ah" points="146,1414 135,1408 135,1420"/><text class="legt" x="162" y="1420">Hand-off, arrow shows the direction of data</text>
-<path class="hand later" d="M580 1414 L624 1414"/><polygon class="ah" points="626,1414 615,1408 615,1420"/><text class="legt" x="642" y="1420">Dashed: later</text>
-<path class="stub" d="M840 1414 L884 1414"/><polygon class="ahp" points="886,1414 875,1408 875,1420"/><text class="legt" x="902" y="1420">Uses Pitwall for local AI (optional)</text>
+<path class="hand" d="M75 1414 L119 1414"/><polygon class="ah" points="121,1414 110,1408 110,1420"/><text class="legt" x="137" y="1420">Hand-off, arrow shows the direction of data</text>
+<path class="hand later" d="M555 1414 L599 1414"/><polygon class="ah" points="601,1414 590,1408 590,1420"/><text class="legt" x="617" y="1420">Dashed: later</text>
+<path class="stub" d="M815 1414 L859 1414"/><polygon class="ahp" points="861,1414 850,1408 850,1420"/><text class="legt" x="877" y="1420">Uses Pitwall for local AI (optional)</text>
 </g>
 </svg>
