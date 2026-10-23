@@ -13,6 +13,9 @@ updates it between jobs, so the builds keep running.
 
 </div>
 
+![Pitcrew: Keep every CI runner running](docs/images/pitcrew-hero.svg)
+
+
 > **Status: v1.0.0.** Supervisor, watchdog, safe updates with roll-back, housekeeping, insights, disk guard, pause
 > windows, notification channels, dashboard and tray on Windows, macOS and Linux. Installers are on the
 > [releases page](https://dev.decryptology.net/decryp7/pitcrew/releases).
@@ -46,6 +49,10 @@ going on, and adds what the scripts lack:
 - **Local only.** No telemetry; tokens live in the OS credential store; Pitcrew never handles passwords.
 
 ## Key features
+
+![Pitcrew features](docs/images/pitcrew-features.svg)
+
+![How Pitcrew works](docs/images/pitcrew-how-it-works.svg)
 
 Every feature, with screenshots, is in [docs/features.md](docs/features.md).
 
