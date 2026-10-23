@@ -127,6 +127,9 @@ UX findings (2026-10-23)
   modal, remembered size and position, Escape closes), never an in-app overlay popup: setup wizards, Settings, managers,
   What's new, About, export/share wizards and confirmations alike (user rule, all apps). Menus, dropdowns, autocomplete
   and tooltips stay in-app.
+- Modality is an explicit property of each dialog: modal for confirmations, credentials, unsaved changes and pickers
+  that feed the next step (parent disabled, dialog above it); modeless for tools kept open beside the work (Settings,
+  managers, viewers, wizards with their own progress), owned by the parent but leaving it usable, one window per dialog.
 - Panes lay out by container queries, not viewport media queries: Debrief's Home cut off "Needs attention" and Health
   in a narrow pane. Paths and file names truncate in the middle with the full value in a tooltip and copyable; long words
   wrap; buttons wrap below text; no horizontal scroll at any width ≥ 320 px.
