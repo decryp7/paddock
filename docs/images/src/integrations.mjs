@@ -44,7 +44,7 @@ link(d, 'router', 'R', 'code', 'L', { label: 'MCP' });
 link(d, 'mcpc', 'T', 'code', 'B', { label: 'MCP', arrow: 'block' });
 
 // Hand-offs that do not involve Pitwall.
-d.group('ho', 48, 808, 1432, 272, 'Hand-offs between apps (none of them needs Pitwall)');
+d.group('ho', 48, 808, 1432, 416, 'Hand-offs between apps (none of them needs Pitwall)');
 const rows = [
   [['sighter2', 'Sighter'], ['debrief2', 'Debrief'], 'Run bundle: video, steps'],
   [[ 'code2', CODEBASE_TOOL], ['sighter3', 'Sighter'], 'Test plan, results back'],
@@ -52,6 +52,10 @@ const rows = [
   [['dyno2', 'Dyno'], ['debrief4', 'Debrief'], 'Deep link: open issue'],
   [['dyno3', 'Dyno'], ['spotter2', 'Spotter'], 'Deep link: watch for updates'],
   [['pitcrew2', 'Pitcrew'], ['runners', 'Gitea runners'], 'Supervises, keeps updated'],
+  [['debrief5', 'Debrief'], ['code3', CODEBASE_TOOL], 'Stack trace to code'],
+  [['code4', CODEBASE_TOOL], ['debrief6', 'Debrief'], 'Log line checks'],
+  [['dyno4', 'Dyno'], ['pitcrew3', 'Pitcrew'], 'Machine health'],
+  [['spotter3', 'Spotter'], ['sighter4', 'Sighter'], 'Smoke tests (later)'],
 ];
 rows.forEach(([[ia, na], [ib, nb], label], i) => {
   const x = 72 + (i % 2) * 720, y = 856 + Math.floor(i / 2) * 72;
@@ -63,7 +67,7 @@ d.legend([{ kind: 'accent', label: 'Pitwall' }, { kind: 'process', label: 'App o
   { kind: 'external', label: 'Outside Paddock' }, { kind: 'planned', label: 'Not built yet' }, { kind: 'line', label: 'Request' }, { kind: 'dashline', label: 'Hand-off' }]);
 const src = join(here, 'drawio');
 mkdirSync(src, { recursive: true });
-writeFileSync(join(src, 'paddock-integrations.drawio'), d.finish(1080));
+writeFileSync(join(src, 'paddock-integrations.drawio'), d.finish(1224));
 console.log('wrote paddock-integrations.drawio');
 
 const drawio = process.env.DRAWIO || '/Applications/draw.io.app/Contents/MacOS/draw.io';

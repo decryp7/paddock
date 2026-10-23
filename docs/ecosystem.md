@@ -113,13 +113,19 @@ The apps never depend on each other to do their own job. They meet in a few well
 |---|---|---|
 | **Pitwall local API** | every app to Pitwall | HTTP on loopback; OpenAI-, Anthropic- and Ollama-compatible, plus `/x/v1`. One key per app (held in the OS credential store), job priorities, prompt and response caching, usage and limits per app. |
 | **MCP** | Pitwall to Pacenotes, and any MCP client | Pacenotes is a read-only MCP server; Pitwall is the MCP client and tool router, offering tools to local models. |
-| **Deep links** | Pitcrew, Dyno to Debrief; Dyno to Spotter | "Open job log in Debrief", "Open in Debrief", "Watch for updates". The target app opens at the right place; nothing is shared but the link. |
+| **Deep links** | Pitcrew and Dyno to Debrief; Dyno to Spotter and Pitcrew | "Job logs" and "Issues" open in Debrief; Dyno's installed software becomes Spotter's watch list; Dyno's machine health shows next to the runners in Pitcrew. The target app opens at the right place. |
+| **Debrief bridge** | Debrief and Pacenotes, both ways | Stack trace to code, and log-line checks against the code. |
 | **Run bundles** | Sighter to Debrief | A file with video, steps and results; Debrief opens it next to the app's logs. |
 | **Test plans and results** | Pacenotes and Sighter | Pacenotes owns requirements and traceability and drafts test plans (`.sighterplan`); Sighter owns UI test execution and results, which flow back to Pacenotes. |
 | **`paddock-testplan`** (planned) | Pacenotes and Sighter | The shared test-plan format behind `.sighterplan`. |
+| **Smoke tests** (later) | Spotter to Sighter | A new release found by Spotter triggers a Sighter smoke test. |
 | **CI** | Pitcrew to every repo | Pitcrew keeps the runners that build and test all of these apps alive, updated and clean. |
 | **Plugin platform** (planned) | Debrief, Pacenotes, later Dyno's tier-3 plugins | Debrief's plugin host, IPC and API (the ADR 0017 model) extracted into shared crates: out-of-process, Rust-only plugins. |
 | **`paddock-pitwall`** (planned) | shared crate in each app | One client for discovery, pairing, keychain keys, retries, priorities, cache headers and capability checks, so no app re-implements Pitwall access. |
+
+What each app uses Pitwall for (the dotted lines in the hero): Debrief, explain and research; Pacenotes, MCP tools, review and
+Q&A (a two-way link: it is an MCP server, Pitwall is the client); Sighter, vision; Spotter, "What's new" summaries; Dyno,
+diagnosis. Pitcrew does not need it.
 
 ## Data and privacy
 
