@@ -118,7 +118,7 @@ describe('TauriBackend: request shapes', () => {
     await backend.addWatchedFolder({ template: 'installers', keepForSecs: 600, recursive: false });
     expect(invoke).toHaveBeenCalledWith('add_watched_folder', { template: 'installers', keepForSecs: 600, recursive: false });
     expect(JSON.stringify(invoke.mock.calls)).not.toContain('path');
-
+  });
 
   it('saveInventoryReport and pickFolder ask the shell for its dialogs', async () => {
     const { backend, invoke } = fake();

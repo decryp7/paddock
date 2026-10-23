@@ -1878,6 +1878,8 @@ export interface AddWatchedFolder {
 // installed software, large and duplicate files, and the maintenance windows. Dyno only reads; removal goes through
 // the cleanup policy.
 
+}
+
 export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved' | 'setting' | 'cleanup';
 
 export interface Change {

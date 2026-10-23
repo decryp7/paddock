@@ -654,6 +654,9 @@ test.describe('timeline', () => {
   test('network changes are a kind of event in the history legend', async ({ page }) => {
     await page.goto(url('/'));
     await expect(page.getByRole('region', { name: 'History' }).getByText('Network', { exact: false }).first()).toBeVisible();
+  });
+});
+
 test.describe('backup health', () => {
   test('lists a healthy, a stale and an unreadable tool, and Check now waits for the check', async ({ page }) => {
     await page.goto(url('/backup'));
