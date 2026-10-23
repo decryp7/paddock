@@ -368,7 +368,7 @@ The v1 set is large and is staged in milestones (section 19).
 | Parser/wasm sandbox with time and memory limits, crash containment | v1 |
 | Prompt-injection hygiene (tool output labelled untrusted) | v1 |
 | Index health: unparsed files with reasons, language coverage, rebuild | v1 |
-| Settings export/import, pack manager, ignore editor | v1 |
+| Settings export/import, pack manager, ignore editor, **"Low memory" preset** (section 21.4) | v1 |
 | Autosave of review state/suppressions/links; versioned persistent state, corrupt files moved aside | v1 |
 
 ## 7. Language packs
@@ -900,6 +900,7 @@ cached. Local-only: requirement documents and code never leave the machine. This
   the index, throttled and resumable initial indexing with progress, tier 2 shown meanwhile; some packs will be unusable on the largest monorepos.
 - **Server licences and distribution**: jdtls is EPL-2.0 and Microsoft's distributed Roslyn server binary terms are unconfirmed; servers are never bundled
   and are shown with their licence in the pack manager. A server update can change behaviour: packs pin a tested version range.
+- **Memory** (added 2026-10-23, user priority): the vector index, the embedding model, language servers and Pitwall's chat model compete for RAM on one machine; language servers are the largest. Mitigated by the RAM budget in section 21.4 (disk-backed index, quantised or reduced vectors with rescoring, idle-only batch indexing, one capped server at a time, results cached) and the "Low memory" preset.
 - **Vector index** (added 2026-10-23): embedding CPU time and index size on large repositories, quality on code-specific queries with small models, a
   model change forcing a full re-embed; mitigated by per-repository opt-in, caps, incremental hashes, a benchmark before choosing the small model, and
   hybrid retrieval that never depends on vectors alone.
@@ -936,7 +937,7 @@ cached. Local-only: requirement documents and code never leave the machine. This
 Added 2026-10-23 (sections 20-26):
 
 22. ~~Vector store~~ **Decided 2026-10-23: SQLite is the source of truth, the ANN index is derived data behind a `VectorIndex` port; the engine is chosen by the
-    spike among usearch (default), hannoy, libSQL and sqlite-vec, LanceDB as fallback (section 21.3).** Still open: should the vector index later also supply candidates for requirement traceability, or stay code-search only?
+    spike among hannoy (preferred, low RAM), libSQL, usearch and sqlite-vec, LanceDB as fallback (sections 21.3-21.4).** Still open: should the vector index later also supply candidates for requirement traceability, or stay code-search only?
 23. **Tier 3 and the hard rule**: is an opt-in, per-repository "trust this repository" that starts language servers (which may run build scripts and proc
     macros) acceptable, with SCIP import as the no-execution alternative? Or tier 3 by SCIP import only?
 24. ~~Embeddings source~~ **Decided 2026-10-23: Pitwall's Qwen3-Embedding (llama.cpp `/v1/embeddings`), else a small code-embedding model downloaded on the user's
@@ -1206,14 +1207,14 @@ keeps "Pitwall is optional" true for every function.
 chunk by chunk id + text hash). **Hybrid search** = FTS5 + vector, fused with reciprocal rank fusion; filters (path, language, tier) and enrichment
 (symbol, signature, tier, hot-spot weight) come from SQLite. **No vector database server and no second primary database.**
 
-Requirements for the index: embedded in a Rust app, permissive licence, maintained, low memory or on disk, incremental insert and delete, a few
+**Primary criterion: low RAM** (user priority, 2026-10-23: Pitwall runs on the same machine). Then: embedded in a Rust app, permissive licence, maintained, low memory or on disk, incremental insert and delete, a few
 hundred thousand chunks, builds on Windows, macOS and Linux. Checked 2026-10-23 (items marked (unverified) are not confirmed from source):
 
 | Candidate | Licence | Maintenance (checked 2026-10-23) | Fit |
 |---|---|---|---|
-| **usearch** (`usearch` crate, HNSW). **Current default** | Apache-2.0 | very active: 2.26.5 (2026-10-18), 1.5M downloads | Vector index only, no payloads; C++ core with Rust bindings, very fast; save/load and memory-mapped view (unverified); f16/int8 quantisation (unverified). Needs a C++ compiler at build time (the app's own code stays Rust) |
-| **hannoy** (Meilisearch's pure-Rust HNSW on LMDB; successor to `arroy`) | MIT (crate and repository) | active: `hannoy` 0.3.0 (2026-10-22), 626k downloads. The version is 0.3.0, not 0.1.x; the repository shows 190 commits, 87 stars | Disk-backed on LMDB (datasets larger than RAM, so low RAM), dynamic insert and delete without a full rebuild, quantized metrics (kind of quantisation unverified), pure Rust, no C++ toolchain. Adds LMDB as a second on-disk store (derived data only); young project, "production-ready" is the project's own claim; the repository is not Meilisearch's own (owner `nnethercott`) |
-| **libSQL native vectors** (Turso's SQLite fork) | MIT | "actively maintained, but new features are being developed in Turso" (the from-scratch Rust database, in beta, recommended for new projects); `libsql` crate 0.10.0 (2026-10-13) | `F32_BLOB(n)` columns (also f16/f8/1-bit) and a DiskANN index (`libsql_vector_idx`, `vector_top_k`) inside the database: one file, transactional consistency, no sync problem. But it **replaces stock SQLite with a fork**, whose feature work has moved elsewhere. Based on SQLite 3.43 (shell banner); **FTS5 support not confirmed from the docs read (unverified)**; the vector index needs a rowid or single-column primary key |
+| 1. **hannoy** (Meilisearch's pure-Rust HNSW on LMDB; successor to `arroy`). **Preferred (low RAM)** | MIT (crate and repository) | active: `hannoy` 0.3.0 (2026-10-22), 626k downloads. The version is 0.3.0, not 0.1.x; the repository shows 190 commits, 87 stars | Disk-backed on LMDB (datasets larger than RAM, so low RAM), dynamic insert and delete without a full rebuild, quantized metrics (kind of quantisation unverified), pure Rust, no C++ toolchain. Adds LMDB as a second on-disk store (derived data only); young project, "production-ready" is the project's own claim; the repository is not Meilisearch's own (owner `nnethercott`) |
+| 2. **libSQL native vectors** (Turso's SQLite fork) | MIT | "actively maintained, but new features are being developed in Turso" (the from-scratch Rust database, in beta, recommended for new projects); `libsql` crate 0.10.0 (2026-10-13) | `F32_BLOB(n)` columns (also f16/f8/1-bit) and a DiskANN index (`libsql_vector_idx`, `vector_top_k`) inside the database: one file, transactional consistency, no sync problem. But it **replaces stock SQLite with a fork**, whose feature work has moved elsewhere. Based on SQLite 3.43 (shell banner); **FTS5 support not confirmed from the docs read (unverified)**; the vector index needs a rowid or single-column primary key |
+| 3. **usearch** (`usearch` crate, HNSW) | Apache-2.0 | very active: 2.26.5 (2026-10-18), 1.5M downloads | Vector index only, no payloads; C++ core with Rust bindings, very fast; save/load and a memory-mapped `view` that serves the index from disk without loading it (confirmed in the README; whether a viewed index accepts inserts and deletes is not documented, so **unverified**, and until the spike shows otherwise updates need the index loaded in RAM, which is why it ranks third); f16 and i8 (cosine-like metrics) and b1 (binary metrics) quantisation, but quantised vectors cannot be read back, so originals must be kept elsewhere (the README). Needs a C++ compiler at build time (the app's own code stays Rust) |
 | **sqlite-vec** (extension, crate `sqlite-vec`) | MIT/Apache-2.0 | pre-v1: `0.1.10-alpha.4` (2026-05-18), last push five months before this check; upstream warns of breaking changes | Prototype and small repositories only: same SQLite file, one transaction, hybrid by SQL, but brute-force scan (unverified), linear in chunk count |
 | **LanceDB** (`lancedb` 0.40.0) | Apache-2.0 | very active; `lance` 13.0.0 (2026-10-07) | **All-in-one fallback**: columnar tables, ANN indexes, full-text and hybrid search (unverified). Heaviest dependency set (Arrow, DataFusion), long compile times, and a second storage engine, which the decision above rules out unless the spike fails |
 
@@ -1221,10 +1222,45 @@ Not shortlisted: Qdrant Edge (`qdrant-edge` 0.9.0, 2026-10-22; young and 0.x), a
 
 **Spike (planned, before M2b).** Same 500k-chunk corpus and the same 1024-dimension vectors for usearch, hannoy, libSQL and sqlite-vec (as the
 brute-force baseline); measure build time, query latency (k=10 and k=50, filtered and unfiltered), **recall@10 against exact search**, RAM, disk, and
-**incremental update and delete cost** (churn of 1%, 10%), plus Windows build and binary size, and for libSQL whether FTS5 is present. The default is
-`usearch` until the numbers say otherwise; the `VectorIndex` port keeps the choice reversible. Fusion (RRF) and re-ranking are our own pure
+**incremental update and delete cost** (churn of 1%, 10%), plus Windows build and binary size, and for libSQL whether FTS5 is present. The order is
+hannoy, libSQL, usearch (by RAM when updating) and the spike confirms or reverses it; the `VectorIndex` port keeps the choice reversible. Fusion (RRF) and re-ranking are our own pure
 functions, tested in the core.
 
+
+### 21.4 RAM budget (user priority: save RAM, Pitwall shares the machine)
+
+Vector memory for 500k chunks (arithmetic; real index overhead, graph links and page cache are measured in the spike):
+
+| Setting | Per vector | 500k chunks |
+|---|---|---|
+| float32, 1024 dimensions | 4 KB | about 2 GB |
+| int8, 1024 dimensions | 1 KB | about 0.5 GB |
+| int8, 512 dimensions | 512 B | about 256 MB |
+| int8, 256 dimensions | 256 B | about 128 MB |
+| binary (1 bit), 1024 dimensions | 128 B | about 64 MB |
+| binary, 256 dimensions | 32 B | about 16 MB, plus rescoring |
+
+Qwen3-Embedding supports user-defined output dimensions from 32 to 1024 (Matryoshka-style; model card, verified), so 256 and 512 are legitimate settings.
+Binary or heavily reduced vectors are used for the first pass and the **top hits are rescored** against higher-precision vectors read from disk (SQLite
+or a side file), so RAM holds only the small vectors. **Default: the smallest setting whose recall@10 stays within a few percent of float32**; the
+spike measures recall@10 per setting (including rescoring cost) on the real corpus. A disk-backed index (hannoy on LMDB, libSQL DiskANN) lets the
+operating system page vectors in and out instead of holding the whole index resident.
+
+**Pitwall side.** The embedding model is small (Qwen3-Embedding 0.6B is about 0.6 GB at Q8 (estimate)). Indexing runs in **batches when Pitwall is
+idle, or at low priority through its queue**, and Pitwall's idle release unloads the model afterwards. The chat model is loaded only to answer or
+re-rank, never for indexing.
+
+**Language servers are usually the largest consumers** (rust-analyzer, jdtls and clangd on big repositories can take several GB each): a per-server memory cap
+(the server is restarted or stopped above it, with a message), **one server at a time by default**, stopped when idle, and results cached in the index so
+browsing does not need a running server.
+
+**Targets (proposals to confirm, to be measured):** with one language server running and semantic search on, about **2 GB total on a 16 GB machine
+("Low memory" preset)** and up to about **6-8 GB on a 64 GB machine** (several servers allowed, larger caches, higher-precision vectors); without servers
+and semantic search, a few hundred MB.
+
+**"Low memory" preset** (settings, default on machines with 16 GB or less): int8 or binary reduced-dimension vectors with rescoring, one language
+server at a time with a memory cap, servers stopped after a short idle time, indexing only when Pitwall is idle, smaller caches and page budget, and the
+per-repository chunk cap lowered. Each knob is also set individually.
 
 ## 22. Views (what to look at while analysing code)
 

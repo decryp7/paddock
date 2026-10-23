@@ -46,7 +46,7 @@ the real build configuration, and answer quality depends on retrieval and the lo
 A per-repository, opt-in **vector index** over syntax-aware chunks is combined with text and structural search (hybrid retrieval, re-ranked), updated
 incrementally as files change, with size limits. Embeddings come from Pitwall when it is present (Qwen3-Embedding), otherwise from a small local model you
 download on a click, otherwise search is text and structural only. SQLite stays the source of truth (index, metadata, FTS5); the vectors sit in an embedded index beside it that is rebuilt from SQLite when missing or stale
-(no vector database server). Hits can be re-ranked and answered with citations through Pitwall. Nothing leaves the machine. (Debrief deliberately does not use vector search.)
+(no vector database server), kept small in RAM because Pitwall shares the machine (disk-backed index, quantised vectors, a "Low memory" preset). Hits can be re-ranked and answered with citations through Pitwall. Nothing leaves the machine. (Debrief deliberately does not use vector search.)
 
 ## Views
 
