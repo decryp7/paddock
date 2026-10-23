@@ -27,7 +27,7 @@ interface Frame {
 }
 
 /** Looks at the scrolled window and says where this frame ends and where the next one starts. */
-async function measure(page: Page): Promise<Frame> {
+async function measure(page: Page, blocks: string): Promise<Frame> {
   return page.evaluate((sel) => {
     const scroller = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY !== 'visible');
     if (!scroller) return { keep: null, next: null };
@@ -59,8 +59,11 @@ async function measure(page: Page): Promise<Frame> {
     // The next frame starts at the cut unit, with the gap that was above it (rows have none).
     const gap = Math.max(0, Math.min(24, cutTop - above) - 6);
     return { keep: Math.floor(Math.min(cutTop, above + 12)), next: Math.round(cutTop - box.top - gap) };
-  }, BLOCKS);
+  }, blocks);
 }
+
+/** Settings are a stack of cards: a frame ends between cards, so no card is cut and none starts half-way. */
+const CARDS = 'main section.group';
 
 /** A table with its own scroll area would show a row cut at its foot: shorten the area to whole rows. */
 async function trimInnerScrollers(page: Page): Promise<void> {
@@ -78,26 +81,26 @@ async function trimInnerScrollers(page: Page): Promise<void> {
   });
 }
 
-/** The wizard's footer sits over the page: hide the table rows it would cut so only whole rows show above it. */
+/** The wizard's footer sits over the page: hide the table rows and disclosures it would cut so only whole rows show above it. */
 async function hideRowsUnderFooter(page: Page): Promise<void> {
   await page.evaluate(() => {
     const top = document.querySelector('footer.nav')?.getBoundingClientRect().top ?? Infinity;
-    for (const row of document.querySelectorAll<HTMLElement>('main tbody tr')) {
+    for (const row of document.querySelectorAll<HTMLElement>('main tbody tr, main details')) {
       if (row.getBoundingClientRect().bottom > top - 4) row.style.display = 'none';
     }
   });
 }
 
 /** Shoots the page as a series of whole-section frames: `name`, `name-2`, `name-3`. */
-async function frames(page: Page, name: string, scheme: string): Promise<void> {
+async function frames(page: Page, name: string, scheme: string, opts: { blocks?: string; max?: number } = {}): Promise<void> {
   let n = 1;
   await trimInnerScrollers(page);
   for (;;) {
-    const frame = await measure(page);
+    const frame = await measure(page, opts.blocks ?? BLOCKS);
     const file = `${OUT}/${name}${n > 1 ? `-${n}` : ''}-${scheme}.png`;
     const vp = page.viewportSize() ?? { width: 1440, height: 900 };
     await page.screenshot({ path: file, ...(frame.keep ? { clip: { x: 0, y: 0, width: vp.width, height: frame.keep } } : {}) });
-    if (frame.next === null || n >= 3) return;
+    if (frame.next === null || n >= (opts.max ?? 3)) return;
     await page.evaluate((by) => {
       const sc = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY !== 'visible');
       if (sc) sc.scrollTop += by;
@@ -130,12 +133,7 @@ for (const scheme of ['dark', 'light'] as const) {
     const shots: [string, string][] = [
       ['dashboard', '/'],
       ['watches', '/#/watches'],
-      ['watch-detail', '/#/watches/w-1'],
-      ['watch-detail-upgrade', '/#/watches/w-6'],
       ['watch-detail-products', '/?mock=products#/watches/w-9'],
-      ['dashboard-empty', '/?mock=empty'],
-      ['watches-empty', '/?mock=empty#/watches'],
-      ['settings', '/#/settings'],
     ];
     for (const [name, url] of shots) {
       test(`${name} ${scheme}`, async ({ page }) => {
@@ -144,6 +142,29 @@ for (const scheme of ['dark', 'light'] as const) {
         await frames(page, name, scheme);
       });
     }
+    // The detail page is a little taller than the window: a taller window shows it whole instead of cutting it in two.
+    for (const [name, url] of [['watch-detail', '/#/watches/w-1'], ['watch-detail-upgrade', '/#/watches/w-6']] as const) {
+      test(`${name} ${scheme}`, async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 1030 });
+        await open(page, url);
+        await settle(page, 1400);
+        await trimInnerScrollers(page);
+        await page.screenshot({ path: `${OUT}/${name}-${scheme}.png` });
+      });
+    }
+    // The empty states are a heading and one message: no point in a window full of nothing.
+    for (const [name, url] of [['dashboard-empty', '/?mock=empty'], ['watches-empty', '/?mock=empty#/watches']] as const) {
+      test(`${name} ${scheme}`, async ({ page }) => {
+        await open(page, url);
+        await settle(page, 1000);
+        await page.screenshot({ path: `${OUT}/${name}-${scheme}.png`, clip: { x: 0, y: 0, width: 1440, height: 560 } });
+      });
+    }
+    test(`settings ${scheme}`, async ({ page }) => {
+      await open(page, '/#/settings');
+      await settle(page, 1400);
+      await frames(page, 'settings', scheme, { blocks: CARDS, max: 4 });
+    });
     test(`settings e-mail ${scheme}`, async ({ page }) => {
       await open(page, '/#/settings');
       await settle(page, 1000);
@@ -199,7 +220,13 @@ for (const scheme of ['dark', 'light'] as const) {
       await settle(page, 1200);
       await page.locator('sp-whats-new li.item').nth(1).click({ button: 'right', position: { x: 220, y: 24 } });
       await settle(page, 400);
-      await page.screenshot({ path: `${OUT}/dashboard-menu-${scheme}.png` });
+      // Whole rows only: end the picture at the last feed row that fits in the window.
+      const keep = await page.evaluate(() => {
+        const win = window.innerHeight;
+        const rows = [...document.querySelectorAll('sp-whats-new li.item')].map((e) => e.getBoundingClientRect().bottom).filter((b) => b <= win - 8);
+        return Math.floor(Math.max(...rows) + 12);
+      });
+      await page.screenshot({ path: `${OUT}/dashboard-menu-${scheme}.png`, clip: { x: 0, y: 0, width: 1440, height: keep } });
     });
     test(`schedule ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches/new');
@@ -217,6 +244,8 @@ for (const scheme of ['dark', 'light'] as const) {
       await open(page, '/#/watches/new');
       await settle(page, 700);
       await page.screenshot({ path: `${OUT}/wizard-source-${scheme}.png` });
+      // The preview lists every release it reports ("12 releases found"): a taller window shows all of them above the footer.
+      await page.setViewportSize({ width: 1440, height: 960 });
       await page.getByRole('button', { name: /Node\.js/ }).click();
       await settle(page, 1600);
       await trimInnerScrollers(page);
