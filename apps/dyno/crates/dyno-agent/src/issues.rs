@@ -182,7 +182,12 @@ pub fn run(shared: &Shared) {
     };
     wait(FIRST_SCAN_AFTER);
     while !shared.stopped() {
-        shared.issues.scan(shared);
-        wait(SCAN_EVERY);
+        // Reading the OS logs is heavier work: only inside the maintenance windows, when the user set any.
+        if crate::extras::maintenance_open(shared) {
+            shared.issues.scan(shared);
+            wait(SCAN_EVERY);
+        } else {
+            wait(std::time::Duration::from_secs(5 * 60));
+        }
     }
 }

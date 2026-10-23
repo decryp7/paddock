@@ -36,6 +36,8 @@ export const routes: Routes = [
       { path: 'watched', title: 'Watched folders · Dyno', loadComponent: () => import('./features/watched/watched-page').then((m) => m.WatchedPage) },
       { path: 'cleanup', title: 'Cleanup · Dyno', loadComponent: () => import('./features/cleanup/cleanup-page').then((m) => m.CleanupPage) },
       { path: 'health', title: 'Health · Dyno', loadComponent: () => import('./features/health/health-page').then((m) => m.HealthPage) },
+      { path: 'backup', title: 'Backup health · Dyno', loadComponent: () => import('./features/backup/backup-page').then((m) => m.BackupPage) },
+      { path: 'extras', title: 'Extras · Dyno', loadComponent: () => import('./features/extras/extras-page').then((m) => m.ExtrasPage) },
       { path: 'lifespan', title: 'Disk and battery life · Dyno', loadComponent: () => import('./features/lifespan/lifespan-page').then((m) => m.LifespanPage) },
       { path: 'tuning', title: 'Tuning · Dyno', loadComponent: () => import('./features/tuning/tuning-page').then((m) => m.TuningPage) },
       { path: 'settings', title: 'Settings · Dyno', loadComponent: () => import('./features/settings/settings-page').then((m) => m.SettingsPage) },

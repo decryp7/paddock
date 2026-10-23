@@ -1,45 +1,87 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! Right-click search, hash search, startup filter, watched folders and network change events end to end over the fake
-//! platform: a real IPC connection and a real SQLite file in a temp folder. Files are created only in temp folders.
+//! The extras (WP-13), backup health (WP-14) and taming proof (WP-36) end to end over the fake platform: scripted tools
+//! (no real `tmutil`, `pmset` or `restic` is run), a real IPC connection and a SQLite file in a temp folder.
 
-use dyno_agent::cli::{ask, connect};
+use dyno_agent::cli::{ask, ask_within, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::activity::UndoState;
-use dyno_core::history::HistoryRange;
-use dyno_core::netchange::{Link, LinkKind, NetState};
-use dyno_core::process::ProcessRef;
-use dyno_core::protocol::{Message, Reply, Request, TimelineEventKind};
-use dyno_core::startup::{ImpactRating, StartupEntry, StartupFilter, StartupImpact, StartupLocation, StartupState};
-use dyno_core::time::Timestamp;
-use dyno_core::weblinks::HashSource;
+use dyno_core::backup::{BackupState, BackupTool};
+use dyno_core::cleanup::DeleteMode;
+use dyno_core::extras::changes::{ChangeKind, ChangesQuery};
+use dyno_core::extras::files::{FinderMode, FinderQuery};
+use dyno_core::ports::PlatformError;
+use dyno_core::protocol::{Message, Reply, Request};
+use dyno_core::rules::{Command, RuleSet};
+use dyno_core::time::{Timestamp, HOUR};
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use dyno_platform::issues::ToolRunner;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// Answers by program name (and optionally first argument), cycling through the scripted answers; records every call.
+#[derive(Default)]
+struct Tools {
+    answers: Mutex<HashMap<String, Vec<Result<String, PlatformError>>>>,
+    calls: Mutex<Vec<String>>,
+}
+
+impl Tools {
+    fn with(list: Vec<(&str, Vec<Result<String, PlatformError>>)>) -> Arc<Tools> {
+        let t = Tools::default();
+        for (k, v) in list {
+            t.answers.lock().unwrap().insert(k.to_string(), v);
+        }
+        Arc::new(t)
+    }
+}
+
+impl ToolRunner for Tools {
+    fn run(&self, program: &str, args: &[String], _timeout: Duration) -> Result<String, PlatformError> {
+        let key = format!(
+            "{} {}",
+            program.rsplit('/').next().unwrap_or(program),
+            args.first().map(String::as_str).unwrap_or("")
+        );
+        self.calls.lock().unwrap().push(key.trim().to_string());
+        let mut answers = self.answers.lock().unwrap();
+        let bare = program.rsplit('/').next().unwrap_or(program).to_string();
+        let name = if answers.contains_key(key.trim()) {
+            key.trim().to_string()
+        } else {
+            bare
+        };
+        let hit = answers.get_mut(&name);
+        match hit {
+            Some(v) if v.len() > 1 => v.remove(0),
+            Some(v) => v
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Err(PlatformError::Failed("no scripted answer".into()))),
+            None => Err(PlatformError::Unsupported(format!("{program} is not available on this computer."))),
+        }
+    }
+}
 
 struct Harness {
     running: Option<Running>,
-    fake: Fake,
     dirs: Dirs,
-    tmp: tempfile::TempDir,
+    _tmp: tempfile::TempDir,
 }
 
 impl Harness {
-    fn start(setup: impl FnOnce(&Fake)) -> Harness {
+    fn start() -> Harness {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         fake.add_process(process(100, "calm", 1.0));
-        setup(&fake);
         let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
         Harness {
             running: Some(running),
-            fake,
             dirs,
-            tmp,
+            _tmp: tmp,
         }
     }
 
@@ -49,13 +91,6 @@ impl Harness {
 
     fn shared(&self) -> Arc<dyno_agent::agent::Shared> {
         self.running.as_ref().unwrap().shared.clone()
-    }
-
-    /// A folder made for the test, canonical (macOS temp folders are links).
-    fn folder(&self, name: &str) -> PathBuf {
-        let p = std::fs::canonicalize(self.tmp.path()).unwrap().join(name);
-        std::fs::create_dir_all(&p).unwrap();
-        p
     }
 }
 
@@ -67,419 +102,452 @@ impl Drop for Harness {
     }
 }
 
-fn old_file(dir: &Path, name: &str) -> PathBuf {
+fn ok(s: &str) -> Result<String, PlatformError> {
+    Ok(s.to_string())
+}
+
+fn real_now() -> Timestamp {
+    Timestamp(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64,
+    )
+}
+
+#[test]
+fn sleep_blockers_come_from_the_scripted_tool_and_a_refusal_is_a_sentence() {
+    let h = Harness::start();
+    let x = &h.shared().extras;
+    x.use_os("linux");
+    x.use_tools(Tools::with(vec![(
+        "systemd-inhibit",
+        vec![ok(
+            "WHO UID USER PID COMM WHAT WHY MODE\nFirefox 1000 sam 2210 firefox sleep Playing audio block\n",
+        )],
+    )]));
+    let Reply::Sleep(s) = ask(&h.client(), Request::SleepBlockers).unwrap() else {
+        panic!("sleep")
+    };
+    assert_eq!(s.blockers[0].name, "Firefox");
+    assert!(s.wakes_unavailable.is_some());
+    x.use_tools(Tools::with(vec![]));
+    let Reply::Sleep(s) = ask(&h.client(), Request::SleepBlockers).unwrap() else {
+        panic!("sleep")
+    };
+    assert!(s.blockers.is_empty() && s.blockers_unavailable.unwrap().contains("not available"));
+}
+
+#[test]
+fn what_changed_compares_software_lists_and_records_the_baseline_silently() {
+    let h = Harness::start();
+    let s = h.shared();
+    s.extras.use_os("macos");
+    let list =
+        |v: &str| format!(r#"{{"SPApplicationsDataType":[{{"_name":"Editor","version":"{v}"}},{{"_name":"Stable","version":"1"}}]}}"#);
+    s.extras.use_tools(Tools::with(vec![(
+        "system_profiler SPApplicationsDataType",
+        vec![ok(&list("1.0"))],
+    )]));
+    dyno_agent::extras::record_changes(&s);
+    let peer = h.client();
+    let q = ChangesQuery { around: None, hours: 24 };
+    let Reply::Changes(t) = ask(&peer, Request::Changes { query: q }).unwrap() else {
+        panic!("changes")
+    };
+    assert!(
+        t.changes.iter().all(|c| c.kind != ChangeKind::Installed),
+        "a baseline is not a change"
+    );
+    assert!(t.watching_since.is_some());
+    // Editor updates and a new program appears.
+    let newer = r#"{"SPApplicationsDataType":[{"_name":"Editor","version":"2.0"},{"_name":"Stable","version":"1"},{"_name":"Fresh","version":"3"}]}"#.to_string();
+    s.extras
+        .use_tools(Tools::with(vec![("system_profiler SPApplicationsDataType", vec![ok(&newer)])]));
+    dyno_agent::extras::record_changes(&s);
+    let Reply::Changes(t) = ask(&peer, Request::Changes { query: q }).unwrap() else {
+        panic!("changes")
+    };
+    let titles: Vec<&str> = t.changes.iter().map(|c| c.title.as_str()).collect();
+    assert!(
+        titles.contains(&"Installed Fresh") && titles.contains(&"Updated Editor"),
+        "{titles:?}"
+    );
+    // A different window around an old moment finds nothing.
+    let old = ChangesQuery {
+        around: Some(real_now().minus(100 * 24 * HOUR)),
+        hours: 1,
+    };
+    let Reply::Changes(t) = ask(&peer, Request::Changes { query: old }).unwrap() else {
+        panic!("changes")
+    };
+    assert!(t.changes.is_empty());
+}
+
+fn write(dir: &std::path::Path, name: &str, byte: u8, len: usize) -> std::path::PathBuf {
     let p = dir.join(name);
-    std::fs::write(&p, name.as_bytes()).unwrap();
-    let f = std::fs::File::open(&p).unwrap();
-    f.set_modified(std::time::SystemTime::now() - Duration::from_secs(5 * 86_400))
-        .unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, vec![byte; len]).unwrap();
     p
 }
 
 #[test]
-fn a_search_seed_is_redacted_and_the_url_is_built_from_the_confirmed_text_only() {
-    let h = Harness::start(|_| {});
+fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
+    let h = Harness::start();
     let peer = h.client();
-    let user = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default();
-    let text = format!("Slack crashed for {user} at 10.1.2.3 {{123e4567-e89b-12d3-a456-426614174000}}");
-    let Reply::SearchSeed(seed) = ask(&peer, Request::SearchSeed { text }).unwrap() else {
-        panic!("seed")
+    let t = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(t.path()).unwrap().join("stuff");
+    const MB: usize = 1024 * 1024;
+    let a = write(&root, "a/movie.mkv", 5, 2 * MB);
+    let b = write(&root, "b/movie copy.mkv", 5, 2 * MB);
+    write(&root, "big.iso", 1, 4 * MB);
+    let query = FinderQuery {
+        folder: root.to_string_lossy().into_owned(),
+        mode: FinderMode::Both,
+        min_bytes: 0,
     };
-    assert!(seed.text.starts_with("Slack crashed"));
-    assert!(!seed.text.contains("10.1.2.3") && !seed.text.contains("123e4567"));
-    assert!(seed.removed.iter().any(|r| r.contains("IP address")) && seed.removed.iter().any(|r| r.contains("GUID")));
-    let Reply::Url(u) = ask(
-        &peer,
-        Request::WebSearch {
-            query: "kernel_task high cpu".into(),
-        },
-    )
-    .unwrap() else {
-        panic!("url")
+    let Reply::FileFinder(r) = ask_within(&peer, Request::FindFiles { query }, Duration::from_secs(60)).unwrap() else {
+        panic!("finder")
     };
-    assert_eq!(u, "https://duckduckgo.com/?q=kernel_task+high+cpu");
-    assert!(ask(&peer, Request::WebSearch { query: "  ".into() })
-        .unwrap_err()
-        .contains("Type something"));
-}
+    assert_eq!(r.large[0].bytes, 4 * MB as u64);
+    assert_eq!(r.duplicates.len(), 1);
+    let ids: Vec<String> = r.duplicates[0].files.iter().map(|f| f.id.clone()).collect();
 
-#[test]
-fn a_file_hash_is_computed_here_and_the_virustotal_address_holds_only_the_hash() {
-    let h = Harness::start(|_| {});
-    let peer = h.client();
-    let f = h.folder("progs").join("tool.bin");
-    std::fs::write(&f, b"abc").unwrap();
-    let Reply::FileHash(info) = ask(
-        &peer,
-        Request::FileHash {
-            source: HashSource::Path(f.to_string_lossy().into_owned()),
-        },
-    )
-    .unwrap() else {
-        panic!("hash")
+    // Removing both copies is refused as a whole; nothing moves.
+    let both = Request::RemoveFoundFiles {
+        scan_id: r.scan_id.clone(),
+        ids: ids.clone(),
+        mode: DeleteMode::Quarantine,
     };
-    assert_eq!(info.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    let Reply::Url(u) = ask(
-        &peer,
-        Request::VirusTotalUrl {
-            sha256: info.sha256.clone(),
-        },
-    )
-    .unwrap() else {
-        panic!("url")
-    };
-    assert_eq!(u, format!("https://www.virustotal.com/gui/file/{}", info.sha256));
-    assert!(ask(&peer, Request::VirusTotalUrl { sha256: "nope".into() })
-        .unwrap_err()
-        .contains("64 hexadecimal"));
-    // A relative path, a folder and a missing file are refused with a reason.
-    for bad in ["relative", h.tmp.path().to_str().unwrap(), "/definitely/not/here"] {
-        let e = ask(
-            &peer,
-            Request::FileHash {
-                source: HashSource::Path(bad.into()),
-            },
-        )
-        .unwrap_err();
-        assert!(!e.is_empty(), "{bad}");
-    }
-    // A process that is not running (a reused pid) is not found.
-    let gone = ProcessRef {
-        pid: 100,
-        started: Timestamp(1),
-    };
+    let err = ask(&peer, both).unwrap_err();
+    assert!(err.contains("every copy"), "{err}");
+    assert!(a.exists() && b.exists());
+
+    // An unknown result is refused.
     assert!(ask(
         &peer,
-        Request::FileHash {
-            source: HashSource::Process(gone)
-        }
-    )
-    .unwrap_err()
-    .contains("exited"));
-}
-
-#[test]
-fn a_running_process_is_hashed_from_the_file_it_runs_from() {
-    let tmp_exe = tempfile::tempdir().unwrap();
-    let exe = tmp_exe.path().join("runner.bin");
-    std::fs::write(&exe, b"abc").unwrap();
-    let mut p = process(300, "runner", 1.0);
-    p.exe = Some(exe.to_string_lossy().into_owned());
-    let target = p.reference();
-    let h = Harness::start(|f| f.add_process(p));
-    let peer = h.client();
-    // The sampler fills the process table within a tick or two.
-    let mut answer = None;
-    for _ in 0..40 {
-        match ask(
-            &peer,
-            Request::FileHash {
-                source: HashSource::Process(target),
-            },
-        ) {
-            Ok(Reply::FileHash(i)) => {
-                answer = Some(i);
-                break;
-            }
-            _ => std::thread::sleep(Duration::from_millis(100)),
-        }
-    }
-    assert_eq!(
-        answer.unwrap().sha256,
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    );
-}
-
-fn startup(name: &str, exe: &str, publisher: Option<&str>) -> StartupEntry {
-    StartupEntry {
-        id: format!("agent:user:{name}"),
-        name: name.into(),
-        command: exe.into(),
-        exe: Some(exe.into()),
-        location: StartupLocation::UserLaunchAgent,
-        state: StartupState::Enabled,
-        publisher: publisher.map(str::to_string),
-        impact: StartupImpact {
-            cpu_secs: 0.0,
-            disk_bytes: 0,
-            rating: ImpactRating::NotMeasured,
-        },
-    }
-}
-
-#[test]
-fn the_startup_list_is_filtered_by_the_engine_with_counts() {
-    // Names that are OS-owned on every OS the test may run on: system folders of macOS, Linux and a Windows folder.
-    let (os_exe, os_name) = if cfg!(windows) {
-        ("C:\\Windows\\System32\\sec.exe", "SecurityHealth")
-    } else if cfg!(target_os = "macos") {
-        ("/System/Library/CoreServices/x", "com.apple.thing")
-    } else {
-        ("/usr/libexec/thing", "thing")
-    };
-    let h = Harness::start(|f| {
-        f.with(|s| {
-            s.startup = vec![
-                startup(os_name, os_exe, None),
-                startup("Slack", "/Applications/Slack.app/slack", Some("Slack Technologies")),
-                startup("mystery", "/tmp/mystery", None),
-            ]
-        })
-    });
-    let peer = h.client();
-    let get = |filter: StartupFilter| {
-        let Reply::StartupOverview(o) = ask(&peer, Request::StartupOverview { filter }).unwrap() else {
-            panic!("overview")
-        };
-        *o
-    };
-    let all = get(StartupFilter::default());
-    assert_eq!((all.entries.len(), all.total, all.os_count, all.signed_count), (3, 3, 1, 1));
-    let hidden = get(StartupFilter {
-        hide_os: true,
-        hide_signed: true,
-    });
-    assert_eq!(hidden.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["mystery"]);
-    assert_eq!((hidden.total, hidden.os_count, hidden.signed_count), (3, 1, 1));
-    // A failing startup source is an error with a reason, not an empty list.
-    h.fake.fail(
-        dyno_platform::fake::FakeOp::StartupList,
-        dyno_core::ports::PlatformError::AccessDenied("no".into()),
-    );
-    assert!(ask(
-        &peer,
-        Request::StartupOverview {
-            filter: StartupFilter::default()
+        Request::RemoveFoundFiles {
+            scan_id: "nope".into(),
+            ids: ids.clone(),
+            mode: DeleteMode::Quarantine
         }
     )
     .is_err());
-}
 
-fn net(links: Vec<Link>, ssid: Option<&str>) -> NetState {
-    NetState {
-        links,
-        ssid: ssid.map(str::to_string),
-    }
-}
-
-fn link(name: &str, kind: LinkKind, addr: &str) -> Link {
-    Link {
-        name: name.into(),
-        kind,
-        addresses: vec![addr.parse().unwrap()],
-    }
-}
-
-#[test]
-fn network_changes_land_on_the_timeline() {
-    let h = Harness::start(|f| f.with(|s| s.net = Some(net(vec![link("en0", LinkKind::Wifi, "192.168.1.5")], Some("Home")))));
-    let shared = h.shared();
-    // The first look is a baseline.
-    assert!(shared.netwatch.look(&shared).is_empty());
-    h.fake.with(|s| {
-        s.net = Some(net(
-            vec![link("en0", LinkKind::Wifi, "10.0.0.9"), link("utun4", LinkKind::Vpn, "10.8.0.2")],
-            Some("Cafe"),
-        ))
-    });
-    let changes = shared.netwatch.look(&shared);
-    assert_eq!(changes.len(), 4, "left, joined, vpn up, ip change: {changes:?}");
-    let peer = h.client();
-    let Reply::History(hist) = ask(
-        &peer,
-        Request::History {
-            range: HistoryRange::Hour,
-            end: None,
-        },
-    )
-    .unwrap() else {
-        panic!("history")
+    // One copy goes to the quarantine, is logged, and can be put back from Activity's quarantine.
+    let one = Request::RemoveFoundFiles {
+        scan_id: r.scan_id.clone(),
+        ids: vec![ids[1].clone()],
+        mode: DeleteMode::Quarantine,
     };
-    let labels: Vec<&str> = hist
-        .events
-        .iter()
-        .filter(|e| e.kind == TimelineEventKind::Network)
-        .map(|e| e.label.as_str())
-        .collect();
-    assert!(labels.contains(&"Left Wi-Fi “Home”"), "{labels:?}");
-    assert!(labels.contains(&"Joined Wi-Fi “Cafe”"));
-    assert!(labels.contains(&"VPN up (utun4)"));
-    assert!(labels.iter().any(|l| l.starts_with("IP address on en0 changed")));
-    // A machine that cannot be read is skipped quietly and keeps the baseline.
-    h.fake.with(|s| s.net = None);
-    assert!(shared.netwatch.look(&shared).is_empty());
-}
-
-fn watched(peer: &Peer<Message>) -> dyno_core::watch::WatchOverview {
-    let Reply::Watched(o) = ask(peer, Request::WatchedFolders).unwrap() else {
-        panic!("watched")
+    let Reply::Outcome(o) = ask(&peer, one).unwrap() else {
+        panic!("outcome")
     };
-    *o
-}
-
-#[test]
-fn a_watched_folder_is_off_until_previewed_and_only_then_sweeps_into_an_undoable_quarantine() {
-    let h = Harness::start(|_| {});
-    let peer = h.client();
-    let dir = h.folder("downloads");
-    let old = old_file(&dir, "installer.dmg");
-    let keep = old_file(&dir, "notes.txt");
-    let outside = old_file(&h.folder("elsewhere"), "other.dmg");
-    // Adding switches nothing on.
-    let Reply::Watched(o) = ask(
-        &peer,
-        Request::AddWatchedFolder {
-            path: dir.to_string_lossy().into_owned(),
-            template: Some("installers".into()),
-            keep_for_secs: 86_400,
-            recursive: false,
-        },
-    )
-    .unwrap() else {
-        panic!("add")
-    };
-    let id = o.folders[0].folder.id.clone();
-    assert!(!o.folders[0].folder.enabled);
-    // Turning on or cleaning without a preview is refused.
-    let on = Request::SetWatchedFolder {
-        id: id.clone(),
-        keep_for_secs: None,
-        enabled: Some(true),
-        recursive: None,
-    };
-    assert!(ask(&peer, on.clone()).unwrap_err().contains("preview first"));
-    assert!(ask(&peer, Request::SweepWatchedFolder { id: id.clone() })
-        .unwrap_err()
-        .contains("preview first"));
-    assert!(old.exists(), "nothing moved before the person agreed");
-    let Reply::WatchPreview(p) = ask(&peer, Request::PreviewWatchedFolder { id: id.clone() }).unwrap() else {
-        panic!("preview")
-    };
-    assert_eq!(p.id, id);
-    assert!(old.exists(), "a preview moves nothing");
-    ask(&peer, on).unwrap();
-    assert!(watched(&peer).folders[0].folder.enabled);
-    // A sweep (creation times are ignored, as temp files made a moment ago would otherwise never be due).
-    let folder = watched(&peer).folders[0].folder.clone();
-    dyno_agent::handlers_watch::sweep_one(&h.shared(), &folder, false).unwrap();
-    assert!(
-        !old.exists() && keep.exists() && outside.exists(),
-        "only the matching old file of the watched folder moved"
-    );
-    let last = watched(&peer).folders[0].folder.last_sweep.clone().unwrap();
-    assert_eq!((last.moved, last.failed), (1, 0));
+    assert_eq!(o.deleted, 1, "{:?}", o.failed);
+    let q = o.quarantine_id.unwrap();
+    let remaining = [&a, &b].iter().filter(|p| p.exists()).count();
+    assert_eq!(remaining, 1);
     let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
         panic!("activity")
     };
-    let entry = log
-        .iter()
-        .find(|a| a.title.contains("old file"))
-        .expect("the sweep is in the activity log");
-    assert_eq!(entry.undo, UndoState::Available);
-    ask(
-        &peer,
-        Request::Undo {
-            activity_id: entry.id.clone(),
-        },
-    )
-    .unwrap();
-    assert!(old.exists(), "undo put the file back");
-    // Stopping the watch leaves the folder alone.
-    ask(&peer, Request::RemoveWatchedFolder { id }).unwrap();
-    assert!(watched(&peer).folders.is_empty() && old.exists());
+    assert!(log.iter().any(|e| e.title.starts_with("Removed 1 file")), "{log:?}");
+    assert!(ask(&peer, Request::RestoreQuarantine { id: q }).is_ok());
+    assert!(a.exists() && b.exists());
 }
 
 #[test]
-fn unsafe_and_overlapping_folders_are_refused_with_a_reason() {
-    let h = Harness::start(|_| {});
+fn the_finder_refuses_a_folder_that_is_not_there_and_stale_selections() {
+    let h = Harness::start();
     let peer = h.client();
-    let add = |path: String| {
-        ask(
-            &peer,
-            Request::AddWatchedFolder {
-                path,
-                template: None,
-                keep_for_secs: 600,
-                recursive: false,
-            },
-        )
+    let q = FinderQuery {
+        folder: "/definitely/not/here".into(),
+        mode: FinderMode::Both,
+        min_bytes: 0,
     };
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
-    for bad in [
-        "/".to_string(),
-        home,
-        h.dirs.root().to_string_lossy().into_owned(),
-        "relative".to_string(),
-        "/no/such/folder".to_string(),
-    ] {
-        let e = add(bad.clone()).unwrap_err();
-        assert!(!e.is_empty(), "{bad}");
-    }
-    let dir = h.folder("a");
-    add(dir.to_string_lossy().into_owned()).unwrap();
-    std::fs::create_dir_all(dir.join("inner")).unwrap();
-    assert!(add(dir.join("inner").to_string_lossy().into_owned())
+    assert!(ask(&peer, Request::FindFiles { query: q })
         .unwrap_err()
-        .contains("overlap"));
+        .contains("cannot be opened"));
     assert!(ask(
         &peer,
-        Request::SetWatchedFolder {
-            id: "w-none".into(),
-            keep_for_secs: Some(600),
-            enabled: None,
-            recursive: None
+        Request::RemoveFoundFiles {
+            scan_id: "x".into(),
+            ids: vec![],
+            mode: DeleteMode::RecycleBin
         }
     )
     .is_err());
-    let id = watched(&peer).folders[0].folder.id.clone();
-    assert!(ask(
-        &peer,
-        Request::SetWatchedFolder {
-            id,
-            keep_for_secs: Some(5),
-            enabled: None,
-            recursive: None
+}
+
+fn backup_report(peer: &Peer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
+    let req = if refresh { Request::RefreshBackup } else { Request::Backup };
+    let Reply::Backup(mut r) = ask(peer, req).unwrap() else {
+        panic!("backup")
+    };
+    for _ in 0..200 {
+        if !r.checking {
+            return *r;
         }
-    )
-    .unwrap_err()
-    .contains("between 10 minutes and 10 days"));
+        std::thread::sleep(Duration::from_millis(50));
+        let Reply::Backup(next) = ask(peer, Request::Backup).unwrap() else {
+            panic!("backup")
+        };
+        r = next;
+    }
+    panic!("the backup check never finished")
 }
 
 #[test]
-fn the_list_survives_an_agent_restart_and_a_damaged_file_starts_empty() {
-    let tmp = tempfile::tempdir().unwrap();
-    let dirs = Dirs::at(tmp.path().join("data"));
-    let dir = std::fs::canonicalize(tmp.path()).unwrap().join("watched");
-    std::fs::create_dir_all(&dir).unwrap();
-    let start = |dirs: &Dirs| {
-        let fake = Fake::new();
-        fake.add_process(process(1, "calm", 1.0));
-        Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap()
-    };
-    let r = start(&dirs);
-    let peer = connect(&dirs).unwrap().0;
-    ask(
+fn a_stale_backup_raises_an_alarm_and_a_fresh_one_clears_it() {
+    let h = Harness::start();
+    let s = h.shared();
+    s.extras.use_os("macos");
+    let old = "/Volumes/.timemachine/X/2026-01-01-000000.backup\n";
+    s.extras.use_backup_tools(Tools::with(vec![
+        ("tmutil destinationinfo", vec![ok("Name : Disk\n")]),
+        ("tmutil latestbackup", vec![ok(old)]),
+    ]));
+    let peer = h.client();
+    // The first request starts the check; it is read-only and finishes in the background.
+    let r = backup_report(&peer, false);
+    let tm = r.statuses.iter().find(|x| x.tool == BackupTool::TimeMachine).unwrap();
+    assert_eq!(tm.state, BackupState::Stale);
+    assert!(r.checked_at.is_some());
+    // Duplicati and the others are "cannot check"/errors from the scripted runner, never a failure of the request.
+    let Reply::Alarms(alarms) = ask(
         &peer,
-        Request::AddWatchedFolder {
-            path: dir.to_string_lossy().into_owned(),
-            template: None,
-            keep_for_secs: 600,
-            recursive: false,
+        Request::Alarms {
+            filter: Default::default(),
         },
     )
-    .unwrap();
-    drop(peer);
-    r.stop();
-    let r = start(&dirs);
-    let peer = connect(&dirs).unwrap().0;
-    assert_eq!(watched(&peer).folders.len(), 1);
-    drop(peer);
-    r.stop();
-    std::fs::write(dirs.watched_folders(), "{broken").unwrap();
-    let _ = std::fs::remove_file(dirs.watched_folders().with_extension("json.bak"));
-    let r = start(&dirs);
-    let peer = connect(&dirs).unwrap().0;
-    assert!(watched(&peer).folders.is_empty());
-    drop(peer);
-    r.stop();
+    .unwrap() else {
+        panic!("alarms")
+    };
+    assert!(
+        alarms.iter().any(|a| a.title.contains("Time Machine backup is out of date")),
+        "{alarms:?}"
+    );
+
+    // A fresh backup clears it.
+    let fresh = format!(
+        "/Volumes/.timemachine/X/{}.backup\n",
+        // Local time does not matter for "recent": the stale limit is 48 hours.
+        "2099-01-01-000000"
+    );
+    s.extras.use_backup_tools(Tools::with(vec![
+        ("tmutil destinationinfo", vec![ok("Name : Disk\n")]),
+        ("tmutil latestbackup", vec![ok(&fresh)]),
+    ]));
+    let r = backup_report(&peer, true);
+    assert_eq!(
+        r.statuses.iter().find(|x| x.tool == BackupTool::TimeMachine).unwrap().state,
+        BackupState::Healthy
+    );
+}
+
+#[test]
+fn background_alerts_can_be_switched_off() {
+    let h = Harness::start();
+    let s = h.shared();
+    s.extras.use_os("macos");
+    s.extras.use_backup_tools(Tools::with(vec![
+        ("tmutil destinationinfo", vec![ok("Name : Disk\n")]),
+        ("tmutil latestbackup", vec![ok("/x/2026-01-01-000000.backup\n")]),
+    ]));
+    let peer = h.client();
+    let Reply::Settings(mut settings) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    settings.backup.alert_when_stale = false;
+    ask(&peer, Request::SaveSettings { settings }).unwrap();
+    backup_report(&peer, true);
+    let Reply::Alarms(alarms) = ask(
+        &peer,
+        Request::Alarms {
+            filter: Default::default(),
+        },
+    )
+    .unwrap() else {
+        panic!("alarms")
+    };
+    assert!(!alarms.iter().any(|a| a.title.contains("out of date")));
+}
+
+#[test]
+fn maintenance_windows_are_validated_and_reported() {
+    let h = Harness::start();
+    let peer = h.client();
+    let Reply::Settings(mut settings) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    settings.maintenance.enabled = true;
+    let err = ask(
+        &peer,
+        Request::SaveSettings {
+            settings: settings.clone(),
+        },
+    )
+    .unwrap_err();
+    assert!(err.contains("Add a window"), "{err}");
+    settings.maintenance.windows = vec![dyno_core::extras::maintenance::Window {
+        days: vec![
+            dyno_core::extras::maintenance::Weekday::Mon,
+            dyno_core::extras::maintenance::Weekday::Tue,
+            dyno_core::extras::maintenance::Weekday::Wed,
+            dyno_core::extras::maintenance::Weekday::Thu,
+            dyno_core::extras::maintenance::Weekday::Fri,
+            dyno_core::extras::maintenance::Weekday::Sat,
+            dyno_core::extras::maintenance::Weekday::Sun,
+        ],
+        start_minute: 0,
+        end_minute: 1439,
+    }];
+    ask(&peer, Request::SaveSettings { settings }).unwrap();
+    let Reply::Maintenance(m) = ask(&peer, Request::Maintenance).unwrap() else {
+        panic!("maintenance")
+    };
+    assert!(m.enabled);
+    // An invalid backup override is refused with the engine's words.
+    let Reply::Settings(mut settings) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    settings.backup.overrides = vec![dyno_core::backup::ToolOverride {
+        tool: BackupTool::Restic,
+        dirs: vec!["relative".into()],
+    }];
+    assert!(ask(&peer, Request::SaveSettings { settings }).unwrap_err().contains("restic"));
+}
+
+#[test]
+fn a_temporary_rule_switches_itself_off_and_says_so() {
+    let h = Harness::start();
+    let peer = h.client();
+    let Reply::Rules(mut set) = ask(&peer, Request::Rules).unwrap() else {
+        panic!("rules")
+    };
+    let r = &mut set.rules[0];
+    r.enabled = true;
+    r.expires_at = Some(real_now().minus(1000));
+    let id = r.id.clone();
+    let set: RuleSet = *set;
+    ask(&peer, Request::SaveRules { rules: set }).unwrap();
+    let mut gone = false;
+    for _ in 0..100 {
+        let Reply::Rules(now_set) = ask(&peer, Request::Rules).unwrap() else {
+            panic!("rules")
+        };
+        let rule = now_set.rules.iter().find(|r| r.id == id).unwrap();
+        if !rule.enabled && rule.expires_at.is_none() {
+            gone = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(gone, "the expired rule is switched off");
+    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
+        panic!("activity")
+    };
+    assert!(
+        log.iter().any(|e| e.title.contains("temporary rule") && e.title.contains("ended")),
+        "{log:?}"
+    );
+}
+
+#[test]
+fn a_measured_effect_is_written_to_the_activity_log() {
+    let h = Harness::start();
+    let s = h.shared();
+    dyno_agent::sampler::apply_commands(
+        &s,
+        vec![Command::Measured {
+            rule_id: "r".into(),
+            rule_name: "Calm builds".into(),
+            app: "Chrome".into(),
+            before: 78.0,
+            after: 31.0,
+            after_secs: 21,
+            description: "lowered its priority".into(),
+        }],
+        real_now(),
+    );
+    let Reply::Activities(log) = ask(&h.client(), Request::Activity { limit: 20 }).unwrap() else {
+        panic!("activity")
+    };
+    let e = log.iter().find(|e| e.title.starts_with("Measured")).unwrap();
+    assert_eq!(e.title, "Measured: Chrome used 78% CPU before and 31% after 21 s");
+    assert!(e.detail.contains("It helped"));
+}
+
+#[test]
+fn boot_analysis_uses_the_stored_boots_and_says_what_it_cannot_know() {
+    let h = Harness::start();
+    let s = h.shared();
+    s.extras.use_os("macos");
+    s.extras.use_tools(Tools::with(vec![]));
+    let t = real_now();
+    for (i, secs) in [40.0f32, 42.0, 41.0, 90.0].iter().enumerate() {
+        lock_put_boot(&s, t.minus((10 - i as i64) * 24 * HOUR), *secs);
+    }
+    let Reply::Boot(b) = ask(&h.client(), Request::BootAnalysis).unwrap() else {
+        panic!("boot")
+    };
+    assert_eq!(b.boots.len(), 4);
+    assert_eq!(b.boots[0].ready_secs, Some(90.0), "newest first");
+    assert!(b.verdict.unwrap().contains("longer than the usual"));
+    assert!(b.steps_unavailable.unwrap().contains("macOS"));
+}
+
+fn lock_put_boot(s: &dyno_agent::agent::Shared, at: Timestamp, ready: f32) {
+    let core = dyno_agent::agent::lock(&s.core);
+    core.store
+        .put_boot(&dyno_core::protocol::BootRecord {
+            at,
+            boot_secs: Some(10.0),
+            ready_secs: Some(ready),
+        })
+        .unwrap();
+}
+
+#[test]
+fn the_inventory_report_is_written_only_to_a_valid_path() {
+    let h = Harness::start();
+    let s = h.shared();
+    s.extras.use_os("linux");
+    s.extras
+        .use_tools(Tools::with(vec![("dpkg-query -W", vec![ok("bash\t5.2\ncurl\t8.4\n")])]));
+    let peer = h.client();
+    let Reply::Software(sw) = ask(&peer, Request::SoftwareInventory).unwrap() else {
+        panic!("software")
+    };
+    assert_eq!(sw.items.len(), 2);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("inv.md");
+    let req = |p: &std::path::Path| Request::SaveInventoryReport {
+        path: p.to_string_lossy().into_owned(),
+        format: dyno_core::extras::software::InventoryFormat::Markdown,
+    };
+    let Reply::InventorySaved(saved) = ask_within(&peer, req(&path), Duration::from_secs(60)).unwrap() else {
+        panic!("saved")
+    };
+    assert!(saved.bytes > 0);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("| bash | 5.2 |"), "{text}");
+    assert!(ask(&peer, req(&dir.path().join("inv.json"))).is_err(), "wrong extension");
+    assert!(ask(&peer, req(&dir.path().join("missing/inv.md"))).is_err(), "folder must exist");
+}
+
+#[test]
+fn gpu_and_usage_degrade_to_a_reason() {
+    let h = Harness::start();
+    let s = h.shared();
+    s.extras.use_os("linux");
+    s.extras.use_tools(Tools::with(vec![]));
+    let peer = h.client();
+    let Reply::Gpu(g) = ask(&peer, Request::GpuProcesses).unwrap() else {
+        panic!("gpu")
+    };
+    assert!(g.processes.is_empty() && g.unavailable.is_some());
+    let Reply::AppUsage(u) = ask(&peer, Request::AppUsage).unwrap() else {
+        panic!("usage")
+    };
+    assert!(u.energy_unavailable.is_some());
 }

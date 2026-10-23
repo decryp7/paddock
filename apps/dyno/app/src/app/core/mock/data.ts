@@ -51,7 +51,8 @@ export const BUILT_IN_PROTECTED = [
   'Dyno.exe',
 ];
 
-export function demoRules(): Rule[] {
+/** The sample rules; the browser rule is a temporary one that ends a little over two hours from `now`. */
+export function demoRules(now: number = Date.now()): Rule[] {
   return [
     {
       id: 'tame-long-hogs',
@@ -66,11 +67,12 @@ export function demoRules(): Rule[] {
       ],
       releaseAfterSecs: 60,
       profiles: ['normal', 'meeting'],
+      expiresAt: null,
     },
     {
       id: 'browser-background',
       name: 'Browsers in the background',
-      enabled: false,
+      enabled: true,
       condition: { target: { apps: ['chrome.exe', 'msedge.exe', 'firefox.exe'] }, cpuAbove: 15, forSecs: 120, when: ['userActive'] },
       ladder: [
         { action: 'efficiencyMode', afterSecs: 0 },
@@ -78,6 +80,7 @@ export function demoRules(): Rule[] {
       ],
       releaseAfterSecs: 30,
       profiles: ['gaming', 'meeting', 'buildingCode'],
+      expiresAt: now + 2 * 3_600_000 + 10 * 60_000,
     },
     {
       id: 'meeting-builds',
@@ -90,6 +93,7 @@ export function demoRules(): Rule[] {
       ],
       releaseAfterSecs: 20,
       profiles: ['meeting'],
+      expiresAt: null,
     },
     {
       id: 'battery-saver',
@@ -103,6 +107,7 @@ export function demoRules(): Rule[] {
       ],
       releaseAfterSecs: 60,
       profiles: ['onBattery'],
+      expiresAt: null,
     },
     {
       id: 'indexer-idle',
@@ -112,6 +117,7 @@ export function demoRules(): Rule[] {
       ladder: [{ action: 'efficiencyMode', afterSecs: 0 }],
       releaseAfterSecs: 120,
       profiles: [],
+      expiresAt: null,
     },
   ];
 }
@@ -435,6 +441,7 @@ export function demoActivity(now: number): ActivityEntry[] {
     bytes,
   });
   return [
+    a('act-13', 90_000, 'rule', 'Lowered priority of Google Chrome', 'Measured: Chrome used 78 % CPU before and 31 % 21 s after.', 'available'),
     a('act-12', 4 * MIN, 'rule', 'Lowered priority of rustc.exe', 'Tame long CPU hogs: above 40% for 5 min', 'available'),
     a('act-11', 2 * MIN, 'manual', 'Efficiency mode on for Docker Desktop.exe (6)', 'From the task manager', 'available'),
     a('act-10', 38 * MIN, 'release', 'Released node.exe', 'Below the threshold for 60 s', 'notUndoable'),
@@ -479,6 +486,14 @@ export function demoSettings(): Settings {
     baselines: { enabled: true, learningDays: 7, alarms: false },
     hardwareAlarms: { throttling: true, lifespan: true },
     unusual: { enabled: true, learningDays: 7 },
+    maintenance: {
+      enabled: true,
+      windows: [
+        { days: ['mon', 'tue', 'wed', 'thu', 'fri'], startMinute: 22 * 60, endMinute: 2 * 60 },
+        { days: ['sat', 'sun'], startMinute: 23 * 60, endMinute: 5 * 60 },
+      ],
+    },
+    backup: { alertWhenStale: true, staleAfterHours: 48, overrides: [] },
   };
 }
 

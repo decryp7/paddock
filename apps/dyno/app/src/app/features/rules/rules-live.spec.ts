@@ -71,4 +71,18 @@ describe('dy-rules-live', () => {
     await settle();
     expect(el.querySelector('[aria-label="Recent activity"] [role="alert"]')).toBeNull();
   });
+
+  it('shows the measured CPU before and after, and that it is still being measured', async () => {
+    const { el, live, settle, mock } = await render();
+    const cell = () => el.querySelector('[aria-label="In effect now"] td.cpu')!;
+    expect(cell().textContent).toContain('CPU 78% → 31%');
+    live.receive({ ...mock.liveUpdate('summary'), activeActions: mock.liveUpdate('summary').activeActions.map((a) => ({ ...a, cpuAfter: null })) });
+    await settle();
+    expect(cell().textContent).toContain('CPU 78% → measuring…');
+  });
+
+  it('lists the measured proof sentence in the recent activity', async () => {
+    const { el } = await render();
+    expect(el.querySelector('[aria-label="Recent activity"]')!.textContent).toContain('Measured: Chrome used 78 % CPU before and 31 % 21 s after.');
+  });
 });

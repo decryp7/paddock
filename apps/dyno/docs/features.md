@@ -11,6 +11,8 @@ not in the code (see [roadmap.md](roadmap.md) for the work package). Screenshots
 - [Processes](#processes)
 - [Why is it slow?](#why-is-it-slow)
 - [CPU taming and profiles](#cpu-taming-and-profiles)
+- [Extras](#extras)
+- [Backup health](#backup-health)
 - [Health and startup](#health-and-startup)
 - [Throttling, hardware life and what is normal](#throttling-hardware-life-and-what-is-normal)
 - [Cleanup](#cleanup)
@@ -92,9 +94,41 @@ battery) and an escalation ladder (lower priority, efficiency mode, a hard cap, 
 carried out per OS (Windows job objects; a 100 ms SIGSTOP/SIGCONT duty cycle on macOS and Linux; EcoQoS and background QoS;
 `nice`), released when the app calms down, when the rule stops applying and when Dyno stops, also after a crash
 ([ADR 0004](adr/0004-cpu-taming-and-throttling-methods.md)). Profiles (Normal, Gaming, Meeting, On battery, Building code)
-select the active rules. **Rules ship disabled.** The CPU taming screen is a placeholder; rules are managed through the
-protocol only (`Rules`, `SaveRules`, `SetProfile`, `PauseRules`). The protected list is absolute and rules never touch the
-foreground app.
+select the active rules. **Rules ship disabled.** A rule can be **temporary** (it ends at a time, releases everything it did and switches
+itself off, with an Activity entry), never touches the app in front (and gives it back the moment you switch to it), restores
+everything when the condition ends or Dyno exits, and **proves its effect**: about 20 s after each step Dyno measures the app's CPU
+again and writes "used 78% CPU before and 31% after 21 s" to Activity and the in-effect list ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)).
+The protected list is absolute and rules never touch the foreground app.
+
+## Extras
+
+**Built** (WP-13), all read-only, on the **Extras** page; every tool runs with a timeout and a missing or refused tool becomes a sentence
+saying why, never an empty screen.
+
+- **What changed**: installs, updates, removals, new startup items, setting changes and cleanups in a window you pick. Dyno compares
+  the software and startup lists every few hours and says since when it has been watching; the first look is a silent baseline.
+- **Sleep**: what keeps the computer awake (`pmset -g assertions`, `powercfg /requests`, `systemd-inhibit --list`) and what woke it
+  (`pmset -g log`, `powercfg /lastwake`). Windows lists blockers only to administrators and says so.
+- **Boot**: how long each start-up took until the desktop settled (recorded by the agent from now on), a sentence comparing the last
+  one with the usual, and on Linux and Windows what slowed it (`systemd-analyze blame`, Diagnostics-Performance events). macOS keeps
+  no breakdown and says so.
+- **Apps**: bytes received and sent per app (the OS's counters; macOS) and energy impact per app (macOS `top`); Windows and Linux say
+  why there is no energy number.
+- **GPU**: GPU use per process (macOS accelerator client time, Windows GPU Engine counters, NVIDIA `nvidia-smi pmon`); Linux with
+  other graphics says it needs the vendor's tool.
+- **Files**: large and duplicate files in a folder you choose. Duplicates are matched by SHA-256 after size and the first 64 KiB.
+  Removal goes through the cleanup policy (re-checked, to the Trash or the 7-day quarantine, never every copy).
+- **Inventory**: the installed software next to the hardware; **Export report** saves Markdown or JSON where you choose.
+- **Maintenance**: windows (days and times) when Dyno's heavier background work may run: reading the OS logs, backup checks and
+  change recording. A click always runs.
+
+## Backup health
+
+**Built** (WP-14), on the **Backup health** page and in Settings. Dyno checks that backups ran, never runs or manages one: Time Machine
+(`tmutil`), Windows Backup and File History (their event logs, `wbadmin`), restic and Borg (`snapshots` / `list`, with the repository
+variables your login shell exports, never passwords); Duplicati is detected but cannot be read yet. Tools are found through your login
+shell's `PATH` (so Homebrew installs work from a background service) and an optional folder per tool. A backup older than the limit
+(48 hours by default) is one plain alarm per tool, cleared when a new backup appears. No tool found is a normal state.
 
 ## Health and startup
 
@@ -238,9 +272,7 @@ Declarative TOML packs are planned ([WP-15](roadmap.md#wp-15-declarative-toml-pa
 All in [roadmap.md](roadmap.md): Issues with statistics, new and unusual processes, right-click search, watched folders with
 keep-for times, benchmarks on click, the tuning catalogue, extras (what changed, why won't it
 All in [roadmap.md](roadmap.md): right-click search, watched folders with
-keep-for times, benchmarks on click, a performance-counter browser, the tuning catalogue, extras (what changed, why won't it
-sleep, boot analysis, network and energy per app, inventory report, GPU per process, large and duplicate file finder,
-maintenance windows), backup health checks, declarative packs, a local web API, "Explain this" via Pitwall, a multi-PC LAN view
+keep-for times, a performance-counter browser, declarative packs, a local web API, "Explain this" via Pitwall, a multi-PC LAN view
 later.
 
 ## Platforms

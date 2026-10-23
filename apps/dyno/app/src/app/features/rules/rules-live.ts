@@ -1,7 +1,9 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { MatTooltip } from '@angular/material/tooltip';
 import type { ActiveAction } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatRelative } from '../../shared/format';
+import { cpuProofText } from './rules-model';
 import { Icon } from '../../shared/icon';
 import { ActivityStore } from '../../state/activity.store';
 import { LiveStore } from '../../state/live.store';
@@ -10,7 +12,7 @@ import { RulesStore } from '../../state/rules.store';
 /** What rules are doing right now (with a Release per app) and the last few things they did. */
 @Component({
   selector: 'dy-rules-live',
-  imports: [AsyncState, Icon],
+  imports: [AsyncState, Icon, MatTooltip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="In effect now">
@@ -20,13 +22,14 @@ import { RulesStore } from '../../state/rules.store';
       } @else {
         <table class="table">
           <caption class="visually-hidden">What Dyno is doing to apps right now</caption>
-          <thead><tr><th>App</th><th>Rule</th><th>What Dyno did</th><th>Since</th><th class="act"><span class="visually-hidden">Actions</span></th></tr></thead>
+          <thead><tr><th>App</th><th>Rule</th><th>What Dyno did</th><th>CPU</th><th>Since</th><th class="act"><span class="visually-hidden">Actions</span></th></tr></thead>
           <tbody>
             @for (a of actions(); track a.target.pid) {
               <tr>
                 <td class="app"><span class="truncate" [title]="a.app">{{ a.app }}</span></td>
                 <td class="muted-cell"><span class="truncate" [title]="a.ruleName">{{ a.ruleName }}</span></td>
                 <td>{{ a.description }}</td>
+                <td class="muted-cell cpu"><span class="proof" matTooltip="Measured about 20 seconds after the latest step took effect." tabindex="0">{{ proof(a) }}</span></td>
                 <td class="muted-cell">{{ since(a) }}</td>
                 <td class="act"><button type="button" class="btn ghost sm" [attr.aria-label]="'Release ' + a.app" (click)="rules.release(a.target)"><dy-icon name="undo" /> Release</button></td>
               </tr>
@@ -71,6 +74,8 @@ import { RulesStore } from '../../state/rules.store';
     .table .act { width: 1%; text-align: right; padding-right: var(--sp-2); }
     .table .when { width: 1%; }
     .app { font-weight: var(--fw-medium); }
+    .cpu { font-variant-numeric: tabular-nums; }
+    .proof { cursor: help; }
     .truncate { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .muted-cell { color: var(--text-3); }
     .empty { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4); color: var(--text-2); }
@@ -91,6 +96,7 @@ export class RulesLive implements OnInit {
     if (!this.activity.loaded()) void this.activity.load();
   }
 
+  protected proof = (a: ActiveAction): string => cpuProofText(a.cpuBefore, a.cpuAfter);
   protected since = (a: ActiveAction): string => formatRelative(a.since, Date.now());
   protected ago = (at: number): string => formatRelative(at, Date.now());
 }

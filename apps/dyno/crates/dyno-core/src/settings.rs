@@ -181,6 +181,10 @@ pub struct Settings {
     pub hardware_alarms: HardwareAlarms,
     /// New and unusual programs: learn a baseline and list what is new (observe-only).
     pub unusual: crate::unusual::UnusualSettings,
+    /// Maintenance windows: when Dyno's heavier background work may run (off: any time).
+    pub maintenance: crate::extras::maintenance::MaintenanceSettings,
+    /// Backup health checks: how stale is too stale, and where to find the tools.
+    pub backup: crate::backup::BackupSettings,
 }
 
 /// Which hardware findings may raise an alarm (the pages always show them).
@@ -226,6 +230,8 @@ impl Default for Settings {
             baselines: Default::default(),
             hardware_alarms: Default::default(),
             unusual: Default::default(),
+            maintenance: Default::default(),
+            backup: Default::default(),
         }
     }
 }
@@ -259,7 +265,22 @@ impl Settings {
         self.custom_alerts = crate::alarms::custom::normalise_rules(self.custom_alerts);
         self.counters = self.counters.normalised();
         self.unusual = self.unusual.clamped();
+        // A damaged value falls back to its default rather than blocking the whole file.
+        self.maintenance.windows.truncate(crate::extras::maintenance::MAX_WINDOWS);
+        if self.maintenance.validate().is_err() {
+            self.maintenance = Default::default();
+        }
+        if self.backup.validate().is_err() {
+            self.backup = Default::default();
+        }
         self
+    }
+
+    /// What the user must fix before these settings are saved (the lenient [`Settings::normalised`] would silently reset
+    /// it): a maintenance window or a backup override that does not make sense.
+    pub fn check_extras(&self) -> Result<(), String> {
+        self.maintenance.validate()?;
+        self.backup.validate()
     }
 }
 
@@ -373,5 +394,22 @@ mod tests {
         assert!(s.unusual.enabled);
         let j = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(j["unusual"]["learningDays"], 7);
+    }
+
+    #[test]
+    fn extras_settings_are_optional_validated_and_reset_when_damaged() {
+        let (s, w) = parse(r#"{"theme":"dark"}"#);
+        assert!(w.is_none());
+        assert!(!s.maintenance.enabled && s.backup.alert_when_stale && s.backup.stale_after_hours == 48);
+        let (s, _) = parse(r#"{"maintenance":{"enabled":true,"windows":[]},"backup":{"staleAfterHours":0}}"#);
+        assert_eq!(s.maintenance, Default::default());
+        assert_eq!(s.backup, Default::default());
+        let mut s = Settings::default();
+        assert!(s.check_extras().is_ok());
+        s.maintenance.enabled = true;
+        assert!(s.check_extras().unwrap_err().contains("Add a window"));
+        s.maintenance.enabled = false;
+        s.backup.stale_after_hours = 5000;
+        assert!(s.check_extras().is_err());
     }
 }

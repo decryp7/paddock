@@ -11,10 +11,11 @@ use super::walk::{owner, Budget};
 use super::{packs, usage};
 use crate::paths::Dirs;
 use dyno_core::cleanup::{CategorySpec, Os};
-use dyno_core::cleanup::{CleanupCategory, CleanupOutcome, CleanupScan, DeleteMode, QuarantineEntry, SizeNode};
+use dyno_core::cleanup::{CleanupCategory, CleanupOutcome, CleanupScan, DeleteMode, FailedItem, QuarantineEntry, SizeNode};
 use dyno_core::ports::FileLocks;
 use dyno_core::time::Timestamp;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -159,6 +160,63 @@ impl CleanupCentre {
             guard(&self.state).scans.retain(|s| s.id != scan_id);
         }
         out
+    }
+
+    /// Moves files that something else already admitted and re-checked (the file finder) to the Recycle Bin / Trash or the
+    /// quarantine. Nothing is checked here: the caller owns the admission, this owns only the recoverable move.
+    pub fn dispose(&self, items: &[(PathBuf, u64)], mode: DeleteMode, now: Timestamp) -> CleanupOutcome {
+        let batch_id = {
+            let mut st = guard(&self.state);
+            st.counter += 1;
+            format!("q-{}-{}", now.millis(), st.counter)
+        };
+        let mut batch = match mode {
+            DeleteMode::Quarantine => match self.quarantine.begin(&batch_id, now) {
+                Ok(b) => Some(b),
+                Err(why) => {
+                    return CleanupOutcome {
+                        freed_bytes: 0,
+                        deleted: 0,
+                        failed: items
+                            .iter()
+                            .map(|(p, _)| FailedItem {
+                                path: p.to_string_lossy().into_owned(),
+                                reason: why.clone(),
+                            })
+                            .collect(),
+                        quarantine_id: None,
+                    }
+                }
+            },
+            DeleteMode::RecycleBin => None,
+        };
+        let (mut deleted, mut freed, mut failed) = (0usize, 0u64, Vec::new());
+        for (path, bytes) in items {
+            let moved = match batch.as_mut() {
+                Some(b) => b.stage(path, *bytes),
+                None => self.trash.trash(path),
+            };
+            match moved {
+                Ok(()) => {
+                    deleted += 1;
+                    freed = freed.saturating_add(*bytes);
+                }
+                Err(reason) => failed.push(FailedItem {
+                    path: path.to_string_lossy().into_owned(),
+                    reason,
+                }),
+            }
+        }
+        let quarantine_id = batch.and_then(|b| {
+            let id = b.id().to_string();
+            b.finish().map(|_| id)
+        });
+        CleanupOutcome {
+            freed_bytes: freed,
+            deleted,
+            failed,
+            quarantine_id,
+        }
     }
 
     /// The names of the categories the ids in a scan belong to (for the activity log).

@@ -206,6 +206,64 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await expect(page.getByRole('region', { name: 'Startup manager' }).getByRole('table')).toBeVisible();
     },
   },
+  { name: 'backup', path: '/#/backup', ready: async (page) => void (await expect(page.getByRole('table', { name: 'Backup tools' })).toBeVisible()) },
+  {
+    name: 'extras-changes',
+    path: '/#/extras?tab=changes',
+    ready: async (page) => void (await expect(page.getByRole('table', { name: 'What changed' })).toBeVisible()),
+  },
+  {
+    name: 'extras-sleep',
+    path: '/#/extras?tab=sleep',
+    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Recent wakes' })).toBeVisible()),
+  },
+  {
+    name: 'extras-boot',
+    path: '/#/extras?tab=boot',
+    ready: async (page) => {
+      await expect(page.getByRole('table', { name: 'What slowed start-up' })).toBeVisible();
+      await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+      await page.clock.runFor(500);
+    },
+  },
+  {
+    name: 'extras-apps',
+    path: '/#/extras?tab=apps',
+    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Network and energy per app' })).toBeVisible()),
+  },
+  {
+    name: 'extras-gpu',
+    path: '/#/extras?tab=gpu',
+    ready: async (page) => void (await expect(page.getByRole('table', { name: 'GPU use per process' })).toBeVisible()),
+  },
+  {
+    name: 'extras-files',
+    path: '/#/extras?tab=files',
+    size: { width: 1440, height: 1320 },
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Choose a folder' }).click();
+      await expect(page.getByRole('table', { name: 'Large and duplicate files' })).toBeVisible();
+    },
+  },
+  {
+    name: 'extras-inventory',
+    path: '/#/extras?tab=inventory',
+    ready: async (page) => void (await expect(page.getByRole('table', { name: 'Installed software' })).toBeVisible()),
+  },
+  {
+    name: 'extras-maintenance',
+    path: '/#/extras?tab=maintenance',
+    ready: async (page) => void (await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri')),
+  },
+  {
+    name: 'rules-temporary',
+    path: '/#/rules',
+    size: { width: 1440, height: 1100 },
+    ready: async (page) => {
+      await expect(page.getByRole('region', { name: 'In effect now' })).toContainText('CPU 78% → 31%');
+      await expect(page.getByRole('row', { name: /Browsers in the background/ })).toContainText('Ends in 2 h 10 min');
+    },
+  },
   { name: 'settings', path: '/#/settings', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()) },
   { name: 'rules', path: '/#/rules', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'CPU taming' })).toBeVisible()) },
   { name: 'alarms', path: '/#/alarms', ready: async (page) => void (await expect(page.getByRole('button', { name: /Acknowledge all/ })).toBeVisible()) },

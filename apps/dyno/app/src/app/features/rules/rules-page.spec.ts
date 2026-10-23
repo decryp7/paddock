@@ -166,4 +166,90 @@ describe('dy-rules-page', () => {
     expect(el.querySelector('[role="alert"]')).toBeNull();
     expect(el.querySelectorAll('table[aria-label="Rules"] tbody tr').length).toBeGreaterThan(0);
   });
+
+  describe('temporary rules', () => {
+    const durButton = (el: HTMLElement, name: string) => byLabel(el, `How long ${name} stays on`);
+    const choose = async (f: Parameters<typeof settle>[0], label: string) => {
+      const item = [...document.querySelectorAll<HTMLButtonElement>('.menu button')].find((b) => b.textContent!.trim() === label)!;
+      item.click();
+      await settle(f);
+    };
+
+    it('says in one place that the app in front is never touched', async () => {
+      const { f, el } = render();
+      await settle(f);
+      const notes = [...el.querySelectorAll('.fixed-note')];
+      expect(notes).toHaveLength(1);
+      expect(notes[0]!.textContent).toContain('Never touches the app in front; gives it back its CPU the moment you switch to it.');
+    });
+
+    it('shows how long a temporary rule has left, and "until turned off" for the others', async () => {
+      const { f, el } = render();
+      await settle(f);
+      expect(durButton(el, 'Browsers in the background').textContent).toMatch(/Ending now|Ends in/);
+      expect(durButton(el, 'Tame long CPU hogs').textContent).toContain('Until turned off');
+      expect(durButton(el, 'Save battery').disabled).toBe(true);
+      expect(durButton(el, 'Tame long CPU hogs').disabled).toBe(false);
+    });
+
+    it('sets an end time of an hour, four hours or tomorrow, and clears it again', async () => {
+      const { f, el, store } = render();
+      await settle(f);
+      const rule = () => store.ruleSet()!.rules.find((r) => r.id === 'tame-long-hogs')!;
+      const before = Date.now();
+      durButton(el, 'Tame long CPU hogs').click();
+      await settle(f);
+      await choose(f, '1 hour');
+      expect(rule().expiresAt! - before).toBeGreaterThanOrEqual(3_600_000);
+      expect(rule().expiresAt! - before).toBeLessThan(3_600_000 + 5_000);
+      expect(durButton(el, 'Tame long CPU hogs').textContent).toContain('Ends in 1 h');
+      durButton(el, 'Tame long CPU hogs').click();
+      await settle(f);
+      await choose(f, '4 hours');
+      expect(rule().expiresAt! - before).toBeGreaterThanOrEqual(4 * 3_600_000);
+      durButton(el, 'Tame long CPU hogs').click();
+      await settle(f);
+      await choose(f, 'Until tomorrow');
+      expect(new Date(rule().expiresAt!).getHours()).toBe(6);
+      durButton(el, 'Tame long CPU hogs').click();
+      await settle(f);
+      await choose(f, 'Until I turn it off');
+      expect(rule().expiresAt).toBeNull();
+    });
+
+    it('asks for a time of day for a custom end, and a cancelled question changes nothing', async () => {
+      const { f, el, store } = render();
+      await settle(f);
+      durButton(el, 'Tame long CPU hogs').click();
+      await settle(f);
+      await choose(f, 'Until a time…');
+      const dialog = document.querySelector('.dy-dialog-panel')!;
+      expect(dialog.textContent).toContain('The rule ends');
+      [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Cancel')!.click();
+      await settle(f);
+      expect(store.ruleSet()!.rules.find((r) => r.id === 'tame-long-hogs')!.expiresAt).toBeNull();
+      durButton(el, 'Tame long CPU hogs').click();
+      await settle(f);
+      await choose(f, 'Until a time…');
+      const input = document.querySelector<HTMLInputElement>('#tmp-time')!;
+      input.value = '23:15';
+      input.dispatchEvent(new Event('input'));
+      await settle(f);
+      const set = [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent === 'Set end time')!;
+      set.click();
+      await settle(f);
+      expect(new Date(store.ruleSet()!.rules.find((r) => r.id === 'tame-long-hogs')!.expiresAt!).getMinutes()).toBe(15);
+    });
+
+    it('turning a rule off clears its end time', async () => {
+      const { f, el, store } = render();
+      await settle(f);
+      const rule = () => store.ruleSet()!.rules.find((r) => r.id === 'browser-background')!;
+      expect(rule().expiresAt).not.toBeNull();
+      el.querySelector<HTMLButtonElement>('tr[data-id="browser-background"] button[role="switch"]')!.click();
+      await settle(f);
+      expect(rule()).toMatchObject({ enabled: false, expiresAt: null });
+      expect(durButton(el, 'Browsers in the background').disabled).toBe(true);
+    });
+  });
 });

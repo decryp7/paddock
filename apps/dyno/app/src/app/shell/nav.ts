@@ -26,6 +26,8 @@ export const NAV: NavItem[] = [
   { path: '/cleanup', label: 'Cleanup', icon: 'cleanup', keywords: 'temp caches disk space free up quarantine trash recycle bin developer build output' },
   { path: '/watched', label: 'Watched folders', icon: 'folder', keywords: 'downloads screenshots keep for old files expire quarantine automatic cleanup sweep' },
   { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
+  { path: '/backup', label: 'Backup health', icon: 'restore', keywords: 'backup time machine restic borg file history duplicati stale last backup' },
+  { path: '/extras', label: 'Extras', icon: 'layers', keywords: 'what changed installs updates sleep wake blockers boot startup time apps network energy gpu large files duplicates software inventory maintenance windows' },
   { path: '/lifespan', label: 'Lifespan', icon: 'battery', keywords: 'ssd disk battery life wear forecast replace endurance capacity cycles' },
   { path: '/tuning', label: 'Tuning', icon: 'sparkle', keywords: 'power plan sleep hibernation battery charge limit indexing visual effects background apps suggestions undo' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },

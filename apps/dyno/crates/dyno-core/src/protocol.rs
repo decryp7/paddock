@@ -480,6 +480,52 @@ pub enum Request {
         /// The folder.
         id: String,
     },
+    // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
+    /// "What changed": installs, updates, new startup items and setting changes in a window. A query. Appended.
+    Changes {
+        /// The window.
+        query: crate::extras::changes::ChangesQuery,
+    },
+    /// "Why won't it sleep / what woke it". A query that runs read-only OS tools. Appended.
+    SleepBlockers,
+    /// Boot analysis. A query. Appended.
+    BootAnalysis,
+    /// Network and energy per app. A query that runs read-only OS tools (takes a second or two). Appended.
+    AppUsage,
+    /// GPU use per process. A query. Appended.
+    GpuProcesses,
+    /// The installed software. A query. Appended.
+    SoftwareInventory,
+    /// Writes the inventory report (hardware and software) to a path the user picked in the OS save dialog; answers
+    /// `InventorySaved`. Appended.
+    SaveInventoryReport {
+        /// Where (absolute, ending in the format's extension, in an existing folder).
+        path: String,
+        /// The file format.
+        format: crate::extras::software::InventoryFormat,
+    },
+    /// Looks for large and duplicate files in a folder the user chose. Deletes nothing. Appended.
+    FindFiles {
+        /// What and where.
+        query: crate::extras::files::FinderQuery,
+    },
+    /// Removes files of a finder result the user selected, through the cleanup policy (re-checked, to the Trash or the
+    /// quarantine). Answers the outcome. Appended.
+    RemoveFoundFiles {
+        /// The finder result.
+        scan_id: String,
+        /// The selected files.
+        ids: Vec<String>,
+        /// Where they go.
+        mode: DeleteMode,
+    },
+    /// The maintenance windows' state now. A query. Appended.
+    Maintenance,
+    /// Backup health (Time Machine, Windows Backup, File History, restic, Borg, Duplicati): the last check, without
+    /// running one unless there is none. Appended.
+    Backup,
+    /// Checks the backups now (read-only tools with timeouts) and answers the report. Appended.
+    RefreshBackup,
 }
 
 /// Dyno's own cost.
@@ -767,6 +813,37 @@ pub enum Reply {
     Watched(Box<crate::watch::WatchOverview>),
     /// A dry run of a sweep. Appended.
     WatchPreview(Box<crate::watch::WatchPreview>),
+    // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
+    /// What changed. Appended.
+    Changes(Box<crate::extras::changes::ChangeTimeline>),
+    /// Sleep blockers and wakes. Appended.
+    Sleep(Box<crate::extras::sleep::SleepReport>),
+    /// Boot analysis. Appended.
+    Boot(Box<crate::extras::boot::BootReport>),
+    /// Network and energy per app. Appended.
+    AppUsage(Box<crate::extras::usage::UsageReport>),
+    /// GPU per process. Appended.
+    Gpu(Box<crate::extras::gpu::GpuReport>),
+    /// Installed software. Appended.
+    Software(Box<crate::extras::software::SoftwareInventory>),
+    /// The inventory report was written. Appended.
+    InventorySaved(SavedInventory),
+    /// Large and duplicate files. Appended.
+    FileFinder(Box<crate::extras::files::FinderResult>),
+    /// The maintenance windows' state. Appended.
+    Maintenance(crate::extras::maintenance::MaintenanceStatus),
+    /// Backup health. Appended.
+    Backup(Box<crate::backup::BackupReport>),
+}
+
+/// The inventory report that was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedInventory {
+    /// Where.
+    pub path: String,
+    /// Its size in bytes.
+    pub bytes: u64,
 }
 
 impl Reply {
@@ -830,6 +907,16 @@ impl Reply {
             Reply::StartupOverview(x) => v(x),
             Reply::Watched(x) => v(x),
             Reply::WatchPreview(x) => v(x),
+            Reply::Changes(x) => v(x),
+            Reply::Sleep(x) => v(x),
+            Reply::Boot(x) => v(x),
+            Reply::AppUsage(x) => v(x),
+            Reply::Gpu(x) => v(x),
+            Reply::Software(x) => v(x),
+            Reply::InventorySaved(x) => v(x),
+            Reply::FileFinder(x) => v(x),
+            Reply::Maintenance(x) => v(x),
+            Reply::Backup(x) => v(x),
         }
     }
 }
@@ -1059,6 +1146,19 @@ mod tests {
             Reply::Benchmarks(Box::default()),
             Reply::Network(Box::default()),
             Reply::HostNames(vec![]),
+            Reply::Changes(Box::default()),
+            Reply::Sleep(Box::default()),
+            Reply::Boot(Box::default()),
+            Reply::AppUsage(Box::default()),
+            Reply::Gpu(Box::default()),
+            Reply::Software(Box::default()),
+            Reply::InventorySaved(SavedInventory {
+                path: "/x.md".into(),
+                bytes: 1,
+            }),
+            Reply::FileFinder(Box::default()),
+            Reply::Maintenance(crate::extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), 0)),
+            Reply::Backup(Box::default()),
             Reply::CounterObjects(Box::default()),
             Reply::CounterHits(vec![]),
             Reply::CounterValues(vec![]),
@@ -1137,6 +1237,41 @@ mod tests {
             serde_json::to_value(AgentError::new(ErrorCode::BadRequest, "x")).unwrap(),
             serde_json::json!({"code": "badRequest", "message": "x"})
         );
+    }
+
+    #[test]
+    fn extras_requests_have_the_json_shape_of_api_types() {
+        for (name, r) in [
+            ("sleepBlockers", Request::SleepBlockers),
+            ("bootAnalysis", Request::BootAnalysis),
+            ("appUsage", Request::AppUsage),
+            ("gpuProcesses", Request::GpuProcesses),
+            ("softwareInventory", Request::SoftwareInventory),
+            ("maintenance", Request::Maintenance),
+            ("backup", Request::Backup),
+            ("refreshBackup", Request::RefreshBackup),
+        ] {
+            assert_eq!(serde_json::to_value(&r).unwrap(), name);
+            assert_eq!(serde_json::from_value::<Request>(serde_json::json!(name)).unwrap(), r);
+        }
+        let r: Request = serde_json::from_value(serde_json::json!({"changes": {"query": {"around": 5, "hours": 6}}})).unwrap();
+        assert!(matches!(r, Request::Changes { query } if query.hours == 6));
+        let r: Request = serde_json::from_value(serde_json::json!({"changes": {"query": {}}})).unwrap();
+        assert!(matches!(r, Request::Changes { query } if query.around.is_none()));
+        let r: Request = serde_json::from_value(serde_json::json!({"findFiles": {"query": {"folder": "/x", "minBytes": 5}}})).unwrap();
+        assert!(matches!(r, Request::FindFiles { query } if query.mode == crate::extras::files::FinderMode::Both));
+        let r: Request =
+            serde_json::from_value(serde_json::json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "recycleBin"}})).unwrap();
+        assert!(matches!(
+            r,
+            Request::RemoveFoundFiles {
+                mode: DeleteMode::RecycleBin,
+                ..
+            }
+        ));
+        let r: Request =
+            serde_json::from_value(serde_json::json!({"saveInventoryReport": {"path": "/r.md", "format": "markdown"}})).unwrap();
+        assert!(matches!(r, Request::SaveInventoryReport { .. }));
     }
 
     #[test]

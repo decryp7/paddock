@@ -33,8 +33,8 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
 | WP-12 | Performance counters browser | built: Counters page (objects, search, instances), chart any counter with the app's events marked, pinned counters and saved sets in settings, "Add to the dashboard" as a counter widget, `dyno counters`; Windows PDH (`PdhEnumObjectsW`, `PdhEnumObjectItemsW`, one persistent query; type-checked and linted from macOS, run by the Windows runner), macOS `vm_stat`/`netstat -inb`/`iostat -Id`/`sysctl`, Linux `/proc`; IOKit per-device statistics are not read |
 | WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Linux `sock_diag` byte counters + `/proc/<pid>/fd`, no admin; Windows per-connection TCP statistics, which need administrator rights, so it says so until the helper), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
-| WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | planned |
-| WP-14 | Backup health checks | planned |
+| WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | built (feat/wp13-14-36): the Extras page with eight tabs over pure parsers with fixtures ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)). Verified by fixtures only: the Windows and Linux readers. Not built: per-app network and energy are not stored as app-minute columns (shown live, macOS only for energy), and Linux GPU per process needs NVIDIA's tool |
+| WP-14 | Backup health checks | built (feat/wp13-14-36): Time Machine, Windows Backup, File History, restic and Borg judged against a stale limit, alarm per tool, login-shell `PATH` resolver (G11). Duplicati is detected but not readable yet; the detectors are built in until WP-15's packs exist; Windows event IDs are fixture-verified only |
 | WP-15 | Declarative TOML packs | planned |
 | WP-16 | Optional local web API | planned |
 | WP-17 | Explain this via Pitwall | planned |
@@ -54,7 +54,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-33 | Right-click "search this file's hash on VirusTotal" (opens the browser only; nothing is uploaded) | built: SHA-256 computed locally and shown first, then the browser opens the VirusTotal page |
 | WP-34 | Startup manager filter: hide OS and signed entries | built: engine-side filter with counts, remembered; "signed" needs a publisher, which macOS launch agents do not report yet |
 | WP-35 | Network change events (Wi-Fi joins, VPN up/down, IP changes) on the timeline | built: `dyno_core::netchange`, per-OS Wi-Fi readers, slow polling; macOS may hide the Wi-Fi name; Windows and Linux readers are fixture-tested only |
-| WP-36 | Taming acceptance rules: temporary, foreground-aware, self-restoring, with measured proof | planned |
+| WP-36 | Taming acceptance rules: temporary, foreground-aware, self-restoring, with measured proof | built (feat/wp13-14-36): `expiresAt` on rules, expiry switches the rule off and releases, foreground app given back at once, CPU before/after measured 20 s after each step and written to Activity and the in-effect list |
 
 Suggested order: foundation gaps; WP-01 to WP-05; WP-06 to WP-08 and WP-26; the in-progress items as their agents report;
 WP-09 to WP-17; WP-27 to WP-30.
@@ -65,9 +65,8 @@ Built this round: WP-02, WP-03, WP-04, WP-05, WP-06, WP-07, WP-08 (Why slow and 
 `sock_diag`; Windows says it needs administrator rights). **Not built and still in v1**, so the release waits for them:
 
 - WP-01 is built; what is left of it is verification on real machines (testing-manual H1-H15: install, prompt, kill, remove on each OS), a code-signature check of the caller once there is a Developer ID / Authenticode certificate, SMAppService registration on macOS, on-demand start (the helper stays resident and idle), a Windows installer hook that offers to remove the helper, and a Linux entry for all-users startup (system units).
-- WP-12 counters browser, WP-13 extras,
-  WP-14 backup checks, WP-15 pack data beyond the cleanup packs, WP-16 web API, WP-17 Explain via Pitwall,
-  WP-27 CLI, WP-30 suite tie-ins, WP-31 session recording, WP-36.
+- WP-12 counters browser, WP-15 pack data beyond the cleanup packs, WP-16 web API, WP-17 Explain via Pitwall,
+  WP-27 CLI, WP-30 suite tie-ins, WP-31 session recording.
 - Parts of built packages: scheduled cleanups, a disk-map screen, Docker image removal, the weekly OS notification (needs an
   agent-to-shell push), score recording in the sampler (the trend only fills while the app asks for health), engine-stored
   diagnosis history, TRIM and network tuning items, Windows IPv6 traffic.
@@ -97,7 +96,7 @@ What the code does today, read from the code on 2026-10-22. Each is a small task
 | G8 | Windows wires sensors (PDH), process control and user activity only. Process details use `NoDetails`; file locks (Restart Manager), startup entries and facts are the in-memory fakes | `crates/dyno-platform/src/windows/mod.rs` | Windows details probe (command line, modules, connections, signature), Restart Manager locks, registry / Startup folder / scheduled-task startup, facts (disk health, updates, power plan); verify on the Windows CI runner |
 | G9 | The doc comments on `Overhead::agent_cpu` and `Load::own_cpu` say "percent of the machine", but the sampler multiplies by the core count: the value is a share of one core (ADR 0002 section 4) | `crates/dyno-core/src/protocol.rs`, `sampling.rs` | Fix the comments (and the UI label) or change the unit; keep the budget comparison consistent |
 | G10 | The CPU taming, Cleanup and Health screens may still be placeholders in the UI (Why slow and Reports are built) although the engine answers `WhySlow`, `Rules`, `SaveRules`, `SetProfile`, `PauseRules`, `Health`, `StartupEntries`, `SetStartupState`, `Alerts`, `Anomalies` | `app/src/app/features/*`, `app/src/app/core/api.types.ts`, the mock | WP-02, WP-03, WP-08 |
-| G11 | The login-shell `PATH` resolver (ADR 0010 item 9) does not exist; nothing starts user tools yet | `crates/dyno-platform/src/process.rs` | Needed by WP-14 and WP-15; bounded, timed out, cached, with a validated per-item override |
+| G11 | Done in WP-14 (`dyno_platform::toolpath`, ADR 0020). Was: the login-shell `PATH` resolver did not exist; nothing started user tools | `crates/dyno-platform/src/toolpath.rs` | done: bounded, timed out, cached, with a validated per-tool override; WP-15 reuses it |
 | G12 | On Windows nothing restarts a crashed agent until the app or the next logon does | `crates/dyno-agent/src/service` | Optional: a Task Scheduler "restart on failure" entry |
 | G13 | Dyno's overhead was measured once, under a high load average, on one machine; there is no CI artifact (`dyno-agent bench`) per OS | `docs/architecture.md`, `.gitea/workflows/build.yml` | Run `bench` on release builds on a quiet runner per OS, record load next to the numbers, fail on a regression |
 | G14 | ~~The tuning plan input to the health report is empty~~ fed from the tuning catalogue (done with WP-05) | `crates/dyno-agent/src/handlers.rs` | WP-05 |
@@ -513,7 +512,7 @@ feature needs its images; a row is done when both exist and show the built scree
 | Benchmarks | `benchmarks-*.png`, `benchmarks-running-*.png`, `benchmarks-compare-*.png` | built |
 | Network | `network-*.png`, `network-connections-*.png` | built |
 | Performance counters | `counters-*.png`, `counters-search-*.png` | built |
-| Backup health | `backup-*.png` | not started (WP-14) |
+| Backup health | `backup-*.png` | built |
 | Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-*.png` | in progress (WP-19) |
 | CPU detail with per-core heatmap | `cpu-detail-*.png` | in progress (WP-19) |
 | Tray popover on a desktop backdrop | `tray-popover-*.png` | in progress (WP-22) |
@@ -527,3 +526,5 @@ feature needs its images; a row is done when both exist and show the built scree
 | Alarms: Statistics | `alarms-statistics-*.png` | planned (WP-26) |
 | Diagnostics bundle preview | `diagnostics-bundle-*.png` | planned (WP-29) |
 | Throttling and forecasts | `throttling-*.png`, `throttling-hot-*.png`, `forecasts-*.png`, `baselines-*.png` | built (WP-23, WP-24, WP-25) |
+| Extras: What changed, Sleep, Boot, Apps, GPU, Files, Inventory, Maintenance | `extras-<tab>-*.png` | built (WP-13) |
+| Temporary rule with measured proof | `rules-temporary-*.png` | built (WP-36) |

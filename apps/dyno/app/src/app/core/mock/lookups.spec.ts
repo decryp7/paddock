@@ -1,4 +1,4 @@
-import { MockWatch, mockHash, mockIsOs, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './extras';
+import { MockWatch, mockHash, mockIsOs, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './lookups';
 import { demoStartup } from './data';
 
 const NOW = 1_700_000_000_000;

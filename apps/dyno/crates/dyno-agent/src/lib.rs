@@ -12,6 +12,7 @@ pub mod counters;
 pub mod diagnostics;
 pub mod discovery;
 pub mod filehash;
+pub mod extras;
 pub mod files;
 pub mod handlers;
 pub mod handlers_cleanup;
@@ -96,6 +97,13 @@ impl Running {
                 .name("dyno-issues".into())
                 .spawn(move || issues::run(&s))
                 .map_err(|e| format!("could not start the issue reader: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-extras".into())
+                .spawn(move || extras::run(&s))
+                .map_err(|e| format!("could not start the extras: {e}"))?,
         );
         let s = shared.clone();
         threads.push(

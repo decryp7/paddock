@@ -93,6 +93,22 @@ computer) and opens VirusTotal's page for it; the file is never uploaded.
 **Watched folders** moves old files to the quarantine. Click **Add folder**, choose what to watch and for how long, then pick the folder
 in the system dialog. It starts off: open **See what would move** and use **Turn on**. A shorter keep time or adding subfolders needs a
 new preview. Undo a sweep from Activity; stopping a watch leaves the files alone. **Health** can hide system and signed startup entries.
+## Extras and backup health
+
+**Extras** (one page, eight tabs) answers small questions without changing anything: *What changed* before things got slow, *Sleep*
+(why the computer will not sleep and what woke it), *Boot* (how long start-up took and what slowed it), *Apps* (network and energy
+per app), *GPU*, *Files* (large and duplicate files in a folder you choose), *Inventory* (installed software, with an export) and
+*Maintenance* (when Dyno's heavier background work may run). If your system does not tell Dyno something, the tab says what and
+why. In *Files*, Dyno pre-selects every copy but the oldest; removing moves files to the Trash or the 7-day quarantine, and one copy
+of each duplicate always stays.
+
+**Backup health** shows whether your backups ran: Time Machine, Windows Backup, File History, restic and Borg. It never starts or
+changes a backup. A backup older than the limit you set (Settings, Backup health; 48 hours by default) raises an alarm. For restic
+and Borg export their repository variables in your shell profile, or give Dyno the tool's folder in Settings. "No backup tool found"
+is a normal answer.
+
+A CPU taming rule can be **temporary** (Rules: Temporary): it ends at the time you chose, gives everything back and switches itself
+off. Activity shows what each rule achieved, for example "Chrome used 78% CPU before and 31% after 21 s".
 
 ## Undo
 

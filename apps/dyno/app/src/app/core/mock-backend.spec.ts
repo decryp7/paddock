@@ -713,6 +713,152 @@ describe('mock CPU layout', () => {
   });
 });
 
+describe('mock extras and backup health', () => {
+  const NOW = new Date(2026, 9, 22, 14, 30).getTime();
+  const fresh = (o: ConstructorParameters<typeof MockBackend>[0] = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
+
+  it('changes: newest first over three days, narrowed by the window', async () => {
+    const b = fresh();
+    const t = await b.changes({ hours: 0 });
+    expect(t.changes.length).toBeGreaterThan(8);
+    expect(t.changes.every((c, i) => i === 0 || c.at <= t.changes[i - 1]!.at)).toBe(true);
+    expect(t.changes.every((c) => c.at >= NOW - 72 * 3_600_000)).toBe(true);
+    expect(new Set(t.changes.map((c) => c.kind)).size).toBeGreaterThanOrEqual(5);
+    const day = await b.changes({ hours: 24 });
+    expect(day.changes.length).toBeLessThan(t.changes.length);
+    const week = await b.changes({ hours: 168 });
+    expect(week.changes.length).toBeGreaterThan(t.changes.length);
+    expect(week.watchingSince).toBeLessThan(NOW);
+    const around = await b.changes({ hours: 24, around: NOW - 3 * 24 * 3_600_000 });
+    expect(around.to).toBeLessThan(NOW);
+  });
+
+  it('sleep, boot, usage, GPU and software answer realistic data', async () => {
+    const b = fresh();
+    const sleep = await b.sleepBlockers();
+    expect(sleep.blockers.map((x) => x.name)).toContain('coreaudiod');
+    expect(sleep.wakes.length).toBeGreaterThan(2);
+    const boot = await b.bootAnalysis();
+    expect(boot.boots).toHaveLength(8);
+    expect(boot.slowest[0]!.secs).toBeGreaterThan(boot.slowest[1]!.secs);
+    expect(boot.verdict).toBeTruthy();
+    const usage = await b.appUsage();
+    expect(usage.apps.length).toBeGreaterThan(5);
+    expect((await b.gpuProcesses()).processes[0]!.gpuPercent).toBeGreaterThan(0);
+    const sw = await b.softwareInventory();
+    expect(sw.items.length).toBeGreaterThanOrEqual(40);
+  });
+
+  it('saveInventoryReport remembers the format; pickFolder answers a sample folder', async () => {
+    const b = fresh();
+    expect(await b.saveInventoryReport('markdown')).toMatchObject({ path: expect.stringMatching(/\.md$/) });
+    expect(await b.saveInventoryReport('json')).toMatchObject({ path: expect.stringMatching(/\.json$/) });
+    expect(b.savedInventories).toEqual(['markdown', 'json']);
+    expect(await b.pickFolder()).toBe('/Users/sam/Projects');
+    expect(b.pickedFolders).toBe(1);
+  });
+
+  it('findFiles: modes, the size floor and a folder that must be absolute', async () => {
+    const b = fresh();
+    const both = await b.findFiles({ folder: '/Users/sam/Projects/', mode: 'both', minBytes: 50 * 1024 ** 2 });
+    expect(both.folder).toBe('/Users/sam/Projects');
+    expect(both.large).toHaveLength(8);
+    expect(both.duplicates).toHaveLength(3);
+    expect(both.wastedBytes).toBe(both.duplicates.reduce((a, g) => a + g.wastedBytes, 0));
+    expect(both.duplicates[0]!.files[0]!.modified).toBeLessThan(both.duplicates[0]!.files[1]!.modified);
+    expect((await b.findFiles({ folder: '/x', mode: 'large', minBytes: 0 })).duplicates).toEqual([]);
+    expect((await b.findFiles({ folder: '/x', mode: 'duplicates', minBytes: 0 })).large).toEqual([]);
+    const big = await b.findFiles({ folder: '/x', mode: 'both', minBytes: 1024 ** 3 });
+    expect(big.large.every((f) => f.bytes >= 1024 ** 3)).toBe(true);
+    await expect(b.findFiles({ folder: 'relative/path', mode: 'both', minBytes: 0 })).rejects.toMatchObject({ code: 'badRequest' });
+  });
+
+  it('removeFoundFiles: refuses stale scans, unknown files and every copy of a group, then removes', async () => {
+    const b = fresh();
+    await expect(b.removeFoundFiles('old', ['l1'], 'quarantine')).rejects.toMatchObject({ code: 'notFound' });
+    await expect(b.removeFoundFiles('scan-1', [], 'quarantine')).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(b.removeFoundFiles('scan-1', ['nope'], 'quarantine')).rejects.toMatchObject({ code: 'badRequest' });
+    await expect(b.removeFoundFiles('scan-1', ['d2a', 'd2b'], 'quarantine')).rejects.toMatchObject({ message: expect.stringContaining('at least one copy') });
+    const out = await b.removeFoundFiles('scan-1', ['d2b', 'l1'], 'quarantine');
+    expect(out).toMatchObject({ deleted: 2, failed: [], quarantineId: 'q-find-1' });
+    expect(out.freedBytes).toBeGreaterThan(6 * 1024 ** 3);
+    expect((await b.removeFoundFiles('scan-1', ['l2'], 'recycleBin')).quarantineId).toBeNull();
+    const after = await b.findFiles({ folder: '/x', mode: 'both', minBytes: 0 });
+    expect(after.large.map((f) => f.id)).not.toContain('l1');
+    expect(after.duplicates.map((g) => g.files.length)).not.toContain(2);
+    // the last copy of the pair that lost one is now alone and no longer a group
+    await expect(b.removeFoundFiles('scan-1', ['d2a'], 'quarantine')).rejects.toMatchObject({ code: 'badRequest' });
+  });
+
+  it('maintenance: open inside a window, closed outside, always open when off', async () => {
+    const b = fresh();
+    // 14:30 on a Thursday: the weeknight window (22:00 to 02:00) is closed and opens tonight.
+    const closed = await b.maintenance();
+    expect(closed).toMatchObject({ enabled: true, openNow: false, closesAt: null });
+    expect(new Date(closed.nextOpensAt!).getHours()).toBe(22);
+    const late = fresh({ now: () => new Date(2026, 9, 22, 23, 15).getTime() });
+    const open = await late.maintenance();
+    expect(open).toMatchObject({ openNow: true, nextOpensAt: null });
+    expect(new Date(open.closesAt!).getHours()).toBe(2);
+    const s = structuredClone(await b.settings());
+    s.maintenance.enabled = false;
+    await b.saveSettings(s);
+    expect(await b.maintenance()).toEqual({ enabled: false, openNow: true, closesAt: null, nextOpensAt: null });
+  });
+
+  it('saveSettings refuses a bad maintenance window or backup setting with the engine sentences', async () => {
+    const b = fresh();
+    const s = structuredClone(await b.settings());
+    s.maintenance.windows[0]!.days = [];
+    await expect(b.saveSettings(s)).rejects.toMatchObject({ message: 'Pick at least one day for each window.' });
+    s.maintenance.windows[0]!.days = ['mon'];
+    s.maintenance.windows[0]!.endMinute = s.maintenance.windows[0]!.startMinute;
+    await expect(b.saveSettings(s)).rejects.toMatchObject({ message: expect.stringContaining('different time') });
+    s.maintenance.windows = [];
+    await expect(b.saveSettings(s)).rejects.toMatchObject({ message: expect.stringContaining('Add a window') });
+    s.maintenance.enabled = false;
+    s.backup.staleAfterHours = 0;
+    await expect(b.saveSettings(s)).rejects.toMatchObject({ message: expect.stringContaining('2160') });
+    s.backup = { alertWhenStale: true, staleAfterHours: 24, overrides: [{ tool: 'restic', dirs: ['relative'] }] };
+    await expect(b.saveSettings(s)).rejects.toMatchObject({ message: expect.stringContaining('absolute') });
+    s.backup.overrides[0]!.dirs = ['/opt/restic'];
+    await expect(b.saveSettings(s)).resolves.toMatchObject({ backup: { staleAfterHours: 24 } });
+  });
+
+  it('backup: a mix of verdicts, nothing found as a variant, and a check that stamps the time', async () => {
+    const b = fresh();
+    const r = await b.backup();
+    expect(r.statuses.map((s) => [s.tool, s.state])).toEqual([
+      ['timeMachine', 'healthy'],
+      ['restic', 'stale'],
+      ['borg', 'cannotCheck'],
+    ]);
+    expect(r.statuses[0]!.nextStep).toBeNull();
+    expect(r.statuses[1]!.nextStep).toContain('never starts a backup');
+    expect(r.checkedAt).toBe(NOW - 40 * 60_000);
+    const checked = await b.refreshBackup();
+    expect(checked.checkedAt).toBe(NOW);
+    expect((await b.backup()).checkedAt).toBe(NOW);
+    const none = await fresh({ backup: 'none' }).backup();
+    expect(none.statuses).toEqual([]);
+  });
+
+  it('the URL option backup=none selects the empty variant', () => {
+    expect(mockOptionsFromUrl('?backup=none').backup).toBe('none');
+    expect(mockOptionsFromUrl('?latency=0').backup).toBeUndefined();
+  });
+
+  it('rules carry a temporary one and the action carries its measured CPU', async () => {
+    const b = fresh();
+    const temp = (await b.rules()).rules.find((r) => r.expiresAt !== null)!;
+    expect(temp.enabled).toBe(true);
+    expect(temp.expiresAt! - NOW).toBe(2 * 3_600_000 + 10 * 60_000);
+    expect(b.liveUpdate('summary').activeActions[0]).toMatchObject({ cpuBefore: 78, cpuAfter: 31 });
+    const act = (await b.activity(50)).find((a) => a.detail.startsWith('Measured:'))!;
+    expect(act.detail).toBe('Measured: Chrome used 78 % CPU before and 31 % 21 s after.');
+  });
+});
+
 describe('hardware: throttling, lifespan and baselines', () => {
   it('answers the throttling overview: fine now, a few episodes in the last 30 days', async () => {
     const t = await make().throttling();

@@ -58,6 +58,17 @@ describe('TauriBackend: request shapes', () => {
     ['setStartupState', (b) => b.setStartupState('s', { delayed: 30 }), { setStartupState: { id: 's', state: { delayed: 30 } } }],
     ['weeklyReport', (b) => b.weeklyReport(3), { weeklyReport: { weeksAgo: 3 } }],
     ['alerts', (b) => b.alerts(10), { alerts: { limit: 10 } }],
+    ['changes', (b) => b.changes({ hours: 24 }), { changes: { query: { hours: 24 } } }],
+    ['sleepBlockers', (b) => b.sleepBlockers(), 'sleepBlockers'],
+    ['bootAnalysis', (b) => b.bootAnalysis(), 'bootAnalysis'],
+    ['appUsage', (b) => b.appUsage(), 'appUsage'],
+    ['gpuProcesses', (b) => b.gpuProcesses(), 'gpuProcesses'],
+    ['softwareInventory', (b) => b.softwareInventory(), 'softwareInventory'],
+    ['findFiles', (b) => b.findFiles({ folder: '/x', mode: 'both', minBytes: 5 }), { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } }],
+    ['removeFoundFiles', (b) => b.removeFoundFiles('s', ['a'], 'quarantine'), { removeFoundFiles: { scanId: 's', ids: ['a'], mode: 'quarantine' } }],
+    ['maintenance', (b) => b.maintenance(), 'maintenance'],
+    ['backup', (b) => b.backup(), 'backup'],
+    ['refreshBackup', (b) => b.refreshBackup(), 'refreshBackup'],
     ['settings', (b) => b.settings(), 'settings'],
     ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS } }],
     ['plugins', (b) => b.plugins(), 'plugins'],
@@ -107,6 +118,14 @@ describe('TauriBackend: request shapes', () => {
     await backend.addWatchedFolder({ template: 'installers', keepForSecs: 600, recursive: false });
     expect(invoke).toHaveBeenCalledWith('add_watched_folder', { template: 'installers', keepForSecs: 600, recursive: false });
     expect(JSON.stringify(invoke.mock.calls)).not.toContain('path');
+
+
+  it('saveInventoryReport and pickFolder ask the shell for its dialogs', async () => {
+    const { backend, invoke } = fake();
+    await backend.saveInventoryReport('json');
+    expect(invoke).toHaveBeenCalledWith('save_inventory_report', { format: 'json' });
+    await backend.pickFolder();
+    expect(invoke).toHaveBeenLastCalledWith('pick_folder');
   });
 
   it('popoverResize sends the measured height to popover_resize', async () => {

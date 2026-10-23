@@ -7,4 +7,13 @@ describe('routes', () => {
     expect(paths).toContain('popover/:id');
     expect(routes.find((r) => r.path === 'popover/:id')?.loadComponent).toBeTypeOf('function');
   });
+
+  it('has lazy screens for backup health and extras inside the shell', async () => {
+    const children = routes.find((r) => r.path === '')!.children!;
+    for (const path of ['backup', 'extras']) {
+      const route = children.find((r) => r.path === path)!;
+      expect(route.title).toContain('Dyno');
+      expect(await route.loadComponent!()).toBeTruthy();
+    }
+  });
 });

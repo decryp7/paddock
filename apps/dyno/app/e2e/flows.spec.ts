@@ -17,13 +17,15 @@ test.describe('screens', () => {
       ['Flight recorder', 'Flight recorder'],
       ['Health', 'Health'],
       ['Watched folders', 'Watched folders'],
+      ['Backup health', 'Backup health'],
+      ['Extras', 'Extras'],
       ['Lifespan', 'Disk and battery life'],
       ['Tuning', 'Tuning'],
       ['Diagnostics', 'Diagnostics bundle'],
       ['Settings', 'Settings'],
       ['Dashboard', 'Dashboard'],
     ] as const) {
-      await nav.first().getByRole('link', { name: label }).click();
+      await nav.first().getByRole('link', { name: label, exact: true }).click();
       await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
     }
   });
@@ -652,5 +654,103 @@ test.describe('timeline', () => {
   test('network changes are a kind of event in the history legend', async ({ page }) => {
     await page.goto(url('/'));
     await expect(page.getByRole('region', { name: 'History' }).getByText('Network', { exact: false }).first()).toBeVisible();
+test.describe('backup health', () => {
+  test('lists a healthy, a stale and an unreadable tool, and Check now waits for the check', async ({ page }) => {
+    await page.goto(url('/backup'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Backup health' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'restic backup is out of date' })).toBeVisible();
+    const table = page.getByRole('table', { name: 'Backup tools' });
+    await expect(table.getByRole('row', { name: /Time Machine/ })).toContainText('Healthy');
+    await expect(table.getByRole('row', { name: /restic/ })).toContainText('Out of date');
+    await expect(table.getByRole('row', { name: /BorgBackup/ })).toContainText('Could not check');
+    await table.getByRole('row', { name: /restic/ }).click();
+    const panel = page.getByRole('complementary', { name: 'Backup details' });
+    await expect(panel).toContainText('never starts a backup');
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await page.getByRole('button', { name: 'Check now' }).click();
+    await expect(page.getByRole('button', { name: 'Check now' })).toBeVisible();
+    await expect(page.getByText('Checked just now')).toBeVisible();
+  });
+
+  test('finding no backup tool is a normal state', async ({ page }) => {
+    await page.goto(url('/backup', '&backup=none'));
+    await expect(page.getByText('No backup tool found')).toBeVisible();
+    await expect(page.locator('.none')).toContainText('never runs or manages a backup');
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  });
+
+  test('Settings has the Backup health section', async ({ page }) => {
+    await page.goto(url('/settings'));
+    const section = page.getByRole('region', { name: 'Backup health' });
+    await expect(section.getByText('Out of date after')).toBeVisible();
+    await section.getByLabel('restic folders').fill('tools/restic');
+    await expect(section.getByRole('alert')).toContainText('not a full path');
+  });
+});
+
+test.describe('extras', () => {
+  test('every tab opens and shows its data', async ({ page }) => {
+    await page.goto(url('/extras'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Extras' })).toBeVisible();
+    await expect(page.getByRole('table', { name: 'What changed' })).toContainText('Updated Visual Studio Code');
+    await page.getByRole('tab', { name: 'Sleep' }).click();
+    await expect(page.getByRole('table', { name: 'Keeping this computer awake' })).toContainText('coreaudiod');
+    await expect(page.getByRole('table', { name: 'Recent wakes' })).toContainText('Lid open');
+    await page.getByRole('tab', { name: 'Boot' }).click();
+    await expect(page.getByRole('region', { name: 'Last start-up' })).toContainText('47.2 s');
+    await expect(page.getByRole('table', { name: 'What slowed start-up' })).toContainText('Docker Desktop');
+    await page.getByRole('tab', { name: 'Apps' }).click();
+    await expect(page.getByRole('table', { name: 'Network and energy per app' })).toContainText('Google Chrome');
+    await page.getByRole('tab', { name: 'GPU' }).click();
+    await expect(page.getByRole('table', { name: 'GPU use per process' })).toContainText('WindowServer');
+    await page.getByRole('tab', { name: 'Inventory' }).click();
+    await expect(page.getByRole('table', { name: 'Installed software' })).toContainText('Visual Studio Code');
+    await page.getByRole('tab', { name: 'Maintenance' }).click();
+    await expect(page.getByText('never limits anything you click')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri, 22:00 to 02:00 the next day');
+  });
+
+  test('Files: choose a folder, keep one copy of each group, confirm and move', async ({ page }) => {
+    await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=files'));
+    await page.getByRole('button', { name: 'Choose a folder' }).click();
+    const table = page.getByRole('table', { name: 'Large and duplicate files' });
+    await expect(table).toContainText('3 copies of site-redesign.psd');
+    await expect(page.getByRole('group', { name: 'Selection' })).toContainText('3 files selected');
+    await table.getByRole('checkbox', { name: 'Select brand-video-final.mov' }).check();
+    await page.getByRole('button', { name: /Quarantine/ }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('4 items');
+    await dialog.getByRole('button', { name: 'Move to quarantine' }).click();
+    await expect(page.getByText(/Moved 4 files/)).toBeVisible();
+    await expect(table).not.toContainText('brand-video-final.mov');
+  });
+
+  test('Inventory exports a report and says where it went', async ({ page }) => {
+    await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=inventory'));
+    await page.getByRole('button', { name: /Export report/ }).click();
+    await page.getByRole('menuitem', { name: /Markdown/ }).click();
+    await expect(page.getByText('/Users/sam/Documents/dyno-inventory.md')).toBeVisible();
+  });
+
+  test('Maintenance windows can be edited and saved', async ({ page }) => {
+    await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=maintenance'));
+    await page.getByRole('button', { name: 'Saturday' }).first().click();
+    await page.getByRole('button', { name: 'Save windows' }).click();
+    await expect(page.getByText('Maintenance windows saved')).toBeVisible();
+  });
+});
+
+test.describe('temporary rules', () => {
+  test('a rule can be made temporary, shows its remaining time and the fixed note', async ({ page }) => {
+    await page.goto(url('/rules'));
+    await expect(page.getByText('Never touches the app in front; gives it back its CPU the moment you switch to it.')).toBeVisible();
+    const row = page.locator('tr[data-id="tame-long-hogs"]');
+    await expect(row).toContainText('Until turned off');
+    await row.getByRole('button', { name: 'How long Tame long CPU hogs stays on' }).click();
+    await page.getByRole('menuitem', { name: '4 hours' }).click();
+    await expect(row).toContainText(/Ends in (3 h 5\d min|4 h)/);
+    await expect(page.getByRole('region', { name: 'In effect now' })).toContainText('CPU 78% → 31%');
+    await expect(page.getByRole('region', { name: 'Recent activity' })).toContainText('Measured: Chrome used 78 % CPU before and 31 % 21 s after.');
   });
 });

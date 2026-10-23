@@ -65,6 +65,19 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  BackupReport,
+  BootReport,
+  ChangeTimeline,
+  ChangesQuery,
+  FinderQuery,
+  FinderResult,
+  GpuReport,
+  InventoryFormat,
+  MaintenanceStatus,
+  SavedInventory,
+  SleepReport,
+  SoftwareInventory,
+  UsageReport,
   IssuesOverview,
   IssuesQuery,
   SavedIssues,
@@ -101,9 +114,11 @@ import {
 import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
 import { mockHostName, mockNetwork } from './mock/network';
+import { FINDER_GROUPS, FINDER_IDS, mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
+import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
-import { MockWatch, mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/extras';
+import { MockWatch, mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
 import { mockHistory } from './mock/history';
 import { mockBaselines, mockLifespan, mockThrottling } from './mock/hardware';
 import { mockInventory } from './mock/inventory';
@@ -133,6 +148,8 @@ export interface MockOptions {
   now?: () => number;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
+  /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
+  backup?: MockBackupVariant;
 }
 
 /**
@@ -152,6 +169,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(cpu ? { cpu } : {}),
     latencyMs: latency !== null && Number.isFinite(Number(latency)) ? Number(latency) : 150,
     fail: new Set(fail ? fail.split(',') : []),
+    ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
   };
 }
 
@@ -210,6 +228,13 @@ export class MockBackend implements DynoBackend {
   private unusualForgotten = false;
   /** Issue exports the mock "saved", for tests. */
   readonly savedIssues: number[] = [];
+  /** Inventory reports the mock "saved", for tests. */
+  readonly savedInventories: InventoryFormat[] = [];
+  /** Folder choices the mock was asked to show, for tests. */
+  pickedFolders = 0;
+  private readonly backupVariant: MockBackupVariant;
+  private backupCheckedAt: number;
+  private readonly removedFound = new Set<string>();
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
@@ -228,9 +253,11 @@ export class MockBackend implements DynoBackend {
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
     this.start = this.now();
+    this.backupVariant = options.backup ?? 'mixed';
+    this.backupCheckedAt = this.start - 40 * MIN;
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
     this.ruleSet = {
-      rules: demoRules(),
+      rules: demoRules(this.start),
       protected: [this.profile.os === 'windows' ? 'Spotify.exe' : 'Spotify', 'OBS'],
       builtInProtected: BUILT_IN_PROTECTED,
       profile: 'normal',
@@ -248,6 +275,8 @@ export class MockBackend implements DynoBackend {
         step: 0,
         description: 'Priority lowered to Below normal',
         since: this.start - 4 * MIN,
+        cpuBefore: 78,
+        cpuAfter: 31,
       },
     ];
     this.activityLog = demoActivity(this.start);
@@ -1392,6 +1421,8 @@ export class MockBackend implements DynoBackend {
     return this.reply('saveSettings', () => {
       if (settings.sampling.intervalMs < 250) throw err('badRequest', 'Sample at most 4 times a second (250 ms).');
       if (settings.webApi.port < 1024 || settings.webApi.port > 65535) throw err('badRequest', 'Choose a port between 1024 and 65535.');
+      const extras = mockMaintenanceProblem(settings.maintenance) ?? mockBackupProblem(settings.backup);
+      if (extras) throw err('badRequest', extras);
       this.settingsValue = copy(settings);
       return this.settingsValue;
     });
@@ -1411,6 +1442,83 @@ export class MockBackend implements DynoBackend {
 
   trayQuit(): Promise<void> {
     return this.reply('trayQuit', () => undefined);
+  }
+
+  // ----------------------------------------------------------------------------------------- extras, backup
+
+  changes(query: ChangesQuery): Promise<ChangeTimeline> {
+    return this.reply('changes', () => mockChanges(query, this.now()));
+  }
+
+  sleepBlockers(): Promise<SleepReport> {
+    return this.reply('sleepBlockers', () => mockSleep());
+  }
+
+  bootAnalysis(): Promise<BootReport> {
+    return this.reply('bootAnalysis', () => mockBoot(this.now()));
+  }
+
+  appUsage(): Promise<UsageReport> {
+    return this.reply('appUsage', () => mockUsage());
+  }
+
+  gpuProcesses(): Promise<GpuReport> {
+    return this.reply('gpuProcesses', () => mockGpu());
+  }
+
+  softwareInventory(): Promise<SoftwareInventory> {
+    return this.reply('softwareInventory', () => mockSoftware());
+  }
+
+  saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null> {
+    return this.reply('saveInventoryReport', () => {
+      this.savedInventories.push(format);
+      return { path: `/Users/sam/Documents/dyno-inventory.${format === 'markdown' ? 'md' : 'json'}`, bytes: 18_204 };
+    });
+  }
+
+  pickFolder(): Promise<string | null> {
+    return this.reply('pickFolder', () => {
+      this.pickedFolders++;
+      return '/Users/sam/Projects';
+    });
+  }
+
+  findFiles(query: FinderQuery): Promise<FinderResult> {
+    return this.reply('findFiles', () => {
+      if (!query.folder.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(query.folder)) throw err('badRequest', 'Choose a folder with a full path.');
+      return mockFinder({ ...query, minBytes: Math.max(query.minBytes, MB) }, this.now(), this.removedFound);
+    });
+  }
+
+  removeFoundFiles(scanId: string, ids: string[], mode: DeleteMode): Promise<CleanupOutcome> {
+    return this.reply('removeFoundFiles', () => {
+      if (scanId !== 'scan-1') throw err('notFound', 'This search is too old. Search the folder again.');
+      if (ids.length === 0 || ids.some((id) => !FINDER_IDS.includes(id))) throw err('badRequest', 'Some of the chosen files are not in the search result.');
+      if (FINDER_GROUPS.some((g) => g.every((id) => ids.includes(id) || this.removedFound.has(id)))) {
+        throw err('badRequest', 'Keep at least one copy of every group of duplicates: all copies of one file were selected.');
+      }
+      for (const id of ids) this.removedFound.add(id);
+      const bytes = mockFinder({ folder: '/x', mode: 'both', minBytes: 0 }, this.now(), new Set());
+      const all = [...bytes.large, ...bytes.duplicates.flatMap((g) => g.files)];
+      const freed = all.filter((f) => ids.includes(f.id)).reduce((a, f) => a + f.bytes, 0);
+      return { freedBytes: freed, deleted: ids.length, failed: [], quarantineId: mode === 'quarantine' ? 'q-find-1' : null };
+    });
+  }
+
+  maintenance(): Promise<MaintenanceStatus> {
+    return this.reply('maintenance', () => mockMaintenanceStatus(this.settingsValue.maintenance, this.now()));
+  }
+
+  backup(): Promise<BackupReport> {
+    return this.reply('backup', () => mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt));
+  }
+
+  refreshBackup(): Promise<BackupReport> {
+    return this.reply('refreshBackup', () => {
+      this.backupCheckedAt = this.now();
+      return mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt);
+    }, 400);
   }
 
   // ---------------------------------------------------------------------------------------------- plumbing
