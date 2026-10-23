@@ -17,6 +17,15 @@ One end-to-end run on macOS (Apple Silicon, an M4 Pro), through the app's own fl
 and Linux, restart after an app update on a real install. Linux behaviour is exercised in container tests by the shell
 task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is not a real-model run.
 
+## 1.0.2 and 1.0.3
+
+- **1.0.2**: the macOS Login Items repair (shown progress, retries, a disabled item is reported), llama.cpp can be installed from
+  its page on a Mac with no build, and the unreachable-server test no longer depends on the default port.
+- **1.0.3** (this tree): llama.cpp installs itself (ADR 0020); llama.cpp is the only engine and the Engines page is the
+  llama.cpp page; "When you quit Pitwall" (ADR 0021); the model catalog lists current-generation models only
+  (checked against Hugging Face on 2026-10-23). The pinned llama.cpp `b11669` (2026-10-15) already runs the `qwen35`,
+  `qwen35moe`, `qwen3next` and `gemma4` architectures of those models, so the pin did not change.
+
 ## Phase 1: the server *(works)*
 
 - Engine management for llama.cpp: pinned and checksummed builds for Windows, macOS and Linux (Metal, CUDA 12 and 13,
@@ -34,7 +43,7 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 - `/x/v1`: health, pairing, model selection by capability, models, jobs and cancel; provenance headers on every answer.
 - Security: hashed per-app keys, pairing with a six-digit code, per-app permissions and rate and token budgets,
   admin key, Host and Origin checks, a single audited outbound client, offline mode.
-- Declarative packs: engine packs (the generic adapter; a llamafile pack ships, experimental) and model catalog packs.
+- Model catalog packs (declarative, `*.models.toml`). Engine packs and the llamafile pack existed in 1.0.1 and were removed in 1.0.3: llama.cpp is the only engine (ADR 0020).
 - Management API and live feed for the UI; versioned settings with backup; metrics with bounded retention; discovery file.
 
 ## Phase 2: the app *(implemented, not released)*
@@ -65,16 +74,16 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | Knowledge collections (local RAG: store, chunk, embed, rerank, query) | **Not built** |
 | MCP and tool hosting | **Not built** |
 | Batch jobs that resume | **Not built** (the batch priority exists) |
-| `/v1/audio/transcriptions` with whisper.cpp | Answers 501 with an explanation; engine **planned** |
-| MLX (Apple Silicon) and vLLM (Linux, NVIDIA) engines | Show as "not available" with the reason; **planned** |
+| `/v1/audio/transcriptions` | Answers 501 with an explanation; **planned** (no engine for it) |
+| Other engines (MLX, vLLM) | **Dropped** (ADR 0020): a new engine would be a new adapter behind the `Engine` trait and a new ADR |
 | Dedicated embedding and reranker adapters | Embeddings work through llama.cpp with an embedding model; rerank **planned** |
 | Real-engine automated test (`PITWALL_LLAMA_E2E=1`) | **Planned**; the smoke test is manual |
 | Usage per connected app | **Built.** Requests, prompt and completion tokens, errors and peak memory per app in hourly buckets (7 days) and daily buckets (90 days), stored locally in `usage.json` (versioned, atomic, backup, tolerant of damage). The Apps page has an app detail with a 24 h / 7 d / 30 d chart, limits with progress and the latest requests; the Dashboard has a usage-by-app chart. Optional limits per app: requests per minute and per day, tokens per day and per month, concurrent requests and a memory share, each refused with a typed, explained error, with a warning event at 80 % |
 | Model update notices | **Built.** Off until the user turns it on (weekly or daily, or Check now). Asks `huggingface.co`, through the one egress client, only for the repository ids of models you downloaded, never in offline mode (zero requests, a typed `offline` outcome), at most 40 repositories per check with timeouts, a pause, a rate limit and a stop on HTTP 429. Rules in the core: a newer revision of the same file (by recorded SHA-256, or by size for old entries), a better quantisation that fits, an imatrix build. Notices show as a Models banner, a note on the library row, a dashboard line and a tray entry; Dismiss or Remind me in a week; "Get it" confirms with the host and then uses the normal download, never automatically. A sidecar `<file>.origin.json` records where a model came from. Stored in `model-updates.json` (versioned, atomic, backup, tolerant of damage). Tests use a fake Hugging Face API. ADR 0017 |
-| Model presets and aliases | **Built.** An app asks for a name such as `debrief-explain`; the user decides which model (or capability selection like `auto:chat,fast`) and parameters (context, temperature, top-p, max tokens, system prompt, engine) serve it. Resolved in the core next to capability selection, in the OpenAI, Anthropic and Ollama families; listed in `/v1/models` and `/api/tags`; `X-Pitwall-Alias` and the request record say which alias was used; a removed target model gives a typed `preset_target_unavailable` error. Models has a Presets tab with a live preview from the engine; stored in `presets.json` (versioned, atomic, backup, tolerant of damage). ADR 0014 |
+| Model presets and aliases | **Built.** An app asks for a name such as `debrief-explain`; the user decides which model (or capability selection like `auto:chat,fast`) and parameters (context, temperature, top-p, max tokens, system prompt) serve it. Resolved in the core next to capability selection, in the OpenAI, Anthropic and Ollama families; listed in `/v1/models` and `/api/tags`; `X-Pitwall-Alias` and the request record say which alias was used; a removed target model gives a typed `preset_target_unavailable` error. Models has a Presets tab with a live preview from the engine; stored in `presets.json` (versioned, atomic, backup, tolerant of damage). ADR 0014 |
 | Parallel slots per model, with their memory cost | **Built.** Choose 1 to 16 parallel slots per model (default 2); the context is per slot and `--ctx-size` is the total, so each slot adds its own KV cache. Models > Slots shows "adds ~X GB" per step and a fit table from the engine (longest context at 1, 2, 4, 8 slots, the most slots at a context, in words with status colours); Discover shows how many requests a variant allows; the scheduler queues requests beyond a model's slots; a change applies on the next load and never touches a busy model. ADR 0016 |
 | `pitwall` command-line tool | **Built.** A small Rust CLI (`crates/pitwall-cli`) over the local management and standard APIs: `status`, `ps`, `models`, `load`, `unload`, `pull` (progress, resumable, honours offline mode), `keys`, `presets`, `chat` (streaming, per-app key from `PITWALL_API_KEY`) and `bench`; `--json`, timeouts, stable exit codes 0 to 4; no new server surface. Not yet shipped inside the installers: the bundle needs a second `externalBin` and a `PATH` entry (follow-up) |
-| Engine version pin, rollback and capability gating | **Built.** Pin a build for all models or per model (strict: a pin to an uninstalled or failed build is a typed error saying to install it in Engines); selection is model pin, then global pin, then automatic. One-click rollback goes to the previous installed build that passed its self-test, never a failed one, and says which loaded models switch on their next load (an engine is never swapped under a busy model). A data-driven capability matrix (`capabilities.json`, minimum llama.cpp release and unsupported backends per feature) gates vision, tools, JSON-schema output, embeddings and rerank: a request the build cannot serve gets a typed, explained error naming the build needed (503 `engine_build_too_old`, 400 `capability_unsupported`, 503 `engine_pin_unavailable`) in the OpenAI, Anthropic and Ollama shapes, and `/x/v1/models` and `auto:` selection leave those capabilities out. Engines shows a Version pin toggle, a Features list per build in words and Roll back naming its target; Models shows `pinned to` with a menu. Stored in `engine-pins.json` (versioned, atomic, backup, tolerant of damage). ADR 0018 |
+| Engine version pin, rollback and capability gating | **Built.** Pin a build for all models or per model (strict: a pin to an uninstalled or failed build is a typed error saying to install it on the llama.cpp page); selection is model pin, then global pin, then automatic. One-click rollback goes to the previous installed build that passed its self-test, never a failed one, and says which loaded models switch on their next load (an engine is never swapped under a busy model). A data-driven capability matrix (`capabilities.json`, minimum llama.cpp release and unsupported backends per feature) gates vision, tools, JSON-schema output, embeddings and rerank: a request the build cannot serve gets a typed, explained error naming the build needed (503 `engine_build_too_old`, 400 `capability_unsupported`, 503 `engine_pin_unavailable`) in the OpenAI, Anthropic and Ollama shapes, and `/x/v1/models` and `auto:` selection leave those capabilities out. The llama.cpp page shows a Version pin toggle, a Features list per build in words and Roll back naming its target; Models shows `pinned to` with a menu. Stored in `engine-pins.json` (versioned, atomic, backup, tolerant of damage). ADR 0018 |
 
 ## Phase 4: the suite *(planned)*
 
@@ -91,7 +100,7 @@ Debrief uses Pitwall when it is running and keeps its built-in AI as the default
 ## Next (hand-off, 2026-10-22)
 
 1. **Linux CI** (`rust tests + core coverage (linux)`): the two end-to-end tests that start a real child process
-   (`an_engine_pack_serves_a_model_through_a_real_child_process` and `a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry`)
+   (`a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry` and `stopping_serving_unloads_every_model_ends_the_engine_processes_and_resuming_serves_again`, which use `pitwall-server --fake-engine` as a real child process)
    fail in the container with `Permission denied (os error 13)` when launching `target/debug/pitwall-server`; the first one
    predates the crash-handling work. Probably the workspace/target mount is `noexec` or the binary is not executable for the
    container user: run the tests with `CARGO_TARGET_DIR` on an executable path (or copy the binary to a temp dir inside the

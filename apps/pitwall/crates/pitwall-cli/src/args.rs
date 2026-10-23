@@ -321,7 +321,7 @@ pub fn split_pull(target: &str) -> Result<(String, String), UsageError> {
     match parts.as_slice() {
         [owner, name, file] if !owner.is_empty() && !name.is_empty() && !file.is_empty() => Ok((format!("{owner}/{name}"), (*file).to_string())),
         _ => Err(usage(format!(
-            "\"{target}\" is not <owner>/<repo>/<file>: for example pitwall pull Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+            "\"{target}\" is not <owner>/<repo>/<file>: for example pitwall pull unsloth/Qwen3.5-2B-GGUF/Qwen3.5-2B-Q4_K_M.gguf"
         ))),
     }
 }

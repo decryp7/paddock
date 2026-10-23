@@ -64,7 +64,7 @@ pressure.
 Source: [c4-3-core-serving.drawio](diagrams/c4-3-core-serving.drawio)
 
 Models and engines: Hugging Face parsing, update notices, GGUF, fit, packs, the pinned runtime catalog with
-capabilities per build, hardware parsing, and the planned engine kinds.
+capabilities per build, and hardware parsing.
 
 ![C4 core models and engines](diagrams/svg/c4-3-core-models.svg)
 

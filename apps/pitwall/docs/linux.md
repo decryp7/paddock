@@ -44,7 +44,7 @@ root rights.
   not after `systemctl --user stop pitwall`.
 - It runs while you are logged in. To run with nobody logged in, enable lingering yourself: `loginctl enable-linger $USER`
   (Pitwall does not do it for you).
-- The server asks your login shell for `PATH` (systemd's is minimal) and uses it for engines that need it.
+- The server asks your login shell for `PATH` (systemd's is minimal) and uses it for llama.cpp.
 - Commands: `systemctl --user status pitwall.service`, `journalctl --user -u pitwall.service`, `systemctl --user restart
   pitwall.service`. Logs are also in `~/.local/share/pitwall/logs/`.
 
@@ -61,10 +61,10 @@ Data folder: **`$XDG_DATA_HOME/pitwall`**, else **`~/.local/share/pitwall`** (`P
 | `models/<owner>/<repo>/` | Downloaded GGUF models |
 | `engines/<build>/` | Installed `llama-server` builds (`cpu`, `vulkan`, `cuda-12`, `cuda-13`, ...) |
 | `partial/` | Unfinished downloads |
-| `packs/` | Your engine and model packs |
+| `packs/` | Your model catalog packs |
 | `logs/` | Service logs, no prompts or responses |
 
-## Engines and GPUs
+## llama.cpp and GPUs
 
 - **CPU** works everywhere. **Vulkan** serves NVIDIA, AMD and Intel GPUs with the vendor's Vulkan driver. **CUDA 12 or 13**
   needs an NVIDIA GPU and a driver new enough for that CUDA version. **ROCm**, **SYCL** and **OpenVINO** builds exist in the
@@ -73,8 +73,7 @@ Data folder: **`$XDG_DATA_HOME/pitwall`**, else **`~/.local/share/pitwall`** (`P
 - The suggested build is the first that matches the hardware; the self-test (`--list-devices`) shows what the build can really
   use, and software renderers such as llvmpipe are not counted as GPUs. A build that fails its self-test is discarded and the
   previous one stays.
-- Linux arm64 has CPU, Vulkan and CUDA 13 builds in the catalog (untested). vLLM (NVIDIA) is **planned**, with the message "vLLM is planned for Linux machines with an
-  NVIDIA GPU."
+- Linux arm64 has CPU, Vulkan and CUDA 13 builds in the catalog (untested).
 
 ## Containers and headless machines
 

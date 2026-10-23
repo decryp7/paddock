@@ -35,7 +35,7 @@ runs have not been done yet; see the [roadmap](docs/roadmap.md) for exactly what
 | Models, Discover: recommendations and "will it fit?" per quantisation | ![models-discover, light](docs/screenshots/models-discover-light.png) | ![models-discover, dark](docs/screenshots/models-discover-dark.png) |
 | Models, Presets: names apps send and what they resolve to | ![models-presets, light](docs/screenshots/models-presets-light.png) | ![models-presets, dark](docs/screenshots/models-presets-dark.png) |
 | Models, Downloads: progress, resume | ![models-downloads, light](docs/screenshots/models-downloads-light.png) | ![models-downloads, dark](docs/screenshots/models-downloads-dark.png) |
-| Engines: builds, pin, features, self-test, roll back | ![engines, light](docs/screenshots/engines-light.png) | ![engines, dark](docs/screenshots/engines-dark.png) |
+| llama.cpp: builds, pin, features, self-test, roll back | ![engines, light](docs/screenshots/engines-light.png) | ![engines, dark](docs/screenshots/engines-dark.png) |
 | Apps and keys: pairing, apps, permissions | ![apps, light](docs/screenshots/apps-light.png) | ![apps, dark](docs/screenshots/apps-dark.png) |
 | Apps, one app: usage over time, limits with progress | ![apps-detail, light](docs/screenshots/apps-detail-light.png) | ![apps-detail, dark](docs/screenshots/apps-detail-dark.png) |
 | Requests: log with timing and the chosen model | ![requests, light](docs/screenshots/requests-light.png) | ![requests, dark](docs/screenshots/requests-dark.png) |
@@ -65,7 +65,7 @@ loaded model in its own engine process; a Tauri app with a tray and an Angular U
   per-app keys stored hashed, engines that run with a scrubbed environment and no network of their own.
 - **Memory that looks after itself.** Models load on first use, are released when idle or when the machine needs the
   memory, and are never released while answering. A request that cannot fit gets a clear error, not swap.
-- **No lock-in to one engine.** llama.cpp today; others behind the `Engine` trait or a declarative TOML pack.
+- **One engine, nothing to configure.** llama.cpp serves every model and installs itself on first start ([ADR 0020](docs/adr/0020-llama-cpp-is-the-only-engine.md)).
 
 ## Features
 
@@ -75,10 +75,9 @@ loaded model in its own engine process; a Tauri app with a tray and an Angular U
 
 Every feature, with its status, is in [docs/features.md](docs/features.md).
 
-- **Engines.** llama.cpp with pinned, checksummed builds chosen for your hardware (Metal, CUDA, Vulkan, CPU, ...), a
+- **llama.cpp.** Installed for you: pinned, checksummed builds chosen for your hardware (Metal, CUDA, Vulkan, CPU, ...), a
   self-test after every install and discard of a build that fails it, version pins (all models or one), one-click rollback to the
   last good build, and capability gating (vision, tools, embeddings, rerank, JSON schema) by what the active build supports.
-  Planned: MLX, vLLM, whisper.cpp.
 - **Model library.** Search and download GGUF models from Hugging Face, a "will this fit?" check before you download,
   resumable downloads verified against the published SHA-256, quantisation variants, delete and disk usage.
 - **Standard APIs** on `127.0.0.1:11435`: OpenAI (`/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`,
@@ -98,8 +97,8 @@ Every feature, with its status, is in [docs/features.md](docs/features.md).
 - **Memory management.** Presets (Low memory, Balanced, Performance), idle and deep-idle release, pressure release,
   pinned models, a countdown on the dashboard.
 - **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits (with usage over time per app), an offline mode.
-- **Packs.** Add engines and model lists with TOML files, no code ([user guide](docs/user-guide.md#packs-add-an-engine-or-a-model-list)).
-- **The app.** Dashboard, models, engines, apps, requests, playground, benchmarks, settings, tray.
+- **Model catalog packs.** Add model lists with a TOML file, no code ([user guide](docs/user-guide.md#packs-add-a-model-list)).
+- **The app.** Dashboard, models, llama.cpp, apps, requests, playground, benchmarks, settings, tray. Choose what Quit does about serving.
 
 Not built yet: LAN sharing with TLS, knowledge collections (RAG), MCP and tool hosting, speech to
 text. See the [roadmap](docs/roadmap.md).
@@ -115,7 +114,7 @@ cargo build -p pitwall-server --release
 ./target/release/pitwall-server --help
 ```
 
-Requirements: Rust 1.88 or newer. Engines and models are downloaded from inside Pitwall, never bundled.
+Requirements: Rust 1.88 or newer. llama.cpp and models are downloaded by Pitwall, never bundled.
 
 ## Quick start
 
@@ -125,7 +124,7 @@ With the server running (`cargo run -p pitwall-server`, or the app once it ships
 # 1. The server answers on 127.0.0.1 only
 curl http://127.0.0.1:11435/x/v1/health
 
-# 2. Install an engine and download a model: Pitwall > Engines and Pitwall > Models.
+# 2. llama.cpp installs itself on first start (Pitwall > llama.cpp shows the progress). Download a model: Pitwall > Models.
 #    From the command line the management API does the same with the admin key in <data folder>/admin.key:
 KEY=$(cat "$HOME/Library/Application Support/Pitwall/admin.key")        # macOS path; see docs/user-guide.md
 curl -s -X POST http://127.0.0.1:11435/mgmt/v1/rpc/engines -H "Authorization: Bearer $KEY"
@@ -142,10 +141,10 @@ APIs only):
 
 ```sh
 pitwall status                     # server, memory, loaded models, queue
-pitwall pull Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf
-pitwall load qwen2.5-0.5b-instruct-q4_k_m
+pitwall pull unsloth/Qwen3.5-2B-GGUF/Qwen3.5-2B-Q4_K_M.gguf
+pitwall load qwen3.5-2b-q4_k_m
 export PITWALL_API_KEY=$(pitwall keys create my-script --new 2>/dev/null)
-pitwall chat qwen2.5-0.5b-instruct-q4_k_m "Say hello in five words."
+pitwall chat qwen3.5-2b-q4_k_m "Say hello in five words."
 ```
 
 See [the CLI section of the user guide](docs/user-guide.md#the-pitwall-command-line-tool) for every command and the exit codes.
@@ -156,7 +155,7 @@ See [the CLI section of the user guide](docs/user-guide.md#the-pitwall-command-l
 # OpenAI chat (add "stream": true for server-sent events)
 curl http://127.0.0.1:11435/v1/chat/completions \
   -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","messages":[{"role":"user","content":"Say hello in five words."}]}'
+  -d '{"model":"qwen3.5-2b-q4_k_m","messages":[{"role":"user","content":"Say hello in five words."}]}'
 
 # Anthropic Messages (the key goes in x-api-key)
 curl http://127.0.0.1:11435/v1/messages \
@@ -165,7 +164,7 @@ curl http://127.0.0.1:11435/v1/messages \
 
 # Ollama chat
 curl http://127.0.0.1:11435/api/chat -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","messages":[{"role":"user","content":"Say hello."}],"stream":false}'
+  -d '{"model":"qwen3.5-2b-q4_k_m","messages":[{"role":"user","content":"Say hello."}],"stream":false}'
 ```
 
 Every answer carries `X-Pitwall-Model`, `X-Pitwall-Engine` and `X-Pitwall-Chosen-By`, and `X-Pitwall-Cold-Start-Ms`

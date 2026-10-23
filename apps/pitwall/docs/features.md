@@ -12,7 +12,7 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 ## Contents
 
 - [Local only](#local-only)
-- [Engines](#engines)
+- [llama.cpp, the engine](#llama-cpp-the-engine)
 - [Model library](#model-library)
 - [Will this fit?](#will-this-fit)
 - [Serving: load on first use and release](#serving-load-on-first-use-and-release)
@@ -22,10 +22,10 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 - [Apps, keys and pairing](#apps-keys-and-pairing)
 - [Command line](#command-line)
 - [Queue and priorities](#queue-and-priorities)
-- [Packs: more engines and model lists without code](#packs-more-engines-and-model-lists-without-code)
+- [Model catalog packs](#model-catalog-packs)
 - [Dashboard](#dashboard)
 - [Models page](#models-page)
-- [Engines page](#engines-page)
+- [llama.cpp page](#llamacpp-page)
 - [Apps and keys page](#apps-and-keys-page)
 - [Requests](#requests)
 - [Playground](#playground)
@@ -49,18 +49,25 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 - **The request path has no HTTP client.** A test fails if a request handler can open an outbound connection, and a script
   (`scripts/ci/privacy-check.sh`) fails the build if the one outbound client (`egress.rs`) is used from anywhere else. Works.
 
-## Engines
+## llama.cpp, the engine
 
-- **llama.cpp** is the built-in engine. Pitwall installs official prebuilt `llama-server` builds from a pinned catalog
+- **llama.cpp is the only engine** ([ADR 0020](adr/0020-llama-cpp-is-the-only-engine.md)): every model is a GGUF file and
+  llama.cpp serves GGUF everywhere. Engine packs, llamafile and the placeholder engines (MLX, vLLM, whisper.cpp) are gone. Works.
+- **It installs itself.** On start, and whenever a model needs a build and none is installed, Pitwall installs the suggested
+  build in the background (checksum and self-test as below). Model loads and model downloads wait for it ("Installing
+  llama.cpp...", downloads stay queued); the Dashboard and the llama.cpp page show the progress; offline mode or a network
+  error ends in a message with **Retry**. You can still install, pick or pin another build. Works (tested with a fake installer,
+  no network).
+- Pitwall installs official prebuilt `llama-server` builds from a pinned catalog
   (release `b11669` today): `cpu`, `vulkan`, `cuda-12`, `cuda-13` on Windows and Linux, `metal` on macOS, with `rocm`, `sycl`
   and `openvino` selectable by hand. The suggested build is chosen for the hardware. Works.
 - **Checksummed install with a self-test and roll back.** Each archive is verified against its SHA-256 before it is unpacked
   (defensively: flat file names, size caps, safe links only), the new build must pass `--version` and `--list-devices`, and only
-  then replaces the old one. A build that fails its self-test is discarded and the previous build stays active; the Engines page
+  then replaces the old one. A build that fails its self-test is discarded and the previous build stays active; the llama.cpp page
   can also go back to an earlier build (see the next item). Works.
 - **Engine version pins, rollback and capability gating.** Pin a build for all models or for one model; selection is the model's
   pin, then the global pin, then automatic. A pin to a build that is not installed or failed its self-test is refused with
-  "Install it in Engines". Roll back goes to the previous installed build that passed its self-test (never a failed one) and
+  "Install it on the llama.cpp page". Roll back goes to the previous installed build that passed its self-test (never a failed one) and
   pins it; a loaded model keeps its engine until it is loaded again and the page says so. A capability matrix
   (`capabilities.json`: minimum llama.cpp release and unsupported backends per feature) gates vision, tools, JSON-schema output,
   embeddings and rerank: a request the build cannot serve is refused before the queue with a typed error naming the build
@@ -71,10 +78,8 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
   after 1 s, 2 s, 4 s and so on (at most 60 s); after five crashes in ten minutes Pitwall stops, the Dashboard shows the model
   with the reason and a Retry button, and requests for it get a clear error instead of another doomed start. Works (tested
   with an engine process that exits by itself).
-- **Planned engines say so.** MLX (Apple Silicon), vLLM (Linux with an NVIDIA GPU) and whisper.cpp (speech to text) appear
-  on the Engines page as "not available" with the reason. Planned, no adapter yet.
-- **External and downloadable engines through packs**, for example llamafile (built in, experimental). See
-  [Packs](#packs-more-engines-and-model-lists-without-code). Works.
+- **Older installs.** A llamafile folder left by 1.0.1 is listed on the llama.cpp page with "Remove llamafile (size)" and is never
+  deleted without that click; a per-model or per-preset engine saved by an older version is ignored. Works.
 
 ## Model library
 
@@ -83,10 +88,11 @@ installing an engine, getting a model and connecting apps ([macOS](macos.md), [L
 - **Resumable, verified downloads.** A partial file resumes with an HTTP range request; the SHA-256 is checked against the one
   Hugging Face publishes for the file (its LFS object id); the finished file must parse as GGUF before it enters the library
   (a bad file is discarded). Downloads can be cancelled. Works.
-- **Starter catalog and recommendations.** A built-in catalog pack lists small, well-known models and is shown with a "will this
-  fit" verdict for this machine. Works.
+- **Starter catalog and recommendations.** A built-in catalog pack lists current-generation models only (Qwen3.8 27B, Qwen3.6
+  35B-A3B, Gemma 4 26B-A4B, 12B and E4B, Qwen3.5 9B, 4B and 2B for small computers, Qwen3 Coder Next, Qwen3 Embedding 0.6B) with
+  a "will this fit" verdict for this machine. Works.
 - **Disk usage and cleanup**: the library shows the size of every model and the free disk space; models can be deleted. Works.
-- **Per-model preferences**: keep loaded (pin), its own idle time, its own context length, its own engine. Works.
+- **Per-model preferences**: keep loaded (pin), its own idle time, its own context length, its own parallel slots and engine build (pin). Works.
 - **Capabilities are read from the file**: chat, JSON, tools (when the chat template mentions tools), vision (a projector file
   next to it), embeddings and rerank (by architecture and name). Works.
 
@@ -243,20 +249,17 @@ packaged inside the installers (see the roadmap).
   A full queue answers `overloaded` (503, `Retry-After: 5`). Works. See [ADR 0005](adr/0005-queue-and-scheduling.md).
 - Cancel by closing the connection or `DELETE /x/v1/jobs/{id}`. Works.
 
-## Packs: more engines and model lists without code
+## Model catalog packs
 
-There is no plugin system ([ADR 0010](adr/0010-no-plugin-system.md)). Pitwall reads two kinds of validated TOML files from
-`<data folder>/packs/` ([ADR 0011](adr/0011-declarative-packs.md)):
+There is no plugin system ([ADR 0010](adr/0010-no-plugin-system.md)). Pitwall reads validated TOML files from
+`<data folder>/packs/` ([ADR 0011](adr/0011-declarative-packs.md), narrowed by ADR 0020):
 
-- **Engine packs** (`*.engine.toml`): any local engine with an OpenAI-compatible server, with launch arguments, a health
-  path, capabilities, memory hints and a pinned, checksummed download per platform, or none for an engine you installed yourself.
-  Works. Built in: **llamafile** (experimental).
 - **Model catalog packs** (`*.models.toml`): curated models with Hugging Face repo, quantisation variants and sizes, context,
-  capabilities and tags. Works. Built in: a starter list.
-- A bad pack is skipped with a message that says what to fix; the others still load. A pack cannot name a download host
-  outside the allow-list, must bind `127.0.0.1` and is limited to 64 files of 256 KB. Works.
+  capabilities and tags. Works. Built in: the starter list.
+- A bad pack is skipped with a message that says what to fix (on Models > Discover); the others still load. Limited to 64 files of
+  256 KB. Works. Engine packs (`*.engine.toml`) no longer exist and are reported as unknown files.
 
-The how-to with complete examples is in the [user guide](user-guide.md#packs-add-an-engine-or-a-model-list).
+The how-to with a complete example is in the [user guide](user-guide.md#packs-add-a-model-list).
 
 ## Dashboard
 
@@ -286,15 +289,15 @@ idle time and engine choices, load, unload and delete. **Discover** shows recomm
 Hugging Face; opening a repository lists its files with a fit verdict for each variant. **Downloads** shows progress, speed,
 host and the verification state, with cancel. Works.
 
-## Engines page
+## llama.cpp page
 
-![Engines](screenshots/engines-light.png)
+![llama.cpp](screenshots/engines-light.png)
 
-One card per engine: availability and why, the installed builds with their tag, devices found by the self-test and
+Availability and why, the installed builds with their tag, devices found by the self-test and
 self-test result, the catalog of builds to install (the suggested one first), select, remove, **pin** (a Version pin toggle per
 build, accent plus the word "Pinned"), **Features** (what each build supports in words: Supported, Needs bNNNN, Not supported,
 with the upgrade hint), **Roll back** (names the build it goes to and asks first), and install progress with cancel. Models
-shows `pinned to <build>` with a small build menu per model. The pack engines appear here too. Works for llama.cpp and packs; MLX, vLLM and whisper.cpp show as planned.
+shows `pinned to <build>` with a small build menu per model. Leftovers of removed features (the llamafile download) are listed at the bottom with a Remove button. Works.
 
 ## Apps and keys page
 
@@ -344,7 +347,8 @@ the window quits the app, but the service keeps running. The shell and the popov
 
 ![Settings](screenshots/settings-light.png)
 
-- **General**: start at login, theme (system, light, dark), keep serving when the app closes.
+- **General**: start at login, theme (system, light, dark), **When you quit Pitwall** (keep serving in the background, stop
+  serving, or ask each time; [ADR 0021](adr/0021-what-quitting-does-about-serving.md)). Works.
 - **Server**: port (default 11435), largest request, request timeout, requests at once, allow keyless local access.
 - **Memory**: the preset and every value of it (idle release, deep idle, pressure threshold, always keep free, hot models at once,
   memory limit for hot models, yield to foreground, notify on release).

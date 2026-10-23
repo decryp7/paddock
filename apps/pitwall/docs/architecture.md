@@ -29,9 +29,10 @@ gives every app one place to use them. It has four parts:
    around an Angular 22 UI (`app/src`) that talks to the server's management API through a backend service injected
    by DI token (a real Tauri backend, or a mock for browser development and tests).
 
-Engines (llama.cpp today) are third-party binaries that Pitwall downloads, checksums and runs as child processes, one
-process per loaded model. There is no plugin system ([ADR 0010](adr/0010-no-plugin-system.md)); extension is by
-declarative TOML packs ([ADR 0011](adr/0011-declarative-packs.md)).
+llama.cpp, the only engine ([ADR 0020](adr/0020-llama-cpp-is-the-only-engine.md)), is a third-party binary that Pitwall
+downloads by itself when none is installed, checksums and runs as child processes, one process per loaded model. There is no
+plugin system ([ADR 0010](adr/0010-no-plugin-system.md)); the model list extends by declarative TOML catalog packs
+([ADR 0011](adr/0011-declarative-packs.md)).
 
 ![Pitwall at a glance](diagrams/pitwall-overview.svg)
 
@@ -75,8 +76,9 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 | `app.rs` | `AppState` (everything shared), the request pipeline `start_chat`, the background tasks (release loop, live pushes, metrics sampling), packs loading |
 | `cache.rs`, `cache_store.rs` | The cache layer (ADR 0019): lookup and store around `start_chat` and the embeddings path, the memory and SQLite stores behind one trait, the writer thread, the sweep (startup, hourly, idle; 5,000 entries a pass), `cache_info` and `clear_cache` |
 | `serving.rs` | The scheduler wrapped for async use, the hot-model table, `ensure` (plan a load, evict, start the engine, wait until healthy), the release `tick`, chat and embedding calls to engines |
-| `engines.rs` | The `Engine` trait, `LlamaCpp` (catalog, install, self-test, defensive unpacking, start), `Planned` (placeholder engines that say why they are unavailable) |
-| `pack_engine.rs` | `PackEngine`: one generic adapter that runs any engine described by an engine pack |
+| `engines.rs` | The `Engine` trait (`ready` lets an engine make callers wait while it sets itself up), `LlamaCpp` (catalog, install, self-test, defensive unpacking, start) and the `BuildInstaller` seam |
+| `engine_setup.rs` | Installing a build as a tracked download, and installing the suggested one by itself when none is installed (ADR 0020) |
+| `leftovers.rs` | Files older versions left behind (the llamafile folder), listed and removed only on request |
 | `library.rs` | Scanning `models/`, the Hugging Face search and file lists, resumable downloads, GGUF verification, deletion |
 | `egress.rs` | The single outbound HTTP client: HTTPS only, no proxy, allow-listed hosts including every redirect, offline switch, resume, SHA-256 check |
 | `auth.rs` | Apps, keys, the admin key, pairing; `apps.json` written atomically with a backup |
@@ -136,7 +138,9 @@ real Windows and Linux desktops is not verified yet (see the [roadmap](roadmap.m
 | Keys hashed, pairing, loopback only, Host and Origin checks, admin key | [ADR 0007](adr/0007-security-model.md) |
 | How apps find, pair with and use Pitwall | [ADR 0009](adr/0009-app-integration-contract.md) |
 | No plugins | [ADR 0010](adr/0010-no-plugin-system.md) |
-| Declarative engine and model packs | [ADR 0011](adr/0011-declarative-packs.md) |
+| Declarative model catalog packs (engine packs superseded) | [ADR 0011](adr/0011-declarative-packs.md) |
+| llama.cpp is the only engine, and installs itself | [ADR 0020](adr/0020-llama-cpp-is-the-only-engine.md) |
+| What quitting does about serving | [ADR 0021](adr/0021-what-quitting-does-about-serving.md) |
 | Parallel slots per model, KV memory per slot, the fit solver | [ADR 0016](adr/0016-parallel-slots.md) |
 | Model update notices: ask Hugging Face for repository ids you downloaded, never fetch | [ADR 0017](adr/0017-model-update-notices.md) |
 | Engine pins, rollback and capability gating | [ADR 0018](adr/0018-engine-pins-and-capability-gating.md) |
@@ -285,7 +289,7 @@ Everything is in one per-user data folder (override with `PITWALL_HOME`): `%APPD
 | `models/<repo>/<file>.gguf` | The model library | |
 | `engines/<build>/` | Installed llama.cpp builds | With `build.json` (tag, self-test result, devices); `<build>.new` and `<build>.old` exist only during an install |
 | `partial/` | Engine archives being downloaded | |
-| `packs/` | The user's engine and model packs | At most 64 files of 256 KB |
+| `packs/` | The user's model catalog packs | At most 64 files of 256 KB |
 | `metrics.json` | Time series | Versioned, bounded retention (default 30 days) |
 | `engine-pins.json` | Engine build pins and rollback history (`pitwall_core::runtimes::pins`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then no pins; one damaged entry is skipped, at most 256 model pins, 8 remembered builds |
 | `presets.json` | Model presets and aliases (`pitwall_core::presets`) | Versioned, atomic write with `.bak`, damage falls back to the backup, then empty; one damaged entry is skipped, at most 64 presets |
@@ -322,9 +326,8 @@ The events feed (2000 entries) and the request list (500 entries) live in memory
 
 ## Extension points
 
-- **A new engine** that serves an OpenAI-compatible API needs a TOML pack, not code
-  ([ADR 0011](adr/0011-declarative-packs.md)). An engine that needs its own protocol is a new `Engine` implementation
-  in the server (planned: MLX, vLLM, whisper.cpp; each currently shows as "not available" with the reason).
+- **A new engine** is a new `Engine` implementation in the server and a new ADR; llama.cpp is the only one
+  ([ADR 0020](adr/0020-llama-cpp-is-the-only-engine.md)). There are no engine packs.
 - **A model list** is a model catalog pack.
 - **A new API family** is a module in `pitwall_core::api` plus routes in `http.rs`.
 - **A new platform** needs a build in the runtime catalog and a row in `service/spec.rs`.
@@ -341,6 +344,6 @@ Said plainly, so nothing in this document is read as a promise:
   (`/x/v1/tokens/count`, `/x/v1/tokens/truncate`) exist and are covered by the server's tests over a fake engine; they
   have not been run against a real model, and the token count is an estimate (about four characters per token), not the
   model's tokenizer.
-- Engines other than llama.cpp: MLX, vLLM, whisper.cpp (`/v1/audio/transcriptions` answers 501), and dedicated
-  embedding and reranker engine adapters (embeddings work through llama.cpp with an embedding model).
+- `/v1/audio/transcriptions` (answers 501) and dedicated embedding and reranker adapters (embeddings work through llama.cpp
+  with an embedding model).
 - Published installers, and running the shell and the services on real Windows and Linux machines.

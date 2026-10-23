@@ -10,19 +10,19 @@ Silicon has been run for real so far** (section "Real-model smoke test", all ste
 CUDA and Vulkan are unverified until these tests are run there and recorded.
 
 Conventions: `PW=http://127.0.0.1:11435`, `PITWALL_KEY` is a key from pairing or **Create app**, `MODEL` is the id of the test
-model below (`qwen2.5-0.5b-instruct-q4_k_m`). Use a separate data folder for a clean run: `PITWALL_HOME=/tmp/pitwall-test`
+model below (`qwen3.5-2b-q4_k_m`). Use a separate data folder for a clean run: `PITWALL_HOME=/tmp/pitwall-test`
 (on Windows a temp folder) when starting `pitwall-server` by hand. Never use real confidential content in prompts.
 
 ## Real-model smoke test (every platform)
 
-The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the starter catalog
-(`Qwen/Qwen2.5-0.5B-Instruct-GGUF`). Delete it afterwards (Models > Library > Delete) if you do not want to keep it.
+The test model is **Qwen3.5 2B Q4_K_M** (about 1.3 GB), from the starter catalog
+(`unsloth/Qwen3.5-2B-GGUF`). Delete it afterwards (Models > Library > Delete) if you do not want to keep it.
 
 | # | Steps | Expected |
 |---|-------|----------|
 | 1 | Fresh data folder. Start Pitwall. `curl -s $PW/x/v1/health` | `{"ok":true,"name":"pitwall","apiVersion":1,"serving":"serving",...,"loadedModels":0}`. `discovery.json` exists in the data folder with the port. |
-| 2 | Engines. Note the suggested build (Metal on a Mac; CUDA/Vulkan/CPU elsewhere). Click Install. | Progress shows the GitHub host. When it ends the card shows tag `b11669`, the devices found and "Self-test passed". The folder `engines/<id>/` contains `llama-server`, its libraries and `build.json`; no `.new` folder is left. |
-| 3 | Models > Discover. Find Qwen2.5 0.5B Instruct, check the verdict (Fits), Download the Q4_K_M. | Progress, speed and host `huggingface.co` (or its CDN host). Verifying appears at the end. The model appears in Library as `qwen2.5-0.5b-instruct-q4_k_m` with capabilities chat and json. |
+| 2 | llama.cpp installs itself: open the llama.cpp page (or the Dashboard) at once and note the suggested build (Metal on a Mac; CUDA/Vulkan/CPU elsewhere). | A banner "Installing llama.cpp..." with progress shows the GitHub host; a model download started meanwhile stays Queued. When it ends the card shows tag `b11669`, the devices found and "Self-test passed". The folder `engines/<id>/` contains `llama-server`, its libraries and `build.json`; no `.new` folder is left. |
+| 3 | Models > Discover. Find Qwen3.5 2B, check the verdict (Fits), Download the Q4_K_M. | Progress, speed and host `huggingface.co` (or its CDN host). Verifying appears at the end. The model appears in Library as `qwen3.5-2b-q4_k_m` with capabilities chat and json. |
 | 4 | Compare the file's SHA-256 with the one Hugging Face shows on the file page (`shasum -a 256 <file>` or `Get-FileHash`). | Identical. (Pitwall already checked it; this confirms the check is meaningful.) |
 | 5 | Apps & keys > Create app "smoke" with defaults. Copy the key. `curl -s $PW/v1/models` without a key, then with `-H "Authorization: Bearer $PITWALL_KEY"`. | 401 with "a valid Pitwall API key is required..." without; with the key the model is listed. |
 | 6 | OpenAI, not streamed: `curl -si $PW/v1/chat/completions -H "Authorization: Bearer $PITWALL_KEY" -H 'Content-Type: application/json' -d '{"model":"'$MODEL'","messages":[{"role":"user","content":"Say hello in five words."}]}'` | 200 with `choices[0].message.content`, `usage` token counts, and headers `x-pitwall-model: qwen2.5-0.5b-instruct-q4_k_m`, `x-pitwall-engine: llama.cpp`, `x-pitwall-chosen-by: explicit` and `x-pitwall-cold-start-ms` (the model was loaded for this request). The Dashboard shows the model loaded with an idle countdown. |
@@ -53,23 +53,25 @@ The test model is **Qwen2.5-0.5B-Instruct Q4_K_M** (about 0.5 GB), from the star
 | 23c | Idle context: set a model's release time to 2 minutes (Models > Release when idle), use it once and wait 70 seconds. | The event feed says the context was cleared and the weights stay loaded; after two minutes the model is released. |
 | 23d | Start Pitwall a second time (double-click the app again; Windows/Linux also launch from the command line). | No second tray icon appears; the existing window comes to the front (rebuilt if it was closed). Autostart at login while it is already running changes nothing. |
 
-## Engines, packs and failures
+## llama.cpp, packs and failures
 
 | # | Steps | Expected |
 |---|-------|----------|
 | 24 | Install a second build (for example CPU next to the GPU one) and select it, then Roll back. | The active build changes each time and chat requests keep working. |
 | 25 | Disconnect the network midway through a model download, reconnect, start it again. | The message says the part is kept; the download resumes (same `.part` file) and ends verified. |
 | 26 | Start an install with offline mode on. | "Pitwall is in offline mode: downloads are off. ..." No file is created. Turn it off. |
-| 27 | Put a broken `bad.engine.toml` (for example no `[health]`) and a valid `*.models.toml` in `packs/`; restart the server. | The Engines page shows the problem for `bad.engine.toml` naming what to fix; the models pack still loads. |
-| 28 | Put the [example engine pack](user-guide.md#an-engine-pack) in `packs/` with a real OpenAI-compatible server on `PATH` (llamafile works). Set a model's engine to it. | The engine appears as installed/available; a request starts it on a loopback port and answers; the response header names the engine. |
+| 27 | Put a broken `bad.models.toml` (for example no `id`), an old `x.engine.toml` and a valid `*.models.toml` in `packs/`; restart the server. | Models > Discover shows the problems for the two bad files naming what to fix; the valid pack still loads. |
+| 28 | Fresh data folder, offline mode on: start Pitwall. | The Dashboard and the llama.cpp page say llama.cpp could not be installed because Pitwall is offline, with **Retry**. Turn offline mode off and press Retry: it installs. |
+| 28f | Put a folder `engines/pack-llamafile/` with any file in the data folder and open the llama.cpp page. | "Left over from an older version" lists llamafile with its size; nothing is deleted until you press **Remove llamafile**. |
+| 28g | Settings > General > When you quit Pitwall: choose *Stop serving*, load a model, then choose Quit in the tray menu. | The engine process ends, the service stays registered, and after opening Pitwall again the Dashboard says Serving. *Ask each time* shows the dialog with Remember my choice. **Quit and stop serving** does it whatever the setting says. |
 
 ### Engine pins, rollback and capability gating
 
 | # | Steps | Expected |
 |---|-------|----------|
-| 28a | On Engines, click **Pin** on an installed build. | The button turns violet and says **Pinned**; the card says automatic choice is off; a toast names loaded models that keep their engine until loaded again. Click it again: back to automatic. |
+| 28a | On the llama.cpp page, click **Pin** on an installed build. | The button turns violet and says **Pinned**; the card says automatic choice is off; a toast names loaded models that keep their engine until loaded again. Click it again: back to automatic. |
 | 28b | In Models, pin one model to a different build with its build menu. | The row shows "pinned to <build> <tag>". Unload and load it: the Dashboard process uses that build. Choose "follows global choice": back to normal. |
-| 28c | Pin a build, then delete its folder under `engines/` (or remove it from Engines) and restart. | Engines shows "Install it in Engines, or remove the pin"; a chat request answers 503 `engine_pin_unavailable` with that message; unpinning fixes it. |
+| 28c | Pin a build, then delete its folder under `engines/` (or remove it on the llama.cpp page) and restart. | The llama.cpp page shows "Install it on the llama.cpp page, or remove the pin"; a chat request answers 503 `engine_pin_unavailable` with that message; unpinning fixes it. |
 | 28d | Install a second build, select it, then click **Roll back**. | The button names the earlier build and asks first; after confirming it is pinned for all models. Damage a build's `build.json` to `"self_test":"failed"` and the button is gone with the reason shown. |
 | 28e | Use a build older than the floors in `capabilities.json` (edit a build's `build.json` tag to `b4000` for the test) and send a request with tools, an image, or a JSON schema. | 503 `engine_build_too_old` in the OpenAI, Anthropic (`overloaded_error`) and Ollama shapes, naming the build needed. **Features** on that build lists them as "Needs bNNNN". `GET /x/v1/models` moves those capabilities to `unavailable`. |
 | 28f | Corrupt `engine-pins.json`, restart. | Pitwall starts; the backup is used (or no pins) and the Events list says the pins file was damaged. |
@@ -126,7 +128,7 @@ Needs a build with caching (ADR 0019) and a small real model. Use `temperature: 
 
 | # | Steps | Expected |
 |---|-------|----------|
-| 44 | Walk every screen (Dashboard, Models, Engines, Apps & keys, Requests, Playground, Benchmarks, Settings, tray popover) in light and dark and with the system theme changing. | Readable, no clipped text, status colours always with words or shapes; keyboard focus rings visible; text is not selectable except where it should be (log text, ids). |
+| 44 | Walk every screen (Dashboard, Models, llama.cpp, Apps & keys, Requests, Playground, Benchmarks, Settings, tray popover) in light and dark and with the system theme changing. | Readable, no clipped text, status colours always with words or shapes; keyboard focus rings visible; text is not selectable except where it should be (log text, ids). |
 | 45 | Disconnect the server (stop it) while the window is open. | Panels show an inline error with Retry, never an endless skeleton. |
 | 46 | Run a chat in the Playground, cancel it midway. | Generation stops; the job leaves the queue. |
 | 47 | Benchmarks > Run on the test model, then quit and start Pitwall again. | A tokens-per-second figure appears and is still listed after the restart (`benchmarks.json` in the data folder). |
@@ -154,7 +156,7 @@ Needs a build with caching (ADR 0019) and a small real model. Use `temperature: 
 | # | Steps | Expected |
 |---|-------|----------|
 | 29 | With Pitwall running run `pitwall status`, `pitwall ps`, `pitwall models`, each also with `--json`. | Tables for people, the server's JSON with `--json`; no key appears in any output. |
-| 30 | `pitwall pull Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf`; interrupt it with Ctrl-C and run it again. | Progress on stderr naming `huggingface.co`; the second run resumes; the Models page shows the same download. With offline mode on: exit code 4 and the offline message. |
+| 30 | `pitwall pull unsloth/Qwen3.5-2B-GGUF/Qwen3.5-2B-Q4_K_M.gguf`; interrupt it with Ctrl-C and run it again. | Progress on stderr naming `huggingface.co`; the second run resumes; the Models page shows the same download. With offline mode on: exit code 4 and the offline message. |
 | 31 | `pitwall load <model>`, `pitwall ps`, `pitwall unload <model>`; load a model larger than the free memory. | Loaded, listed, released; the oversized load exits with 4 and says to unload another model. |
 | 32 | `pitwall keys create cli-test --new`, then `export PITWALL_API_KEY=...; pitwall chat <model> "Say hi"`. | The key is printed once on stdout; the answer streams to stdout. `pitwall keys` shows only the id and prefix. |
 | 33 | `pitwall keys revoke cli-test <key-id>`, then chat again. | The chat fails with exit 1 and a message about the key. |

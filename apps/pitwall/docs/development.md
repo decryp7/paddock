@@ -42,7 +42,7 @@ curl http://127.0.0.1:11436/x/v1/health
 
 The server binds `127.0.0.1` only. With no `--port` it uses the port in `settings.toml` (11435 by default); with no
 `--data-dir` it uses the per-OS data folder. `--fake-engine` turns the binary into a tiny OpenAI-compatible test
-engine; the tests and the engine pack example use it.
+engine; the crash and restart tests use it as a real child process.
 
 The management API needs the admin key in `<data folder>/admin.key`:
 
@@ -124,8 +124,8 @@ changes, change the diagram in the same commit.
 
 | I want to... | Do this |
 | --- | --- |
-| Support a new OpenAI-compatible local engine | Write an engine pack (`*.engine.toml`), see [user-guide.md](user-guide.md#packs-add-an-engine-or-a-model-list); no code |
-| Add a curated model list | A model catalog pack (`*.models.toml`) |
+| Support another engine | Not a supported extension: llama.cpp is the only engine ([ADR 0020](adr/0020-llama-cpp-is-the-only-engine.md)); a new one is a new `Engine` implementation and a new ADR |
+| Add a curated model list | A model catalog pack (`*.models.toml`), see [user-guide.md](user-guide.md#packs-add-a-model-list) |
 | Add an engine with its own protocol | Implement `Engine` in `crates/pitwall-server/src/engines.rs` (or a new file), register it in `AppState::open`, add the pure parts to `pitwall-core`, an ADR, and tests with the fake engine |
 | Add or change an endpoint | Parse and format in `pitwall_core::api::<family>` (pure, with a contract test), add the route and handler in `http.rs`, keep `/x/v1` changes additive ([ADR 0003](adr/0003-api-surface-and-compatibility.md)) |
 | Add a management operation | DTO in `pitwall_core::mgmt` and `app/src/app/core/api.types.ts` in the same commit, a method in `mgmt.rs`'s `call`, a method on the UI `Backend` and the mock |

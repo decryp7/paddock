@@ -26,7 +26,7 @@ the one that has been run for real; see [Verified](#verified-and-not-verified).
 - launchd keeps it alive (`KeepAlive`): a crash or an exit after an update brings it back. The server exits for an update only
   when no request, job or download is in flight.
 - launchd starts agents with a minimal `PATH`; the server asks your login shell for the real one (bounded, with a timeout) and
-  passes it to engines that need it, such as a pack engine you installed yourself.
+  passes it to llama.cpp.
 - Status: `launchctl print gui/$(id -u)/net.decryptology.pitwall.service`. Logs: `~/Library/Application Support/Pitwall/logs/`.
 - Without the app you can run `pitwall-server` in a terminal; it binds `127.0.0.1:11435` (`--port` and `--data-dir` change
   that).
@@ -44,19 +44,18 @@ Data folder: **`~/Library/Application Support/Pitwall`** (`PITWALL_HOME` overrid
 | `models/<owner>/<repo>/` | Downloaded GGUF models |
 | `engines/<build>/` | Installed `llama-server` builds, for example `engines/metal/` |
 | `partial/` | Unfinished downloads |
-| `packs/` | Your engine and model packs |
+| `packs/` | Your model catalog packs |
 | `logs/` | Service logs, no prompts or responses |
 
 Keys that apps hold are in the **Keychain** (the app's own item), not here.
 
-## Engines and memory
+## llama.cpp and memory
 
-- Install the **Metal** build from **Engines** (it is the suggested one on Apple Silicon): a download of the official
+- Pitwall installs the **Metal** build by itself (it is the suggested one on Apple Silicon; the **llama.cpp** page shows the progress): a download of the official
   `llama-b11669-bin-macos-arm64.tar.gz` archive from GitHub, SHA-256 checked, self-tested with `--list-devices` (expect an `MTL0`
   device). Sizes on Apple Silicon: a Q4_K_M 7B model needs about 5 GB plus KV cache, which matters on 8 and 16 GB Macs; use
   the "will this fit" verdict. The *Low memory* preset releases models after two minutes.
-- MLX is **planned** and shows as "MLX (Apple Silicon) is planned; llama.cpp with Metal serves models today." Do not expect it
-  yet.
+- llama.cpp is the only engine; there is no MLX. The app has a menu bar with **Quit Pitwall** and **Quit Pitwall and Stop Serving**.
 - macOS' own memory pressure signal is not read yet; Pitwall acts on the available-memory threshold.
 
 ## Uninstall

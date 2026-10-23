@@ -10,7 +10,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 ## Contents
 
 - [First run](#first-run)
-- [Install an engine](#install-an-engine)
+- [llama.cpp](#llama-cpp-the-engine-installed-for-you)
 - [Get a model](#get-a-model)
 - [Will this fit?](#will-this-fit)
 - [Connect an app: pairing](#connect-an-app-pairing)
@@ -33,8 +33,9 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 1. **Install and open Pitwall** ([macOS](macos.md#install), [Linux](linux.md#install), [Windows](windows.md#install)). The window
    opens on the **Dashboard**. The server is a separate, windowless process that keeps serving when you close the window; the
    tray (menu bar) icon is how you get the window back.
-2. On a fresh machine the dashboard says there is no engine and no model, and shows what to do. Follow
-   [Install an engine](#install-an-engine) and [Get a model](#get-a-model).
+2. On a fresh machine Pitwall installs llama.cpp by itself (the dashboard shows the progress; see
+   [llama.cpp](#llama-cpp-the-engine-installed-for-you)), and the dashboard says there is no model yet. Follow
+   [Get a model](#get-a-model).
 3. **Check the server is up**:
 
    ```sh
@@ -51,22 +52,30 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
 If you run the server on its own (development, a headless Linux machine) the program is `pitwall-server`; its options are
 `--port N` and `--data-dir PATH` (the environment variable `PITWALL_HOME` also sets the data folder).
 
-## Install an engine
+## llama.cpp: the engine, installed for you
 
-An engine is the program that runs a model. Pitwall's own is **llama.cpp**.
+An engine is the program that runs a model. Pitwall has one, **llama.cpp**, which serves every model
+([ADR 0020](adr/0020-llama-cpp-is-the-only-engine.md)).
 
-1. Open **Engines**. The card for llama.cpp lists the builds available for this machine and marks the **suggested** one:
-   **Metal** on a Mac, **CUDA 13** or **CUDA 12** with an NVIDIA card, **Vulkan** for other GPUs, **CPU** if nothing else
-   works. You can pick another one; ROCm, SYCL and OpenVINO can be chosen by hand but are never chosen automatically.
-2. Click **Install**. Pitwall downloads the official release from GitHub (the host is shown), checks its SHA-256 against the
-   value pinned in the catalog, unpacks only the files it expects, and runs a **self-test** (`--version`, `--list-devices`).
-   The card then shows the tag (for example `b11669`), the devices the build found and "Self-test passed".
-3. If the self-test fails, the new build is **discarded** and the previous one stays active; the message says why. You can
-   also switch back to the previous build later with **Roll back**.
+1. **You do not have to install it.** The first time Pitwall starts, and whenever no build is installed, it downloads the
+   build suggested for this computer in the background: **Metal** on a Mac, **CUDA 13** or **CUDA 12** with an NVIDIA card,
+   **Vulkan** for other GPUs, **CPU** if nothing else works. The Dashboard and the **llama.cpp** page show the progress.
+   Models you load or download meanwhile wait ("Installing llama.cpp...") and go on when it is ready. Offline, or without a
+   network, the page says why and offers **Retry**.
+2. The download comes from GitHub (the host is shown); Pitwall checks its SHA-256 against the value pinned in the catalog,
+   unpacks only the files it expects, and runs a **self-test** (`--version`, `--list-devices`). The page then shows the tag
+   (for example `b11669`), the devices the build found and "Self-test passed".
+3. **Another build.** Open **llama.cpp**: the catalog lists the builds for this machine, the suggested one first. Install
+   another (ROCm, SYCL and OpenVINO can be chosen by hand but are never chosen automatically), pick which one is used, or pin
+   one for all models or for one model.
+4. If a self-test fails, the new build is **discarded** and the previous one stays active; the message says why. You can also
+   switch back to the previous build later with **Roll back**.
+5. **Left over from an older version.** Version 1.0.1 could download a llamafile engine. If its folder is still there the page
+   offers **Remove llamafile (size)**; nothing is deleted until you press it.
 
 **Minimum build.** Pitwall always starts llama.cpp with `--jinja` (b4524 and newer) and `--offline` (b5501 and newer), so
 **b5501 is the oldest build it runs**. An older build is refused at install and at engine start with "This llama.cpp build
-(bNNNN) is older than b5501, which Pitwall needs. Update it in Engines." Builds whose number is unknown (a custom
+(bNNNN) is older than b5501, which Pitwall needs. Update it on the llama.cpp page." Builds whose number is unknown (a custom
 `llama-server`) are trusted.
 
 ### Pin a build, roll back, and what a build supports
@@ -75,7 +84,7 @@ An engine is the program that runs a model. Pitwall's own is **llama.cpp**.
   the button turns violet and says **Pinned**, and the card says automatic choice is off until you unpin. Only builds that passed
   their self-test can be pinned. In **Models**, each model has a build menu to pin just that model (the row then says
   "pinned to cuda-13 b11669"). The order is: the model's pin, then the global pin, then automatic.
-- **A pin never silently falls back.** If the pinned build is removed, the Engines page says "Install it in Engines, or remove
+- **A pin never silently falls back.** If the pinned build is removed, the llama.cpp page says "Install it on the llama.cpp page, or remove
   the pin", and requests for the affected models answer 503 `engine_pin_unavailable` with that message.
 - **Roll back** appears when an earlier installed build passed its self-test. It names the build ("Roll back to Vulkan
   b11669"), asks first, and pins that build for all models until you unpin it. A build that failed its self-test is never offered;
@@ -85,7 +94,7 @@ An engine is the program that runs a model. Pitwall's own is **llama.cpp**.
 - **Features.** The **Features** button of a build lists vision, tools, JSON-schema output, embeddings and reranking as
   Supported, "Needs b5600" (with what to install) or Not supported. A request that needs something the build lacks is refused
   up front, for example 503 "... needs tool calling, which needs llama.cpp b4600 or newer; the engine build in use (cpu, b4300)
-  is older. Install llama.cpp b4600 or newer in Engines, or unpin the old build." Models whose features the build cannot serve are
+  is older. Install llama.cpp b4600 or newer on the llama.cpp page, or unpin the old build." Models whose features the build cannot serve are
   left out of `capabilities` in `GET /x/v1/models` (they appear under `unavailable`) and of `auto:` selection. The limits live in
   `capabilities.json` (embedded in the app, next to the pinned catalog); they are reviewed when the catalog moves.
 
@@ -99,8 +108,8 @@ CPU. Only installed builds that work on this machine are considered.
 Open **Models** then **Discover**.
 
 - **Recommended** lists models from the built-in starter catalog (and any catalog pack you added) that fit this machine (those that will not fit are left out), such as
-  *Qwen2.5 0.5B Instruct* (tiny and fast, 0.5 GB), *Qwen2.5 Coder 1.5B*, *Qwen2.5 7B Instruct* and *Nomic Embed Text v1.5*
-  (embeddings).
+  *Qwen3.8 27B*, *Qwen3.6 35B-A3B*, *Gemma 4* (26B-A4B, 12B, E4B), *Qwen3.5* (9B, 4B and 2B for small computers),
+  *Qwen3 Coder Next* and *Qwen3 Embedding 0.6B* (embeddings). Only current-generation models are listed.
 - **Search Hugging Face** finds GGUF models. Open a repository to see its files, each with a [fit verdict](#will-this-fit).
   Pick a quantisation (Q4_K_M is a good start; Q8_0 is larger and closer to the original), then **Download**.
 - A vision model needs its projector file (`mmproj`) in the same folder; download it with the model. Without it the model
@@ -112,8 +121,8 @@ the file is a valid GGUF; a file that fails either check is deleted and the down
 "the downloaded file does not match its checksum ... it was discarded".
 
 A model's **id** (what clients put in `"model"`) is its file name without `.gguf`, lowercased with other characters turned into
-`-`: `qwen2.5-0.5b-instruct-q4_k_m`. `GET /v1/models` lists them. Clients may also use the Hugging Face repo name
-(`Qwen/Qwen2.5-0.5B-Instruct-GGUF`) or `repo:quant`.
+`-`: `qwen3.5-2b-q4_k_m`. `GET /v1/models` lists them. Clients may also use the Hugging Face repo name
+(`unsloth/Qwen3.5-2B-GGUF`) or `repo:quant`.
 
 Gated models (Llama and others) need you to accept the licence on huggingface.co first; Pitwall says so when Hugging Face
 answers 401 or 403 ("the file may be gated"). Pitwall does not take a Hugging Face token.
@@ -225,23 +234,23 @@ curl -s $PW/v1/models -H "Authorization: Bearer $PITWALL_KEY"
 # Not streamed
 curl -s $PW/v1/chat/completions \
   -H "Authorization: Bearer $PITWALL_KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","messages":[{"role":"user","content":"Say hello in five words."}]}'
+  -d '{"model":"qwen3.5-2b-q4_k_m","messages":[{"role":"user","content":"Say hello in five words."}]}'
 
 # Streamed (server-sent events, ends with data: [DONE])
 curl -sN $PW/v1/chat/completions \
   -H "Authorization: Bearer $PITWALL_KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","stream":true,"messages":[{"role":"user","content":"Count to five."}]}'
+  -d '{"model":"qwen3.5-2b-q4_k_m","stream":true,"messages":[{"role":"user","content":"Count to five."}]}'
 
 # JSON-schema constrained output (grammar-enforced by llama.cpp)
 curl -s $PW/v1/chat/completions \
   -H "Authorization: Bearer $PITWALL_KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m",
+  -d '{"model":"qwen3.5-2b-q4_k_m",
        "messages":[{"role":"user","content":"Name a colour and a fruit."}],
        "response_format":{"type":"json_schema","json_schema":{"name":"pick","schema":{
          "type":"object","properties":{"colour":{"type":"string"},"fruit":{"type":"string"}},
          "required":["colour","fruit"],"additionalProperties":false}}}}'
 
-# Embeddings (needs an embedding model, e.g. nomic-embed-text)
+# Embeddings (needs an embedding model, e.g. qwen3-embedding-0.6b-q8_0)
 curl -s $PW/v1/embeddings \
   -H "Authorization: Bearer $PITWALL_KEY" -H 'Content-Type: application/json' \
   -d '{"model":"auto:embeddings","input":["first text","second text"]}'
@@ -258,13 +267,13 @@ api_key=key)`, or the environment variables `OPENAI_BASE_URL=http://127.0.0.1:11
 ```sh
 curl -s $PW/v1/messages \
   -H "x-api-key: $PITWALL_KEY" -H 'anthropic-version: 2023-06-01' -H 'Content-Type: application/json' \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","max_tokens":128,
+  -d '{"model":"qwen3.5-2b-q4_k_m","max_tokens":128,
        "messages":[{"role":"user","content":"Say hello in five words."}]}'
 
 # streamed
 curl -sN $PW/v1/messages \
   -H "x-api-key: $PITWALL_KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","max_tokens":128,"stream":true,
+  -d '{"model":"qwen3.5-2b-q4_k_m","max_tokens":128,"stream":true,
        "messages":[{"role":"user","content":"Count to five."}]}'
 ```
 
@@ -278,12 +287,12 @@ curl -s $PW/api/tags -H "Authorization: Bearer $PITWALL_KEY"          # installe
 curl -s $PW/api/ps   -H "Authorization: Bearer $PITWALL_KEY"          # loaded models and when they expire
 
 curl -s $PW/api/chat -H "Authorization: Bearer $PITWALL_KEY" \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","stream":false,
+  -d '{"model":"qwen3.5-2b-q4_k_m","stream":false,
        "messages":[{"role":"user","content":"Say hello in five words."}]}'
 
 # JSON-schema constrained output: "format" is "json" or a schema
 curl -s $PW/api/chat -H "Authorization: Bearer $PITWALL_KEY" \
-  -d '{"model":"qwen2.5-0.5b-instruct-q4_k_m","stream":false,
+  -d '{"model":"qwen3.5-2b-q4_k_m","stream":false,
        "messages":[{"role":"user","content":"Name a colour and a fruit."}],
        "format":{"type":"object","properties":{"colour":{"type":"string"},"fruit":{"type":"string"}},
                  "required":["colour","fruit"]}}'
@@ -303,9 +312,9 @@ surface and sends nothing off-machine; downloads are done by the server, which s
 pitwall status                        # version, serving or paused, memory, loaded models, queue, speed
 pitwall ps                            # models loaded in memory
 pitwall models                        # installed models, size and fit
-pitwall load qwen2.5-0.5b-instruct-q4_k_m
-pitwall unload qwen2.5-0.5b-instruct-q4_k_m
-pitwall pull Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf
+pitwall load qwen3.5-2b-q4_k_m
+pitwall unload qwen3.5-2b-q4_k_m
+pitwall pull unsloth/Qwen3.5-2B-GGUF/qwen3.5-2b-q4_k_m.gguf
 pitwall keys                          # apps and their keys (ids and prefixes only)
 pitwall keys create my-script --new   # a new app and its first key; the key is printed once
 pitwall keys create Debrief           # another key for an existing app (by name or id)
@@ -314,7 +323,7 @@ pitwall presets                       # aliases and where each one resolves now
 pitwall presets show debrief-explain
 pitwall chat debrief-explain "Explain this error in one sentence"
 echo "Summarise this" | pitwall chat fast
-pitwall bench qwen2.5-0.5b-instruct-q4_k_m
+pitwall bench qwen3.5-2b-q4_k_m
 ```
 
 **Finding the server.** The port comes from `--port`, else the discovery file in the data folder, else 11435. If nothing
@@ -355,7 +364,7 @@ curl -s $PW/v1/chat/completions -H "Authorization: Bearer $PITWALL_KEY" -H 'Cont
 
 # ask first, without running anything
 curl -s $PW/x/v1/select -H "Authorization: Bearer $PITWALL_KEY" -d '{"model":"auto:tools,32k,quality"}'
-# {"model":"qwen2.5-7b-instruct-q4_k_m","chosenBy":"capabilities","loaded":false}
+# {"model":"qwen3.5-9b-q4_k_m","chosenBy":"capabilities","loaded":false}
 ```
 
 Words in `auto:` are capabilities (`chat`, `vision`, `tools`, `json`, `embeddings`, `rerank`), a minimum context (`8k`, `32k`,
@@ -374,7 +383,7 @@ level every 30 seconds so it never starves. An app cannot go above its permissio
 | Header | Meaning |
 |---|---|
 | `X-Pitwall-Model` | The model that answered. |
-| `X-Pitwall-Engine` | The engine that served it: `llama.cpp`, or the id of the engine pack. |
+| `X-Pitwall-Engine` | The engine that served it: `llama.cpp`. |
 | `X-Pitwall-Chosen-By` | `explicit` (named), `capabilities` (`auto:`) or `default`. |
 | `X-Pitwall-Alias` | Present when the `model` field named a preset: the preset's name (`X-Pitwall-Model` is the model behind it). |
 | `X-Pitwall-Cold-Start-Ms` | Present when the model had to be loaded first. |
@@ -393,7 +402,7 @@ A preset gives an app a stable name and lets you decide what serves it. In **Mod
 | Serves from | An installed model id, or a capability selection such as `auto:chat,fast` (the same words as above); with a selection Pitwall picks the best installed model for each request. |
 | Context, Temperature, Top-p, Max tokens | Defaults used when the request does not set them. Empty means the request (or the model) decides. |
 | System prompt | Added in front of the conversation only when the request has no system message of its own. |
-| Engine | llama.cpp, or an installed engine pack. |
+| Engine | llama.cpp. |
 
 While you type, the editor asks the engine what the draft would serve ("Would serve qwen3-8b-instruct-q4_k_m") and shows
 anything that stops it being saved, in words. The list shows where each preset stands: *Ready*, *Model removed* (its model
@@ -533,6 +542,14 @@ Editing any value makes the preset **Custom**. A load never leaves less than a f
 memory now** on the dashboard unloads every idle model; **Pause serving** makes new requests answer "Pitwall has paused serving.
 Resume it in Pitwall's window or tray menu." while running ones finish.
 
+**Quitting.** Closing the window never stops serving. **Settings > General > When you quit Pitwall** decides what **Quit**
+does: *Keep serving in the background* (the default: the service goes on), *Stop serving*, or *Ask each time* (a dialog with
+both choices and "Remember my choice"). Stopping serving unloads every model, asks every engine process to end (killed after
+10 seconds if it does not), and pauses serving: the Dashboard and tray say **Stopped**, and requests are refused until you open
+Pitwall again, which resumes serving, or press Resume. **Quit and stop serving** in the tray (menu bar) menu and in the macOS
+app menu does this whatever the setting says. The background service stays registered
+([ADR 0021](adr/0021-what-quitting-does-about-serving.md)).
+
 Two parts of the policy are decided in the core but not acted on yet: yielding to a full-screen foreground app and releasing
 only the context before the weights. Operating-system memory-pressure signals are not read yet either; the
 available-memory threshold is what works today.
@@ -544,70 +561,14 @@ installed keeps working, because serving never needed the network. A blocked act
 downloads are off. Turn offline mode off in Settings > Network to download." Use it on a machine that must not talk to the
 internet, or to be sure nothing downloads in the background (nothing does without your click).
 
-## Packs: add an engine or a model list
+## Packs: add a model list
 
-Packs are TOML files that you drop in `<data folder>/packs/` (see [where files are](#where-pitwall-keeps-its-files)).
-They are data, not code ([ADR 0011](adr/0011-declarative-packs.md)). Packs are read when the server starts, so restart it after adding or changing one. The file name decides the kind: `*.engine.toml` or `*.models.toml`. At most 64 files of
-256 KB are read; a pack with the same `id` as an earlier one replaces it (yours replace the built-in ones). A problem is shown
-on the Engines page with the file name and what to fix; unknown keys are warnings.
-
-### An engine pack
-
-This example describes a self-installed OpenAI-compatible server that is started by a command on your `PATH`. Because it has no
-`[[download]]` table it is an *external* engine: Pitwall only launches it.
-
-`<data folder>/packs/mytool.engine.toml`:
-
-```toml
-format = 1                 # required; the pack format this version reads
-id = "my-server"           # 1-64 letters, digits, - _ .  (not "llama.cpp")
-name = "My OpenAI-compatible server"
-description = "A server I installed myself, launched by Pitwall."
-version = "1.2.0"          # required: pin the version you tested
-
-[capabilities]             # at least chat or embeddings must be true
-chat = true
-embeddings = false
-vision = false
-tools = false
-
-[launch]
-# The command may be a bare name found on PATH or an absolute path. {host} is always 127.0.0.1.
-command = "my-server"
-# {host}, {port} and {model} are required. Others: {mmproj} {context} (per slot) {slots} {alias} {threads} {engine_dir} {binary}.
-args = ["--host", "{host}", "--port", "{port}", "--model", "{model}", "--ctx-size", "{context}"]
-# api_key_env = "MY_SERVER_API_KEY"   # optional UPPER_CASE variable; Pitwall sets a private key in it
-start_timeout_secs = 120             # 5-1800, default 300
-
-[health]
-path = "/health"           # must start with /; Pitwall waits for a 200 here
-
-[memory]
-overhead_mib = 512         # memory on top of the model file and KV cache
-```
-
-To make Pitwall download the engine itself, add one `[[download]]` table per platform. Copy this shape (it is how the built-in
-**llamafile** pack, `crates/pitwall-core/src/packs/llamafile.engine.toml`, does it); each platform may appear once, the URL must
-be `https` on an allowed host (Hugging Face or GitHub), and the `sha256` and `size` are required:
-
-```toml
-[[download]]
-platform = "linux-x64"     # windows-x64, windows-arm64, macos-arm64, macos-x64, linux-x64, linux-arm64
-url = "https://github.com/example/my-server/releases/download/1.2.0/my-server-linux-x64.tar.gz"
-sha256 = "0000000000000000000000000000000000000000000000000000000000000000"   # 64 lowercase hex characters
-size = 123456789           # bytes
-archive = "tar-gz"         # none (the file is the program), zip or tar-gz
-binary = "my-server"       # the program's file name inside the download
-```
-
-When a pack has downloads, set `command = "{engine_dir}/{binary}"`. Rules Pitwall enforces: the arguments must contain `{host}`,
-`{port}` and `{model}`; they must not name `0.0.0.0` or `::`; at most 64 arguments of 300 characters; only the listed placeholders.
-
-To use it for a model, open **Models**, choose the model and set its **Engine** to `my-server` (a model's default is llama.cpp).
-A pack engine is as capable as the OpenAI-compatible surface it exposes: no grammar-constrained output unless the engine has it,
-and no llama.cpp `/props` capability detection.
-
-### A model catalog pack
+A catalog pack is a TOML file that you drop in `<data folder>/packs/` (see [where files are](#where-pitwall-keeps-its-files)).
+It is data, not code ([ADR 0011](adr/0011-declarative-packs.md)). Packs are read when the server starts, so restart it after
+adding or changing one. Only `*.models.toml` files are read (engine packs were removed in 1.0.3: llama.cpp is the only
+engine, [ADR 0020](adr/0020-llama-cpp-is-the-only-engine.md)). At most 64 files of 256 KB are read; a pack with the same `id`
+as an earlier one replaces it (yours replace the built-in ones). A problem is shown on **Models > Discover** with the file
+name and what to fix; unknown keys are warnings.
 
 `<data folder>/packs/team.models.toml`:
 
@@ -617,15 +578,15 @@ id = "team"                # 1-64 letters, digits, - _ .
 name = "Team models"
 
 [[model]]
-id = "qwen2.5-3b-instruct"           # your name for it
-name = "Qwen2.5 3B Instruct"
-repo = "Qwen/Qwen2.5-3B-Instruct-GGUF"   # owner/name on Hugging Face
-context = 32768                      # 256 to 10000000
+id = "qwen3.5-4b"                    # your name for it
+name = "Qwen3.5 4B"
+repo = "unsloth/Qwen3.5-4B-GGUF"     # owner/name on Hugging Face
+context = 262144                     # 256 to 10000000
 capabilities = ["chat", "json", "tools"]   # chat, vision, tools, json, embeddings, rerank, transcription
 tags = ["general", "small"]          # lowercase words; the Discover tab can filter by tag
 variants = [
-  { quant = "Q4_K_M", file = "qwen2.5-3b-instruct-q4_k_m.gguf", size_bytes = 2104932768 },
-  { quant = "Q8_0",   file = "qwen2.5-3b-instruct-q8_0.gguf",   size_bytes = 3285476352 },
+  { quant = "Q4_K_M", file = "Qwen3.5-4B-Q4_K_M.gguf", size_bytes = 2740937888 },
+  { quant = "Q8_0",   file = "Qwen3.5-4B-Q8_0.gguf",   size_bytes = 4482403488 },
 ]
 ```
 
@@ -656,7 +617,7 @@ recommended, and models that will not fit this machine are left out. Up to 500 m
 | `models/<owner>/<repo>/` | Downloaded models |
 | `engines/` | Installed engine builds (one folder per build id) |
 | `partial/` | Unfinished downloads (resumed later) |
-| `packs/` | Your packs |
+| `packs/` | Your model catalog packs |
 | `logs/` | Service logs (no prompts or responses) |
 
 ## Troubleshooting
@@ -672,14 +633,14 @@ The messages below are what Pitwall actually says.
 | 404 "there is no model named ... Installed: ..." | Use an id from `GET /v1/models`. |
 | 404 "the preset ... points to the model ..., which is no longer installed" (code `preset_target_unavailable`) | The preset's model was deleted. Edit the preset in Models > Presets. |
 | 404 "no installed model offers ...; download one in Pitwall > Models" | No installed model has the capabilities in `auto:...`. |
-| 503 "... needs ..., which needs llama.cpp bNNNN or newer; the engine build in use (...) is older." (code `engine_build_too_old`) | The active engine build is too old for the feature in the request. Install a newer build in Engines, or unpin the old one. |
+| 503 "... needs ..., which needs llama.cpp bNNNN or newer; the engine build in use (...) is older." (code `engine_build_too_old`) | The active engine build is too old for the feature in the request. Install a newer build on the llama.cpp page, or unpin the old one. |
 | 400 "... cannot serve: ..." (code `capability_unsupported`) | No build of that kind (for example that backend) provides the feature. Use another build or model. |
-| 503 "The engine build ... is pinned for ... but is not installed. Install it in Engines, or remove the pin." (code `engine_pin_unavailable`) | The pinned build was removed or failed its self-test. |
+| 503 "The engine build ... is pinned for ... but is not installed. Install it on the llama.cpp page, or remove the pin." (code `engine_pin_unavailable`) | The pinned build was removed or failed its self-test. |
 | 400 "the model ... cannot read images. Choose a vision model (one downloaded with its mmproj file)." | Get the model's projector file too. |
 | 400 "... is not a capability (chat, vision, tools, json, embeddings, rerank), a context like 8k, or fast/quality/small" | A typo in `auto:...`. |
 | 400 "`max_tokens` is required" | Anthropic requests must have it. |
-| 500 "no llama.cpp engine is installed. Open Engines and install one (it is suggested for this machine)." | Install an engine. |
-| 500 "could not load ...: the engine exited (...)" | The engine failed to start; the last lines of its output are in the message. Try another build in Engines, a smaller model or context. |
+| 500 "llama.cpp is not installed yet. Pitwall installs the build suggested for this machine by itself; try again in a moment." | Pitwall is installing llama.cpp; wait, or see the progress on the Dashboard. If it failed, press Retry on the llama.cpp page. |
+| 500 "could not load ...: the engine exited (...)" | The engine failed to start; the last lines of its output are in the message. Try another build on the llama.cpp page, a smaller model or context. |
 | 500 "the model did not become ready within 5 minutes" | The load is too slow for this machine (swap, a huge model). Choose a smaller one. |
 | 503 "... needs about N GiB of memory but only M GiB can be made free. Close other apps, choose a smaller quantisation or a shorter context." | `insufficient_memory`. Do as it says. |
 | 503 "Pitwall is busy: N requests are waiting. Try again shortly or use a lower priority." | The queue is full (`Retry-After: 5`). |
@@ -693,5 +654,5 @@ The messages below are what Pitwall actually says.
 | Download: "Pitwall only downloads from Hugging Face and GitHub over HTTPS; ... is not allowed" | A pack or redirect named another host. |
 | Install: "the new engine failed its self-test and was discarded (...); the previous build stays active" | The build does not run here (missing driver, wrong architecture). Pick another build. |
 | Start: "Pitwall cannot listen on 127.0.0.1:11435" | The port is taken. Change it in Settings > Server or start with `--port`. |
-| An engine pack is listed with a problem | Read the message on the Engines page: it names the file and the line to fix. |
+| A catalog pack is listed with a problem | Read the message on Models > Discover: it names the file and what to fix. |
 | A model is slow after a pause | It was released when idle and is loading again (cold start). Pin it or use the Performance preset. |

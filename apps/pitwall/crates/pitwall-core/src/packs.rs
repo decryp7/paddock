@@ -359,6 +359,31 @@ variants = [{ quant = "Q4_K_M", file = "huge-q4.gguf", size_bytes = 90000000000 
     }
 
     #[test]
+    fn the_starter_catalog_has_only_current_generation_models_with_real_looking_files() {
+        let p = Packs::builtin();
+        let ids: Vec<&str> = p.models.iter().map(|m| m.id.as_str()).collect();
+        for want in ["qwen3.8-27b", "qwen3.6-35b-a3b", "gemma-4-26b-a4b", "qwen3-coder-next", "qwen3-embedding-0.6b"] {
+            assert!(ids.contains(&want), "{want} in {ids:?}");
+        }
+        // Nothing from the generations before these (Qwen2.x, Qwen3 base sizes, Nomic, Llama 3, Gemma 3).
+        for old in ["qwen2", "nomic", "llama-3", "gemma-3", "qwen3-8b", "qwen3-1.7b"] {
+            assert!(ids.iter().all(|i| !i.contains(old)), "{old} must not be in the catalog: {ids:?}");
+        }
+        for m in &p.models {
+            assert!(m.repo.contains('/'), "{}", m.id);
+            assert!(!m.variants.is_empty(), "{}", m.id);
+            for v in &m.variants {
+                assert!(v.file.ends_with(".gguf") && !v.file.contains("-of-0"), "{}: split or odd file {}", m.id, v.file);
+                assert!(v.size_bytes > 100_000_000, "{}: {}", m.id, v.file);
+                assert!(crate::quant::Quant::parse(&v.quant).is_some(), "{}: the fit check must understand {}", m.id, v.quant);
+            }
+        }
+        // A tier for low memory exists, and embeddings are there.
+        assert!(p.models.iter().any(|m| m.tags.iter().any(|t| t == "tiny")));
+        assert!(p.models.iter().any(|m| m.capabilities == [Capability::Embeddings]));
+    }
+
+    #[test]
     fn structural_mistakes_are_named() {
         let ok = |t: &str| parse_models(t, "m", &mut vec![]).unwrap_err();
         assert!(ok("format = 2").contains("format"));

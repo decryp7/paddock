@@ -43,12 +43,12 @@ Data folder: **`%APPDATA%\Pitwall`** (`PITWALL_HOME` overrides it).
 | `models\<owner>\<repo>\` | Downloaded GGUF models |
 | `engines\<build>\` | Installed `llama-server.exe` builds (`cpu`, `vulkan`, `cuda-12`, `cuda-13`, ...) |
 | `partial\` | Unfinished downloads |
-| `packs\` | Your engine and model packs |
+| `packs\` | Your model catalog packs |
 | `logs\` | Service logs, no prompts or responses |
 
 Keys that apps hold are in **Windows Credential Manager**.
 
-## Engines and GPUs
+## llama.cpp and GPUs
 
 - **CUDA 13** or **CUDA 12** (NVIDIA; the CUDA build comes with its `cudart` archive, both checked), **Vulkan** (NVIDIA, AMD,
   Intel) or **CPU**. The suggested build is chosen for the hardware; the self-test shows the devices the build found. SYCL,
