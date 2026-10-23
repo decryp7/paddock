@@ -645,7 +645,11 @@ mod tests {
         let r = run(&[ssd.clone()]);
         assert_eq!(r.score, 95);
         assert_eq!(r.reasons[0].id, "ssdLife:Samsung 990");
-        assert_eq!(r.reasons[0].fix.as_ref().map(|f| f.kind.clone()), Some(FixKind::OpenLifespan), "the reason links to /lifespan");
+        assert_eq!(
+            r.reasons[0].fix.as_ref().map(|f| f.kind.clone()),
+            Some(FixKind::OpenLifespan),
+            "the reason links to /lifespan"
+        );
         assert!(r.reasons[0].detail.contains("Confidence: medium"));
         ssd.outcome = LifeOutcome::AlreadyPastLimit;
         let r = run(&[ssd]);

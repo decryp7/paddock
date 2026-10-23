@@ -442,7 +442,10 @@ mod tests {
     fn pinned_counters_are_read_in_the_background_at_a_bounded_and_stretching_pace() {
         let (c, _) = centre();
         assert!(!c.poll_pinned(&[], Timestamp(1)), "nothing pinned, nothing read");
-        assert!(!c.poll_pinned(&["junk".into()], Timestamp(1)), "an invalid path is skipped, not an error");
+        assert!(
+            !c.poll_pinned(&["junk".into()], Timestamp(1)),
+            "an invalid path is skipped, not an error"
+        );
         assert!(c.poll_pinned(&["\\Memory\\Free".into()], Timestamp(5_000)));
         let mut points = 0;
         for _ in 0..200 {
@@ -464,7 +467,9 @@ mod tests {
     fn the_background_reading_covers_at_most_the_first_few_pinned_and_never_piles_up() {
         let many: Vec<String> = (0..20).map(|i| format!("\\O\\c{i}")).collect();
         let fake = Arc::new(FakeCounters::new(
-            (0..20).map(|i| Entry::new("O", None, &format!("c{i}"), U::Count, CounterKind::Gauge, 1.0)).collect(),
+            (0..20)
+                .map(|i| Entry::new("O", None, &format!("c{i}"), U::Count, CounterKind::Gauge, 1.0))
+                .collect(),
         ));
         let c = CounterCentre::new(fake);
         assert!(c.poll_pinned(&many, Timestamp(1)));
@@ -474,7 +479,10 @@ mod tests {
         let p = vec!["\\O\\c1".to_string()];
         assert!(c.poll_pinned(&p, Timestamp(1)));
         assert!(c.poll_pinned(&p, Timestamp(2)));
-        assert!(!c.poll_pinned(&p, Timestamp(3)), "two reads are stuck: the third is skipped, nothing waits");
+        assert!(
+            !c.poll_pinned(&p, Timestamp(3)),
+            "two reads are stuck: the third is skipped, nothing waits"
+        );
         assert_eq!(c.inner.in_flight.load(Ordering::SeqCst), 2);
         *lock(&hang.0) = true;
     }
