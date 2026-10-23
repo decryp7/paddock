@@ -40,15 +40,11 @@ describe('Shell', () => {
     }
   });
 
-  it('lists the built screens and opens the Coming list as a dialog', async () => {
-    const { f, el } = await make();
+  it('lists the built screens and shows the Coming button only while something is unbuilt', async () => {
+    const { el } = await make();
     const label = (a: Element) => a.querySelector('.label')?.textContent?.trim();
     expect([...el.querySelectorAll('nav ul a')].map(label)).toEqual(NAV.map((n) => n.label));
-    const toggle = el.querySelector<HTMLButtonElement>('button.more')!;
-    expect(toggle.textContent).toContain(`Coming (${COMING.length})`);
-    toggle.click();
-    f.detectChanges();
-    expect(document.body.textContent).toContain('Not built yet');
+    expect(el.querySelector('button.more') !== null).toBe(COMING.length > 0);
   });
   it('has a skip link, a main landmark and a search button', async () => {
     const { el } = await make();

@@ -64,9 +64,11 @@ function readCollapsed(): boolean {
             </li>
           }
         </ul>
-        <button type="button" class="more label" aria-haspopup="dialog" (click)="openComing()">
-          <dy-icon name="info" /> Coming ({{ coming.length }})
-        </button>
+        @if (coming.length > 0) {
+          <button type="button" class="more label" aria-haspopup="dialog" (click)="openComing()">
+            <dy-icon name="info" /> Coming ({{ coming.length }})
+          </button>
+        }
       </nav>
       <div class="side-foot">
         <button type="button" class="btn ghost collapse" (click)="toggle()" [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [attr.aria-expanded]="!collapsed()">

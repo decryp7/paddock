@@ -25,11 +25,9 @@ test.describe('screens', () => {
     }
   });
 
-  test('unbuilt features are listed in one dialog and have no route', async ({ page }) => {
+  test('with nothing unbuilt there is no Coming button, and an unknown route lands on the dashboard', async ({ page }) => {
     await page.goto(url());
-    await page.getByRole('button', { name: /Coming/ }).click();
-    await expect(page.getByRole('dialog').getByText('Issues')).toBeVisible();
-    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: /Coming/ })).toHaveCount(0);
     await page.goto(url('/tuning-admin'));
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
   });

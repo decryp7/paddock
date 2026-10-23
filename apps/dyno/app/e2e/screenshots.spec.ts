@@ -232,14 +232,6 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
   },
   { name: 'reports', path: '/#/reports', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible()) },
   {
-    name: 'coming',
-    path: '/#/',
-    ready: async (page) => {
-      await page.getByRole('button', { name: /Coming/ }).click();
-      await expect(page.getByRole('dialog')).toBeVisible();
-    },
-  },
-  {
     name: 'tray',
     path: '/#/tray',
     size: { width: 440, height: 660 },
