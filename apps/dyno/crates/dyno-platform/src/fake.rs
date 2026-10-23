@@ -14,7 +14,9 @@
 use crate::Platform;
 use dyno_core::facts::SystemFacts;
 use dyno_core::metrics::{CpuSample, DiskIo, MemoryPressure, MemorySample, Reading, SystemSample};
-use dyno_core::ports::{FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessControl, ProcessSource, StartupItems, SystemSensors, UserActivity};
+use dyno_core::ports::{
+    FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessControl, ProcessSource, StartupItems, SystemSensors, UserActivity,
+};
 use dyno_core::process::{ListOrReason, Locker, Pid, ProcessAction, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use dyno_core::startup::{StartupEntry, StartupState};
 use dyno_core::time::Timestamp;

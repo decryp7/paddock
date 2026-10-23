@@ -25,7 +25,10 @@ pub struct Listing {
 }
 
 fn millis(t: std::time::SystemTime) -> Timestamp {
-    Timestamp(t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX)))
+    Timestamp(
+        t.duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX)),
+    )
 }
 
 /// Lists the files of `root` (and below it when `recursive`, at most [`MAX_DEPTH`] levels), never following a link. It
@@ -183,6 +186,19 @@ fn guard(m: &Mutex<WatchedFolders>) -> std::sync::MutexGuard<'_, WatchedFolders>
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// What the person chose when adding a folder.
+#[derive(Debug, Clone, Copy)]
+pub struct NewFolder<'a> {
+    /// The folder from the OS dialog.
+    pub chosen: &'a str,
+    /// The template it started from.
+    pub template: Option<&'a str>,
+    /// How long files may stay, seconds.
+    pub keep_for_secs: u32,
+    /// Include subfolders.
+    pub recursive: bool,
+}
+
 /// How a request to change a folder looks, already parsed.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Change {
@@ -250,17 +266,13 @@ impl WatchCentre {
     }
 
     /// Adds the folder the person chose, switched off. `data` is Dyno's own data folder.
-    pub fn add(
-        &self,
-        chosen: &str,
-        template: Option<&str>,
-        keep_for_secs: u32,
-        recursive: bool,
-        os: Os,
-        home: &str,
-        data: &str,
-        now: Timestamp,
-    ) -> Result<(), String> {
+    pub fn add(&self, new: NewFolder<'_>, os: Os, home: &str, data: &str, now: Timestamp) -> Result<(), String> {
+        let NewFolder {
+            chosen,
+            template,
+            keep_for_secs,
+            recursive,
+        } = new;
         check_keep(keep_for_secs)?;
         let filter = match template {
             Some(t) => template_filter(t).ok_or_else(|| "That template is not known.".to_string())?,
@@ -519,7 +531,9 @@ mod tests {
         assert_eq!(planned.due.len(), 1);
         // The re-check compares the modification time it was planned with.
         let touched = std::fs::File::open(&p).unwrap();
-        touched.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
+        touched
+            .set_modified(std::time::SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
         let meta = p.symlink_metadata().unwrap();
         assert_ne!(meta.modified().map_or(Timestamp(0), millis), planned.due[0].modified);
     }
@@ -536,7 +550,9 @@ mod tests {
             let link = f.dir.join("as-link");
             std::os::unix::fs::symlink(&f.dir, &link).unwrap();
             w.path = link.to_string_lossy().into_owned();
-            assert!(sweep(&w, real_now(), ctx(&f, &mut NoLocks, "w-b7")).unwrap_err().contains("not a plain folder"));
+            assert!(sweep(&w, real_now(), ctx(&f, &mut NoLocks, "w-b7"))
+                .unwrap_err()
+                .contains("not a plain folder"));
         }
     }
 
@@ -554,7 +570,18 @@ mod tests {
     }
 
     fn add(c: &WatchCentre, f: &Fx, path: &Path, keep: u32) -> Result<(), String> {
-        c.add(path.to_str().unwrap(), Some("installers"), keep, false, Os::Linux, &f.home, "/nonexistent/dyno", real_now())
+        c.add(
+            NewFolder {
+                chosen: path.to_str().unwrap(),
+                template: Some("installers"),
+                keep_for_secs: keep,
+                recursive: false,
+            },
+            Os::Linux,
+            &f.home,
+            "/nonexistent/dyno",
+            real_now(),
+        )
     }
 
     #[test]
@@ -574,7 +601,21 @@ mod tests {
         let other = f._t.path().join("other");
         std::fs::create_dir_all(&other).unwrap();
         assert!(add(&c, &f, &other, 5).unwrap_err().contains("between 10 minutes and 10 days"));
-        assert!(c.add(other.to_str().unwrap(), Some("nope"), 600, false, Os::Linux, &f.home, "", real_now()).unwrap_err().contains("template"));
+        assert!(c
+            .add(
+                NewFolder {
+                    chosen: other.to_str().unwrap(),
+                    template: Some("nope"),
+                    keep_for_secs: 600,
+                    recursive: false,
+                },
+                Os::Linux,
+                &f.home,
+                "",
+                real_now()
+            )
+            .unwrap_err()
+            .contains("template"));
         let file = put(&other, "a.txt", 0);
         assert!(add(&c, &f, &file, 600).unwrap_err().contains("not a file"));
         assert!(add(&c, &f, &other.join("missing"), 600).unwrap_err().contains("cannot be found"));
@@ -602,15 +643,43 @@ mod tests {
         c.change(&id, on).unwrap();
         assert!(c.get(&id).unwrap().enabled);
         // A shorter keep-for time turns it off again until previewed; a longer one does not.
-        c.change(&id, Change { keep_for_secs: Some(8 * 86_400), ..Default::default() }).unwrap();
+        c.change(
+            &id,
+            Change {
+                keep_for_secs: Some(8 * 86_400),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(c.get(&id).unwrap().enabled);
-        c.change(&id, Change { keep_for_secs: Some(86_400), ..Default::default() }).unwrap();
+        c.change(
+            &id,
+            Change {
+                keep_for_secs: Some(86_400),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let g = c.get(&id).unwrap();
         assert!(!g.enabled && !g.previewed);
-        c.change(&id, Change { recursive: Some(true), ..Default::default() }).unwrap();
+        c.change(
+            &id,
+            Change {
+                recursive: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         preview(&c, &id, &f.home, real_now()).unwrap();
         c.change(&id, on).unwrap();
-        c.change(&id, Change { recursive: Some(true), ..Default::default() }).unwrap();
+        c.change(
+            &id,
+            Change {
+                recursive: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(c.get(&id).unwrap().enabled, "no change from the previewed setting");
         // A restart reads the same list.
         let again = WatchCentre::load(f._t.path().join("watched-folders.json")).0;
@@ -640,7 +709,14 @@ mod tests {
         let id = c.overview().folders[0].folder.id.clone();
         preview(&c, &id, &f.home, real_now()).unwrap();
         assert!(c.due(real_now()).is_empty(), "off folders are not due");
-        c.change(&id, Change { enabled: Some(true), ..Default::default() }).unwrap();
+        c.change(
+            &id,
+            Change {
+                enabled: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(c.due(real_now()).len(), 1);
         c.record(
             &id,

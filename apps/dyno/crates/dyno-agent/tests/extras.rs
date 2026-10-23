@@ -71,7 +71,8 @@ fn old_file(dir: &Path, name: &str) -> PathBuf {
     let p = dir.join(name);
     std::fs::write(&p, name.as_bytes()).unwrap();
     let f = std::fs::File::open(&p).unwrap();
-    f.set_modified(std::time::SystemTime::now() - Duration::from_secs(5 * 86_400)).unwrap();
+    f.set_modified(std::time::SystemTime::now() - Duration::from_secs(5 * 86_400))
+        .unwrap();
     p
 }
 
@@ -87,11 +88,19 @@ fn a_search_seed_is_redacted_and_the_url_is_built_from_the_confirmed_text_only()
     assert!(seed.text.starts_with("Slack crashed"));
     assert!(!seed.text.contains("10.1.2.3") && !seed.text.contains("123e4567"));
     assert!(seed.removed.iter().any(|r| r.contains("IP address")) && seed.removed.iter().any(|r| r.contains("GUID")));
-    let Reply::Url(u) = ask(&peer, Request::WebSearch { query: "kernel_task high cpu".into() }).unwrap() else {
+    let Reply::Url(u) = ask(
+        &peer,
+        Request::WebSearch {
+            query: "kernel_task high cpu".into(),
+        },
+    )
+    .unwrap() else {
         panic!("url")
     };
     assert_eq!(u, "https://duckduckgo.com/?q=kernel_task+high+cpu");
-    assert!(ask(&peer, Request::WebSearch { query: "  ".into() }).unwrap_err().contains("Type something"));
+    assert!(ask(&peer, Request::WebSearch { query: "  ".into() })
+        .unwrap_err()
+        .contains("Type something"));
 }
 
 #[test]
@@ -110,14 +119,28 @@ fn a_file_hash_is_computed_here_and_the_virustotal_address_holds_only_the_hash()
         panic!("hash")
     };
     assert_eq!(info.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    let Reply::Url(u) = ask(&peer, Request::VirusTotalUrl { sha256: info.sha256.clone() }).unwrap() else {
+    let Reply::Url(u) = ask(
+        &peer,
+        Request::VirusTotalUrl {
+            sha256: info.sha256.clone(),
+        },
+    )
+    .unwrap() else {
         panic!("url")
     };
     assert_eq!(u, format!("https://www.virustotal.com/gui/file/{}", info.sha256));
-    assert!(ask(&peer, Request::VirusTotalUrl { sha256: "nope".into() }).unwrap_err().contains("64 hexadecimal"));
+    assert!(ask(&peer, Request::VirusTotalUrl { sha256: "nope".into() })
+        .unwrap_err()
+        .contains("64 hexadecimal"));
     // A relative path, a folder and a missing file are refused with a reason.
     for bad in ["relative", h.tmp.path().to_str().unwrap(), "/definitely/not/here"] {
-        let e = ask(&peer, Request::FileHash { source: HashSource::Path(bad.into()) }).unwrap_err();
+        let e = ask(
+            &peer,
+            Request::FileHash {
+                source: HashSource::Path(bad.into()),
+            },
+        )
+        .unwrap_err();
         assert!(!e.is_empty(), "{bad}");
     }
     // A process that is not running (a reused pid) is not found.
@@ -125,7 +148,14 @@ fn a_file_hash_is_computed_here_and_the_virustotal_address_holds_only_the_hash()
         pid: 100,
         started: Timestamp(1),
     };
-    assert!(ask(&peer, Request::FileHash { source: HashSource::Process(gone) }).unwrap_err().contains("exited"));
+    assert!(ask(
+        &peer,
+        Request::FileHash {
+            source: HashSource::Process(gone)
+        }
+    )
+    .unwrap_err()
+    .contains("exited"));
 }
 
 #[test]
@@ -141,7 +171,12 @@ fn a_running_process_is_hashed_from_the_file_it_runs_from() {
     // The sampler fills the process table within a tick or two.
     let mut answer = None;
     for _ in 0..40 {
-        match ask(&peer, Request::FileHash { source: HashSource::Process(target) }) {
+        match ask(
+            &peer,
+            Request::FileHash {
+                source: HashSource::Process(target),
+            },
+        ) {
             Ok(Reply::FileHash(i)) => {
                 answer = Some(i);
                 break;
@@ -149,7 +184,10 @@ fn a_running_process_is_hashed_from_the_file_it_runs_from() {
             _ => std::thread::sleep(Duration::from_millis(100)),
         }
     }
-    assert_eq!(answer.unwrap().sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    assert_eq!(
+        answer.unwrap().sha256,
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
 }
 
 fn startup(name: &str, exe: &str, publisher: Option<&str>) -> StartupEntry {
@@ -204,8 +242,17 @@ fn the_startup_list_is_filtered_by_the_engine_with_counts() {
     assert_eq!(hidden.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["mystery"]);
     assert_eq!((hidden.total, hidden.os_count, hidden.signed_count), (3, 1, 1));
     // A failing startup source is an error with a reason, not an empty list.
-    h.fake.fail(dyno_platform::fake::FakeOp::StartupList, dyno_core::ports::PlatformError::AccessDenied("no".into()));
-    assert!(ask(&peer, Request::StartupOverview { filter: StartupFilter::default() }).is_err());
+    h.fake.fail(
+        dyno_platform::fake::FakeOp::StartupList,
+        dyno_core::ports::PlatformError::AccessDenied("no".into()),
+    );
+    assert!(ask(
+        &peer,
+        Request::StartupOverview {
+            filter: StartupFilter::default()
+        }
+    )
+    .is_err());
 }
 
 fn net(links: Vec<Link>, ssid: Option<&str>) -> NetState {
@@ -238,10 +285,22 @@ fn network_changes_land_on_the_timeline() {
     let changes = shared.netwatch.look(&shared);
     assert_eq!(changes.len(), 4, "left, joined, vpn up, ip change: {changes:?}");
     let peer = h.client();
-    let Reply::History(hist) = ask(&peer, Request::History { range: HistoryRange::Hour, end: None }).unwrap() else {
+    let Reply::History(hist) = ask(
+        &peer,
+        Request::History {
+            range: HistoryRange::Hour,
+            end: None,
+        },
+    )
+    .unwrap() else {
         panic!("history")
     };
-    let labels: Vec<&str> = hist.events.iter().filter(|e| e.kind == TimelineEventKind::Network).map(|e| e.label.as_str()).collect();
+    let labels: Vec<&str> = hist
+        .events
+        .iter()
+        .filter(|e| e.kind == TimelineEventKind::Network)
+        .map(|e| e.label.as_str())
+        .collect();
     assert!(labels.contains(&"Left Wi-Fi “Home”"), "{labels:?}");
     assert!(labels.contains(&"Joined Wi-Fi “Cafe”"));
     assert!(labels.contains(&"VPN up (utun4)"));
@@ -289,7 +348,9 @@ fn a_watched_folder_is_off_until_previewed_and_only_then_sweeps_into_an_undoable
         recursive: None,
     };
     assert!(ask(&peer, on.clone()).unwrap_err().contains("preview first"));
-    assert!(ask(&peer, Request::SweepWatchedFolder { id: id.clone() }).unwrap_err().contains("preview first"));
+    assert!(ask(&peer, Request::SweepWatchedFolder { id: id.clone() })
+        .unwrap_err()
+        .contains("preview first"));
     assert!(old.exists(), "nothing moved before the person agreed");
     let Reply::WatchPreview(p) = ask(&peer, Request::PreviewWatchedFolder { id: id.clone() }).unwrap() else {
         panic!("preview")
@@ -301,15 +362,27 @@ fn a_watched_folder_is_off_until_previewed_and_only_then_sweeps_into_an_undoable
     // A sweep (creation times are ignored, as temp files made a moment ago would otherwise never be due).
     let folder = watched(&peer).folders[0].folder.clone();
     dyno_agent::handlers_watch::sweep_one(&h.shared(), &folder, false).unwrap();
-    assert!(!old.exists() && keep.exists() && outside.exists(), "only the matching old file of the watched folder moved");
+    assert!(
+        !old.exists() && keep.exists() && outside.exists(),
+        "only the matching old file of the watched folder moved"
+    );
     let last = watched(&peer).folders[0].folder.last_sweep.clone().unwrap();
     assert_eq!((last.moved, last.failed), (1, 0));
     let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
         panic!("activity")
     };
-    let entry = log.iter().find(|a| a.title.contains("old file")).expect("the sweep is in the activity log");
+    let entry = log
+        .iter()
+        .find(|a| a.title.contains("old file"))
+        .expect("the sweep is in the activity log");
     assert_eq!(entry.undo, UndoState::Available);
-    ask(&peer, Request::Undo { activity_id: entry.id.clone() }).unwrap();
+    ask(
+        &peer,
+        Request::Undo {
+            activity_id: entry.id.clone(),
+        },
+    )
+    .unwrap();
     assert!(old.exists(), "undo put the file back");
     // Stopping the watch leaves the folder alone.
     ask(&peer, Request::RemoveWatchedFolder { id }).unwrap();
@@ -332,19 +405,44 @@ fn unsafe_and_overlapping_folders_are_refused_with_a_reason() {
         )
     };
     let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
-    for bad in ["/".to_string(), home, h.dirs.root().to_string_lossy().into_owned(), "relative".to_string(), "/no/such/folder".to_string()] {
+    for bad in [
+        "/".to_string(),
+        home,
+        h.dirs.root().to_string_lossy().into_owned(),
+        "relative".to_string(),
+        "/no/such/folder".to_string(),
+    ] {
         let e = add(bad.clone()).unwrap_err();
         assert!(!e.is_empty(), "{bad}");
     }
     let dir = h.folder("a");
     add(dir.to_string_lossy().into_owned()).unwrap();
     std::fs::create_dir_all(dir.join("inner")).unwrap();
-    assert!(add(dir.join("inner").to_string_lossy().into_owned()).unwrap_err().contains("overlap"));
-    assert!(ask(&peer, Request::SetWatchedFolder { id: "w-none".into(), keep_for_secs: Some(600), enabled: None, recursive: None }).is_err());
-    let id = watched(&peer).folders[0].folder.id.clone();
-    assert!(ask(&peer, Request::SetWatchedFolder { id, keep_for_secs: Some(5), enabled: None, recursive: None })
+    assert!(add(dir.join("inner").to_string_lossy().into_owned())
         .unwrap_err()
-        .contains("between 10 minutes and 10 days"));
+        .contains("overlap"));
+    assert!(ask(
+        &peer,
+        Request::SetWatchedFolder {
+            id: "w-none".into(),
+            keep_for_secs: Some(600),
+            enabled: None,
+            recursive: None
+        }
+    )
+    .is_err());
+    let id = watched(&peer).folders[0].folder.id.clone();
+    assert!(ask(
+        &peer,
+        Request::SetWatchedFolder {
+            id,
+            keep_for_secs: Some(5),
+            enabled: None,
+            recursive: None
+        }
+    )
+    .unwrap_err()
+    .contains("between 10 minutes and 10 days"));
 }
 
 #[test]

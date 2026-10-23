@@ -114,13 +114,39 @@ impl NetChange {
 
 /// Names of virtual interfaces that are never reported (by prefix).
 const IGNORED_PREFIX: [&str; 13] = [
-    "docker", "veth", "br-", "virbr", "vmnet", "vboxnet", "awdl", "llw", "anpi", "bridge", "gif", "stf", "vethernet",
+    "docker",
+    "veth",
+    "br-",
+    "virbr",
+    "vmnet",
+    "vboxnet",
+    "awdl",
+    "llw",
+    "anpi",
+    "bridge",
+    "gif",
+    "stf",
+    "vethernet",
 ];
 /// Loopback names (whole name).
 const IGNORED_EXACT: [&str; 3] = ["lo", "lo0", "loopback pseudo-interface 1"];
 /// Names (or words of names) of VPN tunnels.
 const VPN: [&str; 15] = [
-    "utun", "tun", "tap", "wg", "ppp", "ipsec", "tailscale", "zt", "vpn", "nordlynx", "wireguard", "wintun", "proton", "mullvad", "cisco",
+    "utun",
+    "tun",
+    "tap",
+    "wg",
+    "ppp",
+    "ipsec",
+    "tailscale",
+    "zt",
+    "vpn",
+    "nordlynx",
+    "wireguard",
+    "wintun",
+    "proton",
+    "mullvad",
+    "cisco",
 ];
 
 /// Classifies an interface by its name. `wifi_device` says the OS lists it as the Wi-Fi adapter.
@@ -247,7 +273,18 @@ mod tests {
         assert_eq!(classify("wg0", false), LinkKind::Vpn);
         assert_eq!(classify("tailscale0", false), LinkKind::Vpn);
         assert_eq!(classify("OpenVPN TAP-Windows Adapter V9", false), LinkKind::Vpn);
-        for n in ["lo0", "lo", "docker0", "veth12ab", "br-1a2b", "awdl0", "llw0", "bridge100", "vmnet8", "virbr0"] {
+        for n in [
+            "lo0",
+            "lo",
+            "docker0",
+            "veth12ab",
+            "br-1a2b",
+            "awdl0",
+            "llw0",
+            "bridge100",
+            "vmnet8",
+            "virbr0",
+        ] {
             assert_eq!(classify(n, false), LinkKind::Ignored, "{n}");
         }
         // "lo" is a whole name or a prefix of a loopback name, but a real adapter such as "lowpan" is not special.
@@ -256,7 +293,16 @@ mod tests {
 
     #[test]
     fn only_global_addresses_count() {
-        for a in ["127.0.0.1", "169.254.1.1", "0.0.0.0", "224.0.0.1", "::1", "fe80::1", "ff02::1", "::"] {
+        for a in [
+            "127.0.0.1",
+            "169.254.1.1",
+            "0.0.0.0",
+            "224.0.0.1",
+            "::1",
+            "fe80::1",
+            "ff02::1",
+            "::",
+        ] {
             assert!(!usable(&ip(a)), "{a}");
         }
         for a in ["192.168.1.5", "10.0.0.2", "2001:db8::1", "fd00::1"] {
@@ -267,8 +313,12 @@ mod tests {
     #[test]
     fn the_first_look_is_only_a_baseline() {
         let mut w = NetWatcher::new();
-        assert!(w.observe(state(vec![link("en0", LinkKind::Wifi, &["192.168.1.5"])], Some("Home"))).is_empty());
-        assert!(w.observe(state(vec![link("en0", LinkKind::Wifi, &["192.168.1.5"])], Some("Home"))).is_empty());
+        assert!(w
+            .observe(state(vec![link("en0", LinkKind::Wifi, &["192.168.1.5"])], Some("Home")))
+            .is_empty());
+        assert!(w
+            .observe(state(vec![link("en0", LinkKind::Wifi, &["192.168.1.5"])], Some("Home")))
+            .is_empty());
     }
 
     #[test]
@@ -298,7 +348,10 @@ mod tests {
     fn vpn_tunnels_come_and_go() {
         let none = state(vec![link("en0", LinkKind::Other, &["192.168.1.5"])], None);
         let up = state(
-            vec![link("en0", LinkKind::Other, &["192.168.1.5"]), link("utun4", LinkKind::Vpn, &["10.8.0.2"])],
+            vec![
+                link("en0", LinkKind::Other, &["192.168.1.5"]),
+                link("utun4", LinkKind::Vpn, &["10.8.0.2"]),
+            ],
             None,
         );
         let only_ll = state(

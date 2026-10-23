@@ -572,6 +572,8 @@ test.describe('startup filter', () => {
     await page.goto(url('/health'));
     const section = page.getByRole('region', { name: 'Startup manager' });
     const rows = section.locator('tbody tr');
+    await expect(rows.first()).toBeVisible();
+    await expect(section.getByText(/Showing \d+ of \d+ entries\./)).toBeVisible();
     const before = await rows.count();
     const hideSystem = section.getByRole('button', { name: /Hide system entries/ });
     await expect(hideSystem).toHaveAttribute('aria-pressed', 'false');

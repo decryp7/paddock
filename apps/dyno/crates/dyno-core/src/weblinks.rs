@@ -83,7 +83,10 @@ fn drop_identifiers(text: &str) -> (String, u32, u32, u32) {
             continue;
         }
         let lower = bare.to_ascii_lowercase();
-        if matches!(lower.as_str(), "serial" | "serial:" | "serial=" | "s/n" | "s/n:" | "sn:" | "serialnumber" | "serialnumber:") {
+        if matches!(
+            lower.as_str(),
+            "serial" | "serial:" | "serial=" | "s/n" | "s/n:" | "sn:" | "serialnumber" | "serialnumber:"
+        ) {
             skip_next = true;
             continue;
         }
@@ -245,7 +248,13 @@ mod tests {
 
     #[test]
     fn serial_forms_are_all_dropped() {
-        for t in ["id serial: ABC123", "id serial=ABC123", "id S/N ABC123", "id serial ABC123", "id serial:ABC123"] {
+        for t in [
+            "id serial: ABC123",
+            "id serial=ABC123",
+            "id S/N ABC123",
+            "id serial ABC123",
+            "id serial:ABC123",
+        ] {
             let s = search_seed(t, &me());
             assert_eq!(s.text, "id", "{t}");
             assert_eq!(s.removed, vec!["1 serial number"]);
@@ -257,7 +266,10 @@ mod tests {
 
     #[test]
     fn search_urls_encode_the_text_and_check_it() {
-        assert_eq!(search_url("  kernel_task  100% cpu & más ").unwrap(), "https://duckduckgo.com/?q=kernel_task+100%25+cpu+%26+m%C3%A1s");
+        assert_eq!(
+            search_url("  kernel_task  100% cpu & más ").unwrap(),
+            "https://duckduckgo.com/?q=kernel_task+100%25+cpu+%26+m%C3%A1s"
+        );
         assert_eq!(search_url("   "), Err(LinkError::EmptyQuery));
         assert_eq!(search_url(&"a".repeat(MAX_QUERY_CHARS + 1)), Err(LinkError::QueryTooLong));
         assert!(search_url(&"a".repeat(MAX_QUERY_CHARS)).is_ok());

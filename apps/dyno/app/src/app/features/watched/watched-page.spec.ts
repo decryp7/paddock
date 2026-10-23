@@ -65,7 +65,7 @@ describe('dy-watched-page', () => {
   });
 
   it('turn off is one click; turn on opens the preview first', async () => {
-    const { f, el, store } = page();
+    const { f, store } = page();
     await settle(f);
     const dialogs = TestBed.inject(Dialogs);
     const open = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: { subscribe: () => ({ unsubscribe() {} }) } } as never);

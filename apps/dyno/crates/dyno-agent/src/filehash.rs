@@ -23,7 +23,8 @@ pub struct FileHasher {
 }
 
 fn millis(t: std::time::SystemTime) -> i64 {
-    t.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 /// The hex SHA-256 of everything `r` yields.
@@ -102,8 +103,14 @@ mod tests {
 
     #[test]
     fn known_vectors() {
-        assert_eq!(sha256_of(&b""[..]).unwrap(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-        assert_eq!(sha256_of(&b"abc"[..]).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            sha256_of(&b""[..]).unwrap(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_of(&b"abc"[..]).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]
@@ -130,7 +137,10 @@ mod tests {
         let h = FileHasher::new();
         assert!(h.hash("relative/file").unwrap_err().contains("full path"));
         assert!(h.hash(&format!("{}/../x", t.path().display())).unwrap_err().contains("full path"));
-        assert!(h.hash(t.path().join("missing").to_str().unwrap()).unwrap_err().contains("no longer there"));
+        assert!(h
+            .hash(t.path().join("missing").to_str().unwrap())
+            .unwrap_err()
+            .contains("no longer there"));
         assert!(h.hash(t.path().to_str().unwrap()).unwrap_err().contains("not a file"));
     }
 

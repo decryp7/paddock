@@ -211,12 +211,7 @@ pub async fn add_watched_folder(
     let link = link.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
-        let Some(chosen) = app
-            .dialog()
-            .file()
-            .set_title("Choose the folder to watch")
-            .blocking_pick_folder()
-        else {
+        let Some(chosen) = app.dialog().file().set_title("Choose the folder to watch").blocking_pick_folder() else {
             return Ok(Value::Null);
         };
         let path = chosen
@@ -329,8 +324,14 @@ mod tests {
             parse_request(json!({"setWatchedFolder": {"id": "w-1", "keepForSecs": 600, "enabled": true, "recursive": null}})).unwrap(),
             Request::SetWatchedFolder { enabled: Some(true), .. }
         ));
-        assert!(matches!(parse_request(json!({"previewWatchedFolder": {"id": "w-1"}})).unwrap(), Request::PreviewWatchedFolder { .. }));
-        assert!(matches!(parse_request(json!({"webSearch": {"query": "q"}})).unwrap(), Request::WebSearch { .. }));
+        assert!(matches!(
+            parse_request(json!({"previewWatchedFolder": {"id": "w-1"}})).unwrap(),
+            Request::PreviewWatchedFolder { .. }
+        ));
+        assert!(matches!(
+            parse_request(json!({"webSearch": {"query": "q"}})).unwrap(),
+            Request::WebSearch { .. }
+        ));
         assert!(matches!(
             parse_request(json!({"fileHash": {"source": {"path": "/a"}}})).unwrap(),
             Request::FileHash { .. }

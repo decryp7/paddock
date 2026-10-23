@@ -4,7 +4,7 @@
 
 use crate::agent::{lock, now, Shared};
 use crate::cleanup::roots::Env;
-use crate::watch::{preview, sweep, Change, SweepCtx};
+use crate::watch::{preview, sweep, Change, NewFolder, SweepCtx};
 use dyno_core::activity::{quarantine_expiry, ActivityKind, UndoRecord};
 use dyno_core::protocol::{AgentError, ErrorCode, Message, Reply, Request, TimelineEvent, TimelineEventKind};
 use dyno_core::watch::{keep_text, SweepSummary, WatchedFolder};
@@ -40,7 +40,18 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
             let data = data_dir.to_string_lossy().trim_start_matches(r"\\?\").to_string();
             shared
                 .watch
-                .add(&path, template.as_deref(), keep_for_secs, recursive, env.os(), &home, &data, now())
+                .add(
+                    NewFolder {
+                        chosen: &path,
+                        template: template.as_deref(),
+                        keep_for_secs,
+                        recursive,
+                    },
+                    env.os(),
+                    &home,
+                    &data,
+                    now(),
+                )
                 .map_err(bad)?;
             Ok(overview(shared))
         }
@@ -128,7 +139,11 @@ pub fn sweep_one(shared: &Arc<Shared>, folder: &WatchedFolder, trust_created: bo
         let name = Path::new(&folder.path)
             .file_name()
             .map_or_else(|| folder.path.clone(), |n| n.to_string_lossy().into_owned());
-        let title = format!("Moved {} old file{} out of {name}", summary.moved, if summary.moved == 1 { "" } else { "s" });
+        let title = format!(
+            "Moved {} old file{} out of {name}",
+            summary.moved,
+            if summary.moved == 1 { "" } else { "s" }
+        );
         let detail = format!(
             "Older than {} in the watched folder {}; held in the 7-day quarantine. Undo puts them back.",
             keep_text(folder.keep_for_secs),

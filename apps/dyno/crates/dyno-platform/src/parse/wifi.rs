@@ -49,13 +49,14 @@ pub fn netsh_wifi(text: &str) -> Option<(String, Option<String>)> {
     let mut ssid: Option<String> = None;
     let mut connected = false;
     let mut found: Option<(String, Option<String>)> = None;
-    let flush = |name: &mut Option<String>, ssid: &mut Option<String>, connected: &mut bool, found: &mut Option<(String, Option<String>)>| {
-        if let (Some(n), true, None) = (name.take(), *connected, found.as_ref()) {
-            *found = Some((n, ssid.take()));
-        }
-        *ssid = None;
-        *connected = false;
-    };
+    let flush =
+        |name: &mut Option<String>, ssid: &mut Option<String>, connected: &mut bool, found: &mut Option<(String, Option<String>)>| {
+            if let (Some(n), true, None) = (name.take(), *connected, found.as_ref()) {
+                *found = Some((n, ssid.take()));
+            }
+            *ssid = None;
+            *connected = false;
+        };
     for line in text.lines() {
         let Some((k, v)) = line.split_once(':') else { continue };
         let (k, v) = (k.trim(), v.trim());
@@ -108,7 +109,10 @@ mod tests {
         let text = "\nThere is 2 interfaces on the system:\n\n    Name                   : Wi-Fi 2\n    State                  : disconnected\n\n    Name                   : Wi-Fi\n    State                  : connected\n    SSID                   : Home\n    BSSID                  : aa:bb\n";
         assert_eq!(netsh_wifi(text), Some(("Wi-Fi".into(), Some("Home".into()))));
         assert_eq!(netsh_wifi("    Name : Wi-Fi\n    State : disconnected\n"), None);
-        assert_eq!(netsh_wifi("    Name : Wi-Fi\n    State : connected\n"), Some(("Wi-Fi".into(), None)));
+        assert_eq!(
+            netsh_wifi("    Name : Wi-Fi\n    State : connected\n"),
+            Some(("Wi-Fi".into(), None))
+        );
         assert_eq!(netsh_wifi("The Wireless AutoConfig Service (wlansvc) is not running."), None);
     }
 }

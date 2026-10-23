@@ -332,7 +332,14 @@ impl Shared {
         }
         let (watch, watch_note) = crate::watch::WatchCentre::load(dirs.watched_folders());
         if let Some(n) = watch_note {
-            core.log(t, ActivityKind::System, "Watched folders were reset".into(), n, UndoRecord::None, None);
+            core.log(
+                t,
+                ActivityKind::System,
+                "Watched folders were reset".into(),
+                n,
+                UndoRecord::None,
+                None,
+            );
         }
         let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);

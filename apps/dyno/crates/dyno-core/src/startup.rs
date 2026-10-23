@@ -172,7 +172,15 @@ pub fn is_os_owned(entry: &StartupEntry, os: crate::cleanup::Os) -> bool {
     match os {
         Os::Macos => {
             name.starts_with("com.apple.")
-                || under(&["/system/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/", "/library/apple/"])
+                || under(&[
+                    "/system/",
+                    "/usr/libexec/",
+                    "/usr/sbin/",
+                    "/usr/bin/",
+                    "/sbin/",
+                    "/bin/",
+                    "/library/apple/",
+                ])
         }
         Os::Windows => {
             let after_drive = exe.get(2..).unwrap_or("");
@@ -180,7 +188,10 @@ pub fn is_os_owned(entry: &StartupEntry, os: crate::cleanup::Os) -> bool {
             in_windows
                 || name.starts_with("/microsoft/windows/")
                 || norm_path(&entry.id).contains(":/microsoft/windows/")
-                || entry.publisher.as_deref().is_some_and(|p| p.eq_ignore_ascii_case("Microsoft Windows"))
+                || entry
+                    .publisher
+                    .as_deref()
+                    .is_some_and(|p| p.eq_ignore_ascii_case("Microsoft Windows"))
         }
         Os::Linux => under(&["/usr/lib/", "/usr/lib64/", "/usr/libexec/", "/usr/sbin/", "/lib/", "/sbin/"]),
     }
@@ -367,16 +378,35 @@ mod filter_tests {
         let apple = entry("com.apple.Spotlight", "/System/Library/CoreServices/x", ImpactRating::Low);
         assert!(is_os_owned(&apple, Os::Macos));
         assert!(is_os_owned(&entry("Other", "/usr/libexec/foo", ImpactRating::Low), Os::Macos));
-        assert!(!is_os_owned(&entry("com.slack", "/Applications/Slack.app/x", ImpactRating::Low), Os::Macos));
+        assert!(!is_os_owned(
+            &entry("com.slack", "/Applications/Slack.app/x", ImpactRating::Low),
+            Os::Macos
+        ));
         // Windows paths use either separator and any case; only the drive's Windows folder counts.
-        assert!(is_os_owned(&entry("SecurityHealth", "C:\\WINDOWS\\system32\\SecurityHealthSystray.exe", ImpactRating::Low), Os::Windows));
-        assert!(!is_os_owned(&entry("Slack", "C:\\Users\\me\\windows\\slack.exe", ImpactRating::Low), Os::Windows));
+        assert!(is_os_owned(
+            &entry(
+                "SecurityHealth",
+                "C:\\WINDOWS\\system32\\SecurityHealthSystray.exe",
+                ImpactRating::Low
+            ),
+            Os::Windows
+        ));
+        assert!(!is_os_owned(
+            &entry("Slack", "C:\\Users\\me\\windows\\slack.exe", ImpactRating::Low),
+            Os::Windows
+        ));
         let mut task = entry("\\Microsoft\\Windows\\Defrag\\ScheduledDefrag", "", ImpactRating::Low);
         task.exe = None;
         assert!(is_os_owned(&task, Os::Windows));
         assert!(is_os_owned(&signed("x", "D:\\a.exe", "Microsoft Windows"), Os::Windows));
-        assert!(is_os_owned(&entry("gnome-keyring", "/usr/libexec/gnome-keyring-daemon", ImpactRating::Low), Os::Linux));
-        assert!(!is_os_owned(&entry("syncthing", "/home/me/bin/syncthing", ImpactRating::Low), Os::Linux));
+        assert!(is_os_owned(
+            &entry("gnome-keyring", "/usr/libexec/gnome-keyring-daemon", ImpactRating::Low),
+            Os::Linux
+        ));
+        assert!(!is_os_owned(
+            &entry("syncthing", "/home/me/bin/syncthing", ImpactRating::Low),
+            Os::Linux
+        ));
     }
 
     #[test]
@@ -396,9 +426,26 @@ mod filter_tests {
         ];
         let all = overview(list.clone(), StartupFilter::default(), Os::Macos);
         assert_eq!((all.entries.len(), all.total, all.os_count, all.signed_count), (3, 3, 1, 1));
-        let no_os = overview(list.clone(), StartupFilter { hide_os: true, hide_signed: false }, Os::Macos);
-        assert_eq!(no_os.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["Slack", "mystery"]);
-        let both = overview(list.clone(), StartupFilter { hide_os: true, hide_signed: true }, Os::Macos);
+        let no_os = overview(
+            list.clone(),
+            StartupFilter {
+                hide_os: true,
+                hide_signed: false,
+            },
+            Os::Macos,
+        );
+        assert_eq!(
+            no_os.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["Slack", "mystery"]
+        );
+        let both = overview(
+            list.clone(),
+            StartupFilter {
+                hide_os: true,
+                hide_signed: true,
+            },
+            Os::Macos,
+        );
         assert_eq!(both.entries.len(), 1);
         assert_eq!(both.entries[0].name, "mystery");
         // The counts do not depend on the filter, so the toggles can always show them.

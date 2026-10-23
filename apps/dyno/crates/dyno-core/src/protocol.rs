@@ -1185,8 +1185,14 @@ mod search_watch_tests {
     #[test]
     fn the_new_requests_have_the_json_shape_of_api_types() {
         let j = |r: Request| serde_json::to_value(r).unwrap();
-        assert_eq!(j(Request::SearchSeed { text: "x".into() }), serde_json::json!({"searchSeed": {"text": "x"}}));
-        assert_eq!(j(Request::WebSearch { query: "q".into() }), serde_json::json!({"webSearch": {"query": "q"}}));
+        assert_eq!(
+            j(Request::SearchSeed { text: "x".into() }),
+            serde_json::json!({"searchSeed": {"text": "x"}})
+        );
+        assert_eq!(
+            j(Request::WebSearch { query: "q".into() }),
+            serde_json::json!({"webSearch": {"query": "q"}})
+        );
         assert_eq!(
             j(Request::FileHash {
                 source: crate::weblinks::HashSource::Path("/a".into())
@@ -1227,7 +1233,9 @@ mod search_watch_tests {
                 }),
             },
             Request::VirusTotalUrl { sha256: "0".repeat(64) },
-            Request::StartupOverview { filter: Default::default() },
+            Request::StartupOverview {
+                filter: Default::default(),
+            },
             Request::WatchedFolders,
             Request::AddWatchedFolder {
                 path: "/x".into(),

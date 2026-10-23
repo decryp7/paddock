@@ -248,12 +248,15 @@ impl WatchedFolders {
                 }
                 // A list that names a folder twice or an unsafe id keeps nothing ambiguous: drop duplicates.
                 let mut seen = std::collections::HashSet::new();
-                w.folders.retain(|f| plain_id(&f.id) && !f.path.is_empty() && seen.insert(f.id.clone()));
+                w.folders
+                    .retain(|f| plain_id(&f.id) && !f.path.is_empty() && seen.insert(f.id.clone()));
                 (w, None)
             }
             Err(e) => (
                 WatchedFolders::default(),
-                Some(format!("The watched folders file is damaged ({e}); none are watched until you add them again.")),
+                Some(format!(
+                    "The watched folders file is damaged ({e}); none are watched until you add them again."
+                )),
             ),
         }
     }
@@ -299,8 +302,24 @@ fn same_or_inside(path: &str, root: &str) -> bool {
 /// Folders that are never watched, per OS (system and application folders).
 fn system_roots(os: Os) -> &'static [&'static str] {
     match os {
-        Os::Macos => &["/", "/system", "/library", "/applications", "/usr", "/bin", "/sbin", "/etc", "/var", "/private", "/opt", "/volumes", "/users"],
-        Os::Linux => &["/", "/boot", "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/var", "/opt", "/proc", "/sys", "/dev", "/home", "/root"],
+        Os::Macos => &[
+            "/",
+            "/system",
+            "/library",
+            "/applications",
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/etc",
+            "/var",
+            "/private",
+            "/opt",
+            "/volumes",
+            "/users",
+        ],
+        Os::Linux => &[
+            "/", "/boot", "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/var", "/opt", "/proc", "/sys", "/dev", "/home", "/root",
+        ],
         Os::Windows => &[
             "c:",
             "c:/windows",
@@ -333,7 +352,21 @@ pub fn validate_root(path: &str, home: &str, data: &str, os: Os) -> Result<(), S
     if os == Os::Windows && p.starts_with("c:/windows") {
         return Err("System folders cannot be watched.".into());
     }
-    if os != Os::Windows && ["/system/", "/usr/", "/bin/", "/sbin/", "/etc/", "/library/", "/applications/", "/boot/", "/lib/"].iter().any(|s| p.starts_with(s)) {
+    if os != Os::Windows
+        && [
+            "/system/",
+            "/usr/",
+            "/bin/",
+            "/sbin/",
+            "/etc/",
+            "/library/",
+            "/applications/",
+            "/boot/",
+            "/lib/",
+        ]
+        .iter()
+        .any(|s| p.starts_with(s))
+    {
         return Err("System folders cannot be watched.".into());
     }
     let d = norm(data);
@@ -411,13 +444,18 @@ pub struct SweepPlan {
 
 /// Names the OS and file managers keep in folders; they are never moved.
 fn is_housekeeping(name: &str) -> bool {
-    matches!(name.to_lowercase().as_str(), ".ds_store" | ".localized" | "desktop.ini" | "thumbs.db" | ".com.apple.timemachine.donotpresent")
+    matches!(
+        name.to_lowercase().as_str(),
+        ".ds_store" | ".localized" | "desktop.ini" | "thumbs.db" | ".com.apple.timemachine.donotpresent"
+    )
 }
 
 /// Names of downloads that are not finished; they are never moved, whatever their age.
 fn is_partial(name: &str) -> bool {
     let l = name.to_lowercase();
-    [".crdownload", ".part", ".download", ".partial", ".opdownload"].iter().any(|e| l.ends_with(e))
+    [".crdownload", ".part", ".download", ".partial", ".opdownload"]
+        .iter()
+        .any(|e| l.ends_with(e))
 }
 
 /// What a sweep of `folder` would move at `now`, given the files found in it. `home` is the user's home folder.
@@ -548,9 +586,9 @@ impl WatchPreview {
 
 /// A keep-for time in words ("10 minutes", "2 days").
 pub fn keep_text(secs: u32) -> String {
-    let (n, unit) = if secs >= 24 * 3600 && secs % (24 * 3600) == 0 {
+    let (n, unit) = if secs >= 24 * 3600 && secs.is_multiple_of(24 * 3600) {
         (secs / (24 * 3600), "day")
-    } else if secs >= 3600 && secs % 3600 == 0 {
+    } else if secs >= 3600 && secs.is_multiple_of(3600) {
         (secs / 3600, "hour")
     } else {
         (secs.div_ceil(60), "minute")
@@ -666,7 +704,16 @@ mod tests {
         }
         let win = |p: &str| validate_root(p, "C:\\Users\\me", "C:\\Users\\me\\AppData\\Local\\Dyno", Os::Windows);
         assert!(win("C:\\Users\\me\\Downloads").is_ok());
-        for bad in ["C:\\", "C:", "C:\\Windows", "C:\\Windows\\Temp", "C:\\Users\\me", "C:\\Users", "C:\\Program Files", "D:"] {
+        for bad in [
+            "C:\\",
+            "C:",
+            "C:\\Windows",
+            "C:\\Windows\\Temp",
+            "C:\\Users\\me",
+            "C:\\Users",
+            "C:\\Program Files",
+            "D:",
+        ] {
             assert!(win(bad).is_err(), "{bad}");
         }
         assert!(validate_root("/home/me/dl", "/home/me", "/home/me/.local/share/dyno", Os::Linux).is_ok());
@@ -696,8 +743,14 @@ mod tests {
             file("/Users/me/Downloads/movie.mp4.crdownload", 9 * 3_600_000, now),
         ];
         let p = plan(&f, &files, HOME, now);
-        assert_eq!(p.due.iter().map(|d| d.path.as_str()).collect::<Vec<_>>(), ["/Users/me/Downloads/older.dmg", "/Users/me/Downloads/old.dmg"]);
-        assert_eq!((p.due_total, p.due_bytes, p.waiting, p.other, p.links, p.refused), (2, 200, 1, 2, 0, 0));
+        assert_eq!(
+            p.due.iter().map(|d| d.path.as_str()).collect::<Vec<_>>(),
+            ["/Users/me/Downloads/older.dmg", "/Users/me/Downloads/old.dmg"]
+        );
+        assert_eq!(
+            (p.due_total, p.due_bytes, p.waiting, p.other, p.links, p.refused),
+            (2, 200, 1, 2, 0, 0)
+        );
     }
 
     #[test]
