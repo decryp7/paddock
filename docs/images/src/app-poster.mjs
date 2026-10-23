@@ -121,6 +121,7 @@ function shotsFor(d) {
   const add = (key, name, rect, outW, q) => ['light', 'dark'].forEach((th) => jobs.push({ key, th, src: shotFile(d, d.id, name, th), x: rect[0], y: rect[1], w: rect[2], h: rect[3], outW, q }));
   add('hero', d.shots.hero, [0, 0, 2880, 1800], 1500, 0.8);
   add('back', d.shots.back, [0, 0, 2880, 1800], 1100, 0.72);
+  (d.tour?.panels ?? []).forEach((p, i) => add(`t${i}`, p.shot, [p.crop[0] * 2, p.crop[1] * 2, p.crop[2] * 2, Math.round((p.crop[2] * 2) / 2.4)], 1100, 0.78));
   d.features.panels.forEach((p, i) => add(`p${i}`, p.shot, [p.crop[0] * 2, p.crop[1] * 2, p.crop[2] * 2, Math.round((p.crop[2] * 2) / 2.4)], 1100, 0.78));
   for (const j of jobs) if (!existsSync(j.src)) throw new Error(`missing screenshot ${j.src}`);
   const res = crops(jobs);
@@ -189,6 +190,32 @@ ${works}
 </svg>`;
 }
 
+// ---- tour (optional: d.tour = { heading, panels: [{ shot, crop, title, text }] }) -------------------------------------------
+// A 2x2 strip of numbered steps, each a cropped screenshot with a title and one line; the README's numbered steps sit below it.
+function tourSvg(d, S) {
+  const a = d.accent, W = 1600, PW = 704, PH = 430, GAP = 32, X0 = 80, Y0 = 172;
+  const defs = [];
+  const panels = d.tour.panels.map((p, i) => {
+    const x = X0 + (i % 2) * (PW + GAP), y = Y0 + Math.floor(i / 2) * (PH + GAP), iw = PW - 32, ih = Math.round(iw / 2.4);
+    defs.push(imgDef(`t${i}l`, S[`t${i}`].light, iw, ih), imgDef(`t${i}d`, S[`t${i}`].dark, iw, ih));
+    const cid = `tc${i}`, lines = wrap(p.text, 60);
+    return `<g transform="translate(${x} ${y})"><rect class="card" width="${PW}" height="${PH}" rx="22"/>` +
+      `<clipPath id="${cid}"><rect x="16" y="16" width="${iw}" height="${ih}" rx="12"/></clipPath><g clip-path="url(#${cid})"><g transform="translate(16 16)">${shotBody(`t${i}l`, `t${i}d`, iw, ih)}</g></g>` +
+      `<rect x="16" y="16" width="${iw}" height="${ih}" rx="12" fill="none" stroke="var(--line)"/>` +
+      `<circle class="accfill" cx="42" cy="${ih + 16 + 38}" r="18"/><text class="ptitle" x="42" y="${ih + 16 + 46}" text-anchor="middle" style="font-size:20px;fill:var(--acct)">${i + 1}</text>` +
+      `<text class="ptitle" x="72" y="${ih + 16 + 46}">${esc(p.title)}</text>` +
+      lines.map((l, k) => `<text class="pbody" x="24" y="${ih + 16 + 88 + k * 28}">${esc(l)}</text>`).join('') + `</g>`;
+  }).join('\n');
+  const H = Y0 + 2 * PH + GAP + 48;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
+<title id="t">${d.name}: a two-minute tour</title><desc id="d">${esc(d.tour.panels.map((p, i) => `${i + 1}. ${p.title}: ${p.text}`).join(' '))}</desc>
+${css(a)}<defs>${defs.join('')}</defs>${glow(W, 420, 800, 0, 900)}
+${iconSvg(d.icon ?? d.id, 80, 52, 56)}<text class="name" x="150" y="90">${d.name}</text>
+<text class="h2" x="80" y="148" style="font-size:36px">${esc(d.tour.heading)}</text>
+${panels}
+</svg>`;
+}
+
 // ---- how it works ------------------------------------------------------------------------------------------------------
 function howSvg(d) {
   const a = d.accent, W = 1600, H = 500, st = d.how.steps, n = st.length, cw = (W - 160) / n;
@@ -241,7 +268,7 @@ async function build(id, wantPng) {
   const outDir = join(appsRoot, id, 'docs/images');
   mkdirSync(outDir, { recursive: true });
   const S = shotsFor(d);
-  const files = { hero: heroSvg(d, S), features: featuresSvg(d, S), 'how-it-works': howSvg(d), social: socialSvg(d, S) };
+  const files = { hero: heroSvg(d, S), features: featuresSvg(d, S), 'how-it-works': howSvg(d), social: socialSvg(d, S), ...(d.tour ? { tour: tourSvg(d, S) } : {}) };
   for (const [k, svg] of Object.entries(files)) {
     const p = join(outDir, `${id}-${k}.svg`);
     writeFileSync(p, svg);

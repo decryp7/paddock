@@ -16,6 +16,15 @@ export default {
       { shot: 'compare', crop: [320, 122, 1091], title: 'Compare two windows', text: 'See which fields changed before and after the incident.' },
     ],
   },
+  tour: {
+    heading: 'A two-minute tour.',
+    panels: [
+      { shot: 'tour-open', crop: [48, 38, 1050], title: 'Open the samples', text: 'Pick a folder or drop it on the window; formats are detected from the content.' },
+      { shot: 'tour-profile', crop: [320, 122, 1091], title: 'Load the sample profile', text: 'Extractors turn text lines into fields such as CPU and memory.' },
+      { shot: 'timeline-zoom', crop: [320, 122, 1091], title: 'Read the timeline', text: 'One lane per process; drag across it to zoom to the minutes that matter.' },
+      { shot: 'inspector', crop: [320, 99, 1120], title: 'Inspect an event', text: 'Click an event to see every property, with its source file and line.' },
+    ],
+  },
   how: {
     steps: [
       { glyph: 'folder', title: 'Open', text: 'Logs, zips and diagnostic files, or a time range of a huge folder.' },
