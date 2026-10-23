@@ -27,6 +27,12 @@ fn browser() -> Option<Browser> {
     // Only the dedicated test browser, never an installed Chrome/Edge (see `find_for_tests`).
     let b = find_for_tests();
     if b.is_none() {
+        // CI sets this: a skipped real-browser test there means the install step failed, which must not pass silently.
+        assert!(
+            std::env::var("SPOTTER_REQUIRE_TEST_BROWSER").map_or(true, |v| v != "1"),
+            "SPOTTER_REQUIRE_TEST_BROWSER=1 but no test browser was found (SPOTTER_TEST_BROWSER_DIR={:?})",
+            std::env::var("SPOTTER_TEST_BROWSER_DIR").ok()
+        );
         eprintln!(
             "skipped: no test browser. Run `node scripts/install-test-browser.mjs` (pinned Chrome for Testing) or set \
              SPOTTER_TEST_BROWSER to its executable; installed browsers are never used in tests"

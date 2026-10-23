@@ -94,6 +94,8 @@ jobs:
       RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
       SCCACHE_DIR: /sccache
       SCCACHE_CACHE_SIZE: 5G
+      # The real-browser tests run in CI; a skipped one fails the job.
+      SPOTTER_REQUIRE_TEST_BROWSER: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -138,6 +140,33 @@ jobs:
           key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: test-registry-${{ runner.os }}-
 
+      # Inside the job's own temp folder, never the user's ~/.cache (the runner context is not available in job env).
+      - name: Test browser location
+        shell: bash
+        run: echo "SPOTTER_TEST_BROWSER_DIR=$RUNNER_TEMP/spotter-test-browser" >> "$GITHUB_ENV"
+
+      # The pinned Chrome for Testing (never an installed browser), cached by the manifest that pins it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Restore the test browser
+        id: test-browser
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.SPOTTER_TEST_BROWSER_DIR }}
+          key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/spotter-render/src/chromium-manifest.toml') }}
+
+      - name: Install the test browser
+        if: steps.test-browser.outputs.cache-hit != 'true'
+        run: node scripts/install-test-browser.mjs
+
+      - uses: actions/cache/save@v4
+        if: steps.test-browser.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.SPOTTER_TEST_BROWSER_DIR }}
+          key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/spotter-render/src/chromium-manifest.toml') }}
+
       - name: Tests
         run: cargo test --workspace
 
@@ -167,6 +196,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/../.spotter-ci-target
       CARGO_BUILD_JOBS: "4"
+      SPOTTER_REQUIRE_TEST_BROWSER: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -178,6 +208,19 @@ jobs:
       - name: Clippy (macOS)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Inside the job's own temp folder, never the user's ~/.cache (the runner context is not available in job env).
+      - name: Test browser location
+        shell: bash
+        run: echo "SPOTTER_TEST_BROWSER_DIR=$RUNNER_TEMP/spotter-test-browser" >> "$GITHUB_ENV"
+
+      # Downloaded fresh each run on the host Mac (no cache): the browser lives only in runner.temp and is deleted below.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Install the test browser (macOS)
+        run: node scripts/install-test-browser.mjs
+
       - name: Tests (macOS)
         run: cargo test --workspace
 
@@ -188,6 +231,7 @@ jobs:
           pkill -f spotter-render || true
           pkill -f 'spotter-chromium' || true
           rm -rf "${TMPDIR:-/tmp}"/spotter-* || true
+          rm -rf "$SPOTTER_TEST_BROWSER_DIR" || true
 
   licences:
     name: licences, scripts + commits
