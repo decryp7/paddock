@@ -13,6 +13,12 @@ if [ ! -f app/src-tauri/Cargo.toml ]; then
   exit 0
 fi
 
+dir="${CARGO_TARGET_DIR:-target}"
+if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
+# The Windows runner keeps its target folder between runs: drop old installers so an earlier version's (signed)
+# installer can never be collected into this release (it once shipped as latest.json's Windows download).
+rm -rf "$dir/dist/bundle"
+
 (
   cd app
   npm ci
@@ -27,9 +33,15 @@ fi
   fi
 )
 
+rm -rf dist
 mkdir -p dist
-dir="${CARGO_TARGET_DIR:-target}"
-if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
 find "$dir/dist/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \
   -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;
 ls -la dist
+# Every versioned installer must carry this build's version (the .app.tar.gz has none in its name).
+version="$(node -p "require('./app/src-tauri/tauri.conf.json').version")"
+stale="$(ls dist | grep -E '_[0-9]+\.[0-9]+\.[0-9]+' | grep -v "_${version}_" || true)"
+if [ -n "$stale" ]; then
+  echo "::error::Installers from another version than $version: $stale"
+  exit 1
+fi
