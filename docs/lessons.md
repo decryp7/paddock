@@ -236,3 +236,41 @@ Source: [docs/research/2026-10-angular-and-signalstore.md](research/2026-10-angu
   contract per dialog in one checked registry, one notification and service-health model, and layout by declared
   min/preferred sizes and priorities. Rule 40: when a bug kind recurs, propose the redesign (ADR) that makes the class
   impossible or checked, then fix the instances through it.
+
+## Problem catalogue findings (2026-10-24)
+Added by the audit of all apps ([problem-catalogue.md](problem-catalogue.md), [audits/](audits/)). Each lesson names the check
+that enforces it ([conformance-proposal.md](conformance-proposal.md)).
+- A fix that lives on a side branch is not a fix: Debrief's macOS store-worker fix (and 85 other commits) sat on
+  `fix/macos-store-and-dialogs` while main was already versioned 1.0.2. Merge a fix to main before the version bump, and let the
+  tag preflight list every `fix/*` or `release/*` branch with commits newer than the last tag that are not in the tag (`C07`).
+- While the bundle is ad-hoc signed, turn the hardened runtime off (`hardenedRuntime: false` next to `signingIdentity: "-"`):
+  with the runtime on, library validation refuses a vendor-signed dylib even after an ad-hoc re-sign (reproduced with libduckdb).
+  It is switched back on automatically when a Developer ID is configured. Applies to every app that bundles or loads a third-party
+  library or ships helper binaries (`C04`).
+- Start every bundled sidecar from the built `.app` in CI (`--self-test` or `--version`), on macOS too. Debrief's real-app smoke ran
+  on Linux and Windows only, which is why the 1.0.1 crash on macOS reached users (`C04`).
+- Test a service update as an update: install build N, then build N+1 over it, and assert the agent is running and not in
+  EX_CONFIG. A unit test of the repair code does not prove the launchd state (`C21`).
+- Quit must always end the process: arm an exit watchdog that ends it after a bounded teardown if the window close or a worker
+  stalls (Debrief's session-0 hang; only Debrief has it). The real-app smoke asserts Quit exits within 10 s (`C20`).
+- A release workflow separate from the checks workflow can publish from a red commit (Pitwall's `release.yml` had no gate). One
+  workflow, `release` needs every gate; the preflight asks the Gitea API for a green run of this exact commit (`C07`).
+- The postcard IPC cannot decode internally tagged enums, so a page worked against the mock and failed against the real agent
+  (Dyno Network). Round-trip every IPC DTO through the real codec in a test, and have the mock return values decoded from the same
+  fixtures (`C19b`).
+- Mocks and specs derive the app version from its single source; a literal in a mock (`0.1.0`, `1.0.0`) is the same bug as one
+  in a spec (`C16`).
+- Build quirks seen on CI: `tauri-build` writes a placeholder over a sidecar of the same name (empty, non-executable engine
+  binary); `copy_file_range` and hard links on the checkout volume can yield empty files; a `noexec` build mount blocks running
+  a copied server. Check that every sidecar is a real, executable binary above a size floor (`C05`).
+- macOS Finder stalls when a volume's free space is polled often: poll at most once a minute and put the poll cost in the
+  benchmark budgets (Dyno, `a068435`).
+- Playwright `retries` turn flakes green and invisible: list every retried test in the job summary and fail when the count grows
+  against main (`C17`).
+- Pasted logs from the user are confidential: never into samples, fixtures, docs or commits; invent same-shape data, and scan
+  fixtures against a local denylist that is never committed (`C25`).
+- Guards copied into each app drift (check-icons in three apps, key strip in four, codesign verify in three, nothing in
+  Pitcrew): shared guards live in Paddock and are consumed by version, never copied (rule 39 applies to scripts too).
+- macOS permission grants (Screen Recording, Accessibility) are tied to the code signature, and an ad-hoc re-sign on update
+  changes it; verify in the first spike of Sighter and give the user a Repair that opens the right Settings pane (ADR 0010).
+
