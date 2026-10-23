@@ -39,46 +39,11 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .rule{fill:var(--line)}
 .track{fill:none;stroke:var(--line);stroke-width:1.25;opacity:.7}
 </style>
-<path class="track" d="M-40 230 C 300 80, 520 200, 800 110 S 1300 20, 1660 160"/>
 
 <text class="eyebrow" x="800" y="76" text-anchor="middle">PADDOCK</text>
 <text class="h1" x="800" y="136" text-anchor="middle">Seven local-first tools for people who keep systems running</text>
 <text class="sub" x="800" y="176" text-anchor="middle">One private AI hub, one shared foundation. Each app is good alone and better together.</text>
 
-<g><rect class="hub" x="75" y="650" width="1450" height="160" rx="24"/><rect class="chip-ok" x="1343" y="670" width="77" height="26" rx="13"/><text class="chipt-ok" x="1381.5" y="688" text-anchor="middle">v1.0.2</text>
-<svg x="103" y="690" width="80" height="80" viewBox="60 60 904 904" overflow="visible">
-  
-  <defs>
-    <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7B46DB"/><stop offset="0.55" stop-color="#5A24B0"/><stop offset="1" stop-color="#43198F"/>
-    </linearGradient>
-    <radialGradient id="p19sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="p19edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
-      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
-    </linearGradient>
-    <clipPath id="p19clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
-    <filter id="p19gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#24094F" flood-opacity="0.32"/></filter>
-    <filter id="p19ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
-    <mask id="p19m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M392 448V528M452 404V572M512 364V612M572 404V572M632 448V528" fill="none" stroke="#000" stroke-width="34" stroke-linecap="round"/></mask>
-  </defs>
-  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p19bg)" filter="url(#p19ts)"/>
-  <g clip-path="url(#p19clip)">
-    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
-    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
-    <rect x="100" y="100" width="824" height="824" fill="url(#p19sheen)"/>
-    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p19edge)" stroke-width="6"/>
-    
-  </g>
-  <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
-</svg>
-<rect x="205" y="694" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
-<text class="name hubname" x="205" y="730">Pitwall</text>
-<text class="promise" x="205" y="756">The local AI hub, on llama.cpp.</text>
-<text class="promise" x="205" y="779">Optional for every app.</text>
-<text class="vt" x="580" y="712">One local API</text><text class="vs" x="580" y="740">OpenAI, Anthropic and Ollama</text><text class="vs" x="580" y="763">compatible, plus /x/v1.</text><text class="vt" x="930" y="712">Tools over MCP</text><text class="vs" x="930" y="740">MCP client and tool</text><text class="vs" x="930" y="763">router.</text><text class="vt" x="1172" y="712">Yours alone</text><text class="vs" x="1172" y="740">Keys, priorities, caching.</text><text class="vs" x="1172" y="763">No cloud, no telemetry.</text></g>
 <path class="stub" d="M245 514 L245 646"/><polygon class="ahp" points="245,646 239,635 251,635"/><polygon class="ahp" points="245,514 239,525 251,525"/><g><rect class="pill" x="178" y="551" width="134" height="58" rx="22"/><text class="lbl" x="245" y="575" text-anchor="middle">Q&amp;A,</text><text class="lbl" x="245" y="601" text-anchor="middle">embeddings</text></g>
 <path class="stub" d="M720 514 L720 646"/><polygon class="ahp" points="720,646 714,635 726,635"/><g><rect class="pill" x="663.5" y="551" width="113" height="58" rx="22"/><text class="lbl" x="720" y="575" text-anchor="middle">Explain,</text><text class="lbl" x="720" y="601" text-anchor="middle">research</text></g>
 <path class="stub" d="M1265 514 L1265 646"/><polygon class="ahp" points="1265,646 1259,635 1271,635"/><polygon class="ahp" points="1265,514 1259,525 1271,525"/><g><rect class="pill" x="1214" y="551" width="102" height="58" rx="22"/><text class="lbl" x="1265" y="575" text-anchor="middle">Vision,</text><text class="lbl" x="1265" y="601" text-anchor="middle">planner</text></g>
@@ -263,6 +228,40 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <path class="hand" d="M380 948 L380 931 Q380 914 397 914 L501 914 Q523 914 523 892 L523 562 Q523 540 545 540 L646 540 Q660 540 660 526 L660 512"/><polygon class="ah" points="660,512 654,523 666,523"/><g><rect class="pill" x="466.5" y="863" width="113" height="34" rx="22"/><text class="lbl" x="523" y="888" text-anchor="middle">Job logs</text></g>
 <path class="hand" d="M900 948 L900 512"/><polygon class="ah" points="900,512 894,523 906,523"/><g><rect class="pill" x="854" y="563" width="92" height="34" rx="22"/><text class="lbl" x="900" y="588" text-anchor="middle">Issues</text></g>
 <path class="hand later" d="M1450 948 L1450 512"/><polygon class="ah" points="1450,512 1444,523 1456,523"/><g><rect class="pill" x="1377.5" y="563" width="145" height="34" rx="22"/><text class="lbl" x="1450" y="588" text-anchor="middle">Smoke tests</text></g>
+<g><rect class="hub" x="75" y="650" width="1450" height="160" rx="24"/><rect class="chip-ok" x="1343" y="670" width="77" height="26" rx="13"/><text class="chipt-ok" x="1381.5" y="688" text-anchor="middle">v1.0.2</text>
+<svg x="103" y="690" width="80" height="80" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7B46DB"/><stop offset="0.55" stop-color="#5A24B0"/><stop offset="1" stop-color="#43198F"/>
+    </linearGradient>
+    <radialGradient id="p19sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="p19edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="p19clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="p19gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#24094F" flood-opacity="0.32"/></filter>
+    <filter id="p19ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="p19m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M392 448V528M452 404V572M512 364V612M572 404V572M632 448V528" fill="none" stroke="#000" stroke-width="34" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p19bg)" filter="url(#p19ts)"/>
+  <g clip-path="url(#p19clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#p19sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p19edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
+</svg>
+<rect x="205" y="694" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
+<text class="name hubname" x="205" y="730">Pitwall</text>
+<text class="promise" x="205" y="756">The local AI hub, on llama.cpp.</text>
+<text class="promise" x="205" y="779">Optional for every app.</text>
+<text class="vt" x="580" y="712">One local API</text><text class="vs" x="580" y="740">OpenAI, Anthropic and Ollama</text><text class="vs" x="580" y="763">compatible, plus /x/v1.</text><text class="vt" x="930" y="712">Tools over MCP</text><text class="vs" x="930" y="740">MCP client and tool</text><text class="vs" x="930" y="763">router.</text><text class="vt" x="1172" y="712">Yours alone</text><text class="vs" x="1172" y="740">Keys, priorities, caching.</text><text class="vs" x="1172" y="763">No cloud, no telemetry.</text></g>
 
 <g>
 <rect class="found" x="75" y="1180" width="1450" height="100" rx="20"/>

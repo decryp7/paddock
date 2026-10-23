@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=3cc1d67c" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=f2367e55" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -10,7 +10,7 @@ only: no cloud, no account, no telemetry.
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=0f7cacd7) and [dark](images/paddock-ecosystem-dark.png?v=04eb684e), integrations
+hero [light](images/paddock-ecosystem-light.png?v=538a1af4) and [dark](images/paddock-ecosystem-dark.png?v=7e47372c), integrations
 [light](images/paddock-integrations-light.png?v=6c1eb46a) and [dark](images/paddock-integrations-dark.png?v=8b3853e3).
 
 Each app's marketing art (hero banner, feature showcase, how it works, 1280x640 social card) is generated from one data file per app

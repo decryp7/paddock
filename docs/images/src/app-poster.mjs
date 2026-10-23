@@ -173,7 +173,7 @@ function featuresSvg(d, S) {
       `<text class="ptitle" x="24" y="${ih + 16 + 48}">${esc(p.title)}</text>` +
       lines.map((l, k) => `<text class="pbody" x="24" y="${ih + 16 + 86 + k * 30}">${esc(l)}</text>`).join('') + `</g>`;
   }).join('\n');
-  const sy = Y0 + 2 * PH + GAP + 40, ww = d.worksWith, cw = (W - 160) / Math.max(ww.length, 4);
+  const sy = Y0 + 2 * PH + GAP + 68, ww = d.worksWith, cw = (W - 160) / Math.max(ww.length, 4);
   const works = `<text class="wtit" x="80" y="${sy}">WORKS WITH</text>` + ww.map((w, i) => {
     const x = 80 + i * cw;
     return `<g transform="translate(${x} ${sy + 24})">${iconSvg(w.app, 0, 0, 52)}<text class="wname" x="66" y="22">${names[w.app]}</text><text class="wnote" x="66" y="46">${esc(w.note)}</text></g>`;
@@ -181,7 +181,7 @@ function featuresSvg(d, S) {
   const H = sy + 24 + 52 + 48;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">${d.name} features</title><desc id="d">${esc(d.features.panels.map((p) => `${p.title}: ${p.text}`).join(' '))}</desc>
-${css(a)}<defs>${defs.join('')}</defs>${glow(W, 520, 800, 0, 900)}
+${css(a)}<defs>${defs.join('')}</defs>${glow(W, 900, 800, 0, 900)}
 ${iconSvg(d.icon ?? d.id, 80, 64, 56)}<text class="name" x="150" y="102">${d.name}</text>
 ${d.planned ? pill(150 + d.name.length * 15.5 + 16, 94, 'Planned', true) : ''}
 <text class="h2" x="80" y="196">${esc(d.features.heading)}</text>
@@ -210,7 +210,7 @@ function tourSvg(d, S) {
   const H = Y0 + 2 * PH + GAP + 48;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">${d.name}: a two-minute tour</title><desc id="d">${esc(d.tour.panels.map((p, i) => `${i + 1}. ${p.title}: ${p.text}`).join(' '))}</desc>
-${css(a)}<defs>${defs.join('')}</defs>${glow(W, 420, 800, 0, 900)}
+${css(a)}<defs>${defs.join('')}</defs>${glow(W, 900, 800, 0, 900)}
 ${iconSvg(d.icon ?? d.id, 80, 52, 56)}<text class="name" x="150" y="90">${d.name}</text>
 <text class="h2" x="80" y="148" style="font-size:36px">${esc(d.tour.heading)}</text>
 ${panels}
@@ -238,7 +238,8 @@ ${items}
 
 // ---- social (1280x640) ---------------------------------------------------------------------------------------------------
 function socialSvg(d, S) {
-  const a = d.accent, fw = 880, fbh = 550, fx = 600, fy = 118;
+  // d.social = { fx, fy } moves the bleeding window so the right and bottom edges cut between columns and rows, not through text.
+  const a = d.accent, fw = 880, fbh = 550, fx = d.social?.fx ?? 600, fy = d.social?.fy ?? 118;
   const defs = d.planned ? '' : imgDef('hero-l', S.hero.light, fw, fbh) + imgDef('hero-d', S.hero.dark, fw, fbh);
   const win = windowFrame(fx, fy, fw, fbh, d.planned ? mockBody(mock.hero(d.id), fw, 960, 600) : shotBody('hero-l', 'hero-d', fw, fbh));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="t">

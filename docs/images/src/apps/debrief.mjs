@@ -32,11 +32,11 @@ export default {
       { glyph: 'pulse', title: 'Analyse', text: 'Anomalies, patterns, exceptions and error outliers.' },
       { glyph: 'doc', title: 'Share', text: 'Incident reports and redacted copies.' },
     ],
-    family: 'Pitcrew opens its job logs in Debrief. Sighter run bundles and Pitwall explanations are planned.',
+    family: 'Pitcrew opens its job logs in Debrief. Sighter run bundles are in design; Pitwall explanations are optional.',
   },
   worksWith: [
     { app: 'pitcrew', note: 'Job logs' },
-    { app: 'sighter', note: 'Run bundles (planned)' },
-    { app: 'pitwall', note: 'Explanations (planned)' },
+    { app: 'sighter', note: 'Run bundles (in design)' },
+    { app: 'pitwall', note: 'Explanations (optional)' },
   ],
 };

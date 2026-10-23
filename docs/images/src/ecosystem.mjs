@@ -202,16 +202,15 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .rule{fill:var(--line)}
 .track{fill:none;stroke:var(--line);stroke-width:1.25;opacity:.7}
 </style>
-<path class="track" d="M-40 230 C 300 80, 520 200, 800 110 S 1300 20, 1660 160"/>
 
 <text class="eyebrow" x="${W / 2}" y="76" text-anchor="middle">PADDOCK</text>
 <text class="h1" x="${W / 2}" y="136" text-anchor="middle">Seven local-first tools for people who keep systems running</text>
 <text class="sub" x="${W / 2}" y="176" text-anchor="middle">One private AI hub, one shared foundation. Each app is good alone and better together.</text>
 
-${hub}
 ${stubs}
 ${cards}
 ${links.join('\n')}
+${hub}
 
 <g>
 <rect class="found" x="${PX}" y="${PY}" width="${PW}" height="${PH}" rx="20"/>
