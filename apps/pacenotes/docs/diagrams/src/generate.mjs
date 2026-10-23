@@ -47,7 +47,7 @@ function toHub(d, hubId, side, nodeId, nside, rev = false) {
   const gx = 352, gy = Y0, nw = 240;
   const nodes = [
     ['t1', 'accent', { name: 'Tier 1 · Text', tech: 'every language', desc: 'Full-text and regex search, file tree, git history and hot spots, docs' }],
-    ['t2', 'accent', { name: 'Tier 2 · Syntax', tech: 'tree-sitter grammars', desc: 'Symbols, outline, imports, approximate call graph, where defined and used' }],
+    ['t2', 'accent', { name: 'Tier 2 · Syntax', tech: 'tree-sitter grammars', desc: 'Symbols, outline, imports, approximate call graph, where defined and used. C, C++, C#, Java, TypeScript/JavaScript, Rust, Python, Go' }],
     ['t3', 'plugin', { name: 'Tier 3 · Semantic', tech: 'declarative language pack', desc: 'Exact references, types and calls from the server or a SCIP index; cached in the index' }],
   ];
   const hs = nodes.map(([, , o]) => d.fit(nw, o));
@@ -55,7 +55,6 @@ function toHub(d, hubId, side, nodeId, nside, rev = false) {
   d.group('tiers', gx, gy, nw + 48, gh, 'Indexing tiers (per language)');
   let y = gy + 40;
   nodes.forEach(([id, role, o], i) => { d.node(id, gx + 24, y, nw, hs[i], role, o); y += hs[i] + 24; });
-  d.tag(gx + 24 + nw - 8, d.rect.t3[1] + 8, 'language pack', 'plugin');
 
   const t1y = d.rect.t1[1], t2b = d.rect.t2[1] + d.rect.t2[3], t3 = d.rect.t3;
   const rh = 128, ry = Math.round((t1y + t2b - rh) / 2);
@@ -65,11 +64,11 @@ function toHub(d, hubId, side, nodeId, nside, rev = false) {
   d.node('lsp', cx[0], t3[1], W, t3[3], 'external', {
     name: 'Language server', tech: 'LSP client · child process', desc: 'rust-analyzer, clangd, pyright, gopls… installed separately; stops when idle',
   });
-  d.node('index', cx[1], gy, W + 0, null, 'process', { name: 'Local index', tech: 'SQLite · incremental', desc: 'Files, symbols, edges, FTS5 text, git facts' });
+  d.node('index', cx[1], gy, W + 0, null, 'process', { name: 'Local index', tech: 'SQLite · FTS5 · incremental', desc: 'Files, symbols, edges, full-text, git facts' });
   d.node('chunk', cx[1], gy + 168, W, null, 'core', { name: 'Syntax chunker', desc: 'Functions and classes from tree-sitter; fixed windows for other files' });
   d.node('embed', cx[1], gy + 336, W, null, 'process', { name: 'Embedder', tech: 'optional', desc: 'Pitwall (Qwen3-Embedding) or a small local model' });
   d.node('retr', cx[2], gy, W, null, 'core', { name: 'Hybrid retrieval', desc: 'Text + structural + vector, fused with RRF, then re-ranked; cited results' });
-  d.node('vec', cx[2], gy + 168, W, null, 'process', { name: 'Vector index', tech: 'per repository · opt-in', desc: 'Chunk embeddings, re-embedded on change' });
+  d.node('vec', cx[2], gy + 168, W, null, 'process', { name: 'Vector index', tech: 'usearch · per repository · opt-in', desc: 'Chunk embeddings, re-embedded on change' });
   d.node('mcp', cx[3], gy, W, null, 'accent', { name: 'MCP server', tech: 'read-only tools', desc: 'The same view for the UI, Pitwall, Claude Code, Debrief and Sighter' });
   d.node('who', cx[3], gy + 168, W, null, 'external', { name: 'Local AI and agents', desc: 'Pitwall, Claude Code, Debrief, Sighter. Answers carry file and line citations' });
 
@@ -146,9 +145,9 @@ function toHub(d, hubId, side, nodeId, nside, rev = false) {
     title: 'Dependency graph',
     kind: 'Flow · One graph of all links',
     desc: 'Built from the index and manifests; laid out and aggregated in the engine, so thousands of nodes stay usable.',
-    w: 1400,
+    w: 1264,
   });
-  const NW = 264, h = 104, GW = 440;
+  const NW = 264, h = 104, GW = 408;
   const rows = [0, 1, 2, 3].map((i) => Y0 + i * (h + 40));
   const ins = [
     ['i_idx', 'process', { name: 'Code index', tech: 'tiers 1–3', desc: 'Imports, calls, inheritance, FFI, config use, tests' }],
