@@ -50,6 +50,23 @@ Process and workflow
 - No plugin systems unless third-party code/untrusted parsing/privilege separation needs one (user decision).
 - Docs like Debrief: architecture.md, design.md with C4/UML draw.io + exported SVGs, user guide, features,
   roadmap, manual tests, README in Debrief's structure — and regenerate screenshots/diagrams at the end.
+- When CI fails, fix and re-run only the failed tests locally, push once, then run the full suite locally and in CI in
+  parallel as the final gate. A full CI round is 40–50 min; never push fix by fix to see what CI says.
+- Lint and type-check the touched files before every push: a quoting typo in two e2e skip reasons cost a whole CI run.
+- Agents stop and remove only the Docker containers, images and volumes they created (unique name or label), never
+  `docker ps -q | xargs docker stop`: a blanket stop once destroyed a user's long-running container.
+
+Releasing (Pitcrew, Pitwall and Spotter 1.0, 2026-10-23)
+- Ship the approved icon set from `paddock/icons/<app>/tauri` and guard it in CI: Pitwall 1.0.0 shipped a placeholder
+  whose artwork covered 10% of the canvas (the rest opaque white), so the app showed a blank icon. Check that the
+  artwork's bounding box (alpha > 0 and not near-white) fills the canvas (Pitwall `scripts/ci/check-icons.mjs`).
+- Strip whitespace from `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_UPDATER_PUBKEY` before bundling: a trailing newline in
+  the secret fails with base64 "Invalid symbol 10".
+- `[skip ci]` commits are unverified: run one CI build with bundles before tagging, and never tag a `[skip ci]` commit
+  (Gitea skips the tag run too).
+- Verify the artifact, not only `latest.json`: install the DMG/installer and look at the icon and the first launch.
+- Without a Developer ID and notarization, macOS shows "Apple could not verify…" (Open Anyway in Privacy & Security);
+  Windows SmartScreen needs a code-signing certificate. Say so in the release notes until the apps are signed.
 
 ## Platforms (user, 2026-10-22: "same thing for all apps, support linux, mac and windows")
 Every app supports Windows, macOS and Linux as first-class platforms: the app, its service/agent/helper per OS
