@@ -73,7 +73,7 @@ Every feature, with its state, is in [docs/features.md](docs/features.md). Built
    packs (planned) and out-of-process Rust plugins ([docs/plugins.md](docs/plugins.md)).
 10. **Updates itself** with the Tauri updater: signed, opt-in ([docs/releasing.md](docs/releasing.md)).
 
-Planned (see the roadmap): Issues with statistics, new and unusual processes, right-click search, watched folders,
+Planned (see the roadmap): right-click search, watched folders,
 benchmarks on click, a performance-counter browser, the tuning catalogue, cleanup with quarantine, backup health,
 declarative packs, alerts and a weekly report, a local web API, multi-PC view.
 

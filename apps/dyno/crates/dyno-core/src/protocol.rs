@@ -339,6 +339,41 @@ pub enum Request {
     InstallHelper,
     /// Removes the helper (answers `Helper`). Appended.
     UninstallHelper,
+
+    // ---- issues and unusual programs (WP-06, WP-07) ----
+    /// The Issues page: crashes, hangs and other problems the OS recorded, with the stability score, leaderboards and how
+    /// each log source was read. A query: it reads what the agent stored. Appended.
+    Issues {
+        /// The window.
+        query: crate::issues::IssuesQuery,
+    },
+    /// Reads the OS logs now (instead of waiting for the next scheduled read) and answers the Issues page. Appended.
+    RescanIssues {
+        /// The window.
+        query: crate::issues::IssuesQuery,
+    },
+    /// Writes the issues of the last `days` as JSON lines (for Debrief) to a path the user picked in the OS save dialog;
+    /// answers `IssuesSaved`. Appended.
+    SaveIssues {
+        /// Where (absolute, ending in `.jsonl`, in an existing folder).
+        path: String,
+        /// How many days back (1 to 90).
+        days: u32,
+    },
+    /// New and unusual programs. A query. Appended.
+    Unusual {
+        /// Also list the programs the user ignored or protected.
+        include_ignored: bool,
+    },
+    /// Ignores, protects or restores a program on the list; answers the list. Appended.
+    UnusualAct {
+        /// The program's key from the list.
+        key: String,
+        /// What to do.
+        action: crate::unusual::baseline::UnusualAction,
+    },
+    /// Forgets the baseline of programs; learning starts again. Appended.
+    ForgetBaseline,
 }
 
 /// Dyno's own cost.
@@ -586,6 +621,14 @@ pub enum Reply {
     // ---- the privileged helper (WP-01, ADR 0016) ----
     /// The helper's state. Appended.
     Helper(Box<crate::helper_wire::HelperStatus>),
+
+    // ---- issues and unusual programs (WP-06, WP-07) ----
+    /// The Issues page. Appended.
+    Issues(Box<crate::issues::IssuesOverview>),
+    /// The issues file was written. Appended.
+    IssuesSaved(crate::issues::SavedIssues),
+    /// New and unusual programs. Appended.
+    Unusual(Box<crate::unusual::UnusualOverview>),
 }
 
 impl Reply {
@@ -633,6 +676,9 @@ impl Reply {
             Reply::HostNames(x) => v(x),
             Reply::ReportSaved(x) => v(x),
             Reply::Helper(x) => v(x),
+            Reply::Issues(x) => v(x),
+            Reply::IssuesSaved(x) => v(x),
+            Reply::Unusual(x) => v(x),
         }
     }
 }
@@ -858,6 +904,11 @@ mod tests {
             Reply::ReportSaved(crate::report::SavedReport {
                 path: "/x.md".into(),
                 bytes: 1,
+            }),
+            Reply::IssuesSaved(crate::issues::SavedIssues {
+                path: "/x.jsonl".into(),
+                bytes: 1,
+                count: 1,
             }),
             Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {
                 path: "/x.zip".into(),

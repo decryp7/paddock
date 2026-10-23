@@ -36,8 +36,27 @@ apps by CPU and memory, and "Dyno: x % CPU, y MB" (its own overhead, measured; [
 **Built.** The agent keeps raw points for a day, then 1-minute, 15-minute and hourly rollups with min, average and max (so a
 short spike stays visible at every zoom level), per-app minutes for "top consumers", disk space for the forecast, timeline
 events and boot records, in SQLite ([ADR 0008](adr/0008-storage-sqlite-and-retention.md)). History keeps running with the
-window closed. Retention is configurable. A damaged database is moved aside and recreated. The **crashes** series is empty
-until Issues is built ([roadmap G4](roadmap.md#known-gaps-in-the-foundation)).
+window closed. Retention is configurable. A damaged database is moved aside and recreated. The **crashes** series comes from the Issues log below.
+
+## Issues
+
+**Built.** The agent reads what the OS itself recorded, read-only and with timeouts: macOS crash reports in
+`~/Library/Logs/DiagnosticReports` and the unified log (`log show`), the Windows Event Log (Application, System, Windows
+Update), the Linux journal and `coredumpctl`. Crashes, hangs, unexpected shutdowns, disk and memory errors, overheating, failing
+services, running out of memory, update and driver failures are normalised, stored in SQLite and shown with a daily
+**stability score** (0 to 100, a pure function of how often each kind happened), the apps and kinds with the most trouble, the
+trend against the period before and each event's own text (plain text, never HTML). A log that cannot be read is listed as
+"could not be read: reason", never an error, and no score is claimed when none can be read. **Export for Debrief** saves the
+period as JSON lines. Serious issues raise alarms; a crash loop raises the crash-loop alert; the health reason "crashing apps"
+and the weekly report count crashes. See [ADR 0017](adr/0017-issues-and-the-program-baseline.md).
+
+## New and unusual programs
+
+**Built.** A transparency tool, not an antivirus. Dyno keeps a baseline of the programs seen on this PC, learning silently for a
+configurable period (7 days by default) so a fresh install does not flag everything. After that it lists programs it has not
+seen, and says **why** one may be worth a look ("unusual because it runs from a temporary folder, is not signed"): an unusual
+place, a name one letter from a system program, an invalid or missing signature, many child programs or connections, a new
+startup entry. Protect (rules never touch it), Hide and Restore are the only actions; nothing ends or removes a program.
 
 ## Processes
 
@@ -155,7 +174,7 @@ Declarative TOML packs are planned ([WP-15](roadmap.md#wp-15-declarative-toml-pa
 
 ## Planned features
 
-All in [roadmap.md](roadmap.md): Issues with statistics, new and unusual processes, right-click search, watched folders with
+All in [roadmap.md](roadmap.md): right-click search, watched folders with
 keep-for times, benchmarks on click, a performance-counter browser, the tuning catalogue, extras (what changed, why won't it
 sleep, boot analysis, network and energy per app, inventory report, GPU per process, large and duplicate file finder,
 maintenance windows), backup health checks, declarative packs, a local web API, "Explain this" via Pitwall, a multi-PC LAN view

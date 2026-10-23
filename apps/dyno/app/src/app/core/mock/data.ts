@@ -476,6 +476,7 @@ export function demoSettings(): Settings {
     customAlerts: [{ id: 'gpu-limit', name: 'GPU limit', metric: 'gpuLoad', op: 'above', limit: 90, forSecs: 120, severity: 'warning', enabled: true }],
     networkAlerts: { newExposedListener: false, newRemoteHost: false },
     notifications: true,
+    unusual: { enabled: true, learningDays: 7 },
   };
 }
 

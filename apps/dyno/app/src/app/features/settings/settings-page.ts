@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { IpLookupSettings, Settings, Theme, TrayItem } from '../../core/api.types';
+import type { IpLookupSettings, Settings, Theme, TrayItem, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -148,6 +148,19 @@ import { HelperCard } from '../helper/helper-card';
                 <label class="num-in"><input class="input" type="number" min="1" max="240" [disabled]="!d.alerts.enabled" aria-label="Minutes of high CPU" [ngModel]="d.alerts.longHighCpuMinutes" (ngModelChange)="setAlerts({ longHighCpuMinutes: +$event })" /><span>minutes</span></label>
               </div>
             </section>
+
+            <section class="card" aria-label="New programs">
+              <h2>New programs</h2>
+              <p class="sub">Dyno notes which programs run on this PC and lists new ones on the Issues page, with the reasons some may be worth a look. It only watches: it never ends or removes a program, and it says "unusual because", never "malware".</p>
+              <div class="row">
+                <div class="lbl"><strong>Watch for new programs</strong><small>Keeps a list of the programs it has seen, on this PC only.</small></div>
+                <dy-switch [checked]="unusual().enabled" (changed)="setUnusual({ enabled: $event })" label="Watch for new programs" />
+              </div>
+              <div class="row" [class.off]="!unusual().enabled">
+                <div class="lbl"><strong>Learn quietly first</strong><small>For this long after the first look, nothing is listed, so a fresh install does not flag everything it already has.</small></div>
+                <label class="num-in"><input class="input" type="number" min="0" max="60" [disabled]="!unusual().enabled" aria-label="Days of quiet learning" [ngModel]="unusual().learningDays" (ngModelChange)="setUnusual({ learningDays: +$event })" /><span>days</span></label>
+              </div>
+            </section>
           </div>
         }
       </dy-async>
@@ -276,6 +289,10 @@ export class SettingsPage implements OnInit {
   }
   protected setRetention(p: Partial<Settings['retention']>): void {
     this.draft.update((d) => (d ? { ...d, retention: { ...d.retention, ...p } } : d));
+  }
+  protected readonly unusual = computed(() => this.draft()?.unusual ?? { enabled: true, learningDays: 7 });
+  protected setUnusual(p: Partial<UnusualSettings>): void {
+    this.draft.update((d) => (d ? { ...d, unusual: { ...(d.unusual ?? { enabled: true, learningDays: 7 }), ...p } } : d));
   }
   protected setAlerts(p: Partial<Settings['alerts']>): void {
     this.draft.update((d) => (d ? { ...d, alerts: { ...d.alerts, ...p } } : d));

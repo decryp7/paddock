@@ -57,6 +57,12 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  IssuesOverview,
+  IssuesQuery,
+  SavedIssues,
+  UnusualAction,
+  UnusualItem,
+  UnusualOverview,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import {
@@ -77,6 +83,7 @@ import {
 } from './mock/data';
 import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { mockHostName, mockNetwork } from './mock/network';
+import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHistory } from './mock/history';
 import { mockInventory } from './mock/inventory';
@@ -178,6 +185,10 @@ export class MockBackend implements DynoBackend {
   private readonly activityListeners = new Set<(a: ActivityEntry) => void>();
   private readonly agentListeners = new Set<(s: AgentStatus) => void>();
   private readonly alarmListeners = new Set<(c: AlarmChange) => void>();
+  private unusualItems: UnusualItem[] = seedUnusual();
+  private unusualForgotten = false;
+  /** Issue exports the mock "saved", for tests. */
+  readonly savedIssues: number[] = [];
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
@@ -1175,6 +1186,53 @@ export class MockBackend implements DynoBackend {
 
   /** The reports the mock "saved", for tests. */
   readonly savedReports: { format: ReportFormat; weeksAgo: number }[] = [];
+
+  issues(query: IssuesQuery): Promise<IssuesOverview> {
+    return this.reply('issues', () => mockIssuesOverview(query, this.now(), mockSources(this.now())));
+  }
+
+  rescanIssues(query: IssuesQuery): Promise<IssuesOverview> {
+    return this.reply('rescanIssues', () => mockIssuesOverview(query, this.now(), mockSources(this.now())));
+  }
+
+  saveIssues(days: number): Promise<SavedIssues | null> {
+    return this.reply('saveIssues', () => {
+      this.savedIssues.push(days);
+      return { path: '/Users/me/dyno-issues.jsonl', bytes: 3_412, count: 13 };
+    });
+  }
+
+  unusual(includeIgnored: boolean): Promise<UnusualOverview> {
+    return this.reply('unusual', () => this.unusualView(includeIgnored));
+  }
+
+  unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview> {
+    return this.reply('unusualAct', () => {
+      const item = this.unusualItems.find((i) => i.key === key);
+      if (!item) throw err('notFound', 'Dyno no longer lists that program.');
+      if (action === 'ignore') item.status = 'ignored';
+      else if (action === 'protect') {
+        item.status = 'protected';
+        const target = item.exe ?? item.name;
+        if (!this.ruleSet.protected.includes(target)) this.ruleSet = { ...this.ruleSet, protected: [...this.ruleSet.protected, target] };
+      } else if (item.status === 'ignored' || item.status === 'protected') item.status = 'new';
+      return this.unusualView(false);
+    });
+  }
+
+  forgetBaseline(): Promise<UnusualOverview> {
+    return this.reply('forgetBaseline', () => {
+      this.unusualItems = [];
+      this.unusualForgotten = true;
+      return this.unusualView(false);
+    });
+  }
+
+  private unusualView(includeIgnored: boolean): UnusualOverview {
+    const view = mockUnusual(this.unusualItems, this.now(), includeIgnored, 2);
+    if (!this.unusualForgotten) return view;
+    return { ...view, known: 0, ignored: 0, learning: { active: true, until: this.now() + this.settingsValue.unusual!.learningDays * DAY } };
+  }
 
   saveReport(format: ReportFormat, weeksAgo: number): Promise<SavedReport | null> {
     return this.reply('saveReport', () => {

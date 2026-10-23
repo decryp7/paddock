@@ -110,6 +110,9 @@ pub struct Core {
     pub alarms: crate::alarms::AlarmCentre,
     /// The flight recorder.
     pub recorder: crate::recorder::Recorder,
+    /// Apps that are crashing repeatedly now (refreshed after each read of the OS logs); the crash-loop alert and the
+    /// health report read them.
+    pub crash_loops: Vec<dyno_core::anomaly::Anomaly>,
 }
 
 impl Core {
@@ -207,6 +210,10 @@ pub struct Shared {
     pub reveal: Reveal,
     /// Open ports and connections (observe-only).
     pub network: crate::network::NetCentre,
+    /// The OS problem logs (observe-only).
+    pub issues: crate::issues::IssueCentre,
+    /// The baseline of programs seen on this machine (observe-only).
+    pub unusual: crate::unusual::UnusualCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
     /// Cleanup: categories, scans and the quarantine (deletes only on the user's confirmed click).
@@ -273,6 +280,7 @@ impl Shared {
             inventory: None,
             alarms,
             recorder: crate::recorder::Recorder::new(),
+            crash_loops: Vec::new(),
         };
         for n in notes {
             core.log(
@@ -308,6 +316,7 @@ impl Shared {
                 None,
             );
         }
+        let unusual = crate::unusual::UnusualCentre::load(&core.store);
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         // One link to the helper (if it is installed) serves the tuning, startup and traffic wrappers and the lifecycle.
         // Only the agent of the user's own data folder talks to the real helper or opens the real permission prompt; an agent
@@ -338,6 +347,7 @@ impl Shared {
             startup,
             facts,
             activity,
+            issues,
         } = platform;
         let shared = Shared {
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
@@ -357,6 +367,8 @@ impl Shared {
             reveal,
             bench,
             cleanup,
+            issues: crate::issues::IssueCentre::new(issues),
+            unusual,
             network: crate::network::NetCentre::new(
                 Box::new(dyno_platform::network::OsSockets),
                 Arc::new(dyno_platform::network::OsReverseDns),

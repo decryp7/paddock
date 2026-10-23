@@ -63,6 +63,18 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **CPU taming, Cleanup and Health and tuning** may still be placeholders; rules ship disabled and cannot act until you enable
   them (see features.md).
 
+## Issues and new programs
+
+Open **Issues** to see what your system itself recorded going wrong: crashes, apps that stopped responding, unexpected
+shutdowns, disk and memory errors, failing services. The big number is today's stability score out of 100; the bars are the days
+before. Click an app or kind to filter, click a row for the system's own words, and use **Export for Debrief...** to save the
+period as a file you can open in Debrief. If a log could not be read, the page says which one and why.
+
+**New and unusual** lists programs Dyno has not seen on this PC. For the first week (Settings, New programs) it only learns.
+Each program says why it is listed; a program that runs from a temporary folder or is not signed is "unusual because it...",
+which is a reason to look, not a verdict. **Protect** adds it to the list rules never touch, **Hide** removes it from the list,
+and **Forget** in the menu starts learning again. Dyno never ends or removes a program because of this list.
+
 ## Undo
 
 Everything Dyno does to a process, a startup entry or (later) a file or setting is logged in **Activity** with an **Undo**
