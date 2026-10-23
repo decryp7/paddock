@@ -406,6 +406,9 @@ jobs:
           target="${CARGO_TARGET_DIR:-target}"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
+          # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
+          export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"
+          export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"
           bundles="$BUNDLES"
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
             if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
