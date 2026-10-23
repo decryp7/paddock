@@ -533,6 +533,16 @@ jobs:
         run: |
           cargo install git-cliff --locked
           git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+          # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
+          cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
+
+          ### First launch
+
+          Spotter is not code-signed yet, so your system may warn the first time you open it.
+
+          - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Spotter > **Open Anyway**.
+          - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
+          FIRST_LAUNCH
 
       # latest.json for the updater: version, notes, pub_date and, per platform, the installer's URL, signature and
       # size. Installed apps fetch releases/download/latest/latest.json (the latest non-pre-release release).

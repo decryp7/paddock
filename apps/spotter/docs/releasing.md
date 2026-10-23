@@ -64,3 +64,7 @@ Spotter needs its **own** key pair — never reuse another product's updater key
 **If the private key is lost**, no further update can be signed for the key built into installed copies: users
 install the next version by hand. **If it leaks**, generate a new pair, publish a release signed with the new key,
 tell users to reinstall from the releases page, and revoke the old secrets.
+
+## First launch note
+
+Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
