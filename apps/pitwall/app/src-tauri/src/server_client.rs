@@ -100,11 +100,16 @@ pub fn error_from_response(status: u16, body: &Value) -> CommandError {
 /// The ports to try, most likely first: the one in `discovery.json` (bounded and strictly parsed), then the well-known
 /// one. A stale file that points at a dead port falls through to the default.
 pub fn candidate_ports(discovery_text: Option<&str>) -> Vec<LoopbackPort> {
+    candidate_ports_with(discovery_text, Some(DEFAULT_PORT))
+}
+
+/// [`candidate_ports`] with the well-known port given (`None`: only what the discovery file names).
+fn candidate_ports_with(discovery_text: Option<&str>, default: Option<u16>) -> Vec<LoopbackPort> {
     let from_file = discovery_text
         .and_then(|t| pitwall_core::discovery::Discovery::parse(t).ok())
         .and_then(|d| LoopbackPort::new(d.port));
     let mut out: Vec<LoopbackPort> = from_file.into_iter().collect();
-    if let Some(p) = LoopbackPort::new(DEFAULT_PORT) {
+    if let Some(p) = default.and_then(LoopbackPort::new) {
         if !out.contains(&p) {
             out.push(p);
         }
@@ -116,12 +121,25 @@ pub fn candidate_ports(discovery_text: Option<&str>) -> Vec<LoopbackPort> {
 pub struct LoopbackClient {
     data_dir: PathBuf,
     keys: Arc<dyn AdminKeys>,
+    /// Whether the well-known port is tried after the one in the discovery file (always, except in tests).
+    try_default_port: bool,
 }
 
 impl LoopbackClient {
     /// A client of the server whose data folder is `data_dir`.
     pub fn new(data_dir: PathBuf, keys: Arc<dyn AdminKeys>) -> LoopbackClient {
-        LoopbackClient { data_dir, keys }
+        LoopbackClient {
+            data_dir,
+            keys,
+            try_default_port: true,
+        }
+    }
+
+    /// Tests only: never fall back to the well-known port, which a Pitwall installed on the machine may be using.
+    #[cfg(test)]
+    fn discovery_port_only(mut self) -> LoopbackClient {
+        self.try_default_port = false;
+        self
     }
 
     fn ports(&self) -> Vec<LoopbackPort> {
@@ -130,7 +148,7 @@ impl LoopbackClient {
             .ok()
             .filter(|m| m.len() as usize <= pitwall_core::discovery::MAX_BYTES)
             .and_then(|_| std::fs::read_to_string(path).ok());
-        candidate_ports(text.as_deref())
+        candidate_ports_with(text.as_deref(), self.try_default_port.then_some(DEFAULT_PORT))
     }
 
     async fn call_once(&self, method: &str, args: &Value, timeout: Duration, key: Option<String>) -> Result<Value, CommandError> {
@@ -474,6 +492,8 @@ mod tests {
             l.local_addr().unwrap().port()
         };
         let (_d, c) = client_for(port, "k");
+        // Hermetic: an installed Pitwall may listen on the well-known port, so only the discovery port is tried.
+        let c = c.discovery_port_only();
         let e = c.call("overview", Value::Null, Duration::from_secs(5)).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
         assert!(e.message.contains("Start the service"));
