@@ -597,6 +597,38 @@ User decision 2026-10-23: a test case may involve multiple applications running 
 - **Debrief run bundles**: steps carry the app identity, and logs from each app can be correlated with them.
 - `act` scope binding (section 10) becomes a set of allowed windows/processes per run rather than one.
 
+### 7.13 Pure-vision testing of legacy apps
+User point 2026-10-23: very old C++ applications have no UIA, so Sighter may be needed completely, while the test project is still written in C# calling the Sighter API.
+
+**The scenario**: MFC, raw Win32 or owner-drawn C++ apps (also VB6, Delphi and PowerBuilder) with no usable UIA. The test project is plain C# (NUnit/xUnit) using **only** Sighter's FlaUI-style object model (7.9): no FlaUI dependency, everything located by vision.
+
+```csharp
+// C# (NUnit), legacy MFC app, no UIA, no FlaUI
+[Test] public void CreatesOrder() {
+    using var app = Sighter.Launch(@"C:\Legacy\Orders.exe", new SessionOptions { Model = "orders@5" });
+    var win = app.MainWindow;
+    win.FindFirst(cf => cf.ByControlType(ControlType.TextBox).RightOf("Customer")).AsTextBox().Enter("ACME");   // label anchor
+    win.FindFirst(cf => cf.ByText("Add").And(cf.ByControlType(ControlType.Button))).AsButton().Click();          // owner-drawn button
+    var grid = win.FindFirst(cf => cf.ByControlType(ControlType.Grid)).AsGrid();
+    Assert.That(grid.Cell(row: "ACME", column: "Total").Text, Is.EqualTo("120.00"));   // row/column header lookup, OCR
+    win.AssertScreen("order-saved");
+}
+```
+
+**Cheap helpers that are not UIA** (optional, Windows only, never required; the pixel path works without them):
+- **Win32 window info**: HWND enumeration, window titles, class names and process ids. Used to identify, activate and scope windows and dialogs reliably (7.12 uses the same data), even without UIA.
+- **MSAA (IAccessible)**: some old controls expose it even without UIA. It is an optional extra `LabelSource` (like the other accessibility sources, section 5), never a run-time dependency.
+
+**Legacy-specific considerations**
+- **Non-DPI-aware apps** are bitmap-scaled by Windows: record and train at the DPI the tests run at, or let Sighter normalise the scale (detect the scale factor from the window's client size versus its logical size).
+- **Classic GDI fonts** make OCR very reliable (crisp, fixed fonts, no anti-aliasing variants), so OCR anchors are the main identity signal here.
+- **Owner-drawn grids and lists** need **table/cell lookup** (row and column header lookup, `Cell(row, column)`); promoted from "lookup later" to **v1**, with table extract still Later.
+- **Fixed-size dialogs** make layout anchors and screen fingerprints very stable.
+- **Old common controls** (themed versus classic look) are two visual variants: include both in training and the theme matrix (7.4).
+- **Running under RDP/VDI** is common for such apps; 7.6 applies unchanged.
+
+**Positioning**: for these apps Sighter is the only practical automation path in the sense that UIA-based tools (FlaUI, Appium Windows) cannot see inside them. The competitors there are UiPath Computer Vision, Eggplant and SikuliX (section 13). Sighter's advantages are trained per-app models, OCR and layout identity, the C# API in the shape testers already know (7.9), and running locally with no cloud.
+
 ## 8. The resolver and models
 
 Per request, configurable: **cache** (screen fingerprint + query + model version) -> **template** (stored crop, fingerprint matches) ->
@@ -820,7 +852,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Serve & locate | Per-query similarity, occurrences, click offset, timeout | v1 | SikuliX, Power Automate |
 | Serve & locate | Determinism, model pinning, screen-state fingerprints | v1 | (own idea) |
 | Serve & locate | Relative queries (near, inside, nth, anchors), OCR text anchors | v1 | Eggplant, UI.Vision, UiPath |
-| Serve & locate | Table cell lookup by row/column name, table extract | v1 lookup, Later extract | UiPath CV |
+| Serve & locate | Table cell lookup by row/column header (owner-drawn grids in legacy apps, 7.13), table extract | **v1 lookup** (promoted for legacy apps), Later extract | UiPath CV |
 | Serve & locate | `assert_pixel` colour probe | v1 | AutoIt (verify) |
 | Serve & locate | Mockup-based tests (locate from a design image) | Later | Tosca |
 | Serve & locate | `act` (guarded; required for Sighter's own tests, 7.8) | v1 (decided) | UI.Vision, Airtest |
@@ -833,6 +865,8 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Script & test | **Run Sighter's own tests**: studio watch mode with overlay, headless `sighter run`, parallel-safe per screen, retries/waits from the resolver, plans as TOML in git (`paddock-testplan`) (7.8) | v1 | Eggplant, Airtest |
 | Script & test | **FlaUI-style object model** in the C#/Java/C++ clients: sessions/windows, `FindFirst`/`FindAll` condition builder with vision-only conditions, `WaitFor`, typed wrappers (Button, TextBox, CheckBox, ComboBox, ListBox, Grid), element properties with `Confidence`/`ResolvedBy`/`ModelVersion`, typed failures (7.9) | v1 | FlaUI (MIT, style only) |
 | Script & test | **Hybrid adapters v1: `Sighter.FlaUI` (C#), `sighter-pywinauto` (Python), `sighter-appium` (Java, Python), Robot Framework `SighterLibrary`**: scope a vision search to a framework element rect/window, "framework first, vision when it misses" fallback with logging, shared waits, runner reporting hooks (7.11) | v1 | FlaUI, pywinauto, Appium, Robot (peer dependencies only) |
+| Script & test | **Pure-vision legacy-app testing from C#** (MFC/Win32/VB6/Delphi/PowerBuilder, no UIA, no FlaUI): 7.9 object model only, plus optional Win32 window info (HWND, class, pid) (7.13) | v1 | UiPath CV, Eggplant, SikuliX |
+| Label | Optional MSAA (IAccessible) `LabelSource` for old controls | Later (after Windows UIA) | (own idea) |
 | Script & test | Further hybrid adapters and recipes: `sighter-appium` JS, `sighter-nutjs`, `sighter-pyautogui` shim, Swing/JavaFX/Selenium/Playwright/Qt/Squish/raw-UIA/Mac2/dogtail recipes; drop-in `find`/`click` shim for SikuliX/PyAutoGUI/nut.js users (7.11) | Later | SikuliX, PyAutoGUI, nut.js |
 | Script & test | **Multi-application tests**: several sessions per test, per-app models plus OS dialogs model, `Activate`/`WaitForWindow`/`WaitForProcess`, cross-app copy/paste/drag, `Sighter.Desktop` search, per-monitor DPI, focus-following recorder (7.12) | v1 | UiPath, Power Automate Desktop |
 | Script & test | FlaUI migration shim package (map common FlaUI calls) | Later | FlaUI |
@@ -880,7 +914,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **AI recovery (7.10)**: non-determinism (a recovered run can differ from the last) and masking real bugs (a dialog that should not appear gets dismissed). Mitigated by the "passed with recovery" warning state, CI default "warn", diagnose-only as the default policy, a closed action vocabulary, bounded attempts, and proposals that need human acceptance.
 - **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing (one GPU rule, section 9).
 
-## 15. Open questions for the user (16; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
+## 15. Open questions for the user (17; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
 1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
 2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? Is the FlaUI-style object model (7.9) the right default surface, with raw verbs underneath?
 3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
@@ -899,6 +933,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 
 15. **Which adapters in v1** (7.11): proposed `Sighter.FlaUI` (UIA2 and UIA3), `sighter-pywinauto`, `sighter-appium` (Java and Python) and the Robot `SighterLibrary`; the rest Later as recipes. Which frameworks do your teams actually use (Swing, JavaFX, Qt/Squish, SikuliX, nut.js), and should any of them move to v1? Adapters live in `sighter-clients` as MIT packages.
 16. **Multi-application limits**: how many concurrent sessions and models per test (VRAM, section 12), and should the OS dialogs model ship as a starter model per OS (it would be trained on our own recordings of OS dialogs, no third-party data)?
+17. **Legacy apps** (7.13): which legacy stacks do you actually test (MFC, VB6, Delphi, PowerBuilder), at which DPI, and are they non-DPI-aware? Is the optional Win32 window info enough, or is MSAA wanted earlier than Later?
 
 ## 16. Size (one capable agent team, rough, excluding polish and design pass)
 - Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RT-DETRv2 + D-FINE, ONNX in `ort`, measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
@@ -913,6 +948,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Hybrid adapters (7.11)** (my estimate, not the user's): shared adapter core (scope, fallback, DPI helper shared with 7.12, reporting hook) 1 to 2 weeks; `Sighter.FlaUI` 1 to 2 weeks; `sighter-pywinauto` 1 week; `sighter-appium` (Java and Python) 2 weeks; Robot `SighterLibrary` 1 week; recipes and docs for the Later frameworks about 1 week. About 7 to 9 weeks, partly parallel (was 3 to 4 weeks for FlaUI alone). The Later adapters would add roughly 1 to 2 weeks each.
 - **Multi-application tests (7.12)** (my estimate, not the user's): multi-session model, per-app model auto-selection, OS dialogs model, activation/focus verification 3 to 4 weeks; `Desktop` search with occlusion and z-order, per-monitor DPI helper 2 to 3 weeks; focus-following recorder and per-app steps in the editor 2 to 3 weeks; Debrief identity and log correlation about 1 week. About 8 to 11 weeks, partly parallel.
 - Together 7.11 and 7.12 add roughly 2 to 3 months to the total.
+- **Pure-vision legacy testing (7.13)** (my estimate, not the user's): table/cell lookup and grid wrapper 2 to 3 weeks; Win32 window info helper about 1 week (shared with 7.12); non-DPI-aware scale normalisation 1 week; legacy sample app set (invented, no confidential screenshots), docs and the C# example suite 1 to 2 weeks. About 4 to 6 weeks, partly parallel; MSAA source Later, about 1 to 2 weeks.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
 - Total about 13 to 18 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients, AI recovery, the FlaUI hybrid and multi-application tests), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
