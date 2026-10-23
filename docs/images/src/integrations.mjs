@@ -28,7 +28,7 @@ d.group('pw', 472, 144, 648, 608, 'Pitwall: one service process, loopback only')
 d.node('api', 496, 192, 272, 424, 'accent', { name: 'Local API', tech: 'HTTP on 127.0.0.1',
   desc: 'OpenAI, Anthropic and Ollama compatible, plus /x/v1. One key per app, job priorities, prompt and response caching, usage and limits per app.' });
 d.node('router', 824, 192, 272, 88, 'accent', { name: 'Tool router', tech: 'MCP client', desc: 'Offers MCP tools to local models.' });
-d.group('os', 800, 336, 320, 168, 'Engine process', { os: true });
+d.group('os', 800, 336, 304, 168, 'Engine process', { os: true });
 d.node('eng', 824, 384, 272, 88, 'process', { name: 'llama.cpp', tech: 'child process, loopback', desc: 'The only engine. Runs the model on your hardware.' });
 d.node('cred', 824, 536, 272, 88, 'process', { name: 'OS credential store', tech: 'Keychain, Credential Manager, Secret Service', desc: 'Holds the per-app keys.' });
 d.note('local', 496, 664, 600, 'Local only: the sole outbound traffic is the model and engine downloads you ask for.');
@@ -52,8 +52,7 @@ d.group('ho', 48, 808, 1432, 488, 'Hand-offs between apps (Pitwall is optional f
 const rows = [
   [['sighter2', 'Sighter'], ['debrief2', 'Debrief'], 'Run bundle: video, steps'],
   [['debrief7', 'Debrief'], ['sighter5', 'Sighter'], 'MCP: bug from a video'],
-  [['code5', CODEBASE_TOOL], ['sighter6', 'Sighter'], 'MCP host: drive UI'],
-  [[ 'code2', CODEBASE_TOOL], ['sighter3', 'Sighter'], 'Test plan, results back'],
+  [['code5', CODEBASE_TOOL], ['sighter6', 'Sighter'], 'MCP host: drive UI, test plans'],
   [['pitcrew', 'Pitcrew'], ['debrief3', 'Debrief'], 'Deep link: open job log'],
   [['dyno2', 'Dyno'], ['debrief4', 'Debrief'], 'Deep link: open issue'],
   [['dyno3', 'Dyno'], ['spotter2', 'Spotter'], 'Deep link: watch for updates'],
@@ -64,7 +63,7 @@ const rows = [
   [['spotter3', 'Spotter'], ['sighter4', 'Sighter'], 'Smoke tests (later)'],
 ];
 rows.forEach(([[ia, na], [ib, nb], label], i) => {
-  const x = 72 + (i % 2) * 720, y = 856 + Math.floor(i / 2) * 72;
+  const x = 72 + (i % 2) * 800, y = 856 + Math.floor(i / 2) * 72;
   d.node(ia, x, y, 184, 48, ia.startsWith('code') || ia.startsWith('sighter') ? 'process' : 'process', { name: na, planned: ia.startsWith('code') || ia.startsWith('sighter') });
   d.node(ib, x + 400, y, 184, 48, ib === 'runners' ? 'external' : 'process', { name: nb, planned: /^(code|sighter)/.test(ib) });
   link(d, ia, 'R', ib, 'L', { label, dash: true });

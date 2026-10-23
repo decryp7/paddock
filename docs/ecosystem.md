@@ -11,7 +11,7 @@ only: no cloud, no account, no telemetry.
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
 hero [light](images/paddock-ecosystem-light.png?v=be994643) and [dark](images/paddock-ecosystem-dark.png?v=c21c05d9), integrations
-[light](images/paddock-integrations-light.png?v=3af0c38f) and [dark](images/paddock-integrations-dark.png?v=32ba0f3c).
+[light](images/paddock-integrations-light.png?v=d2d6cb92) and [dark](images/paddock-integrations-dark.png?v=45c0b7ae).
 
 Each app's marketing art (hero banner, feature showcase, how it works, 1280x640 social card) is generated from one data file per app
 in [`images/src/apps/`](images/src/apps/) by [`images/src/app-poster.mjs`](images/src/app-poster.mjs), into the app's own
@@ -118,7 +118,7 @@ Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/pacenotes>
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=c1717d3b" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; Sighter's MCP server is driven by Debrief, Pacenotes or any MCP host; apps hand off files and deep links directly" width="100%">
+  <img src="images/paddock-integrations.svg?v=d5559b91" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; Sighter's MCP server is driven by Debrief, Pacenotes or any MCP host; apps hand off files and deep links directly" width="100%">
 </picture>
 
 The apps never depend on each other to do their own job. They meet in a few well-defined places:
