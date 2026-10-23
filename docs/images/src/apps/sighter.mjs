@@ -8,7 +8,7 @@ export default {
     panels: [
       { mock: 'detect', title: 'Find elements from pixels', text: 'Boxes, confidence and which layer answered.' },
       { mock: 'review', title: 'Review what it is unsure of', text: 'A queue for everything not identified automatically.' },
-      { mock: 'flaui', title: 'Works with your FlaUI tests', text: 'Keep UIA where it works; let Sighter see the rest.' },
+      { mock: 'flaui', title: 'Works with your existing UI tests', text: 'Keep UIA where it works; let Sighter see the rest.' },
       { mock: 'apps', title: 'Across apps', text: 'One test, several applications, each with its own model.' },
     ],
   },
