@@ -23,6 +23,7 @@ Refinements:
 - Sighter authors and runs its own tests in v1; `act` is required for those (7.8).
 - AI-assisted recovery through Pitwall: diagnose-only by default, recover opt-in, reported as "passed with recovery" (7.10).
 - Works alongside any UI test framework (FlaUI, pywinauto, Appium, Robot) as an add-on (7.11); multi-application tests (7.12); pure-vision legacy apps from C# (7.13).
+- Desktop automation through an MCP server and an agent mode over Pitwall's chat API (7.14); a `Target` interface with Local and RDP in v1, controller PC model, IP-KVM Later (7.15).
 
 ## 1. Pitch
 
@@ -79,6 +80,8 @@ watcher). Decision: **Sighter**.
 6. **Test**: engineers write unit tests and scripts against the API. Failures and low-confidence results can be flagged back to step 3.
 
 Day-one value needs no training: OCR plus template matching cover many legacy lookups before a model exists.
+
+Above the resolver sit a `Target` layer (Local, RDP, later VNC and IP-KVM; 7.15), an MCP server with its safety guard and an agent runner (7.14); see the component diagram there.
 
 ![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](images/sighter-overview.svg?v=51430f13)
 
@@ -337,7 +340,7 @@ Baselines per (app, screen, OS, DPI, theme, language); anything below is configu
 UiPath built its Computer Vision product mainly for virtual desktops such as Citrix, where selectors are missing or unreliable: it sends an image of the window to a neural network that labels elements, using anchors and "relative to" offsets ([UiPath docs](https://docs.uipath.com/activities/other/latest/ui-automation/computer-vision-activities)).
 Automation Anywhere's AISense targets Citrix, RDP and legacy toolkits (Delphi, Qt, Flex) the same way ([docs](https://docs.automationanywhere.com/bundle/enterprise-v11.3/page/enterprise/topics/aae-client/metabots/md-in-enterprise-client/aisense-overview.html)).
 Power Automate Desktop switches its recorder to image mode in Citrix and RDP sessions ([June 2021 update](https://powerautomate.microsoft.com/ar-sa/blog/power-automate-desktop-june-2021-update/)).
-Sighter is pixels-only, so this is its natural home, not an extra.
+Sighter is pixels-only, so this is its natural home, not an extra. The `Target` interface and the embedded RDP client of 7.15 build on this section.
 - **Target type `remote_session`**: the thing captured is the local client window (mstsc/RDP, Citrix Workspace, VMware Horizon, VNC viewer, VM console) or a VNC/RDP pixel stream; the query and models treat it as a window with a "remote" flag.
 - **What differs**: lossy codecs (blur, banding, text edges: lower template tolerance, OCR on 2x upscaled crops, train with JPEG/H.264 augmentation and record on the same codec settings), variable latency (`wait_for` defaults longer, change detection waits for N stable frames), scaling/high-DPI mismatches between client and session (store both scales), keyboard layout and key mapping (type via the viewer's input path, offer a clipboard-free typing mode), and reconnect/lock screens (recognised as screens in the graph).
 - **Input**: `act` targets the client window with the usual guards; coordinates are mapped client-window -> session using the recorded geometry. Where the viewer filters injected input (UIPI, secure-attention sequences), it fails with a message and a next step instead of clicking elsewhere. (Details by viewer: verify per product.)
@@ -607,6 +610,71 @@ User point 2026-10-23: very old C++ applications have no UIA, so Sighter may be 
 
 **Positioning**: for these apps Sighter is the only practical automation path in the sense that UIA-based tools (FlaUI, Appium Windows) cannot see inside them. The competitors there are UiPath Computer Vision, Eggplant and SikuliX (section 13). Sighter's advantages are trained per-app models, OCR and layout identity, the C# locator API in a shape many testers already know from Playwright (7.9), and running locally with no cloud.
 
+### 7.14 Desktop automation: MCP server and agent mode
+User decision 2026-10-23: Sighter also drives desktops for people and agents, not only for test code. Three ways in, one set of tools, one safety layer.
+
+![Desktop automation components](images/diagrams/svg/c4-3-desktop-automation.svg?v=0614eabe)
+
+**MCP server** (user, 2026-10-23). Sighter exposes a Model Context Protocol server over stdio or loopback only. Its tools act on the session's selected target (7.15):
+- `observe`: a screenshot plus the detected, labelled elements with boxes (`#1 Save button`, `#2 Cancel`, ...), so a model refers to elements by label and never has to guess pixels;
+- `observe_image`: detect and label elements on a given image (for example a recorded video frame), with no input and no target needed;
+- `locate` (a locator query, 7.9), `click`, `type`, `press`, `drag`, `launch_app`, `wait_for`.
+
+Any MCP host can drive it: Sighter's own runner, Claude Desktop or Claude Code, Pacenotes, or a script. **Any app in the family can be an MCP host** (user, 2026-10-23): an app with an agent loop and a model, Pitwall by default. A host brings its own model; Sighter does not need Pitwall for this.
+
+**Agent mode: `sighter do "<goal>"`** (user, 2026-10-23). A built-in loop calls Pitwall's OpenAI-compatible chat API with tool calling, using the same tool definitions, and runs the tools in-process (no MCP hop). Each step is observe, model picks one tool call, safety check, act, verify (the screen changed as expected); the loop has a step and time budget and ends when the goal is met, a budget runs out or the user stops it.
+
+![One agent-mode step](images/diagrams/svg/uml-seq-agent-step.svg?v=201c19c3)
+
+- **Pitwall does not speak MCP and does not change.** It stays a model server; the agent runner is the MCP-style client and the tool-calling loop lives in Sighter.
+- **Pitwall is optional** (family rule, section 9): without it agent mode is unavailable. Scripted runs and the MCP server still work, and an external MCP host may bring its own model.
+- **Scripted automation (RPA)** through plans and the locator clients (7.8, 7.9) works with no LLM at all; it is the deterministic path and stays the default for CI.
+
+**Safety is enforced in the MCP server, not in the client** (user, 2026-10-23), so it holds for every host, the agent runner and scripts alike:
+- allow-listed apps and windows only (the `act` scope binding of section 10, a set per run);
+- confirmation before destructive actions (send, delete, pay, install), by the user, never by the model;
+- step and time budget per run;
+- a visible "agent in control" overlay with a stop hotkey (the panic key of section 10); physical input pauses the run;
+- a full replay log of observations and actions (screenshots, tool calls, verdicts), kept in the run bundle and openable in Debrief;
+- local only: no cloud model, no remote MCP.
+
+**Worked flow: reproduce a bug from a Debrief video** (user, 2026-10-23). Debrief already opens a screen recording as a source, picks key frames, aligns them to the logs and has the local model describe them. As an MCP host it can go one step further:
+1. Debrief turns the video into **candidate steps**. Sighter's detector can also run on the recorded frames through `observe_image`, which names the elements that were clicked or typed into more precisely than a free-text description.
+2. Debrief connects to Sighter's MCP server and selects the **RDP target** of the remote PC under test (7.15).
+3. It drives the steps with Pitwall choosing the tools step by step, while **watching the remote PC's logs** (live or watched-folder import) for the same error signature or known issue.
+4. It stops when the failure reproduces, or when the step or time budget runs out.
+5. It saves the executed steps as a **`.sighterplan` regression test** that later runs with no LLM.
+
+Safety is unchanged: Sighter's server enforces it (allow-list, confirmations, budget, stop key, replay log); the user confirms before anything runs on a remote PC; everything stays local.
+
+![Reproduce a bug from a Debrief video](images/diagrams/svg/uml-seq-repro-from-video.svg?v=16ea23e7)
+
+**Model fit.** The detector does the seeing, so the LLM only chooses among labelled elements; this is a far easier job than pixel grounding. Current local models with tool calling are enough (Qwen3.x and Gemma 4 through llama.cpp in Pitwall; verify tool-calling quality per model in the spike). A step takes seconds, so agent mode suits exploratory and one-off tasks, not the CI regression path.
+
+### 7.15 Targets: where frames come from and input goes
+User decision 2026-10-23. This extends 7.6 (remote sessions), which stays the reference for codecs, scaling and keyboard mapping; here the same idea becomes one interface.
+
+A small `Target` interface: `frames()` (screenshots), `input()` (keyboard and mouse), optional `launch()` and file transfer. Detection, locators, plans, the MCP server and agent mode sit above it, so a test written once runs on any target.
+
+| Adapter | How | v1 |
+|---|---|---|
+| **Local** | Screenshots plus SendInput (platform equivalents elsewhere), the guarded input driver of section 11 | v1 |
+| **RDP** | Sighter's own embedded RDP client (FreeRDP library), headless: frames go straight to Sighter | v1 |
+| **VNC** | VNC client | alongside RDP if cheap, else Later |
+| **IP-KVM** | An existing open IP-KVM device (HDMI capture plus USB keyboard and pointer) | Later, optional |
+
+**The controller PC model** (user, 2026-10-23: "perhaps hardware is too much; maybe I run Sighter on this PC and remote desktop to the PC under test"). The primary way to test what local input cannot reach is a controller PC that runs Sighter and connects to the PC under test over RDP. Because the embedded client has no mstsc window, the classic problem of a minimised RDP window that stops rendering does not apply. Works for VMs too.
+- **UAC prompts and elevated apps are reachable inside the RDP session** (they are shown in it), which local SendInput cannot do: UIPI blocks injection into elevated windows and the secure desktop without an elevated helper.
+- **Reboots**: Sighter reconnects after a reboot and waits for the session. The logon itself is done by RDP and NLA, so the interactive Windows logon screen and BIOS/UEFI are not tested this way.
+- **One interactive session**: Windows client editions allow one interactive session, so connecting takes over the console user's session (the person at that PC is signed out of the screen); server editions and VMs are not affected the same way. Say this in the target setup screen.
+- **Stable detection**: fixed session resolution and scaling per target, recorded with the model (7.6).
+- **Credentials** come from the OS credential store, by reference; never in plans or logs (section 10).
+- **Other routes**: RDP usually shows UAC prompts inside the session; a VNC server shows them only when it runs as a system service.
+
+**IP-KVM (Later, optional).** Only worth it for what RDP cannot show: BIOS/UEFI, the pre-logon screen and crash screens, on any OS with nothing installed. Prefer supporting existing open device APIs (PiKVM, GPL, so API only and no linking; Sipeed NanoKVM; JetKVM; GL.iNet KVM) over building hardware. Design notes when it is built: absolute pointer mapping, keyboard layout mapping for typed text, capture resolution, scaling and colour, about 50 to 150 ms capture latency, HDCP content shows black, no clipboard (use the device's virtual USB mass storage or a network share), multi-monitor.
+
+**Phasing** (user, 2026-10-23): v1 = Local + RDP (controller PC model); VNC alongside if cheap; IP-KVM Later. Agent mode and IP-KVM are Later; the Target interface and MCP server are v1 so nothing is rebuilt.
+
 ## 8. The resolver and models
 
 Per request, configurable: **cache** (screen fingerprint + query + model version) -> **template** (stored crop, fingerprint matches) ->
@@ -676,6 +744,9 @@ runner has no GPU/Pitwall, or icons have no text.
 - **Codebase tool (name pending)**: drafts UI test cases from requirements and acceptance criteria and hands them over as `.sighterplan` (7.2); reads back `.sighterresult` (requirement coverage, failing cases). File-based and CLI-based hand-off first (`sighter plan import`), no live coupling; each tool works alone. Its read-only MCP server may expose "which requirements have recordings" later (Later).
 - **Pitcrew**: runs engineers' scripts on a runner that has `sighter-server` as a service plus an interactive logged-in desktop session (headless Windows services cannot capture or drive the desktop); Pitcrew verifies this, warns, and shows Sighter health. JUnit, TRX and artifacts (videos, overlays). Runner labels carry matrix axes (DPI, theme, language, remote-session capable). Unreviewed-dependent flows are refused.
 - **Dyno**: CPU/GPU/memory samples during a run attached to the report; "step slow because the machine was throttling" via Dyno's throttling detector; overlay on time-to-screen charts. Optional.
+- **Any app as MCP host** (7.14): for example Debrief reproduces a bug from a recording (`observe_image` on key frames, drive a remote PC through Sighter, watch its logs, save a `.sighterplan`); an app brings an agent loop and a model, Pitwall by default.
+- **Pitwall as agent planner** (7.14): Pitwall's chat API with tool calling drives `sighter do`; Pitwall does not speak MCP and does not change, and agent mode is unavailable without it.
+- **Pacenotes and Claude as MCP hosts** (7.14): Pacenotes, Claude Desktop/Code or any script can drive Sighter's MCP server with their own model.
 - **Spotter**: new release detected -> run the smoke plan (Later).
 - **Paddock**: `paddock-ui`, `paddock-notify`, `paddock-service`, `paddock-cli`, `chromium-driver`, proposed `paddock-video`, `paddock-pitwall` (shared Pitwall client: discovery, pairing, key in the credential store, priorities, cancel, caps, `ground`/chat helpers, a "needs local AI" status type; Sighter, the codebase tool, Spotter and Debrief all use it instead of four copies), `paddock-testplan` (the plan/result schema shared with the codebase tool).
 
@@ -689,6 +760,7 @@ runner has no GPU/Pitwall, or icons have no text.
   | Grounding fallback at run time | none: step fails or pauses as "needs labelling" (the safe default anyway) | recovery from unseen UI changes |
   | Step descriptions in reports | templated text from the recorded step ("Click 'Checkout' (button) on Cart") | prose descriptions |
   | Screen-state names | window title + the largest OCR heading + a human name | auto names |
+  | Agent mode (`sighter do`) | scripted plans and clients; the MCP server for an external host with its own model | autonomous goal-driven runs |
   | Plan drafting | the codebase tool is a separate decision; hand-written plans work | AI-drafted cases (the codebase tool's concern) |
   | Localisation language id / "is this translated" | OCR language detection (PaddleOCR lang models) and string comparison | semantic checks |
 - **One GPU.** Batch labelling and description jobs go to Pitwall at **batch priority and run only when idle** (no training, no interactive Playground request, optionally only when the machine is not in use); they pause and resume, are cancellable, and show an estimate and a per-project cap. Training reserves the GPU: Sighter asks Pitwall to unload the VLM first and restores it after. Interactive `locate` never waits on a batch job.
@@ -723,6 +795,7 @@ VLM fallback, and the review queue picks up the slack (Florence-2 ONNX optionall
 - **`act` guards**: off by default; per-key permission; bound to a window/process; deny-list of titles ("Delete account", UAC, Keychain prompts); no keystrokes into password fields; refuses secure-desktop surfaces; dry-run and step-by-step modes; max-actions cap; global panic hotkey (default Ctrl+Alt+Shift+Esc) and a visible "Sighter is driving" border; physical input pauses the run.
 - **Recorder privacy**: redaction regions applied before storage; auto-pause on password fields; typed key text not stored by default (keys recorded as events without characters unless the user opts in per project); consent screen before input capture; permission preflight per OS.
 - **Data**: recordings and datasets stay in the project folder; optional encrypted at rest; "delete recording but keep labels"; no network except user-requested runtime/model downloads and the user-chosen training host; VLM calls only to local Pitwall. Server: loopback only, hashed per-app keys, size caps, rate limits, logs hold no screenshots unless run logging is enabled per key.
+- **Agent mode and MCP rules** (7.14, user 2026-10-23): enforced in the MCP server, never in the client, so they hold for every host. Allow-listed apps and windows; confirmation by the user for destructive actions (send, delete, pay, install); step and time budget; a visible "agent in control" overlay with a stop hotkey; a full replay log of observations and actions; stdio or loopback only, local models only. Remote targets (7.15): the user confirms before a run starts on a remote PC; RDP credentials come from the OS credential store, never from plans, prompts or logs; the model sees screenshots only through local Pitwall.
 - Per AGENTS.md: validate every IPC/HTTP argument in Rust, parsers never panic, bounded inputs (image size, frame count, regex), plugin-free module guarded by `guard::catch`, every failure mode tested.
 
 ## 11. Architecture
@@ -733,11 +806,12 @@ VLM fallback, and the review queue picks up the slack (Florence-2 ONNX optionall
 - `paddock-video` (shared, extracted from Debrief): ffmpeg runtime, encoders, frame extraction. `sighter-frames`: sampling, scene-change, dedup (`image`, `fast_image_resize`, perceptual hash, SSIM).
 - `sighter-model` (state graph, coverage, path generation; pure), `sighter-plan` (`.sighterplan` parser, resolution, task list, traceability; uses shared `paddock-testplan`), `sighter-report` (JUnit/TRX/Allure/JSON writers, matrices, visual-diff levels).
 - `sighter-ocr`, `sighter-infer` (`ort`/`tract`), `sighter-train` (`ManagedPython` default, `ExportOnly`, later `Burn`), `sighter-pitwall` (job queue and prompts on top of the shared `paddock-pitwall` client).
+- `sighter-target` (the `Target` interface of 7.15 with the Local adapter; RDP adapter on FreeRDP, VNC and IP-KVM adapters later), `sighter-mcp` (MCP server, tool definitions and the safety guard of 7.14) and `sighter-agent` (the `sighter do` loop over the shared `paddock-pitwall` chat client; Later).
 - `sighter-server` (axum-style HTTP, OpenAPI generation), `sighter-input` (optional `act`: SendInput, CGEvent, XTEST, RemoteDesktop portal/libei, scoped), `sighter` CLI (reuse `paddock-cli`).
 - `app/src-tauri` + `app/src` (Angular 22, `paddock-ui`): Home dashboard, Recordings, Label (canvas + queue), Models, Playground (drop a screenshot or capture live, type a query, see every layer's candidates and timing), Runs, Keys and permissions, Settings. Backend service by DI token with a mock for browser dev.
 
 **Processes**: studio (Tauri); `sighter-server` service; recorder helper (out of process); training worker (sandboxed, downloaded runtime);
-Pitwall (separate app, HTTP).
+Pitwall (separate app, HTTP); the MCP server (stdio child of a host, or loopback) and, Later, the agent runner.
 
 **Formats**: model = ONNX + `model.json` (classes, input size, normalisation, per-class thresholds, dataset hash, metrics, parent, base
 weight licence; optional FP16/INT8). Project = SQLite (sessions, frames, events, boxes, sources, scores, states) + frame store
@@ -848,6 +922,12 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Script & test | Further hybrid adapters and recipes: `sighter-appium` JS, `sighter-nutjs`, `sighter-pyautogui` shim, Swing/JavaFX/Selenium/Playwright/Qt/Squish/raw-UIA/Mac2/dogtail recipes; drop-in `find`/`click` shim for SikuliX/PyAutoGUI/nut.js users (7.11) | Later | SikuliX, PyAutoGUI, nut.js |
 | Script & test | **Multi-application tests**: several sessions per test, per-app models plus OS dialogs model, `Activate`/`WaitForWindow`/`WaitForProcess`, cross-app copy/paste/drag, `Sighter.Desktop` search, per-monitor DPI, focus-following recorder (7.12) | v1 | UiPath, Power Automate Desktop |
 | Script & test | **AI-assisted recovery via Pitwall**: diagnose-only (default when Pitwall is present) and recover with guardrails (closed action vocabulary, no destructive actions, bounded attempts, "passed with recovery" state, `RecoveryPolicy`, diagnosis in failure exceptions, recovery transcript in Debrief bundles) (7.10) | v1 | (own idea; Functionize/mabl heal differently) |
+| Targets | **`Target` interface** (frames, input, launch) with the **Local** and **RDP** adapters (embedded FreeRDP client, controller PC model: UAC and elevated apps inside the session, reconnect after reboot, fixed resolution, credentials in the OS store) (7.15) | v1 | UiPath CV, Automation Anywhere (verify) |
+| Targets | VNC adapter | v1 only if cheap, else Later | (own idea) |
+| Targets | IP-KVM adapter via existing open device APIs (BIOS/UEFI, pre-logon, crash screens only) | Later, optional | PiKVM, NanoKVM, JetKVM, GL.iNet (verify) |
+| Automation | **MCP server** (`observe`, `observe_image`, `locate`, `click`, `type`, `press`, `drag`, `launch_app`, `wait_for`) with the safety guard (allow-list, confirmations, budget, overlay and stop key, replay log) (7.14) | v1 | (own idea) |
+| Automation | **Scripted automation (RPA)** by plans and clients, no LLM | v1 | UiPath, Power Automate Desktop |
+| Automation | **Agent mode** `sighter do "<goal>"` over Pitwall's chat API with tool calling (no MCP in Pitwall) (7.14); family MCP hosts such as Debrief's bug reproduction from a video | Later (open question 19) | (own idea) |
 | Script & test | Learned recovery handlers auto-proposed across suites | Later | (own idea) |
 | Script & test | Natural-language steps | Later | Eggplant, Functionize |
 | Plans & model | **`.sighterplan` import** (requirements, screens, cases, steps), dry-run report, diff on re-import, unknown elements to record tasks (7.2) | v1 | (family: codebase tool) |
@@ -889,9 +969,13 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Safety and privacy**: section 10; recordings contain secrets, `act` is dangerous; evidence screenshots in reports and pushes may show secrets (redaction applies before storage and before any export).
 - **Scope**: recorder, studio, server and now a test layer (plans, graph, management, matrices) are four products; v1 is desktop, remote-session windows and browsers, one OS pair per phase. The test layer is cut to the v1 items in section 13; the rest is Later. Sighter-authored tests (7.8) are now v1 and add scope; the cut line is the Later rows, not this.
 - **AI recovery (7.10)**: non-determinism (a recovered run can differ from the last) and masking real bugs (a dialog that should not appear gets dismissed). Mitigated by the "passed with recovery" warning state, CI default "warn", diagnose-only as the default policy, a closed action vocabulary, bounded attempts, and proposals that need human acceptance.
+- **Agent reliability (7.14)**: local models with tool calling may loop, pick wrong elements or stop early; mitigated by detector-labelled elements, per-step verification, step and time budgets, and agent mode being Later and off the CI path; scripted plans stay the deterministic route.
+- **Agent and MCP safety**: an agent or a host can click destructive things or be steered by text on screen (prompt injection); mitigated by enforcing allow-lists, confirmations, budgets and the stop key in the server, confirming remote runs, and never trusting screen text as instructions.
+- **Capture fidelity (7.15)**: RDP codecs and scaling blur text; a controller PC takes over the console user's session on Windows client editions; reboots drop the session. Mitigated by fixed resolution and scaling, stability waits, reconnect logic and clear setup warnings. Local SendInput cannot reach elevated windows or the secure desktop.
+- **Hardware variety (IP-KVM, Later)**: many devices with different APIs, latency and keyboard mapping; PiKVM is GPL (API only, no linking). Kept Later and optional; one device first.
 - **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing (one GPU rule, section 9).
 
-## 15. Open questions for the user (17; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
+## 15. Open questions for the user (19; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
 1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
 2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? (Decided 2026-10-23: one API style, locators, 7.9; raw verbs stay underneath.)
 3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
@@ -912,6 +996,9 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 16. **Multi-application limits**: how many concurrent sessions and models per test (VRAM, section 12), and should the OS dialogs model ship as a starter model per OS (it would be trained on our own recordings of OS dialogs, no third-party data)?
 17. **Legacy apps** (7.13): which legacy stacks do you actually test (MFC, VB6, Delphi, PowerBuilder), at which DPI, and are they non-DPI-aware? Is the optional Win32 window info enough, or is MSAA wanted earlier than Later?
 
+18. **Targets and RDP** (7.15): confirm Local + RDP (controller PC model) in v1 and the one-interactive-session takeover on Windows client editions as acceptable; is VNC wanted in v1 or only if cheap; which RDP setups do you actually use (Windows client, server, VMs)?
+19. **Agent mode in v1 or Later** (7.14): proposed Later (the MCP server, `observe_image` and the Target interface are v1, so any host, Debrief included, can already drive Sighter with its own model). Move `sighter do` into v1?
+
 ## 16. Size (one capable agent team, rough, excluding polish and design pass)
 - Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RT-DETRv2 + D-FINE, ONNX in `ort`, measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
 - Recorder (capture, events, encoding, preflight, video import, remote-session windows): large, 4 to 6 weeks (three OS, Wayland hardest).
@@ -926,8 +1013,9 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Multi-application tests (7.12)** (my estimate, not the user's): multi-session model, per-app model auto-selection, OS dialogs model, activation/focus verification 3 to 4 weeks; `Desktop` search with occlusion and z-order, per-monitor DPI helper 2 to 3 weeks; focus-following recorder and per-app steps in the editor 2 to 3 weeks; Debrief identity and log correlation about 1 week. About 8 to 11 weeks, partly parallel.
 - Together 7.11 and 7.12 add roughly 2 to 3 months to the total.
 - **Pure-vision legacy testing (7.13)** (my estimate, not the user's): table/cell lookup and grid wrapper 2 to 3 weeks; Win32 window info helper about 1 week (shared with 7.12); non-DPI-aware scale normalisation 1 week; legacy sample app set (invented, no confidential screenshots), docs and the C# example suite 1 to 2 weeks. About 4 to 6 weeks, partly parallel; MSAA source Later, about 1 to 2 weeks.
+- **Desktop automation (7.14, 7.15)** (my estimate, not the user's): `Target` interface and Local adapter refactor of the input driver 1 to 2 weeks; embedded RDP adapter (FreeRDP bindings, headless frames, input mapping, reconnect, credential store, fixed resolution) 4 to 6 weeks; MCP server, tool definitions, `observe_image` and the safety guard (allow-list, confirmations, overlay and stop key, replay log) 3 to 4 weeks. About 8 to 12 weeks in v1, partly parallel. Later: agent runner and verification loop 3 to 4 weeks; VNC adapter 1 to 2 weeks; first IP-KVM adapter 3 to 5 weeks plus about 1 to 2 weeks per further device; the Debrief reproduction flow is Debrief's own work on top.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
-- Total about 13 to 17 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients, AI recovery, the FlaUI hybrid and multi-application tests), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
+- Total about 14 to 18 months of one team (adding the desktop automation v1 items, 7.14 and 7.15), before that (was 8 to 11 before the Sighter-authored tests, the extra clients, AI recovery, the FlaUI hybrid and multi-application tests), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
 ## 17. Sources
 - RT-DETRv2: https://arxiv.org/pdf/2407.17140 ; DEIMv2 (DINOv3): https://arxiv.org/pdf/2509.20787 ; DEIM repo: https://github.com/Intellindust-AI-Lab/DEIM

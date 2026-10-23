@@ -35,3 +35,51 @@ link(d, 'srv', 'R', 'pw', 'L', { label: 'Grounding', dash: true });
 link(d, 'store', 'R', 'dbf', 'L', { label: 'Run bundles' });
 d.legend([{ kind: 'ui', label: 'Studio' }, { kind: 'accent', label: 'Sighter container' }, { kind: 'process', label: 'Data' }, { kind: 'external', label: 'External system' }, { kind: 'line', label: 'Uses' }, { kind: 'dashline', label: 'Optional' }]);
 save('c4-2-containers', d, g1 + gh);
+
+// ---------- Component view: desktop automation, MCP server and targets (planned) ----------
+{
+  const d = P({ title: 'Sighter — desktop automation components', kind: 'C4 · Level 3 — Components · planned', w: 1328,
+    desc: 'Planned design. Sighter runs on the controller PC (loopback and stdio only) and reaches the PC under test over RDP. MCP hosts and the built-in agent runner call the same tools; the safety guard sits in front of every action; one Target interface hides where frames come from and input goes.' });
+  const NW = 208, NH = 120, GAP = 96;
+  const gx = 48, gcx = (i) => gx + 24 + i * (NW + GAP), gw = 24 + 4 * NW + 3 * GAP + 24;
+  const t0 = 144, g1 = t0 + NH + 72, y0 = g1 + 48, yI = y0 + NH + 56, yA = yI + 56 + 56, gh = yA + NH + 24 - g1;
+  const yP = g1 + gh + 72;
+
+  d.node('pw', gcx(0), t0, NW, NH, 'external', { name: 'Pitwall', tech: 'local AI hub, optional', desc: 'OpenAI-compatible chat with tool calling. Does not speak MCP.' });
+  d.node('host', gcx(1), t0, NW, NH, 'external', { name: 'MCP hosts', tech: 'Claude Desktop/Code, Pacenotes, scripts', desc: 'Bring their own model; call the tools over stdio.' });
+  d.node('cli', gcx(3), t0, NW, NH, 'external', { name: 'Plans and clients', tech: 'sighter run, C#, Java, Python', desc: 'Scripted automation (RPA); no LLM involved.' });
+
+  d.group('g', gx, g1, gw, gh, 'Controller PC');
+  d.node('run', gcx(0), y0, NW, NH, 'accent', { name: 'Agent runner', tech: 'sighter do "goal"', desc: 'Loop: observe, ask Pitwall, act, verify. Step and time budget.' });
+  d.node('mcp', gcx(1), y0, NW, NH, 'accent', { name: 'MCP server', tech: 'stdio or loopback', desc: 'observe, locate, click, type, press, drag, launch_app, wait_for.' });
+  d.node('sf', gcx(2), y0, NW, NH, 'accent', { name: 'Safety guard', tech: 'in the server, not the client', desc: 'Allow-list, confirmations, budget, stop hotkey, replay log.' });
+  d.node('res', gcx(3), y0, NW, NH, 'accent', { name: 'Resolver', tech: 'detector, OCR, anchors', desc: 'Turns a frame into labelled elements with boxes.' });
+  d.node('tgt', gcx(0), yI, gw - 48, 56, 'process', { name: 'Target interface', tech: 'frames() · input() · launch() · optional file transfer', desc: '' });
+  d.node('loc', gcx(0), yA, NW, NH, 'accent', { name: 'Local adapter', tech: 'screenshots, SendInput', desc: 'This machine. Elevated windows need a helper.' });
+  d.node('rdp', gcx(1), yA, NW, NH, 'accent', { name: 'RDP adapter', tech: 'FreeRDP library', desc: 'Embedded and headless: no mstsc window. Main path in v1.' });
+  d.node('vnc', gcx(2), yA, NW, NH, 'accent', { name: 'VNC adapter', tech: 'VNC client', desc: 'Alongside RDP if cheap.' });
+  d.node('kvm', gcx(3), yA, NW, NH, 'accent', { name: 'IP-KVM adapter', tech: 'PiKVM, NanoKVM, JetKVM APIs', desc: 'Optional, Later: BIOS, pre-logon and crash screens only.' });
+
+  d.node('p1', gcx(0), yP, NW, NH, 'external', { name: 'This PC', tech: 'any local app', desc: 'Captured and driven in the user session.' });
+  d.node('p2', gcx(1), yP, 2 * NW + GAP, NH, 'external', { name: 'PC under test, VM or VDI', tech: 'reached over RDP', desc: 'UAC prompts and elevated apps appear inside the session. Nothing installed.' });
+  d.node('p3', gcx(3), yP, NW, NH, 'external', { name: 'Bare PC, Later', tech: 'behind an IP-KVM', desc: 'Firmware setup and crash screens.' });
+
+  link(d, 'host', 'B', 'mcp', 'T', { label: 'Tool calls' });
+  link(d, 'pw', 'B', 'run', 'T', { label: 'Chat + tools', dash: true });
+  link(d, 'run', 'R', 'mcp', 'L', { label: 'Same tools' });
+  link(d, 'mcp', 'R', 'sf', 'L', { label: 'Each call' });
+  link(d, 'sf', 'R', 'res', 'L', { label: 'Approved' });
+  link(d, 'cli', 'B', 'res', 'T', { label: 'Locate, act' });
+  link(d, 'sf', 'B', 'tgt', 'T', { label: 'Input' });
+  link(d, 'res', 'B', 'tgt', 'T', { label: 'Frames' });
+  link(d, 'tgt', 'B', 'loc', 'T', {});
+  link(d, 'tgt', 'B', 'rdp', 'T', {});
+  link(d, 'tgt', 'B', 'vnc', 'T', { dash: true });
+  link(d, 'tgt', 'B', 'kvm', 'T', { dash: true });
+  link(d, 'loc', 'B', 'p1', 'T', {});
+  link(d, 'rdp', 'B', 'p2', 'T', { label: 'RDP' });
+  link(d, 'vnc', 'B', 'p2', 'T', { dash: true });
+  link(d, 'kvm', 'B', 'p3', 'T', { label: 'HDMI, USB HID', dash: true });
+  d.legend([{ kind: 'accent', label: 'Sighter component' }, { kind: 'process', label: 'Interface' }, { kind: 'external', label: 'External system' }, { kind: 'line', label: 'Uses' }, { kind: 'dashline', label: 'Optional or Later' }]);
+  save('c4-3-desktop-automation', d, yP + NH);
+}
