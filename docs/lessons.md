@@ -145,6 +145,8 @@ UX findings (2026-10-23)
   and show a notice with Open Login Items (Pitcrew, then Pitwall).
 
 Agents and the shared Mac (2026-10-23)
+- Work on one app at a time and finish it before starting the next (user rule); parallel agents only within that app.
+  Juggling six apps at once overloaded the Mac and CI and left several releases half-done.
 - Every agent that edits a repo works in its own git worktree; the main checkout stays on main. Two Debrief agents
   editing one checkout at once mixed their changes.
 - Max ~5 heavy agents; check `uptime` before starting more (load 30–76 slowed every build to hours). Pause lower-priority
