@@ -148,6 +148,20 @@ describe('WatchDetailPage', () => {
     expect(backend.calls).toEqual(expect.arrayContaining(['downloadRelease', 'openRelease']));
   });
 
+  it('copies the upgrade command from the upgrade line when the release has one, and shows no button when it has none', async () => {
+    const { f } = await make('w-6');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const copy = q(f, '.upgrade button[aria-label^="Copy the upgrade command"]');
+    expect(copy.getAttribute('title')).toMatch(/^npm install tinyparse@/);
+    await click(f, copy);
+    expect(writeText).toHaveBeenCalledWith(copy.getAttribute('title'));
+    expect(TestBed.inject(ToastStore).toasts().map((t) => t.title)).toContain('Upgrade command copied');
+    TestBed.resetTestingModule();
+    const other = await make('w-1');
+    expect(q(other.f, '.upgrade button[aria-label^="Copy the upgrade command"]')).toBeNull();
+  });
+
   it('copies the address from the header button and the menu', async () => {
     const { f } = await make();
     const writeText = vi.fn().mockResolvedValue(undefined);

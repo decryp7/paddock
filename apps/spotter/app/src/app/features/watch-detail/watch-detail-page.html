@@ -6,7 +6,7 @@
     @let s = summary();
     @if (d && s) {
       <header class="head">
-        <sp-avatar [name]="s.name" [size]="44" />
+        <sp-avatar [name]="s.name" [watch]="s.id" [size]="44" />
         <div class="id">
           <h1 id="hero-h" class="truncate">{{ s.name }}</h1>
           <p class="src truncate">
@@ -43,6 +43,9 @@
             <span class="token"><sp-ver [value]="s.installed" /><mat-icon svgIcon="sp:arrow-right" aria-hidden="true" /><span class="to"><sp-ver [value]="s.latest.version" /></span></span>
             <span class="muted">is available</span>
             <span class="grow"></span>
+            @if (s.latest.upgradeCommand; as cmd) {
+              <button type="button" class="btn ghost sm" (click)="copy(cmd, 'Upgrade command')" [attr.title]="cmd" [attr.aria-label]="'Copy the upgrade command: ' + cmd"><mat-icon svgIcon="sp:copy" aria-hidden="true" />Copy command</button>
+            }
             <button type="button" class="btn sm" (click)="watches.download(s.id, s.latest.version, { product: s.latest.product })"><mat-icon svgIcon="sp:download" aria-hidden="true" />Download</button>
             <button type="button" class="btn sm" (click)="watches.openRelease(s.id, s.latest.version, { product: s.latest.product })"><mat-icon svgIcon="sp:external" aria-hidden="true" />Open</button>
           </div>

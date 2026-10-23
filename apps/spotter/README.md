@@ -4,6 +4,8 @@ Spotter watches for new releases anywhere and tells you the moment one appears. 
 Linux) from the Paddock suite, and it is **local only**: no cloud, no account, no telemetry. Everything it learns stays
 in a local database on your machine.
 
+**Status: v1.0.0.** Releases are built and published by the tag workflow; the roadmap lists what is still open ([docs/roadmap.md](docs/roadmap.md)).
+
 ![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=10df0435)
 
 

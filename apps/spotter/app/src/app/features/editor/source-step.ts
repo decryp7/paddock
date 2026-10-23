@@ -38,7 +38,7 @@ type Way = 'presets' | 'kinds' | 'feed' | 'import';
           <div class="grid">
             @for (p of shown(); track p.id) {
               <button type="button" class="card" (click)="store.pickPreset(p)">
-                <sp-avatar [name]="p.name" [size]="36" />
+                <sp-avatar [name]="p.name" [preset]="p.id" [size]="36" />
                 <span class="t">{{ p.name }}</span>
                 <span class="d">{{ p.description }}</span>
               </button>

@@ -33,7 +33,7 @@ import { WatchesStore } from '../../state/watches.store';
             @for (item of g.items; track item.watchId + item.release.version + (item.release.product ?? '')) {
               <li class="item" spRowItem [cdkContextMenuTriggerFor]="ctx" [class.seen]="!item.unseen" (click)="goto(item)" tabindex="-1" (spRowActivate)="goto(item)" (keydown.e)="seen(item)">
                 <span class="unseen-dot" [class.off]="!item.unseen" [attr.title]="item.unseen ? 'Not seen yet' : null"></span>
-                <sp-avatar [name]="item.watchName" />
+                <sp-avatar [name]="item.watchName" [watch]="item.watchId" />
                 <div class="main">
                   <div class="title truncate">
                     <span class="name">{{ item.watchName }}</span>

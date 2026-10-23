@@ -14,6 +14,7 @@ for (const scheme of ['dark', 'light'] as const) {
       ['dashboard', '/'],
       ['watches', '/#/watches'],
       ['watch-detail', '/#/watches/w-1'],
+      ['watch-detail-upgrade', '/#/watches/w-6'],
       ['watch-detail-products', '/?mock=products#/watches/w-9'],
       ['dashboard-empty', '/?mock=empty'],
       ['watches-empty', '/?mock=empty#/watches'],
@@ -37,6 +38,22 @@ for (const scheme of ['dark', 'light'] as const) {
         }
       });
     }
+    test(`settings e-mail ${scheme}`, async ({ page }) => {
+      await page.goto('/#/settings');
+      await settle(page, 1000);
+      const mail = page.locator('sp-mail-settings');
+      await mail.getByLabel('Server').fill('smtp.example.org');
+      await mail.getByLabel('From').fill('spotter@example.org');
+      await mail.getByLabel('User name').fill('spotter-robot');
+      await mail.getByLabel('Password').fill('example-password');
+      await mail.getByRole('button', { name: 'Save' }).click();
+      await mail.getByLabel('Send a test message to').fill('you@example.org');
+      await mail.getByRole('button', { name: 'Send test e-mail' }).click();
+      await settle(page, 500);
+      await page.locator('#not-h').evaluate((e) => { e.scrollIntoView({ block: 'start' }); e.closest('section')?.scrollIntoView({ block: 'start' }); });
+      await settle(page, 400);
+      await page.screenshot({ path: `${OUT}/settings-email-${scheme}.png` });
+    });
     test(`cadence ${scheme}`, async ({ page }) => {
       await page.goto('/');
       await settle(page, 1400);

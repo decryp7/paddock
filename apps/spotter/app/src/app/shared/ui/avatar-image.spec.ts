@@ -44,3 +44,18 @@ describe('Avatar image', () => {
     expect(el.querySelector('img')).not.toBeNull();
   });
 });
+
+describe('Avatar lookup by watch', () => {
+  it('shows the engine picture for a watch and keeps the monogram for one without', async () => {
+    const { appProviders, makeMock, settle } = await import('../../../testing/test-helpers');
+    @Component({ imports: [Avatar], template: `<sp-avatar name="Acme Installer" watch="w-1" /><sp-avatar name="Zed" watch="w-none" />` })
+    class Lookup {}
+    TestBed.configureTestingModule({ providers: appProviders(makeMock()) });
+    const f = TestBed.createComponent(Lookup);
+    await settle(f);
+    const avatars = Array.from((f.nativeElement as HTMLElement).querySelectorAll('sp-avatar'));
+    expect(avatars[0]!.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/svg\+xml/);
+    expect(avatars[1]!.querySelector('img')).toBeNull();
+    expect(avatars[1]!.textContent).toContain('Z');
+  });
+});

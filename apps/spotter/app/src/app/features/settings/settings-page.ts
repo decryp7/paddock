@@ -5,6 +5,7 @@ import type { Settings, Theme } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { formatDateTime, spanText } from '../../shared/format';
 import { Panel } from '../../shared/ui/panel';
+import { MailSettings } from './mail-settings';
 import { SettingsStore } from '../../state/settings.store';
 
 const THEMES: SuSegment[] = [
@@ -16,7 +17,7 @@ const THEMES: SuSegment[] = [
 /** Settings: appearance, notifications, checks, downloads, the page renderer, updates and data. */
 @Component({
   selector: 'sp-settings-page',
-  imports: [MatIcon, SuSegmentedControl, Panel],
+  imports: [MatIcon, SuSegmentedControl, Panel, MailSettings],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './settings-page.html',
   styleUrl: './settings-page.scss',

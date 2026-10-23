@@ -47,7 +47,7 @@
           @for (w of watches.attention(); track w.id) {
             <li>
               <a [routerLink]="['/watches', w.id]">
-                <sp-avatar [name]="w.name" [size]="24" />
+                <sp-avatar [name]="w.name" [watch]="w.id" [size]="24" />
                 <span class="name truncate">{{ w.name }}</span>
                 <sp-status-dot [watch]="w" />
                 <span class="why truncate">{{ w.status.message }}</span>

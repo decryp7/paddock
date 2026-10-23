@@ -32,7 +32,7 @@ import { WatchesStore } from '../../state/watches.store';
           @for (w of unseen(); track w.id) {
             <li>
               <button type="button" class="item" (click)="open(w.id)" [attr.aria-label]="w.name + ' ' + w.latest?.version + ', open'">
-                <sp-avatar [name]="w.name" [size]="32" />
+                <sp-avatar [name]="w.name" [watch]="w.id" [size]="32" />
                 <span class="main">
                   <span class="name truncate">{{ w.name }}</span>
                   <span class="meta truncate">

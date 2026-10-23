@@ -51,7 +51,7 @@
                   <td>
                     <div class="who">
                       <span class="unseen-dot" [class.off]="!w.unseen" [attr.title]="w.unseen ? 'New release' : null"></span>
-                      <sp-avatar [name]="w.name" />
+                      <sp-avatar [name]="w.name" [watch]="w.id" />
                       <div class="names">
                         <a class="name truncate" [routerLink]="['/watches', w.id]" (click)="$event.stopPropagation()" [attr.title]="w.name">{{ w.name }}</a>
                         <div class="src truncate" [attr.title]="w.sourceLabel + ' · ' + w.sourceDescription">

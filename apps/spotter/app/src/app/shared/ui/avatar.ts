@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, input, linkedSignal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, linkedSignal } from '@angular/core';
+import { AvatarsStore } from '../../state/avatars.store';
 import { hueOf, monogram } from '../identity';
 
 /**
@@ -46,9 +47,29 @@ export class Avatar {
   readonly size = input(32);
   /** The cached image for this watch, or null for none (then the monogram shows). */
   readonly src = input<string | null>(null);
+  /** A watch whose cached picture to show (looked up once through the avatars store). */
+  readonly watch = input<string | null>(null);
+  /** A catalogue preset whose picture to show. */
+  readonly preset = input<string | null>(null);
+  private readonly avatars = inject(AvatarsStore);
+  private readonly looked = computed(() => {
+    const w = this.watch();
+    const p = this.preset();
+    if (w) return this.avatars.urlOf({ watch: w });
+    return p ? this.avatars.urlOf({ preset: p }) : null;
+  });
   /** The image failed to load: back to the monogram. */
-  protected readonly broken = linkedSignal<string | null, boolean>({ source: this.src, computation: () => false });
-  protected readonly image = computed(() => (this.broken() ? null : this.src()));
+  protected readonly broken = linkedSignal<string | null, boolean>({ source: () => this.src() ?? this.looked(), computation: () => false });
+  protected readonly image = computed(() => (this.broken() ? null : (this.src() ?? this.looked())));
   protected readonly letters = computed(() => monogram(this.name()));
   protected readonly hue = computed(() => hueOf(this.name()));
+
+  constructor() {
+    effect(() => {
+      const w = this.watch();
+      const p = this.preset();
+      if (w) this.avatars.request({ watch: w });
+      else if (p) this.avatars.request({ preset: p });
+    });
+  }
 }

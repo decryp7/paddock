@@ -17,12 +17,10 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
    before launch returned; test now allows for START_LIMIT) and `challenges_become_needs_you` (a DevTools call timed out because 8 browsers started at once
    on the runner; the file's tests now take turns via `serial()`). Next: dispatch/push once Debrief has shipped, read logs with /tmp-style
    `actions/runs/<run>/jobs` then `actions/jobs/<id>/logs`. Also added: stale-bundle guards in the bundle job (not yet run in CI).
-2. Avatars: engine side done (round 4, ADR 0006): owner avatars and favicons are fetched from the watched site, checked, cached on disk with expiry, and fall back to a bundled mark per source kind, then to the monogram. Commands `watch_avatar`, `preset_avatar`, `kind_avatar`. Open: the UI still draws monograms until it calls them (feat/ui-gaps); bundled marks exist per source kind, not per preset (brand logos are not licensed for bundling).
+2. Avatars: done (ADR 0006). Owner avatars and favicons are fetched from the watched site, checked, cached on disk with expiry and fall back to a bundled mark per source kind, then to the monogram. The UI asks once per identity (`AvatarsStore`; `sp-avatar` takes `watch` or `preset`) in the feed, watches table, dashboard attention list, cadence cards, detail hero, tray and the wizard's preset tiles. Bundled marks exist per source kind, not per preset (brand logos are not licensed for bundling).
 3. Right-click context menus and Up/Down row navigation in the feed and tables; sticky headers on the detail tables.
 4. Tray extras: popup height fitted to content, rounded corners on Windows 11 (DWMWCP_ROUND), toast action buttons and
-   click-through (Open, Mark as seen). E-mail channel delivery is done in the engine (SMTP through lettre, TLS, timeouts,
-   password in the credential store, typed errors with a next step; commands `mail_status`, `set_mail_password`,
-   `send_test_email`); the UI has no mail form yet (feat/ui-gaps), and no test against a real TLS server has been run (the tests use a local fake SMTP server; STARTTLS and TLS failure paths are covered, a successful TLS session is not).
+   click-through (Open, Mark as seen). E-mail channel delivery is done: the engine sends through SMTP (lettre, TLS, timeouts, typed errors) and Settings > Notifications has the form (server, port, security, sender, account, password in the credential store, "Send test e-mail" with the error shown inline). No test against a real TLS server has been run (the tests use a local fake SMTP server; STARTTLS and TLS failure paths are covered, a successful TLS session is not).
 5. Coverage (2026-10-23, after the engine-gaps round): `spotter-core` 99.4%, `spotter-sources` 99.0% and `spotter-engine` 98.9% lines (`cargo llvm-cov`, summary
    method); the rest are `?` regions on SQLite and file operations (seek, flush, write, pragma, transactions) that need a
    fault-injecting database or file layer. Added seams: the in-memory database returns an error (not an exit) and takes an injected opener, a size limit
@@ -52,7 +50,7 @@ functions. `npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities; 
 `TZ=Pacific/Auckland`.
 
 Left:
-- Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command": the engine field exists (`Release.upgradeCommand`, container tags and registry packages) and the UI does not show it yet.
+- Done: the detail hero's upgrade line has a Copy command button when the release carries `upgradeCommand`.
 - Check scripts/check-index.mjs against dist/app/browser/index.html.
 
 - Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; done: the watches table shows the schedule text next to Next and `wizard-schedule-*.png` shows the cron mode.

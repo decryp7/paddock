@@ -71,10 +71,22 @@ function problem(code: CommandError['code'], message: string, problems: string[]
   return { code, message, problems };
 }
 
-/** A simple bundled-style mark for a source kind (the mock never fetches a picture). */
+/** Marks like the engine's bundled ones: one simple glyph and colour per source kind (the mock never fetches a picture). */
+const MARKS: Record<string, { color: string; shape: string }> = {
+  folder: { color: '#C27B16', shape: '<path d="M4 8.5a1.5 1.5 0 0 1 1.5-1.5H10l2 2h6.5A1.5 1.5 0 0 1 20 10.5v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/>' },
+  github: { color: '#6E56CF', shape: '<circle cx="12" cy="12" r="7.5"/><path d="M9 17.5v-3M15 17.5v-3M9 14.5c-2 .5-3-1-3.5-2"/>' },
+  gitea: { color: '#3F9B4F', shape: '<path d="M6 8h10v6a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4zM16 9h2a2 2 0 0 1 0 4h-2"/>' },
+  gitlab: { color: '#E24329', shape: '<path d="M12 19 5 13l2-6 2.5 4.5h5L17 7l2 6z"/>' },
+  oci: { color: '#2A7FD4', shape: '<rect x="5" y="8" width="14" height="9" rx="1.5"/><path d="M9 8v9M13 8v9M17 8v9"/>' },
+  npm: { color: '#CB3837', shape: '<rect x="4.5" y="7.5" width="15" height="9" rx="1"/><path d="M8 16.5v-6h4v6M16 10.5v6"/>' },
+  'web-page': { color: '#0E8577', shape: '<circle cx="12" cy="12" r="7.5"/><path d="M4.5 12h15M12 4.5c3 3.5 3 11.500 0 15M12 4.5c-3 3.5-3 11.500 0 15"/>' },
+  feed: { color: '#D9731A', shape: '<circle cx="7" cy="17" r="1.2"/><path d="M5.5 11.500a7 7 0 0 1 7 7M5.5 6.500a12 12 0 0 1 12 12"/>' },
+};
+
 function mockMark(kind: string): Avatar | null {
   if (!kind) return null;
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#0E8577" stroke-width="1.8"><circle cx="12" cy="12" r="8"/></svg>';
+  const m = MARKS[kind] ?? { color: '#0E8577', shape: '<circle cx="12" cy="12" r="7.5"/>' };
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${m.color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${m.shape}</svg>`;
   return { source: 'bundled', mime: 'image/svg+xml', dataUrl: 'data:image/svg+xml;base64,' + btoa(svg) };
 }
 
@@ -129,6 +141,7 @@ function demoWatches(now: number): MockWatch[] {
     failures: 1,
   });
   const pkg = mk(6, 'tinyparse', 'npm', { package: 'tinyparse' }, 'semver', 14, 'tinyparse-');
+  for (const r of pkg.releases) r.upgradeCommand = `npm install tinyparse@${r.version}`;
   const vendor = mk(7, 'Vendor download page', 'web-page', { url: 'https://vendor.example/download', selector: 'h2', render: 'auto' }, 'numeric', 10, 'Vendor-', {
     status: { kind: 'needsYou', message: 'The page asks for a login before it shows the download. Open it, sign in, then check again.' },
   });
@@ -323,7 +336,7 @@ export class MockBackend implements SpotterBackend {
 
   appInfo(): Promise<AppInfo> {
     return this.call('appInfo', () => ({
-      version: '0.1.0',
+      version: '1.0.0',
       configPath: '/home/demo/.config/spotter-demo/config.toml',
       logsDir: '/home/demo/.local/share/spotter-demo/logs',
       downloadsDir: '/home/demo/Downloads/Spotter-demo',
@@ -729,14 +742,14 @@ export class MockBackend implements SpotterBackend {
   }
 
   appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.call('appUpdateStatus', () => ({ available: true, reason: null, currentVersion: '0.1.0' }));
+    return this.call('appUpdateStatus', () => ({ available: true, reason: null, currentVersion: '1.0.0' }));
   }
 
   checkAppUpdate(): Promise<AppUpdateCheck> {
     return this.call('checkAppUpdate', () => {
       this.updateCount++;
       return this.updateCount % 2 === 1
-        ? { updateAvailable: true, version: '0.2.0', notes: 'Faster checks and a calmer dashboard.' }
+        ? { updateAvailable: true, version: '1.1.0', notes: 'Faster checks and a calmer dashboard.' }
         : { updateAvailable: false, version: null, notes: null };
     });
   }
