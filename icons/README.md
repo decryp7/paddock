@@ -1,13 +1,13 @@
 # Icons
 
-The family icon set: app icons for Debrief, Pitcrew, Spotter, Pitwall and Dyno, plus **draft** Sighter and Pacenotes icons (awaiting approval).
+The family icon set: app icons for Debrief, Pitcrew, Spotter, Pitwall, Dyno, Sighter and Pacenotes. All seven are approved.
 Open `preview.html` to review them, or see the renders in `screenshots/`.
 
 | App | Status |
 |---|---|
 | Debrief, Pitcrew, Spotter, Pitwall, Dyno | Approved |
-| Sighter | Draft, awaiting approval |
-| Pacenotes | Draft, awaiting the user's approval |
+| Sighter | Approved (2026-10-23) |
+| Pacenotes | Approved (2026-10-23) |
 
 ## Build
 
@@ -50,8 +50,8 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 | Spotter | `#F4B315` | `#FFD257` → `#E59600` | `#7A4E00` | `#3A2600` | 7.8:1 |
 | Pitwall | `#5A24B0` | `#7B46DB` → `#43198F` | `#24094F` | white | 9.1:1 |
 | Dyno | `#BE3584` | `#DE559F` → `#A0226A` | `#5E0E3C` | white | 5.2:1 |
-| Pacenotes (draft, awaiting approval) | `#831826` | `#B3283C` → `#66131E` | `#340A0F` | white | 9.9:1 |
-| Sighter (draft, awaiting approval) | `#00B8D9` | `#4FD8F0` → `#0094B8` | `#00485A` | `#00303B` (dark) | ink 6.0:1 on base |
+| Pacenotes | `#831826` | `#B3283C` → `#66131E` | `#340A0F` | white | 9.9:1 |
+| Sighter | `#00B8D9` | `#4FD8F0` → `#0094B8` | `#00485A` | `#00303B` (dark) | ink 6.0:1 on base |
 
 - **Ink rule:** the glyph is white wherever white reaches at least 3:1 on the tile. Spotter's amber tile is the only light one, so it takes dark ink.
 - **Colour-vision check:** the hues were picked by a search in OKLCH that maximises the smallest pairwise OKLab distance under simulated protanopia, deuteranopia and tritanopia (Machado 2009, full severity). The smallest ΔE (OKLab ×100) is 17.7 for normal vision, 11.6 for protanopia, 13.6 for deuteranopia and 10.7 for tritanopia. Run `node tools/cvd.mjs '{"set":{...}}'` to check a new palette.
@@ -64,8 +64,8 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 - **Pitcrew:** a wheel nut inside a cycle arrow: keep runners alive, swap them safely, clean up.
 - **Spotter:** binoculars and a spark: it watches everywhere and calls the moment a release appears.
 - **Pitwall:** a radio bubble with the voice kept inside it: a private, local model.
-- **Sighter (draft, awaiting the user's approval):** a pointer arrow inside a sighting reticle (four ring arcs with ticks through the gaps): it finds UI elements by sight. Cyan is the only free hue that keeps the CVD minimum of the five unchanged (min dE 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan, so Sighter is never the closest pair). Lime was rejected: 3.3 to 4.3 dE from Spotter or Pitcrew under protan/deutan. Dark ink because a light cyan tile fails 3:1 with white, like Spotter's amber.
-- **Pacenotes (draft, awaiting the user's approval):** a portrait spiral notebook with a second page peeking out behind it, rings through punched holes on the left edge, ruled lines, a small route curve drawn like a pacenote and a compact `</>` mark: notes about the road ahead, here the shape of a codebase. The first version (a squarish card with flat tabs) was rejected as not reading as a notebook. At 32 px the code mark drops out, at 16 px only rings, page and one curve remain. A variant with the spiral along the top is `alternative/pacenotes-top-spiral` (the left spiral was clearer at 16 px); the first-round concept `alternative/pacenotes-brackets-road` is kept too. Deep crimson is the only hue family that keeps all four CVD minimums unchanged with seven apps (normal 17.7, protan 11.6, deutan 13.6, tritan 10.7); every green, indigo-slate, graphite and teal tried lowered at least one (for example deep green `#1B5E3B` tritan 8.7, indigo-slate `#3D4F73` protan 4.3, graphite `#3F454F` tritan 5.7). White ink gives 9.9:1.
+- **Sighter:** a pointer arrow inside a sighting reticle (four ring arcs with ticks through the gaps): it finds UI elements by sight. Cyan is the only free hue that keeps the CVD minimum of the five unchanged (min dE 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan, so Sighter is never the closest pair). Lime was rejected: 3.3 to 4.3 dE from Spotter or Pitcrew under protan/deutan. Dark ink because a light cyan tile fails 3:1 with white, like Spotter's amber.
+- **Pacenotes:** a portrait spiral notebook with a second page peeking out behind it, rings through punched holes on the left edge, ruled lines, a small route curve drawn like a pacenote and a compact `</>` mark: notes about the road ahead, here the shape of a codebase. The first version (a squarish card with flat tabs) was rejected as not reading as a notebook. At 32 px the code mark drops out, at 16 px only rings, page and one curve remain. A variant with the spiral along the top is `alternative/pacenotes-top-spiral` (the left spiral was clearer at 16 px); the first-round concept `alternative/pacenotes-brackets-road` is kept too. Deep crimson is the only hue family that keeps all four CVD minimums unchanged with seven apps (normal 17.7, protan 11.6, deutan 13.6, tritan 10.7); every green, indigo-slate, graphite and teal tried lowered at least one (for example deep green `#1B5E3B` tritan 8.7, indigo-slate `#3D4F73` protan 4.3, graphite `#3F454F` tritan 5.7). White ink gives 9.9:1.
 - **Dyno:** a dynamometer gauge with a load arc and the needle near the redline.
 
 ## Layout
