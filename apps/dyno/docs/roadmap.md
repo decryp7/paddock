@@ -74,6 +74,11 @@ Built this round: WP-02, WP-03, WP-04, WP-05, WP-08 (Why slow and Reports pages)
 - Not verified on a real desktop: clicking the OS notification and the native save dialog from a debug run (needs a person or
   computer-use session); the Windows and Linux adapters for tuning, cleanup and traffic run only in CI.
 
+CI (2026-10-23): run 7 (56b77e8) had format, clippy, macOS tests, frontend, both Playwright projects and all three bundles green;
+rust tests failed on Ubuntu and Windows and were fixed in 72196b3. Run 8 (72196b3) had every test job green; its Ubuntu bundle was
+cancelled at the coordinator's request and the Windows and macOS bundles passed. The last commit (the stale-installer guards in
+the bundle job) has not run in CI yet: dispatch once after Debrief ships.
+
 Nothing here has been moved to Later; any item moved out of v1 is a user decision.
 
 ## Known gaps in the foundation
