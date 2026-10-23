@@ -443,17 +443,17 @@ mod tests {
         assert!(a.failed.is_empty());
 
         // In use: refused with the program's name.
-        let a = admit_selection(&k, &[drop.id.clone()], home, now, &mut |_| Some("Player".into())).unwrap();
+        let a = admit_selection(&k, std::slice::from_ref(&drop.id), home, now, &mut |_| Some("Player".into())).unwrap();
         assert!(a.failed[0].reason.contains("In use by Player"));
 
         // Changed since the scan.
         std::fs::write(&drop.path, vec![9u8; 3 * MB]).unwrap();
-        let a = admit_selection(&k, &[drop.id.clone()], home, now, &mut never_in_use()).unwrap();
+        let a = admit_selection(&k, std::slice::from_ref(&drop.id), home, now, &mut never_in_use()).unwrap();
         assert!(a.failed[0].reason.contains("changed after the scan"));
 
         // Gone.
         std::fs::remove_file(&drop.path).unwrap();
-        let a = admit_selection(&k, &[drop.id.clone()], home, now, &mut never_in_use()).unwrap();
+        let a = admit_selection(&k, std::slice::from_ref(&drop.id), home, now, &mut never_in_use()).unwrap();
         assert!(a.failed[0].reason.contains("no longer there"));
         let _ = keep;
     }
@@ -469,7 +469,14 @@ mod tests {
         std::fs::write(&outside, vec![1u8; 5 * MB]).unwrap();
         std::fs::remove_file(&big.path).unwrap();
         std::os::unix::fs::symlink(&outside, &big.path).unwrap();
-        let a = admit_selection(&k, &[big.id.clone()], root.parent().unwrap(), Timestamp(2_000), &mut never_in_use()).unwrap();
+        let a = admit_selection(
+            &k,
+            std::slice::from_ref(&big.id),
+            root.parent().unwrap(),
+            Timestamp(2_000),
+            &mut never_in_use(),
+        )
+        .unwrap();
         assert!(a.failed[0].reason.contains("no longer a plain file"), "{:?}", a.failed);
         assert!(a.ready.is_empty());
         assert!(outside.exists());

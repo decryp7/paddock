@@ -161,9 +161,7 @@ fn what_changed_compares_software_lists_and_records_the_baseline_silently() {
     );
     assert!(t.watching_since.is_some());
     // Editor updates and a new program appears.
-    let newer = format!(
-        r#"{{"SPApplicationsDataType":[{{"_name":"Editor","version":"2.0"}},{{"_name":"Stable","version":"1"}},{{"_name":"Fresh","version":"3"}}]}}"#
-    );
+    let newer = r#"{"SPApplicationsDataType":[{"_name":"Editor","version":"2.0"},{"_name":"Stable","version":"1"},{"_name":"Fresh","version":"3"}]}"#.to_string();
     s.extras
         .use_tools(Tools::with(vec![("system_profiler SPApplicationsDataType", vec![ok(&newer)])]));
     dyno_agent::extras::record_changes(&s);

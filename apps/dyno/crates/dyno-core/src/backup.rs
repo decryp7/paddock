@@ -369,7 +369,7 @@ pub fn judged(tool: BackupTool, at: Timestamp, now: Timestamp, stale_after_hours
 }
 
 fn age_sentence_limit(hours: u32) -> String {
-    if hours % 24 == 0 {
+    if hours.is_multiple_of(24) {
         let d = hours / 24;
         format!("{d} day{}", if d == 1 { "" } else { "s" })
     } else {
