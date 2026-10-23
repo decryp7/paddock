@@ -14,6 +14,7 @@ not in the code (see [roadmap.md](roadmap.md) for the work package). Screenshots
 - [Extras](#extras)
 - [Backup health](#backup-health)
 - [Health and startup](#health-and-startup)
+- [Throttling, hardware life and what is normal](#throttling-hardware-life-and-what-is-normal)
 - [Cleanup](#cleanup)
 - [Tuning](#tuning)
 - [Alerts and reports](#alerts-and-reports)
@@ -152,6 +153,33 @@ the item says why.
 Really applicable now: Windows power plan, sleep timer, visual effects, background apps and indexing; Linux power profile;
 macOS indexing exclusions (Spotlight markers). Windows commands are unit-tested through a fake runner, not yet run on Windows.
 
+## Throttling, hardware life and what is normal
+
+**Built** ([WP-23](roadmap.md#wp-23-throttling-detector), [WP-24](roadmap.md#wp-24-disk-and-battery-life-forecasts),
+[WP-25](roadmap.md#wp-25-is-this-normal-baselines), [ADR 0018](adr/0018-throttling-lifespan-and-baselines.md)). All three only
+read; nothing here changes a setting.
+
+- **Throttling.** `Throttling` answers whether the CPU runs slower than it could while busy, and why: heat, a power limit, a
+  battery-saving mode, or "unexplained" (with what could not be ruled out). It states how much speed is lost, how sure it is
+  (low, medium, high) and the numbers behind it. A machine that does not report its clock or temperature gets "cannot tell" and a
+  list of what it does and does not report. A lasting episode (busy and slow for 20 s) is stored with its cause, duration, share
+  of speed lost and peak temperature; the **Throttling** page lists the last 30 days. The same detector names the cause in
+  **Why slow**, and a lasting episode at medium confidence or better can raise an alarm.
+- **Disk and battery life.** `Lifespan` forecasts "about 7 years of writes left (5 to 10 years)" for an SSD from its wear counter
+  and bytes written, and "replace the battery in about 23 months (17 to 31 months)" from its capacity trend and charge cycles. Each
+  forecast is a range with the readings it stands on and a confidence; with under two weeks (SSD) or four weeks (battery) of history
+  it says so instead of guessing, and a part Dyno cannot read says why and what would help (installing smartmontools, or the helper
+  later). A replaced disk or battery starts a new series. A part past its limit, or with under a year left at medium confidence,
+  appears in Health, the weekly report and, if you allow it, as an alarm.
+- **Is this normal?** Dyno learns, per metric (CPU, memory, disk writes, network, temperature, GPU) and per app (CPU, memory), what
+  is usual for each weekday and hour, and says when the present is outside it in words ("higher than usual for Tuesday mornings",
+  with the usual value and range). A new install learns silently for seven days (1 to 30 in Settings). The dashboard shows only what
+  is unusual; alarms for values far above usual that last five minutes are off until you turn them on.
+- **Where it reads from** (observe-only): macOS `pmset -g therm`, `ioreg` and, for SSD wear, `smartctl` when installed; Linux the
+  kernel's thermal-throttle counters, cpufreq limits and `/sys/class/power_supply`, and `smartctl`; Windows `powercfg /batteryreport`
+  and `smartctl`, with throttling inferred from the clock, the temperature and the power mode (Windows reports no reason). The
+  Windows readers run only in CI and on Windows machines; macOS and Linux paths are tested here.
+
 ## Cleanup
 
 **Built, observe-only.** The Cleanup screen scans the categories you tick (scanning deletes nothing), lists every item with its path,
@@ -181,6 +209,27 @@ report ("Nothing to report"). The **Reports** page has a week selector and expor
 for it (the dashboard and Reports do), so a week with no visit has no trend. A weekly OS notification is not built.
 [WP-08](roadmap.md#wp-08-alerts-and-the-weekly-report).
 
+## Performance counters
+
+**Built.** The **Counters** page browses the raw performance counters the OS offers, found by name: first the objects, then an
+object's counters with its instances, or a search by words (every word must match; best match first). Any counter can be charted
+next to Dyno's own events (rule actions, cleanups, tuning, alerts) for 5 minutes, 15 minutes or an hour, up to 32 at once with two
+units on the axes at most. A counter that has gone (a device unplugged, a program ended) is shown as unavailable with the reason,
+never as zero. Counters can be pinned (kept in settings, so they survive a restart), saved as named sets, and added to the
+dashboard as a graph widget. Counters are read only while the page or a dashboard widget needs them; the engine bounds objects,
+counters, instances, history points and results, and every call into the OS has a deadline. Windows uses PDH, with the names in the
+user's language; macOS reads `vm_stat`, `netstat -inb`, `iostat -Id` and `sysctl`; Linux reads `/proc` (memory, paging, network,
+disks, load, context switches and pressure). Running totals are shown as the rate per second. Per-device IOKit statistics are not
+read. [WP-12](roadmap.md#wp-12-performance-counters-browser).
+
+## Command line
+
+The `dyno` command speaks the agent's own local protocol (ADR 0014). Read-only by default: `status`, `why-slow`, `top`, `alarms`,
+`snapshot` and `counters`, as text or `--json`. `end`, `cap` and `undo` change something and do nothing without `--yes`; they go
+through the same validation, protected list and activity log as a click, so a protected process is refused and a cap can be undone.
+A `dyno` built for another protocol version than the running Dyno refuses with a message. [cli.md](cli.md).
+[WP-27](roadmap.md#wp-27-dyno-cli).
+
 ## Tray, window and settings
 
 **Built.** A tray icon with a live metric (CPU, memory, …, chosen in Settings; a template image on macOS) and a compact dropdown
@@ -208,6 +257,8 @@ Declarative TOML packs are planned ([WP-15](roadmap.md#wp-15-declarative-toml-pa
 
 ## Planned features
 
+All in [roadmap.md](roadmap.md): Issues with statistics, new and unusual processes, right-click search, watched folders with
+keep-for times, benchmarks on click, the tuning catalogue, extras (what changed, why won't it
 All in [roadmap.md](roadmap.md): right-click search, watched folders with
 keep-for times, a performance-counter browser, declarative packs, a local web API, "Explain this" via Pitwall, a multi-PC LAN view
 later.

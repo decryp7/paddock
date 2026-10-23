@@ -331,6 +331,41 @@ pub enum Request {
         weeks_ago: u32,
     },
 
+    // ---- performance counters browser (WP-12) ----
+    /// The counter objects the OS offers, with sizes only (answers `CounterObjects`). Appended.
+    CounterObjects,
+    /// One object with its counters and instances (answers `CounterObject`). Appended.
+    CounterObject {
+        /// The object's name.
+        name: String,
+    },
+    /// Counters matching the words typed, best first (answers `CounterHits`). Appended.
+    CounterSearch {
+        /// The words; every one must match.
+        query: String,
+        /// At most this many (1-200).
+        limit: u32,
+    },
+    /// Reads up to 32 counters now (answers `CounterValues`) and adds them to their charts. Appended.
+    CounterValues {
+        /// The paths, as `\Object(Instance)\Counter`.
+        paths: Vec<String>,
+    },
+    /// The readings kept for counters over the last minutes, with the app's events in the same window (answers
+    /// `CounterHistory`). Appended.
+    CounterHistory {
+        /// The paths (up to 32).
+        paths: Vec<String>,
+        /// How far back, 1-60 minutes.
+        minutes: u32,
+    },
+    // ---- throttling, lifespan and baselines (WP-23, WP-24, WP-25) ----
+    /// Is the CPU throttled, why, and the recent episodes. Appended.
+    Throttling,
+    /// Life forecasts for SSDs and the battery. Appended.
+    Lifespan,
+    /// What is usual for this time of the week, and how the current values compare. Appended.
+    Baselines,
     // ---- the privileged helper (WP-01, ADR 0016) ----
     /// Whether the privileged helper is installed and usable (answers `Helper`). Appended.
     HelperStatus,
@@ -665,6 +700,24 @@ pub enum Reply {
     /// The report file was written. Appended.
     ReportSaved(crate::report::SavedReport),
 
+    // ---- performance counters browser (WP-12) ----
+    /// The counter objects. Appended.
+    CounterObjects(Box<crate::counters::CounterObjectList>),
+    /// One counter object. Appended.
+    CounterObject(Box<crate::counters::CounterObject>),
+    /// Counters found by search. Appended.
+    CounterHits(Vec<crate::counters::CounterHit>),
+    /// Counter readings. Appended.
+    CounterValues(Vec<crate::counters::CounterReading>),
+    /// Counter history with events. Appended.
+    CounterHistory(Box<crate::counters::CounterHistory>),
+    // ---- throttling, lifespan and baselines (WP-23, WP-24, WP-25) ----
+    /// The throttling overview. Appended.
+    Throttling(Box<crate::throttle::ThrottleOverview>),
+    /// The life forecasts. Appended.
+    Lifespan(Box<crate::lifespan::LifespanOverview>),
+    /// The baseline comparison. Appended.
+    Baselines(Box<crate::baseline::BaselineOverview>),
     // ---- the privileged helper (WP-01, ADR 0016) ----
     /// The helper's state. Appended.
     Helper(Box<crate::helper_wire::HelperStatus>),
@@ -754,6 +807,14 @@ impl Reply {
             Reply::BenchComparison(x) => v(x),
             Reply::HostNames(x) => v(x),
             Reply::ReportSaved(x) => v(x),
+            Reply::CounterObjects(x) => v(x),
+            Reply::CounterObject(x) => v(x),
+            Reply::CounterHits(x) => v(x),
+            Reply::CounterValues(x) => v(x),
+            Reply::CounterHistory(x) => v(x),
+            Reply::Throttling(x) => v(x),
+            Reply::Lifespan(x) => v(x),
+            Reply::Baselines(x) => v(x),
             Reply::Helper(x) => v(x),
             Reply::Issues(x) => v(x),
             Reply::IssuesSaved(x) => v(x),
@@ -928,6 +989,21 @@ mod tests {
     }
 
     #[test]
+    fn counter_requests_have_the_json_shape_of_api_types() {
+        let r: Request = serde_json::from_value(serde_json::json!({"counterHistory": {"paths": ["\\a\\b"], "minutes": 5}})).unwrap();
+        assert_eq!(
+            r,
+            Request::CounterHistory {
+                paths: vec!["\\a\\b".into()],
+                minutes: 5
+            }
+        );
+        assert_eq!(serde_json::to_value(Request::CounterObjects).unwrap(), "counterObjects");
+        let r: Request = serde_json::from_value(serde_json::json!({"counterSearch": {"query": "pages", "limit": 20}})).unwrap();
+        assert!(matches!(r, Request::CounterSearch { limit: 20, .. }));
+    }
+
+    #[test]
     fn messages_survive_postcard() {
         let live = LiveUpdate {
             system: sample(1),
@@ -995,6 +1071,16 @@ mod tests {
             Reply::FileFinder(Box::default()),
             Reply::Maintenance(crate::extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), 0)),
             Reply::Backup(Box::default()),
+            Reply::CounterObjects(Box::default()),
+            Reply::CounterHits(vec![]),
+            Reply::CounterValues(vec![]),
+            Reply::CounterHistory(Box::default()),
+            Reply::CounterObject(Box::new(crate::counters::CounterObject {
+                name: "Memory".into(),
+                counters: vec![],
+                instances: vec![],
+                instances_total: 0,
+            })),
             Reply::Url("https://example.com/".into()),
             Reply::RecorderSnapshots(vec![]),
             Reply::Helper(Box::new(crate::helper_wire::assess(
@@ -1098,5 +1184,39 @@ mod tests {
         let r: Request =
             serde_json::from_value(serde_json::json!({"saveInventoryReport": {"path": "/r.md", "format": "markdown"}})).unwrap();
         assert!(matches!(r, Request::SaveInventoryReport { .. }));
+    }
+
+    #[test]
+    fn hardware_requests_and_replies_have_the_json_shape_of_api_types() {
+        for (r, name) in [
+            (Request::Throttling, "throttling"),
+            (Request::Lifespan, "lifespan"),
+            (Request::Baselines, "baselines"),
+        ] {
+            assert_eq!(serde_json::to_value(&r).unwrap(), name);
+            assert_eq!(serde_json::from_value::<Request>(serde_json::json!(name)).unwrap(), r);
+            let bytes = postcard::to_stdvec(&Message::Request(Box::new(r.clone()))).unwrap();
+            assert_eq!(postcard::from_bytes::<Message>(&bytes).unwrap(), Message::Request(Box::new(r)));
+        }
+        let life = Reply::Lifespan(Box::new(crate::lifespan::LifespanOverview {
+            at: Timestamp(5),
+            forecasts: vec![crate::lifespan::unavailable(
+                crate::lifespan::LifeSubject::Battery,
+                "Battery",
+                "No battery",
+            )],
+        }));
+        let j = life.into_json().unwrap();
+        assert_eq!(j["forecasts"][0]["outcome"]["unavailable"]["reason"], "No battery");
+        assert_eq!(j["forecasts"][0]["subject"], "battery");
+        let base = Reply::Baselines(Box::new(crate::baseline::BaselineOverview {
+            at: Timestamp(5),
+            learning: crate::baseline::Learning::Learning {
+                days_done: 2,
+                days_needed: 7,
+            },
+            items: vec![],
+        }));
+        assert_eq!(base.into_json().unwrap()["learning"]["learning"]["daysNeeded"], 7);
     }
 }

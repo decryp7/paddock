@@ -740,3 +740,305 @@ fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html
         assert!(ask(&peer, request).is_err());
     }
 }
+
+/// The counters browser against this machine's real counters (read-only): browse, search, read twice, chart.
+#[test]
+fn the_counters_browser_lists_searches_reads_and_charts_this_machines_counters() {
+    let h = Harness::start();
+    let peer = h.client();
+    let ask_slow = |r| ask_within(&peer, r, Duration::from_secs(30));
+    let Reply::CounterObjects(objects) = ask_slow(Request::CounterObjects).unwrap() else {
+        panic!("objects")
+    };
+    assert!(objects.objects.iter().any(|o| o.name == "Memory" && o.counters > 0));
+    let Reply::CounterObject(memory) = ask_slow(Request::CounterObject { name: "Memory".into() }).unwrap() else {
+        panic!("object")
+    };
+    let path = format!("\\Memory\\{}", memory.counters[0].name);
+    let Reply::CounterHits(hits) = ask_slow(Request::CounterSearch {
+        query: memory.counters[0].name.clone(),
+        limit: 5,
+    })
+    .unwrap() else {
+        panic!("hits")
+    };
+    assert!(hits.iter().any(|x| x.path == path));
+    for _ in 0..2 {
+        let Reply::CounterValues(values) = ask_slow(Request::CounterValues { paths: vec![path.clone()] }).unwrap() else {
+            panic!("values")
+        };
+        assert_eq!(values[0].path, path);
+        std::thread::sleep(Duration::from_millis(1100));
+    }
+    let Reply::CounterHistory(history) = ask_slow(Request::CounterHistory {
+        paths: vec![path.clone()],
+        minutes: 5,
+    })
+    .unwrap() else {
+        panic!("history")
+    };
+    assert_eq!(history.series.len(), 1);
+    assert!(!history.series[0].points.is_empty());
+    // Bad input is refused by the engine, not trusted.
+    let bad = ask_slow(Request::CounterValues {
+        paths: vec!["junk".into()],
+    });
+    assert!(bad.is_err());
+    let missing = ask_slow(Request::CounterObject {
+        name: "No Such Object".into(),
+    });
+    assert!(missing.unwrap_err().contains("no counter object"));
+}
+
+#[test]
+fn pinned_counters_and_saved_sets_are_validated_and_survive_a_restart() {
+    let h = Harness::start();
+    let peer = h.client();
+    let Reply::Settings(mut s) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    s.counters.pinned = vec!["\\Memory\\Free".into(), "junk".into(), "\\Memory\\Free".into()];
+    s.counters.sets = vec![dyno_core::counters::CounterSet {
+        name: "Memory".into(),
+        paths: vec!["\\Memory\\Free".into(), "bad".into()],
+    }];
+    let Reply::Settings(saved) = ask(&peer, Request::SaveSettings { settings: s }).unwrap() else {
+        panic!("settings")
+    };
+    assert_eq!(saved.counters.pinned, ["\\Memory\\Free"]);
+    assert_eq!(saved.counters.sets[0].paths, ["\\Memory\\Free"]);
+    let text = std::fs::read_to_string(h.dirs.settings()).unwrap();
+    let (reloaded, warning) = dyno_core::settings::parse(&text);
+    assert!(warning.is_none());
+    assert_eq!(reloaded.counters, saved.counters);
+}
+
+// ---- throttling, lifespan and baselines (WP-23, WP-24, WP-25) ----
+
+fn shared(h: &Harness) -> std::sync::Arc<dyno_agent::agent::Shared> {
+    h.running.as_ref().unwrap().shared.clone()
+}
+
+fn alarm_rules(peer: &Peer<Message>) -> Vec<String> {
+    let Reply::Alarms(list) = ask(
+        peer,
+        Request::Alarms {
+            filter: Default::default(),
+        },
+    )
+    .unwrap() else {
+        panic!("alarms")
+    };
+    list.into_iter().map(|a| a.rule).collect()
+}
+
+fn episode(start_ms: i64) -> dyno_core::throttle::ThrottleEpisode {
+    dyno_core::throttle::ThrottleEpisode {
+        id: dyno_core::throttle::ThrottleEpisode::id_for(Timestamp(start_ms)),
+        start: Timestamp(start_ms),
+        end: Some(Timestamp(start_ms + 120_000)),
+        cause: dyno_core::throttle::ThrottleCause::Thermal,
+        avg_lost_percent: 35.0,
+        peak_lost_percent: 48.0,
+        peak_temperature_c: Some(99.0),
+    }
+}
+
+#[test]
+fn a_throttling_episode_with_evidence_raises_an_alarm_and_is_remembered() {
+    use dyno_core::hardware::Confidence;
+    use dyno_core::throttle::TrackerEvent;
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    let t = dyno_agent::agent::now();
+    // A hint (low confidence) never alarms.
+    dyno_agent::hardware::handle_events(&s, vec![TrackerEvent::Started(episode(t.millis()))], Some(Confidence::Low), t);
+    assert!(alarm_rules(&peer).is_empty());
+    // With evidence it does; the finished episode is stored and the alarm returns.
+    dyno_agent::hardware::handle_events(&s, vec![TrackerEvent::Started(episode(t.millis()))], Some(Confidence::High), t);
+    assert_eq!(alarm_rules(&peer), vec!["throttling:cpu"]);
+    dyno_agent::hardware::handle_events(&s, vec![TrackerEvent::Ended(episode(t.millis()))], Some(Confidence::High), t);
+    let Reply::Throttling(o) = ask(&peer, Request::Throttling).unwrap() else {
+        panic!("throttling")
+    };
+    assert_eq!(o.episodes.len(), 1);
+    assert_eq!(o.minutes_30d, 2);
+    assert_eq!(o.inputs.len(), 4);
+}
+
+#[test]
+fn throttling_alarms_can_be_switched_off_but_the_episode_is_still_recorded() {
+    use dyno_core::hardware::Confidence;
+    use dyno_core::throttle::TrackerEvent;
+    let h = Harness::start();
+    let peer = h.client();
+    let mut settings = match ask(&peer, Request::Settings).unwrap() {
+        Reply::Settings(x) => *x,
+        _ => panic!("settings"),
+    };
+    settings.hardware_alarms.throttling = false;
+    ask(
+        &peer,
+        Request::SaveSettings {
+            settings: Box::new(settings),
+        },
+    )
+    .unwrap();
+    let s = shared(&h);
+    let t = dyno_agent::agent::now();
+    dyno_agent::hardware::handle_events(&s, vec![TrackerEvent::Started(episode(t.millis()))], Some(Confidence::High), t);
+    dyno_agent::hardware::handle_events(&s, vec![TrackerEvent::Ended(episode(t.millis()))], Some(Confidence::High), t);
+    assert!(alarm_rules(&peer).is_empty(), "switched off means no alarm");
+    let Reply::Throttling(o) = ask(&peer, Request::Throttling).unwrap() else {
+        panic!("throttling")
+    };
+    assert_eq!(o.episodes.len(), 1);
+}
+
+#[test]
+fn lifespan_forecasts_come_from_stored_readings_and_a_worn_battery_raises_an_alarm() {
+    use dyno_core::hardware::{BatteryCapacity, DiskWear};
+    use dyno_core::metrics::Reading;
+    use dyno_core::time::{DAY, HOUR};
+    use dyno_platform::hardware::{FakeBattery, FakeThrottle, FakeWear};
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    let battery = BatteryCapacity {
+        id: "b1".into(),
+        design: 5_500,
+        full: 4_300,
+        cycles: Some(640),
+        rated_cycles: Some(1_000),
+    };
+    let disk = DiskWear {
+        id: "Test SSD SN1".into(),
+        name: "Test SSD".into(),
+        capacity: Some(500_000_000_000),
+        percent_used: Some(20.0),
+        bytes_written: None,
+        rated_bytes: None,
+        power_on_hours: None,
+    };
+    s.hardware.replace_sources(
+        Box::new(FakeThrottle(vec![Reading::unavailable("none")])),
+        Box::new(FakeWear(Reading::Available(vec![disk.clone()]))),
+        Box::new(FakeBattery(Reading::Available(battery.clone()))),
+    );
+    // An earlier history: the SSD wore 0.05 points a day for 200 days.
+    let now = dyno_agent::agent::now();
+    {
+        let core = dyno_agent::agent::lock(&s.core);
+        for i in 0..400 {
+            let at = now.minus(200 * DAY).plus(i * 12 * HOUR);
+            let pct = 10.0 + 0.05 * (i as f32 / 2.0);
+            let d = DiskWear {
+                percent_used: Some(pct.round()),
+                ..disk.clone()
+            };
+            core.store
+                .put_hardware_reading(dyno_agent::store::hardware_kind::SSD, &disk.id, at, &d)
+                .unwrap();
+        }
+    }
+    dyno_agent::hardware::slow_cycle(&s);
+    let Reply::Lifespan(o) = ask(&peer, Request::Lifespan).unwrap() else {
+        panic!("lifespan")
+    };
+    let ssd = o
+        .forecasts
+        .iter()
+        .find(|f| f.subject == dyno_core::lifespan::LifeSubject::Ssd)
+        .unwrap();
+    assert!(ssd.mid_days().is_some(), "{ssd:?}");
+    let bat = o
+        .forecasts
+        .iter()
+        .find(|f| f.subject == dyno_core::lifespan::LifeSubject::Battery)
+        .unwrap();
+    // 78 % of the original charge is past the replacement line, which needs no history to say.
+    assert_eq!(bat.outcome, dyno_core::lifespan::LifeOutcome::AlreadyPastLimit, "{bat:?}");
+    assert!(alarm_rules(&peer).contains(&"lifespan:battery".to_string()));
+}
+
+#[test]
+fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
+    use dyno_core::baseline::{Learning, State};
+    use dyno_core::history::{HistoryPoint, Tier};
+    use dyno_core::time::{DAY, MINUTE};
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    // A new install learns silently: no items, and it says how far along it is.
+    let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
+        panic!("baselines")
+    };
+    assert!(matches!(o.learning, Learning::Learning { days_needed: 7, .. }), "{:?}", o.learning);
+    assert!(o.items.is_empty());
+    // Four weeks of quiet history, first seen long ago.
+    let now = dyno_agent::agent::now();
+    {
+        let core = dyno_agent::agent::lock(&s.core);
+        core.store.set_meta("firstSeen", &now.minus(30 * DAY).millis().to_string()).unwrap();
+        for q in 0..(28 * 96) {
+            let p = HistoryPoint {
+                at: now.minus(28 * DAY).plus(q * 15 * MINUTE),
+                cpu: 5.0,
+                memory: 50.0,
+                ..Default::default()
+            };
+            core.store.put_point(Tier::QuarterHour, &p).unwrap();
+        }
+    }
+    h.fake.push_sample(dyno_platform::fake::quiet_sample(Timestamp(0)));
+    let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
+        panic!("baselines")
+    };
+    assert!(matches!(o.learning, Learning::Ready { .. }), "{:?}", o.learning);
+    let cpu = o
+        .items
+        .iter()
+        .find(|i| i.subject == "System" && i.label == "CPU")
+        .expect("a CPU item");
+    assert_eq!(cpu.judgement.state, State::Usual, "{cpu:?}");
+    assert!(cpu.judgement.phrase.starts_with("Usual for"), "{}", cpu.judgement.phrase);
+
+    // The machine goes far above its usual: judged Higher, and with baseline alarms on, an alarm after a lasting streak.
+    let mut busy = dyno_platform::fake::quiet_sample(Timestamp(0));
+    busy.cpu.total = 95.0;
+    h.fake.push_sample(busy);
+    let mut settings = match ask(&peer, Request::Settings).unwrap() {
+        Reply::Settings(x) => *x,
+        _ => panic!("settings"),
+    };
+    settings.baselines.alarms = true;
+    settings.sampling.interval_ms = 500;
+    ask(
+        &peer,
+        Request::SaveSettings {
+            settings: Box::new(settings),
+        },
+    )
+    .unwrap();
+    let mut seen_high = false;
+    for _ in 0..100 {
+        let Reply::Baselines(o) = ask(&peer, Request::Baselines).unwrap() else {
+            panic!("baselines")
+        };
+        if o.items
+            .iter()
+            .any(|i| i.label == "CPU" && matches!(i.judgement.state, State::Higher(dyno_core::baseline::Strength::Strong)))
+        {
+            seen_high = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(seen_high, "a busy CPU is far higher than usual");
+    assert!(alarm_rules(&peer).is_empty(), "one evaluation is not a lasting streak");
+    for _ in 0..dyno_agent::baselines::ALARM_STREAK {
+        dyno_agent::baselines::evaluate_alarms(&s);
+    }
+    assert!(alarm_rules(&peer).contains(&"baseline:cpu".to_string()), "{:?}", alarm_rules(&peer));
+}

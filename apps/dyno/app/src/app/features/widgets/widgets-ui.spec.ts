@@ -4,6 +4,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { newWidget } from './widget-model';
 import { DashboardLayoutStore } from '../../state/dashboard-layout.store';
+import { CountersStore } from '../../state/counters.store';
 import { LiveStore } from '../../state/live.store';
 import { SettingsStore } from '../../state/settings.store';
 import { TrayItemsEditor } from '../settings/tray-items-editor';
@@ -38,6 +39,33 @@ describe('dy-widget', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('.hero')!.getAttribute('data-tone')).toBe('warn');
     expect(el.querySelector('.hero')!.textContent).toMatch(/\d/);
+  });
+});
+
+describe('dy-widget with a performance counter', () => {
+  it('shows the counter value, its history and, when it is gone, the reason', async () => {
+    env();
+    const counters = TestBed.inject(CountersStore);
+    const path = '\\System\\Load Average (1 minute)';
+    const f = TestBed.createComponent(WidgetView);
+    f.componentRef.setInput('widget', newWidget('graph', { perfCounter: path }, []));
+    f.detectChanges();
+    expect((f.nativeElement as HTMLElement).textContent).toContain('Waiting for the first reading');
+    counters.track([path]);
+    await counters.tick();
+    await counters.tick();
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('h3')!.textContent).toBe('Load Average (1 minute)');
+    expect(el.querySelector('.hero b')!.textContent).toMatch(/\d/);
+    expect(el.querySelector('dy-sparkline')).not.toBeNull();
+
+    const gone = TestBed.createComponent(WidgetView);
+    gone.componentRef.setInput('widget', newWidget('bigNumber', { perfCounter: '\\Nothing\\here' }, []));
+    counters.track(['\\Nothing\\here']);
+    await counters.tick();
+    gone.detectChanges();
+    expect((gone.nativeElement as HTMLElement).textContent).toMatch(/not available/);
   });
 });
 

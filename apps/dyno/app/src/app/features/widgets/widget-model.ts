@@ -1,4 +1,5 @@
 import type {
+  CounterReading,
   DashboardLayout,
   NamedPreset,
   SystemSample,
@@ -10,6 +11,7 @@ import type {
   WidgetThresholds,
 } from '../../core/api.types';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../shared/format';
+import { counterTitle, formatCounter, readingNumber, readingReason } from '../counters/counters-model';
 import type { Series } from '../../state/live.store';
 
 /** The limits the engine enforces (`dyno_core::widgets`); the UI keeps to them so a save is never rejected for them. */
@@ -75,7 +77,8 @@ export const METRICS: { metric: WidgetMetric; label: string }[] = [
 
 export function metricLabel(m: WidgetMetric): string {
   if (typeof m === 'string') return METRICS.find((x) => x.metric === m)?.label ?? m;
-  return 'process' in m ? `Process ${m.process}` : `Counter ${m.perfCounter}`;
+  if ('process' in m) return `Process ${m.process}`;
+  return m.perfCounter.startsWith('\\') ? counterTitle(m.perfCounter) : `Counter ${m.perfCounter}`;
 }
 
 /** Whether the metric is a 0-100 percentage. */
@@ -215,6 +218,14 @@ export function readMetric(metric: WidgetMetric, s: SystemSample | null): Readin
     default:
       return na('This metric is not available yet.');
   }
+}
+
+/** Reads a performance counter widget from the counters the engine reads for it (see `CountersStore`). Pure. */
+export function readCounter(r: CounterReading | undefined): Reading {
+  if (!r) return na('Waiting for the first reading.');
+  const n = readingNumber(r);
+  if (n === null) return na(readingReason(r) ?? 'The counter is not available.');
+  return { value: n, text: formatCounter(n, r.unit), percent: r.unit === 'percent' ? Math.min(100, Math.max(0, n)) : null, reason: null };
 }
 
 /** The live history of a metric for a graph (`values2` is the second line, e.g. disk write), or `null` when none is kept. */

@@ -338,6 +338,9 @@ mod tests {
             parse_request(json!({"activity": {"limit": 5}})).unwrap(),
             Request::Activity { limit: 5 }
         ));
+        assert_eq!(parse_request(json!("throttling")).unwrap(), Request::Throttling);
+        assert_eq!(parse_request(json!("lifespan")).unwrap(), Request::Lifespan);
+        assert_eq!(parse_request(json!("baselines")).unwrap(), Request::Baselines);
     }
 
     #[test]

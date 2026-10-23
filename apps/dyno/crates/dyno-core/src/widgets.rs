@@ -43,7 +43,7 @@ pub enum WidgetError {
         hint: &'static str,
     },
     /// A metric's argument (process name, counter path) is empty or too long.
-    #[error("A process name or counter path must be 1 to {MAX_TEXT} characters.")]
+    #[error("A process name is 1 to {MAX_TEXT} characters; a counter is written \\Object(Instance)\\Counter.")]
     BadMetricArgument,
     /// Thresholds are not in order.
     #[error("The warning threshold must be below the critical threshold.")]
@@ -204,9 +204,9 @@ impl Metric {
 
     fn validate(&self) -> Result<(), WidgetError> {
         match self {
-            Metric::Process(s) | Metric::PerfCounter(s) if s.trim().is_empty() || s.chars().count() > MAX_TEXT => {
-                Err(WidgetError::BadMetricArgument)
-            }
+            Metric::Process(s) if s.trim().is_empty() || s.chars().count() > MAX_TEXT => Err(WidgetError::BadMetricArgument),
+            // A counter is a real path (`\Object(Instance)\Counter`, up to the counters' own limit), not free text.
+            Metric::PerfCounter(s) if s.parse::<crate::counters::CounterPath>().is_err() => Err(WidgetError::BadMetricArgument),
             _ => Ok(()),
         }
     }
@@ -879,6 +879,9 @@ mod tests {
         assert_eq!(w.validate(), Err(WidgetError::BadMetricArgument));
         w.metric = Metric::PerfCounter("x".repeat(65));
         assert_eq!(w.validate(), Err(WidgetError::BadMetricArgument));
+        let mut long = widget("long");
+        long.metric = Metric::PerfCounter(format!("\\Network Interface({})\\Bytes Total/sec", "n".repeat(100)));
+        assert_eq!(long.validate(), Ok(()));
         let mut t = widget("t");
         t.thresholds = Thresholds {
             warning: Some(90.0),

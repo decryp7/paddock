@@ -1,0 +1,28 @@
+[package]
+name = "dyno-cli"
+description = "The dyno command: read Dyno's status from a terminal or a script over the agent's local IPC (ADR 0014)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "dyno"
+path = "src/main.rs"
+
+# Only the protocol and the IPC: the CLI never links the platform adapters or the agent (ADR 0014).
+[dependencies]
+dyno-core.workspace = true
+dyno-ipc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+dyno-agent.workspace = true
+dyno-platform.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,11 +1,13 @@
 import { CdkDrag, CdkDragDrop, CdkDragHandle, CdkDropList } from '@angular/cdk/drag-drop';
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import type { Widget, WidgetKind, WidgetMetric } from '../../core/api.types';
 import { Icon } from '../../shared/icon';
+import { CountersStore } from '../../state/counters.store';
 import { DashboardLayoutStore } from '../../state/dashboard-layout.store';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
 import { SettingsStore } from '../../state/settings.store';
+import { widgetCounterPaths } from '../counters/counters-model';
 import { WidgetView } from './widget-view';
 import { PANEL_KINDS, KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS, SIZE_LABEL, accepts, defaultMetric, metricLabel } from './widget-model';
 
@@ -125,6 +127,7 @@ import { PANEL_KINDS, KINDS, KIND_HINT, KIND_LABEL, METRICS, SIZES, SIZE_COLUMNS
 export class WidgetBoard {
   protected readonly store = inject(DashboardLayoutStore);
   protected readonly settings = inject(SettingsStore);
+  private readonly counters = inject(CountersStore);
   protected readonly gallery = signal(false);
   protected readonly naming = signal(false);
   protected readonly presetName = signal('');
@@ -137,6 +140,7 @@ export class WidgetBoard {
   protected readonly sizeLabel = (s: 's' | 'm' | 'l') => SIZE_LABEL[s];
   protected readonly span = (w: Widget) => SIZE_COLUMNS[w.size];
   protected readonly icon = (k: WidgetKind) => ICONS[k];
+
   protected readonly metricName = (w: Widget) => metricLabel(w.metric);
   protected readonly metricsFor = (w: Widget) => METRICS.filter((m) => accepts(w.kind, m.metric)).map((m) => ({ value: m.metric as string, label: m.label }));
 
@@ -144,6 +148,18 @@ export class WidgetBoard {
     // The cards below read these; load them once when the board opens.
     inject(HealthStore).loadReport().catch(() => undefined);
     void inject(DiagnosisStore).loadAnomalies();
+    // Counters are read only while a widget shows one; the engine reads them at most every two seconds.
+    let release: (() => void) | null = null;
+    inject(DestroyRef).onDestroy(() => release?.());
+    effect(() => {
+      const paths = widgetCounterPaths(this.store.widgets());
+      this.counters.track(paths);
+      if (paths.length > 0 && !release) release = this.counters.use();
+      else if (paths.length === 0 && release) {
+        release();
+        release = null;
+      }
+    });
   }
 
   protected add(kind: WidgetKind): void {

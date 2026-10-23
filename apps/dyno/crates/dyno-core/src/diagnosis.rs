@@ -6,9 +6,11 @@
 
 use crate::anomaly::Evidence;
 use crate::grouping::{file_name, AppGroup};
+use crate::hardware::{Confidence, OsThrottle};
 use crate::metrics::{derive_pressure, MemoryPressure, SystemSample};
 use crate::process::{Priority, ProcessAction, ProcessRef, ProcessSample};
 use crate::protect::Protection;
+use crate::throttle::{self, ThrottleInput};
 use crate::time::Timestamp;
 use crate::units::bytes;
 use serde::{Deserialize, Serialize};
@@ -163,7 +165,21 @@ pub struct Input<'a> {
     pub protection: &'a Protection<'a>,
     /// The volume the OS lives on (its id, e.g. "C:" or "/").
     pub system_disk: &'a str,
+    /// What the OS says about speed limits, and whether a battery-saving mode is on (for the throttling cause).
+    pub throttle: ThrottleContext,
 }
+
+/// Facts that are not part of a sample but help name why the CPU is slow.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ThrottleContext {
+    /// The OS's own speed limit, when it reports one.
+    pub os: OsThrottle,
+    /// A battery-saving mode is on, when known.
+    pub power_saver: Option<bool>,
+}
+
+/// Samples the throttling check looks at.
+const THROTTLE_WINDOW: usize = 10;
 
 fn avg(samples: &[SystemSample], f: impl Fn(&SystemSample) -> f32) -> f32 {
     if samples.is_empty() {
@@ -462,30 +478,28 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
 }
 
 fn thermal_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
-    let Some(last) = input.samples.last() else { return };
-    let total = avg(input.samples, |s| s.cpu.total);
-    let freq = avg(input.samples, |s| s.cpu.frequency_mhz as f32);
-    let base = last.cpu.base_frequency_mhz as f32;
-    let slowed = base > 0.0 && total > 50.0 && freq > 0.0 && freq < 0.7 * base;
-    let hot = last.hottest().filter(|t| t.celsius >= t.critical.map_or(95.0, |c| c - 5.0));
-    if !slowed && hot.is_none() {
+    let window: Vec<ThrottleInput> = input
+        .samples
+        .iter()
+        .rev()
+        .take(THROTTLE_WINDOW)
+        .rev()
+        .map(|s| ThrottleInput::from_sample(s, input.throttle.power_saver, input.throttle.os))
+        .collect();
+    let reading = throttle::detect(&window);
+    if !matches!(reading.verdict, throttle::Verdict::Throttled { .. }) {
         return;
-    }
-    let mut evidence = vec![];
-    if base > 0.0 && freq > 0.0 {
-        evidence.push(Evidence::new("CPU clock", format!("{freq:.0} MHz of {base:.0} MHz")));
-    }
-    if let Some(t) = last.hottest() {
-        evidence.push(Evidence::new(t.label.clone(), format!("{:.0} °C", t.celsius)));
     }
     out.push(Cause {
         kind: CauseKind::ThermalThrottling,
-        title: "The CPU is slowing down to cool off".into(),
-        explanation: "The processor runs below its normal speed because it is hot or short of power. Check that the \
-                      vents are free, the machine is plugged in, and the power plan isn't set to save power."
-            .into(),
-        confidence: if hot.is_some() && slowed { 0.85 } else { 0.6 },
-        evidence,
+        title: reading.headline,
+        explanation: format!("{} Confidence: {}.", reading.explanation, reading.confidence.word()),
+        confidence: match reading.confidence {
+            Confidence::High => 0.9,
+            Confidence::Medium => 0.7,
+            Confidence::Low => 0.5,
+        },
+        evidence: reading.evidence,
         suggestions: vec![],
         involved: vec![],
     });
@@ -545,6 +559,7 @@ mod tests {
     struct Case {
         samples: Vec<SystemSample>,
         procs: Vec<ProcessSample>,
+        throttle: ThrottleContext,
     }
 
     impl Case {
@@ -552,6 +567,7 @@ mod tests {
             Case {
                 samples: (0..12).map(|i| sample(i * 5_000)).collect(),
                 procs: vec![proc(10, None, "chrome.exe", 2.0, 400), proc(11, None, "code.exe", 1.0, 300)],
+                throttle: ThrottleContext::default(),
             }
         }
         fn each(&mut self, f: impl Fn(&mut SystemSample)) {
@@ -568,6 +584,7 @@ mod tests {
                 processes: &self.procs,
                 protection: &protection,
                 system_disk: "c:",
+                throttle: self.throttle,
             })
         }
     }
@@ -581,6 +598,7 @@ mod tests {
         let empty = Case {
             samples: vec![],
             procs: vec![],
+            throttle: ThrottleContext::default(),
         };
         assert_eq!(empty.run().causes[0].kind, CauseKind::NothingWrong);
         assert_eq!(avg(&[], |s| s.cpu.total), 0.0);
@@ -634,6 +652,7 @@ mod tests {
         let empty = Case {
             samples: vec![],
             procs: vec![],
+            throttle: ThrottleContext::default(),
         };
         assert_eq!(empty.run().window_secs, 0);
     }
@@ -719,14 +738,35 @@ mod tests {
         });
         let d = c.run();
         let t = d.causes.iter().find(|c| c.kind == CauseKind::ThermalThrottling).unwrap();
-        assert_eq!(t.confidence, 0.85);
-        assert_eq!(t.evidence.len(), 2);
+        assert_eq!(t.confidence, 0.7, "hot and slow, but nothing from the system itself");
+        assert_eq!(t.evidence.len(), 3, "load, clock, temperature");
+        assert!(t.title.contains("heat") && t.explanation.contains("Confidence: medium"), "{t:?}");
         let mut c = Case::new();
         c.each(|s| {
             s.cpu.total = 60.0;
             s.cpu.frequency_mhz = 1_200;
         });
-        assert_eq!(c.run().causes[0].confidence, 0.6);
+        let d = c.run();
+        assert_eq!(d.causes[0].confidence, 0.5, "slow with no explanation is only a hint");
+        assert!(
+            !d.causes[0].title.contains("cool"),
+            "no unsupported claim about heat: {}",
+            d.causes[0].title
+        );
+
+        // The system saying so is the strongest evidence, and a cause is named.
+        let mut c = Case::new();
+        c.each(|s| {
+            s.cpu.total = 80.0;
+            s.cpu.frequency_mhz = 0;
+            s.cpu.base_frequency_mhz = 0;
+        });
+        c.throttle.os = OsThrottle {
+            speed_limit_percent: Some(60),
+            thermal: Some(true),
+            power: None,
+        };
+        assert_eq!(c.run().causes[0].confidence, 0.9);
 
         let mut c = Case::new();
         c.each(|s| s.disks[0].free = 512 << 20);

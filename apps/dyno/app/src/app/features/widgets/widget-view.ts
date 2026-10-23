@@ -16,7 +16,8 @@ import { CpuTile } from '../dashboard/tiles';
 import { DiagnosisCard } from '../dashboard/diagnosis-card';
 import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
-import { PANEL_KINDS, KIND_LABEL, metricLabel, readMetric, seriesFor, thresholdTone } from './widget-model';
+import { CountersStore } from '../../state/counters.store';
+import { PANEL_KINDS, KIND_LABEL, metricLabel, readCounter, readMetric, seriesFor, thresholdTone } from './widget-model';
 
 const ICON: Record<WidgetKind, IconName> = {
   graph: 'trend',
@@ -176,18 +177,32 @@ export class WidgetView {
   protected readonly live = inject(LiveStore);
   protected readonly health = inject(HealthStore);
   private readonly diagnosis = inject(DiagnosisStore);
+  private readonly counters = inject(CountersStore);
 
   protected readonly title = computed(() => (this.widget().kind === 'topProcesses' ? `Top apps by ${metricLabel(this.widget().metric).toLowerCase()}` : PANEL_KINDS.includes(this.widget().kind) ? KIND_LABEL[this.widget().kind] : metricLabel(this.widget().metric)));
   /** The panel kinds are cards of their own (they bring header, loading and error states). */
   protected readonly ownCard = computed(() => ['cpu', 'diagnosis', 'events', 'history', 'consumers', 'diskTrend'].includes(this.widget().kind) || (this.widget().kind === 'health' && this.widget().size !== 's'));
   protected readonly icon = computed(() => ICON[this.widget().kind]);
-  protected readonly reading = computed(() => readMetric(this.widget().metric, this.live.system()));
+  /** The performance counter this widget shows, when it shows one. */
+  private readonly counterPath = computed(() => {
+    const m = this.widget().metric;
+    return typeof m === 'object' && 'perfCounter' in m ? m.perfCounter : null;
+  });
+  protected readonly reading = computed(() => {
+    const path = this.counterPath();
+    return path === null ? readMetric(this.widget().metric, this.live.system()) : readCounter(this.counters.readings()[path]);
+  });
   protected readonly percent = computed(() => this.reading().percent !== null);
   protected readonly tone = computed(() => thresholdTone(this.reading().value, this.widget().thresholds));
   protected readonly barTone = computed(() => (this.tone() === 'ok' ? null : this.tone()));
   protected readonly ringTone = computed<'ok' | 'warn' | 'bad' | 'accent'>(() => (this.tone() === 'ok' ? 'accent' : this.tone()));
   protected readonly accent = computed(() => this.widget().options.accent ?? 'var(--accent)');
-  protected readonly series = computed(() => seriesFor(this.widget().metric, this.live.series()));
+  protected readonly series = computed(() => {
+    const path = this.counterPath();
+    if (path === null) return seriesFor(this.widget().metric, this.live.series());
+    const values = this.counters.trail()[path] ?? [];
+    return values.length > 1 ? { values, values2: null } : null;
+  });
   protected readonly cores = computed(() => this.live.system()?.cpu.perCore ?? []);
   protected readonly busiest = computed(() => Math.max(0, ...this.cores()));
   protected readonly top = computed(() => {
