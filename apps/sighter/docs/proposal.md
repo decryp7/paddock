@@ -501,6 +501,30 @@ User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go bac
 
 **Performance**: a VLM call takes seconds, so it happens only on the failure path, never on normal steps; the 8 GB one-GPU gating of section 9 applies.
 
+### 7.11 Alongside FlaUI (hybrid tests)
+User decision 2026-10-23: engineers who code their tests with FlaUI can keep using FlaUI and use the Sighter API for the UI FlaUI cannot handle. This is a key selling point: Sighter is an **add-on, not a replacement**, for existing UIA/FlaUI suites. No suite has to be rewritten to adopt it.
+
+A small C# package, **`Sighter.FlaUI`**, with FlaUI (MIT) as a **peer dependency, not bundled**:
+- **Scope from UIA**: `uiaElement.Sighter().FindFirst(cf => ...)` searches only inside a FlaUI `AutomationElement`'s `BoundingRectangle` (for example a custom-drawn grid or a canvas inside an otherwise UIA-friendly window); `window.Sighter()` does the same for a whole FlaUI `Window`. The result is a Sighter element from 7.9.
+- **Fallback helper**: `window.FindFirstOrSight(cf => cf.ByAutomationId("Save"), s => s.ByText("Save").And(s.ByControlType(Button)))` tries UIA first, falls back to vision, and logs which one answered (so a team sees where UIA is failing).
+- **Mixed input**: both sides use the OS input. FlaUI `Mouse` and Sighter actions interleave safely because they share the coordinate space and DPI handling: per-monitor DPI awareness, with all conversions in one helper (the same helper as 7.12).
+- **Shared waits**: `Retry`-style waits that accept a UIA condition, a Sighter condition or either.
+- **Reports**: a Sighter step inside a FlaUI test still produces screenshots and run-bundle entries, through an `ITestContext` hook for NUnit and xUnit.
+- **Java**: the equivalent for UIA-on-Java users is a hybrid with WinAppDriver/Appium-Windows sessions: the Appium element's rectangle scopes a Sighter search, and Sighter is the fallback when a locator fails. (WinAppDriver is unmaintained; Appium's Windows driver is the recommended base, section 13.)
+- **C++**: hybrid through raw coordinates and regions: pass a rectangle from the UIA code to `locate` as `region`, and use the returned centre with the existing input code.
+
+### 7.12 Multi-application tests
+User decision 2026-10-23: a test case may involve multiple applications running and switching.
+- **Sessions**: one test can hold several sessions: `Sighter.Launch(...)` / `Attach(processName | title | pid)`, each with its own window tracking and **its own model** (per-app models in the registry, auto-selected by process name and window class), plus an **OS dialogs model** for file pickers, UAC-like prompts and message boxes, shared across apps.
+- **Switching**: `app.Activate()` brings the app to the front and waits until focused, verified through the foreground-window API and the screen fingerprint. Windows from child or helper processes are handled through `app.Windows` and `WaitForWindow(title|class)`.
+- **Cross-app flows**: copy in A and paste in B; drag between windows; one app launching another (for example an installer opening the product), with `WaitForProcess` and `WaitForWindow`.
+- **Screen-level search**: `Sighter.Desktop.FindFirst(...)` searches across all windows and monitors when you do not know which app shows the thing (for example a toast or tray balloon). It is occlusion-aware: only visible pixels count, and z-order is checked before acting.
+- **Multiple monitors and DPI**: per-monitor coordinates; regions are always relative to the window and converted centrally.
+- **Recording**: the recorder follows focus across apps and tags each step with its app or window, so a recorded multi-app flow replays with the right session per step. The step editor (7.8) shows the app per step.
+- **Recovery (7.10)** knows which app was expected to be in front, so "wrong app in front" is a diagnosis it can act on (activate the expected app) within the same guardrails.
+- **Debrief run bundles**: steps carry the app identity, and logs from each app can be correlated with them.
+- `act` scope binding (section 10) becomes a set of allowed windows/processes per run rather than one.
+
 ## 8. The resolver and models
 
 Per request, configurable: **cache** (screen fingerprint + query + model version) -> **template** (stored crop, fingerprint matches) ->
@@ -736,6 +760,9 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Script & test | **Sighter-authored tests**: record a flow into steps, visual step editor (target, action, assertion, wait), data tables, sub-flows (7.8) | v1 | Eggplant, Airtest, Playwright codegen |
 | Script & test | **Run Sighter's own tests**: studio watch mode with overlay, headless `sighter run`, parallel-safe per screen, retries/waits from the resolver, plans as TOML in git (`paddock-testplan`) (7.8) | v1 | Eggplant, Airtest |
 | Script & test | **FlaUI-style object model** in the C#/Java/C++ clients: sessions/windows, `FindFirst`/`FindAll` condition builder with vision-only conditions, `WaitFor`, typed wrappers (Button, TextBox, CheckBox, ComboBox, ListBox, Grid), element properties with `Confidence`/`ResolvedBy`/`ModelVersion`, typed failures (7.9) | v1 | FlaUI (MIT, style only) |
+| Script & test | **`Sighter.FlaUI` hybrid package** (C#, FlaUI as peer dependency): scope a vision search to a UIA element or window, `FindFirstOrSight` UIA-then-vision fallback with logging, shared waits, `ITestContext` reporting hook (7.11) | v1 | FlaUI (MIT, peer dependency only) |
+| Script & test | Java hybrid with Appium-Windows sessions; C++ hybrid via regions and coordinates (7.11) | v1 as documented recipes, packaged helper Later | Appium |
+| Script & test | **Multi-application tests**: several sessions per test, per-app models plus OS dialogs model, `Activate`/`WaitForWindow`/`WaitForProcess`, cross-app copy/paste/drag, `Sighter.Desktop` search, per-monitor DPI, focus-following recorder (7.12) | v1 | UiPath, Power Automate Desktop |
 | Script & test | FlaUI migration shim package (map common FlaUI calls) | Later | FlaUI |
 | Script & test | **AI-assisted recovery via Pitwall**: diagnose-only (default when Pitwall is present) and recover with guardrails (closed action vocabulary, no destructive actions, bounded attempts, "passed with recovery" state, `RecoveryPolicy`, diagnosis in failure exceptions, recovery transcript in Debrief bundles) (7.10) | v1 | (own idea; Functionize/mabl heal differently) |
 | Script & test | Learned recovery handlers auto-proposed across suites | Later | (own idea) |
@@ -781,7 +808,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **AI recovery (7.10)**: non-determinism (a recovered run can differ from the last) and masking real bugs (a dialog that should not appear gets dismissed). Mitigated by the "passed with recovery" warning state, CI default "warn", diagnose-only as the default policy, a closed action vocabulary, bounded attempts, and proposals that need human acceptance.
 - **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing (one GPU rule, section 9).
 
-## 15. Open questions for the user (14; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
+## 15. Open questions for the user (16; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
 1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
 2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? Is the FlaUI-style object model (7.9) the right default surface, with raw verbs underneath?
 3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
@@ -798,6 +825,9 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 13. **Recovery default for CI**: with Pitwall present, is `DiagnoseOnly` the right default and `Recover` opt-in per suite, and should CI treat "passed with recovery" as warn (proposed), fail or pass?
 14. **Recovery budget**: attempts per step (proposed 3), time budget per step and per run, and which actions of the closed vocabulary (dismiss dialog, scroll, wait, Escape, re-anchor, navigate back) are allowed by default.
 
+15. **Hybrid package scope**: is `Sighter.FlaUI` (C#, FlaUI peer dependency) wanted as a first-party package in `sighter-clients`, and which FlaUI versions (FlaUI.UIA3 and UIA2) must it support? For Java, is the Appium-Windows recipe enough, or is a packaged helper wanted?
+16. **Multi-application limits**: how many concurrent sessions and models per test (VRAM, section 12), and should the OS dialogs model ship as a starter model per OS (it would be trained on our own recordings of OS dialogs, no third-party data)?
+
 ## 16. Size (one capable agent team, rough, excluding polish and design pass)
 - Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RT-DETRv2 + D-FINE, ONNX in `ort`, measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
 - Recorder (capture, events, encoding, preflight, video import, remote-session windows): large, 4 to 6 weeks (three OS, Wayland hardest).
@@ -808,8 +838,11 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Sighter-authored tests (new in v1, 7.8)**: step model and TOML (de)serialisation in `paddock-testplan` 1 to 2 weeks; flow-to-steps conversion from the recorder 1 to 2 weeks; visual step editor, data tables and sub-flows in the studio 4 to 6 weeks; runner (`sighter run`, watch mode with overlay, parallel-safe scheduling, retries) 3 to 4 weeks; guarded `act` driver hardening on two OSes 2 to 3 weeks (moved from optional to required); C#/Java/C++ clients, examples and CI 2 to 3 weeks. About 10 to 15 weeks, partly parallel.
 - FlaUI-style object models for C#/Java/C++ on top of the generated clients (7.9): 2 to 3 weeks, partly inside the 2 to 3 weeks for clients above.
 - **AI-assisted recovery (7.10)** (my estimate, not the user's): `sighter-recover` preset and Pitwall contract extension 1 week; trigger detection, closed-vocabulary plan parser and guarded executor 2 to 3 weeks; "passed with recovery" state, reports, Debrief transcript and `RecoveryPolicy` in the clients 1 to 2 weeks; proposals UI in the studio 1 to 2 weeks. About 5 to 8 weeks, partly parallel; adds roughly 1 month to the total.
+- **FlaUI hybrid package (7.11)** (my estimate, not the user's): `Sighter.FlaUI` C# package with scoping, fallback, shared waits and the `ITestContext` hook 2 to 3 weeks (shares the DPI helper with 7.12); Java and C++ recipes and examples about 1 week. About 3 to 4 weeks.
+- **Multi-application tests (7.12)** (my estimate, not the user's): multi-session model, per-app model auto-selection, OS dialogs model, activation/focus verification 3 to 4 weeks; `Desktop` search with occlusion and z-order, per-monitor DPI helper 2 to 3 weeks; focus-following recorder and per-app steps in the editor 2 to 3 weeks; Debrief identity and log correlation about 1 week. About 8 to 11 weeks, partly parallel.
+- Together 7.11 and 7.12 add roughly 1.5 to 2.5 months to the total.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
-- Total about 11 to 15 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients and AI recovery), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
+- Total about 13 to 17 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients, AI recovery, the FlaUI hybrid and multi-application tests), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
 ## 17. Sources
 - RT-DETRv2: https://arxiv.org/pdf/2407.17140 ; DEIMv2 (DINOv3): https://arxiv.org/pdf/2509.20787 ; DEIM repo: https://github.com/Intellindust-AI-Lab/DEIM
