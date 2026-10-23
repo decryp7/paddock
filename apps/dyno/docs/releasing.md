@@ -78,3 +78,7 @@ reinstall from the releases page, and revoke the old secrets.
 - `CHANGELOG`/release notes read well: `git cliff --latest` (Conventional Commits; no attribution trailers).
 - The overhead numbers in `docs/architecture.md` were re-measured on a quiet machine for this release (roadmap G13).
 - `docs/screenshots` match the built screens (`npm run screenshots` in `app/`).
+
+## First launch note
+
+Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
