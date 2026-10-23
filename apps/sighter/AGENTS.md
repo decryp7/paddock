@@ -40,6 +40,9 @@ Apply these deliberately. They are not decoration:
 - **Tests never touch TCC-protected folders or real user data** (Desktop, Documents, Downloads, Photos, and similar),
   and never capture the developer's real screen content into fixtures. Use generated or synthetic fixtures; derive data
   folder, port and socket names from a test-specific folder, never the production names.
+- **Pitwall is always optional.** Recording, labelling, training and locating work without it; Pitwall-assisted features
+  (label suggestions, naming, grounding fallback, step descriptions) show a clear "Needs local AI" state instead of an
+  error. Use the shared `paddock-pitwall` client, and send batch labelling at Pitwall's batch priority.
 
 ## Security and robustness
 
