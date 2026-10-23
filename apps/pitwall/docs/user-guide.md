@@ -43,7 +43,7 @@ download you start (engines from GitHub, models from Hugging Face), and offline 
    ```
 
    ```json
-   {"ok":true,"name":"pitwall","version":"1.0.3","apiVersion":1,"serving":"serving","offline":false,"loadedModels":0}
+   {"ok":true,"name":"pitwall","version":"1.0.4","apiVersion":1,"serving":"serving","offline":false,"loadedModels":0}
    ```
 
    The port is 11435 (next to Ollama's 11434). If another program uses it, Pitwall says "Pitwall cannot listen on ... Is
@@ -655,4 +655,5 @@ The messages below are what Pitwall actually says.
 | Install: "the new engine failed its self-test and was discarded (...); the previous build stays active" | The build does not run here (missing driver, wrong architecture). Pick another build. |
 | Start: "Pitwall cannot listen on 127.0.0.1:11435" | The port is taken. Change it in Settings > Server or start with `--port`. |
 | A catalog pack is listed with a problem | Read the message on Models > Discover: it names the file and what to fix. |
+| "The background service could not start after the update", or "Pitwall's server is not running" right after updating (macOS) | macOS keeps the code signature of the previously registered build and refuses to start the new one (`launchctl print` shows `spawn failed`, exit code 78 `EX_CONFIG`, `has LWCR`). Pitwall repairs this by itself once per version; if it did not, press **Repair service** in the banner, on the error, or in Settings > Background service. It removes the registration, waits until macOS has dropped it and registers again (up to a minute). The Settings section works even when the server is down. If Pitwall is not listed in System Settings > General > Login Items, Repair puts it back; if you switched it off there, Pitwall leaves it off until you switch it on. |
 | A model is slow after a pause | It was released when idle and is loading again (cold start). Pin it or use the Performance preset. |
