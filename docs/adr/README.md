@@ -10,3 +10,6 @@
 | [0006](0006-rollout-versioning-consumption.md) | Rollout order, other crates, versioning, consumption, open questions |
 | [0007](0007-mcp-servers-across-the-family.md) | MCP servers across the family: who serves, who hosts, `paddock-mcp`, shared safety rules, rollout |
 | [0008](0008-long-operations.md) | Long operations: phases, progress, cancel and parallel work (`paddock-jobs`, `pd-job`) |
+| [0009](0009-dialogs-kinds-and-declared-contracts.md) | Dialogs as windows: kinds and declared contracts (proposed) |
+| [0010](0010-notifications-and-service-health.md) | Notifications with cause keys and a service-health model (proposed) |
+| [0011](0011-layout-by-declared-constraints.md) | Layout by declared constraints: one pure layout function (proposed) |
