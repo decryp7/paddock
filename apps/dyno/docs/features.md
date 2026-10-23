@@ -12,6 +12,7 @@ not in the code (see [roadmap.md](roadmap.md) for the work package). Screenshots
 - [Why is it slow?](#why-is-it-slow)
 - [CPU taming and profiles](#cpu-taming-and-profiles)
 - [Health and startup](#health-and-startup)
+- [Throttling, hardware life and what is normal](#throttling-hardware-life-and-what-is-normal)
 - [Cleanup](#cleanup)
 - [Tuning](#tuning)
 - [Alerts and reports](#alerts-and-reports)
@@ -95,6 +96,33 @@ runs text as a command. Changes that need administrator rights (Defender, hibern
 Mode) are listed with the reason and are not applicable until the privileged helper exists ([WP-01](roadmap.md#wp-01-privileged-helper)).
 Really applicable now: Windows power plan, sleep timer, visual effects, background apps and indexing; Linux power profile;
 macOS indexing exclusions (Spotlight markers). Windows commands are unit-tested through a fake runner, not yet run on Windows.
+
+## Throttling, hardware life and what is normal
+
+**Built** ([WP-23](roadmap.md#wp-23-throttling-detector), [WP-24](roadmap.md#wp-24-disk-and-battery-life-forecasts),
+[WP-25](roadmap.md#wp-25-is-this-normal-baselines), [ADR 0016](adr/0016-throttling-lifespan-and-baselines.md)). All three only
+read; nothing here changes a setting.
+
+- **Throttling.** `Throttling` answers whether the CPU runs slower than it could while busy, and why: heat, a power limit, a
+  battery-saving mode, or "unexplained" (with what could not be ruled out). It states how much speed is lost, how sure it is
+  (low, medium, high) and the numbers behind it. A machine that does not report its clock or temperature gets "cannot tell" and a
+  list of what it does and does not report. A lasting episode (busy and slow for 20 s) is stored with its cause, duration, share
+  of speed lost and peak temperature; the **Throttling** page lists the last 30 days. The same detector names the cause in
+  **Why slow**, and a lasting episode at medium confidence or better can raise an alarm.
+- **Disk and battery life.** `Lifespan` forecasts "about 7 years of writes left (5 to 10 years)" for an SSD from its wear counter
+  and bytes written, and "replace the battery in about 23 months (17 to 31 months)" from its capacity trend and charge cycles. Each
+  forecast is a range with the readings it stands on and a confidence; with under two weeks (SSD) or four weeks (battery) of history
+  it says so instead of guessing, and a part Dyno cannot read says why and what would help (installing smartmontools, or the helper
+  later). A replaced disk or battery starts a new series. A part past its limit, or with under a year left at medium confidence,
+  appears in Health, the weekly report and, if you allow it, as an alarm.
+- **Is this normal?** Dyno learns, per metric (CPU, memory, disk writes, network, temperature, GPU) and per app (CPU, memory), what
+  is usual for each weekday and hour, and says when the present is outside it in words ("higher than usual for Tuesday mornings",
+  with the usual value and range). A new install learns silently for seven days (1 to 30 in Settings). The dashboard shows only what
+  is unusual; alarms for values far above usual that last five minutes are off until you turn them on.
+- **Where it reads from** (observe-only): macOS `pmset -g therm`, `ioreg` and, for SSD wear, `smartctl` when installed; Linux the
+  kernel's thermal-throttle counters, cpufreq limits and `/sys/class/power_supply`, and `smartctl`; Windows `powercfg /batteryreport`
+  and `smartctl`, with throttling inferred from the clock, the temperature and the power mode (Windows reports no reason). The
+  Windows readers run only in CI and on Windows machines; macOS and Linux paths are tested here.
 
 ## Cleanup
 

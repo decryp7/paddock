@@ -63,6 +63,16 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **CPU taming, Cleanup and Health and tuning** may still be placeholders; rules ship disabled and cannot act until you enable
   them (see features.md).
 
+- **Throttling** says whether the processor is running slower than it could while it is busy, and why (heat, a power limit,
+  battery saver, or unknown), how much speed it costs and how sure Dyno is. Below it are the episodes of the last 30 days and a list of
+  what your machine does and does not report; when it reports too little, the page says "cannot tell" rather than guess.
+- **Lifespan** shows how long your SSD and battery should last as a range ("about 23 months, 17 to 31"), what the estimate stands on
+  and how sure it is. A new install needs a couple of weeks of readings first. If Dyno cannot read your SSD's wear it says what to
+  install (smartmontools) or that the helper will do it later. A replaced disk or battery starts a new forecast.
+- **Is this normal?** appears on the dashboard once Dyno has learned your usual week (7 days by default). It lists only what is out
+  of the ordinary right now, in words ("CPU: higher than usual for Tuesday mornings, 71% against about 14%"). Change the learning
+  period or switch alarms on in **Settings, Hardware and baselines**.
+
 ## Undo
 
 Everything Dyno does to a process, a startup entry or (later) a file or setting is logged in **Activity** with an **Undo**
@@ -80,6 +90,7 @@ next agent start releases leftovers.
 | Sampling | System and process intervals (Dyno slows itself down when nobody is watching or on battery) |
 | History retention | How long raw points and each rollup tier are kept |
 | Alerts | Which conditions raise an alert |
+| Hardware and baselines | Whether and how long Dyno learns what is normal, and which hardware findings (throttling, disk and battery life, far-above-usual values) may raise an alarm |
 
 Settings are versioned and saved with a backup; a damaged file falls back to the backup and then to the defaults.
 
