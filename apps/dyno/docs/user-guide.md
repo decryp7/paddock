@@ -132,7 +132,7 @@ dyno end 4242 --yes                # changes something: only with --yes
 
 Open **Counters** in the sidebar. Search for a counter by words, or open an object and pick an instance, then choose **+** to chart
 it. The chart marks what Dyno did (cleanups, rule actions, alerts) so you can see whether a spike followed one. Pin a counter to
-keep it listed, save the charted ones as a **set**, or use the row's **...** menu to add one to the dashboard. A counter that has
+keep it listed (Dyno then reads it every 15 seconds in the background, so its line already has history when you open the page), save the charted ones as a **set**, or use the row's **...** menu to add one to the dashboard. A counter that has
 disappeared shows *Unavailable* with the reason. Rates (per second) need two readings, so a new line starts a moment later.
 
 ## Files and logs

@@ -48,6 +48,8 @@ pub enum FixKind {
     Restart,
     /// Open the task manager.
     OpenTaskManager,
+    /// Open the disk and battery life page.
+    OpenLifespan,
 }
 
 /// A one-click fix.
@@ -265,7 +267,11 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             format!("{} Confidence: {}.", f.explanation, f.confidence.word()),
             if severity == Severity::Warning { 12 } else { 5 },
             severity,
-            None,
+            simple_fix(
+                "See disk and battery life",
+                "Opens the lifespan page with the forecast, its range and how sure Dyno is.",
+                FixKind::OpenLifespan,
+            ),
         );
     }
 
@@ -639,6 +645,7 @@ mod tests {
         let r = run(&[ssd.clone()]);
         assert_eq!(r.score, 95);
         assert_eq!(r.reasons[0].id, "ssdLife:Samsung 990");
+        assert_eq!(r.reasons[0].fix.as_ref().map(|f| f.kind.clone()), Some(FixKind::OpenLifespan), "the reason links to /lifespan");
         assert!(r.reasons[0].detail.contains("Confidence: medium"));
         ssd.outcome = LifeOutcome::AlreadyPastLimit;
         let r = run(&[ssd]);
@@ -649,6 +656,8 @@ mod tests {
             high_days: 90.0,
         };
         bat.confidence = Confidence::High;
-        assert_eq!(run(&[bat]).reasons[0].id, "batteryLife:Battery");
+        let r = run(&[bat]);
+        assert_eq!(r.reasons[0].id, "batteryLife:Battery");
+        assert_eq!(r.reasons[0].fix.as_ref().map(|f| f.kind.clone()), Some(FixKind::OpenLifespan));
     }
 }

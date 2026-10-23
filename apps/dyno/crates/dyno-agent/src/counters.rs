@@ -26,6 +26,22 @@ const MAX_IN_FLIGHT: usize = 2;
 const MAX_RINGS: usize = 48;
 /// The longest history window, in minutes.
 pub const MAX_MINUTES: u32 = 60;
+/// How often pinned counters are read in the background (ADR 0002, own overhead): slow, because a minute of history
+/// at this pace is still a readable line and the OS call is not free.
+pub const PINNED_PERIOD: Duration = Duration::from_secs(15);
+/// How many pinned counters the background reading covers; the rest are read when the Counters page is open.
+pub const MAX_PINNED_POLLED: usize = 8;
+
+/// The pause between background readings: the base period, stretched in proportion to the overshoot when Dyno's own
+/// CPU (percent of one core) is above its budget (like the sampling intervals, ADR 0002), at most four times.
+pub fn pinned_period(own_cpu: f32) -> Duration {
+    let budget = dyno_core::sampling::CPU_BUDGET;
+    if own_cpu.is_finite() && own_cpu > budget {
+        PINNED_PERIOD.mul_f32((own_cpu / budget).min(4.0))
+    } else {
+        PINNED_PERIOD
+    }
+}
 
 struct Series {
     unit: CounterUnit,
@@ -39,6 +55,8 @@ struct Inner {
     catalog: Mutex<Option<(Instant, Arc<CounterCatalog>)>>,
     rates: Mutex<RateTracker>,
     rings: Mutex<HashMap<String, Series>>,
+    /// The pinned counters the background reading covers, so a page's reads do not make the rate tracker forget them.
+    pinned: Mutex<Vec<String>>,
 }
 
 /// Counts a call in flight until the thread running it ends, wherever that happens.
@@ -63,6 +81,38 @@ fn bad(msg: impl Into<String>) -> AgentError {
     AgentError::new(ErrorCode::BadRequest, msg)
 }
 
+/// Turns raw readings into values (running totals become rates) and adds them to their histories.
+fn record(inner: &Inner, raws: Vec<RawCounter>, now: Timestamp) -> Vec<CounterReading> {
+    let mut keep: Vec<String> = raws.iter().map(|r| r.path.clone()).collect();
+    keep.extend(lock(&inner.pinned).iter().cloned());
+    let readings: Vec<CounterReading> = {
+        let mut rates = lock(&inner.rates);
+        let out = raws.into_iter().map(|r| rates.apply(r, now)).collect();
+        // Counters nobody asks for (the page and the pinned list) are forgotten, so the tracker cannot grow.
+        rates.retain(&keep);
+        out
+    };
+    let mut rings = lock(&inner.rings);
+    for r in &readings {
+        if let Some(v) = r.value.value() {
+            if !rings.contains_key(&r.path) && rings.len() >= MAX_RINGS {
+                if let Some(oldest) = rings.iter().min_by_key(|(_, s)| s.used).map(|(k, _)| k.clone()) {
+                    rings.remove(&oldest);
+                }
+            }
+            let s = rings.entry(r.path.clone()).or_insert_with(|| Series {
+                unit: r.unit,
+                ring: CounterRing::new(),
+                used: Instant::now(),
+            });
+            s.unit = r.unit;
+            s.used = Instant::now();
+            s.ring.push(now, *v);
+        }
+    }
+    readings
+}
+
 impl CounterCentre {
     /// A centre reading through `source`.
     pub fn new(source: Arc<dyn CounterSource>) -> CounterCentre {
@@ -73,6 +123,7 @@ impl CounterCentre {
                 catalog: Mutex::new(None),
                 rates: Mutex::new(RateTracker::new()),
                 rings: Mutex::new(HashMap::new()),
+                pinned: Mutex::new(Vec::new()),
             }),
         }
     }
@@ -175,33 +226,32 @@ impl CounterCentre {
         let raws: Vec<RawCounter> = self.within(READ_DEADLINE, "reading the performance counters", move |inner| {
             inner.source.read(&parsed)
         })?;
-        let keep: Vec<String> = raws.iter().map(|r| r.path.clone()).collect();
-        let readings: Vec<CounterReading> = {
-            let mut rates = lock(&self.inner.rates);
-            let out = raws.into_iter().map(|r| rates.apply(r, now)).collect();
-            // Counters the page stopped asking for are forgotten, so the tracker cannot grow.
-            rates.retain(&keep);
-            out
-        };
-        let mut rings = lock(&self.inner.rings);
-        for r in &readings {
-            if let Some(v) = r.value.value() {
-                if !rings.contains_key(&r.path) && rings.len() >= MAX_RINGS {
-                    if let Some(oldest) = rings.iter().min_by_key(|(_, s)| s.used).map(|(k, _)| k.clone()) {
-                        rings.remove(&oldest);
-                    }
-                }
-                let s = rings.entry(r.path.clone()).or_insert_with(|| Series {
-                    unit: r.unit,
-                    ring: CounterRing::new(),
-                    used: Instant::now(),
-                });
-                s.unit = r.unit;
-                s.used = Instant::now();
-                s.ring.push(now, *v);
+        Ok(record(&self.inner, raws, now))
+    }
+
+    /// Reads the pinned counters (at most [`MAX_PINNED_POLLED`]) in the background so they have history before anyone
+    /// opens the page. Never waits: when two OS calls are already in flight, or nothing valid is pinned, it does nothing
+    /// and says so. The readings go to the same history as the page's reads; nothing else is stored.
+    pub fn poll_pinned(&self, pinned: &[String], now: Timestamp) -> bool {
+        let parsed: Vec<CounterPath> = pinned.iter().filter_map(|p| p.parse().ok()).take(MAX_PINNED_POLLED).collect();
+        *lock(&self.inner.pinned) = parsed.iter().map(ToString::to_string).collect();
+        if parsed.is_empty() || self.inner.in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_IN_FLIGHT {
+            if !parsed.is_empty() {
+                self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
             }
+            return false;
         }
-        Ok(readings)
+        let slot = Slot(self.inner.clone());
+        let inner = self.inner.clone();
+        let spawned = std::thread::Builder::new().name("dyno-counters-pinned".into()).spawn(move || {
+            let _slot = slot;
+            let raws = inner.source.read(&parsed);
+            record(&inner, raws, now);
+        });
+        spawned.is_ok() || {
+            self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
+            false
+        }
     }
 
     /// The readings kept over the last `minutes` (1 to [`MAX_MINUTES`]) for each path; `events` are the app's own
@@ -386,6 +436,47 @@ mod tests {
             c.values(&p, Timestamp(1)).unwrap();
         }
         assert_eq!(lock(&c.inner.rings).len(), MAX_RINGS);
+    }
+
+    #[test]
+    fn pinned_counters_are_read_in_the_background_at_a_bounded_and_stretching_pace() {
+        let (c, _) = centre();
+        assert!(!c.poll_pinned(&[], Timestamp(1)), "nothing pinned, nothing read");
+        assert!(!c.poll_pinned(&["junk".into()], Timestamp(1)), "an invalid path is skipped, not an error");
+        assert!(c.poll_pinned(&["\\Memory\\Free".into()], Timestamp(5_000)));
+        let mut points = 0;
+        for _ in 0..200 {
+            let h = c.history(&["\\Memory\\Free".into()], 5, Timestamp(6_000), no_events).unwrap();
+            points = h.series[0].points.len();
+            if points > 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(points, 1, "the background reading filled the history");
+        assert_eq!(pinned_period(0.2), PINNED_PERIOD);
+        assert_eq!(pinned_period(f32::NAN), PINNED_PERIOD);
+        assert_eq!(pinned_period(2.0), PINNED_PERIOD * 2);
+        assert_eq!(pinned_period(50.0), PINNED_PERIOD * 4, "stretched at most four times");
+    }
+
+    #[test]
+    fn the_background_reading_covers_at_most_the_first_few_pinned_and_never_piles_up() {
+        let many: Vec<String> = (0..20).map(|i| format!("\\O\\c{i}")).collect();
+        let fake = Arc::new(FakeCounters::new(
+            (0..20).map(|i| Entry::new("O", None, &format!("c{i}"), U::Count, CounterKind::Gauge, 1.0)).collect(),
+        ));
+        let c = CounterCentre::new(fake);
+        assert!(c.poll_pinned(&many, Timestamp(1)));
+        assert_eq!(lock(&c.inner.pinned).len(), MAX_PINNED_POLLED);
+        let hang = Arc::new(Hanging(Mutex::new(false)));
+        let c = CounterCentre::new(hang.clone());
+        let p = vec!["\\O\\c1".to_string()];
+        assert!(c.poll_pinned(&p, Timestamp(1)));
+        assert!(c.poll_pinned(&p, Timestamp(2)));
+        assert!(!c.poll_pinned(&p, Timestamp(3)), "two reads are stuck: the third is skipped, nothing waits");
+        assert_eq!(c.inner.in_flight.load(Ordering::SeqCst), 2);
+        *lock(&hang.0) = true;
     }
 
     struct Hanging(Mutex<bool>);

@@ -41,13 +41,14 @@ const scenarioNow = (explicit?: HardwareScenario): HardwareScenario => explicit 
 const ev = (label: string, value: string): Evidence => ({ label, value });
 
 function episodes(now: number): ThrottleEpisode[] {
-  return [
+  const rows: Omit<ThrottleEpisode, 'id'>[] = [
     { start: now - 1 * DAY - 3 * HOUR, end: now - 1 * DAY - 3 * HOUR + 14 * MIN, cause: 'thermal', avgLostPercent: 34, peakLostPercent: 46, peakTemperatureC: 101 },
     { start: now - 3 * DAY - 5 * HOUR, end: now - 3 * DAY - 5 * HOUR + 38 * MIN, cause: 'thermal', avgLostPercent: 28, peakLostPercent: 41, peakTemperatureC: 99 },
     { start: now - 9 * DAY - 2 * HOUR, end: now - 9 * DAY - 2 * HOUR + 6 * MIN, cause: 'power', avgLostPercent: 22, peakLostPercent: 25, peakTemperatureC: null },
     { start: now - 17 * DAY - 6 * HOUR, end: now - 17 * DAY - 6 * HOUR + 52 * MIN, cause: 'batterySaver', avgLostPercent: 40, peakLostPercent: 40, peakTemperatureC: null },
     { start: now - 24 * DAY - 4 * HOUR, end: now - 24 * DAY - 4 * HOUR + 21 * MIN, cause: 'thermal', avgLostPercent: 31, peakLostPercent: 39, peakTemperatureC: 98 },
   ];
+  return rows.map((r) => ({ id: `throttle-${r.start}`, ...r }));
 }
 
 function inputs(os: MockOs, scenario: HardwareScenario): InputStatus[] {
@@ -76,7 +77,7 @@ export function mockThrottling(os: MockOs, now: number, scenario?: HardwareScena
   const past = sc === 'blind' ? [] : episodes(now);
   const total = (e: ThrottleEpisode[]) => Math.round(e.reduce((a, x) => a + ((x.end ?? now) - x.start), 0) / MIN);
   if (sc === 'hot') {
-    const current: ThrottleEpisode = { start: now - 7 * MIN, end: null, cause: 'thermal', avgLostPercent: 43, peakLostPercent: 45, peakTemperatureC: 101 };
+    const current: ThrottleEpisode = { id: `throttle-${now - 7 * MIN}`, start: now - 7 * MIN, end: null, cause: 'thermal', avgLostPercent: 43, peakLostPercent: 45, peakTemperatureC: 101 };
     const reading: ThrottleReading = {
       verdict: { throttled: { cause: 'thermal', lostPercent: 44 } },
       confidence: 'high',
@@ -182,7 +183,7 @@ const judgement = (state: BaselineState, phrase: string, explanation: string, us
   usual,
 });
 
-const item = (subject: string, metric: BaselineItem['metric'], label: string, current: string, j: Judgement): BaselineItem => ({ subject, metric, label, current, judgement: j });
+const item = (subject: string, metric: BaselineItem['metric'], label: string, current: string, j: Judgement): BaselineItem => ({ id: `${metric}:${subject}`, subject, metric, label, current, judgement: j });
 
 /** The "Is this normal?" data. */
 export function mockBaselines(now: number, scenario?: HardwareScenario): BaselineOverview {

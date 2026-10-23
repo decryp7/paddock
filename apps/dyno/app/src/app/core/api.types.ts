@@ -573,7 +573,7 @@ export interface SizeNode {
 export type Grade = 'good' | 'fair' | 'poor';
 export type Severity = 'info' | 'warning' | 'critical';
 
-export type FixKind = { tuning: string } | 'openCleanup' | 'openStartup' | 'restart' | 'openTaskManager';
+export type FixKind = { tuning: string } | 'openCleanup' | 'openStartup' | 'restart' | 'openTaskManager' | 'openLifespan';
 
 export interface Fix {
   label: string;
@@ -1492,6 +1492,8 @@ export interface ThrottleReading {
 }
 
 export interface ThrottleEpisode {
+  /** Stable: names the episode by when it began (`throttle-<ms>`). */
+  id: string;
   start: Timestamp;
   /** Null while it continues. */
   end: Timestamp | null;
@@ -1569,6 +1571,8 @@ export interface Judgement {
 }
 
 export interface BaselineItem {
+  /** Stable: the metric and the subject (`cpu:System`, `appCpu:Chrome`). */
+  id: string;
   /** "System" or an app's name. */
   subject: string;
   metric: BaselineMetric;

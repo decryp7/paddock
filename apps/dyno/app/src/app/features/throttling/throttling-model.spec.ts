@@ -1,7 +1,7 @@
 import type { ThrottleEpisode, ThrottleVerdict } from '../../core/api.types';
 import { CAUSE_LABEL, CAUSE_TONE, confidenceText, episodeSeconds, sortEpisodes, verdictCause, verdictTone } from './throttling-model';
 
-const ep = (start: number, end: number | null): ThrottleEpisode => ({ start, end, cause: 'thermal', avgLostPercent: 30, peakLostPercent: 40, peakTemperatureC: 99 });
+const ep = (start: number, end: number | null): ThrottleEpisode => ({ id: `throttle-${start}`, start, end, cause: 'thermal', avgLostPercent: 30, peakLostPercent: 40, peakTemperatureC: 99 });
 
 describe('throttling model', () => {
   it('words the confidence', () => {

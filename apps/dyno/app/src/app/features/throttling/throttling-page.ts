@@ -71,7 +71,7 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
                       </tr>
                     </thead>
                     <tbody>
-                      @for (e of rows(); track e.start) {
+                      @for (e of rows(); track e.id) {
                         <tr>
                           <td class="num">{{ stamp(e.start) }}</td>
                           <td class="r">{{ duration(e) }}</td>

@@ -834,6 +834,7 @@ fn alarm_rules(peer: &Peer<Message>) -> Vec<String> {
 
 fn episode(start_ms: i64) -> dyno_core::throttle::ThrottleEpisode {
     dyno_core::throttle::ThrottleEpisode {
+        id: dyno_core::throttle::ThrottleEpisode::id_for(Timestamp(start_ms)),
         start: Timestamp(start_ms),
         end: Some(Timestamp(start_ms + 120_000)),
         cause: dyno_core::throttle::ThrottleCause::Thermal,

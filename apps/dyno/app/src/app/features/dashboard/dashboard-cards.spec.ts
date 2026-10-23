@@ -277,6 +277,7 @@ describe('HealthHero', () => {
   it.each([
     ['openStartup', '/health'],
     ['openTaskManager', '/processes'],
+    ['openLifespan', '/lifespan'],
   ] as const)('a confirmed %s fix navigates to %s', async (kind, url) => {
     const { mock, nav } = env();
     vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, kind, { needsAdmin: false, undoable: false, preview: [] })]));

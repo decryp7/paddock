@@ -422,6 +422,7 @@ mod tests {
         use crate::lifespan::{unavailable, LifeOutcome, LifeSubject};
         use crate::throttle::{ThrottleCause, ThrottleEpisode};
         let e = ThrottleEpisode {
+            id: ThrottleEpisode::id_for(Timestamp(0)),
             start: Timestamp(0),
             end: None,
             cause: ThrottleCause::Thermal,

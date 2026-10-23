@@ -832,6 +832,7 @@ mod tests {
         use crate::throttle::{ThrottleCause, ThrottleEpisode};
         use crate::time::MINUTE;
         let ep = |s: i64, e: Option<i64>, cause| ThrottleEpisode {
+            id: ThrottleEpisode::id_for(Timestamp(s * MINUTE)),
             start: Timestamp(s * MINUTE),
             end: e.map(|m| Timestamp(m * MINUTE)),
             cause,

@@ -15,13 +15,13 @@ fn main() {
         windows = tauri_build::WindowsAttributes::new_without_app_manifest();
     }
     println!("cargo:rerun-if-env-changed=TAURI_UPDATER_PUBKEY");
-    // tauri-build requires the sidecars (bundle.externalBin: the agent and the privileged helper) to exist even for `cargo check` and tests. Bundles
+    // tauri-build requires the sidecars (bundle.externalBin: the agent, the privileged helper and the dyno command) to exist even for `cargo check` and tests. Bundles
     // always build the real one first (scripts/sidecar.mjs in beforeBuildCommand); elsewhere an empty placeholder stands
     // in, which the app treats as "missing" (it then looks for a dyno-agent next to itself, or DYNO_AGENT_BIN).
     if let Ok(target) = std::env::var("TARGET") {
         let ext = if target.contains("windows") { ".exe" } else { "" };
         let dir = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default()).join("binaries");
-        for name in ["dyno-agent", "dyno-helper"] {
+        for name in ["dyno-agent", "dyno-helper", "dyno"] {
             let sidecar = dir.join(format!("{name}-{target}{ext}"));
             if !sidecar.exists() {
                 let _ = std::fs::create_dir_all(&dir);

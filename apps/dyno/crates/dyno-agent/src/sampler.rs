@@ -28,6 +28,7 @@ pub struct Sampler {
     own_cpu: f32,
     own_memory: u64,
     ticks: u64,
+    last_pinned: Option<Instant>,
 }
 
 impl Sampler {
@@ -40,6 +41,7 @@ impl Sampler {
             own_cpu: 0.0,
             own_memory: 0,
             ticks: 0,
+            last_pinned: None,
         }
     }
 
@@ -126,8 +128,26 @@ impl Sampler {
             crate::hardware::handle_events(shared, throttle_events, throttle_confidence, t);
         }
         apply_commands(shared, commands, t);
+        self.read_pinned_counters(shared, t);
         self.ticks += 1;
         iv
+    }
+
+    /// Gives the pinned performance counters history in the background (WP-12): a slow, bounded reading that never
+    /// waits for the OS and stretches when Dyno's own CPU is over its budget.
+    fn read_pinned_counters(&mut self, shared: &Arc<Shared>, t: Timestamp) {
+        if self
+            .last_pinned
+            .is_some_and(|l| l.elapsed() < crate::counters::pinned_period(self.own_cpu))
+        {
+            return;
+        }
+        let pinned = lock(&shared.core).settings.counters.pinned.clone();
+        if pinned.is_empty() {
+            return;
+        }
+        self.last_pinned = Some(Instant::now());
+        shared.counters.poll_pinned(&pinned, t);
     }
 
     /// Own CPU as a share of one core, and resident memory, from the process table.

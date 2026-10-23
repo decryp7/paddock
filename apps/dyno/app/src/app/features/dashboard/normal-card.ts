@@ -24,7 +24,7 @@ import { itemName, normalLine, unusualItems, unusualStrength } from './normal-mo
           </div>
           @if (unusual().length) {
             <ul>
-              @for (i of unusual(); track i.subject + i.metric) {
+              @for (i of unusual(); track i.id) {
                 <li [title]="i.judgement.explanation">
                   <span class="dot" [attr.data-tone]="tone(i)" aria-hidden="true"></span>
                   <span class="what"><strong>{{ name(i) }}:</strong> {{ i.judgement.phrase }}</span>

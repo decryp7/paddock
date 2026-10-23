@@ -92,6 +92,20 @@ impl BaselineMetric {
     /// The per-app metrics.
     pub const APP: [BaselineMetric; 2] = [BaselineMetric::AppCpu, BaselineMetric::AppMemory];
 
+    /// The metric's wire name (as serialised), used in ids.
+    pub fn key(self) -> &'static str {
+        match self {
+            BaselineMetric::Cpu => "cpu",
+            BaselineMetric::Memory => "memory",
+            BaselineMetric::DiskWrite => "diskWrite",
+            BaselineMetric::Network => "network",
+            BaselineMetric::Temperature => "temperature",
+            BaselineMetric::Gpu => "gpu",
+            BaselineMetric::AppCpu => "appCpu",
+            BaselineMetric::AppMemory => "appMemory",
+        }
+    }
+
     /// The name shown to the user.
     pub fn label(self) -> &'static str {
         match self {
@@ -415,6 +429,8 @@ pub fn judge(baseline: &Baseline, metric: BaselineMetric, value: f64, at: Timest
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaselineItem {
+    /// Stable across refreshes: the metric and the subject (`cpu:System`, `appCpu:Chrome`), so the UI can key rows on it.
+    pub id: String,
     /// "System" or an app's name.
     pub subject: String,
     /// What is measured.

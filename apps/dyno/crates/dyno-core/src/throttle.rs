@@ -319,6 +319,9 @@ fn reading(verdict: Verdict, confidence: Confidence, headline: &str, explanation
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThrottleEpisode {
+    /// Stable across refreshes and restarts: it names the episode by when it began (`throttle-<ms>`), so the UI can key rows on it.
+    #[serde(default)]
+    pub id: String,
     /// When it began.
     pub start: Timestamp,
     /// When it ended; `None` while it continues.
@@ -334,6 +337,11 @@ pub struct ThrottleEpisode {
 }
 
 impl ThrottleEpisode {
+    /// The id of the episode that began at `start`.
+    pub fn id_for(start: Timestamp) -> String {
+        format!("throttle-{}", start.millis())
+    }
+
     /// How long it lasted (to `now` while it continues).
     pub fn duration_ms(&self, now: Timestamp) -> i64 {
         self.end.unwrap_or(now).since(self.start).max(0)
@@ -419,6 +427,7 @@ impl Open {
             .max_by_key(|(_, n)| *n)
             .map_or(ThrottleCause::Unexplained, |(c, _)| *c);
         ThrottleEpisode {
+            id: ThrottleEpisode::id_for(self.start),
             start: self.start,
             end,
             cause,
@@ -679,6 +688,7 @@ mod tests {
     #[test]
     fn minutes_are_totalled() {
         let ep = |start_min: i64, end_min: Option<i64>| ThrottleEpisode {
+            id: ThrottleEpisode::id_for(Timestamp(start_min * MINUTE)),
             start: Timestamp(start_min * MINUTE),
             end: end_min.map(|m| Timestamp(m * MINUTE)),
             cause: ThrottleCause::Power,
@@ -746,12 +756,15 @@ mod tests {
         assert_eq!(started.len(), 1, "{started:?}");
         let TrackerEvent::Started(e) = &started[0] else { panic!() };
         assert_eq!(e.cause, ThrottleCause::Thermal);
+        assert_eq!(e.id, format!("throttle-{}", e.start.millis()));
+        let started_id = e.id.clone();
         assert!(e.end.is_none());
         assert!(t.current().is_some());
         let ended = feed(&mut t, 120, 200, |_| {});
         assert_eq!(ended.len(), 1);
         let TrackerEvent::Ended(e) = &ended[0] else { panic!() };
         assert_eq!(e.cause, ThrottleCause::Thermal);
+        assert_eq!(e.id, started_id, "the id does not change when the episode ends");
         assert!(e.end.is_some() && e.duration_ms(Timestamp(0)) >= 40 * SECOND);
         assert!(e.avg_lost_percent > 40.0 && e.peak_lost_percent >= e.avg_lost_percent);
         assert_eq!(e.peak_temperature_c, Some(99.0));

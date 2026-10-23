@@ -231,6 +231,7 @@ fn rank(j: &Judgement) -> u8 {
 
 fn item(subject: &str, metric: BaselineMetric, v: f64, j: &Judgement) -> BaselineItem {
     BaselineItem {
+        id: format!("{}:{subject}", metric.key()),
         subject: subject.into(),
         metric,
         label: metric.label().into(),
@@ -323,6 +324,16 @@ mod tests {
             memory: 40.0,
             temperature: Some(50.0),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn items_have_stable_ids_from_the_metric_and_the_subject() {
+        let j = judge(&Baseline::default(), BaselineMetric::Cpu, 5.0, Timestamp(0), 0);
+        assert_eq!(item("System", BaselineMetric::Cpu, 5.0, &j).id, "cpu:System");
+        assert_eq!(item("Chrome", BaselineMetric::AppMemory, 5.0, &j).id, "appMemory:Chrome");
+        for m in BaselineMetric::SYSTEM.iter().chain(BaselineMetric::APP.iter()) {
+            assert_eq!(serde_json::to_value(m).unwrap(), m.key(), "the key is the wire name");
         }
     }
 

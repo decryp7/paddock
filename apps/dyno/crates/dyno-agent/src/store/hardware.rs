@@ -94,7 +94,17 @@ impl Store {
             .conn
             .prepare("SELECT data FROM throttle_episodes WHERE start >= ?1 ORDER BY start DESC LIMIT ?2")?;
         let rows = st.query_map(params![from.millis(), i64::from(limit)], |r| r.get::<_, String>(0))?;
-        Ok(rows.filter_map(|r| r.ok()).filter_map(|s| parse::<ThrottleEpisode>(&s)).collect())
+        Ok(rows
+            .filter_map(|r| r.ok())
+            .filter_map(|s| parse::<ThrottleEpisode>(&s))
+            .map(|mut e| {
+                // Rows saved before episodes had an id get theirs from when they began.
+                if e.id.is_empty() {
+                    e.id = ThrottleEpisode::id_for(e.start);
+                }
+                e
+            })
+            .collect())
     }
 
     /// When Dyno first saw this machine: stored on the first call, the same afterwards.
@@ -160,6 +170,7 @@ mod tests {
     fn episodes_round_trip_and_prune() {
         let s = Store::memory().unwrap();
         let ep = |start: i64| ThrottleEpisode {
+            id: ThrottleEpisode::id_for(Timestamp(start)),
             start: Timestamp(start),
             end: Some(Timestamp(start + 1)),
             cause: ThrottleCause::Thermal,
@@ -181,6 +192,16 @@ mod tests {
         s.prune_hardware(now).unwrap();
         assert_eq!(s.throttle_episodes(Timestamp(0), 10).unwrap(), vec![recent]);
         assert_eq!(s.hardware_readings::<BatteryCapacity>(kind::SSD, "d").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_episode_saved_without_an_id_gets_one_from_when_it_began() {
+        let s = Store::memory().unwrap();
+        let old = r#"{"start":42,"end":43,"cause":"thermal","avgLostPercent":1.0,"peakLostPercent":2.0,"peakTemperatureC":null}"#;
+        s.conn
+            .execute("INSERT INTO throttle_episodes (start, data) VALUES (42, ?1)", params![old])
+            .unwrap();
+        assert_eq!(s.throttle_episodes(Timestamp(0), 10).unwrap()[0].id, "throttle-42");
     }
 
     #[test]

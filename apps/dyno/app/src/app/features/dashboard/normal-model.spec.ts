@@ -2,6 +2,7 @@ import type { BaselineItem, BaselineOverview, BaselineState } from '../../core/a
 import { itemName, normalLine, unusualItems, unusualStrength } from './normal-model';
 
 const item = (subject: string, state: BaselineState, label = 'CPU'): BaselineItem => ({
+  id: `cpu:${subject}`,
   subject,
   metric: 'cpu',
   label,
