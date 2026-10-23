@@ -98,7 +98,7 @@ Validate, check the protected list, apply to a `ProcessRef`, record the inverse;
 
 ![Helper install](../diagrams/svg/uml-seq-helper-install.svg)
 
-Review, the helper's explanation, the OS's own prompt (the install runs `dyno-helper install` elevated), then the change: a second validation inside the helper, the setting read back, the helper's audit line and the activity entry with its inverse (ADR 0016). The picture predates the one-step install and still shows the same order.
+Review, the helper's explanation, the OS's own prompt (the install runs `dyno-helper install` elevated), then the change: a second validation inside the helper, the setting read back, the helper's audit line and the activity entry with its inverse (ADR 0016).
 
 ### Agent restart after an update
 

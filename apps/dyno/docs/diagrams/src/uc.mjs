@@ -38,6 +38,6 @@ useCases('uml-use-cases-observe', {
 });
 useCases('uml-use-cases-act', {
   title: 'Use cases — change and tune', desc: 'Everything that changes the machine needs an enabled rule or an explicit click, and is undoable where the OS allows. Dashed ellipses are planned.', owner: 'PC owner',
-  rows: [['End, suspend or re-prioritise an app'], ['Tame an app with a rule or profile'], ['Manage startup items'], ['Undo an action from Activity'], ['Set tray metric, theme, sampling'], ['Approve an admin change (helper)'], ['Start the agent at login'], ['Clean up disk with quarantine', 1], ['Apply a tuning suggestion', 1], ['Run a benchmark on click', 1]],
+  rows: [['End, suspend or re-prioritise an app'], ['Tame an app with a rule or profile'], ['Manage startup items'], ['Undo an action from Activity'], ['Set tray metric, theme, sampling'], ['Install the helper, approve an admin change'], ['Start the agent at login'], ['Clean up disk with quarantine', 1], ['Apply a tuning suggestion', 1], ['Run a benchmark on click', 1]],
   ext: { name: 'OS (login, power)', row: 6 },
 });
