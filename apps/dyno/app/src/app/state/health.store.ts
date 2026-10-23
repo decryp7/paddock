@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
-import type { CommandError, HealthReport, StartupEntry, StartupState, WeeklyReport } from '../core/api.types';
+import type { CommandError, HealthReport, StartupEntry, StartupFilter, StartupState, WeeklyReport } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { Notifier } from '../shared/notifier';
@@ -12,6 +12,8 @@ interface HealthState {
   /** Last week's report, for the score trend. */
   weekly: WeeklyReport | null;
   startup: StartupEntry[];
+  /** Every entry before the filter, and how many are the OS's and how many signed (the toggles show them). */
+  startupCounts: { total: number; os: number; signed: number };
   startupLoaded: boolean;
   startupError: CommandError | null;
   /** Ids of startup entries with a change in flight. */
@@ -23,6 +25,7 @@ const initial: HealthState = {
   reportError: null,
   weekly: null,
   startup: [],
+  startupCounts: { total: 0, os: 0, signed: 0 },
   startupLoaded: false,
   startupError: null,
   busy: [],
@@ -44,10 +47,12 @@ export const HealthStore = signalStore(
           patchState(store, { reportError: toCommandError(e) });
         }
       },
-      async loadStartup(): Promise<void> {
+      /** Loads the startup list with the engine's filter applied (`hideOs`, `hideSigned`) and the counts. */
+      async loadStartup(filter: StartupFilter = { hideOs: false, hideSigned: false }): Promise<void> {
         patchState(store, { startupError: null });
         try {
-          patchState(store, { startup: await backend.startupEntries(), startupLoaded: true });
+          const o = await backend.startupOverview(filter);
+          patchState(store, { startup: o.entries, startupCounts: { total: o.total, os: o.osCount, signed: o.signedCount }, startupLoaded: true });
         } catch (e) {
           patchState(store, { startupError: toCommandError(e) });
         }

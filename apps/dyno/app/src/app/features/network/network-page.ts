@@ -8,6 +8,7 @@ import { formatRate, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { NetworkStore } from '../../state/network.store';
+import { Lookups } from '../lookup/lookups';
 import {
   type GroupBy,
   type TableRow,
@@ -231,6 +232,12 @@ function readCollapsed(): Set<string> {
           }
           <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copyRow(row)"><dy-icon name="copy" /> Copy as text</button>
           <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="showProcess()"><dy-icon name="processes" /> Show process</button>
+          @if (row.item.owner.kind === 'process') {
+            <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(row.item.owner.name)"><dy-icon name="search" /> Search the web…</button>
+            @if (row.item.owner.path) {
+              <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchHash(row.item.owner.path, row.item.owner.name)"><dy-icon name="shield" /> Search file hash on VirusTotal…</button>
+            }
+          }
         }
       </div>
     </ng-template>
@@ -311,6 +318,7 @@ export class NetworkPage implements OnInit, OnDestroy {
   /** The machine's own address as the connections see it (constant, so it is shown once here rather than on every row). */
   protected readonly thisPc = computed(() => this.connections().find((c) => c.local !== '127.0.0.1' && c.local !== '::1' && !c.local.startsWith('fe80'))?.local ?? null);
   private readonly router = inject(Router);
+  private readonly lookups = inject(Lookups);
   protected readonly trafficByName = computed(() => new Map((this.store.snapshot()?.traffic ?? []).map((t) => [t.name, t])));
   protected readonly trafficOf = (title: string) => this.trafficByName().get(title) ?? null;
   protected readonly rate = formatRate;
@@ -450,6 +458,14 @@ export class NetworkPage implements OnInit, OnDestroy {
     else if (mod && e.key.toLowerCase() === 'c' && cur.kind === 'item' && !window.getSelection()?.toString()) void this.copyRow(cur);
     else return;
     e.preventDefault();
+  }
+
+  protected searchWeb(name: string): void {
+    void this.lookups.searchWeb(name, name);
+  }
+
+  protected searchHash(path: string, name: string): void {
+    void this.lookups.searchHash({ path }, name);
   }
 
   protected showProcess(): void {

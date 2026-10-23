@@ -16,6 +16,7 @@ test.describe('screens', () => {
       ['Alarms', 'Alarms'],
       ['Flight recorder', 'Flight recorder'],
       ['Health', 'Health'],
+      ['Watched folders', 'Watched folders'],
       ['Lifespan', 'Disk and battery life'],
       ['Tuning', 'Tuning'],
       ['Diagnostics', 'Diagnostics bundle'],
@@ -525,3 +526,131 @@ test.describe('issues', () => {
   });
 });
 
+
+test.describe('right-click search (nothing is sent until the click)', () => {
+  test('a process searches the web with the text shown and edited first', async ({ page }) => {
+    await page.goto(url('/processes'));
+    await page.getByLabel('Filter processes').fill('rustc');
+    await page.locator('[role=row][data-key^="g"]').first().getByRole('button', { name: /Actions for/ }).click();
+    await page.getByRole('menuitem', { name: 'Search the web…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Search the web' });
+    await expect(dialog.getByText('Nothing leaves your computer until you click Search')).toBeVisible();
+    const field = dialog.getByLabel('Search for');
+    await expect(field).toHaveValue(/rustc|Rust/);
+    await field.fill('rustc high cpu while building');
+    await dialog.getByRole('button', { name: 'Search' }).click();
+    await expect(dialog).toBeHidden();
+  });
+
+  test('a right-click on a row opens the same menu with the web and hash searches', async ({ page }) => {
+    await page.goto(url('/processes'));
+    await page.getByRole('button', { name: 'All', exact: true }).click();
+    await page.getByLabel('Filter processes').fill('rustc');
+    await page.locator('[role=row][data-key^="p"]').first().click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Search the web…' })).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Search file hash on VirusTotal…' }).click();
+    const dialog = page.getByRole('dialog', { name: /VirusTotal/ });
+    await expect(dialog.getByText('Nothing is uploaded')).toBeVisible();
+    await expect(dialog.getByLabel('SHA-256 hash')).toHaveText(/^[0-9a-f]{64}$/);
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+  });
+
+  test('an issue shows what was removed from the text', async ({ page }) => {
+    await page.goto(url('/issues'));
+    await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Search the web…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Search the web' });
+    await expect(dialog.getByText(/Removed from the text: 1 home folder/)).toBeVisible();
+    await expect(dialog.getByLabel('Search for')).not.toHaveValue(/alex/);
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+  });
+});
+
+test.describe('startup filter', () => {
+  test('hides the system and signed entries, shows the counts and remembers the choice', async ({ page }) => {
+    await page.goto(url('/health'));
+    const section = page.getByRole('region', { name: 'Startup manager' });
+    const rows = section.locator('tbody tr');
+    await expect(rows.first()).toBeVisible();
+    await expect(section.getByText(/Showing \d+ of \d+ entries\./)).toBeVisible();
+    const before = await rows.count();
+    const hideSystem = section.getByRole('button', { name: /Hide system entries/ });
+    await expect(hideSystem).toHaveAttribute('aria-pressed', 'false');
+    await hideSystem.click();
+    await expect(hideSystem).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows).toHaveCount(before - 1);
+    await expect(section.getByText(/Showing \d+ of \d+ entries, 1 hidden by the filter/)).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('region', { name: 'Startup manager' }).getByRole('button', { name: /Hide system entries/ })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('region', { name: 'Startup manager' }).getByRole('button', { name: /Hide signed apps/ }).click();
+    // The demo list has no unsigned entry, so hiding both leaves nothing, and the page says why instead of claiming nothing starts.
+    await expect(page.getByRole('region', { name: 'Startup manager' }).getByText('Everything is hidden by the filter')).toBeVisible();
+  });
+});
+
+test.describe('watched folders', () => {
+  test('lists the folders, previews before turning one on, changes the time and stops watching with a confirmation', async ({ page }) => {
+    await page.goto(url('/watched'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Watched folders' })).toBeVisible();
+    const table = page.getByRole('table', { name: 'Watched folders' });
+    await expect(table.locator('tbody tr')).toHaveCount(3);
+    await expect(table.getByRole('row', { name: /Downloads/ })).toContainText('On');
+    const build = table.getByRole('row', { name: /build/ });
+    await expect(build).toContainText('Off, not previewed');
+
+    // Turning on opens the preview first; its Turn on button is the only way.
+    await build.getByRole('button', { name: 'Actions for build' }).click();
+    await page.getByRole('menuitem', { name: 'Turn on…' }).click();
+    const preview = page.getByRole('dialog', { name: 'What would move' });
+    await expect(preview.getByText(/would move to the 7-day quarantine|Nothing is older than/)).toBeVisible();
+    await expect(preview.getByText(/put back from Activity/)).toBeVisible();
+    await preview.getByRole('button', { name: 'Turn on' }).click();
+    await expect(preview).toBeHidden();
+    await expect(table.getByRole('row', { name: /build/ })).toContainText('On');
+
+    // A shorter keep time turns it off until it is previewed again.
+    await table.getByRole('row', { name: /build/ }).getByRole('button', { name: 'Actions for build' }).click();
+    await page.getByRole('menuitem', { name: /^Keep for/ }).hover();
+    await page.getByRole('menuitem', { name: '10 minutes' }).click();
+    await expect(table.getByRole('row', { name: /build/ })).toContainText('10 minutes');
+    await expect(table.getByRole('row', { name: /build/ })).toContainText('Off, not previewed');
+
+    // Stopping the watch asks first and says the files stay.
+    await table.getByRole('row', { name: /build/ }).getByRole('button', { name: 'Actions for build' }).click();
+    await page.getByRole('menuitem', { name: 'Stop watching…' }).click();
+    const confirm = page.getByRole('dialog');
+    await expect(confirm.getByText('The files stay where they are')).toBeVisible();
+    await confirm.getByRole('button', { name: 'Stop watching' }).click();
+    await expect(table.locator('tbody tr')).toHaveCount(2);
+  });
+
+  test('adds a folder through the folder dialog, switched off', async ({ page }) => {
+    await page.goto(url('/watched'));
+    await page.getByRole('button', { name: 'Add folder' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Watch a folder' });
+    await dialog.getByRole('radio', { name: /Screenshots/ }).click();
+    await dialog.getByRole('button', { name: /Choose folder/ }).click();
+    await expect(dialog).toBeHidden();
+    const table = page.getByRole('table', { name: 'Watched folders' });
+    await expect(table.locator('tbody tr')).toHaveCount(4);
+    await expect(table.locator('tbody tr').last()).toContainText('Off, not previewed');
+  });
+
+  test('moving the files now needs the preview and tells where they went', async ({ page }) => {
+    await page.goto(url('/watched'));
+    const table = page.getByRole('table', { name: 'Watched folders' });
+    await table.getByRole('row', { name: /Downloads/ }).getByRole('button', { name: 'See what would move in Downloads' }).click();
+    const preview = page.getByRole('dialog', { name: 'What would move' });
+    await expect(preview.locator('tbody tr').first()).toBeVisible();
+    await preview.getByRole('button', { name: /^Move \d+ now/ }).click();
+    await expect(page.getByText('Swept the folder')).toBeVisible();
+  });
+});
+
+test.describe('timeline', () => {
+  test('network changes are a kind of event in the history legend', async ({ page }) => {
+    await page.goto(url('/'));
+    await expect(page.getByRole('region', { name: 'History' }).getByText('Network', { exact: false }).first()).toBeVisible();
+  });
+});

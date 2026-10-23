@@ -16,6 +16,7 @@ pub mod fake;
 pub mod hardware;
 pub mod inventory;
 pub mod issues;
+pub mod links;
 pub mod network;
 pub mod parse;
 pub mod process;
@@ -60,6 +61,8 @@ pub struct Platform {
     pub activity: Box<dyn UserActivity>,
     /// The OS problem logs (crashes, hangs, failing services). Empty where the OS has none Dyno can read.
     pub issues: Vec<Box<dyn dyno_core::issues::IssueSource>>,
+    /// The network interfaces and the Wi-Fi network joined (network change events).
+    pub links: Box<dyn dyno_core::ports::NetworkLinks>,
 }
 
 /// The ports for the current OS, with process-control state kept in [`default_state_file`].

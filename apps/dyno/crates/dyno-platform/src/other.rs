@@ -61,6 +61,7 @@ pub fn platform(_state_file: PathBuf) -> Platform {
         facts: Box::new(Unsupported),
         activity: Box::new(Unsupported),
         issues: Vec::new(),
+        links: Box::new(crate::links::OsLinks::new()),
     }
 }
 

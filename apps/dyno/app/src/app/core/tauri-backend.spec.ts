@@ -66,6 +66,21 @@ describe('TauriBackend: request shapes', () => {
     ['unusual', (b) => b.unusual(true), { unusual: { includeIgnored: true } }],
     ['unusualAct', (b) => b.unusualAct('/a', 'protect'), { unusualAct: { key: '/a', action: 'protect' } }],
     ['forgetBaseline', (b) => b.forgetBaseline(), 'forgetBaseline'],
+    ['searchSeed', (b) => b.searchSeed('Slack'), { searchSeed: { text: 'Slack' } }],
+    ['webSearch', (b) => b.webSearch('slack high cpu'), { webSearch: { query: 'slack high cpu' } }],
+    ['fileHash of a process', (b) => b.fileHash({ process: REF }), { fileHash: { source: { process: REF } } }],
+    ['fileHash of a path', (b) => b.fileHash({ path: '/a/b' }), { fileHash: { source: { path: '/a/b' } } }],
+    ['openVirusTotal', (b) => b.openVirusTotal('ab'.repeat(32)), { virusTotalUrl: { sha256: 'ab'.repeat(32) } }],
+    ['startupOverview', (b) => b.startupOverview({ hideOs: true, hideSigned: false }), { startupOverview: { filter: { hideOs: true, hideSigned: false } } }],
+    ['watchedFolders', (b) => b.watchedFolders(), 'watchedFolders'],
+    [
+      'setWatchedFolder sends absent fields as null',
+      (b) => b.setWatchedFolder('w-1', { enabled: true }),
+      { setWatchedFolder: { id: 'w-1', keepForSecs: null, enabled: true, recursive: null } },
+    ],
+    ['removeWatchedFolder', (b) => b.removeWatchedFolder('w-1'), { removeWatchedFolder: { id: 'w-1' } }],
+    ['previewWatchedFolder', (b) => b.previewWatchedFolder('w-1'), { previewWatchedFolder: { id: 'w-1' } }],
+    ['sweepWatchedFolder', (b) => b.sweepWatchedFolder('w-1'), { sweepWatchedFolder: { id: 'w-1' } }],
   ];
 
   it.each(cases)('%s sends the externally tagged request through the dyno command', async (_name, call, request) => {
@@ -85,6 +100,13 @@ describe('TauriBackend: request shapes', () => {
     const { backend, invoke } = fake();
     await backend.saveIssues(30);
     expect(invoke).toHaveBeenCalledWith('save_issues', { days: 30 });
+  });
+
+  it('addWatchedFolder asks the shell for the folder dialog and never sends a path from the webview', async () => {
+    const { backend, invoke } = fake();
+    await backend.addWatchedFolder({ template: 'installers', keepForSecs: 600, recursive: false });
+    expect(invoke).toHaveBeenCalledWith('add_watched_folder', { template: 'installers', keepForSecs: 600, recursive: false });
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('path');
   });
 
   it('popoverResize sends the measured height to popover_resize', async () => {

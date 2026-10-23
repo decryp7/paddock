@@ -234,6 +234,59 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await page.clock.runFor(500);
     },
   },
+  {
+    name: 'watched-folders',
+    path: '/#/watched',
+    ready: async (page) => {
+      await expect(page.getByRole('table', { name: 'Watched folders' }).locator('tbody tr')).toHaveCount(3);
+      await page.getByRole('row', { name: /Downloads/ }).hover();
+    },
+  },
+  {
+    name: 'watched-folders-preview',
+    path: '/#/watched',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'See what would move in Downloads' }).click({ force: true });
+      await expect(page.getByRole('dialog', { name: 'What would move' }).locator('tbody tr').first()).toBeVisible();
+    },
+  },
+  {
+    name: 'watched-folders-add',
+    path: '/#/watched',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'Add folder' }).click();
+      await expect(page.getByRole('dialog', { name: 'Watch a folder' })).toBeVisible();
+    },
+  },
+  {
+    name: 'web-search',
+    path: '/#/issues',
+    ready: async (page) => {
+      await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Search the web…' }).click();
+      await expect(page.getByRole('dialog', { name: 'Search the web' }).getByText(/Removed from the text/)).toBeVisible();
+    },
+  },
+  {
+    name: 'hash-search',
+    path: '/#/processes',
+    ready: async (page) => {
+      await page.getByRole('button', { name: 'All', exact: true }).click();
+      await page.getByLabel('Filter processes').fill('rustc');
+      await page.locator('[role=row][data-key^="p"]').first().click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Search file hash on VirusTotal…' }).click();
+      await expect(page.getByRole('dialog', { name: /VirusTotal/ }).getByLabel('SHA-256 hash')).toBeVisible();
+    },
+  },
+  {
+    name: 'health-startup-filter',
+    path: '/#/health',
+    size: { width: 1440, height: 1100 },
+    ready: async (page) => {
+      await page.getByRole('button', { name: /Hide system entries/ }).click();
+      await expect(page.getByText(/hidden by the filter/)).toBeVisible();
+    },
+  },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my PC slow?' })).toBeVisible()) },
   {
     name: 'throttling',

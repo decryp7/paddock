@@ -19,5 +19,6 @@ pub mod powercfg;
 pub mod sock_diag;
 pub mod startup_approved;
 pub mod time;
+pub mod wifi;
 pub mod win_estats;
 pub mod win_facts;

@@ -64,6 +64,15 @@ import type {
   SavedIssues,
   UnusualAction,
   UnusualOverview,
+  AddWatchedFolder,
+  FileHashInfo,
+  HashSource,
+  SearchSeed,
+  StartupFilter,
+  StartupOverview,
+  WatchChange,
+  WatchOverview,
+  WatchPreview,
 } from './api.types';
 
 /** Stops a subscription. */
@@ -210,6 +219,31 @@ export interface DynoBackend {
   unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview>;
   /** Forgets the baseline of programs; learning starts again. */
   forgetBaseline(): Promise<UnusualOverview>;
+
+  // Right-click search (WP-09), hash search (WP-33) and the startup filter (WP-34). Nothing is fetched or uploaded by Dyno: the
+  // shell opens the default browser on the click.
+  /** The redacted starting text for a web search about `text`. */
+  searchSeed(text: string): Promise<SearchSeed>;
+  /** Opens a web search for exactly this text in the default browser. */
+  webSearch(query: string): Promise<void>;
+  /** The SHA-256 of a program's file, computed here. */
+  fileHash(source: HashSource): Promise<FileHashInfo>;
+  /** Opens the VirusTotal page of a hash in the default browser. */
+  openVirusTotal(sha256: string): Promise<void>;
+  /** The startup entries after hiding the OS's and signed ones, with the counts. */
+  startupOverview(filter: StartupFilter): Promise<StartupOverview>;
+
+  // Watched folders (WP-10): files older than the keep-for time move to the 7-day quarantine, only in folders the person
+  // chose, configured, previewed and turned on.
+  watchedFolders(): Promise<WatchOverview>;
+  /** Opens the OS folder dialog and adds the chosen folder (switched off); `null` when they cancel. */
+  addWatchedFolder(request: AddWatchedFolder): Promise<WatchOverview | null>;
+  setWatchedFolder(id: string, change: WatchChange): Promise<WatchOverview>;
+  removeWatchedFolder(id: string): Promise<WatchOverview>;
+  /** A dry run: what a sweep would move now. Needed before a folder can be turned on. */
+  previewWatchedFolder(id: string): Promise<WatchPreview>;
+  /** Sweeps now (after the preview); answers the list. */
+  sweepWatchedFolder(id: string): Promise<WatchOverview>;
 
   // The tray dropdown window.
   /** Shows and focuses the main window (and hides the tray dropdown). */

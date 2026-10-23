@@ -14,7 +14,9 @@
 use crate::Platform;
 use dyno_core::facts::SystemFacts;
 use dyno_core::metrics::{CpuSample, DiskIo, MemoryPressure, MemorySample, Reading, SystemSample};
-use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessControl, ProcessSource, StartupItems, SystemSensors, UserActivity};
+use dyno_core::ports::{
+    FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessControl, ProcessSource, StartupItems, SystemSensors, UserActivity,
+};
 use dyno_core::process::{ListOrReason, Locker, Pid, ProcessAction, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use dyno_core::startup::{StartupEntry, StartupState};
 use dyno_core::time::Timestamp;
@@ -62,6 +64,8 @@ pub struct FakeState {
     pub idle_secs: Option<u64>,
     /// The foreground process.
     pub foreground: Option<Pid>,
+    /// What the network looks like now (default: nothing; `None` makes the read fail).
+    pub net: Option<dyno_core::netchange::NetState>,
     /// Injected failures and how many more calls they affect (`None`: every call).
     pub failures: HashMap<FakeOp, (PlatformError, Option<u32>)>,
 }
@@ -154,12 +158,22 @@ impl Fake {
             facts: Box::new(self.clone()),
             activity: Box::new(self.clone()),
             issues: Vec::new(),
+            links: Box::new(self.clone()),
         }
     }
 }
 
 fn lock(m: &Mutex<FakeState>) -> MutexGuard<'_, FakeState> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl NetworkLinks for Fake {
+    fn links(&self) -> Result<dyno_core::netchange::NetState, PlatformError> {
+        self.lock()
+            .net
+            .clone()
+            .ok_or_else(|| PlatformError::Unsupported("The fake machine has no network state.".into()))
+    }
 }
 
 impl SystemSensors for Fake {

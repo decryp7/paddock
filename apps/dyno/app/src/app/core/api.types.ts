@@ -349,7 +349,7 @@ export interface HistoryPoint {
   temperature: number | null;
 }
 
-export type TimelineEventKind = 'throttle' | 'cap' | 'release' | 'cleanup' | 'tuning' | 'alert' | 'boot';
+export type TimelineEventKind = 'throttle' | 'cap' | 'release' | 'cleanup' | 'tuning' | 'alert' | 'boot' | 'network';
 
 export interface TimelineEvent {
   at: Timestamp;
@@ -1731,4 +1731,136 @@ export interface UnusualSettings {
   enabled: boolean;
   /** 0 to 60 days of silent learning. */
   learningDays: number;
+}
+
+// ------------------------------------------------------------------------------- right-click search, hash search, startup filter
+// Mirrors `dyno_core::weblinks` and `dyno_core::startup` (WP-09, WP-33, WP-34). Dyno never fetches or uploads anything: the
+// shell opens the browser on the click, with an address the engine built from a typed value.
+
+/** The starting text of a web search and what was removed from it. */
+export interface SearchSeed {
+  /** Redacted: home folders, user and computer names, addresses, GUIDs and serial numbers are gone. Editable before searching. */
+  text: string;
+  /** In words: "1 home folder", "2 IP addresses". Empty when nothing was removed. */
+  removed: string[];
+}
+
+/** Where the file to hash comes from. */
+export type HashSource = { process: ProcessRef } | { path: string };
+
+/** A file's SHA-256, computed on this computer. */
+export interface FileHashInfo {
+  path: string;
+  bytes: number;
+  /** 64 lower-case hexadecimal digits. */
+  sha256: string;
+}
+
+/** What the startup manager hides. */
+export interface StartupFilter {
+  hideOs: boolean;
+  hideSigned: boolean;
+}
+
+/** The startup list after the filter, with the counts the toggles show (independent of the filter). */
+export interface StartupOverview {
+  entries: StartupEntry[];
+  total: number;
+  osCount: number;
+  signedCount: number;
+}
+
+// ------------------------------------------------------------------------------------------------------ watched folders
+// Mirrors `dyno_core::watch` (WP-10, ADR 0019). Files move only to the 7-day quarantine, only in folders the person chose.
+
+export interface WatchFilter {
+  /** Without the dot, lower case. Empty lists (both) match every file. */
+  extensions: string[];
+  nameStarts: string[];
+}
+
+export interface SweepSummary {
+  at: Timestamp;
+  moved: number;
+  bytes: number;
+  failed: number;
+  firstFailure: string | null;
+  /** The quarantine holding them; Activity can undo the sweep. */
+  quarantineId: string | null;
+}
+
+export interface WatchedFolder {
+  id: string;
+  path: string;
+  /** 600 to 864 000 seconds. */
+  keepForSecs: number;
+  filter: WatchFilter;
+  recursive: boolean;
+  enabled: boolean;
+  /** The preview of the current settings was shown; a folder cannot be turned on before that. */
+  previewed: boolean;
+  template: string | null;
+  added: Timestamp;
+  lastSweep: SweepSummary | null;
+}
+
+export interface WatchedFolderView {
+  folder: WatchedFolder;
+  exists: boolean;
+  filterText: string;
+  nextSweep: Timestamp | null;
+}
+
+export interface WatchTemplateInfo {
+  id: string;
+  name: string;
+  about: string;
+  keepForSecs: number;
+  recursive: boolean;
+  filterText: string;
+}
+
+export interface WatchOverview {
+  folders: WatchedFolderView[];
+  templates: WatchTemplateInfo[];
+}
+
+export interface DueFile {
+  path: string;
+  bytes: number;
+  arrived: Timestamp;
+  modified: Timestamp;
+}
+
+export interface SweepPlan {
+  /** Oldest first; the preview lists at most 200, the totals are complete. */
+  due: DueFile[];
+  dueTotal: number;
+  dueBytes: number;
+  /** Matching files that have not yet stayed long enough. */
+  waiting: number;
+  /** Files the filter does not match. */
+  other: number;
+  links: number;
+  refused: number;
+  truncated: boolean;
+}
+
+export interface WatchPreview {
+  id: string;
+  plan: SweepPlan;
+}
+
+/** What to change about a watched folder; absent fields stay as they are. */
+export interface WatchChange {
+  keepForSecs?: number;
+  enabled?: boolean;
+  recursive?: boolean;
+}
+
+/** The settings chosen in "Add folder" before the OS folder dialog opens (the folder itself is only ever chosen there). */
+export interface AddWatchedFolder {
+  template: string | null;
+  keepForSecs: number;
+  recursive: boolean;
 }

@@ -33,6 +33,7 @@ export const routes: Routes = [
       { path: 'alarms', title: 'Alarms · Dyno', loadComponent: () => import('./features/alarms/alarms-page').then((m) => m.AlarmsPage) },
       { path: 'recorder', title: 'Flight recorder · Dyno', loadComponent: () => import('./features/recorder/recorder-page').then((m) => m.RecorderPage) },
       { path: 'diagnostics', title: 'Diagnostics · Dyno', loadComponent: () => import('./features/diagnostics/diagnostics-page').then((m) => m.DiagnosticsPage) },
+      { path: 'watched', title: 'Watched folders · Dyno', loadComponent: () => import('./features/watched/watched-page').then((m) => m.WatchedPage) },
       { path: 'cleanup', title: 'Cleanup · Dyno', loadComponent: () => import('./features/cleanup/cleanup-page').then((m) => m.CleanupPage) },
       { path: 'health', title: 'Health · Dyno', loadComponent: () => import('./features/health/health-page').then((m) => m.HealthPage) },
       { path: 'lifespan', title: 'Disk and battery life · Dyno', loadComponent: () => import('./features/lifespan/lifespan-page').then((m) => m.LifespanPage) },

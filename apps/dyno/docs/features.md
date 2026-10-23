@@ -221,6 +221,18 @@ a memory cap and quarantine) are built and listed in Settings; their contributio
 Declarative TOML packs are planned ([WP-15](roadmap.md#wp-15-declarative-toml-packs)). See [plugins.md](plugins.md) and
 [ADR 0007](adr/0007-extensibility-three-tiers.md).
 
+## Right-click search, hash search and watched folders
+
+- **Search the web** (Processes, Network, Issues, New and unusual menus): a dialog with the text, private details removed
+  (home folders, user and computer names, IP and e-mail addresses, GUIDs, serial numbers) and what was removed. Edit it; nothing
+  leaves the computer until Search, which opens your browser.
+- **Search file hash on VirusTotal**: Dyno computes the SHA-256 on your computer, shows it, and on a click opens VirusTotal's page
+  for that hash. Nothing is uploaded.
+- **Startup filter** (Health): hide the operating system's entries and signed apps, with counts; remembered.
+- **Network changes on the timeline**: Wi-Fi joins and leaves, VPN up and down, IPv4 address changes.
+- **Watched folders**: pick a folder and how long files may stay (10 minutes to 10 days); older files move to the 7-day
+  quarantine and can be put back from Activity. A folder is off until you have seen the preview.
+
 ## Planned features
 
 All in [roadmap.md](roadmap.md): Issues with statistics, new and unusual processes, right-click search, watched folders with

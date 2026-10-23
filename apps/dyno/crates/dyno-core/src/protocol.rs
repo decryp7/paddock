@@ -409,6 +409,77 @@ pub enum Request {
     },
     /// Forgets the baseline of programs; learning starts again. Appended.
     ForgetBaseline,
+
+    // ---- right-click search, hash search, startup filter, watched folders (WP-09, WP-33, WP-34, WP-10) ----
+    /// The redacted starting text of a web search for `text` (home folders, user and computer names, addresses, GUIDs,
+    /// serial numbers removed) and what was removed. A query; nothing is sent anywhere. Appended.
+    SearchSeed {
+        /// What the person right-clicked (a process name, an issue title, ...).
+        text: String,
+    },
+    /// The address of a web search for exactly this text (answers `Url`; the shell opens it in the default browser on the
+    /// click, Dyno never fetches it). Appended.
+    WebSearch {
+        /// The text the person confirmed.
+        query: String,
+    },
+    /// The SHA-256 of a program's file, computed here (cached by path, size and modification time). Nothing is uploaded.
+    /// Appended.
+    FileHash {
+        /// Which file.
+        source: crate::weblinks::HashSource,
+    },
+    /// The VirusTotal page of a hash (answers `Url`; the shell opens it in the default browser). Appended.
+    VirusTotalUrl {
+        /// 64 hexadecimal digits.
+        sha256: String,
+    },
+    /// The startup entries after hiding the operating system's and signed ones, with the counts. A query. Appended.
+    StartupOverview {
+        /// What to hide.
+        filter: crate::startup::StartupFilter,
+    },
+    /// The watched folders. A query. Appended.
+    WatchedFolders,
+    /// Adds a watched folder, switched off until its preview was shown. Sent only by the shell, after the person chose the
+    /// folder in the OS dialog (the webview's own requests for it are refused). Answers the list. Appended.
+    AddWatchedFolder {
+        /// The folder the person chose.
+        path: String,
+        /// A template to start from.
+        template: Option<String>,
+        /// How long files may stay, seconds.
+        keep_for_secs: u32,
+        /// Include subfolders.
+        recursive: bool,
+    },
+    /// Changes a watched folder; turning one on needs its preview first. Answers the list. Appended.
+    SetWatchedFolder {
+        /// The folder.
+        id: String,
+        /// A new keep-for time, seconds.
+        keep_for_secs: Option<u32>,
+        /// Turn sweeping on or off.
+        enabled: Option<bool>,
+        /// Include subfolders or not.
+        recursive: Option<bool>,
+    },
+    /// Stops watching a folder; its files are left alone. Answers the list. Appended.
+    RemoveWatchedFolder {
+        /// The folder.
+        id: String,
+    },
+    /// What a sweep of the folder would move right now (a dry run; changes nothing except remembering the preview).
+    /// Appended.
+    PreviewWatchedFolder {
+        /// The folder.
+        id: String,
+    },
+    /// Sweeps the folder now, after its preview. Answers the list. Appended.
+    SweepWatchedFolder {
+        /// The folder.
+        id: String,
+    },
 }
 
 /// Dyno's own cost.
@@ -481,6 +552,8 @@ pub enum TimelineEventKind {
     Alert,
     /// The machine started.
     Boot,
+    /// A Wi-Fi join or leave, a VPN coming up or going down, or an IP address change. Appended.
+    Network,
 }
 
 /// One boot.
@@ -682,6 +755,18 @@ pub enum Reply {
     IssuesSaved(crate::issues::SavedIssues),
     /// New and unusual programs. Appended.
     Unusual(Box<crate::unusual::UnusualOverview>),
+
+    // ---- right-click search, hash search, startup filter, watched folders ----
+    /// The starting text of a search. Appended.
+    SearchSeed(crate::weblinks::SearchSeed),
+    /// A file's hash. Appended.
+    FileHash(crate::weblinks::FileHashInfo),
+    /// The filtered startup list. Appended.
+    StartupOverview(Box<crate::startup::StartupOverview>),
+    /// The watched folders. Appended.
+    Watched(Box<crate::watch::WatchOverview>),
+    /// A dry run of a sweep. Appended.
+    WatchPreview(Box<crate::watch::WatchPreview>),
 }
 
 impl Reply {
@@ -740,6 +825,11 @@ impl Reply {
             Reply::Issues(x) => v(x),
             Reply::IssuesSaved(x) => v(x),
             Reply::Unusual(x) => v(x),
+            Reply::SearchSeed(x) => v(x),
+            Reply::FileHash(x) => v(x),
+            Reply::StartupOverview(x) => v(x),
+            Reply::Watched(x) => v(x),
+            Reply::WatchPreview(x) => v(x),
         }
     }
 }
@@ -1081,5 +1171,102 @@ mod tests {
             items: vec![],
         }));
         assert_eq!(base.into_json().unwrap()["learning"]["learning"]["daysNeeded"], 7);
+    }
+}
+
+#[cfg(test)]
+mod search_watch_tests {
+    use super::*;
+
+    fn round<T: Serialize + serde::de::DeserializeOwned>(v: &T) -> T {
+        postcard::from_bytes(&postcard::to_stdvec(v).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn the_new_requests_have_the_json_shape_of_api_types() {
+        let j = |r: Request| serde_json::to_value(r).unwrap();
+        assert_eq!(
+            j(Request::SearchSeed { text: "x".into() }),
+            serde_json::json!({"searchSeed": {"text": "x"}})
+        );
+        assert_eq!(
+            j(Request::WebSearch { query: "q".into() }),
+            serde_json::json!({"webSearch": {"query": "q"}})
+        );
+        assert_eq!(
+            j(Request::FileHash {
+                source: crate::weblinks::HashSource::Path("/a".into())
+            }),
+            serde_json::json!({"fileHash": {"source": {"path": "/a"}}})
+        );
+        assert_eq!(
+            j(Request::StartupOverview {
+                filter: crate::startup::StartupFilter {
+                    hide_os: true,
+                    hide_signed: false
+                }
+            }),
+            serde_json::json!({"startupOverview": {"filter": {"hideOs": true, "hideSigned": false}}})
+        );
+        assert_eq!(j(Request::WatchedFolders), serde_json::json!("watchedFolders"));
+        assert_eq!(
+            j(Request::SetWatchedFolder {
+                id: "w-1".into(),
+                keep_for_secs: Some(600),
+                enabled: None,
+                recursive: None
+            }),
+            serde_json::json!({"setWatchedFolder": {"id": "w-1", "keepForSecs": 600, "enabled": null, "recursive": null}})
+        );
+        assert_eq!(serde_json::to_value(TimelineEventKind::Network).unwrap(), "network");
+    }
+
+    #[test]
+    fn the_new_requests_and_replies_survive_the_wire() {
+        let reqs = vec![
+            Request::SearchSeed { text: "a".into() },
+            Request::WebSearch { query: "b".into() },
+            Request::FileHash {
+                source: crate::weblinks::HashSource::Process(ProcessRef {
+                    pid: 3,
+                    started: Timestamp(4),
+                }),
+            },
+            Request::VirusTotalUrl { sha256: "0".repeat(64) },
+            Request::StartupOverview {
+                filter: Default::default(),
+            },
+            Request::WatchedFolders,
+            Request::AddWatchedFolder {
+                path: "/x".into(),
+                template: Some("installers".into()),
+                keep_for_secs: 600,
+                recursive: true,
+            },
+            Request::SetWatchedFolder {
+                id: "w-1".into(),
+                keep_for_secs: None,
+                enabled: Some(true),
+                recursive: Some(false),
+            },
+            Request::RemoveWatchedFolder { id: "w-1".into() },
+            Request::PreviewWatchedFolder { id: "w-1".into() },
+            Request::SweepWatchedFolder { id: "w-1".into() },
+        ];
+        for r in reqs {
+            assert_eq!(round(&r), r);
+        }
+        let seed = Reply::SearchSeed(crate::weblinks::SearchSeed {
+            text: "t".into(),
+            removed: vec!["1 IP address".into()],
+        });
+        assert_eq!(round(&seed), seed);
+        assert_eq!(seed.into_json().unwrap()["removed"][0], "1 IP address");
+        let watched = Reply::Watched(Box::new(crate::watch::WatchOverview {
+            folders: vec![],
+            templates: crate::watch::template_infos(),
+        }));
+        assert_eq!(round(&watched), watched);
+        assert_eq!(watched.into_json().unwrap()["templates"][0]["id"], "installers");
     }
 }

@@ -9,6 +9,7 @@ import { Icon } from '../../shared/icon';
 import { ISSUE_KIND_LABEL, ISSUE_SOURCE_LABEL, type Tone } from '../../shared/labels';
 import { Notifier } from '../../shared/notifier';
 import { ISSUE_WINDOWS, IssuesStore } from '../../state/issues.store';
+import { Lookups } from '../lookup/lookups';
 import {
   type IssueFilter,
   type IssueRow,
@@ -166,6 +167,7 @@ import {
     <ng-template #menu let-issue="issue">
       <div class="menu" cdkMenu aria-label="Issue actions">
         <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="copy(issue)"><dy-icon name="copy" /> Copy details</button>
+        <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="searchWeb(issue)"><dy-icon name="search" /> Search the web…</button>
         @if (issue.app) { <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="setFilter({ app: issue.app })"><dy-icon name="filter" /> Only this app</button> }
         <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="setFilter({ kind: issue.kind })"><dy-icon name="filter" /> Only this kind</button>
       </div>
@@ -245,6 +247,7 @@ export class IssuesView {
   protected readonly store = inject(IssuesStore);
   private readonly theme = inject(ThemeService);
   private readonly notifier = inject(Notifier);
+  private readonly lookups = inject(Lookups);
   protected readonly windows = ISSUE_WINDOWS;
   protected readonly filter = signal<IssueFilter>(NO_FILTER);
   protected readonly selectedId = signal<string | null>(null);
@@ -328,6 +331,11 @@ export class IssuesView {
 
   protected when(i: Issue): string {
     return `${formatDate(i.at, this.now())}, ${formatClock(i.at)}`;
+  }
+
+  /** Searches for the OS's title and evidence for the issue (the engine removes private details before the text is shown). */
+  protected searchWeb(i: Issue): void {
+    void this.lookups.searchWeb(`${i.title}. ${i.evidence}`, i.app || i.title);
   }
 
   protected async copy(i: Issue, e?: Event): Promise<void> {

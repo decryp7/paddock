@@ -71,6 +71,15 @@ import type {
   UnusualAction,
   UnusualItem,
   UnusualOverview,
+  AddWatchedFolder,
+  FileHashInfo,
+  HashSource,
+  SearchSeed,
+  StartupFilter,
+  StartupOverview,
+  WatchChange,
+  WatchOverview,
+  WatchPreview,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import {
@@ -94,6 +103,7 @@ import { MockCounters, demoCounterSettings } from './mock/counters';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
+import { MockWatch, mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/extras';
 import { mockHistory } from './mock/history';
 import { mockBaselines, mockLifespan, mockThrottling } from './mock/hardware';
 import { mockInventory } from './mock/inventory';
@@ -1109,6 +1119,89 @@ export class MockBackend implements DynoBackend {
       if (/^(10\.|127\.|192\.168\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip) || ip === '::1') throw err('badRequest', 'Private address, nothing to look up.');
       this.opened.push(tpl.replace('{ip}', ip));
     });
+  }
+
+  private watchValue: MockWatch | null = null;
+
+  /** Created on first use, because the clock is set by the constructor. */
+  private get watch(): MockWatch {
+    return (this.watchValue ??= new MockWatch(() => this.now()));
+  }
+
+  searchSeed(text: string): Promise<SearchSeed> {
+    return this.reply('searchSeed', () => mockSearchSeed(text));
+  }
+
+  webSearch(query: string): Promise<void> {
+    return this.reply('webSearch', () => {
+      try {
+        this.opened.push(mockSearchUrl(query));
+      } catch (e) {
+        throw err('badRequest', (e as Error).message);
+      }
+    });
+  }
+
+  fileHash(source: HashSource): Promise<FileHashInfo> {
+    return this.reply('fileHash', () => {
+      const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
+      if (!path.startsWith('/') && !/^[A-Za-z]:\\/.test(path)) throw err('notFound', 'That is not a full path to a file.');
+      return { path, bytes: 48_231_424, sha256: mockHash(path) };
+    });
+  }
+
+  openVirusTotal(sha256: string): Promise<void> {
+    return this.reply('openVirusTotal', () => {
+      if (!/^[0-9a-f]{64}$/i.test(sha256)) throw err('badRequest', 'A SHA-256 hash has 64 hexadecimal digits.');
+      this.opened.push(`https://www.virustotal.com/gui/file/${sha256.toLowerCase()}`);
+    });
+  }
+
+  startupOverview(filter: StartupFilter): Promise<StartupOverview> {
+    return this.reply('startupOverview', () => copy(mockStartupOverview(this.startup, filter)));
+  }
+
+  watchedFolders(): Promise<WatchOverview> {
+    return this.reply('watchedFolders', () => this.watch.overview());
+  }
+
+  addWatchedFolder(request: AddWatchedFolder): Promise<WatchOverview | null> {
+    return this.reply('addWatchedFolder', () => this.guard(() => this.watch.add(request.template, request.keepForSecs, request.recursive)));
+  }
+
+  setWatchedFolder(id: string, change: WatchChange): Promise<WatchOverview> {
+    return this.reply('setWatchedFolder', () => this.guard(() => this.watch.change(id, change)));
+  }
+
+  removeWatchedFolder(id: string): Promise<WatchOverview> {
+    return this.reply('removeWatchedFolder', () => this.guard(() => this.watch.remove(id)));
+  }
+
+  previewWatchedFolder(id: string): Promise<WatchPreview> {
+    return this.reply('previewWatchedFolder', () => this.guard(() => this.watch.preview(id)));
+  }
+
+  sweepWatchedFolder(id: string): Promise<WatchOverview> {
+    return this.reply('sweepWatchedFolder', () =>
+      this.guard(() => {
+        const out = this.watch.sweep(id);
+        const f = out.folders.find((v) => v.folder.id === id)?.folder;
+        if (f?.lastSweep && f.lastSweep.moved > 0) {
+          this.log('cleanup', `Moved ${f.lastSweep.moved} old files out of ${f.path.split('/').pop()}`, 'Held in the 7-day quarantine. Undo puts them back.', 'available');
+        }
+        return out;
+      }),
+    );
+  }
+
+  /** Turns a plain Error from the pure mock helpers into the contract's bad-request error. */
+  private guard<T>(body: () => T): T {
+    try {
+      return body();
+    } catch (e) {
+      if (e instanceof Error) throw err('badRequest', e.message);
+      throw e;
+    }
   }
 
   private benchRuns: BenchRun[] | null = null;

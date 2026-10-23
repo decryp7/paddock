@@ -84,6 +84,11 @@ impl Dirs {
         self.root.join("packs")
     }
 
+    /// The watched folders (WP-10).
+    pub fn watched_folders(&self) -> PathBuf {
+        self.root.join("watched-folders.json")
+    }
+
     /// Where cleaned items wait for seven days.
     pub fn quarantine(&self) -> PathBuf {
         self.root.join("quarantine")
@@ -108,6 +113,7 @@ mod tests {
             d.plugins(),
             d.packs(),
             d.quarantine(),
+            d.watched_folders(),
         ] {
             assert!(p.starts_with("/x/dyno"));
         }

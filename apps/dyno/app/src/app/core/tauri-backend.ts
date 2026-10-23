@@ -65,6 +65,15 @@ import type {
   SavedIssues,
   UnusualAction,
   UnusualOverview,
+  AddWatchedFolder,
+  FileHashInfo,
+  HashSource,
+  SearchSeed,
+  StartupFilter,
+  StartupOverview,
+  WatchChange,
+  WatchOverview,
+  WatchPreview,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -81,6 +90,9 @@ export type DynoRequest = string | Record<string, Record<string, unknown>>;
 export const REQUEST_TIMEOUT_MS = 15_000;
 /** A command that waits for the person at an OS dialog may take as long as they do (within reason). */
 export const DIALOG_TIMEOUT_MS = 10 * 60_000;
+/** Hashing a large program or listing a big watched folder may take longer than an ordinary request. */
+export const HASH_TIMEOUT_MS = 60_000;
+export const PREVIEW_TIMEOUT_MS = 60_000;
 /** Reading the system logs can take a minute or two on a busy PC (the shell waits 150 s for the agent). */
 export const LOG_READ_TIMEOUT_MS = 160_000;
 
@@ -451,6 +463,62 @@ export class TauriBackend implements DynoBackend {
   /** The shell shows the OS save dialog (the webview never sees a path it chose itself) and asks the agent to write there. */
   saveDiagnostics(): Promise<SavedDiagnostics | null> {
     return this.command<SavedDiagnostics | null>('save_diagnostics', undefined, DIALOG_TIMEOUT_MS);
+  }
+
+  // ------------------------------------------------------------------------- search, hash search, startup filter
+
+  searchSeed(text: string): Promise<SearchSeed> {
+    return this.request({ searchSeed: { text } });
+  }
+
+  /** The agent builds the address from the text; the shell opens it in the default browser. */
+  webSearch(query: string): Promise<void> {
+    return this.request({ webSearch: { query } });
+  }
+
+  fileHash(source: HashSource): Promise<FileHashInfo> {
+    return this.request({ fileHash: { source } }, HASH_TIMEOUT_MS);
+  }
+
+  openVirusTotal(sha256: string): Promise<void> {
+    return this.request({ virusTotalUrl: { sha256 } });
+  }
+
+  startupOverview(filter: StartupFilter): Promise<StartupOverview> {
+    return this.request({ startupOverview: { filter } });
+  }
+
+  // ------------------------------------------------------------------------------------------- watched folders
+
+  watchedFolders(): Promise<WatchOverview> {
+    return this.request('watchedFolders');
+  }
+
+  /** The shell shows the OS folder dialog (the webview never names the folder) and asks the agent to add the choice. */
+  addWatchedFolder(request: AddWatchedFolder): Promise<WatchOverview | null> {
+    return this.command<WatchOverview | null>(
+      'add_watched_folder',
+      { template: request.template, keepForSecs: request.keepForSecs, recursive: request.recursive },
+      DIALOG_TIMEOUT_MS,
+    );
+  }
+
+  setWatchedFolder(id: string, change: WatchChange): Promise<WatchOverview> {
+    return this.request({
+      setWatchedFolder: { id, keepForSecs: change.keepForSecs ?? null, enabled: change.enabled ?? null, recursive: change.recursive ?? null },
+    });
+  }
+
+  removeWatchedFolder(id: string): Promise<WatchOverview> {
+    return this.request({ removeWatchedFolder: { id } });
+  }
+
+  previewWatchedFolder(id: string): Promise<WatchPreview> {
+    return this.request({ previewWatchedFolder: { id } }, PREVIEW_TIMEOUT_MS);
+  }
+
+  sweepWatchedFolder(id: string): Promise<WatchOverview> {
+    return this.request({ sweepWatchedFolder: { id } }, PREVIEW_TIMEOUT_MS);
   }
 
   // ------------------------------------------------------------------------------------------------ benchmarks

@@ -52,6 +52,7 @@ pub fn platform(state_file: PathBuf) -> Platform {
         facts: Box::new(facts::LinuxFacts::new(paths, facts::FactPaths::host(), tools.clone())),
         activity: Box::new(activity::LinuxActivity::from_env(tools)),
         issues: crate::issues::os_sources(),
+        links: Box::new(crate::links::OsLinks::new()),
     }
 }
 

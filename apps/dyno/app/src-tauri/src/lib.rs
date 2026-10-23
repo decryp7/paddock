@@ -44,6 +44,7 @@ pub fn run() {
             commands::save_diagnostics,
             commands::save_report,
             commands::save_issues,
+            commands::add_watched_folder,
         ])
         .on_window_event(|win, event| match event {
             tauri::WindowEvent::Destroyed => {

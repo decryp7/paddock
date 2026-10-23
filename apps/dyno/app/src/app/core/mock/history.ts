@@ -81,7 +81,10 @@ function events(from: number, to: number, now: number, step: number): TimelineEv
   // The build running now.
   if (now - 4 * MIN >= from && now - 4 * MIN <= to) out.push({ at: now - 4 * MIN, kind: 'throttle', label: 'Lowered priority of rustc.exe (Tame long CPU hogs)' });
   const fixed: TimelineEvent[] = [
+    { at: now - 35 * MIN, kind: 'network', label: 'Joined Wi-Fi “Studio”' },
+    { at: now - 58 * MIN, kind: 'network', label: 'VPN up (utun4)' },
     { at: now - 72 * MIN, kind: 'cleanup', label: 'Cleanup freed 4.6 GB' },
+    { at: now - 3 * HOUR, kind: 'network', label: 'IP address on en0 changed: 192.168.1.23 → 192.168.1.41' },
     { at: now - 5 * HOUR, kind: 'tuning', label: 'Lighter visual effects' },
     { at: now - 27 * HOUR, kind: 'alert', label: 'Memory pressure high' },
     { at: now - 2 * DAY, kind: 'cleanup', label: 'Scheduled cleanup freed 6.1 GB' },
