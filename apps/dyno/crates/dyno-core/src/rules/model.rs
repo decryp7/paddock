@@ -182,6 +182,10 @@ pub struct Rule {
     pub release_after_secs: u32,
     /// Profiles it is active in (empty: all).
     pub profiles: Vec<ProfileId>,
+    /// A temporary rule: when this moment passes, the rule releases everything it did and switches itself off (WP-36).
+    /// Absent: the rule stays until the user turns it off.
+    #[serde(default)]
+    pub expires_at: Option<Timestamp>,
 }
 
 /// The user's rules, protected list, profile and pause switch (persisted by the agent).
@@ -221,6 +225,18 @@ pub const MAX_RULES: usize = 100;
 pub const MAX_STEPS: usize = 8;
 
 impl RuleSet {
+    /// Switches off the temporary rules whose time has come and clears their expiry; returns their names. The engine has
+    /// already stopped them acting (an expired rule is inactive), so this only makes the change visible and permanent.
+    pub fn expire(&mut self, now: Timestamp) -> Vec<String> {
+        let mut names = Vec::new();
+        for r in self.rules.iter_mut().filter(|r| r.expires_at.is_some_and(|e| now >= e)) {
+            r.enabled = false;
+            r.expires_at = None;
+            names.push(r.name.clone());
+        }
+        names
+    }
+
     /// Fills in the display-only fields.
     pub fn for_display(mut self) -> RuleSet {
         self.built_in_protected = protect::built_in();
@@ -291,6 +307,9 @@ pub fn validate_rule(r: &Rule) -> Result<(), String> {
     if !(5..=3_600).contains(&r.release_after_secs) {
         return Err(format!("{name}: release after 5 seconds to 1 hour."));
     }
+    if r.expires_at.is_some_and(|e| e.millis() <= 0) {
+        return Err(format!("{name}: the end time is not a valid moment."));
+    }
     Ok(())
 }
 
@@ -310,6 +329,7 @@ pub fn default_rules() -> Vec<Rule> {
         ladder,
         release_after_secs: 30,
         profiles,
+        expires_at: None,
     };
     vec![
         rule(
@@ -405,6 +425,10 @@ pub struct ActiveAction {
     pub description: String,
     /// Since when.
     pub since: Timestamp,
+    /// The app's CPU (percent of the machine) when the rule started acting.
+    pub cpu_before: f32,
+    /// The app's CPU measured a little after the latest step took effect; absent until it has been measured (WP-36).
+    pub cpu_after: Option<f32>,
 }
 
 #[cfg(test)]

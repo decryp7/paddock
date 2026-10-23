@@ -26,6 +26,8 @@ trash = "5"
 # The diagnostics bundle (MIT; the same build as Debrief's: deflate via the Rust zlib-rs, no C code).
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+# Content hashes for the duplicate file finder (MIT OR Apache-2.0; already in the tree through other dependencies).
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

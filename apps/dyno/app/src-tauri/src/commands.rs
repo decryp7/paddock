@@ -19,6 +19,8 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
     match request {
         // Only the app's own shutdown path may stop the agent.
         Request::Shutdown => Err(CommandError::bad("The window may not stop the agent.")),
+        // The report goes only where the OS save dialog said (`save_inventory_report`), never to a path the webview names.
+        Request::SaveInventoryReport { .. } => Err(CommandError::bad("Use the Export button: it asks where to save the report.")),
         r => Ok(r),
     }
 }
@@ -42,6 +44,91 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
         .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
 }
 
+/// The folders the person picked in the OS folder dialog this session; the file finder may look only in these.
+#[derive(Default)]
+pub struct PickedFolders(std::sync::Mutex<Vec<String>>);
+
+/// The most folders remembered.
+const MAX_PICKED: usize = 16;
+
+impl PickedFolders {
+    /// Remembers a picked folder (its canonical form when it can be resolved).
+    pub fn remember(&self, folder: &str) -> String {
+        let canon = std::fs::canonicalize(folder)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| folder.to_string());
+        let mut list = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        list.retain(|f| f != &canon);
+        list.push(canon.clone());
+        if list.len() > MAX_PICKED {
+            list.remove(0);
+        }
+        canon
+    }
+
+    /// Whether `folder` is one the person picked (compared in canonical form).
+    pub fn allows(&self, folder: &str) -> bool {
+        let canon = std::fs::canonicalize(folder)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| folder.to_string());
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&canon)
+    }
+}
+
+/// "Choose folder..." for the file finder: the OS folder dialog; the answer is the folder (`null` when they cancel) and is
+/// the only kind of folder the finder accepts afterwards.
+#[tauri::command]
+pub async fn pick_folder(app: AppHandle, picked: State<'_, PickedFolders>) -> Result<Value, CommandError> {
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        app.dialog().file().set_title("Choose a folder to look in").blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?;
+    let Some(chosen) = chosen else { return Ok(Value::Null) };
+    let path = chosen
+        .into_path()
+        .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
+    Ok(Value::String(picked.remember(&path.to_string_lossy())))
+}
+
+/// "Export report..." on the Inventory tab: the OS save dialog, then the agent writes the hardware and software report
+/// there. `null` when they cancel.
+#[tauri::command]
+pub async fn save_inventory_report(
+    app: AppHandle,
+    link: State<'_, Arc<AgentLink>>,
+    format: dyno_core::extras::software::InventoryFormat,
+) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let ext = format.extension();
+        let Some(chosen) = app
+            .dialog()
+            .file()
+            .set_title("Save the inventory report")
+            .set_file_name(format!("dyno-inventory.{ext}"))
+            .add_filter("Report", &[ext])
+            .blocking_save_file()
+        else {
+            return Ok(Value::Null);
+        };
+        let path = chosen
+            .into_path()
+            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
+        let reply = link.call(Request::SaveInventoryReport {
+            path: path.to_string_lossy().into_owned(),
+            format,
+        })?;
+        reply
+            .into_json()
+            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
 /// The one command of the engine contract: `invoke('dyno', { request })`.
 #[tauri::command]
 pub async fn dyno(
@@ -49,9 +136,16 @@ pub async fn dyno(
     webview: Webview,
     link: State<'_, Arc<AgentLink>>,
     shell: State<'_, Arc<Shell>>,
+    picked: State<'_, PickedFolders>,
     request: Value,
 ) -> Result<Value, CommandError> {
     let request = parse_request(request)?;
+    // The file finder looks only in a folder the person picked in the OS dialog (`pick_folder`).
+    if let Request::FindFiles { query } = &request {
+        if !picked.allows(&query.folder) {
+            return Err(CommandError::bad("Choose the folder with the Choose folder button first."));
+        }
+    }
     let opens_browser = matches!(request, Request::LookupIp { .. });
     let (link, shell, label) = (link.inner().clone(), shell.inner().clone(), webview.label().to_string());
     let value = tauri::async_runtime::spawn_blocking(move || handle(&link, &shell, &label, request))
@@ -244,6 +338,55 @@ mod tests {
             parse_request(json!({"activity": {"limit": 5}})).unwrap(),
             Request::Activity { limit: 5 }
         ));
+    }
+
+    #[test]
+    fn the_report_path_and_the_finder_folder_cannot_come_from_the_webview() {
+        use serde_json::json;
+        // The report is saved only through the dialog command.
+        assert!(parse_request(json!({"saveInventoryReport": {"path": "/tmp/x.md", "format": "markdown"}})).is_err());
+        // The finder's request parses, but `dyno` refuses a folder nobody picked.
+        let r = parse_request(json!({"findFiles": {"query": {"folder": "/tmp", "minBytes": 1}}})).unwrap();
+        assert!(matches!(r, Request::FindFiles { .. }));
+        let picked = PickedFolders::default();
+        let dir = std::env::temp_dir();
+        let dir = dir.to_string_lossy();
+        assert!(!picked.allows(&dir));
+        let canon = picked.remember(&dir);
+        assert!(picked.allows(&dir) && picked.allows(&canon));
+        assert!(!picked.allows("/definitely/not/picked"));
+        // Only the most recent folders are remembered.
+        for i in 0..(MAX_PICKED + 3) {
+            picked.remember(&format!("/picked/{i}"));
+        }
+        assert!(!picked.allows(&dir));
+        assert!(picked.allows(&format!("/picked/{}", MAX_PICKED + 2)));
+    }
+
+    #[test]
+    fn the_extras_requests_have_the_shape_the_ui_sends() {
+        use serde_json::json;
+        for name in [
+            "sleepBlockers",
+            "bootAnalysis",
+            "appUsage",
+            "gpuProcesses",
+            "softwareInventory",
+            "maintenance",
+            "backup",
+            "refreshBackup",
+        ] {
+            assert!(parse_request(json!(name)).is_ok(), "{name}");
+        }
+        assert!(matches!(
+            parse_request(json!({"changes": {"query": {"hours": 24}}})).unwrap(),
+            Request::Changes { query } if query.hours == 24
+        ));
+        assert!(matches!(
+            parse_request(json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "quarantine"}})).unwrap(),
+            Request::RemoveFoundFiles { .. }
+        ));
+        assert!(parse_request(json!({"removeFoundFiles": {"scanId": "s", "ids": ["a"], "mode": "shred"}})).is_err());
     }
 
     #[test]

@@ -113,6 +113,12 @@ impl NetCentre {
         out
     }
 
+    /// The OS's cumulative bytes per process right now (a read of the traffic port; the OS tool can take seconds), for the
+    /// per-app totals.
+    pub fn counters(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, PlatformError> {
+        self.traffic_source.counters()
+    }
+
     /// Bytes per second per program, or why there are none. The OS tool can take seconds (macOS `nettop`), so this
     /// never waits for it: it returns the last read and starts a refresh in the background when that is stale.
     fn traffic(&self) -> (Vec<TrafficRow>, Option<String>) {

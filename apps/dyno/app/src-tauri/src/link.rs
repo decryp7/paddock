@@ -22,10 +22,20 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a request that reads the system logs may take (the unified log of a busy Mac takes a minute or two).
 pub const LOG_READ_TIMEOUT: Duration = Duration::from_secs(150);
 
+/// How long the extras that run slow OS tools or walk a folder may take (`pmset -g log`, `system_profiler`, a file scan).
+pub const EXTRAS_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// How long to wait for the agent's answer to `request`.
 pub fn timeout_for(request: &Request) -> Duration {
     match request {
         Request::RescanIssues { .. } => LOG_READ_TIMEOUT,
+        Request::SleepBlockers
+        | Request::BootAnalysis
+        | Request::AppUsage
+        | Request::SoftwareInventory
+        | Request::SaveInventoryReport { .. }
+        | Request::FindFiles { .. }
+        | Request::RemoveFoundFiles { .. } => EXTRAS_TIMEOUT,
         _ => REQUEST_TIMEOUT,
     }
 }
@@ -549,6 +559,16 @@ mod tests {
             REQUEST_TIMEOUT
         );
         assert_eq!(timeout_for(&Request::Settings), REQUEST_TIMEOUT);
+        for slow in [
+            Request::SleepBlockers,
+            Request::BootAnalysis,
+            Request::AppUsage,
+            Request::SoftwareInventory,
+        ] {
+            assert_eq!(timeout_for(&slow), EXTRAS_TIMEOUT);
+        }
+        // Backup checks run in the background and are polled, so their requests stay quick.
+        assert_eq!(timeout_for(&Request::RefreshBackup), REQUEST_TIMEOUT);
     }
 
     fn disc(version: &str, protocol: u32) -> Discovery {

@@ -143,13 +143,37 @@ impl Sampler {
     ) -> Vec<Command> {
         let fresh = table.is_some();
         let mut commands = Vec::new();
-        let (rules_run, power) = {
-            let core = lock(&shared.core);
+        let (rules_run, power, ended) = {
+            let mut core = lock(&shared.core);
+            // Temporary rules whose time has come are switched off first; the engine then releases what they did.
+            let expired = core.rules.expire(t);
+            let ended: Vec<_> = if expired.is_empty() {
+                Vec::new()
+            } else {
+                core.save_rules(&shared.dirs);
+                expired
+                    .into_iter()
+                    .map(|name| {
+                        core.log(
+                            t,
+                            ActivityKind::System,
+                            format!("The temporary rule \"{name}\" ended"),
+                            "Everything it did has been given back and the rule is switched off.".into(),
+                            UndoRecord::None,
+                            None,
+                        )
+                    })
+                    .collect()
+            };
             (
-                core.rules.rules.iter().any(|r| r.enabled) && fresh,
+                (core.rules.rules.iter().any(|r| r.enabled) || !core.engine.is_idle()) && fresh,
                 sample.battery.value().map(|b| b.source),
+                ended,
             )
         };
+        for entry in ended {
+            shared.broadcast(&Message::Activity(entry));
+        }
         // Foreground and idle time are OS calls: only when a rule might use them and the table is fresh.
         let sit = rules_run.then(|| situation(shared, power));
         let mut core = lock(&shared.core);
@@ -339,6 +363,30 @@ pub fn apply_commands(shared: &Arc<Shared>, commands: Vec<Command>, t: Timestamp
                         label: format!("{name}: released"),
                     });
                 }
+            }
+            Command::Measured {
+                rule_id,
+                rule_name,
+                app,
+                before,
+                after,
+                after_secs,
+                description,
+            } => {
+                let verdict = if after + 1.0 < before {
+                    "It helped."
+                } else {
+                    "It made little difference."
+                };
+                let entry = lock(&shared.core).log(
+                    t,
+                    ActivityKind::Rule,
+                    format!("Measured: {app} used {before:.0}% CPU before and {after:.0}% after {after_secs} s"),
+                    format!("Rule \"{rule_name}\" ({rule_id}) {description}. {verdict}"),
+                    UndoRecord::None,
+                    None,
+                );
+                shared.broadcast(&Message::Activity(entry));
             }
             Command::Notify { rule_name, app, cpu } => {
                 let mut core = lock(&shared.core);

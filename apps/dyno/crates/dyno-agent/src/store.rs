@@ -22,6 +22,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 mod alarms;
+mod extras;
 mod issues;
 mod recorder;
 
@@ -133,6 +134,7 @@ impl Store {
         conn.execute_batch(alarms::SCHEMA_SQL)?;
         conn.execute_batch(recorder::SCHEMA_SQL)?;
         conn.execute_batch(issues::SCHEMA_SQL)?;
+        conn.execute_batch(extras::SCHEMA_SQL)?;
         Ok(Store { conn })
     }
 
@@ -142,6 +144,7 @@ impl Store {
         conn.execute_batch(alarms::SCHEMA_SQL)?;
         conn.execute_batch(recorder::SCHEMA_SQL)?;
         conn.execute_batch(issues::SCHEMA_SQL)?;
+        conn.execute_batch(extras::SCHEMA_SQL)?;
         let version: Option<String> = conn
             .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| r.get(0))
             .optional()?;

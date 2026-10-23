@@ -44,6 +44,8 @@ pub fn run() {
             commands::save_diagnostics,
             commands::save_report,
             commands::save_issues,
+            commands::pick_folder,
+            commands::save_inventory_report,
         ])
         .on_window_event(|win, event| match event {
             tauri::WindowEvent::Destroyed => {
@@ -69,6 +71,7 @@ pub fn run() {
             let link = AgentLink::new(dirs, env!("CARGO_PKG_VERSION"), shell.clone(), Box::new(launcher));
             app.manage(shell.clone());
             app.manage(link.clone());
+            app.manage(commands::PickedFolders::default());
             popover::init(app.handle());
             let items = shell::initial_items(&dyno_core::settings::Settings::default().tray_items);
             if let Err(e) = tray::sync_items(app.handle(), &items) {

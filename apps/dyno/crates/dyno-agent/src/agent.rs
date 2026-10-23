@@ -214,6 +214,8 @@ pub struct Shared {
     pub issues: crate::issues::IssueCentre,
     /// The baseline of programs seen on this machine (observe-only).
     pub unusual: crate::unusual::UnusualCentre,
+    /// The extras and backup health checks (observe-only; removing finder results is a click).
+    pub extras: crate::extras::ExtrasCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
     /// Cleanup: categories, scans and the quarantine (deletes only on the user's confirmed click).
@@ -369,6 +371,7 @@ impl Shared {
             cleanup,
             issues: crate::issues::IssueCentre::new(issues),
             unusual,
+            extras: crate::extras::ExtrasCentre::new(own_folder),
             network: crate::network::NetCentre::new(
                 Box::new(dyno_platform::network::OsSockets),
                 Arc::new(dyno_platform::network::OsReverseDns),

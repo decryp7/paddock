@@ -146,6 +146,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         )),
         Request::Settings => Ok(Reply::Settings(Box::new(lock(&shared.core).settings.clone()))),
         Request::SaveSettings { settings } => {
+            settings.check_extras().map_err(bad)?;
             let mut core = lock(&shared.core);
             core.settings = (*settings).normalised();
             let alarm_config = core.settings.alarms;
@@ -291,6 +292,18 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::Quarantine
         | Request::RestoreQuarantine { .. }
         | Request::DiskUsage { .. }) => crate::handlers_cleanup::handle(shared, r),
+        r @ (Request::Changes { .. }
+        | Request::SleepBlockers
+        | Request::BootAnalysis
+        | Request::AppUsage
+        | Request::GpuProcesses
+        | Request::SoftwareInventory
+        | Request::SaveInventoryReport { .. }
+        | Request::FindFiles { .. }
+        | Request::RemoveFoundFiles { .. }
+        | Request::Maintenance
+        | Request::Backup
+        | Request::RefreshBackup) => crate::extras::handle(shared, r),
         Request::Tuning => crate::tuning::list(shared).map(Reply::Tuning),
         Request::ApplyTuning { id } => crate::tuning::apply(shared, &id).map(Reply::Activity),
         Request::RevertTuning { id, force } => crate::tuning::revert(shared, &id, force).map(Reply::Activity),

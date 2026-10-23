@@ -15,6 +15,9 @@ use crate::protect::Protection;
 use crate::time::{Timestamp, SECOND};
 use std::collections::{BTreeMap, HashMap};
 
+/// Seconds after a step before its effect is measured (long enough for the CPU average to settle).
+pub const MEASURE_AFTER_SECS: i64 = 20;
+
 /// The situation the rules look at, besides CPU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Situation {
@@ -62,6 +65,23 @@ pub enum Command {
         /// The step.
         step: StepAction,
     },
+    /// The effect of the latest step, measured: the app's CPU when the rule started acting and a little after the step.
+    Measured {
+        /// The rule.
+        rule_id: String,
+        /// The rule's name.
+        rule_name: String,
+        /// The app.
+        app: String,
+        /// CPU (percent of the machine) when the rule started acting.
+        before: f32,
+        /// CPU after the step had time to take effect.
+        after: f32,
+        /// Seconds between the step and the measurement.
+        after_secs: u32,
+        /// What had been done by then ("lowered its priority, capped it at 20% CPU").
+        description: String,
+    },
     /// Tell the user a rule acted.
     Notify {
         /// The rule's name.
@@ -87,6 +107,10 @@ enum State {
         below_since: Option<Timestamp>,
         /// How many ladder steps each member has had applied.
         applied: BTreeMap<ProcessRef, usize>,
+        /// The app's CPU when acting started.
+        before: f32,
+        /// The step whose effect was measured, and the CPU then.
+        measured: Option<(usize, f32)>,
     },
     Snoozed,
 }
@@ -124,8 +148,9 @@ fn matches_target(target: &RuleTarget, g: &AppGroup) -> bool {
     }
 }
 
-fn rule_active(rule: &Rule, set: &RuleSet, situation: &Situation) -> bool {
+fn rule_active(rule: &Rule, set: &RuleSet, situation: &Situation, now: Timestamp) -> bool {
     rule.enabled
+        && rule.expires_at.is_none_or(|e| now < e)
         && !set.paused
         && (rule.profiles.is_empty() || rule.profiles.contains(&set.profile))
         && rule.condition.when.iter().all(|c| situation.holds(*c))
@@ -135,6 +160,12 @@ impl Engine {
     /// A fresh engine.
     pub fn new() -> Engine {
         Engine::default()
+    }
+
+    /// Whether the engine holds nothing (no app is being acted on, watched or snoozed). While it holds something it must keep
+    /// being ticked even if every rule was switched off, so that what it did is undone.
+    pub fn is_idle(&self) -> bool {
+        self.states.is_empty()
     }
 
     /// Evaluates one tick and returns what to do, in order.
@@ -149,7 +180,7 @@ impl Engine {
             let rule = set.rules.iter().find(|r| r.id == key.0);
             let group = groups.get(key.1.as_str()).copied();
             let keep = match (rule, group) {
-                (Some(r), Some(g)) => rule_active(r, set, &t.situation) && eligible(g, &by_pid, protection, &t.situation),
+                (Some(r), Some(g)) => rule_active(r, set, &t.situation, t.now) && eligible(g, &by_pid, protection, &t.situation),
                 _ => false,
             };
             if !keep {
@@ -161,7 +192,7 @@ impl Engine {
             }
         }
 
-        for rule in set.rules.iter().filter(|r| rule_active(r, set, &t.situation)) {
+        for rule in set.rules.iter().filter(|r| rule_active(r, set, &t.situation, t.now)) {
             for g in t.groups.iter().filter(|g| matches_target(&rule.condition.target, g)) {
                 if !eligible(g, &by_pid, protection, &t.situation) {
                     continue;
@@ -184,7 +215,13 @@ impl Engine {
             .iter()
             .filter_map(|((rule_id, _), s)| match s {
                 State::Acting {
-                    app, root, step, since, ..
+                    app,
+                    root,
+                    step,
+                    since,
+                    before,
+                    measured,
+                    ..
                 } => {
                     let rule = set.rules.iter().find(|r| &r.id == rule_id)?;
                     let description = rule.ladder[..=*step]
@@ -200,6 +237,8 @@ impl Engine {
                         step: *step,
                         description,
                         since: *since,
+                        cpu_before: *before,
+                        cpu_after: measured.filter(|(s, _)| s == step).map(|(_, cpu)| cpu),
                     })
                 }
                 _ => None,
@@ -268,23 +307,28 @@ fn step_state(
             since,
             below_since,
             mut applied,
+            before,
+            mut measured,
         }) => {
+            // Proof (WP-36): once the latest step has had time to work, record the CPU next to the "before".
+            if measured.is_none_or(|(s, _)| s != step)
+                && now.since(step_at) >= MEASURE_AFTER_SECS * SECOND
+                && rule.ladder[..=step].iter().any(|s| s.action != StepAction::Notify)
+            {
+                measured = Some((step, g.cpu));
+                out.push(Command::Measured {
+                    rule_id: rule.id.clone(),
+                    rule_name: rule.name.clone(),
+                    app: g.name.clone(),
+                    before,
+                    after: g.cpu,
+                    after_secs: u32::try_from(now.since(step_at) / SECOND).unwrap_or(u32::MAX),
+                    description: describe_steps(rule, step),
+                });
+            }
             if !above {
                 let below = below_since.unwrap_or(now);
-                if now.since(below) >= i64::from(rule.release_after_secs) * SECOND {
-                    let s = State::Acting {
-                        app,
-                        root,
-                        step,
-                        step_at,
-                        since,
-                        below_since: Some(below),
-                        applied,
-                    };
-                    undo_state(&s, rule, &rule.id, by_pid, out);
-                    return None;
-                }
-                return Some(State::Acting {
+                let s = State::Acting {
                     app,
                     root,
                     step,
@@ -292,7 +336,14 @@ fn step_state(
                     since,
                     below_since: Some(below),
                     applied,
-                });
+                    before,
+                    measured,
+                };
+                if now.since(below) >= i64::from(rule.release_after_secs) * SECOND {
+                    undo_state(&s, rule, &rule.id, by_pid, out);
+                    return None;
+                }
+                return Some(s);
             }
             if let Some(next) = rule.ladder.get(step + 1) {
                 if now.since(step_at) >= i64::from(next.after_secs) * SECOND {
@@ -316,9 +367,21 @@ fn step_state(
                 since,
                 below_since: None,
                 applied,
+                before,
+                measured,
             })
         }
     }
+}
+
+/// What the ladder has done up to and including `step`, for the activity log.
+fn describe_steps(rule: &Rule, step: usize) -> String {
+    rule.ladder[..=step]
+        .iter()
+        .filter(|s| s.action != StepAction::Notify)
+        .map(|s| s.action.describe())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// From watching: start acting once the condition held long enough.
@@ -359,6 +422,8 @@ fn maybe_start(
         since: now,
         below_since: None,
         applied,
+        before: g.cpu,
+        measured: None,
     }
 }
 
@@ -440,6 +505,7 @@ mod tests {
                 .collect(),
             release_after_secs: 10,
             profiles: vec![],
+            expires_at: None,
         }
     }
 
@@ -543,7 +609,10 @@ mod tests {
         assert_eq!(a.step, 3);
         assert!(a.description.contains("capped it at 20% CPU"));
         assert_eq!(a.target.pid, 100);
-        assert!(w.at(500).is_empty(), "nothing more at the top of the ladder");
+        assert!(
+            w.at(500).iter().all(|c| matches!(c, Command::Measured { .. })),
+            "nothing more at the top of the ladder"
+        );
 
         w.hog(10.0);
         assert!(w.at(501).is_empty(), "release waits");
@@ -770,5 +839,101 @@ mod tests {
             &mut out,
         );
         assert!(matches!(s, State::Watching { .. }), "no live root process");
+    }
+
+    fn measured(cmds: &[Command]) -> Vec<(f32, f32, u32, String)> {
+        cmds.iter()
+            .filter_map(|c| match c {
+                Command::Measured {
+                    before,
+                    after,
+                    after_secs,
+                    description,
+                    ..
+                } => Some((*before, *after, *after_secs, description.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_effect_of_a_step_is_measured_once_it_has_had_time() {
+        let mut w = World::new(vec![rule(
+            50.0,
+            5,
+            vec![(StepAction::LowerPriority, 0), (StepAction::CpuCap(20), 60)],
+        )]);
+        w.hog(90.0);
+        w.at(0);
+        assert_eq!(applies(&w.at(5)).len(), 2);
+        assert!(measured(&w.at(15)).is_empty(), "too early");
+        // The cap works: the app is now at 30 %.
+        w.hog(30.0);
+        let m = measured(&w.at(26));
+        assert_eq!(m.len(), 1);
+        assert_eq!((m[0].0, m[0].1, m[0].2), (90.0, 30.0, 21));
+        assert_eq!(m[0].3, "lowered its priority");
+        assert!(measured(&w.at(30)).is_empty(), "once per step");
+        let active = w.engine.active(&w.set);
+        assert_eq!((active[0].cpu_before, active[0].cpu_after), (90.0, Some(30.0)));
+        // The next step is measured again against the same "before".
+        w.hog(90.0);
+        w.at(66);
+        let m = measured(&w.at(90));
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].0, 90.0);
+        assert!(m[0].3.contains("capped it at 20% CPU"));
+    }
+
+    #[test]
+    fn a_notify_only_step_has_nothing_to_prove() {
+        let mut w = World::new(vec![rule(50.0, 5, vec![(StepAction::Notify, 0)])]);
+        w.hog(90.0);
+        w.at(0);
+        w.at(5);
+        assert!(measured(&w.at(40)).is_empty());
+        assert_eq!(w.engine.active(&w.set)[0].cpu_after, None);
+    }
+
+    #[test]
+    fn a_temporary_rule_stops_at_its_end_and_releases() {
+        let mut r = rule(50.0, 5, vec![(StepAction::LowerPriority, 0)]);
+        r.expires_at = Some(Timestamp(30_000));
+        let mut w = World::new(vec![r]);
+        w.hog(90.0);
+        w.at(0);
+        assert_eq!(applies(&w.at(5)).len(), 2);
+        assert!(undos(&w.at(29)).is_empty());
+        assert_eq!(undos(&w.at(30)).len(), 2, "released the moment it expires");
+        assert!(w.at(35).is_empty(), "and never acts again");
+        assert!(w.engine.active(&w.set).is_empty());
+        // The set switches the rule off and forgets the end time.
+        let names = w.set.expire(Timestamp(30_000));
+        assert_eq!(names, ["Rule"]);
+        assert!(!w.set.rules[0].enabled && w.set.rules[0].expires_at.is_none());
+        assert!(w.set.expire(Timestamp(99_000)).is_empty());
+    }
+
+    #[test]
+    fn the_engine_is_idle_until_it_watches_something() {
+        let mut w = World::new(vec![rule(50.0, 5, vec![(StepAction::LowerPriority, 0)])]);
+        assert!(w.engine.is_idle());
+        w.hog(90.0);
+        w.at(0);
+        assert!(!w.engine.is_idle(), "watching counts");
+        w.hog(1.0);
+        w.at(1);
+        assert!(w.engine.is_idle());
+    }
+
+    #[test]
+    fn coming_to_the_front_releases_at_once() {
+        let mut w = World::new(vec![rule(50.0, 5, vec![(StepAction::CpuCap(20), 0)])]);
+        w.hog(90.0);
+        w.at(0);
+        assert_eq!(applies(&w.at(5)).len(), 2);
+        w.situation.foreground = Some(100);
+        assert_eq!(undos(&w.at(6)).len(), 2, "the app in front is given back its CPU immediately");
+        assert!(applies(&w.at(20)).is_empty(), "and is never touched while it stays in front");
     }
 }
