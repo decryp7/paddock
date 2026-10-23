@@ -7,6 +7,7 @@ import { BrandLogo } from './brand-logo';
 import { confirmAction } from './confirm-dialog';
 import { EmptyState } from './empty-state';
 import { LoadState } from './load-state';
+import { ServiceStore } from '../../state/service.store';
 import { Sparkline } from './sparkline';
 import { StatusBadge } from './status-badge';
 import { Timeline, type TimelineRow } from './timeline';
@@ -117,6 +118,38 @@ describe('LoadState', () => {
     f.detectChanges();
     expect(el.querySelector('.content')).not.toBeNull();
     expect(el.querySelector('[role="alert"]')).not.toBeNull();
+  });
+});
+
+describe('LoadState with the service down', () => {
+  it('offers Repair service on a serviceUnavailable error on macOS, and the button calls the app command', async () => {
+    const mock = makeMock({ serverDown: true, startFailed: true });
+    TestBed.configureTestingModule({ providers: appProviders(mock) });
+    const f = TestBed.createComponent(LoadHost);
+    f.componentInstance.error.set({ code: 'serviceUnavailable', message: 'It is not running.' });
+    f.detectChanges();
+    await TestBed.inject(ServiceStore).load();
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    const repair = el.querySelector<HTMLButtonElement>('[data-testid="repair-service"]');
+    expect(text(repair)).toBe('Repair service');
+    repair!.click();
+    await settle(f, 6);
+    expect(mock.repairs).toBe(1);
+    expect(el.querySelector('[data-testid="repair-service"]')).toBeNull();
+    mock.dispose();
+  });
+
+  it('offers no Repair for other errors or off macOS', async () => {
+    const mock = makeMock({ serverDown: true });
+    TestBed.configureTestingModule({ providers: appProviders(mock) });
+    const f = TestBed.createComponent(LoadHost);
+    f.componentInstance.error.set({ code: 'serviceUnavailable', message: 'It is not running.' });
+    f.detectChanges();
+    await TestBed.inject(ServiceStore).load();
+    f.detectChanges();
+    expect(f.nativeElement.querySelector('[data-testid="repair-service"]')).toBeNull();
+    mock.dispose();
   });
 });
 

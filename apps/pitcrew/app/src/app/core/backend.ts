@@ -139,6 +139,11 @@ export interface PitcrewBackend {
   /** Asks the OS for permission (UAC / Login Items) and installs and starts the service. */
   installService(): Promise<void>;
   uninstallService(): Promise<void>;
+  /**
+   * macOS: replaces the launchd job an update left behind (unregister, bootout, wait, register) in the background; the
+   * progress shows in `serviceInstall().repair`. The app's own business: it works while the service is down.
+   */
+  repairService(): Promise<void>;
   /** macOS: opens System Settings ▸ General ▸ Login Items. Pitcrew never switches the item itself. */
   openLoginItems(): Promise<void>;
 

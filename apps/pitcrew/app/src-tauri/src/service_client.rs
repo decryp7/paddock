@@ -74,7 +74,12 @@ fn connect() -> Result<Box<dyn Stream>, ClientError> {
         let s = std::os::unix::net::UnixStream::connect(path).map_err(|e| {
             if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) {
                 ClientError::Unavailable(
-                    "it is not running. Turn it on in Settings ▸ Service (macOS asks you to allow it in Login Items; on Linux it is a systemd user service)".into(),
+                    if cfg!(target_os = "macos") {
+                        "it is not running. Use Repair service (Settings ▸ Service) to start it again; macOS may ask you to allow it in Login Items"
+                    } else {
+                        "it is not running. Turn it on in Settings ▸ Service (on Linux it is a systemd user service)"
+                    }
+                    .into(),
                 )
             } else {
                 ClientError::Unavailable(e.to_string())

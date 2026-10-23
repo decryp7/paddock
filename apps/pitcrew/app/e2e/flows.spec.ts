@@ -254,4 +254,22 @@ test.describe('native feel (ADR 0008)', () => {
     await save.click();
     await expect(page.getByText('Process defaults saved')).toBeVisible();
   });
+
+  test('with the service down after an update, Settings still shows the service and Repair brings it back', async ({ page }) => {
+    await page.goto('/?simulate=0&mock-down&mock-startfailed#/settings?section=service');
+    await expect(page.getByTestId('service-start-failed').first()).toContainText('could not start after the update');
+    await expect(page.getByText('Installed, not running')).toBeVisible();
+    await page.getByRole('button', { name: 'Repair service' }).click();
+    await expect(page.getByText('Installed and running')).toBeVisible();
+    await expect(page.getByTestId('service-start-failed')).toHaveCount(0);
+  });
+
+  test('the global notice repairs the service when it could not start after the update', async ({ page }) => {
+    await page.goto('/?simulate=0&mock-down&mock-startfailed#/');
+    const notice = page.getByTestId('service-start-failed');
+    await expect(notice).toContainText('could not start after the update');
+    await notice.getByRole('button', { name: 'Repair' }).click();
+    await expect(notice).toHaveCount(0);
+    await expect(page.getByRole('alert').filter({ hasText: 'cannot reach its service' })).toHaveCount(0);
+  });
 });

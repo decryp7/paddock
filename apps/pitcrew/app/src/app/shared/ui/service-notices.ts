@@ -15,6 +15,18 @@ import { ServiceStore } from '../../state/service.store';
           <span>{{ r.message }}</span>
         </p>
       }
+      @if ((s.startFailed || s.notInLoginItems) && s.repair?.state !== 'working') {
+        <div class="notice" role="status" data-testid="service-start-failed">
+          <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+          <span>
+            {{ s.startFailed ? 'The background service could not start after the update.' : 'Pitcrew is not listed in System Settings ▸ General ▸ Login Items, so macOS does not start the service.' }}
+            Repair registers it again.
+          </span>
+          <button type="button" class="btn sm primary" data-testid="repair-service" [disabled]="service.working() !== null" (click)="service.repair()">
+            {{ service.working() === 'repair' ? 'Repairing…' : 'Repair' }}
+          </button>
+        </div>
+      }
       @if (s.disabledInLoginItems) {
         <div class="notice" role="status" data-testid="service-disabled">
           <mat-icon svgIcon="pc:alert" aria-hidden="true" />

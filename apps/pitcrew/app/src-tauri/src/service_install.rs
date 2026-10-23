@@ -26,6 +26,45 @@ pub fn service_exe() -> Result<std::path::PathBuf, CommandError> {
     }
 }
 
+/// What the OS says about the registration (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OsState {
+    /// Registered.
+    pub installed: bool,
+    /// What to do next, in words.
+    pub message: Option<String>,
+    /// The repair's progress, if one ran.
+    pub repair: Option<crate::service_repair::RepairNotice>,
+    /// The user switched the item off in Login Items.
+    pub disabled_in_login_items: bool,
+    /// launchd holds a job it cannot start ([`crate::service_repair::JobReport::stale`]).
+    pub job_stale: bool,
+    /// launchd has the job, `SMAppService` does not know the registration.
+    pub job_unlisted: bool,
+}
+
+/// Puts the OS state and the service's answer together (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn compose(os: OsState, running: bool) -> ServiceInstall {
+    let repairing = os
+        .repair
+        .as_ref()
+        .is_some_and(|r| r.state == crate::service_repair::RepairState::Working);
+    let broken = !running && !os.disabled_in_login_items && !repairing;
+    ServiceInstall {
+        platform: "macos",
+        installed: os.installed,
+        running,
+        can_install: true,
+        message: os.message,
+        repair: os.repair,
+        disabled_in_login_items: os.disabled_in_login_items,
+        start_failed: broken && os.job_stale,
+        not_in_login_items: broken && os.job_unlisted,
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     //! SCM queries are safe wrappers; elevation is `ShellExecuteExW` with the "runas" verb, the one unsafe call.
@@ -51,6 +90,8 @@ mod imp {
             message: None,
             repair: None,
             disabled_in_login_items: false,
+            start_failed: false,
+            not_in_login_items: false,
         };
         let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) else {
             return ServiceInstall {
@@ -143,14 +184,16 @@ mod imp {
     #![allow(unsafe_code, unused_unsafe)]
 
     use super::*;
+    use crate::app_state::AppState;
     use crate::applog;
     use crate::service_client::ServiceClient;
     use crate::service_repair::{
-        disabled_in_login_items, parse_print_disabled, run_repair, stale_registration, RegisterError, RegistrationStatus, RepairOps,
-        RepairOutcome, REPAIR,
+        disabled_in_login_items, parse_job, parse_print_disabled, plan, run_repair, JobReport, Observed, Plan, RegisterError,
+        RegistrationStatus, RepairOps, RepairOutcome, REPAIR,
     };
     use objc2_foundation::NSString;
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
+    use std::path::Path;
     use std::time::{Duration, Instant};
 
     const PLIST: &str = "net.decryptology.pitcrew.service.plist";
@@ -176,18 +219,17 @@ mod imp {
         }
     }
 
-    /// Whether the user switched Pitcrew's background item off in Login Items.
-    fn disabled_by_user() -> bool {
-        disabled_in_login_items(registration_status(), launchd_disabled())
+    /// The service answers.
+    fn answers() -> bool {
+        crate::service_client::LocalServiceClient
+            .request(pitcrew_core::protocol::Request::Status)
+            .is_ok()
     }
 
     /// Whether the service is registered and running.
     pub fn state() -> ServiceInstall {
         let status = registration_status();
-        let running = crate::service_client::LocalServiceClient
-            .request(pitcrew_core::protocol::Request::Status)
-            .is_ok();
-        let disabled = disabled_in_login_items(status, launchd_disabled());
+        let running = answers();
         let (installed, message) = match status {
             RegistrationStatus::Enabled => (true, None),
             RegistrationStatus::RequiresApproval => (true, Some("allow Pitcrew in System Settings ▸ General ▸ Login Items".to_string())),
@@ -197,15 +239,24 @@ mod imp {
             ),
             RegistrationStatus::NotRegistered => (false, None),
         };
-        ServiceInstall {
-            platform: "macos",
-            installed,
+        let job = job_report();
+        let message = message.or_else(|| {
+            job.stale().then(|| {
+                "launchd refused to start the service (error 78, bad configuration): the app was updated and macOS still holds the previous version's signature. Repair replaces it."
+                    .to_string()
+            })
+        });
+        compose(
+            OsState {
+                installed,
+                message,
+                repair: REPAIR.current(Instant::now()),
+                disabled_in_login_items: disabled_in_login_items(status, launchd_disabled()),
+                job_stale: job.stale(),
+                job_unlisted: job.found && status == RegistrationStatus::NotRegistered,
+            },
             running,
-            can_install: true,
-            message,
-            repair: REPAIR.current(Instant::now()),
-            disabled_in_login_items: disabled,
-        }
+        )
     }
 
     /// Opens System Settings ▸ General ▸ Login Items. The user switches the item; Pitcrew never does it for them.
@@ -217,6 +268,10 @@ mod imp {
 
     /// Registers and starts the service (the OS asks the user).
     pub fn install() -> Result<(), CommandError> {
+        register()
+    }
+
+    fn register() -> Result<(), CommandError> {
         let s = service();
         // SAFETY: a method call on a valid object; the error is returned as a Retained NSError.
         match unsafe { s.registerAndReturnError() } {
@@ -239,6 +294,11 @@ mod imp {
         }
     }
 
+    /// The user registered the service from the app: this version has looked after it.
+    pub fn note_registered(dir: &Path) {
+        record_version(dir);
+    }
+
     /// Stops and removes the service.
     pub fn uninstall() -> Result<(), CommandError> {
         // SAFETY: a method call on a valid object.
@@ -246,31 +306,80 @@ mod imp {
             .map_err(|e| CommandError::internal(format!("the launch agent could not be removed: {}", e.localizedDescription())))
     }
 
-    /// After the app was updated, launchd may refuse the registered service (see [`stale_registration`]). When the
-    /// service is registered but does not answer and launchd reports a stale registration, registers it again
-    /// ([`run_repair`]), publishing progress in [`REPAIR`] and every step in the app log. `None`: nothing to repair
+    /// launchd's report of the job (nothing found when it cannot be read).
+    fn job_report() -> JobReport {
+        target()
+            .and_then(|t| launchctl(&["print", &t]))
+            .map(|r| parse_job(&r))
+            .unwrap_or_default()
+    }
+
+    /// Remembers in `dir` that this version looked after the registration.
+    fn record_version(dir: &Path) {
+        let mut s = AppState::load(dir);
+        s.service_registered_version = Some(env!("CARGO_PKG_VERSION").to_string());
+        if let Err(e) = s.save(dir) {
+            applog::write(&format!("could not remember the registered version: {e}"));
+        }
+    }
+
+    fn observe(dir: &Path, up: bool, requested: bool) -> Plan {
+        let registered = AppState::load(dir).service_registered_version;
+        plan(&Observed {
+            status: registration_status(),
+            launchd_disabled: launchd_disabled(),
+            answers: up,
+            job: job_report(),
+            registered_version: registered.as_deref(),
+            current_version: env!("CARGO_PKG_VERSION"),
+            requested,
+        })
+    }
+
+    /// After the app was updated launchd refuses the registered service (its stored launch constraint is the previous
+    /// build's cdhash, see [`JobReport::stale`]), and the job can be missing from Login Items. This registers the
+    /// service again ([`run_repair`]) when launchd reports a stale job while the service does not answer, and once after
+    /// every version change; progress goes to [`REPAIR`] and every step to the app log. `None`: nothing to repair
     /// (including the user having switched the item off: that is their choice and is left alone).
-    pub fn repair_registration() -> Option<RepairOutcome> {
-        if registration_status() == RegistrationStatus::NotFound || disabled_by_user() {
-            return None;
+    pub fn repair_registration(dir: &Path) -> Option<RepairOutcome> {
+        match observe(dir, answers(), false) {
+            Plan::Nothing => None,
+            Plan::MarkCurrent => {
+                record_version(dir);
+                None
+            }
+            Plan::Repair(_) => REPAIR.start(Instant::now()).then(|| perform(dir)),
         }
-        if crate::service_client::LocalServiceClient
-            .request(pitcrew_core::protocol::Request::Status)
-            .is_ok()
-        {
-            return None;
+    }
+
+    /// The user pressed Repair: runs the repair in the background (progress in [`REPAIR`]). Refused when the user
+    /// switched the item off in Login Items or the launch agent is missing from the app.
+    pub fn request_repair(dir: &Path) -> Result<(), CommandError> {
+        if observe(dir, false, true) == Plan::Nothing {
+            return Err(CommandError::new(
+                CommandErrorCode::PermissionDenied,
+                "Pitcrew's background item is switched off in System Settings ▸ General ▸ Login Items, or the app is not in /Applications. Switch it on there; Pitcrew never does it for you.",
+            ));
         }
-        // After the app was replaced macOS can report "not registered" while launchd still holds the old job and
-        // refuses to start the new binary, so launchd's own report decides.
-        if !stale_registration(&launchctl(&["print", &target()?])?) {
-            return None;
+        if REPAIR.start(Instant::now()) {
+            let dir = dir.to_path_buf();
+            std::thread::spawn(move || {
+                perform(&dir);
+            });
         }
-        REPAIR.begin(Instant::now());
-        applog::write("the service is registered but launchd refuses it (stale registration): repairing");
+        Ok(())
+    }
+
+    /// Runs the repair (the tracker is already working) and records the result.
+    fn perform(dir: &Path) -> RepairOutcome {
+        applog::write("the background service cannot start (stale registration or new version): repairing");
         let outcome = run_repair(&mut MacOps, &mut |step| applog::write(&format!("repair: {step}")));
         REPAIR.finish(&outcome, Instant::now());
+        if outcome == RepairOutcome::Recovered {
+            record_version(dir);
+        }
         applog::write(&format!("repair finished: {outcome:?}"));
-        Some(outcome)
+        outcome
     }
 
     /// [`RepairOps`] over `SMAppService` and `launchctl`.
@@ -278,7 +387,7 @@ mod imp {
 
     impl RepairOps for MacOps {
         fn register(&mut self) -> Result<(), RegisterError> {
-            install().map_err(|e| {
+            register().map_err(|e| {
                 if e.code == CommandErrorCode::PermissionDenied {
                     RegisterError::NeedsApproval
                 } else {
@@ -289,15 +398,20 @@ mod imp {
         fn unregister(&mut self) -> Result<(), String> {
             uninstall().map_err(|e| e.message)
         }
+        fn bootout(&mut self) -> Result<(), String> {
+            let t = target().ok_or("the user's launchd domain is unknown")?;
+            launchctl(&["bootout", &t])
+                .map(|_| ())
+                .ok_or_else(|| "launchctl bootout could not be run".to_string())
+        }
+        fn job_gone(&mut self) -> bool {
+            !job_report().found
+        }
         fn registration_stale(&mut self) -> bool {
-            target()
-                .and_then(|t| launchctl(&["print", &t]))
-                .is_some_and(|report| stale_registration(&report))
+            job_report().stale()
         }
         fn service_answers(&mut self) -> bool {
-            crate::service_client::LocalServiceClient
-                .request(pitcrew_core::protocol::Request::Status)
-                .is_ok()
+            answers()
         }
         fn pause(&mut self, how_long: Duration) {
             std::thread::sleep(how_long);
@@ -392,6 +506,8 @@ mod imp {
             message,
             repair: None,
             disabled_in_login_items: false,
+            start_failed: false,
+            not_in_login_items: false,
         }
     }
 
@@ -453,7 +569,7 @@ mod imp {
 pub use imp::{install, state, uninstall};
 
 #[cfg(target_os = "macos")]
-pub use imp::{open_login_items, repair_registration};
+pub use imp::{note_registered, open_login_items, repair_registration, request_repair};
 
 /// Opens System Settings ▸ General ▸ Login Items, where the user switches the background item on. Only macOS has one.
 #[cfg(not(target_os = "macos"))]
@@ -462,6 +578,16 @@ pub fn open_login_items() -> Result<(), CommandError> {
         CommandErrorCode::NotImplemented,
         "Login Items exist on macOS only",
     ))
+}
+
+/// Remembers which version registered the service (macOS only; nothing elsewhere).
+#[cfg(not(target_os = "macos"))]
+pub fn note_registered(_dir: &std::path::Path) {}
+
+/// Repair exists on macOS only; elsewhere the service is installed or removed from the app.
+#[cfg(not(target_os = "macos"))]
+pub fn request_repair(_dir: &std::path::Path) -> Result<(), CommandError> {
+    Err(CommandError::new(CommandErrorCode::NotImplemented, "Repair exists on macOS only"))
 }
 
 /// How many times a run of the app checks for a stale service registration (macOS).
@@ -475,6 +601,65 @@ pub fn repair_delay(attempt: u32) -> std::time::Duration {
 
 #[cfg(test)]
 mod stale_tests {
+    use super::*;
+    use crate::service_repair::{RepairNotice, RepairState};
+
+    fn notice(state: RepairState) -> Option<RepairNotice> {
+        Some(RepairNotice {
+            state,
+            message: "m".into(),
+        })
+    }
+
+    #[test]
+    fn repair_is_offered_when_the_job_cannot_start_or_is_missing_from_login_items() {
+        let stale = OsState {
+            job_stale: true,
+            job_unlisted: true,
+            ..OsState::default()
+        };
+        let s = compose(stale.clone(), false);
+        assert!(s.start_failed && s.not_in_login_items);
+        // Running, repairing or switched off by the user: no Repair offer.
+        assert!(!compose(stale.clone(), true).start_failed);
+        let working = OsState {
+            repair: notice(RepairState::Working),
+            ..stale.clone()
+        };
+        assert!(!compose(working, false).start_failed);
+        let off = OsState {
+            disabled_in_login_items: true,
+            ..stale
+        };
+        let s = compose(off, false);
+        assert!(!s.start_failed && !s.not_in_login_items);
+        let json = serde_json::to_value(compose(OsState::default(), false)).unwrap();
+        assert_eq!(
+            (json["startFailed"].clone(), json["notInLoginItems"].clone()),
+            (false.into(), false.into())
+        );
+    }
+
+    #[test]
+    fn the_repair_and_the_login_item_switch_reach_the_ui() {
+        let os = OsState {
+            installed: true,
+            repair: notice(RepairState::Working),
+            disabled_in_login_items: true,
+            ..OsState::default()
+        };
+        let json = serde_json::to_value(compose(os, false)).unwrap();
+        assert_eq!(json["disabledInLoginItems"], true);
+        assert_eq!(json["repair"]["state"], "working");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn repair_exists_on_macos_only() {
+        let e = request_repair(std::path::Path::new("/nowhere")).unwrap_err();
+        assert_eq!(e.code, CommandErrorCode::NotImplemented);
+    }
+
     #[test]
     fn repair_checks_soon_then_every_minute() {
         assert_eq!(super::repair_delay(0).as_secs(), 3);

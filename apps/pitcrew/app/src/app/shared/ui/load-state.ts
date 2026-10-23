@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import type { CommandError } from '../../core/api.types';
+import { ServiceStore } from '../../state/service.store';
 
 /**
  * A panel's error boundary: a skeleton while the first request runs, an inline error with Retry when it fails, and the
@@ -18,6 +19,11 @@ import type { CommandError } from '../../core/api.types';
           <strong>{{ what() }} could not be loaded</strong>
           <span class="muted">{{ e.message }}</span>
         </div>
+        @if (e.code === 'serviceUnavailable' && service.canRepair()) {
+          <button type="button" class="btn sm primary" data-testid="repair-service" [disabled]="service.working() !== null" (click)="service.repair()">
+            Repair service
+          </button>
+        }
         <button type="button" class="btn sm" (click)="retry.emit()">
           <mat-icon svgIcon="pc:refresh" aria-hidden="true" />
           Retry
@@ -58,6 +64,8 @@ export class LoadState {
   /** Skeleton bar heights. */
   readonly skeleton = input<number[]>([16, 16, 16]);
   readonly retry = output<void>();
+
+  protected readonly service = inject(ServiceStore);
 
   protected readonly bars = computed(() => this.skeleton());
 }

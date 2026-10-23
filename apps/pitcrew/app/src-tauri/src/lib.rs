@@ -2,6 +2,7 @@
 //! everything comes from the service through [`service_client::ServiceClient`], pushed by `events`.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod app_state;
 pub mod applog;
 pub mod channels;
 pub mod commands;
@@ -70,6 +71,7 @@ pub fn run() {
             commands::service_install_state,
             commands::install_service,
             commands::uninstall_service,
+            commands::repair_service,
             commands::open_login_items,
             commands::app_update_status,
             commands::check_app_update,
@@ -99,12 +101,18 @@ pub fn run() {
             // After an update launchd may refuse the registered service (a rebuilt app has a new code identity on
             // macOS): register it again in the background, so the runners come back without the user's help.
             #[cfg(target_os = "macos")]
-            std::thread::spawn(|| {
+            let repair_dir = {
+                use tauri::Manager;
+                app.path().app_data_dir().ok()
+            };
+            #[cfg(target_os = "macos")]
+            std::thread::spawn(move || {
+                let Some(dir) = repair_dir else { return };
                 // The service may only fail later (it restarts itself onto a new binary when idle), so keep checking
                 // while it does not answer, a bounded number of times per run of the app.
                 for attempt in 0..service_install::REPAIR_ATTEMPTS {
                     std::thread::sleep(service_install::repair_delay(attempt));
-                    match service_install::repair_registration() {
+                    match service_install::repair_registration(&dir) {
                         Some(service_repair::RepairOutcome::Recovered | service_repair::RepairOutcome::NeedsApproval) => break,
                         // Failed: the next check tries again (bounded by REPAIR_ATTEMPTS); nothing to repair: keep watching.
                         Some(service_repair::RepairOutcome::Failed(_)) | None => {}

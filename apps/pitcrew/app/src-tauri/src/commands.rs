@@ -593,14 +593,30 @@ pub async fn service_install_state() -> Result<ServiceInstall, CommandError> {
 
 /// `install_service` (UAC / Login Items approval).
 #[tauri::command]
-pub async fn install_service() -> Result<(), CommandError> {
-    blocking(service_install::install).await
+pub async fn install_service<R: Runtime>(app: AppHandle<R>) -> Result<(), CommandError> {
+    let dir = app.path().app_data_dir().ok();
+    blocking(move || {
+        service_install::install()?;
+        if let Some(dir) = dir {
+            service_install::note_registered(&dir);
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// `uninstall_service`.
 #[tauri::command]
 pub async fn uninstall_service() -> Result<(), CommandError> {
     blocking(service_install::uninstall).await
+}
+
+/// `repair_service`: replaces the registration launchd refuses (macOS). Runs in the background; `service_install_state`
+/// shows the progress. It is the app's own business and does not need the service to answer.
+#[tauri::command]
+pub async fn repair_service<R: Runtime>(app: AppHandle<R>) -> Result<(), CommandError> {
+    let dir = app.path().app_data_dir().map_err(|e| CommandError::internal(e.to_string()))?;
+    blocking(move || service_install::request_repair(&dir)).await
 }
 
 /// `open_login_items`: opens System Settings ▸ General ▸ Login Items (macOS).

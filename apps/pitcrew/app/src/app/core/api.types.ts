@@ -566,6 +566,10 @@ export interface ServiceInstall {
   repair: RepairNotice | null;
   /** macOS: the user switched Pitcrew's background item off in System Settings ▸ General ▸ Login Items. */
   disabledInLoginItems: boolean;
+  /** macOS: the service is registered or known to launchd but cannot start, and it does not answer: offer Repair. */
+  startFailed: boolean;
+  /** macOS: launchd still has the job but Login Items does not list Pitcrew: offer Repair. */
+  notInLoginItems: boolean;
 }
 
 /** Progress of the background repair of the service's registration (macOS). */

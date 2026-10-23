@@ -38,6 +38,11 @@ import { StatusStore } from '../../state/status.store';
               {{ isMac() ? 'On macOS it is your own launch agent: installing it adds Pitcrew to Login Items, and macOS asks you to approve it in System Settings ▸ General ▸ Login Items.' : 'On Windows it is a service started by Windows; installing or removing it asks for administrator permission (a UAC prompt). Pitcrew never asks for or stores your password.' }}
             </p>
             <div class="btn-row">
+              @if (service.canRepair()) {
+                <button type="button" class="btn" data-testid="repair-service-settings" (click)="service.repair()" [disabled]="service.working() !== null">
+                  <mat-icon svgIcon="pc:refresh" aria-hidden="true" />{{ service.working() === 'repair' ? 'Repairing…' : 'Repair service' }}
+                </button>
+              }
               @if (!s.installed && !s.disabledInLoginItems) {
                 <button type="button" class="btn primary" (click)="service.install()" [disabled]="!s.canInstall || service.working() !== null">
                   <mat-icon svgIcon="pc:shield" aria-hidden="true" />{{ service.working() === 'install' ? 'Waiting for permission…' : 'Install service' }}

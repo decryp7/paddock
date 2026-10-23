@@ -207,6 +207,10 @@ pub struct ServiceInstall {
     pub repair: Option<crate::service_repair::RepairNotice>,
     /// The user switched the background item off in System Settings ▸ General ▸ Login Items (macOS only).
     pub disabled_in_login_items: bool,
+    /// The service is registered or known to launchd but cannot start, and it does not answer (macOS): offer Repair.
+    pub start_failed: bool,
+    /// launchd still has the job but System Settings ▸ Login Items does not list Pitcrew (macOS): offer Repair.
+    pub not_in_login_items: bool,
 }
 
 /// `BackendEvent`, emitted as the Tauri event `pitcrew://event`.

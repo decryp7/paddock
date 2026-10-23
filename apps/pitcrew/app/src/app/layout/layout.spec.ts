@@ -162,13 +162,13 @@ describe('ConnectionBanner', () => {
 
   it('explains Login Items on macOS', async () => {
     configure({ scenario: 'notInstalled' });
-    vi.spyOn(mock, 'serviceInstall').mockResolvedValue({ platform: 'macos', installed: false, running: false, canInstall: true, message: null, repair: null, disabledInLoginItems: false });
+    vi.spyOn(mock, 'serviceInstall').mockResolvedValue({ platform: 'macos', installed: false, running: false, canInstall: true, message: null, repair: null, disabledInLoginItems: false, startFailed: false, notInLoginItems: false });
     const f = TestBed.createComponent(ConnectionBanner);
     await settle(f);
     expect(text(f.nativeElement)).toContain('Login Items');
   });
 
-  const macos = { platform: 'macos', installed: true, running: false, canInstall: true, message: null, repair: null, disabledInLoginItems: false } as const;
+  const macos = { platform: 'macos', installed: true, running: false, canInstall: true, message: null, repair: null, disabledInLoginItems: false, startFailed: false, notInLoginItems: false } as const;
 
   it('says the repair is working and offers no install while it does', async () => {
     configure({ scenario: 'unavailable' });

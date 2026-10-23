@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../core/backend';
 import { MockBackend } from '../core/mock-backend';
 import { flush, makeMock } from '../../testing/test-helpers';
-import { REPAIR_POLL_MS, ServiceStore } from './service.store';
+import { DOWN_POLL_MS, MAX_DOWN_CHECKS, REPAIR_POLL_MS, ServiceStore } from './service.store';
 import { StatusStore } from './status.store';
 import { ToastStore } from './toast.store';
 
@@ -43,7 +43,7 @@ describe('ServiceStore', () => {
   });
 
   describe('the macOS repair', () => {
-    const base = { platform: 'macos', installed: true, running: false, canInstall: true, message: null, disabledInLoginItems: false } as const;
+    const base = { platform: 'macos', installed: true, running: false, canInstall: true, message: null, repair: null, disabledInLoginItems: false, startFailed: false, notInLoginItems: false } as const;
     const working = { state: 'working', message: 'Re-registering the background service with macOS… (this can take a minute)' } as const;
 
     afterEach(() => vi.useRealTimers());
@@ -78,6 +78,58 @@ describe('ServiceStore', () => {
       spy.mockResolvedValueOnce({ ...base, repair: { state: 'failed', message: 'Open System Settings ▸ General ▸ Login Items.' } });
       await vi.advanceTimersByTimeAsync(REPAIR_POLL_MS);
       expect(s.toasts.toasts().at(-1)).toMatchObject({ tone: 'danger', body: 'Open System Settings ▸ General ▸ Login Items.' });
+    });
+
+    it('repair calls the app command, reloads the state and brings the connection back', async () => {
+      const s = setup('demo');
+      mock = s.mock;
+      await flush();
+      vi.spyOn(mock, 'serviceInstall').mockResolvedValueOnce({ ...base });
+      await s.store.load();
+      expect(s.store.canRepair()).toBe(true);
+      await s.store.repair();
+      expect(mock.repairs).toBe(1);
+      expect(s.store.working()).toBeNull();
+      expect(s.store.registration().value).toMatchObject({ running: true, startFailed: false });
+      expect(s.store.canRepair()).toBe(false);
+    });
+
+    it('reports a repair that could not start', async () => {
+      const s = setup('demo');
+      mock = s.mock;
+      vi.spyOn(mock, 'repairService').mockRejectedValueOnce({ code: 'permissionDenied', message: 'switched off' });
+      await s.store.repair();
+      expect(s.toasts.toasts().at(-1)).toMatchObject({ tone: 'danger', title: 'Repair did not start', body: 'switched off' });
+      expect(s.store.working()).toBeNull();
+    });
+
+    it('canRepair is off when the item is switched off in Login Items, on Windows, or while a repair works', async () => {
+      const s = setup('demo');
+      mock = s.mock;
+      vi.useFakeTimers();
+      const spy = vi.spyOn(mock, 'serviceInstall');
+      for (const [patch, expected] of [
+        [{ disabledInLoginItems: true }, false],
+        [{ platform: 'windows' as const }, false],
+        [{ repair: working }, false],
+        [{ running: true }, false],
+        [{}, true],
+      ] as const) {
+        spy.mockResolvedValueOnce({ ...base, ...patch });
+        await s.store.load();
+        expect(s.store.canRepair()).toBe(expected);
+      }
+    });
+
+    it('keeps looking while it is down on macOS, a bounded number of times', async () => {
+      const s = setup('demo');
+      mock = s.mock;
+      await flush();
+      vi.useFakeTimers();
+      const spy = vi.spyOn(mock, 'serviceInstall').mockResolvedValue({ ...base });
+      await s.store.load();
+      await vi.advanceTimersByTimeAsync(DOWN_POLL_MS * (MAX_DOWN_CHECKS + 5));
+      expect(spy).toHaveBeenCalledTimes(MAX_DOWN_CHECKS + 1);
     });
 
     it('opens Login Items, and reports when that fails', async () => {

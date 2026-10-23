@@ -11,7 +11,10 @@ import { provideIcons } from './shared/icons';
 
 const SCENARIOS: MockScenario[] = ['demo', 'empty', 'unavailable', 'notInstalled', 'mismatch'];
 
-/** The browser build's mock; `?mock=<scenario>&platform=<os>` picks what it shows (development and screenshots). */
+/**
+ * The browser build's mock; `?mock=<scenario>&platform=<os>` picks what it shows (development and screenshots).
+ * `?mock-down` takes the service down (its controls keep working), `?mock-startfailed` shows launchd refusing it after an update.
+ */
 function browserBackend(): PitcrewBackend {
   const params = new URLSearchParams(globalThis.location?.search ?? '');
   const scenario = params.get('mock') as MockScenario | null;
@@ -20,6 +23,8 @@ function browserBackend(): PitcrewBackend {
     scenario: scenario && SCENARIOS.includes(scenario) ? scenario : 'demo',
     latencyMs: 120,
     simulate: params.get('simulate') !== '0',
+    serverDown: params.has('mock-down'),
+    startFailed: params.has('mock-startfailed'),
     platform: platform === 'macos' || platform === 'windows' || platform === 'linux' ? platform : 'browser',
   });
 }

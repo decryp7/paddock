@@ -83,6 +83,10 @@ export interface MockOptions {
   simulate?: boolean;
   platform?: Platform;
   now?: () => number;
+  /** The service is down (installed, not answering) while its controls keep working. */
+  serverDown?: boolean;
+  /** macOS: launchd refuses the service after an update (the "could not start" state with Repair). */
+  startFailed?: boolean;
 }
 
 const FLOW: Exclude<RunnerSnapshot['updatePhase']['phase'], 'idle' | 'rollingBack'>[] = [
@@ -140,14 +144,19 @@ export class MockBackend implements PitcrewBackend {
     const configs = this.scenario === 'empty' ? [] : demoRunnerConfigs();
     this.config = defaultConfig(configs);
     this.runners = demoSnapshots(now, configs, this.config.defaults);
+    const down = (options.serverDown ?? false) || (options.startFailed ?? false);
     this.service = {
-      platform: 'windows',
+      platform: options.startFailed ? 'macos' : 'windows',
       installed: this.scenario !== 'notInstalled',
-      running: this.scenario !== 'notInstalled' && this.scenario !== 'unavailable',
+      running: this.scenario !== 'notInstalled' && this.scenario !== 'unavailable' && !down,
       canInstall: true,
-      message: null,
+      message: options.startFailed
+        ? 'launchd refused to start the service (error 78, bad configuration): the app was updated and macOS still holds the previous version\'s signature. Repair replaces it.'
+        : null,
       repair: null,
       disabledInLoginItems: false,
+      startFailed: options.startFailed ?? false,
+      notInLoginItems: options.startFailed ?? false,
     };
   }
 
@@ -750,6 +759,24 @@ export class MockBackend implements PitcrewBackend {
   async openLoginItems(): Promise<void> {
     await this.delay();
     this.loginItemsOpened += 1;
+  }
+
+  /** How often Repair was pressed (tests). */
+  repairs = 0;
+
+  async repairService(): Promise<void> {
+    await this.delay();
+    this.repairs += 1;
+    this.service = {
+      ...this.service,
+      running: true,
+      startFailed: false,
+      notInLoginItems: false,
+      message: null,
+      repair: { state: 'succeeded', message: 'Service is running again' },
+    };
+    this.emit({ kind: 'connection', connection: this.connection() });
+    this.pushStatus();
   }
 
   async uninstallService(): Promise<void> {
