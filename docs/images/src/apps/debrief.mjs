@@ -12,7 +12,7 @@ export default {
     panels: [
       { shot: 'workspace', crop: [324, 150, 1087], title: 'Every process on one timeline', text: 'A lane per process and machine, with crashes, errors and starts marked.' },
       { shot: 'patterns', crop: [320, 122, 1091], title: 'Patterns with trends', text: 'Thousands of lines become a short list, each with its own sparkline.' },
-      { shot: 'outliers', crop: [320, 122, 1091], title: 'What the errors have in common', text: 'Values that are over-represented among errors, ranked by lift.' },
+      { shot: 'outliers', crop: [320, 122, 1091], title: 'What the errors have in common', text: 'Values over-represented among errors, by lift.' },
       { shot: 'compare', crop: [320, 122, 1091], title: 'Compare two windows', text: 'See which fields changed before and after the incident.' },
     ],
   },
