@@ -166,6 +166,8 @@ export interface PitwallBackend {
   uninstallService(): Promise<ServiceInstall>;
   /** The user said no to the service; do not ask again. */
   declineService(): Promise<void>;
+  /** macOS: opens System Settings > General > Login Items. Pitwall never switches the item itself. */
+  openLoginItems(): Promise<void>;
   autostart(): Promise<boolean>;
   setAutostart(enabled: boolean): Promise<boolean>;
 }

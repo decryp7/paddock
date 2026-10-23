@@ -11,6 +11,7 @@ pub mod live;
 pub mod native_feel;
 pub mod server_client;
 pub mod service_install;
+pub mod service_repair;
 pub mod shell;
 pub mod tray;
 pub mod tray_model;
@@ -186,11 +187,32 @@ pub fn run() {
             app_commands::install_service,
             app_commands::uninstall_service,
             app_commands::decline_service,
+            app_commands::open_login_items,
             app_commands::get_autostart,
             app_commands::set_autostart,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            // After an update launchd may refuse the registered service (a rebuilt app has a new code identity on
+            // macOS): register it again in the background, so the server comes back without the user's help.
+            #[cfg(target_os = "macos")]
+            {
+                let client = app.state::<SharedClient>().inner().clone();
+                std::thread::spawn(move || {
+                    let answers =
+                        || tauri::async_runtime::block_on(commands::forward(client.as_ref(), "overview", serde_json::Value::Null)).is_ok();
+                    // The service may only fail later (it restarts itself onto a new binary when idle), so keep
+                    // checking while it does not answer, a bounded number of times per run of the app.
+                    for attempt in 0..service_install::REPAIR_ATTEMPTS {
+                        std::thread::sleep(service_install::repair_delay(attempt));
+                        match service_install::repair_registration(&answers) {
+                            Some(service_repair::RepairOutcome::Recovered | service_repair::RepairOutcome::NeedsApproval) => break,
+                            // Failed: the next check tries again (bounded by REPAIR_ATTEMPTS); nothing to repair: keep watching.
+                            Some(service_repair::RepairOutcome::Failed(_)) | None => {}
+                        }
+                    }
+                });
+            }
             let view = model.lock().unwrap_or_else(|p| p.into_inner()).view();
             if let Err(e) = tray::create(&handle, &view, tray_action) {
                 // Linux without a status-notifier host or libayatana-appindicator: the window is then the only way

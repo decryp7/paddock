@@ -107,6 +107,10 @@ export interface MockOptions {
   seed?: number;
   /** The server is not registered with the OS yet and the user has not been asked (first-run question). */
   askConsent?: boolean;
+  /** macOS: the background item is switched off in Login Items (notice with an "Open Login Items" button). */
+  loginItemOff?: boolean;
+  /** macOS: a repair of a refused registration is under way (notice with its progress). */
+  repairing?: boolean;
   /** A newer release is available and the build can update itself. */
   updateAvailable?: boolean;
   /** A model's engine crashed repeatedly and was given up on (dashboard issue with Retry). */
@@ -186,6 +190,8 @@ export class MockBackend implements PitwallBackend {
       canInstall: true,
       askConsent: options.askConsent ?? false,
       message: null,
+      repair: options.repairing ? { state: 'working', message: 'Re-registering the background service with macOS… (this can take a minute)' } : null,
+      disabledInLoginItems: options.loginItemOff ?? false,
     };
     const now = this.now();
     const empty = options.empty ?? false;
@@ -1188,6 +1194,15 @@ export class MockBackend implements PitwallBackend {
   declineService(): Promise<void> {
     return this.reply('declineService', () => {
       this.service = { ...this.service, askConsent: false };
+    });
+  }
+
+  /** How often "Open Login Items" was asked for (tests). */
+  loginItemsOpened = 0;
+
+  openLoginItems(): Promise<void> {
+    return this.reply('openLoginItems', () => {
+      this.loginItemsOpened += 1;
     });
   }
 

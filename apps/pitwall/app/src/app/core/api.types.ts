@@ -909,6 +909,17 @@ export interface ServiceInstall {
   askConsent: boolean;
   /** What to do next, when something is off. */
   message: string | null;
+  /** macOS: the automatic re-registration of a service launchd refused, while it works and after. */
+  repair: RepairNotice | null;
+  /** macOS: the user switched Pitwall's background item off in System Settings > General > Login Items. */
+  disabledInLoginItems: boolean;
+}
+
+/** Progress of the background repair of the service's registration (macOS). */
+export interface RepairNotice {
+  state: 'working' | 'succeeded' | 'failed';
+  /** Ready to show. */
+  message: string;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

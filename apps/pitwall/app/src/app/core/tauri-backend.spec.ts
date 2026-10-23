@@ -120,6 +120,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['installService', (b) => b.installService(), 'install_service', undefined],
   ['uninstallService', (b) => b.uninstallService(), 'uninstall_service', undefined],
   ['declineService', (b) => b.declineService(), 'decline_service', undefined],
+  ['openLoginItems', (b) => b.openLoginItems(), 'open_login_items', undefined],
   ['autostart', (b) => b.autostart(), 'get_autostart', undefined],
   ['setAutostart', (b) => b.setAutostart(true), 'set_autostart', { enabled: true }],
 ];

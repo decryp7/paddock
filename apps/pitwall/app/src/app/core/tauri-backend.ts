@@ -342,6 +342,9 @@ export class TauriBackend implements PitwallBackend {
   declineService(): Promise<void> {
     return this.run('decline_service');
   }
+  openLoginItems(): Promise<void> {
+    return this.run('open_login_items');
+  }
   autostart(): Promise<boolean> {
     return this.run('get_autostart');
   }

@@ -57,6 +57,14 @@ pub async fn uninstall_service(client: State<'_, SharedClient>) -> Result<Servic
     Ok(compose_state(client.inner()).await)
 }
 
+/// Opens System Settings > General > Login Items (macOS); the user switches the item, Pitwall never does.
+#[tauri::command]
+pub async fn open_login_items() -> Result<(), CommandError> {
+    tauri::async_runtime::spawn_blocking(service_install::open_login_items)
+        .await
+        .map_err(|e| internal(format!("opening Login Items stopped unexpectedly: {e}")))?
+}
+
 /// The user said no to the service; do not ask again.
 #[tauri::command]
 pub fn decline_service() {

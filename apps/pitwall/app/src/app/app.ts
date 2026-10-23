@@ -3,6 +3,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { isTauri } from './core/backend';
+import { ServiceNotices } from './features/service/service-notices';
 import { ServiceConsentPrompt } from './features/service/service-consent';
 import { ServiceStore } from './features/service/service.store';
 import { LiveStore } from './core/live.store';
@@ -17,7 +18,7 @@ import { ToastHost } from './shared/ui/toast-host';
  */
 @Component({
   selector: 'pw-root',
-  imports: [RouterOutlet, Sidebar, ToastHost],
+  imports: [RouterOutlet, Sidebar, ToastHost, ServiceNotices],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (tray()) {
@@ -27,6 +28,7 @@ import { ToastHost } from './shared/ui/toast-host';
       <div class="shell">
         <pw-sidebar />
         <main id="main" tabindex="-1">
+          <pw-service-notices class="notices" />
           <router-outlet />
         </main>
       </div>
@@ -57,6 +59,9 @@ import { ToastHost } from './shared/ui/toast-host';
       border-left: 1px solid var(--border);
       outline: none;
       scrollbar-gutter: stable;
+    }
+    .notices {
+      padding: var(--sp-3) var(--sp-5) 0;
     }
     .skip {
       position: fixed;

@@ -3,7 +3,7 @@ import type { PitwallBackend } from '../../core/backend';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
-import { ServiceStore } from './service.store';
+import { REPAIR_POLL_MS, ServiceStore } from './service.store';
 
 describe('ServiceStore', () => {
   function setup(options: ConstructorParameters<typeof MockBackend>[0] = {}, backend?: PitwallBackend) {
@@ -65,7 +65,7 @@ describe('ServiceStore', () => {
 
   it('install that leaves the server not yet answering says it is starting', async () => {
     const backend = new MockBackend({ askConsent: true });
-    vi.spyOn(backend, 'installService').mockResolvedValue({ platform: 'linux', installed: true, running: false, canInstall: true, askConsent: false, message: null });
+    vi.spyOn(backend, 'installService').mockResolvedValue({ platform: 'linux', installed: true, running: false, canInstall: true, askConsent: false, message: null, repair: null, disabledInLoginItems: false });
     const { store, toasts } = setup({}, backend);
     await store.install();
     expect(toasts.toasts().at(-1)?.message).toBe('The service is installed; it is starting.');
@@ -158,5 +158,53 @@ describe('ServiceStore', () => {
     expect(store.error()?.code).toBe('notAvailable');
     await store.applyUpdate();
     expect(store.isBusy()('apply')).toBe(false);
+  });
+
+  describe('macOS Login Items and the repair', () => {
+    const working = { state: 'working' as const, message: 'Re-registering…' };
+
+    it('opens Login Items through the backend and counts it', async () => {
+      const backend = new MockBackend({ loginItemOff: true });
+      const { store } = setup({}, backend);
+      await store.refresh();
+      expect(store.service()?.disabledInLoginItems).toBe(true);
+      await store.openLoginItems();
+      expect(backend.loginItemsOpened).toBe(1);
+    });
+
+    it('a failed open is toasted, not thrown', async () => {
+      const { store, toasts } = setup({ failing: ['openLoginItems'] });
+      await store.openLoginItems();
+      expect(toasts.toasts().at(-1)?.tone).toBe('bad');
+    });
+
+    it('reads again while the repair works and reports how it ended', async () => {
+      vi.useFakeTimers();
+      try {
+        const backend = new MockBackend({ repairing: true, latencyMs: 0 });
+        const { store, toasts } = setup({}, backend);
+        const base = await backend.serviceState();
+        const spy = vi.spyOn(backend, 'serviceState');
+        spy.mockResolvedValueOnce({ ...base, repair: working });
+        spy.mockResolvedValueOnce({ ...base, repair: { state: 'failed', message: 'Switch Pitwall off and on.' } });
+        await store.refresh();
+        expect(store.service()?.repair?.state).toBe('working');
+        await vi.advanceTimersByTimeAsync(REPAIR_POLL_MS);
+        expect(store.service()?.repair?.state).toBe('failed');
+        expect(toasts.toasts().at(-1)?.message).toContain('could not be re-registered');
+        expect(toasts.toasts().at(-1)?.message).toContain('Switch Pitwall off and on.');
+        spy.mockResolvedValueOnce({ ...base, repair: working });
+        spy.mockResolvedValueOnce({ ...base, repair: { state: 'succeeded', message: 'Service is running again' } });
+        await store.refresh();
+        await vi.advanceTimersByTimeAsync(REPAIR_POLL_MS);
+        expect(toasts.toasts().at(-1)?.message).toBe('Service is running again');
+        // Nothing is polled once the repair ended.
+        const calls = spy.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(REPAIR_POLL_MS * 3);
+        expect(spy.mock.calls.length).toBe(calls);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

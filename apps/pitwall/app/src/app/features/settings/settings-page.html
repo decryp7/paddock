@@ -337,10 +337,21 @@
               <div class="lbl"><span class="name">{{ sv.installed ? 'Remove the service' : 'Run in the background' }}</span><p class="hint">{{ serviceHint(sv.platform) }}</p></div>
               @if (sv.installed) {
                 <button type="button" class="btn" [disabled]="service.isBusy()('uninstall')" (click)="service.uninstall()">{{ service.isBusy()('uninstall') ? 'Removing…' : 'Remove service' }}</button>
-              } @else {
+              } @else if (!sv.disabledInLoginItems) {
                 <button type="button" class="btn primary" [disabled]="!sv.canInstall || service.isBusy()('install')" (click)="service.install()">{{ service.isBusy()('install') ? 'Installing…' : 'Install service' }}</button>
               }
             </div>
+            @if (sv.repair; as r) {
+              <div class="row" data-testid="service-repair-row">
+                <div class="lbl"><span class="name">{{ r.state === 'working' ? 'Repairing the registration' : r.state === 'succeeded' ? 'Registration repaired' : 'Registration could not be repaired' }}</span><p class="hint">{{ r.message }}</p></div>
+              </div>
+            }
+            @if (sv.disabledInLoginItems) {
+              <div class="row" data-testid="service-login-items-row">
+                <div class="lbl"><span class="name">Switched off in Login Items</span><p class="hint">Switch Pitwall on in System Settings > General > Login Items. Pitwall never does it for you.</p></div>
+                <button type="button" class="btn primary" [disabled]="service.isBusy()('loginItems')" (click)="service.openLoginItems()">Open Login Items</button>
+              </div>
+            }
           } @else {
             <p class="faint pad">Could not ask the operating system about the service.</p>
           }

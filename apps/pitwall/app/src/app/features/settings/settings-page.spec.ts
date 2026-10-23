@@ -70,6 +70,16 @@ describe('SettingsPage', () => {
     expect(el.querySelector('[data-testid="service-pill"]')?.textContent).toContain('Not installed');
   });
 
+  it('offers Open Login Items instead of Install when the item is switched off, and shows the repair', async () => {
+    const backend = new MockBackend({ loginItemOff: true, repairing: true });
+    const { fixture, el } = await setup(backend);
+    expect(el.querySelector('[data-testid="service-repair-row"]')?.textContent).toContain('Re-registering');
+    expect(el.querySelector('[data-testid="service-login-items-row"]')).not.toBeNull();
+    await button(el, 'Open Login Items').click();
+    await settle(fixture);
+    expect(backend.loginItemsOpened).toBe(1);
+  });
+
   it('switches start at log-in', async () => {
     const { fixture, el } = await setup();
     const toggle = el.querySelector<HTMLButtonElement>('[aria-labelledby="lbl-login"] button, button[aria-labelledby="lbl-login"]')!;

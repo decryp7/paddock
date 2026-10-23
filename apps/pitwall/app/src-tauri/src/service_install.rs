@@ -3,6 +3,7 @@
 //! with the launch agent inside the app bundle); on Linux nothing is elevated (a systemd user unit written by
 //! `pitwall-server install`). Pitwall never asks for or handles a password. Adapted from Pitcrew's service_install.
 
+use crate::service_repair::RepairNotice;
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,10 @@ pub struct ServiceInstall {
     pub ask_consent: bool,
     /// What to do next, when something is off.
     pub message: Option<String>,
+    /// The background repair of a registration macOS refused, while it works and after (macOS only).
+    pub repair: Option<RepairNotice>,
+    /// The user switched the background item off in System Settings > General > Login Items (macOS only).
+    pub disabled_in_login_items: bool,
 }
 
 /// The server program's file name.
@@ -55,12 +60,16 @@ pub fn server_exe() -> Result<PathBuf, CommandError> {
 }
 
 /// What the OS says about the registration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OsState {
     /// Registered.
     pub installed: bool,
     /// What to do next.
     pub message: Option<String>,
+    /// The macOS repair's progress, if one ran.
+    pub repair: Option<RepairNotice>,
+    /// The user switched the item off in Login Items (macOS).
+    pub disabled_in_login_items: bool,
 }
 
 /// Puts the OS state, the server's answer and the first-run decision together.
@@ -79,6 +88,8 @@ pub fn compose(os: OsState, running: bool, ask_consent: bool) -> ServiceInstall 
         can_install: true,
         ask_consent: ask_consent && !os.installed && !running,
         message,
+        repair: os.repair,
+        disabled_in_login_items: os.disabled_in_login_items,
     }
 }
 
@@ -114,6 +125,7 @@ mod imp {
             return OsState {
                 installed: false,
                 message: Some("the Service Control Manager cannot be asked".into()),
+                ..OsState::default()
             };
         };
         match manager.open_service(SERVICE_NAME, ServiceAccess::QUERY_STATUS) {
@@ -125,12 +137,10 @@ mod imp {
                 OsState {
                     installed: true,
                     message: (!running).then(|| "installed but not running; Windows restarts it, or start it from Services".to_string()),
+                    ..OsState::default()
                 }
             }
-            Err(_) => OsState {
-                installed: false,
-                message: None,
-            },
+            Err(_) => OsState::default(),
         }
     }
 
@@ -205,10 +215,16 @@ mod imp {
     #![allow(unsafe_code, unused_unsafe)]
 
     use super::*;
+    use crate::service_repair::{
+        disabled_in_login_items, parse_print_disabled, run_repair, stale_registration, RegisterError, RegistrationStatus, RepairOps,
+        RepairOutcome, REPAIR,
+    };
     use objc2_foundation::NSString;
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
+    use std::time::{Duration, Instant};
 
     const PLIST: &str = "net.decryptology.pitwall.service.plist";
+    const LABEL: &str = "net.decryptology.pitwall.service";
 
     fn service() -> objc2::rc::Retained<SMAppService> {
         let name = NSString::from_str(PLIST);
@@ -216,35 +232,55 @@ mod imp {
         unsafe { SMAppService::agentServiceWithPlistName(&name) }
     }
 
-    /// Whether the launch agent is registered.
-    pub fn os_state() -> OsState {
+    /// What `SMAppService` says, as the pure mapping's type.
+    fn registration_status() -> RegistrationStatus {
         // SAFETY: a property read on a valid object.
         let status = unsafe { service().status() };
         if status == SMAppServiceStatus::Enabled {
-            OsState {
-                installed: true,
-                message: None,
-            }
+            RegistrationStatus::Enabled
         } else if status == SMAppServiceStatus::RequiresApproval {
-            OsState {
-                installed: true,
-                message: Some("allow Pitwall in System Settings > General > Login Items".to_string()),
-            }
+            RegistrationStatus::RequiresApproval
         } else if status == SMAppServiceStatus::NotFound {
-            OsState {
-                installed: false,
-                message: Some("run Pitwall from /Applications (the launch agent is part of the app bundle)".to_string()),
-            }
+            RegistrationStatus::NotFound
         } else {
-            OsState {
-                installed: false,
-                message: None,
-            }
+            RegistrationStatus::NotRegistered
         }
     }
 
-    /// Registers and starts the service (the OS asks the user).
-    pub fn install() -> Result<(), CommandError> {
+    /// Whether the user switched Pitwall's background item off in Login Items.
+    fn disabled_by_user() -> bool {
+        disabled_in_login_items(registration_status(), launchd_disabled())
+    }
+
+    /// What the OS says about the registration, with the repair's progress and the Login Items switch.
+    pub fn os_state() -> OsState {
+        let status = registration_status();
+        let (installed, message) = match status {
+            RegistrationStatus::Enabled => (true, None),
+            RegistrationStatus::RequiresApproval => (true, Some("allow Pitwall in System Settings > General > Login Items".to_string())),
+            RegistrationStatus::NotFound => (
+                false,
+                Some("run Pitwall from /Applications (the launch agent is part of the app bundle)".to_string()),
+            ),
+            RegistrationStatus::NotRegistered => (false, None),
+        };
+        OsState {
+            installed,
+            message,
+            repair: REPAIR.current(Instant::now()),
+            disabled_in_login_items: disabled_in_login_items(status, launchd_disabled()),
+        }
+    }
+
+    /// Opens System Settings > General > Login Items. The user switches the item; Pitwall never does it for them.
+    pub fn open_login_items() -> Result<(), CommandError> {
+        // SAFETY: a class method without arguments.
+        unsafe { SMAppService::openSystemSettingsLoginItems() };
+        Ok(())
+    }
+
+    /// Registers the launch agent; `open_settings` also opens Login Items when macOS wants the user's approval.
+    fn register(open_settings: bool) -> Result<(), CommandError> {
         let s = service();
         // SAFETY: a method call on a valid object; the error is returned as a Retained NSError.
         match unsafe { s.registerAndReturnError() } {
@@ -252,11 +288,13 @@ mod imp {
             Err(e) => {
                 // SAFETY: as above.
                 if unsafe { s.status() } == SMAppServiceStatus::RequiresApproval {
-                    // SAFETY: a class method without arguments.
-                    unsafe { SMAppService::openSystemSettingsLoginItems() };
+                    if open_settings {
+                        // SAFETY: a class method without arguments.
+                        unsafe { SMAppService::openSystemSettingsLoginItems() };
+                    }
                     return Err(CommandError::new(
                         ErrorCode::Forbidden,
-                        "macOS needs your approval: allow Pitwall in System Settings > General > Login Items (opened for you)",
+                        "macOS needs your approval: allow Pitwall in System Settings > General > Login Items",
                     ));
                 }
                 Err(CommandError::new(
@@ -265,6 +303,11 @@ mod imp {
                 ))
             }
         }
+    }
+
+    /// Registers and starts the service (the OS asks the user).
+    pub fn install() -> Result<(), CommandError> {
+        register(true)
     }
 
     /// Stops and removes the service.
@@ -276,6 +319,104 @@ mod imp {
                 format!("the launch agent could not be removed: {}", e.localizedDescription()),
             )
         })
+    }
+
+    /// After the app was updated, launchd may refuse the registered service (see [`stale_registration`]). When the
+    /// service is registered but `answers` says it is not up and launchd reports a stale registration, registers it
+    /// again ([`run_repair`]), publishing progress in [`REPAIR`] and every step on standard error. `None`: nothing to
+    /// repair (including the user having switched the item off: that is their choice and is left alone).
+    pub fn repair_registration(answers: &dyn Fn() -> bool) -> Option<RepairOutcome> {
+        if registration_status() == RegistrationStatus::NotFound || disabled_by_user() || answers() {
+            return None;
+        }
+        // After the app was replaced macOS can report "not registered" while launchd still holds the old job and
+        // refuses to start the new binary, so launchd's own report decides.
+        if !stale_registration(&launchctl(&["print", &target()?])?) {
+            return None;
+        }
+        REPAIR.begin(Instant::now());
+        eprintln!("Pitwall: the service is registered but launchd refuses it (stale registration): repairing");
+        let outcome = run_repair(&mut MacOps { answers }, &mut |step| eprintln!("Pitwall: repair: {step}"));
+        REPAIR.finish(&outcome, Instant::now());
+        eprintln!("Pitwall: repair finished: {outcome:?}");
+        Some(outcome)
+    }
+
+    /// [`RepairOps`] over `SMAppService` and `launchctl`.
+    struct MacOps<'a> {
+        answers: &'a dyn Fn() -> bool,
+    }
+
+    impl RepairOps for MacOps<'_> {
+        fn register(&mut self) -> Result<(), RegisterError> {
+            register(false).map_err(|e| {
+                if e.code == ErrorCode::Forbidden {
+                    RegisterError::NeedsApproval
+                } else {
+                    RegisterError::Other(e.message)
+                }
+            })
+        }
+        fn unregister(&mut self) -> Result<(), String> {
+            uninstall().map_err(|e| e.message)
+        }
+        fn registration_stale(&mut self) -> bool {
+            target()
+                .and_then(|t| launchctl(&["print", &t]))
+                .is_some_and(|report| stale_registration(&report))
+        }
+        fn service_answers(&mut self) -> bool {
+            (self.answers)()
+        }
+        fn pause(&mut self, how_long: Duration) {
+            std::thread::sleep(how_long);
+        }
+    }
+
+    /// `gui/<uid>/<label>`.
+    fn target() -> Option<String> {
+        Some(format!("{}/{LABEL}", gui_domain()?))
+    }
+
+    fn gui_domain() -> Option<String> {
+        use std::os::unix::fs::MetadataExt;
+        let home = std::env::var_os("HOME")?;
+        Some(format!("gui/{}", std::fs::metadata(home).ok()?.uid()))
+    }
+
+    /// Whether launchd's override database marks the service disabled (`launchctl print-disabled gui/<uid>`).
+    fn launchd_disabled() -> Option<bool> {
+        let report = launchctl(&["print-disabled", &gui_domain()?])?;
+        parse_print_disabled(&report, LABEL)
+    }
+
+    /// `launchctl <args>`, bounded to a few seconds; `None` when it cannot be run or read.
+    fn launchctl(args: &[&str]) -> Option<String> {
+        use std::process::{Command, Stdio};
+        // macOS only: no console window to hide, and the wait below is bounded.
+        #[allow(clippy::disallowed_methods)]
+        let mut child = Command::new("/bin/launchctl")
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+        let mut out = String::new();
+        std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
+        Some(out)
     }
 }
 
@@ -303,6 +444,7 @@ mod imp {
         OsState {
             installed: unit_file().is_some_and(|p| p.exists()),
             message: None,
+            ..OsState::default()
         }
     }
 
@@ -372,9 +514,58 @@ mod imp {
 
 pub use imp::{install, os_state, uninstall};
 
+#[cfg(target_os = "macos")]
+pub use imp::{open_login_items, repair_registration};
+
+/// Opens System Settings > General > Login Items, where the user switches the background item on. Only macOS has one.
+#[cfg(not(target_os = "macos"))]
+pub fn open_login_items() -> Result<(), CommandError> {
+    Err(CommandError::new(ErrorCode::NotAvailable, "Login Items exist on macOS only"))
+}
+
+/// How many times a run of the app checks for a stale service registration (macOS).
+pub const REPAIR_ATTEMPTS: u32 = 8;
+
+/// The wait before check number `attempt`: soon after start, then every minute (the service may only fail later,
+/// when it restarts itself onto a new binary).
+pub fn repair_delay(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_secs(if attempt == 0 { 3 } else { 60 })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repair_checks_soon_then_every_minute() {
+        assert_eq!(repair_delay(0).as_secs(), 3);
+        assert_eq!(repair_delay(1).as_secs(), 60);
+        const { assert!(REPAIR_ATTEMPTS >= 5) };
+    }
+
+    #[test]
+    fn the_repair_and_the_login_item_switch_reach_the_ui() {
+        let os = OsState {
+            installed: true,
+            repair: Some(RepairNotice {
+                state: crate::service_repair::RepairState::Working,
+                message: "m".into(),
+            }),
+            disabled_in_login_items: true,
+            ..OsState::default()
+        };
+        let s = compose(os, false, false);
+        assert!(s.disabled_in_login_items && s.repair.is_some());
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["disabledInLoginItems"], true);
+        assert_eq!(json["repair"]["state"], "working");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn login_items_exist_on_macos_only() {
+        assert_eq!(open_login_items().unwrap_err().code, ErrorCode::NotAvailable);
+    }
 
     #[test]
     fn the_server_program_must_exist_and_not_be_an_empty_placeholder() {
@@ -390,13 +581,10 @@ mod tests {
 
     #[test]
     fn the_state_tells_the_user_what_is_off() {
-        let none = OsState {
-            installed: false,
-            message: None,
-        };
+        let none = OsState::default();
         let yes = OsState {
             installed: true,
-            message: None,
+            ..OsState::default()
         };
         // Fresh machine: ask.
         let s = compose(none.clone(), false, true);
@@ -414,6 +602,7 @@ mod tests {
         let os = OsState {
             installed: true,
             message: Some("allow it".into()),
+            ..OsState::default()
         };
         assert_eq!(compose(os, false, false).message.as_deref(), Some("allow it"));
         assert!(["windows", "macos", "linux"].contains(&PLATFORM));

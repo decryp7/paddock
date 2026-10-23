@@ -20,6 +20,9 @@ interface ServiceState {
   error: CommandError | null;
 }
 
+/** How often the state is read again while the repair works. */
+export const REPAIR_POLL_MS = 3000;
+
 const initial: ServiceState = { service: null, autostart: null, updateStatus: null, update: null, upToDate: false, busy: {}, error: null };
 
 /**
@@ -35,6 +38,7 @@ export const ServiceStore = signalStore(
     isBusy: computed(() => (key: string) => key in busy()),
   })),
   withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => {
+    let poll: ReturnType<typeof setTimeout> | null = null;
     const setBusy = (key: string, on: boolean) => {
       const next = { ...store.busy() };
       if (on) next[key] = true;
@@ -59,16 +63,33 @@ export const ServiceStore = signalStore(
       }
     }
 
+    /** Reads the service, start-at-log-in and update state; each part on its own so one failure hides nothing else. */
+    async function refresh(): Promise<void> {
+      if (poll !== null) clearTimeout(poll);
+      poll = null;
+      const before = store.service()?.repair?.state ?? null;
+      const [service, autostart, updateStatus] = await Promise.allSettled([backend.serviceState(), backend.autostart(), backend.appUpdateStatus()]);
+      patchState(store, {
+        service: service.status === 'fulfilled' ? service.value : store.service(),
+        autostart: autostart.status === 'fulfilled' ? autostart.value : store.autostart(),
+        updateStatus: updateStatus.status === 'fulfilled' ? updateStatus.value : store.updateStatus(),
+        error: service.status === 'rejected' ? toCommandError(service.reason) : null,
+      });
+      const repair = store.service()?.repair ?? null;
+      if (repair?.state === 'working') {
+        // The repair runs in the background and can take a minute: look again until it ends.
+        poll = setTimeout(() => void refresh(), REPAIR_POLL_MS);
+      } else if (before === 'working' && repair) {
+        if (repair.state === 'succeeded') toasts.ok(repair.message);
+        else toasts.show(`The background service could not be re-registered. ${repair.message}`, 'bad', 10000);
+      }
+    }
+
     return {
-      /** Reads the service, start-at-log-in and update state; each part on its own so one failure hides nothing else. */
-      async refresh(): Promise<void> {
-        const [service, autostart, updateStatus] = await Promise.allSettled([backend.serviceState(), backend.autostart(), backend.appUpdateStatus()]);
-        patchState(store, {
-          service: service.status === 'fulfilled' ? service.value : store.service(),
-          autostart: autostart.status === 'fulfilled' ? autostart.value : store.autostart(),
-          updateStatus: updateStatus.status === 'fulfilled' ? updateStatus.value : store.updateStatus(),
-          error: service.status === 'rejected' ? toCommandError(service.reason) : null,
-        });
+      refresh,
+      /** Opens System Settings > General > Login Items; the user switches the item (Pitwall never does). */
+      async openLoginItems(): Promise<void> {
+        await act('loginItems', () => backend.openLoginItems());
       },
 
       /** The user said yes to the service. */
