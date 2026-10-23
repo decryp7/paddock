@@ -123,6 +123,10 @@ Configuration (user, 2026-10-23)
   only ever narrowing safety rules, and reloaded without a restart.
 
 UX findings (2026-10-23)
+- Every dialog is a real OS window (Tauri window owned by and centred on the main window, modal where the dialog was
+  modal, remembered size and position, Escape closes), never an in-app overlay popup: setup wizards, Settings, managers,
+  What's new, About, export/share wizards and confirmations alike (user rule, all apps). Menus, dropdowns, autocomplete
+  and tooltips stay in-app.
 - Panes lay out by container queries, not viewport media queries: Debrief's Home cut off "Needs attention" and Health
   in a narrow pane. Paths and file names truncate in the middle with the full value in a tooltip and copyable; long words
   wrap; buttons wrap below text; no horizontal scroll at any width ≥ 320 px.
