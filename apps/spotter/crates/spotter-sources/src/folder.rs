@@ -1257,24 +1257,23 @@ mod tests {
     async fn cancelling_stops_the_walk() {
         let d = tempfile::tempdir().unwrap();
         tree(d.path(), 24, 20);
-        let (job, seen, cancel) = recording_job(Duration::ZERO);
-        // Cancel from the first report that has counted something.
-        let watcher = {
-            let (seen, cancel) = (seen.clone(), cancel.clone());
-            tokio::spawn(async move {
-                loop {
-                    if seen.lock().unwrap().iter().any(|p| p.done > 0) {
-                        cancel.cancel();
-                        return;
-                    }
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+        // Cancel inside the first report that has counted something, so the walk cannot finish first (a polling task
+        // lost that race on a fast runner).
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let cancel = Cancel::new();
+        let job = {
+            let (sink, stop) = (seen.clone(), cancel.clone());
+            Job::new(cancel.clone(), move |p: &spotter_core::job::Progress| {
+                if p.done > 0 {
+                    stop.cancel();
                 }
+                sink.lock().unwrap().push(p.clone());
             })
+            .with_interval(Duration::ZERO)
         };
         let mut req = request(source(d.path(), &[("depth", "2")]));
         req.settle = false;
         let e = scan_job(req, &job).await.unwrap_err();
-        watcher.await.unwrap();
         assert_eq!(e.message(), CANCELLED);
         assert!(
             seen.lock().unwrap().last().unwrap().total.is_none(),
