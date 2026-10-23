@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { versionPaddockDocs } from './version-links.mjs';
 import { Diagram, link } from '../../../diagrams/tools/lib.mjs';
 import { CODEBASE_TOOL } from './family.mjs';
 
@@ -86,3 +87,4 @@ if (process.argv.includes('--png')) {
     console.log(`wrote paddock-integrations-${theme}.png`);
   }
 }
+versionPaddockDocs(join(out, '../..'));

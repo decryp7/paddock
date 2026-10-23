@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=f2610227" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -10,14 +10,21 @@ only: no cloud, no account, no telemetry.
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png) and [dark](images/paddock-ecosystem-dark.png), integrations
-[light](images/paddock-integrations-light.png) and [dark](images/paddock-integrations-dark.png).
+hero [light](images/paddock-ecosystem-light.png?v=6b34418d) and [dark](images/paddock-ecosystem-dark.png?v=ea6670ba), integrations
+[light](images/paddock-integrations-light.png?v=a89dbf99) and [dark](images/paddock-integrations-dark.png?v=d056b1fd).
 
 Each app's marketing art (hero banner, feature showcase, how it works, 1280x640 social card) is generated from one data file per app
 in [`images/src/apps/`](images/src/apps/) by [`images/src/app-poster.mjs`](images/src/app-poster.mjs), into the app's own
 `docs/images/` (apps are expected as sibling checkouts, or set `PADDOCK_APPS`):
 `node docs/images/src/app-poster.mjs <app|all> --png`. Screenshots come from the app's `docs/screenshots`; planned apps use a
 concept mock. Debrief's data file is prepared but not generated until its release.
+
+Image links carry a version, `images/x.svg?v=<first 8 hex of the file's SHA-256>`, so a regenerated image shows immediately through
+Cloudflare and browser caches (the server caches for an hour and Cloudflare's cache key includes the query string). The generators
+call [`images/src/version-links.mjs`](images/src/version-links.mjs) after writing: it rewrites `src`/`srcset` and Markdown links that
+point at an existing file in an `images` directory in Paddock's README and this page, in the app README the poster wrote into, and in
+the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempotent; to apply it by hand:
+`node docs/images/src/version-links.mjs <README.md ...>`.
 
 ## Status
 
@@ -110,7 +117,7 @@ Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/pacenotes>
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; apps hand off files and deep links directly" width="100%">
+  <img src="images/paddock-integrations.svg?v=69a6ff19" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; apps hand off files and deep links directly" width="100%">
 </picture>
 
 The apps never depend on each other to do their own job. They meet in a few well-defined places:

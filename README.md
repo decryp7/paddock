@@ -1,7 +1,7 @@
 # Paddock
 
 <p align="center">
-  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%"></a>
+  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=f2610227" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%"></a>
 </p>
 
 <p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>

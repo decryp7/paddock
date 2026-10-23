@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { versionFile } from './version-links.mjs';
 import { crops } from './shots.mjs';
 import { glyph } from './glyphs.mjs';
 import * as mock from './mocks.mjs';
@@ -247,6 +248,7 @@ async function build(id, wantPng) {
     if (k === 'social') { png(p, join(outDir, `${id}-social.png`), w, h, 'dark', 1); png(p, join(outDir, `${id}-social-light.png`), w, h, 'light', 1); }
     else for (const th of ['light', 'dark']) png(p, join(outDir, `${id}-${k}-${th}.png`), w, h, th, 2);
   }
+  if (versionFile(join(appsRoot, id, 'README.md'))) console.log(`versioned image links in ${id}/README.md`);
 }
 
 const want = process.argv.slice(2).filter((a) => !a.startsWith('--'));
