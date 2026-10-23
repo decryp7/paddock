@@ -286,10 +286,7 @@ mod tests {
     async fn a_silent_server_hits_the_total_limit() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let _keep = tokio::spawn(async move {
-            let _held = listener.accept().await;
-            tokio::time::sleep(Duration::from_secs(30)).await;
-        });
+        // The kernel completes the connection; nobody ever answers it.
         let e = send_within(
             &account(port, SmtpSecurity::None),
             &message(),
@@ -299,5 +296,6 @@ mod tests {
         .await
         .unwrap_err();
         assert!(matches!(e, MailError::Timeout(_)), "{e:?}");
+        drop(listener);
     }
 }

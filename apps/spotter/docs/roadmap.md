@@ -23,7 +23,7 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
    click-through (Open, Mark as seen). E-mail channel delivery is done in the engine (SMTP through lettre, TLS, timeouts,
    password in the credential store, typed errors with a next step; commands `mail_status`, `set_mail_password`,
    `send_test_email`); the UI has no mail form yet (feat/ui-gaps), and no test against a real TLS server has been run (the tests use a local fake SMTP server; STARTTLS and TLS failure paths are covered, a successful TLS session is not).
-5. Coverage (done 2026-10-23, release prep): `spotter-sources` 99.0% and `spotter-engine` 98.8% lines (`cargo llvm-cov`, summary
+5. Coverage (2026-10-23, after the engine-gaps round): `spotter-core` 99.4%, `spotter-sources` 99.0% and `spotter-engine` 98.9% lines (`cargo llvm-cov`, summary
    method); the rest are `?` regions on SQLite and file operations (seek, flush, write, pragma, transactions) that need a
    fault-injecting database or file layer. Added seams: the in-memory database returns an error (not an exit) and takes an injected opener, a size limit
    parameter for downloads, platform parameters for folder error messages, `Gathered::into_candidates`, `feeds_in`.
