@@ -10,6 +10,9 @@ Dyno). Like the pit wall in a race, it is where every car radios in.
 
 </div>
 
+![Pitwall: One private AI for every app](docs/images/pitwall-hero.svg)
+
+
 > **Local only.** Nothing you ask and nothing the model answers ever leaves your computer. No cloud models, no
 > telemetry, no crash upload. The only network traffic is downloading engines and models you asked for, and offline
 > mode turns even that off. This is the first architecture decision and is enforced in code and tests:
@@ -65,6 +68,10 @@ loaded model in its own engine process; a Tauri app with a tray and an Angular U
 - **No lock-in to one engine.** llama.cpp today; others behind the `Engine` trait or a declarative TOML pack.
 
 ## Features
+
+![Pitwall features](docs/images/pitwall-features.svg)
+
+![How Pitwall works](docs/images/pitwall-how-it-works.svg)
 
 Every feature, with its status, is in [docs/features.md](docs/features.md).
 
