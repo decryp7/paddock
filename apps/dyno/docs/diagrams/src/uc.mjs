@@ -34,10 +34,10 @@ function useCases(file, { title, desc, owner, rows, ext }) {
 }
 useCases('uml-use-cases-observe', {
   title: 'Use cases — see and understand', desc: 'What the PC owner learns about the machine. Nothing here changes it. Dashed ellipses are planned.', owner: 'PC owner',
-  rows: [['Watch live performance'], ['Browse and sort processes'], ['Ask "why is my PC slow?"'], ['Review history and spikes'], ['Check health and read the reasons'], ['Receive alerts and anomalies'], ['Browse Issues and unusual processes', 1], ['Watched folders with keep-for times', 1], ['Read the weekly report', 1], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Ask "is this normal?"']],
+  rows: [['Watch live performance'], ['Browse and sort processes'], ['Ask "why is my PC slow?"'], ['Review history and spikes'], ['Check health and read the reasons'], ['Receive alerts and anomalies'], ['Browse Issues and unusual processes'], ['Read the weekly report'], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Ask "is this normal?"'], ['Use Extras; see backup and network changes']],
 });
 useCases('uml-use-cases-act', {
   title: 'Use cases — change and tune', desc: 'Everything that changes the machine needs an enabled rule or an explicit click, and is undoable where the OS allows. Dashed ellipses are planned.', owner: 'PC owner',
-  rows: [['End, suspend or re-prioritise an app'], ['Tame an app with a rule or profile'], ['Manage startup items'], ['Undo an action from Activity'], ['Set tray metric, theme, sampling'], ['Install the helper, approve an admin change'], ['Start the agent at login'], ['Clean up disk with quarantine', 1], ['Apply a tuning suggestion', 1], ['Run a benchmark on click', 1]],
+  rows: [['End, suspend or re-prioritise an app'], ['Tame an app with a rule, profile or timer'], ['Manage startup items'], ['Undo an action from Activity'], ['Set tray metric, theme, sampling'], ['Install the helper, approve an admin change'], ['Start the agent at login'], ['Clean up disk with quarantine'], ['Apply a tuning suggestion'], ['Run a benchmark on click'], ['Watch folders with keep-for times'], ['Search the web or a hash on click']],
   ext: { name: 'OS (login, power)', row: 6 },
 });

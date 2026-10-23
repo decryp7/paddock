@@ -24,7 +24,7 @@ function column(d, x, w, y0, H, list) {
     ['hosts', 'external', 0, { name: 'Release host', tech: 'Gitea releases, HTTPS', desc: 'Signed installers and latest.json for Dyno\'s own opt-in updates.' }],
     ['debrief', 'external', 0, { name: 'Debrief', tech: 'Sister app', desc: 'Open in Debrief: a time window exported for log analysis.', planned: true }],
     ['pitwall', 'external', 0, { name: 'Pitwall', tech: 'Local LLM server', desc: 'Explain this: a redacted summary, only on click.', planned: true }],
-    ['backup', 'external', 0, { name: 'Backup tools', tech: 'Time Machine · restic · Borg', desc: 'Dyno checks that they ran; it never runs backups.', planned: true }],
+    ['backup', 'external', 0, { name: 'Backup tools', tech: 'Time Machine · restic · Borg', desc: 'Dyno checks that they ran; it never runs backups.' }],
   ];
   const H = Math.max(need(d, W, left), need(d, W, right));
   column(d, 48, W, y0, H, left);
