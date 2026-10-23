@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { IpLookupSettings, Settings, Theme, TrayItem } from '../../core/api.types';
+import type { BaselineSettings, HardwareAlarms, IpLookupSettings, Settings, Theme, TrayItem } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -147,6 +147,31 @@ import { TrayItemsEditor } from './tray-items-editor';
                 <label class="num-in"><input class="input" type="number" min="1" max="240" [disabled]="!d.alerts.enabled" aria-label="Minutes of high CPU" [ngModel]="d.alerts.longHighCpuMinutes" (ngModelChange)="setAlerts({ longHighCpuMinutes: +$event })" /><span>minutes</span></label>
               </div>
             </section>
+
+            <section class="card" aria-label="Hardware and baselines">
+              <h2>Hardware and baselines</h2>
+              <p class="sub">Dyno learns what is normal for this PC at each time of the week, and watches the CPU speed, disks and battery. These only raise alarms when you allow it.</p>
+              <div class="row">
+                <div class="lbl"><strong>Learn what is normal</strong><small>Shows on the dashboard what is unusual for this time of the week. Nothing is highlighted while Dyno is still learning.</small></div>
+                <dy-switch [checked]="baselines().enabled" (changed)="setBaselines({ enabled: $event })" label="Learn what is normal" />
+              </div>
+              <div class="row" [class.off]="!baselines().enabled">
+                <div class="lbl"><strong>Learning period</strong><small>Days of history before anything is called unusual (1 to 30).</small></div>
+                <label class="num-in"><input class="input" type="number" min="1" max="30" [disabled]="!baselines().enabled" aria-label="Days of learning" [ngModel]="baselines().learningDays" (ngModelChange)="setLearningDays($event)" /><span>days</span></label>
+              </div>
+              <div class="row" [class.off]="!baselines().enabled">
+                <div class="lbl"><strong>Alarm when far above usual</strong><small>Raises an alarm when something stays far above what is normal for the time of week. Off by default.</small></div>
+                <dy-switch [checked]="baselines().alarms" (changed)="setBaselines({ alarms: $event })" label="Alarm when far above usual" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Alarm for throttling</strong><small>Raises an alarm when the CPU is slowed down for a while.</small></div>
+                <dy-switch [checked]="hardwareAlarms().throttling" (changed)="setHardwareAlarms({ throttling: $event })" label="Alarm for throttling" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Alarm for worn disks and batteries</strong><small>Raises an alarm when a disk or battery is near the end of its life.</small></div>
+                <dy-switch [checked]="hardwareAlarms().lifespan" (changed)="setHardwareAlarms({ lifespan: $event })" label="Alarm for disks and batteries near end of life" />
+              </div>
+            </section>
           </div>
         }
       </dy-async>
@@ -227,6 +252,8 @@ export class SettingsPage implements OnInit {
   protected readonly presetId = computed(() => presetIdFor(this.ipLookup().ipTemplate));
   protected readonly ipProblem = computed(() => templateProblem(this.ipLookup().ipTemplate, 'ip'));
   protected readonly asnProblem = computed(() => templateProblem(this.ipLookup().asnTemplate, 'asn'));
+  protected readonly baselines = computed<BaselineSettings>(() => this.draft()?.baselines ?? { enabled: true, learningDays: 7, alarms: false });
+  protected readonly hardwareAlarms = computed<HardwareAlarms>(() => this.draft()?.hardwareAlarms ?? { throttling: true, lifespan: true });
   protected readonly systemIntervals = [500, 1000, 2000, 5000];
   protected readonly processIntervals = [1000, 2000, 5000, 10000];
   protected readonly hint = computed(() => {
@@ -276,6 +303,17 @@ export class SettingsPage implements OnInit {
   }
   protected setAlerts(p: Partial<Settings['alerts']>): void {
     this.draft.update((d) => (d ? { ...d, alerts: { ...d.alerts, ...p } } : d));
+  }
+  protected setBaselines(p: Partial<BaselineSettings>): void {
+    this.draft.update((d) => (d ? { ...d, baselines: { ...this.baselines(), ...p } } : d));
+  }
+  /** A typed number: only a whole number from 1 to 30 is taken (the engine validates the same range). */
+  protected setLearningDays(v: unknown): void {
+    const n = Math.round(Number(v));
+    if (Number.isFinite(n) && n >= 1 && n <= 30) this.setBaselines({ learningDays: n });
+  }
+  protected setHardwareAlarms(p: Partial<HardwareAlarms>): void {
+    this.draft.update((d) => (d ? { ...d, hardwareAlarms: { ...this.hardwareAlarms(), ...p } } : d));
   }
   protected setTrayItems(items: TrayItem[]): void {
     this.draft.update((d) => (d ? { ...d, trayItems: { version: d.trayItems?.version ?? 1, items } } : d));

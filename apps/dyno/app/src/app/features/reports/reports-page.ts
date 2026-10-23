@@ -124,6 +124,17 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
             }
           </section>
 
+          @if (r.hardware.length) {
+            <section class="card" aria-label="Hardware">
+              <div class="card-head"><h2><dy-icon name="temperature" /> Hardware</h2></div>
+              <ul class="plain">
+                @for (h of r.hardware; track $index) {
+                  <li>{{ h }}</li>
+                }
+              </ul>
+            </section>
+          }
+
           <section class="card" aria-label="What changed">
             <div class="card-head"><h2><dy-icon name="diff" /> What changed</h2></div>
             <p class="lead">Rules stepped in {{ plural(r.ruleActions, 'time') }}; cleanup freed {{ bytes(r.cleanedBytes) }}.</p>

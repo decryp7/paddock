@@ -41,6 +41,9 @@ import type {
   StartupEntry,
   StartupState,
   SystemInventory,
+  ThrottleOverview,
+  LifespanOverview,
+  BaselineOverview,
   BenchComparison,
   NetworkQuery,
   NetworkSnapshot,
@@ -322,6 +325,18 @@ export class TauriBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.request('inventory');
+  }
+
+  throttling(): Promise<ThrottleOverview> {
+    return this.request('throttling');
+  }
+
+  lifespan(): Promise<LifespanOverview> {
+    return this.request('lifespan');
+  }
+
+  baselines(): Promise<BaselineOverview> {
+    return this.request('baselines');
   }
 
   network(query: NetworkQuery): Promise<NetworkSnapshot> {

@@ -690,6 +690,8 @@ export interface WeeklyReport {
   issues: ReportIssue[];
   /** What changed on the machine, newest first (at most 20). */
   changes: ReportChange[];
+  /** Hardware sentences: time throttled, disks and batteries that need attention (empty when there is nothing to say). */
+  hardware: string[];
   /** True when the week holds nothing: a valid report that says so. */
   nothingToReport: boolean;
 }
@@ -764,6 +766,10 @@ export interface Settings {
   networkAlerts?: NetworkAlerts;
   /** Desktop notifications for new alarms (quiet hours and muted rules still apply). */
   notifications?: boolean;
+  /** "Is this normal?" baselines: learning period and alarms (the engine fills the default when absent). */
+  baselines?: BaselineSettings;
+  /** Which hardware findings may raise an alarm (the engine fills the default when absent). */
+  hardwareAlarms?: HardwareAlarms;
 }
 
 export interface PluginInfo {
@@ -1346,3 +1352,133 @@ export interface IpLookupSettings {
 // END rust-agent additions. Also appended to `Settings` (all optional in the JSON): dashboard, trayItems, alarms,
 // flightRecorder (see the widgets, alarms and recorder blocks above).
 // ===================================================================================================================
+
+// ===================================================================================================================
+// WP-23 throttling, WP-24 disk and battery life, WP-25 "Is this normal?" (mirrors dyno_core::{throttle, lifespan,
+// baseline, hardware}). Requests are `throttling`, `lifespan`, `baselines`; each answers the matching overview.
+// ===================================================================================================================
+
+/** How sure Dyno is of a finding; always shown in words next to it. */
+export type Confidence = 'low' | 'medium' | 'high';
+
+export type ThrottleCause = 'thermal' | 'power' | 'batterySaver' | 'unexplained';
+
+export type ThrottleVerdict =
+  | { throttled: { cause: ThrottleCause; lostPercent: number } }
+  | 'fine'
+  | 'notBusy'
+  | 'cannotTell';
+
+export interface ThrottleReading {
+  verdict: ThrottleVerdict;
+  confidence: Confidence;
+  headline: string;
+  explanation: string;
+  evidence: Evidence[];
+}
+
+export interface ThrottleEpisode {
+  start: Timestamp;
+  /** Null while it continues. */
+  end: Timestamp | null;
+  cause: ThrottleCause;
+  avgLostPercent: number;
+  peakLostPercent: number;
+  peakTemperatureC: number | null;
+}
+
+/** What this machine reports, so "cannot tell" is explained. */
+export interface InputStatus {
+  label: string;
+  available: boolean;
+  detail: string;
+}
+
+export interface ThrottleOverview {
+  at: Timestamp;
+  reading: ThrottleReading;
+  /** The running episode, once it has lasted long enough to count. */
+  current: ThrottleEpisode | null;
+  /** The last 30 days, newest first. */
+  episodes: ThrottleEpisode[];
+  minutes30d: number;
+  inputs: InputStatus[];
+}
+
+export type LifeSubject = 'ssd' | 'battery';
+
+export type LifeOutcome =
+  | { remaining: { lowDays: number; midDays: number; highDays: number } }
+  | 'beyondHorizon'
+  | 'noWearDetected'
+  | 'alreadyPastLimit'
+  | { tooLittleHistory: { haveDays: number; needDays: number } }
+  | { unavailable: { reason: string } };
+
+export interface LifeForecast {
+  subject: LifeSubject;
+  name: string;
+  outcome: LifeOutcome;
+  confidence: Confidence;
+  /** One line with the range in words ("Replace in about 22 months (17 to 31 months)"). */
+  headline: string;
+  explanation: string;
+  /** The data the estimate stands on. */
+  basis: Evidence[];
+  historyDays: number;
+  readings: number;
+  /** Set when the series was cut because a different disk or battery appeared. */
+  restartedAt: Timestamp | null;
+}
+
+export interface LifespanOverview {
+  at: Timestamp;
+  forecasts: LifeForecast[];
+}
+
+export type BaselineMetric = 'cpu' | 'memory' | 'diskWrite' | 'network' | 'temperature' | 'gpu' | 'appCpu' | 'appMemory';
+
+export type Learning = 'off' | { learning: { daysDone: number; daysNeeded: number } } | { ready: { days: number } };
+
+export type BaselineStrength = 'notable' | 'strong';
+
+export type BaselineState = 'notJudged' | 'noBaseline' | 'usual' | { higher: BaselineStrength } | { lower: BaselineStrength };
+
+export interface Judgement {
+  state: BaselineState;
+  confidence: Confidence;
+  /** "Higher than usual for Tuesday mornings". */
+  phrase: string;
+  explanation: string;
+  /** The usual value, formatted. */
+  usual: string;
+}
+
+export interface BaselineItem {
+  /** "System" or an app's name. */
+  subject: string;
+  metric: BaselineMetric;
+  label: string;
+  current: string;
+  judgement: Judgement;
+}
+
+export interface BaselineOverview {
+  at: Timestamp;
+  learning: Learning;
+  /** Unusual values first. Empty while learning. */
+  items: BaselineItem[];
+}
+
+export interface BaselineSettings {
+  enabled: boolean;
+  /** 1..30 days of history before anything is highlighted. */
+  learningDays: number;
+  /** Alarm when something stays far above its usual (off by default). */
+  alarms: boolean;
+}
+
+export interface HardwareAlarms {
+  throttling: boolean;
+  lifespan: boolean;
+}

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { NormalCard } from './normal-card';
 import { WidgetBoard } from '../widgets/widget-board';
 import { formatDuration } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -13,7 +14,7 @@ import { RulesStore } from '../../state/rules.store';
  */
 @Component({
   selector: 'dy-dashboard',
-  imports: [RouterLink, Icon, WidgetBoard],
+  imports: [RouterLink, Icon, WidgetBoard, NormalCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -27,6 +28,8 @@ import { RulesStore } from '../../state/rules.store';
           <dy-icon [name]="rules.paused() ? 'play' : 'pause'" /> {{ rules.paused() ? 'Resume rules' : 'Pause rules' }}
         </button>
       </header>
+
+      <dy-normal-card />
 
       <dy-widget-board />
     </div>
