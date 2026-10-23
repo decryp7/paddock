@@ -16,7 +16,7 @@ const W = 1600, H = 1500;
 const row1 = [
   { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#831826', lines: ['Everything code-related:', 'index, review, diagrams,', 'requirements, tests.'] },
   { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
-  { id: 'sighter', name: 'Sighter', accent: '#00B8D9', lines: ['Finds any UI element by', 'sight, for UI tests.'] },
+  { id: 'sighter', name: 'Sighter', accent: '#00B8D9', lines: ['Finds any UI element by', 'sight. MCP server and', 'agent for any desktop.'] },
 ];
 const row3 = [
   { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] },
@@ -92,12 +92,14 @@ const links = [];
 links.push(hand([[gapR(0) - 2, m1 - 30], [gapL(0) + 2, m1 - 30]]) + pill((gapL(0) + gapR(0)) / 2, m1 - 30, 'Trace → code'));
 links.push(hand([[gapL(0) + 2, m1 + 30], [gapR(0) - 2, m1 + 30]]) + pill((gapL(0) + gapR(0)) / 2, m1 + 30, 'Log checks'));
 // Sighter -> Debrief
-links.push(hand([[cardX(2) - 2, m1], [gapL(1) + 2, m1]]) + pill((gapL(1) + cardX(2)) / 2, m1, 'Run bundles'));
+links.push(hand([[cardX(2) - 2, m1 - 34], [gapL(1) + 2, m1 - 34]]) + pill((gapL(1) + cardX(2)) / 2, m1 - 34, 'Run bundles'));
+// Debrief -> Sighter (MCP host: reproduce a bug from a video)
+links.push(hand([[gapL(1) + 2, m1 + 34], [cardX(2) - 2, m1 + 34]]) + pill((gapL(1) + cardX(2)) / 2, m1 + 34, 'Video repro (MCP)'));
 // Dyno -> Pitcrew, Dyno -> Spotter
 links.push(hand([[cardX(1) - 2, m3], [gapL(0) + 2, m3]]) + pill((gapL(0) + cardX(1)) / 2, m3, 'Machine health'));
 links.push(hand([[gapL(1) + 2, m3], [cardX(2) - 2, m3]]) + pill((gapL(1) + cardX(2)) / 2, m3, 'Installed software'));
 // Pacenotes -> Sighter (test plans) and back (results): nested arcs over the top row
-links.push(hand([[335, R1 - 2], [335, R1 - 40], [1265, R1 - 40], [1265, R1 - 2]]) + pill(800, R1 - 40, 'Test plans'));
+links.push(hand([[335, R1 - 2], [335, R1 - 40], [1265, R1 - 40], [1265, R1 - 2]]) + pill(800, R1 - 40, 'Test plans, MCP host'));
 links.push(hand([[1385, R1 - 2], [1385, R1 - 100], [275, R1 - 100], [275, R1 - 2]]) + pill(800, R1 - 100, 'Results'));
 // Pitcrew -> Debrief, Dyno -> Debrief, Spotter -> Sighter (later): lines through the lane around the hub band
 const CH1 = Math.round((gapL(0) + cardX(1)) / 2), DX = 900, SX = 1450;
@@ -110,7 +112,7 @@ const T = B1 + 4, Bt = HUB - 4, H2 = HUB + HUBH + 4, T3 = R3 - 4;
 const stubs = [
   stub(cardX(0) + CW / 2, T, Bt, 'MCP, review, Q&amp;A', { both: true }),
   stub(720, T, Bt, 'Explain, research'),
-  stub(1265, T, Bt, 'Vision'),
+  stub(1265, T, Bt, 'Vision, planner', { both: true }),
   stub(720, T3, H2, 'Diagnosis'),
   stub(1265, T3, H2, 'What’s new'),
 ].join('\n');
@@ -124,11 +126,13 @@ const cols = [
 ];
 const hubCols = cols.map(([x, h, ls]) => `<text class="vt" x="${x}" y="${HUB + 62}">${h}</text>` +
   ls.map((l, k) => `<text class="vs" x="${x}" y="${HUB + 90 + k * 23}">${l}</text>`).join('')).join('');
-const hub = `<g><rect class="hub" x="${HX}" y="${HUB}" width="${HW}" height="${HUBH}" rx="24"/>
+const hst = STATUS.pitwall, hcw = Math.round(hst.text.length * 7.8 + 30);
+const hubTag = `<rect class="chip-${hst.tone}" x="${1420 - hcw}" y="${HUB + 20}" width="${hcw}" height="26" rx="13"/><text class="chipt-${hst.tone}" x="${1420 - hcw / 2}" y="${HUB + 38}" text-anchor="middle">${hst.text}</text>`;
+const hub = `<g><rect class="hub" x="${HX}" y="${HUB}" width="${HW}" height="${HUBH}" rx="24"/>${hubTag}
 ${icon('pitwall', HX + 28, HUB + 40, 80)}
 <rect x="${HX + 130}" y="${HUB + 44}" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
 <text class="name hubname" x="${HX + 130}" y="${HUB + 80}">Pitwall</text>
-<text class="promise" x="${HX + 130}" y="${HUB + 106}">The local AI hub.</text>
+<text class="promise" x="${HX + 130}" y="${HUB + 106}">The local AI hub, on llama.cpp.</text>
 <text class="promise" x="${HX + 130}" y="${HUB + 129}">Optional for every app.</text>
 ${hubCols}</g>`;
 
@@ -159,7 +163,7 @@ const legend = `<g>
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">The Paddock family</title>
-<desc id="d">Seven local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Pitcrew sends job logs, Dyno sends issues, installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later.</desc>
+<desc id="d">Seven local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief and Pacenotes drive Sighter as MCP hosts (Debrief reproduces a bug from a video), Sighter uses Pitwall as its vision model and agent planner, Pitcrew sends job logs, Dyno sends issues, installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0}}

@@ -3,13 +3,14 @@
 // which updates this constant, README.md and docs/ecosystem.md, and regenerates both images.
 export const CODEBASE_TOOL = 'Pacenotes';
 
-// Status chip per app on the hero (and the wording used in the README and ecosystem tables). tone: ok | soon | dev | design.
+// Status chip per app on the hero and the app posters (README and ecosystem tables use the same wording by hand). To flip a status,
+// edit it here and regenerate. tone: ok | soon | dev | design.
 export const STATUS = {
-  pitcrew: { text: 'v1.0', tone: 'ok' },
-  debrief: { text: 'Releasing', tone: 'soon' },
-  pitwall: { text: 'Release next', tone: 'soon' },
+  pitcrew: { text: 'v1.0.1', tone: 'ok' },
+  pitwall: { text: 'v1.0.2', tone: 'ok' }, // 1.0.3 is coming
+  debrief: { text: 'Releasing today', tone: 'soon' },
+  spotter: { text: 'Releasing soon', tone: 'soon' },
   dyno: { text: 'In development', tone: 'dev' },
-  spotter: { text: 'In development', tone: 'dev' },
   sighter: { text: 'In design', tone: 'design' },
   pacenotes: { text: 'In design', tone: 'design' },
 };

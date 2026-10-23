@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=f2610227" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=d3cc4ec0" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -10,8 +10,8 @@ only: no cloud, no account, no telemetry.
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=6b34418d) and [dark](images/paddock-ecosystem-dark.png?v=ea6670ba), integrations
-[light](images/paddock-integrations-light.png?v=a89dbf99) and [dark](images/paddock-integrations-dark.png?v=d056b1fd).
+hero [light](images/paddock-ecosystem-light.png?v=be994643) and [dark](images/paddock-ecosystem-dark.png?v=c21c05d9), integrations
+[light](images/paddock-integrations-light.png?v=3af0c38f) and [dark](images/paddock-integrations-dark.png?v=32ba0f3c).
 
 Each app's marketing art (hero banner, feature showcase, how it works, 1280x640 social card) is generated from one data file per app
 in [`images/src/apps/`](images/src/apps/) by [`images/src/app-poster.mjs`](images/src/app-poster.mjs), into the app's own
@@ -30,11 +30,11 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 
 | App | Status |
 |---|---|
-| Pitcrew | **v1.0 released** (v1.0.0) |
-| Debrief | Releasing; the code is still named IMT while the rename to Debrief lands |
-| Pitwall | Release next (feature-complete) |
+| Pitcrew | **v1.0.1 released** |
+| Debrief | Releasing today |
+| Pitwall | **v1.0.2 released** (1.0.3 coming) |
 | Dyno | In development |
-| Spotter | In development |
+| Spotter | Releasing soon |
 | Sighter | In design |
 | Pacenotes (everything code-related) | In design |
 
@@ -58,18 +58,18 @@ Status: release in progress. Repo: <https://dev.decryptology.net/decryp7/debrief
 - Housekeeping, disk guard, pause windows and notifications, with a dashboard and tray.
 - Runs the CI for every app in this family.
 
-Status: **v1.0.0 released**. Repo: <https://dev.decryptology.net/decryp7/pitcrew>
+Status: **v1.0.1 released**. Repo: <https://dev.decryptology.net/decryp7/pitcrew>
 
 ### Pitwall
 **Purpose.** The private, local AI hub every other app talks to.
 **For.** Anyone who wants AI in their tools without sending data anywhere.
 - OpenAI-, Anthropic- and Ollama-compatible APIs over models on your own machine, plus `/x/v1` extensions built for the family.
-- Engine and model management with checksums, "will it fit?" guidance, presets and idle unloading.
+- llama.cpp is its only engine; model management with checksums, "will it fit?" guidance, presets and idle unloading.
 - One key per app, job priorities (interactive first, batch when idle), prompt-prefix and opt-in response caching, usage and limits per app.
 - MCP client and tool router for tool servers such as Pacenotes.
 - Local only by design: no cloud models, no telemetry; the only traffic is downloads you asked for.
 
-Status: feature-complete, release next. Repo: <https://dev.decryptology.net/decryp7/pitwall>
+Status: **v1.0.2 released** (1.0.3 coming). Repo: <https://dev.decryptology.net/decryp7/pitwall>
 
 ### Dyno
 **Purpose.** Measures, explains and tunes your PC.
@@ -88,7 +88,7 @@ Status: in development. Repo: <https://dev.decryptology.net/decryp7/dyno>
 - Version schemes, filters and soak time as declarative presets; plugins for the rest.
 - Digests, quiet hours and OS notifications; optional "What's new" summaries from Pitwall.
 
-Status: in development. Repo: <https://dev.decryptology.net/decryp7/spotter>
+Status: releasing soon. Repo: <https://dev.decryptology.net/decryp7/spotter>
 
 ### Sighter
 **Purpose.** Finds any UI element by sight: record, label and train vision models that UI tests can query.
@@ -97,6 +97,7 @@ Status: in development. Repo: <https://dev.decryptology.net/decryp7/spotter>
 - A layered resolver (cache, template, OCR, detector, Pitwall vision model, flag for manual) behind a loopback `/v1/locate` API.
 - A recorder and a labelling and training studio; redacts recordings before storing them.
 - Run bundles (video plus steps) that open next to the app's logs in Debrief.
+- An MCP server (`observe`, `observe_image`, `locate`, `click`, `type`, `launch`, ...) that any family app can drive as an MCP host (Debrief reproduces a bug from a video, Pacenotes drives tests), and an agent mode with Pitwall as the local planner. Targets: this PC, or a remote PC under test over RDP from a controller PC (IP-KVM later). Pitwall stays a model server and optional.
 
 Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/sighter>
 
@@ -117,7 +118,7 @@ Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/pacenotes>
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=69a6ff19" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; apps hand off files and deep links directly" width="100%">
+  <img src="images/paddock-integrations.svg?v=c1717d3b" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; Sighter's MCP server is driven by Debrief, Pacenotes or any MCP host; apps hand off files and deep links directly" width="100%">
 </picture>
 
 The apps never depend on each other to do their own job. They meet in a few well-defined places:

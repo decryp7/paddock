@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { versionFile } from './version-links.mjs';
 import { crops } from './shots.mjs';
 import { glyph } from './glyphs.mjs';
+import { STATUS } from './family.mjs';
 import * as mock from './mocks.mjs';
 import { MOCK_CSS } from './mocks.mjs';
 
@@ -141,7 +142,7 @@ function heroSvg(d, S, { W = 900 * 16 / 9, H = 900 } = {}) {
   const lines = d.headline.map((l, i) => `<text class="h1" x="96" y="${372 + i * 66}">${esc(l)}</text>`).join('');
   const sub = d.sub.map((l, i) => `<text class="sub" x="96" y="${372 + (d.headline.length - 1) * 66 + 58 + i * 34}">${esc(l)}</text>`).join('');
   const subEnd = 372 + (d.headline.length - 1) * 66 + 26 + d.sub.length * 34;
-  const tag = d.planned ? pill(96, subEnd + 46, 'Planned · coming soon') : pill(96, subEnd + 46, d.status);
+  const tag = d.planned ? pill(96, subEnd + 46, 'Planned · coming soon') : pill(96, subEnd + 46, STATUS[d.id]?.text ?? d.status);
   const mockNote = d.planned ? `<text class="small" x="${fx}" y="${fy + fbh + 54}" style="font-size:17px">Concept: the screen is a mock-up, not a product screenshot.</text>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="t d">
 <title id="t">${d.name}: ${esc(d.headline.join(' '))}</title><desc id="d">${esc(d.sub.join(' '))}</desc>
@@ -247,7 +248,7 @@ ${win}
 ${iconSvg(d.icon ?? d.id, 72, 84, 76)}<text class="name" x="164" y="136" style="font-size:34px">${d.name}</text>
 ${d.headline.map((l, i) => `<text class="h1" x="72" y="${268 + i * 62}" style="font-size:50px">${esc(l)}</text>`).join('')}
 ${d.sub.map((l, i) => `<text class="sub" x="72" y="${268 + d.headline.length * 62 + 12 + i * 30}" style="font-size:20px">${esc(l)}</text>`).join('')}
-${pill(72, 568, d.planned ? 'Planned · coming soon' : d.status)}
+${pill(72, 568, d.planned ? 'Planned · coming soon' : STATUS[d.id]?.text ?? d.status)}
 </svg>`;
 }
 

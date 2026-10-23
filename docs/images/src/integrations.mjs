@@ -20,7 +20,7 @@ d.t.app = 'Paddock';
 // Apps that call Pitwall (left), Pitwall (centre), MCP server (right).
 d.group('apps', 48, 144, 312, 608, 'Apps on this machine');
 const apps = [['debrief', 'Debrief', 'Tauri app', 'Explain, research, summaries.'], ['spotter', 'Spotter', 'Tauri app', 'What’s-new summaries.'],
-  ['dyno', 'Dyno', 'Tauri app and agent', 'Diagnosis in plain words.'], ['sighter', 'Sighter', 'Tauri app and server', 'Vision for finding UI elements.']];
+  ['dyno', 'Dyno', 'Tauri app and agent', 'Diagnosis in plain words.'], ['sighter', 'Sighter', 'Tauri app and server', 'Vision, and the agent planner (tool calling).']];
 apps.forEach(([id, name, tech, desc], i) => d.node(id, 72, 192 + i * 112, 264, 88, 'process', { name, tech, desc, planned: id === 'sighter' }));
 d.node('lib', 72, 640, 264, 88, 'core', { name: 'paddock-pitwall', tech: 'Rust crate in each app', desc: 'Discovery, pairing, keys, retries.', planned: true });
 
@@ -29,7 +29,7 @@ d.node('api', 496, 192, 272, 424, 'accent', { name: 'Local API', tech: 'HTTP on 
   desc: 'OpenAI, Anthropic and Ollama compatible, plus /x/v1. One key per app, job priorities, prompt and response caching, usage and limits per app.' });
 d.node('router', 824, 192, 272, 88, 'accent', { name: 'Tool router', tech: 'MCP client', desc: 'Offers MCP tools to local models.' });
 d.group('os', 800, 336, 320, 168, 'Engine process', { os: true });
-d.node('eng', 824, 384, 272, 88, 'process', { name: 'llama.cpp', tech: 'child process, loopback', desc: 'Runs the model on your hardware.' });
+d.node('eng', 824, 384, 272, 88, 'process', { name: 'llama.cpp', tech: 'child process, loopback', desc: 'The only engine. Runs the model on your hardware.' });
 d.node('cred', 824, 536, 272, 88, 'process', { name: 'OS credential store', tech: 'Keychain, Credential Manager, Secret Service', desc: 'Holds the per-app keys.' });
 d.note('local', 496, 664, 600, 'Local only: the sole outbound traffic is the model and engine downloads you ask for.');
 
@@ -43,11 +43,16 @@ link(d, 'api', 'R', 'eng', 'L');
 link(d, 'api', 'R', 'cred', 'L');
 link(d, 'router', 'R', 'code', 'L', { label: 'MCP' });
 link(d, 'mcpc', 'T', 'code', 'B', { label: 'MCP', arrow: 'block' });
+d.node('sigmcp', 1232, 568, 248, null, 'process', { name: 'Sighter', tech: 'MCP server, targets: Local or a PC under test over RDP',
+  desc: 'observe, observe_image, locate, click, type, launch.', planned: true });
+link(d, 'mcpc', 'B', 'sigmcp', 'T', { label: 'MCP', arrow: 'block' });
 
 // Hand-offs that do not involve Pitwall.
-d.group('ho', 48, 808, 1432, 416, 'Hand-offs between apps (none of them needs Pitwall)');
+d.group('ho', 48, 808, 1432, 488, 'Hand-offs between apps (Pitwall is optional for all of them)');
 const rows = [
   [['sighter2', 'Sighter'], ['debrief2', 'Debrief'], 'Run bundle: video, steps'],
+  [['debrief7', 'Debrief'], ['sighter5', 'Sighter'], 'MCP: bug from a video'],
+  [['code5', CODEBASE_TOOL], ['sighter6', 'Sighter'], 'MCP host: drive UI'],
   [[ 'code2', CODEBASE_TOOL], ['sighter3', 'Sighter'], 'Test plan, results back'],
   [['pitcrew', 'Pitcrew'], ['debrief3', 'Debrief'], 'Deep link: open job log'],
   [['dyno2', 'Dyno'], ['debrief4', 'Debrief'], 'Deep link: open issue'],
@@ -61,14 +66,14 @@ const rows = [
 rows.forEach(([[ia, na], [ib, nb], label], i) => {
   const x = 72 + (i % 2) * 720, y = 856 + Math.floor(i / 2) * 72;
   d.node(ia, x, y, 184, 48, ia.startsWith('code') || ia.startsWith('sighter') ? 'process' : 'process', { name: na, planned: ia.startsWith('code') || ia.startsWith('sighter') });
-  d.node(ib, x + 400, y, 184, 48, ib === 'runners' ? 'external' : 'process', { name: nb, });
+  d.node(ib, x + 400, y, 184, 48, ib === 'runners' ? 'external' : 'process', { name: nb, planned: /^(code|sighter)/.test(ib) });
   link(d, ia, 'R', ib, 'L', { label, dash: true });
 });
 d.legend([{ kind: 'accent', label: 'Pitwall' }, { kind: 'process', label: 'App or process' }, { kind: 'core', label: 'Shared library' },
   { kind: 'external', label: 'Outside Paddock' }, { kind: 'planned', label: 'Not built yet' }, { kind: 'line', label: 'Request' }, { kind: 'dashline', label: 'Hand-off' }]);
 const src = join(here, 'drawio');
 mkdirSync(src, { recursive: true });
-writeFileSync(join(src, 'paddock-integrations.drawio'), d.finish(1224));
+writeFileSync(join(src, 'paddock-integrations.drawio'), d.finish(1296));
 console.log('wrote paddock-integrations.drawio');
 
 const drawio = process.env.DRAWIO || '/Applications/draw.io.app/Contents/MacOS/draw.io';
