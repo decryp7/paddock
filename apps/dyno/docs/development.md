@@ -131,3 +131,22 @@ Rust: unit tests beside the code, adapter tests against temporary trees and scri
 real-OS tests that spawn and kill their own dummies, and end-to-end agent tests against a private data folder. UI: Vitest with
 TestBed for stores, services, components and pure utilities (including colour contrast and colour-vision specs for the
 palette); Playwright flows with the mock backend in Chromium and WebKit. Every bug fix starts with a failing regression test.
+
+## CI image and compile cache
+
+Linux CI jobs run in the [garage](https://dev.decryptology.net/decryp7/garage) image (Rust, Tauri libraries, Node,
+Playwright browsers, sccache), so the jobs no longer install system packages. The Rust test and bundle jobs compile with
+`sccache`; its cache directory `/sccache` is saved and restored with `actions/cache`, keyed on `Cargo.lock`. The
+step `sccache statistics` in each job shows the hit rate.
+
+Optional upgrade (faster, needs a change to each runner's `config.yaml`): keep the cache on the runner host so no
+restore or save is needed, then drop the two `actions/cache` steps named after sccache:
+
+```yaml
+container:
+  options: "-v /var/cache/sccache:/sccache"
+  valid_volumes:
+    - /var/cache/sccache
+```
+
+See the [garage README](https://dev.decryptology.net/decryp7/garage) for the measurements.
