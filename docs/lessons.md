@@ -52,6 +52,9 @@ Process and workflow
   roadmap, manual tests, README in Debrief's structure — and regenerate screenshots/diagrams at the end.
 - When CI fails, fix and re-run only the failed tests locally, push once, then run the full suite locally and in CI in
   parallel as the final gate. A full CI round is 40–50 min; never push fix by fix to see what CI says.
+- Run only the tests affected by a change while working (touched crates with `cargo test -p`/nextest filters, touched
+  specs with `ng test --include`, related Playwright files); never full-workspace runs inside a branch. The full suite runs
+  once on the combined result before a local build or release, plus CI (user rule).
 - Lint and type-check the touched files before every push: a quoting typo in two e2e skip reasons cost a whole CI run.
 - Agents stop and remove only the Docker containers, images and volumes they created (unique name or label), never
   `docker ps -q | xargs docker stop`: a blanket stop once destroyed a user's long-running container.
