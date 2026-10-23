@@ -9,10 +9,17 @@ tested like any other. Everything runs on your machine.
 
 </div>
 
+![Sighter: Find any UI element by sight](docs/images/sighter-hero.svg)
+
+
 > **Status: in design; not usable yet.** There is no product code in this repository. The design is in
 > [docs/proposal.md](docs/proposal.md) and open questions are pending. Building starts after Debrief ships.
 
 ## What it will do
+
+![Sighter features](docs/images/sighter-features.svg)
+
+![How Sighter works](docs/images/sighter-how-it-works.svg)
 
 - **Find elements from pixels alone.** Send a screenshot (or ask for a window capture) and a query ("the Save button",
   text "Export"); get boxes, confidence and which layer answered. Accessibility trees are an optional label source,
