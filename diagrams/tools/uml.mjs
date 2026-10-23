@@ -65,7 +65,7 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
       const ly = y + lh + 9;
       const lx = Math.min(xa, xb) + 8;
       d.text(d.id(), [lx, y, lw, lh], lines.join(' '), {});
-      gaps.push([lx - 4, lx + lw + 4, y, y + lh]);
+      gaps.push([lx - 4, lx + lw + 4, y - 4, y + lh + 6]);
       d.line([xa, ly], [xb, ly], { dash: reply, arrow: reply ? 'open' : 'block' });
       y = ly + 16;
     },
@@ -78,7 +78,7 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
       d.line([x, y], [x, y + h], { via: [[x + 24, y], [x + 24, y + h]] });
       const sw = Math.max(...lines.map((l) => tw(l, 12))) + 8;
       d.text(d.id(), [x + 32, y + (h - lh) / 2, sw, lh], lines.join(' '), {});
-      gaps.push([x + 28, x + 36 + sw, y + (h - lh) / 2, y + (h + lh) / 2]);
+      gaps.push([x + 28, x + 36 + sw, y + (h - lh) / 2 - 4, y + (h + lh) / 2 + 6]);
       y += h + 16;
     },
     note(p, text, w = 280) {
