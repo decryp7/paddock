@@ -25,6 +25,12 @@ pub enum Source {
     Cleanup,
     /// A network event: a new exposed listener or a new remote host.
     Network,
+    /// The CPU running slower than it should (heat, a power limit or battery saver).
+    Throttling,
+    /// A disk or battery near the end of its life.
+    Lifespan,
+    /// A value far outside what is usual for this time of the week.
+    Baseline,
     /// Anything else (plugins).
     Custom,
 }
@@ -38,6 +44,9 @@ impl Source {
             Source::Taming => "taming",
             Source::Cleanup => "cleanup",
             Source::Network => "network",
+            Source::Throttling => "throttling",
+            Source::Lifespan => "lifespan",
+            Source::Baseline => "baseline",
             Source::Custom => "custom",
         }
     }
@@ -220,6 +229,96 @@ pub fn from_cleanup(title: &str, detail: &str) -> Observation {
     }
 }
 
+/// A throttling episode that has lasted long enough to count; `active` is false once it ended. Heat is a warning (it can
+/// damage a machine over time), the other causes are information.
+pub fn from_throttle(e: &crate::throttle::ThrottleEpisode, active: bool, confidence: crate::hardware::Confidence) -> Observation {
+    use crate::throttle::ThrottleCause;
+    Observation {
+        source: Source::Throttling,
+        name: "cpu".into(),
+        subject: String::new(),
+        severity: if e.cause == ThrottleCause::Thermal {
+            Severity::Warning
+        } else {
+            Severity::Info
+        },
+        title: format!(
+            "The CPU is {:.0}% slower than it should be ({})",
+            e.avg_lost_percent,
+            e.cause.label().to_lowercase()
+        ),
+        detail: format!(
+            "Throttling since {} with {} confidence. Open Throttling for the cause and what could help.",
+            crate::report::utc_time(e.start),
+            confidence.word()
+        ),
+        value: Some(f64::from(e.avg_lost_percent)),
+        metric: Some(Metric::CpuTotal),
+        active,
+        one_off: false,
+    }
+}
+
+/// A disk or battery that needs attention (`active`) or no longer does.
+pub fn from_lifespan(f: &crate::lifespan::LifeForecast, active: bool) -> Observation {
+    Observation {
+        source: Source::Lifespan,
+        name: match f.subject {
+            crate::lifespan::LifeSubject::Ssd => "ssd".into(),
+            crate::lifespan::LifeSubject::Battery => "battery".into(),
+        },
+        subject: f.name.clone(),
+        severity: if matches!(f.outcome, crate::lifespan::LifeOutcome::AlreadyPastLimit) {
+            Severity::Warning
+        } else {
+            Severity::Info
+        },
+        title: format!("{}: {}", f.name, f.headline),
+        detail: format!("{} Confidence: {}.", f.explanation, f.confidence.word()),
+        value: None,
+        metric: matches!(f.subject, crate::lifespan::LifeSubject::Battery).then_some(Metric::Battery),
+        active,
+        one_off: false,
+    }
+}
+
+/// A value that stays far outside what is usual for this time of the week.
+pub fn from_baseline(
+    subject: &str,
+    metric: crate::baseline::BaselineMetric,
+    current: f64,
+    j: &crate::baseline::Judgement,
+    active: bool,
+) -> Observation {
+    use crate::baseline::BaselineMetric as M;
+    let app = subject != "System";
+    Observation {
+        source: Source::Baseline,
+        name: format!("{metric:?}").to_lowercase(),
+        subject: subject.into(),
+        severity: Severity::Info,
+        title: if app {
+            format!("{subject}: {} {}", metric.label(), j.phrase.to_lowercase())
+        } else {
+            format!("{} - {}", metric.label(), j.phrase.to_lowercase())
+        },
+        detail: j.explanation.clone(),
+        value: Some(current),
+        metric: match (metric, app) {
+            (_, true) => Some(Metric::Process(subject.into())),
+            (M::Cpu, _) => Some(Metric::CpuTotal),
+            (M::Memory, _) => Some(Metric::Memory),
+            (M::Gpu, _) => Some(Metric::GpuLoad),
+            (M::Temperature, _) => Some(Metric::Temperature),
+            (M::DiskWrite, _) => Some(Metric::DiskActivity),
+            (M::Network, _) => Some(Metric::NetworkDown),
+            (M::AppCpu | M::AppMemory, _) => Some(Metric::Process(subject.into())),
+        },
+        active,
+        one_off: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +412,67 @@ mod tests {
                 ..from_cleanup("x", "y")
             };
             assert_eq!(o.key(), o.rule());
+        }
+    }
+
+    #[test]
+    fn hardware_findings_become_observations() {
+        use crate::baseline::{BaselineMetric, Judgement};
+        use crate::hardware::Confidence;
+        use crate::lifespan::{unavailable, LifeOutcome, LifeSubject};
+        use crate::throttle::{ThrottleCause, ThrottleEpisode};
+        let e = ThrottleEpisode {
+            start: Timestamp(0),
+            end: None,
+            cause: ThrottleCause::Thermal,
+            avg_lost_percent: 31.6,
+            peak_lost_percent: 40.0,
+            peak_temperature_c: Some(99.0),
+        };
+        let o = from_throttle(&e, true, Confidence::High);
+        assert_eq!((o.rule().as_str(), o.key().as_str()), ("throttling:cpu", "throttling:cpu"));
+        assert_eq!(o.severity, Severity::Warning);
+        assert!(
+            o.title.contains("32% slower") && o.title.contains("heat") && o.detail.contains("high confidence"),
+            "{o:?}"
+        );
+        let power = from_throttle(
+            &ThrottleEpisode {
+                cause: ThrottleCause::Power,
+                ..e.clone()
+            },
+            false,
+            Confidence::Medium,
+        );
+        assert_eq!(power.severity, Severity::Info);
+        assert!(!power.active);
+
+        let mut f = unavailable(LifeSubject::Battery, "Battery", "n/a");
+        f.outcome = LifeOutcome::AlreadyPastLimit;
+        f.headline = "Time to think about a new battery".into();
+        let o = from_lifespan(&f, true);
+        assert_eq!(o.key(), "lifespan:battery:Battery");
+        assert_eq!(o.severity, Severity::Warning);
+        assert_eq!(o.metric, Some(Metric::Battery));
+        f.subject = LifeSubject::Ssd;
+        assert_eq!(from_lifespan(&f, false).rule(), "lifespan:ssd");
+
+        let j = Judgement::not_judged("Higher than usual for Monday nights", "CPU is 72% now.");
+        let o = from_baseline("System", BaselineMetric::Cpu, 72.0, &j, true);
+        assert_eq!(o.key(), "baseline:cpu:System");
+        assert_eq!(o.metric, Some(Metric::CpuTotal));
+        assert!(o.title.starts_with("CPU - higher than usual"));
+        let app = from_baseline("Chrome", BaselineMetric::Memory, 40.0, &j, true);
+        assert_eq!(app.metric, Some(Metric::Process("Chrome".into())));
+        assert!(app.title.starts_with("Chrome: Memory"));
+        for (m, want) in [
+            (BaselineMetric::Memory, Metric::Memory),
+            (BaselineMetric::Gpu, Metric::GpuLoad),
+            (BaselineMetric::Temperature, Metric::Temperature),
+            (BaselineMetric::DiskWrite, Metric::DiskActivity),
+            (BaselineMetric::Network, Metric::NetworkDown),
+        ] {
+            assert_eq!(from_baseline("System", m, 1.0, &j, true).metric, Some(want));
         }
     }
 }

@@ -4,6 +4,7 @@
 
 pub mod agent;
 pub mod alarms;
+pub mod baselines;
 pub mod bench;
 pub mod cleanup;
 pub mod cli;
@@ -13,6 +14,7 @@ pub mod discovery;
 pub mod files;
 pub mod handlers;
 pub mod handlers_cleanup;
+pub mod hardware;
 pub mod helper_centre;
 pub mod helper_link;
 pub mod inventory;
@@ -75,6 +77,13 @@ impl Running {
                     }
                 })
                 .map_err(|e| format!("could not start the network watcher: {e}"))?,
+        );
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-hardware".into())
+                .spawn(move || hardware::run_background(&s))
+                .map_err(|e| format!("could not start the hardware watcher: {e}"))?,
         );
         let s = shared.clone();
         threads.push(

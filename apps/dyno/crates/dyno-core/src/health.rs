@@ -120,6 +120,8 @@ pub struct HealthInput<'a> {
     pub crashes_7d: u32,
     /// Tuning plans that fit now (fixes link to them).
     pub tuning: &'a [Plan],
+    /// Disk and battery life forecasts (only ones that need attention cost points).
+    pub lifespans: &'a [crate::lifespan::LifeForecast],
 }
 
 /// The grade for a score.
@@ -240,6 +242,31 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
                 None,
             );
         }
+    }
+
+    for f in i.lifespans.iter().filter(|f| f.needs_attention()) {
+        use crate::lifespan::{LifeOutcome, LifeSubject};
+        // A battery already below 80 % is the battery reason above.
+        if f.subject == LifeSubject::Battery && f.outcome == LifeOutcome::AlreadyPastLimit {
+            continue;
+        }
+        let id = match f.subject {
+            LifeSubject::Ssd => "ssdLife",
+            LifeSubject::Battery => "batteryLife",
+        };
+        let severity = if f.outcome == LifeOutcome::AlreadyPastLimit {
+            Severity::Warning
+        } else {
+            Severity::Info
+        };
+        add(
+            &format!("{id}:{}", f.name),
+            format!("{}: {}", f.name, f.headline),
+            format!("{} Confidence: {}.", f.explanation, f.confidence.word()),
+            if severity == Severity::Warning { 12 } else { 5 },
+            severity,
+            None,
+        );
     }
 
     let pressure = i
@@ -427,6 +454,7 @@ mod tests {
             anomalies,
             crashes_7d: crashes,
             tuning: &tuning,
+            lifespans: &[],
         })
     }
 
@@ -572,5 +600,55 @@ mod tests {
             &[("C:".into(), Forecast::FullInDays(90.0))],
         );
         assert_eq!(r.score, 100);
+    }
+
+    #[test]
+    fn disk_and_battery_life_cost_points_only_with_evidence() {
+        use crate::hardware::Confidence;
+        use crate::lifespan::{unavailable, LifeOutcome, LifeSubject};
+        let tuning = plans(&SystemFacts::unknown("w"), Os::Windows, Some(PowerSource::Ac), &[]);
+        let facts = SystemFacts::unknown("w");
+        let s = sample(0);
+        let mut ssd = unavailable(LifeSubject::Ssd, "Samsung 990", "x");
+        ssd.outcome = LifeOutcome::Remaining {
+            low_days: 100.0,
+            mid_days: 200.0,
+            high_days: 300.0,
+        };
+        ssd.headline = "About 7 months of writes left".into();
+        ssd.confidence = Confidence::Low;
+        let mut bat = unavailable(LifeSubject::Battery, "Battery", "x");
+        bat.outcome = LifeOutcome::AlreadyPastLimit;
+        let run = |l: &[crate::lifespan::LifeForecast]| {
+            assess(&HealthInput {
+                now: Timestamp(1),
+                sample: &s,
+                facts: &facts,
+                system_disk: "C:",
+                forecasts: &[],
+                startup: &[],
+                anomalies: &[],
+                crashes_7d: 0,
+                tuning: &tuning,
+                lifespans: l,
+            })
+        };
+        assert_eq!(run(&[ssd.clone()]).score, 100, "a low-confidence hint costs nothing");
+        assert_eq!(run(&[bat.clone()]).score, 100, "the battery reason above covers a worn battery");
+        ssd.confidence = Confidence::Medium;
+        let r = run(&[ssd.clone()]);
+        assert_eq!(r.score, 95);
+        assert_eq!(r.reasons[0].id, "ssdLife:Samsung 990");
+        assert!(r.reasons[0].detail.contains("Confidence: medium"));
+        ssd.outcome = LifeOutcome::AlreadyPastLimit;
+        let r = run(&[ssd]);
+        assert_eq!((r.score, r.reasons[0].severity), (88, Severity::Warning));
+        bat.outcome = LifeOutcome::Remaining {
+            low_days: 30.0,
+            mid_days: 60.0,
+            high_days: 90.0,
+        };
+        bat.confidence = Confidence::High;
+        assert_eq!(run(&[bat]).reasons[0].id, "batteryLife:Battery");
     }
 }

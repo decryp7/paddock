@@ -175,3 +175,20 @@ export function formatMetric(value: number | null | undefined): string {
   const digits = Math.abs(value) >= 1000 ? 0 : Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2;
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(value);
 }
+
+/** A span of days as one short phrase: `9 days`, `6 weeks`, `23 months` (up to three years), `7.4 years`. Only how it reads; the engine owns the numbers. */
+export function formatSpan(days: number | null | undefined): string {
+  if (days === null || days === undefined || !Number.isFinite(days) || days < 0) return '—';
+  const n = (v: number, unit: string) => `${v} ${unit}${v === 1 ? '' : 's'}`;
+  if (days < 14) return n(Math.max(0, Math.round(days)), 'day');
+  if (days < 60) return n(Math.round(days / 7), 'week');
+  if (days < 1095) return n(Math.round(days / 30.44), 'month');
+  const years = trimZero((days / 365.25).toFixed(1));
+  return `${years} ${years === '1' ? 'year' : 'years'}`;
+}
+
+/** A moment as `Oct 22, 4:20 PM` (the year only when it differs from `now`'s); short enough never to wrap. */
+export function formatStamp(at: number, now: number = at): string {
+  const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear();
+  return new Intl.DateTimeFormat('en-US', sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at);
+}

@@ -22,6 +22,7 @@ so the numbering is fixed.
 | [0015](0015-benchmarks-network-and-ip-lookup.md) | Benchmarks on click out of process; sockets through a port; IP lookup is a browser hand-off |
 | [0016](0016-privileged-helper-install-and-ipc.md) | The privileged helper: a registered system daemon, installed on a click, one authorised user, closed action list |
 | [0017](0017-issues-and-the-program-baseline.md) | Issues from the OS logs behind a port; a baseline of programs that explains, never accuses |
+| [0018](0018-throttling-lifespan-and-baselines.md) | Throttling episodes, hardware life forecasts as ranges and learned baselines: pure judging, read-only readers, evidence before alarms |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.

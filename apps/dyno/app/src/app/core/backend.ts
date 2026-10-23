@@ -40,6 +40,9 @@ import type {
   StartupEntry,
   StartupState,
   SystemInventory,
+  ThrottleOverview,
+  LifespanOverview,
+  BaselineOverview,
   BenchComparison,
   CounterHistory,
   CounterHit,
@@ -142,6 +145,10 @@ export interface DynoBackend {
   /** Reads up to 32 counters now; the engine also adds the readings to their history. */
   counterValues(paths: string[]): Promise<CounterReading[]>;
   counterHistory(paths: string[], minutes: number): Promise<CounterHistory>;
+  // Is the CPU throttled and why (WP-23), how long disks and batteries have left (WP-24), what is normal for now (WP-25).
+  throttling(): Promise<ThrottleOverview>;
+  lifespan(): Promise<LifespanOverview>;
+  baselines(): Promise<BaselineOverview>;
 
   // Open ports and connections (observe-only), and "Look up IP" (the shell opens the browser; Dyno never fetches).
   network(query: NetworkQuery): Promise<NetworkSnapshot>;

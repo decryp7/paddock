@@ -81,4 +81,23 @@ describe('dy-reports-page', () => {
     expect(btn(el, 'Export Markdown').disabled).toBe(true);
     vi.spyOn(mock, 'weeklyReport').mockRestore();
   });
+
+  it('lists the hardware sentences in their own section, and leaves the section out when there are none', async () => {
+    const { f, el } = render();
+    await settle(f);
+    const items = [...el.querySelectorAll('[aria-label="Hardware"] li')].map((l) => l.textContent);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toContain('slower than it should');
+    TestBed.resetTestingModule();
+    const mock2 = new MockBackend({ latencyMs: 0, now: () => NOW });
+    const report = await mock2.weeklyReport(0);
+    vi.spyOn(mock2, 'weeklyReport').mockResolvedValue({ ...report, hardware: [] });
+    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock2 }] });
+    const none = { f: TestBed.createComponent(ReportsPage), el: null as unknown as HTMLElement };
+    none.el = none.f.nativeElement as HTMLElement;
+    none.f.detectChanges();
+    await settle(none.f);
+    expect(none.el.querySelector('[aria-label="Hardware"]')).toBeNull();
+    expect(none.el.querySelector('[aria-label="Issues"]')).not.toBeNull();
+  });
 });

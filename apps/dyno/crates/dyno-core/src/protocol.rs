@@ -359,6 +359,13 @@ pub enum Request {
         /// How far back, 1-60 minutes.
         minutes: u32,
     },
+    // ---- throttling, lifespan and baselines (WP-23, WP-24, WP-25) ----
+    /// Is the CPU throttled, why, and the recent episodes. Appended.
+    Throttling,
+    /// Life forecasts for SSDs and the battery. Appended.
+    Lifespan,
+    /// What is usual for this time of the week, and how the current values compare. Appended.
+    Baselines,
     // ---- the privileged helper (WP-01, ADR 0016) ----
     /// Whether the privileged helper is installed and usable (answers `Helper`). Appended.
     HelperStatus,
@@ -657,6 +664,13 @@ pub enum Reply {
     CounterValues(Vec<crate::counters::CounterReading>),
     /// Counter history with events. Appended.
     CounterHistory(Box<crate::counters::CounterHistory>),
+    // ---- throttling, lifespan and baselines (WP-23, WP-24, WP-25) ----
+    /// The throttling overview. Appended.
+    Throttling(Box<crate::throttle::ThrottleOverview>),
+    /// The life forecasts. Appended.
+    Lifespan(Box<crate::lifespan::LifespanOverview>),
+    /// The baseline comparison. Appended.
+    Baselines(Box<crate::baseline::BaselineOverview>),
     // ---- the privileged helper (WP-01, ADR 0016) ----
     /// The helper's state. Appended.
     Helper(Box<crate::helper_wire::HelperStatus>),
@@ -719,6 +733,9 @@ impl Reply {
             Reply::CounterHits(x) => v(x),
             Reply::CounterValues(x) => v(x),
             Reply::CounterHistory(x) => v(x),
+            Reply::Throttling(x) => v(x),
+            Reply::Lifespan(x) => v(x),
+            Reply::Baselines(x) => v(x),
             Reply::Helper(x) => v(x),
             Reply::Issues(x) => v(x),
             Reply::IssuesSaved(x) => v(x),
@@ -1030,5 +1047,39 @@ mod tests {
             serde_json::to_value(AgentError::new(ErrorCode::BadRequest, "x")).unwrap(),
             serde_json::json!({"code": "badRequest", "message": "x"})
         );
+    }
+
+    #[test]
+    fn hardware_requests_and_replies_have_the_json_shape_of_api_types() {
+        for (r, name) in [
+            (Request::Throttling, "throttling"),
+            (Request::Lifespan, "lifespan"),
+            (Request::Baselines, "baselines"),
+        ] {
+            assert_eq!(serde_json::to_value(&r).unwrap(), name);
+            assert_eq!(serde_json::from_value::<Request>(serde_json::json!(name)).unwrap(), r);
+            let bytes = postcard::to_stdvec(&Message::Request(Box::new(r.clone()))).unwrap();
+            assert_eq!(postcard::from_bytes::<Message>(&bytes).unwrap(), Message::Request(Box::new(r)));
+        }
+        let life = Reply::Lifespan(Box::new(crate::lifespan::LifespanOverview {
+            at: Timestamp(5),
+            forecasts: vec![crate::lifespan::unavailable(
+                crate::lifespan::LifeSubject::Battery,
+                "Battery",
+                "No battery",
+            )],
+        }));
+        let j = life.into_json().unwrap();
+        assert_eq!(j["forecasts"][0]["outcome"]["unavailable"]["reason"], "No battery");
+        assert_eq!(j["forecasts"][0]["subject"], "battery");
+        let base = Reply::Baselines(Box::new(crate::baseline::BaselineOverview {
+            at: Timestamp(5),
+            learning: crate::baseline::Learning::Learning {
+                days_done: 2,
+                days_needed: 7,
+            },
+            items: vec![],
+        }));
+        assert_eq!(base.into_json().unwrap()["learning"]["learning"]["daysNeeded"], 7);
     }
 }

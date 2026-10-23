@@ -175,8 +175,31 @@ pub struct Settings {
     pub notifications: bool,
     /// Pinned performance counters and saved counter sets.
     pub counters: crate::counters::CounterSettings,
+    /// "Is this normal?" baselines: learning period and alarms.
+    pub baselines: crate::baseline::BaselineSettings,
+    /// Alarms for hardware findings (throttling episodes, disks and batteries near the end of their life).
+    pub hardware_alarms: HardwareAlarms,
     /// New and unusual programs: learn a baseline and list what is new (observe-only).
     pub unusual: crate::unusual::UnusualSettings,
+}
+
+/// Which hardware findings may raise an alarm (the pages always show them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HardwareAlarms {
+    /// A throttling episode that lasts (heat, power limit or battery saver).
+    pub throttling: bool,
+    /// A disk or battery with less than a year left, at medium confidence or better.
+    pub lifespan: bool,
+}
+
+impl Default for HardwareAlarms {
+    fn default() -> Self {
+        HardwareAlarms {
+            throttling: true,
+            lifespan: true,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -200,6 +223,8 @@ impl Default for Settings {
             custom_alerts: Vec::new(),
             notifications: true,
             counters: Default::default(),
+            baselines: Default::default(),
+            hardware_alarms: Default::default(),
             unusual: Default::default(),
         }
     }
@@ -222,6 +247,7 @@ impl Settings {
             self.tray.metrics = Tray::default().metrics;
         }
         self.alerts = self.alerts.clamped();
+        self.baselines = self.baselines.clamped();
         self.cleanup.dev_project_age_days = self.cleanup.dev_project_age_days.clamp(7, 365);
         self.cleanup.categories.retain(|c| !c.is_empty() && c.len() <= 64);
         self.cleanup.categories.truncate(100);

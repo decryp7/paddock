@@ -123,6 +123,28 @@ pub trait TuningSystem: Send {
     fn apply(&mut self, action: &HelperAction) -> Result<(), PlatformError>;
 }
 
+// ---- throttling and hardware life (WP-23, WP-24) ----
+
+/// What the OS itself says about limits on the CPU's speed. Cheap enough to call every few seconds; a system that does
+/// not say answers an unavailable reading with the reason.
+pub trait ThrottleSignals: Send {
+    /// The OS's current speed limit and its reasons.
+    fn read(&mut self) -> crate::metrics::Reading<crate::hardware::OsThrottle>;
+}
+
+/// SSD wear counters (SMART / NVMe health log). Slow and possibly privileged: called every few hours off the sampling
+/// path; a refusal is an unavailable reading that says what would help.
+pub trait DiskWearSource: Send {
+    /// One reading per SSD that reports wear.
+    fn read(&mut self) -> crate::metrics::Reading<Vec<crate::hardware::DiskWear>>;
+}
+
+/// Battery capacity and cycles. Slow to read on some systems: called every few hours.
+pub trait BatteryCapacitySource: Send {
+    /// The battery's capacities; unavailable on machines without one.
+    fn read(&mut self) -> crate::metrics::Reading<crate::hardware::BatteryCapacity>;
+}
+
 /// Whether someone is using the machine.
 pub trait UserActivity: Send {
     /// Seconds since the last keyboard or mouse input, when the OS tells.

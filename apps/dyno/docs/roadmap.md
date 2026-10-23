@@ -42,9 +42,9 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-20 | Memory modules inventory with slot drawings | built: parsers (Windows/macOS/Linux DMI), hints, inventory page with slot drawing; Linux helper read planned |
 | WP-21 | Customisable widgets (ADR 0012) | built: model, dashboard edit mode/presets, menu-bar items editor; preset save button planned |
 | WP-22 | Native tray popover | built: popover.rs + dy-popover; Windows/Linux look CI/manual-only |
-| WP-23 | Throttling detector | planned |
-| WP-24 | Disk and battery life forecasts | planned |
-| WP-25 | "Is this normal?" learned baselines | planned |
+| WP-23 | Throttling detector | built: pure detector and episode tracker, read-only readers (macOS `pmset`, Linux sysfs counters; Windows infers), Throttling page, Why slow cause, alarms with evidence; Windows reader CI-only |
+| WP-24 | Disk and battery life forecasts | built: robust range forecasts for SSD wear and battery capacity, replacement and clock-change handling, readers (smartctl, ioreg, sysfs, powercfg), Lifespan page, Health, report and alarms; reading SSD wear without smartmontools waits for WP-01 |
+| WP-25 | "Is this normal?" learned baselines | built: weekday-and-hour baselines per metric and app with fallbacks, silent learning period, dashboard card in words, optional alarms |
 | WP-26 | Alarms view and custom alerts (ADR 0013) | built: Alarms page (active, history, rules), custom alert rules evaluated by the agent, desktop notifications (tauri-plugin-notification), quiet hours |
 | WP-27 | `dyno` CLI (ADR 0014) | built: `dyno status\|why-slow\|top\|alarms\|snapshot\|counters` (text or `--json`) and `end`, `cap`, `undo` only with `--yes`; refuses another protocol version; the binary is built with `cargo build -p dyno-cli` and is not yet in the installers |
 | WP-28 | Flight recorder | built: ring, capture, alarm capture and the timeline page |
@@ -57,7 +57,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-36 | Taming acceptance rules: temporary, foreground-aware, self-restoring, with measured proof | planned |
 
 Suggested order: foundation gaps; WP-01 to WP-05; WP-06 to WP-08 and WP-26; the in-progress items as their agents report;
-WP-09 to WP-17; WP-23 to WP-25, WP-27 to WP-30.
+WP-09 to WP-17; WP-27 to WP-30.
 
 ## Still open in v1 (2026-10-23)
 
@@ -66,7 +66,7 @@ Built this round: WP-02, WP-03, WP-04, WP-05, WP-06, WP-07, WP-08 (Why slow and 
 
 - WP-01 is built; what is left of it is verification on real machines (testing-manual H1-H15: install, prompt, kill, remove on each OS), a code-signature check of the caller once there is a Developer ID / Authenticode certificate, SMAppService registration on macOS, on-demand start (the helper stays resident and idle), a Windows installer hook that offers to remove the helper, and a Linux entry for all-users startup (system units).
 - WP-09 right-click search, WP-10 watched folders, WP-12 counters browser, WP-13 extras,
-  WP-14 backup checks, WP-15 pack data beyond the cleanup packs, WP-16 web API, WP-17 Explain via Pitwall, WP-23 to WP-25,
+  WP-14 backup checks, WP-15 pack data beyond the cleanup packs, WP-16 web API, WP-17 Explain via Pitwall,
   WP-27 CLI, WP-30 suite tie-ins, WP-31 session recording, WP-33 to WP-36.
 - Parts of built packages: scheduled cleanups, a disk-map screen, Docker image removal, the weekly OS notification (needs an
   agent-to-shell push), score recording in the sampler (the trend only fills while the app asks for health), engine-stored
@@ -390,6 +390,10 @@ Each is small and independent; all are core logic plus an adapter plus a card or
 - **Acceptance.** A pure detector over frequency, temperature and power readings with tests per cause; an unavailable input
   gives "cannot tell", never a guess; the result feeds Why slow and alarms.
 - **Touches.** new `dyno-core/src/throttle.rs`, adapters for frequency and limit flags, `diagnosis.rs`.
+- **Built (2026-10-23, [ADR 0018](adr/0018-throttling-lifespan-and-baselines.md)).** `throttle.rs` (detector, episode tracker),
+  `dyno-platform/src/hardware.rs` (`pmset -g therm`, Linux sysfs counters), `agent/src/hardware.rs`, the Throttling page, the cause in
+  Why slow, alarms at medium confidence or better. **Left:** GPU throttling (only the CPU is judged; no GPU clock source on any OS
+  yet), Windows reports no throttle reason (inferred, CI-only), and the episode in progress is lost if the agent crashes.
 
 ## WP-24 Disk and battery life forecasts
 
@@ -397,6 +401,10 @@ Each is small and independent; all are core logic plus an adapter plus a card or
   capacity trend and cycle count as "replace in about N months".
 - **Acceptance.** Estimates show a range and the data they stand on; too little history says so; no estimate without data.
 - **Touches.** `dyno-core/src/forecast.rs`, facts adapters, history of capacity and wear.
+- **Built (2026-10-23).** `lifespan.rs` (a robust Theil-Sen range, replacement and clock-change handling), readers behind
+  `DiskWearSource` / `BatteryCapacitySource` (smartctl, ioreg, sysfs, powercfg), `hardware_readings` in the store, the Lifespan page,
+  Health reasons, the weekly report and alarms. **Left:** SSD wear without smartmontools needs the helper (WP-01); the rated TBW is
+  used only when a reader supplies it (no vendor table); the Windows battery and smartctl readers run only in CI.
 
 ## WP-25 "Is this normal?" baselines
 
@@ -405,6 +413,10 @@ Each is small and independent; all are core logic plus an adapter plus a card or
 - **Acceptance.** A pure statistics function with tests; a new install learns silently for a configurable period; highlights
   carry the words ("higher than usual for Tuesday mornings"), not colour alone.
 - **Touches.** `dyno-core/src/stats.rs` and `anomaly.rs`, history queries, dashboard.
+- **Built (2026-10-23).** `baseline.rs` (learning, fallbacks from weekday-and-hour to weekday-or-weekend to hour, judgement in words,
+  persistence for alarms), `agent/src/baselines.rs` (learned from the quarter-hour tier and the minute rows, cached for 30 min), the
+  dashboard card and Settings. **Left:** per-app baselines use only the minute rows (14 days by default) and so carry lower
+  confidence; no baseline chart (the card states the usual value and range in words).
 
 ## WP-26 Alarms view and custom alerts
 
@@ -512,4 +524,4 @@ feature needs its images; a row is done when both exist and show the built scree
 | Alarms: History | `alarms-history-*.png` | planned (WP-26) |
 | Alarms: Statistics | `alarms-statistics-*.png` | planned (WP-26) |
 | Diagnostics bundle preview | `diagnostics-bundle-*.png` | planned (WP-29) |
-| Throttling and forecasts | `throttling-*.png`, `forecasts-*.png` | planned (WP-23, WP-24) |
+| Throttling and forecasts | `throttling-*.png`, `throttling-hot-*.png`, `forecasts-*.png`, `baselines-*.png` | built (WP-23, WP-24, WP-25) |

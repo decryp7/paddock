@@ -119,7 +119,12 @@ impl Sampler {
             sampling_interval_ms: iv.system_ms,
             process_interval_ms: iv.process_ms,
         };
+        // Throttling is judged here (an external tool may be read, so never under the core lock).
+        let (throttle_events, throttle_confidence) = shared.hardware.on_sample(&sample);
         let commands = self.record(shared, &sample, table, overhead, t);
+        if !throttle_events.is_empty() {
+            crate::hardware::handle_events(shared, throttle_events, throttle_confidence, t);
+        }
         apply_commands(shared, commands, t);
         self.ticks += 1;
         iv

@@ -43,6 +43,9 @@ import type {
   StartupEntry,
   StartupState,
   SystemInventory,
+  ThrottleOverview,
+  LifespanOverview,
+  BaselineOverview,
   BenchComparison,
   CounterHistory,
   CounterHit,
@@ -92,6 +95,7 @@ import { mockHostName, mockNetwork } from './mock/network';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHistory } from './mock/history';
+import { mockBaselines, mockLifespan, mockThrottling } from './mock/hardware';
 import { mockInventory } from './mock/inventory';
 import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
@@ -958,6 +962,18 @@ export class MockBackend implements DynoBackend {
     return this.reply('counterHistory', () => this.counters.history(paths, minutes, this.now()));
   }
 
+  throttling(): Promise<ThrottleOverview> {
+    return this.reply('throttling', () => mockThrottling(this.profile.os, this.now()));
+  }
+
+  lifespan(): Promise<LifespanOverview> {
+    return this.reply('lifespan', () => mockLifespan(this.profile.os, this.machine));
+  }
+
+  baselines(): Promise<BaselineOverview> {
+    return this.reply('baselines', () => mockBaselines(this.now()));
+  }
+
   network(query: NetworkQuery): Promise<NetworkSnapshot> {
     return this.reply('network', () => mockNetwork(query, this.now()));
   }
@@ -1173,7 +1189,7 @@ export class MockBackend implements DynoBackend {
       const from = to - 7 * DAY;
       // Dyno has been collecting for about five weeks: older weeks are empty and say so.
       if (weeksAgo >= 5) {
-        return { from, to, score: null, scoreChange: 0, avgCpu: 0, peakCpu: 0, avgMemory: 0, topApps: [], ruleActions: 0, cleanedBytes: 0, crashes: 0, alerts: 0, highlights: ['Dyno has no history for this week yet.'], scoreTrend: [], disks: [], issues: [], changes: [], nothingToReport: true };
+        return { from, to, score: null, scoreChange: 0, avgCpu: 0, peakCpu: 0, avgMemory: 0, topApps: [], ruleActions: 0, cleanedBytes: 0, crashes: 0, alerts: 0, highlights: ['Dyno has no history for this week yet.'], scoreTrend: [], disks: [], issues: [], changes: [], hardware: [], nothingToReport: true };
       }
       const issueAt = (h: number): number => to - h * 60 * MIN;
       return {
@@ -1208,6 +1224,7 @@ export class MockBackend implements DynoBackend {
           { at: issueAt(4 * 60), title: 'Cleanup removed temp files', detail: '10.7 GB freed; you can undo this from Activity.' },
           { at: issueAt(20 * 60), title: 'Turned off Updater at login', detail: 'You changed this in the startup manager.' },
         ],
+        hardware: ['The CPU ran slower than it should for 52 min this week (52 min of heat).', 'Battery: replace in about 23 months (17 to 31 months) (confidence medium).'],
         nothingToReport: false,
       };
     });
