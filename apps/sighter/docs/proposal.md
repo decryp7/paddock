@@ -2,7 +2,7 @@ Status: proposal, open questions pending
 
 # Proposal: Sighter, a local vision locator server for UI automation
 
-Date 2026-10-23, revision 4 plus user decisions of the same day: core idea, C#/Java/C++ clients, own tests in v1 (feature research pass 2: test layer, plans, remote sessions, family rules; supersedes revisions 1 to 3). Research proposal, nothing built. Items marked (verify) come
+Date 2026-10-23, revision 4 plus user decisions of the same day (see Decisions): core idea, one locator-style client API, own tests in v1 (feature research pass 2: test layer, plans, remote sessions, family rules; supersedes revisions 1 to 3). Research proposal, nothing built. Items marked (verify) come
 from secondary sources (Roboflow catalog pages, mirrors, blogs, forum posts) and must be checked against the official repo or paper
 first. Speeds and accuracy figures are published or order-of-magnitude, not measured on our data; a week-1 spike must measure.
 
@@ -16,6 +16,13 @@ Refinements:
 - **Active-learning loop on UI change**: when the UI changes, low-confidence or unknown results are flagged, the LLM/VLM (Pitwall, optional) proposes labels, a human reviews them, and the model is retrained.
 - **Training for variation**: DPI, theme and size variation (section 6) so one model survives scaling, dark/light and resized windows.
 - **Two ways to test, one engine**: engineers' own code tests through the API, and tests Sighter authors and runs itself (section 7.8), both on the same models and resolver.
+
+## Decisions (user, 2026-10-23)
+- Core idea: fast permissive detector + OCR/layout identity; the LLM only helps label; the API is the product.
+- **One client API style: Playwright-style locators**, generated in C#, Java, Python, TypeScript and C++ over OpenAPI (7.9).
+- Sighter authors and runs its own tests in v1; `act` is required for those (7.8).
+- AI-assisted recovery through Pitwall: diagnose-only by default, recover opt-in, reported as "passed with recovery" (7.10).
+- Works alongside any UI test framework (FlaUI, pywinauto, Appium, Robot) as an add-on (7.11); multi-application tests (7.12); pure-vision legacy apps from C# (7.13).
 
 ## 1. Pitch
 
@@ -234,39 +241,7 @@ dialog"), constrain searches ("inside this dialog"), power `assert_screen`/`wait
 (`runs/<run_id>/<seq>-*.png/json`, retention caps, redaction applied before storing). `X-Sighter-Run: <id>` groups calls. A run folder
 opens in the studio and exports a Debrief bundle.
 
-**Clients**: OpenAPI is the contract. Thin generated MIT clients live **outside the app repo** in `sighter-clients`. First-class, generated and versioned with the API: **C#/.NET** (NuGet), **Java** (Maven Central), **C++** (header-only over a small HTTP/JSON dependency), **Python** (pytest fixtures, `httpx`) and **TypeScript** (Playwright/Node); plus a Robot Framework keyword library wrapping the Python client and the Rust `sighter` CLI shipped with the app (`sighter serve|locate|wait-for|assert|ocr|record|run|models`). The app itself contains no non-Rust code. Each client ships a tiny example; all of them call the same three verbs:
-
-```csharp
-// C# (NUnit; xUnit is the same with [Fact])
-[Test] public async Task SavesDocument() {
-    var s = new SighterClient("app@3");
-    await s.Locate(new Query { Name = "Save", Class = "button" }).Click();   // locate (+ act, if enabled)
-    await s.WaitFor(new Query { Text = "Saved" }, timeout: 5000);           // wait_for
-    await s.AssertScreen("main");                                           // assert_screen
-}
-```
-
-```java
-// Java (JUnit 5)
-@Test void savesDocument() {
-    var s = new SighterClient("app@3");
-    s.locate(Query.name("Save").clazz("button")).click();
-    s.waitFor(Query.text("Saved"), Duration.ofSeconds(5));
-    s.assertScreen("main");
-}
-```
-
-```cpp
-// C++ (GoogleTest)
-TEST(Editor, SavesDocument) {
-  sighter::Client s{"app@3"};
-  s.locate({.name = "Save", .cls = "button"}).click();
-  s.wait_for({.text = "Saved"}, std::chrono::seconds(5));
-  s.assert_screen("main");
-}
-```
-
-(Method names are illustrative; the generated surface follows the OpenAPI operation names.) Python and TypeScript clients mirror these. C#, Java and C++ also offer a FlaUI-style object model over the same API (7.9).
+**Clients**: OpenAPI is the contract. Thin generated MIT clients live **outside the app repo** in `sighter-clients`, one API style (locators, 7.9) in the same shape for **C#/.NET** (NuGet), **Java** (Maven Central), **Python** (pytest fixtures, `httpx`), **TypeScript** (Playwright/Node) and **C++** (header-only over a small HTTP/JSON dependency), with a Robot Framework keyword library wrapping the Python client and the Rust `sighter` CLI shipped with the app (`sighter serve|locate|wait-for|assert|ocr|record|run|models`). The app itself contains no non-Rust code. Each client ships a tiny example (7.9).
 
 **Performance targets** (goals to confirm in the spike; p50, 1080p screenshot in memory): cache under 5 ms; template under 30 ms; OCR
 anchor under 100 ms with a region, 150 to 500 ms full screen on CPU (cache OCR by fingerprint); detector under 50 ms on a discrete/Apple
@@ -400,71 +375,73 @@ Besides the API for engineers' code, Sighter can author and run test cases itsel
 
 **Two ways to test, one engine**: engineers' own code tests via the API (C#, Java, C++, Python, TypeScript) and Sighter-authored tests both go through `sighter-server`, the same pinned models and the same resolver, so results are comparable and a flagged failure feeds the same labelling queue.
 
-### 7.9 FlaUI-style client API
-The C#, Java and C++ clients expose an object model **similar to FlaUI** ([FlaUI](https://github.com/FlaUI/FlaUI), MIT, the .NET UIA library many Windows testers know), backed by vision instead of UIA. The HTTP/OpenAPI API stays the wire contract underneath; these object models are client-side layers over it. The raw verbs (`locate`, `wait_for`, `assert_screen`) remain available in every client.
+### 7.9 Client API: locators
+User decision 2026-10-23: **one client API style only, Playwright-style locators**, to reduce complexity and effort. Playwright's API design ([docs](https://playwright.dev/docs/locators), Apache-2.0) inspires it; no code is reused. The **same shape** is generated in **C#, Java, Python, TypeScript and C++** over the OpenAPI wire contract (section 7), which stays the contract underneath; the locator layer is client-side. The raw verbs (`locate`, `wait_for`, `assert_screen`) remain available in every client.
 
-One `FindFirst(...).AsButton().Click()` from a C# test, through the client, the HTTP API, the resolver layers and the guarded input driver:
+**Semantics**
+- **Lazy locators, re-resolved on every action**: `window.GetByText("Save")` does nothing until used; each action resolves it again, so a UI that redraws between steps is handled.
+- **Auto-waiting and actionability**: before an action the locator waits (within a timeout) until the target is found, **visible**, **stable** (the box has stopped moving, frame-diff based) and **enabled** (inferred from a disabled class), and checks it is not occluded.
+- **Strict matching by default**: more than one match is an error (`Ambiguous`, with the candidates); choose with `.First()`, `.Last()` or `.Nth(n)`.
+- **Retrying assertions**: `Expect(locator).ToHaveTextAsync("Saved")`, `ToBeVisibleAsync()`, `ToBeEnabledAsync()` retry until the timeout, so tests need no sleeps.
+- **Finding**: `GetByText`, `GetByKind(Kind.Button, name: "Save")` (the detector class plus OCR name), `.Near("label")`, `.RightOf`, `.Below`, `.Within(region | window)`, `.Filter(...)`, `.ByImage(template)`, `.MinConfidence(0.8)`; `Locator.And/Or` to combine.
+- **Grid helpers**: `grid.Cell(row, column)` by row and column header (7.13).
+- **Actions**: `ClickAsync`, `FillAsync` (focus click plus typing), `PressAsync`, `DragToAsync`, `CaptureAsync`; all go through the guarded input driver (`act`) or the engineer's own.
+- **Element info**: box, text, kind, confidence, `resolvedBy` (cache, template, OCR, detector or VLM) and `modelVersion`.
+- **Sessions**: `Sighter.Launch(...)` / `Attach(processName | title | pid)` give an app with `MainWindow`; the model pin goes in the session options (`app@3`).
+
+One `Locator.ClickAsync()` from a C# test, through the client, the HTTP API, the resolver layers and the guarded input driver:
 
 ![Locate and click an element](images/diagrams/svg/uml-seq-locate.svg?v=fd576cdc)
 
-**Familiarity, not compatibility**: not a drop-in FlaUI replacement (different namespaces and types), but familiar enough that a FlaUI user is productive at once. **Licence**: FlaUI is MIT; this is an API style, not code reuse.
-
-| FlaUI | Sighter client | Notes |
-|---|---|---|
-| `Application.Launch(path)` / `Attach(process or title)` | `Sighter.Launch(...)` / `Sighter.Attach(...)` | Session options carry the model pin (`app@3`) and the act permission |
-| `app.GetMainWindow(automation)` | `app.MainWindow` | The OS window APIs give the window and its capture region |
-| `FindFirstDescendant(cf => ...)` / `FindAllDescendants(...)` | `window.FindFirst(cf => ...)` / `FindAll(...)` | Same `ConditionFactory`-style builder |
-| `cf.ByControlType(ControlType.Button)` | `cf.ByControlType(...)` | The detector class |
-| `cf.ByText("Save")` / `ByName` | `cf.ByText(...)` / `ByName(...)` | OCR text (and the label's stable name) |
-| (no equivalent) | `Near("Name")`, `RightOf`, `Below`, `Inside(region)`, `Index(n)`, `ByImage(template)`, `MinConfidence(0.8)` | Vision-only conditions, combined with `.And(...)` |
-| `Retry.WhileNull(...)` | `window.WaitFor(cond, timeout)`, `WaitUntilGone(cond, timeout)` | Server-side polling with frame-diff |
-| `AsButton().Invoke()` | `AsButton().Click()` | |
-| `AsTextBox().Enter(text)` | `AsTextBox().Enter(text)` | Focus click plus typing |
-| `AsCheckBox().IsChecked` / `Toggle()` | same | State from the detector's checked/unchecked classes |
-| `AsComboBox().Select("Item")` | same | Open, find the item by OCR, click, verify |
-| `AsListBox` / `AsGrid` rows and cells | same | Rows and cells by layout |
-| `BoundingRectangle`, `Name`, `ControlType`, `IsEnabled` | same, plus `Confidence`, `ResolvedBy`, `ModelVersion` | `Name` is OCR text, `ControlType` the class, `IsEnabled` inferred from a disabled class; `ResolvedBy` is cache, template, OCR, detector or VLM |
-| `Mouse` / `Keyboard` statics | `Sighter.Mouse` / `Sighter.Keyboard` | Through the guarded input driver (`act`), or the engineer's own |
-| `Capture.Element` / `Capture.Screen` | `element.Capture()` / `window.Capture()` | |
-
 ```csharp
-// C# (NUnit)
-using var app = Sighter.Launch(@"C:\Tools\Editor.exe", new SessionOptions { Model = "editor@3" });
-var win = app.MainWindow;
-var save = win.FindFirst(cf => cf.ByText("Save").And(cf.ByControlType(ControlType.Button)).MinConfidence(0.8));
-Assert.That(save.IsEnabled);
-save.AsButton().Click();
-win.WaitFor(cf => cf.ByText("Saved"), TimeSpan.FromSeconds(5));
-win.FindFirst(cf => cf.ByControlType(ControlType.TextBox).Near("File name")).AsTextBox().Enter("report.txt");
-Console.WriteLine($"{save.Confidence:F2} via {save.ResolvedBy} on {save.ModelVersion}");
+// C# (NUnit; xUnit is the same with [Fact])
+[Test] public async Task SavesDocument() {
+    await using var app = await Sighter.LaunchAsync(@"C:\Tools\Editor.exe", new SessionOptions { Model = "editor@3" });
+    var win = app.MainWindow;
+    var save = win.GetByKind(Kind.Button, name: "Save").MinConfidence(0.8);
+    await Expect(save).ToBeEnabledAsync();
+    await save.ClickAsync();                                                       // waits, then clicks
+    await Expect(win.GetByText("Saved")).ToBeVisibleAsync();                       // retries until shown
+    await win.GetByKind(Kind.TextBox).RightOf("File name").FillAsync("report.txt");
+    await Expect(win.GetByKind(Kind.Grid).Cell(row: "report.txt", column: "Size")).ToHaveTextAsync("2 KB");
+    var box = await save.BoundingBoxAsync();                                       // plus Confidence, ResolvedBy, ModelVersion
+    await win.AssertScreenAsync("main");
+}
 ```
 
 ```java
 // Java (JUnit 5)
-try (var app = Sighter.launch("/opt/editor", SessionOptions.model("editor@3"))) {
-    var win = app.mainWindow();
-    win.findFirst(cf -> cf.byText("Save").and(cf.byControlType(ControlType.BUTTON))).asButton().click();
-    win.waitFor(cf -> cf.byText("Saved"), Duration.ofSeconds(5));
+@Test void savesDocument() {
+    try (var app = Sighter.launch("/opt/editor", SessionOptions.model("editor@3"))) {
+        var win = app.mainWindow();
+        win.getByKind(Kind.BUTTON, "Save").click();
+        expect(win.getByText("Saved")).toBeVisible();
+        win.getByKind(Kind.TEXT_BOX).rightOf("File name").fill("report.txt");
+    }
 }
 ```
 
-```cpp
-// C++ (GoogleTest)
-auto app = sighter::Sighter::launch("/opt/editor", {.model = "editor@3"});
-auto win = app.main_window();
-win.find_first([](auto& cf) { return cf.by_text("Save").and_(cf.by_control_type(ControlType::Button)); }).as_button().click();
-win.wait_for([](auto& cf) { return cf.by_text("Saved"); }, std::chrono::seconds(5));
+```python
+# Python (pytest)
+def test_saves_document(sighter):
+    app = sighter.launch("/opt/editor", model="editor@3")
+    win = app.main_window
+    win.get_by_kind(Kind.BUTTON, name="Save").click()
+    expect(win.get_by_text("Saved")).to_be_visible()
+    win.get_by_kind(Kind.TEXT_BOX).right_of("File name").fill("report.txt")
 ```
 
-**Patterns, approximated visually**: Value via OCR, Toggle via a state class, ExpandCollapse via `act` plus verify. **What vision cannot do, stated plainly**:
-- No element tree: `Parent`, `Children` and tree walks do not exist; use layout conditions instead.
-- No hidden or off-screen elements: scroll-to-find helpers (`ScrollIntoView(cond)`) replace them.
+TypeScript and C++ (`win.getByText("Save").click()`, `win.get_by_text("Save").click()`) have the same shape. Method names are illustrative; the generated surface follows the OpenAPI operation names.
+
+**What vision cannot do, stated plainly**
+- No element tree: `Parent`, `Children` and tree walks do not exist; use layout conditions (`Near`, `Within`) instead.
+- No hidden or off-screen elements: scroll-to-find helpers (`ScrollIntoViewAsync()`) replace them.
 - No `AutomationId`: stable names come from Sighter's labels instead.
-- `IsEnabled` and checked state are inferred from classes and can be wrong where the app draws states unusually; confidence is exposed so tests can assert on it.
+- `IsEnabled`, checked and toggle state are inferred from detector classes and can be wrong where the app draws states unusually; confidence is exposed so tests can assert on it. Value comes from OCR; expand/collapse is `act` plus a verifying locator.
 
-**Failures** throw typed exceptions (`ElementNotFound`, `Ambiguous`, `NeedsLabelling`, `LowConfidence`) carrying the screenshot path, the candidates and the review-queue link (`/v1/flag`); **never a blind click**: an action on an ambiguous or below-threshold match is refused, not guessed.
+**Failures** throw typed exceptions (`ElementNotFound`, `Ambiguous`, `NeedsLabelling`, `LowConfidence`, `NotActionable`) carrying the screenshot path, the candidates and the review-queue link (`/v1/flag`); **never a blind click**: an action on an ambiguous or below-threshold match is refused, not guessed.
 
-A thin shim package mapping common FlaUI calls, to migrate existing suites, is a Later idea.
+Familiar to Playwright users; FlaUI users keep their FlaUI code and add Sighter locators where UIA cannot see (7.11).
 
 ### 7.10 AI-assisted recovery (via Pitwall)
 User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go back to the LLM to find out why and try to continue. This applies to Sighter-authored tests (7.8) and, opt-in, to engineers' code tests through the clients.
@@ -493,7 +470,7 @@ User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go bac
 
 **Learning loop**: every recovery becomes a **proposal**: add a "handle 'Session expired' dialog" sub-flow, update the step's anchor or wait, or label new elements. The user accepts proposals in the studio; nothing changes a test silently.
 
-**API users**: the C#/Java/C++ clients (and Python/TypeScript) get an opt-in `RecoveryPolicy` (`Off` / `DiagnoseOnly` / `Recover`). A failure exception always includes Pitwall's diagnosis when available, even with recovery off, which helps debugging.
+**API users**: every locator client gets an opt-in `RecoveryPolicy` set on the session or a single call (`new SessionOptions { Recovery = RecoveryPolicy.DiagnoseOnly }`; `Off` / `DiagnoseOnly` / `Recover`). A failure exception always includes Pitwall's diagnosis when available, even with recovery off, which helps debugging.
 
 **Pitwall optional**: without Pitwall, behaviour is exactly as before: fail with a screenshot. With Pitwall, the default is `DiagnoseOnly`; `Recover` is opt-in per suite.
 
@@ -502,16 +479,16 @@ User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go bac
 **Performance**: a VLM call takes seconds, so it happens only on the failure path, never on normal steps; the 8 GB one-GPU gating of section 9 applies.
 
 ### 7.11 Alongside your UI test framework (hybrid tests)
-User decisions 2026-10-23: engineers who code their tests with FlaUI can keep using FlaUI and use the Sighter API for the UI FlaUI cannot handle, and the same holds for **any other UI testing framework** (Java and Python have their own). This is a key selling point: Sighter is an **add-on, not a replacement**, for existing UIA/Appium/pywinauto/Robot suites. No suite has to be rewritten to adopt it. FlaUI is the lead example.
+User decisions 2026-10-23: engineers who code their tests with FlaUI can keep using FlaUI and use the Sighter API for the UI FlaUI cannot handle, and the same holds for **any other UI testing framework** (Java and Python have their own). This is a key selling point: Sighter is an **add-on, not a replacement**, for existing UIA/Appium/pywinauto/Robot suites. No suite has to be rewritten to adopt it. FlaUI is the lead example. Familiar to Playwright users; FlaUI users keep their FlaUI code and add Sighter locators where UIA can't see.
 
 **The shared integration pattern** (works with any framework):
 1. **Scope**: nearly every framework exposes an element's **bounding rectangle** and/or a **window handle (hwnd) or process id**. The adapter passes that to Sighter, which searches only inside that region or window (`region` in `locate`, or a window-bound session from 7.12). A custom-drawn grid or canvas inside an otherwise accessible window is the typical case.
-2. **Fallback helper** ("framework first, vision when it misses"): `FindFirstOrSight(frameworkLocator, sighterQuery)` tries the framework, falls back to vision when it throws or finds nothing, and logs which one answered, so a team sees where its locators fail.
+2. **Fallback helper** ("framework first, vision when it misses"): `FirstOf(frameworkQuery, sighterLocator)` tries the framework, falls back to vision when it throws or finds nothing, and logs which one answered, so a team sees where its locators fail.
 3. **Shared input in one coordinate space**: framework mouse/keyboard and Sighter actions both use the OS input, so they interleave safely when the adapter does all coordinate conversion in one helper with per-monitor DPI awareness (the same helper as 7.12). Sighter returns the centre in screen coordinates; the adapter converts for the framework when it needs window-relative ones.
-4. **Shared waits**: a wait that accepts a framework condition, a Sighter condition or either.
+4. **Shared waits**: Sighter's auto-waiting and `Expect` work on either side; `FirstOf` accepts both in one wait.
 5. **Reports**: a Sighter step inside a framework test still produces screenshots and run-bundle entries, through the test runner's context hook (`ITestContext` for NUnit/xUnit, a JUnit extension, a pytest fixture, a Robot listener).
 
-Adapters are thin client-side layers over the HTTP API (section 7); the object model of 7.9 is reused. Frameworks are third-party peer dependencies, never bundled; the adapters are MIT and share no code with them.
+Adapters are thin client-side layers over the HTTP API (section 7); the locator API of 7.9 is reused. Frameworks are third-party peer dependencies, never bundled; the adapters are MIT and share no code with them.
 
 **Frameworks checked** (status and licence from the GitHub/PyPI/npm records on 2026-10-23; (verify) where I could not confirm from an official record):
 
@@ -553,30 +530,30 @@ Adapters are thin client-side layers over the HTTP API (section 7); the object m
 using var app = Application.Launch("Editor.exe");
 using var automation = new UIA3Automation();
 var window = app.GetMainWindow(automation);
-window.FindFirstDescendant(cf => cf.ByAutomationId("Menu")).Click();           // UIA is fine here
-var grid = window.FindFirstDescendant(cf => cf.ByAutomationId("CustomGrid")); // custom-drawn: UIA sees one pane
-grid.Sighter().FindFirst(s => s.ByText("Total").And(s.ByControlType(ControlType.Cell)))   // vision, inside the grid's rectangle
-    .AsCell().Click();
-window.FindFirstOrSight(cf => cf.ByAutomationId("Save"), s => s.ByText("Save").And(s.ByControlType(ControlType.Button))).AsButton().Click();
+window.FindFirstDescendant(cf => cf.ByAutomationId("Menu")).Click();             // UIA is fine here (FlaUI code unchanged)
+var grid = window.FindFirstDescendant(cf => cf.ByAutomationId("CustomGrid"));    // custom-drawn: UIA sees one pane
+await grid.Sighter().GetByText("Total").ClickAsync();                            // vision, inside the grid's rectangle
+await Expect(window.Sighter().GetByText("Saved")).ToBeVisibleAsync();           // whole FlaUI Window
+await FirstOf(window.FindFirstDescendant(cf => cf.ByAutomationId("Save")),       // UIA first, vision when it misses
+              window.Sighter().GetByKind(Kind.Button, name: "Save")).ClickAsync();
 ```
 
 ```python
 # Python + pywinauto
 from pywinauto import Application
-from sighter_pywinauto import sight            # adapter, illustrative names
+from sighter_pywinauto import sighter          # adapter, illustrative names
 app = Application(backend="uia").connect(title_re="Editor.*")
 dlg = app.window(title_re="Editor.*")
 canvas = dlg.child_window(auto_id="Canvas")    # one UIA pane
-sight(canvas).find_first(text="Export", cls="button").click()   # search inside canvas.rectangle()
+sighter(canvas).get_by_text("Export").click()  # search inside canvas.rectangle()
 dlg.child_window(title="Save", control_type="Button").click()
 ```
 
 ```java
 // Java + Appium (JUnit 5)
 WebElement pane = driver.findElement(AppiumBy.accessibilityId("CustomGrid"));
-Rectangle r = pane.getRect();                      // scope from the framework
-Sighter.on(driver).inside(r).findFirst(cf -> cf.byText("Total").and(cf.byControlType(ControlType.CELL))).click();
-Sighter.on(driver).findFirstOrSight(AppiumBy.accessibilityId("Save"), cf -> cf.byText("Save")).click();
+Sighter.on(driver).within(pane.getRect()).getByText("Total").click();           // scope from the framework
+firstOf(driver.findElement(AppiumBy.accessibilityId("Save")), Sighter.on(driver).getByText("Save")).click();
 ```
 
 (All adapter names and methods above are illustrative; the generated surface follows the OpenAPI operation names and 7.9.)
@@ -590,8 +567,9 @@ User decision 2026-10-23: a test case may involve multiple applications running 
 - **Sessions**: one test can hold several sessions: `Sighter.Launch(...)` / `Attach(processName | title | pid)`, each with its own window tracking and **its own model** (per-app models in the registry, auto-selected by process name and window class), plus an **OS dialogs model** for file pickers, UAC-like prompts and message boxes, shared across apps.
 - **Switching**: `app.Activate()` brings the app to the front and waits until focused, verified through the foreground-window API and the screen fingerprint. Windows from child or helper processes are handled through `app.Windows` and `WaitForWindow(title|class)`.
 - **Cross-app flows**: copy in A and paste in B; drag between windows; one app launching another (for example an installer opening the product), with `WaitForProcess` and `WaitForWindow`.
-- **Screen-level search**: `Sighter.Desktop.FindFirst(...)` searches across all windows and monitors when you do not know which app shows the thing (for example a toast or tray balloon). It is occlusion-aware: only visible pixels count, and z-order is checked before acting.
+- **Screen-level search**: `Sighter.Desktop.GetByText("Update available")` (a locator over all windows and monitors) searches across all windows and monitors when you do not know which app shows the thing (for example a toast or tray balloon). It is occlusion-aware: only visible pixels count, and z-order is checked before acting.
 - **Multiple monitors and DPI**: per-monitor coordinates; regions are always relative to the window and converted centrally.
+- **Example**: `var installer = await Sighter.AttachAsync(title: "Setup"); await installer.MainWindow.GetByText("Finish").ClickAsync(); var editor = await Sighter.WaitForAppAsync(process: "Editor.exe"); await Expect(editor.MainWindow.GetByText("Welcome")).ToBeVisibleAsync();` (each app uses its own model).
 - **Recording**: the recorder follows focus across apps and tags each step with its app or window, so a recorded multi-app flow replays with the right session per step. The step editor (7.8) shows the app per step.
 - **Recovery (7.10)** knows which app was expected to be in front, so "wrong app in front" is a diagnosis it can act on (activate the expected app) within the same guardrails.
 - **Debrief run bundles**: steps carry the app identity, and logs from each app can be correlated with them.
@@ -600,18 +578,18 @@ User decision 2026-10-23: a test case may involve multiple applications running 
 ### 7.13 Pure-vision testing of legacy apps
 User point 2026-10-23: very old C++ applications have no UIA, so Sighter may be needed completely, while the test project is still written in C# calling the Sighter API.
 
-**The scenario**: MFC, raw Win32 or owner-drawn C++ apps (also VB6, Delphi and PowerBuilder) with no usable UIA. The test project is plain C# (NUnit/xUnit) using **only** Sighter's FlaUI-style object model (7.9): no FlaUI dependency, everything located by vision.
+**The scenario**: MFC, raw Win32 or owner-drawn C++ apps (also VB6, Delphi and PowerBuilder) with no usable UIA. The test project is plain C# (NUnit/xUnit) using **only** Sighter's locator API (7.9): no FlaUI dependency, everything located by vision.
 
 ```csharp
 // C# (NUnit), legacy MFC app, no UIA, no FlaUI
-[Test] public void CreatesOrder() {
-    using var app = Sighter.Launch(@"C:\Legacy\Orders.exe", new SessionOptions { Model = "orders@5" });
+[Test] public async Task CreatesOrder() {
+    await using var app = await Sighter.LaunchAsync(@"C:\Legacy\Orders.exe", new SessionOptions { Model = "orders@5" });
     var win = app.MainWindow;
-    win.FindFirst(cf => cf.ByControlType(ControlType.TextBox).RightOf("Customer")).AsTextBox().Enter("ACME");   // label anchor
-    win.FindFirst(cf => cf.ByText("Add").And(cf.ByControlType(ControlType.Button))).AsButton().Click();          // owner-drawn button
-    var grid = win.FindFirst(cf => cf.ByControlType(ControlType.Grid)).AsGrid();
-    Assert.That(grid.Cell(row: "ACME", column: "Total").Text, Is.EqualTo("120.00"));   // row/column header lookup, OCR
-    win.AssertScreen("order-saved");
+    await win.GetByKind(Kind.TextBox).RightOf("Customer").FillAsync("ACME");                  // label anchor
+    await win.GetByKind(Kind.Button, name: "Add").ClickAsync();                               // owner-drawn button
+    var grid = win.GetByKind(Kind.Grid);
+    await Expect(grid.Cell(row: "ACME", column: "Total")).ToHaveTextAsync("120.00");          // row/column header lookup, OCR
+    await win.AssertScreenAsync("order-saved");
 }
 ```
 
@@ -627,7 +605,7 @@ User point 2026-10-23: very old C++ applications have no UIA, so Sighter may be 
 - **Old common controls** (themed versus classic look) are two visual variants: include both in training and the theme matrix (7.4).
 - **Running under RDP/VDI** is common for such apps; 7.6 applies unchanged.
 
-**Positioning**: for these apps Sighter is the only practical automation path in the sense that UIA-based tools (FlaUI, Appium Windows) cannot see inside them. The competitors there are UiPath Computer Vision, Eggplant and SikuliX (section 13). Sighter's advantages are trained per-app models, OCR and layout identity, the C# API in the shape testers already know (7.9), and running locally with no cloud.
+**Positioning**: for these apps Sighter is the only practical automation path in the sense that UIA-based tools (FlaUI, Appium Windows) cannot see inside them. The competitors there are UiPath Computer Vision, Eggplant and SikuliX (section 13). Sighter's advantages are trained per-app models, OCR and layout identity, the C# locator API in a shape many testers already know from Playwright (7.9), and running locally with no cloud.
 
 ## 8. The resolver and models
 
@@ -863,13 +841,12 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Script & test | Self-healing: re-resolve through later layers, propose a label/template update (explicit, never silent) | v1 proposal only | Eggplant, Tosca, TestComplete, Testim/mabl |
 | Script & test | **Sighter-authored tests**: record a flow into steps, visual step editor (target, action, assertion, wait), data tables, sub-flows (7.8) | v1 | Eggplant, Airtest, Playwright codegen |
 | Script & test | **Run Sighter's own tests**: studio watch mode with overlay, headless `sighter run`, parallel-safe per screen, retries/waits from the resolver, plans as TOML in git (`paddock-testplan`) (7.8) | v1 | Eggplant, Airtest |
-| Script & test | **FlaUI-style object model** in the C#/Java/C++ clients: sessions/windows, `FindFirst`/`FindAll` condition builder with vision-only conditions, `WaitFor`, typed wrappers (Button, TextBox, CheckBox, ComboBox, ListBox, Grid), element properties with `Confidence`/`ResolvedBy`/`ModelVersion`, typed failures (7.9) | v1 | FlaUI (MIT, style only) |
+| Script & test | **Locator API (C#, Java, Python, TypeScript, C++)**: one Playwright-style client surface; lazy locators, auto-waiting/actionability, strict matching, retrying `Expect`, vision-only filters (`Near`, `RightOf`, `Within`, `ByImage`, `MinConfidence`), `Cell(row, column)`, typed failures, element info with `Confidence`/`ResolvedBy`/`ModelVersion` (7.9) | v1 | Playwright (API design, Apache-2.0; no code reused) |
 | Script & test | **Hybrid adapters v1: `Sighter.FlaUI` (C#), `sighter-pywinauto` (Python), `sighter-appium` (Java, Python), Robot Framework `SighterLibrary`**: scope a vision search to a framework element rect/window, "framework first, vision when it misses" fallback with logging, shared waits, runner reporting hooks (7.11) | v1 | FlaUI, pywinauto, Appium, Robot (peer dependencies only) |
-| Script & test | **Pure-vision legacy-app testing from C#** (MFC/Win32/VB6/Delphi/PowerBuilder, no UIA, no FlaUI): 7.9 object model only, plus optional Win32 window info (HWND, class, pid) (7.13) | v1 | UiPath CV, Eggplant, SikuliX |
+| Script & test | **Pure-vision legacy-app testing from C#** (MFC/Win32/VB6/Delphi/PowerBuilder, no UIA, no FlaUI): 7.9 locator API only, plus optional Win32 window info (HWND, class, pid) (7.13) | v1 | UiPath CV, Eggplant, SikuliX |
 | Label | Optional MSAA (IAccessible) `LabelSource` for old controls | Later (after Windows UIA) | (own idea) |
 | Script & test | Further hybrid adapters and recipes: `sighter-appium` JS, `sighter-nutjs`, `sighter-pyautogui` shim, Swing/JavaFX/Selenium/Playwright/Qt/Squish/raw-UIA/Mac2/dogtail recipes; drop-in `find`/`click` shim for SikuliX/PyAutoGUI/nut.js users (7.11) | Later | SikuliX, PyAutoGUI, nut.js |
 | Script & test | **Multi-application tests**: several sessions per test, per-app models plus OS dialogs model, `Activate`/`WaitForWindow`/`WaitForProcess`, cross-app copy/paste/drag, `Sighter.Desktop` search, per-monitor DPI, focus-following recorder (7.12) | v1 | UiPath, Power Automate Desktop |
-| Script & test | FlaUI migration shim package (map common FlaUI calls) | Later | FlaUI |
 | Script & test | **AI-assisted recovery via Pitwall**: diagnose-only (default when Pitwall is present) and recover with guardrails (closed action vocabulary, no destructive actions, bounded attempts, "passed with recovery" state, `RecoveryPolicy`, diagnosis in failure exceptions, recovery transcript in Debrief bundles) (7.10) | v1 | (own idea; Functionize/mabl heal differently) |
 | Script & test | Learned recovery handlers auto-proposed across suites | Later | (own idea) |
 | Script & test | Natural-language steps | Later | Eggplant, Functionize |
@@ -916,7 +893,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 
 ## 15. Open questions for the user (17; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
 1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
-2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? Is the FlaUI-style object model (7.9) the right default surface, with raw verbs underneath?
+2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? (Decided 2026-10-23: one API style, locators, 7.9; raw verbs stay underneath.)
 3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
 4. First OS pair and targets: Windows + macOS, then Linux X11, then Wayland; desktop + browsers + **remote-session client windows (Citrix/RDP/Horizon/VNC) in v1**, mobile Later?
 5. How important is unattended CI (interactive logged-in session on runners; implications for Pitcrew)? Is recording on CI runners wanted, or studio-only recording?
@@ -943,14 +920,14 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - Server, resolver, OpenAPI, CLI, clients, integrations, docs: 5 to 7 weeks.
 - **Test layer (new)**: plan import and task backlog 2 to 3 weeks; app state graph, coverage, path generation 3 to 4 weeks; traceability, run sets, JUnit/TRX/Allure 2 to 3 weeks; data tables and matrices 1 to 2 weeks; visual regression completion (regions, levels, baselines UI) 2 to 3 weeks; `paddock-pitwall` crate and batch-priority jobs 1 to 2 weeks. About 11 to 17 weeks, partly parallel.
 - **Sighter-authored tests (new in v1, 7.8)**: step model and TOML (de)serialisation in `paddock-testplan` 1 to 2 weeks; flow-to-steps conversion from the recorder 1 to 2 weeks; visual step editor, data tables and sub-flows in the studio 4 to 6 weeks; runner (`sighter run`, watch mode with overlay, parallel-safe scheduling, retries) 3 to 4 weeks; guarded `act` driver hardening on two OSes 2 to 3 weeks (moved from optional to required); C#/Java/C++ clients, examples and CI 2 to 3 weeks. About 10 to 15 weeks, partly parallel.
-- FlaUI-style object models for C#/Java/C++ on top of the generated clients (7.9): 2 to 3 weeks, partly inside the 2 to 3 weeks for clients above.
+- **Locator API (7.9)** (my estimate, not the user's): one locator layer defined once and generated in C#, Java, Python, TypeScript and C++ (auto-waiting, actionability, strict matching, `Expect`, grid helpers, typed failures) 2 to 3 weeks, partly inside the 2 to 3 weeks for clients above; a single surface replaces the earlier two (raw verbs plus a FlaUI-style object model), saving roughly 1 to 2 weeks of design, docs and per-language wrappers.
 - **AI-assisted recovery (7.10)** (my estimate, not the user's): `sighter-recover` preset and Pitwall contract extension 1 week; trigger detection, closed-vocabulary plan parser and guarded executor 2 to 3 weeks; "passed with recovery" state, reports, Debrief transcript and `RecoveryPolicy` in the clients 1 to 2 weeks; proposals UI in the studio 1 to 2 weeks. About 5 to 8 weeks, partly parallel; adds roughly 1 month to the total.
 - **Hybrid adapters (7.11)** (my estimate, not the user's): shared adapter core (scope, fallback, DPI helper shared with 7.12, reporting hook) 1 to 2 weeks; `Sighter.FlaUI` 1 to 2 weeks; `sighter-pywinauto` 1 week; `sighter-appium` (Java and Python) 2 weeks; Robot `SighterLibrary` 1 week; recipes and docs for the Later frameworks about 1 week. About 7 to 9 weeks, partly parallel (was 3 to 4 weeks for FlaUI alone). The Later adapters would add roughly 1 to 2 weeks each.
 - **Multi-application tests (7.12)** (my estimate, not the user's): multi-session model, per-app model auto-selection, OS dialogs model, activation/focus verification 3 to 4 weeks; `Desktop` search with occlusion and z-order, per-monitor DPI helper 2 to 3 weeks; focus-following recorder and per-app steps in the editor 2 to 3 weeks; Debrief identity and log correlation about 1 week. About 8 to 11 weeks, partly parallel.
 - Together 7.11 and 7.12 add roughly 2 to 3 months to the total.
 - **Pure-vision legacy testing (7.13)** (my estimate, not the user's): table/cell lookup and grid wrapper 2 to 3 weeks; Win32 window info helper about 1 week (shared with 7.12); non-DPI-aware scale normalisation 1 week; legacy sample app set (invented, no confidential screenshots), docs and the C# example suite 1 to 2 weeks. About 4 to 6 weeks, partly parallel; MSAA source Later, about 1 to 2 weeks.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
-- Total about 13 to 18 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients, AI recovery, the FlaUI hybrid and multi-application tests), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
+- Total about 13 to 17 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients, AI recovery, the FlaUI hybrid and multi-application tests), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
 ## 17. Sources
 - RT-DETRv2: https://arxiv.org/pdf/2407.17140 ; DEIMv2 (DINOv3): https://arxiv.org/pdf/2509.20787 ; DEIM repo: https://github.com/Intellindust-AI-Lab/DEIM
