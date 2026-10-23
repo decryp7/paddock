@@ -92,7 +92,48 @@ const ringArcs = (cx, cy, r, gap) => [0, 90, 180, 270].map(a => arc(cx, cy, r, a
 const pointer = (x, y, k) =>
   `M${f(x)} ${f(y)}L${f(x)} ${f(y + 300 * k)}L${f(x + 82 * k)} ${f(y + 224 * k)}L${f(x + 142 * k)} ${f(y + 354 * k)}L${f(x + 214 * k)} ${f(y + 324 * k)}L${f(x + 154 * k)} ${f(y + 196 * k)}L${f(x + 268 * k)} ${f(y + 196 * k)}Z`;
 
-const PN_CUT_1024 = 'M384 436L330 500L384 564M640 436L694 500L640 564M468 722C468 606 556 626 556 526C556 466 526 446 526 376';
+/**
+ * Pacenotes: a portrait spiral notebook (a second page peeks out behind it) with ruled lines, a small route curve drawn like a
+ * pacenote and a compact </> mark. `left` has the spiral on the left edge, `top` along the top. Rings pass through punched holes.
+ */
+const PACENOTES = {
+  left: {
+    g1024: [
+      { kind: 'fill', d: rr(366, 276, 380, 496, 40), tone: 'secondary', cut: [rr(334, 246, 380, 496, 40)] },
+      { kind: 'fill', d: rr(334, 246, 380, 496, 40), tone: 'primary', cut: [circle(388, 330, 21), circle(388, 494, 21), circle(388, 658, 21)], cutStroke: { d: 'M452 360H672M452 428H610M470 706C470 636 548 650 548 590C548 556 530 548 530 520M610 566L580 610L610 654M678 566L708 610L678 654M656 560L634 660', w: 26, cap: 'round' } },
+      { kind: 'stroke', d: 'M300 330H388M300 494H388M300 658H388', w: 34, tone: 'primary' },
+    ],
+    g32: [
+      { kind: 'fill', d: rr(11.5, 6.5, 14.5, 21, 2.5), tone: 'secondary', cut: [rr(9, 4.5, 14.5, 21, 2.5)] },
+      { kind: 'fill', d: rr(9, 4.5, 14.5, 21, 2.5), tone: 'primary', cutStroke: { d: 'M13.5 9.5H21M13.5 12.5H19M14.5 22C14.5 19.5 18.5 20 18.5 17.5C18.5 16 17.5 15.8 17.5 15', w: 1.6, cap: 'round' }, cut: [circle(11.5, 9, 1), circle(11.5, 15, 1), circle(11.5, 21, 1)] },
+      { kind: 'stroke', d: 'M6 9H11.5M6 15H11.5M6 21H11.5', w: 2, tone: 'primary' },
+    ],
+    g16: [
+      { kind: 'fill', d: rr(6.5, 3, 7.5, 11, 1.5), tone: 'secondary', cut: [rr(5, 2, 7.5, 11, 1.5)] },
+      { kind: 'fill', d: rr(5, 2, 7.5, 11, 1.5), tone: 'primary', cutStroke: { d: 'M7.6 10.5C7.6 9 9.8 9.4 9.8 7.5', w: 1.2, cap: 'butt' } },
+      { kind: 'stroke', d: 'M2.8 4.5H5.5M2.8 7.5H5.5M2.8 10.5H5.5', w: 1.3, tone: 'primary', cap: 'butt' },
+    ],
+  },
+  top: {
+    g1024: [
+      { kind: 'fill', d: rr(366, 372, 330, 400, 40), tone: 'secondary', cut: [rr(344, 330, 330, 424, 40)] },
+      { kind: 'fill', d: rr(344, 330, 330, 424, 40), tone: 'primary', cut: [circle(420, 370, 21), circle(512, 370, 21), circle(604, 370, 21)], cutStroke: { d: 'M408 440H620M408 500H570M416 706C416 644 486 656 486 604C486 570 470 566 470 540M552 590L524 628L552 666M624 590L652 628L624 666M598 582L578 674', w: 26, cap: 'round' } },
+      { kind: 'stroke', d: 'M420 286V370M512 286V370M604 286V370', w: 34, tone: 'primary' },
+    ],
+    g32: [
+      { kind: 'fill', d: rr(11, 11, 14, 18, 2.5), tone: 'secondary', cut: [rr(8.5, 9, 14, 18, 2.5)] },
+      { kind: 'fill', d: rr(8.5, 9, 14, 18, 2.5), tone: 'primary', cutStroke: { d: 'M12.5 15H19M13.5 24C13.5 21.5 17.5 22 17.5 19.5C17.5 18 16.5 17.8 16.5 17', w: 1.6, cap: 'round' }, cut: [circle(12, 9.5, 1), circle(16, 9.5, 1), circle(20, 9.5, 1)] },
+      { kind: 'stroke', d: 'M12 5V9.5M16 5V9.5M20 5V9.5', w: 2, tone: 'primary' },
+    ],
+    g16: [
+      { kind: 'fill', d: rr(5.5, 5.5, 7.5, 9, 1.5), tone: 'secondary', cut: [rr(4, 4.5, 7.5, 9, 1.5)] },
+      { kind: 'fill', d: rr(4, 4.5, 7.5, 9, 1.5), tone: 'primary', cutStroke: { d: 'M6.5 12C6.5 10.5 8.7 10.8 8.7 9', w: 1.2, cap: 'butt' } },
+      { kind: 'stroke', d: 'M5.8 2V4.8M8 2V4.8M10.2 2V4.8', w: 1.3, tone: 'primary', cap: 'butt' },
+    ],
+  },
+};
+export const PACENOTES_MAIN = 'left';
+export { PACENOTES };
 
 /** Master glyphs on the 1024 grid (optical centre 512,512; live area ~ 270..754). */
 export const GLYPH_1024 = {
@@ -136,11 +177,7 @@ export const GLYPH_1024 = {
     { kind: 'stroke', d: cardinal(512, 512, 216, 300), w: 52, tone: 'secondary', cap: 'round' },
     { kind: 'fill', d: pointer(436, 392, 0.76), tone: 'primary', round: 10 },
   ],
-  /** Pacenotes: a rally notebook page (spiral binding on top) with code brackets and the route curve cut through it. */
-  pacenotes: () => [
-    { kind: 'fill', d: rr(280, 290, 464, 494, 64), tone: 'primary', cutStroke: { d: PN_CUT_1024, w: 48 } },
-    { kind: 'stroke', d: 'M392 226V326M512 226V326M632 226V326', w: 58, tone: 'secondary' },
-  ],
+  pacenotes: () => PACENOTES[PACENOTES_MAIN].g1024,
   dyno: () => {
     const cx = 512, cy = 548, r = 248, needle = 318;
     return [
@@ -185,10 +222,7 @@ export const GLYPH_SMALL = {
       { kind: 'stroke', d: ringArcs(8, 8, 5.5, 26), w: 1.5, tone: 'secondary', cap: 'butt' },
       { kind: 'fill', d: pointer(5.9, 4.9, 0.0205), tone: 'primary' },
     ],
-    pacenotes: [
-      { kind: 'fill', d: rr(2.5, 4.5, 11, 9.5, 2), tone: 'primary', cutStroke: { d: 'M6.5 12.5C6.5 10.5 9.5 11 9.5 9C9.5 7.8 8.6 7.4 8.6 6.5', w: 1.5, cap: 'butt' } },
-      { kind: 'stroke', d: 'M5.5 2V5M8 2V5M10.5 2V5', w: 1.4, tone: 'secondary', cap: 'butt' },
-    ],
+    pacenotes: PACENOTES[PACENOTES_MAIN].g16,
     dyno: [
       { kind: 'stroke', d: arc(8, 9, 5.5, 150, 390), w: 1.75, tone: 'secondary', cap: 'butt' },
       { kind: 'stroke', d: arc(8, 9, 5.5, 150, 318), w: 1.75, tone: 'primary', cap: 'butt' },
@@ -230,10 +264,7 @@ export const GLYPH_SMALL = {
       { kind: 'stroke', d: ringArcs(16, 16, 11, 24), w: 2.5, tone: 'secondary', cap: 'round' },
       { kind: 'fill', d: pointer(10.3, 8.6, 0.0425), tone: 'primary' },
     ],
-    pacenotes: [
-      { kind: 'fill', d: rr(5, 8, 22, 19.5, 3), tone: 'primary', cutStroke: { d: 'M10.5 14.5L8.5 17L10.5 19.5M21.5 14.5L23.5 17L21.5 19.5M14.5 25C14.5 21.5 17.5 22 17.5 18.5C17.5 16.5 16.3 15.5 16.3 13', w: 1.7 } },
-      { kind: 'stroke', d: 'M10.5 4.5V8.5M16 4.5V8.5M21.5 4.5V8.5', w: 2.3, tone: 'secondary', cap: 'butt' },
-    ],
+    pacenotes: PACENOTES[PACENOTES_MAIN].g32,
     dyno: [
       { kind: 'stroke', d: arc(16, 17.5, 9.5, 150, 390), w: 2.5, tone: 'secondary', cap: 'round' },
       { kind: 'stroke', d: arc(16, 17.5, 9.5, 150, 318), w: 2.5, tone: 'primary', cap: 'round' },
@@ -412,8 +443,9 @@ function trayGlyph(app, status) {
       ];
     case 'pacenotes':
       return [
-        { kind: 'fill', d: rr(2.5, 4, 11, 10.5, 2), tone: 'primary', cutStroke: { d: 'M6.5 12.5C6.5 10.5 9.5 11 9.5 9C9.5 7.8 8.6 7.4 8.6 6.5', w: 1.5, cap: 'butt' } },
-        { kind: 'stroke', d: 'M5.5 1.5V4.5M8 1.5V4.5M10.5 1.5V4.5', w: 1.4, tone: 'primary', cap: 'butt' },
+        { kind: 'fill', d: rr(5.5, 2, 8.5, 12, 1.5), tone: 'secondary', cut: [rr(4.5, 1.5, 8.5, 12, 1.5)] },
+        { kind: 'fill', d: rr(4.5, 1.5, 8.5, 12, 1.5), tone: 'primary', cutStroke: { d: 'M7 10.5C7 9 9.5 9.4 9.5 7.5', w: 1.2, cap: 'butt' } },
+        { kind: 'stroke', d: 'M1.8 4H4.5M1.8 7H4.5M1.8 10H4.5', w: 1.3, tone: 'primary', cap: 'butt' },
       ];
     case 'dyno': {
       const n = status === 'high' ? 372 : 300;
