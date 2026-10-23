@@ -161,6 +161,42 @@ Agents and the shared Mac (2026-10-23)
 - Every drawing, diagram and screenshot gets an independent review before release; every Paddock image or status change
   also refreshes the profile repo (decryp7/.profile).
 
+More findings (2026-10-23, all apps)
+- Service after an update (macOS): SMAppService keeps the old ad-hoc build's launch constraint (LWCR) while the launchd
+  job lives, so after every update the agent fails with EX_CONFIG (78) and loops. Repair = unregister → `launchctl
+  bootout` → wait until launchd drops the job → register (with retries), and do it proactively once per version change.
+  Re-registering over the live job does nothing (Pitwall 1.0.3, Pitcrew, Dyno's agent).
+- A control that repairs X must never depend on X: Pitwall's Settings ▸ Service rendered only after settings loaded from
+  the server it was meant to start. Repair/install controls live in the app shell and always render; every "X is not
+  running" message carries a working Repair button.
+- Never list an installable thing as "planned": Pitwall's llama.cpp could not be installed because a not-installed engine
+  fell into the read-only "planned" list. Not installed + installable = a card with Install (or install automatically).
+- Parallel workers report progress out of order: a "found" count fed by several threads ticked backwards on Windows.
+  Make each phase's `done` monotonic at the reporter (shared atomic or fetch_max) and test it with several threads.
+- Race-free cancel tests: cancel from inside the progress callback (or a deterministic hook), not from a polling task
+  that the operation can outrun on a fast runner.
+- A fix branch must not share `CARGO_TARGET_DIR` with another checkout: Cargo fingerprints workspace crates by relative
+  path, so a build in one worktree overwrote the other's artefacts mid-session. One target dir per worktree.
+- Playwright `reuseExistingServer` silently tests whatever already listens on the port (another agent's app): give each
+  worktree its own e2e port and check it is free before running.
+- Regenerate i18n catalogs (`npm run i18n`) after merging branches instead of hand-merging messages.xlf.
+- ADR numbers collide when branches add ADRs in parallel: allocate at merge time, rename the file and every reference.
+- Stale e2e tests hide in suites nobody ran for a while (Pitcrew's Updates table, Resume menu, duplicate link): run the
+  affected e2e files whenever a page changes.
+- Local-only test failures can be environmental (plugin harness tests exit 71 under the agent sandbox's sandbox_init;
+  macOS idle RSS above a Linux-tuned memory budget): check the same test on Linux CI and the previous release tag before
+  calling it a regression; record environment-bound tests in docs/testing, don't skip them silently.
+- Worktrees of a repo with a git-ignored local config that uses relative paths (Debrief's `.cargo/libduckdb.toml`) need
+  absolute paths or env vars (DUCKDB_LIB_DIR/DUCKDB_INCLUDE_DIR) in each worktree.
+- Model fit: a flat "file size + 1–2 GB" and "65% of total RAM" said "fits comfortably" for models that then spilled to
+  the CPU; the shared fit check must use KV cache for the real context and free VRAM/RAM now (see UX findings).
+- Engines and models go stale fast: the catalogue lists only current-generation models (verified on Hugging Face), and
+  one engine (llama.cpp) installed automatically beats a menu of engines (llamafile caused the confusion).
+- Segmented (multi-connection) downloads give ~4× on per-connection-throttled CDNs (measured 1→4 connections: 11.0 s →
+  2.7 s for 64 MiB at 8 MiB/s per connection) while keeping one in-order checksum and per-segment resume; only for large
+  files on hosts with Range support, with per-host caps and 429 back-off.
+- Every lesson goes here first, then into the apps' suite-lessons copies when each app is next touched.
+
 ## Platforms (user, 2026-10-22: "same thing for all apps, support linux, mac and windows")
 Every app supports Windows, macOS and Linux as first-class platforms: the app, its service/agent/helper per OS
 (Windows service, macOS launch agent via SMAppService, Linux systemd user service), installers (NSIS; .dmg; .deb +
