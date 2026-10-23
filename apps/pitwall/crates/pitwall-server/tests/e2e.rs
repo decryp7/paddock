@@ -560,7 +560,11 @@ async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retr
     let h = common::harness_with(
         dir,
         false,
-        Some(std::sync::Arc::new(common::ChildEngine { exe, die_after_ms: 900 })),
+        Some(std::sync::Arc::new(common::ChildEngine {
+            exe,
+            die_after_ms: 900,
+            pids: Default::default(),
+        })),
     )
     .await;
     h.st.serving.set_restart_limits(pitwall_core::backoff::Limits {
@@ -723,4 +727,50 @@ async fn benchmark_results_survive_a_restart_and_tolerate_damage() {
     drop(again.st);
     let third = common::harness_in(dir, false).await;
     assert!(third.rpc("benchmarks", json!({})).await.json().as_array().unwrap().len() <= 1);
+}
+
+#[tokio::test]
+async fn stopping_serving_unloads_every_model_ends_the_engine_processes_and_resuming_serves_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let exe = common::runnable_server(dir.path());
+    let pids: std::sync::Arc<std::sync::Mutex<Vec<u32>>> = Default::default();
+    let engine = common::ChildEngine {
+        exe,
+        die_after_ms: 600_000,
+        pids: pids.clone(),
+    };
+    let h = common::harness_with(dir, false, Some(std::sync::Arc::new(engine))).await;
+    let key = h.make_key("Quit Test").await;
+    let r = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    let pid = pids.lock().unwrap()[0];
+    assert!(pitwall_server::system::pid_alive(pid));
+
+    let stopped = h.rpc("stop_serving", json!({})).await;
+    assert_eq!(stopped.status, 200, "{}", stopped.body);
+    assert_eq!(stopped.json()["unloaded"], 1);
+    assert!(h.st.serving.loaded().is_empty());
+    for _ in 0..100 {
+        if !pitwall_server::system::pid_alive(pid) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(!pitwall_server::system::pid_alive(pid), "the engine process ended");
+    assert_eq!(h.rpc("overview", json!({})).await.json()["server"]["serving"], "stopped");
+    let refused = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    assert_eq!(refused.status, 503, "{}", refused.body);
+
+    // Resuming (what opening Pitwall does) serves again, with the model loaded afresh.
+    assert_eq!(h.rpc("set_serving", json!({"paused": false})).await.status, 200);
+    assert_eq!(h.rpc("overview", json!({})).await.json()["server"]["serving"], "serving");
+    let again = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    assert_eq!(again.status, 200, "{}", again.body);
+    h.st.serving.release_all();
 }

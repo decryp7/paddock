@@ -203,6 +203,8 @@ struct Inner {
     gate: RwLock<Option<Arc<dyn CapabilityGate>>>,
     /// Where saved prompt prefixes live (`--slot-save-path`); set by `AppState`.
     slots_dir: RwLock<Option<std::path::PathBuf>>,
+    /// Serving was stopped because Pitwall was quit with "stop serving" (it is paused as well; opening Pitwall resumes).
+    stopped: std::sync::atomic::AtomicBool,
 }
 
 /// The serving core.
@@ -274,6 +276,7 @@ impl Serving {
                 presets: RwLock::new(Presets::default()),
                 gate: RwLock::new(None),
                 slots_dir: RwLock::new(None),
+                stopped: std::sync::atomic::AtomicBool::new(false),
             }),
         }
     }
@@ -296,10 +299,57 @@ impl Serving {
         self.inner.wake.notify_waiters();
     }
 
-    /// Pause or resume accepting work.
+    /// Pause or resume accepting work. Resuming also ends a "stopped" state.
     pub fn set_paused(&self, paused: bool) {
+        if !paused {
+            self.inner.stopped.store(false, Ordering::SeqCst);
+        }
         lock(&self.inner.sched).set_paused(paused);
         self.inner.wake.notify_waiters();
+    }
+
+    /// Whether serving was stopped by quitting Pitwall (models unloaded, engines ended, requests refused until Pitwall
+    /// is opened or serving is resumed).
+    pub fn stopped(&self) -> bool {
+        self.inner.stopped.load(Ordering::SeqCst)
+    }
+
+    /// Stops serving: pauses it, unloads every model and ends every engine process. Each engine is asked to end
+    /// (SIGTERM on Unix) and killed when it has not ended after `grace`; where there is no such signal (Windows) it is
+    /// killed at once. Returns how many models were unloaded.
+    pub async fn stop_all(&self, grace: Duration) -> usize {
+        self.inner.stopped.store(true, Ordering::SeqCst);
+        lock(&self.inner.sched).set_paused(true);
+        self.inner.wake.notify_waiters();
+        let models: Vec<Arc<HotModel>> = lock(&self.inner.hot).drain().map(|(_, h)| h).collect();
+        let pids: Vec<u32> = models
+            .iter()
+            .filter_map(|h| h.running.child.as_ref().and_then(tokio::process::Child::id))
+            .collect();
+        self.event(
+            EventKind::ServingChanged,
+            Severity::Info,
+            format!("Pitwall was quit with \"stop serving\": unloading {} model(s)", models.len()),
+        );
+        #[cfg(unix)]
+        {
+            for pid in &pids {
+                system::terminate(*pid, false);
+            }
+            let deadline = std::time::Instant::now() + grace;
+            while std::time::Instant::now() < deadline && pids.iter().any(|p| system::pid_alive(*p)) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            for pid in pids.iter().filter(|p| system::pid_alive(**p)) {
+                system::terminate(*pid, true);
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = (&pids, grace);
+        let n = models.len();
+        // Dropping the handles kills anything that is left (`kill_on_drop`).
+        drop(models);
+        n
     }
 
     /// Whether serving is paused.

@@ -33,6 +33,7 @@ pub const MAX_CHAT_BYTES: usize = 8 * 1024 * 1024;
 pub fn timeout_for(method: &str) -> Duration {
     Duration::from_secs(match method {
         "load_model" | "run_benchmark" => 600,
+        "stop_serving" => 30,
         "delete_model" | "install_build" | "remove_build" | "select_build" | "rollback_build" => 120,
         "search_models" | "repo_files" | "download_model" | "release_memory" | "unload_model" => 60,
         _ => 15,

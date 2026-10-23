@@ -207,12 +207,25 @@ describe('SettingsPage', () => {
     expect((await backend.settings()).network.offline).toBe(true);
   });
 
+  it('chooses what quitting does about serving and saves it', async () => {
+    const { fixture, el, backend } = await setup();
+    const group = el.querySelector('[aria-labelledby="lbl-quit"]')!;
+    const radios = Array.from(group.querySelectorAll<HTMLButtonElement>('[role=radio]'));
+    expect(radios.map((r) => r.textContent!.trim())).toEqual(['Keep serving in the background', 'Stop serving', 'Ask each time']);
+    expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+    radios[2]!.click();
+    await settle(fixture);
+    expect(radios[2]!.getAttribute('aria-checked')).toBe('true');
+    button(el, 'Save changes').click();
+    await settle(fixture);
+    expect((await backend.settings()).general.onQuit).toBe('ask');
+  });
+
   it('warns when keyless local access is on and shows LAN details once saved', async () => {
     const { fixture, el } = await setup();
     expect(el.querySelector('.note.warn')).toBeNull();
     switchOf(el, 'lbl-keyless').click();
     switchOf(el, 'lbl-login').click();
-    switchOf(el, 'lbl-keep').click();
     switchOf(el, 'lbl-ctx').click();
     switchOf(el, 'lbl-yield').click();
     switchOf(el, 'lbl-notify').click();

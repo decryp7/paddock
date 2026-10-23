@@ -4,11 +4,13 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod app_commands;
+pub mod app_menu;
 pub mod app_state;
 pub mod commands;
 pub mod credentials;
 pub mod live;
 pub mod native_feel;
+pub mod quit;
 pub mod server_client;
 pub mod service_install;
 pub mod service_repair;
@@ -68,8 +70,12 @@ fn tray_action(app: &AppHandle<Wry>, action: TrayAction) {
         TrayAction::Open => {
             shell::handle(app, Lifecycle::TrayOpen);
         }
-        // Quitting the app never stops the server: it is a service.
-        TrayAction::Quit => app.exit(0),
+        // What quitting does about serving follows the setting; the service itself stays registered either way.
+        TrayAction::Quit | TrayAction::QuitAndStop => {
+            let app = app.clone();
+            let forced = (action == TrayAction::QuitAndStop).then_some(quit::QuitChoice::StopServing);
+            tauri::async_runtime::spawn(async move { quit::request(&app, forced).await });
+        }
         TrayAction::ToggleServing | TrayAction::ReleaseMemory => {
             let client = app.state::<SharedClient>().inner().clone();
             let paused = app.state::<SharedModel>().lock().unwrap_or_else(|p| p.into_inner()).paused();
@@ -111,10 +117,12 @@ pub fn run() {
             Some(vec![window::HIDDEN_ARG]),
         ))
         .plugin(updater::plugin())
+        .on_menu_event(app_menu::on_event)
         .manage(client.clone())
         .manage(model.clone())
         .manage(Arc::new(commands::Streams::default()))
         .manage(tray::Drawn::default())
+        .manage(quit::PendingAsk::default())
         .manage(updater::Pending::default())
         .invoke_handler(tauri::generate_handler![
             commands::overview,
@@ -181,6 +189,8 @@ pub fn run() {
             commands::run_benchmark,
             commands::settings,
             commands::save_settings,
+            quit::quit_app,
+            quit::take_quit_ask,
             app_commands::app_update_status,
             app_commands::check_app_update,
             app_commands::install_app_update,
@@ -213,6 +223,20 @@ pub fn run() {
                         }
                     }
                 });
+            }
+            // Opening Pitwall after it was quit with "stop serving" resumes serving.
+            {
+                let client = app.state::<SharedClient>().inner().clone();
+                tauri::async_runtime::spawn(async move { quit::resume_if_stopped(client.as_ref()).await });
+            }
+            #[cfg(target_os = "macos")]
+            {
+                match app_menu::build(&handle) {
+                    Ok(menu) => {
+                        let _ = app.set_menu(menu);
+                    }
+                    Err(e) => eprintln!("Pitwall: the app menu could not be built ({e})"),
+                }
             }
             let view = model.lock().unwrap_or_else(|p| p.into_inner()).view();
             if let Err(e) = tray::create(&handle, &view, tray_action) {

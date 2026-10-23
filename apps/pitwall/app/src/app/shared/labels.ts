@@ -15,6 +15,7 @@ import type {
   PresetStatus,
   ReleaseReason,
   SelfTest,
+  ServingState,
   BuildCapability,
   Severity,
   UpdateKind,
@@ -83,6 +84,11 @@ export const CAPABILITY_ICON: Record<Capability, string> = {
  * The tone of a usage meter: neutral until it matters (calm by default), warning above 85 %, danger above 95 %.
  * Accent is never used for usage: it means action and selection.
  */
+/** The server's serving state in words (stopped: it was quit with "stop serving"). */
+export function servingLabel(s: ServingState): string {
+  return s === 'serving' ? 'Serving' : s === 'paused' ? 'Paused' : 'Stopped';
+}
+
 export function loadTone(percent: number): 'neutral' | 'warn' | 'bad' {
   return percent > 95 ? 'bad' : percent > 85 ? 'warn' : 'neutral';
 }

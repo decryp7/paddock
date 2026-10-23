@@ -349,6 +349,27 @@ export class TauriBackend implements PitwallBackend {
   openLoginItems(): Promise<void> {
     return this.run('open_login_items');
   }
+  quitApp(stopServing: boolean, remember: boolean): Promise<void> {
+    return this.run('quit_app', { stopServing, rememberChoice: remember });
+  }
+  takeQuitAsk(): Promise<boolean> {
+    return this.run('take_quit_ask');
+  }
+  onQuitAsk(handler: () => void): Unsubscribe {
+    let stopped = false;
+    let unlisten: (() => void) | null = null;
+    this.bridge.listen<null>('pitwall://quit-ask', () => handler()).then(
+      (u) => {
+        if (stopped) u();
+        else unlisten = u;
+      },
+      () => undefined,
+    );
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
+  }
   autostart(): Promise<boolean> {
     return this.run('get_autostart');
   }

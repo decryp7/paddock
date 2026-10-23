@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DOCUMENT, DestroyRef, OnInit, after
 import { MatIconModule } from '@angular/material/icon';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import type { CacheClearScope, CacheInfo, CacheKindInfo, CacheStorage, Preset, ThemeChoice } from '../../core/api.types';
+import type { CacheClearScope, CacheInfo, CacheKindInfo, CacheStorage, OnQuit, Preset, ThemeChoice } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
 import { Toasts } from '../../core/toasts';
@@ -81,6 +81,11 @@ export class SettingsPage implements OnInit {
     { value: 'system', label: 'System', icon: 'monitor' },
     { value: 'light', label: 'Light', icon: 'sun' },
     { value: 'dark', label: 'Dark', icon: 'moon' },
+  ];
+  protected readonly quitOptions: { value: OnQuit; label: string }[] = [
+    { value: 'keepServing', label: 'Keep serving in the background' },
+    { value: 'stopServing', label: 'Stop serving' },
+    { value: 'ask', label: 'Ask each time' },
   ];
   protected readonly d = computed(() => this.store.draft());
   protected readonly lan = computed(() => this.live.server()?.lan ?? null);

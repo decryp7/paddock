@@ -88,7 +88,7 @@ impl ErrorCode {
     }
 }
 
-/// Serving or paused.
+/// Serving, paused or stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ServingState {
@@ -96,6 +96,9 @@ pub enum ServingState {
     Serving,
     /// New requests are refused.
     Paused,
+    /// Pitwall was quit with "stop serving": no model is loaded and new requests are refused until Pitwall is opened
+    /// again or serving is resumed.
+    Stopped,
 }
 
 /// LAN exposure (`LanStatus`).

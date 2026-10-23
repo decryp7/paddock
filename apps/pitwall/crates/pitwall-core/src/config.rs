@@ -31,21 +31,34 @@ pub enum Theme {
     Light,
 }
 
+/// What quitting Pitwall does about serving (`onQuit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OnQuit {
+    /// The service keeps serving in the background.
+    #[default]
+    KeepServing,
+    /// Unload every model, end every engine process and pause serving until Pitwall is opened or serving is resumed.
+    StopServing,
+    /// Ask each time.
+    Ask,
+}
+
 /// General settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GeneralSettings {
     /// The UI theme.
     pub theme: Theme,
-    /// Keep the server running when the window and tray app close.
-    pub keep_serving_when_closed: bool,
+    /// What quitting Pitwall does about serving.
+    pub on_quit: OnQuit,
 }
 
 impl Default for GeneralSettings {
     fn default() -> Self {
         GeneralSettings {
             theme: Theme::System,
-            keep_serving_when_closed: true,
+            on_quit: OnQuit::KeepServing,
         }
     }
 }

@@ -41,7 +41,8 @@ export type Severity = 'info' | 'warn' | 'error';
 // ---------------------------------------------------------------------------------------------------------------
 // Server and memory
 
-export type ServingState = 'serving' | 'paused';
+/** `stopped`: Pitwall was quit with "stop serving"; nothing is loaded until Pitwall is opened again or serving is resumed. */
+export type ServingState = 'serving' | 'paused' | 'stopped';
 
 export interface ServerInfo {
   version: string;
@@ -833,9 +834,12 @@ export interface PrivacySettings {
   metricsRetentionDays: number;
 }
 
+/** What quitting Pitwall does about serving. */
+export type OnQuit = 'keepServing' | 'stopServing' | 'ask';
+
 export interface GeneralSettings {
   theme: ThemeChoice;
-  keepServingWhenClosed: boolean;
+  onQuit: OnQuit;
 }
 
 export interface Settings {

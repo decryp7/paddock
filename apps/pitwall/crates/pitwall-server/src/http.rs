@@ -769,7 +769,7 @@ async fn x_health(State(st): S, h: HeaderMap) -> Response {
         "name": "pitwall",
         "version": env!("CARGO_PKG_VERSION"),
         "apiVersion": pitwall_core::API_VERSION,
-        "serving": if st.serving.paused() { "paused" } else { "serving" },
+        "serving": if st.serving.stopped() { "stopped" } else if st.serving.paused() { "paused" } else { "serving" },
         "offline": cfg.network.offline,
         "loadedModels": st.serving.loaded().len(),
     }))

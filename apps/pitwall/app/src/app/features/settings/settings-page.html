@@ -45,8 +45,15 @@
             }
           </div>
           <div class="row">
-            <div class="lbl"><span class="name" id="lbl-keep">Keep serving when the window is closed</span><p class="hint">Apps keep working; Pitwall stays in the tray.</p></div>
-            <mat-slide-toggle hideIcon aria-labelledby="lbl-keep" [checked]="s.general.keepServingWhenClosed" (change)="store.edit('general', { keepServingWhenClosed: $event.checked })" />
+            <div class="lbl">
+              <span class="name" id="lbl-quit">When you quit Pitwall</span>
+              <p class="hint">Closing the window never stops serving; Pitwall stays in the tray. This is about Quit. The background service stays registered either way.</p>
+            </div>
+            <div class="seg" role="radiogroup" aria-labelledby="lbl-quit">
+              @for (o of quitOptions; track o.value) {
+                <button type="button" role="radio" [attr.aria-checked]="s.general.onQuit === o.value" (click)="store.edit('general', { onQuit: o.value })">{{ o.label }}</button>
+              }
+            </div>
           </div>
         </pw-panel>
 

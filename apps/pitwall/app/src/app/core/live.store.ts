@@ -35,7 +35,9 @@ export const LiveStore = signalStore(
     engineSetup: computed(() => overview()?.engineSetup ?? null),
     server: computed(() => overview()?.server ?? null),
     apps: computed(() => overview()?.apps ?? []),
-    paused: computed(() => overview()?.server.serving === 'paused'),
+    paused: computed(() => overview()?.server.serving !== 'serving' && overview() !== null),
+    /** Pitwall was quit with "stop serving" and has not been opened since. */
+    stopped: computed(() => overview()?.server.serving === 'stopped'),
     isBusy: computed(() => (key: string) => key in busy()),
   })),
   withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => {

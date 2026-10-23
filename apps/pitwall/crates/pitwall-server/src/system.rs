@@ -81,6 +81,19 @@ pub fn rss(pid: u32) -> u64 {
     s.process(p).map_or(0, sysinfo::Process::memory)
 }
 
+/// Asks a process to end (SIGTERM; `force`: kills it). Only ever used on engine processes this server started. Where the
+/// platform has no such signal the process is killed.
+pub fn terminate(pid: u32, force: bool) {
+    let mut s = sysinfo::System::new();
+    let p = sysinfo::Pid::from_u32(pid);
+    s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), false);
+    if let Some(proc_) = s.process(p) {
+        if force || proc_.kill_with(sysinfo::Signal::Term).is_none() {
+            proc_.kill();
+        }
+    }
+}
+
 /// Whether a process id is alive.
 pub fn pid_alive(pid: u32) -> bool {
     let mut s = sysinfo::System::new();

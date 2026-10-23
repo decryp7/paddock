@@ -374,6 +374,8 @@ pub fn runnable_server(_dir: &std::path::Path) -> String {
 pub struct ChildEngine {
     pub exe: String,
     pub die_after_ms: u64,
+    /// The process ids started, so a test can check they ended.
+    pub pids: Arc<std::sync::Mutex<Vec<u32>>>,
 }
 
 impl Engine for ChildEngine {
@@ -398,6 +400,9 @@ impl Engine for ChildEngine {
                 .kill_on_drop(true)
                 .spawn()
                 .map_err(|e| EngineError::Start(e.to_string()))?;
+            if let Some(pid) = child.id() {
+                self.pids.lock().unwrap().push(pid);
+            }
             let port = LoopbackPort::new(l.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
             let client = Client::new(port, None);
             for _ in 0..200 {

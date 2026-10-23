@@ -311,7 +311,7 @@ export function demoEngines(now: number): Engine[] {
 
 export function demoSettings(): Settings {
   return {
-    general: { theme: 'system', keepServingWhenClosed: true },
+    general: { theme: 'system', onQuit: 'keepServing' },
     server: { port: 11500, maxRequestBytes: 32 * MiB, requestTimeoutSecs: 600, maxConcurrent: 4, allowKeylessLocal: false },
     memory: {
       preset: 'balanced',

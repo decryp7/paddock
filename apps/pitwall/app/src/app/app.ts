@@ -3,6 +3,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { isTauri } from './core/backend';
+import { QuitPrompt } from './features/quit/quit-prompt';
 import { ServiceNotices } from './features/service/service-notices';
 import { ServiceConsentPrompt } from './features/service/service-consent';
 import { ServiceStore } from './features/service/service.store';
@@ -106,6 +107,9 @@ export class App {
       effect(() => {
         if (service.askConsent()) void prompt.ask();
       });
+      // "When you quit Pitwall: ask each time": the app asks this window to show the question.
+      const stopQuit = inject(QuitPrompt).watch();
+      inject(DestroyRef).onDestroy(stopQuit);
     }
     // The tray popover's "Open Pitwall" can ask the main window for a screen.
     const stop = inject(WINDOW_CONTROL).onNavigate((route) => void this.router.navigateByUrl(route));

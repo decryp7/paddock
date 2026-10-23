@@ -171,6 +171,12 @@ export interface PitwallBackend {
   declineService(): Promise<void>;
   /** macOS: opens System Settings > General > Login Items. Pitwall never switches the item itself. */
   openLoginItems(): Promise<void>;
+  /** Quits the app now, stopping serving first when asked; `remember` saves the choice as the "When you quit" setting. */
+  quitApp(stopServing: boolean, remember: boolean): Promise<void>;
+  /** A quit asked for while no window was open is waiting for the dialog: true once. */
+  takeQuitAsk(): Promise<boolean>;
+  /** The app asks the open window to show the "When you quit" dialog. */
+  onQuitAsk(handler: () => void): Unsubscribe;
   autostart(): Promise<boolean>;
   setAutostart(enabled: boolean): Promise<boolean>;
 }

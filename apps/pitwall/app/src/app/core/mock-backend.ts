@@ -1219,6 +1219,42 @@ export class MockBackend implements PitwallBackend {
     });
   }
 
+  /** Quits asked of the mock app: whether serving was stopped and the choice remembered. */
+  quits: { stopServing: boolean; remember: boolean }[] = [];
+  private quitAskPending = false;
+  private quitAskHandlers = new Set<() => void>();
+
+  quitApp(stopServing: boolean, remember: boolean): Promise<void> {
+    return this.reply('quitApp', () => {
+      this.quits.push({ stopServing, remember });
+      if (remember) this.settings_.general.onQuit = stopServing ? 'stopServing' : 'keepServing';
+      if (stopServing) {
+        this.loaded = [];
+        this.server.serving = 'stopped';
+        this.emit({ kind: 'server', server: clone(this.server) });
+      }
+    });
+  }
+
+  takeQuitAsk(): Promise<boolean> {
+    return this.reply('takeQuitAsk', () => {
+      const pending = this.quitAskPending;
+      this.quitAskPending = false;
+      return pending;
+    });
+  }
+
+  onQuitAsk(handler: () => void): Unsubscribe {
+    this.quitAskHandlers.add(handler);
+    return () => this.quitAskHandlers.delete(handler);
+  }
+
+  /** Demo and test hook: the user chose Quit while the setting is "ask" (`windowOpen`: the window is there to answer). */
+  askQuit(windowOpen = true): void {
+    if (windowOpen) this.quitAskHandlers.forEach((h) => h());
+    else this.quitAskPending = true;
+  }
+
   autostart(): Promise<boolean> {
     return this.reply('autostart', () => this.autostart_);
   }

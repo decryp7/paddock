@@ -20,7 +20,7 @@ describe('editSettings', () => {
     const s = demoSettings();
     expect(editSettings(s, 'memory', { maxHotModels: 2 }).memory.preset).toBe('custom');
     expect(editSettings(s, 'memory', { preset: 'performance' }).memory.preset).toBe('performance');
-    expect(editSettings(s, 'general', { keepServingWhenClosed: false }).memory.preset).toBe('balanced');
+    expect(editSettings(s, 'general', { onQuit: 'ask' }).memory.preset).toBe('balanced');
   });
 });
 
@@ -60,14 +60,14 @@ describe('SettingsStore', () => {
   it('tracks dirty state across edits and discard', async () => {
     const { store } = setup();
     await store.load();
-    store.edit('general', { keepServingWhenClosed: false });
+    store.edit('general', { onQuit: 'ask' });
     expect(store.dirty()).toBe(true);
-    expect(store.saved()?.general.keepServingWhenClosed).toBe(true);
+    expect(store.saved()?.general.onQuit).toBe('keepServing');
     store.discard();
     expect(store.dirty()).toBe(false);
-    expect(store.draft()?.general.keepServingWhenClosed).toBe(true);
-    store.edit('general', { keepServingWhenClosed: false });
-    store.edit('general', { keepServingWhenClosed: true });
+    expect(store.draft()?.general.onQuit).toBe('keepServing');
+    store.edit('general', { onQuit: 'ask' });
+    store.edit('general', { onQuit: 'keepServing' });
     expect(store.dirty()).toBe(false);
   });
 
@@ -117,7 +117,7 @@ describe('SettingsStore', () => {
   it('reports a failing save call', async () => {
     const { store } = setup(new MockBackend({ failing: ['saveSettings'] }));
     await store.load();
-    store.edit('general', { keepServingWhenClosed: false });
+    store.edit('general', { onQuit: 'ask' });
     expect(await store.save()).toBe(false);
     expect(store.saveError()?.code).toBe('serverUnavailable');
     store.discard();
@@ -127,11 +127,11 @@ describe('SettingsStore', () => {
   it('applies a preset: server memory values are shown and other unsaved edits stay', async () => {
     const { store, toasts } = setup();
     await store.load();
-    store.edit('general', { keepServingWhenClosed: false });
+    store.edit('general', { onQuit: 'ask' });
     await store.applyPreset('lowMemory');
     expect(store.draft()?.memory.preset).toBe('lowMemory');
     expect(store.draft()?.memory.maxHotModels).toBe(1);
-    expect(store.draft()?.general.keepServingWhenClosed).toBe(false);
+    expect(store.draft()?.general.onQuit).toBe('ask');
     expect(store.saved()?.memory.preset).toBe('lowMemory');
     expect(toasts.toasts().at(-1)?.message).toBe('Low memory preset applied.');
   });

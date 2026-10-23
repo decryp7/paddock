@@ -139,6 +139,13 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let limit: usize = arg(a, "limit")?;
             ok(lock(&st.events).recent(limit.min(500)))
         }
+        "stop_serving" => {
+            let n = st.serving.stop_all(std::time::Duration::from_secs(10)).await;
+            st.push(&LiveUpdate::Server {
+                server: overview(st).server,
+            });
+            ok(json!({ "unloaded": n }))
+        }
         "set_serving" => {
             let paused: bool = arg(a, "paused")?;
             st.serving.set_paused(paused);
@@ -743,7 +750,9 @@ fn overview(st: &Arc<AppState>) -> mgmt::Overview {
             pid: std::process::id(),
             port: if port == 0 { cfg.server.port } else { port },
             started_at: st.started_at,
-            serving: if st.serving.paused() {
+            serving: if st.serving.stopped() {
+                mgmt::ServingState::Stopped
+            } else if st.serving.paused() {
                 mgmt::ServingState::Paused
             } else {
                 mgmt::ServingState::Serving

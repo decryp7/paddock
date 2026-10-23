@@ -76,6 +76,8 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['engines', (b) => b.engines(), 'engines', undefined],
   ['packs', (b) => b.packs('code'), 'packs', { tag: 'code' }],
   ['packs without a tag', (b) => b.packs(), 'packs', { tag: null }],
+  ['quitApp', (b) => b.quitApp(true, false), 'quit_app', { stopServing: true, rememberChoice: false }],
+  ['takeQuitAsk', (b) => b.takeQuitAsk(), 'take_quit_ask', undefined],
   ['removeLeftover', (b) => b.removeLeftover('pack-llamafile'), 'remove_leftover', { id: 'pack-llamafile' }],
   ['retryEngineSetup', (b) => b.retryEngineSetup(), 'retry_engine_setup', undefined],
   ['installBuild', (b) => b.installBuild('cuda-13'), 'install_build', { buildId: 'cuda-13' }],
@@ -135,7 +137,7 @@ describe('TauriBackend', () => {
 
   it('covers every request/response method of the backend interface', () => {
     const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run');
-    const pinned = new Set([...TABLE.map((r) => r[0]), 'subscribe', 'chat']);
+    const pinned = new Set([...TABLE.map((r) => r[0]), 'subscribe', 'onQuitAsk', 'chat']);
     expect(methods.filter((m) => !pinned.has(m))).toEqual([]);
   });
 
@@ -158,6 +160,22 @@ describe('TauriBackend', () => {
     listeners[0]!(update);
     expect(got.length).toBe(1);
     expect(unlistened).toEqual([LIVE_EVENT]);
+  });
+
+  it('listens for the quit question and stops listening on unsubscribe', async () => {
+    const { bridge, listeners, unlistened } = fakeBridge();
+    let asked = 0;
+    const stop = new TauriBackend(bridge).onQuitAsk(() => asked++);
+    await Promise.resolve();
+    listeners[0]!(null);
+    expect(asked).toBe(1);
+    stop();
+    expect(unlistened).toEqual(['pitwall://quit-ask']);
+    const early = new TauriBackend(fakeBridge().bridge).onQuitAsk(() => undefined);
+    early();
+    const failing = new TauriBackend({ ...fakeBridge().bridge, listen: () => Promise.reject(new Error('no ipc')) }).onQuitAsk(() => undefined);
+    await Promise.resolve();
+    expect(() => failing()).not.toThrow();
   });
 
   it('unlistens at once when unsubscribed before listening resolved', async () => {

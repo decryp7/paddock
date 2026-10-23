@@ -13,8 +13,10 @@ pub enum TrayAction {
     ToggleServing,
     /// Unload every model that may be unloaded.
     ReleaseMemory,
-    /// Quit the app (the server keeps running).
+    /// Quit the app; what happens to serving follows the setting "When you quit Pitwall".
     Quit,
+    /// Quit the app and stop serving (models unloaded, engines ended, paused until Pitwall is opened again).
+    QuitAndStop,
 }
 
 impl TrayAction {
@@ -25,6 +27,7 @@ impl TrayAction {
             TrayAction::ToggleServing => "toggle_serving",
             TrayAction::ReleaseMemory => "release_memory",
             TrayAction::Quit => "quit",
+            TrayAction::QuitAndStop => "quit_and_stop",
         }
     }
 
@@ -35,6 +38,7 @@ impl TrayAction {
             TrayAction::ToggleServing,
             TrayAction::ReleaseMemory,
             TrayAction::Quit,
+            TrayAction::QuitAndStop,
         ]
         .into_iter()
         .find(|a| a.id() == id)
@@ -124,7 +128,7 @@ impl TrayModel {
     /// Starts from a full snapshot (after every (re)connect).
     pub fn seed(&mut self, o: &Overview) {
         self.connected = true;
-        self.paused = o.server.serving == ServingState::Paused;
+        self.paused = o.server.serving != ServingState::Serving;
         self.models = o.models.iter().map(|m| (m.name.clone(), m.ram_bytes + m.vram_bytes)).collect();
         self.running = o.queue.running.len();
         self.waiting = o.queue.waiting.len();
@@ -142,7 +146,7 @@ impl TrayModel {
                 self.waiting = queue.waiting.len();
             }
             LiveUpdate::Throughput { throughput } => self.gen_tps = throughput.gen_tps,
-            LiveUpdate::Server { server } => self.paused = server.serving == ServingState::Paused,
+            LiveUpdate::Server { server } => self.paused = server.serving != ServingState::Serving,
             LiveUpdate::Pairing { pairings } => self.pairings = pairings.len(),
             LiveUpdate::Memory { .. }
             | LiveUpdate::Event { .. }
@@ -246,7 +250,12 @@ impl TrayModel {
         entries.push(Entry::Separator);
         entries.push(Entry::Item {
             action: TrayAction::Quit,
-            label: "Quit Pitwall (the server keeps running)".into(),
+            label: "Quit Pitwall".into(),
+            enabled: true,
+        });
+        entries.push(Entry::Item {
+            action: TrayAction::QuitAndStop,
+            label: "Quit and stop serving".into(),
             enabled: true,
         });
         TrayView { state, tooltip, entries }

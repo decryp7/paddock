@@ -5,7 +5,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 import type { ThemeChoice } from '../core/api.types';
 import { LiveStore } from '../core/live.store';
 import { ThemeService } from '../core/theme';
-import { downloadActive, loadTone } from '../shared/labels';
+import { downloadActive, loadTone, servingLabel } from '../shared/labels';
 import { bytes, percent } from '../shared/format';
 
 interface NavItem {
@@ -45,7 +45,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       <mat-icon class="logo" svgIcon="pw:logo" aria-hidden="true" />
       <span class="product" data-tauri-drag-region>Pitwall</span>
       @if (live.server(); as s) {
-        <span class="state" [attr.data-state]="s.serving" [matTooltip]="(s.serving === 'paused' ? 'Paused' : 'Serving') + ' on port ' + s.port"><span class="dot" aria-hidden="true"></span>{{ s.serving === 'paused' ? 'Paused' : 'Serving' }}</span>
+        <span class="state" [attr.data-state]="s.serving" [matTooltip]="servingLabel(s.serving) + ' on port ' + s.port"><span class="dot" aria-hidden="true"></span>{{ servingLabel(s.serving) }}</span>
       } @else if (live.error()) {
         <span class="state" data-state="down"><span class="dot" aria-hidden="true"></span>Unreachable</span>
       } @else {
@@ -152,7 +152,8 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
       &[data-state='serving'] .dot {
         background: var(--ok);
       }
-      &[data-state='paused'] .dot {
+      &[data-state='paused'] .dot,
+      &[data-state='stopped'] .dot {
         background: var(--warn);
       }
       &[data-state='down'] .dot {
@@ -305,6 +306,7 @@ export class Sidebar {
   protected readonly pairings = computed(() => this.live.pairings().length);
   protected readonly downloading = computed(() => this.live.downloads().filter((d) => downloadActive(d.state)).length);
   protected readonly tone = loadTone;
+  protected readonly servingLabel = servingLabel;
   protected readonly ramPct = computed(() => {
     const m = this.live.memory();
     return m ? percent(m.ramTotal - m.ramAvailable, m.ramTotal) : 0;

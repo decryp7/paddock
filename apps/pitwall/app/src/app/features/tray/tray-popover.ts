@@ -3,7 +3,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { LiveStore } from '../../core/live.store';
 import { WINDOW_CONTROL } from '../../core/window-control';
 import { bytes, percent, rate } from '../../shared/format';
-import { loadTone, pressureLook } from '../../shared/labels';
+import { loadTone, pressureLook, servingLabel } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
 import { HotModels } from '../dashboard/hot-models';
 import { UpdatesStore } from '../updates/updates.store';
@@ -20,7 +20,7 @@ import { UpdatesStore } from '../updates/updates.store';
         <h1>Pitwall</h1>
         <div class="title">
           @if (live.server(); as s) {
-            <span class="state" [attr.data-state]="s.serving"><span class="dot" aria-hidden="true"></span>{{ s.serving === 'paused' ? 'Paused' : 'Serving' }} on :{{ s.port }}</span>
+            <span class="state" [attr.data-state]="s.serving"><span class="dot" aria-hidden="true"></span>{{ servingLabel(s.serving) }} on :{{ s.port }}</span>
           } @else if (live.error()) {
             <span class="state" data-state="down"><span class="dot" aria-hidden="true"></span>Server unreachable</span>
           } @else {
@@ -174,7 +174,8 @@ import { UpdatesStore } from '../updates/updates.store';
       &[data-state='serving'] .dot {
         background: var(--ok);
       }
-      &[data-state='paused'] .dot {
+      &[data-state='paused'] .dot,
+      &[data-state='stopped'] .dot {
         background: var(--warn);
       }
       &[data-state='down'] .dot {
@@ -260,6 +261,7 @@ export class TrayPopover {
   protected readonly live = inject(LiveStore);
   protected readonly updates = inject(UpdatesStore);
   private readonly windows = inject(WINDOW_CONTROL);
+  protected readonly servingLabel = servingLabel;
   protected readonly now = injectNow();
   protected readonly size = bytes;
 
