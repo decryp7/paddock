@@ -12,8 +12,20 @@ Rules for a crate here:
   `paddock-foo = { git = "https://dev.decryptology.net/decryp7/paddock", tag = "v0.2.0" }`.
 - One semver tag for the whole repo: a release tag versions the UI package and every crate together.
 
-Planned crates (named when extracted): `paddock-env`, `paddock-service`, `paddock-proc`, `paddock-window`, `paddock-notify`,
-`chromium-driver` and `paddock-cli`.
+Planned crates, with their designs in [`docs/adr/`](../docs/adr/README.md) (ADRs 0001 to 0006; nothing is built yet):
+
+| Crate(s) | Purpose | Three users today? |
+|---|---|---|
+| `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
+| `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
+| `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
+| `paddock-env` | per-OS data/config dirs, portable mode | yes |
+| `paddock-service` | background service install/control per OS | yes |
+| `paddock-proc` | child processes with timeouts, caps, kill-tree | yes |
+| `paddock-window` | native window feel, tray, single instance | yes |
+| `paddock-notify` | OS notifications | borderline (two to three) |
+| `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
+| `paddock-cli` | shared CLI conventions (`--json`, exit codes, timeouts) | yes |
 
 To add a crate: create `crates/<name>`, add it to `members` in `Cargo.toml`, and add its job to
 `.gitea/workflows/ci.yml` (the Rust jobs are stubbed there).
