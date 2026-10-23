@@ -110,7 +110,10 @@ const imgDef = (id, uri, w, h) => `<image id="${id}" href="${uri}" width="${w}" 
 const mockBody = (g, w, designW, designH) => `<g transform="scale(${w / designW})">${g}</g>`;
 
 // ---- screenshots -------------------------------------------------------------------------------------------------------
-const shotFile = (d, app, name, theme) => d.shots.layout === 'dir' ? join(appsRoot, app, 'docs/screenshots', theme, `${name}.png`) : join(appsRoot, app, 'docs/screenshots', `${name}-${theme}.png`);
+// layout 'dir': screenshots/<theme>/<name>.png; 'light-suffix': <name>.png is dark and <name>-light.png light (Debrief); otherwise <name>-<theme>.png.
+const shotFile = (d, app, name, theme) => d.shots.layout === 'dir' ? join(appsRoot, app, 'docs/screenshots', theme, `${name}.png`)
+  : d.shots.layout === 'light-suffix' ? join(appsRoot, app, 'docs/screenshots', theme === 'light' ? `${name}-light.png` : `${name}.png`)
+  : join(appsRoot, app, 'docs/screenshots', `${name}-${theme}.png`);
 /** Collect crop tasks for an app and return {key: {light,dark}} data URIs. */
 function shotsFor(d) {
   if (d.planned) return {};
