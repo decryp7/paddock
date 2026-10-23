@@ -1,6 +1,6 @@
 # 10. Notifications and service health
 
-- Status: Proposed
+- Status: Accepted (2026-10-24; user: per-dialog command lists, everything in 1.1; incident-summary becomes a modeless viewer; a saved layout that does not fit is fitted with one Undo notification; shared crates `paddock-dialogs` and `paddock-health`)
 - Date: 2026-10-24
 - Related: rule 19 (a control that repairs X never depends on X), rule 39, rule 40, ADR 0008 (jobs report through events)
 - First adopter: Debrief ADR 0055 (replaces its `StoreHealth`). Read it for the model, UI contract and migration.

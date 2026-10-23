@@ -1,6 +1,6 @@
 # 11. Layout by declared constraints
 
-- Status: Proposed
+- Status: Accepted (2026-10-24; user: per-dialog command lists, everything in 1.1; incident-summary becomes a modeless viewer; a saved layout that does not fit is fitted with one Undo notification; shared crates `paddock-dialogs` and `paddock-health`)
 - Date: 2026-10-24
 - Related: rule 18 (panes lay out by container queries; no horizontal scroll at any width >= 320 px), rule 39, rule 40
 - First adopter: Debrief ADR 0056 (replaces the placement heuristics in `dock-placement.ts`).
