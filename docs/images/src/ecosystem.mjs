@@ -14,7 +14,7 @@ const W = 1600, H = 1500;
 
 // Layout: Pacenotes, Debrief and Sighter form a triangle on top; Pitcrew, Dyno and Spotter below; Pitwall is the band between.
 const row1 = [
-  { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#831826', lines: ['Everything code-related:', 'index, review, diagrams,', 'requirements, tests.'] },
+  { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#831826', lines: ['Understands code in any', 'language: link graph, code', 'review, local search.'] },
   { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
   { id: 'sighter', name: 'Sighter', accent: '#00B8D9', lines: ['Finds any UI element by', 'sight. MCP server and', 'agent for any desktop.'] },
 ];
@@ -110,7 +110,7 @@ links.push(hand([[SX, R3 - 2], [SX, B1 + 2]], { later: true }) + pill(SX, B1 + 7
 // ---- Pitwall stubs: what each app uses the hub for ----
 const T = B1 + 4, Bt = HUB - 4, H2 = HUB + HUBH + 4, T3 = R3 - 4;
 const stubs = [
-  stub(cardX(0) + CW / 2, T, Bt, 'MCP, review, Q&amp;A', { both: true }),
+  stub(cardX(0) + CW / 2, T, Bt, 'Q&amp;A, embeddings', { both: true }),
   stub(720, T, Bt, 'Explain, research'),
   stub(1265, T, Bt, 'Vision, planner', { both: true }),
   stub(720, T3, H2, 'Diagnosis'),

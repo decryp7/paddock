@@ -2,7 +2,7 @@
 // Run: PADDOCK_APPS=<dir holding a "debrief" checkout> node docs/images/src/app-poster.mjs debrief --png
 // Copy and facts come from the Debrief README; crops are [x, y, width] in 1440x900 CSS pixels (height = width / 2.4).
 export default {
-  id: 'debrief', name: 'Debrief', icon: 'debrief', status: 'Version 1', platforms: 'Windows, macOS and Linux',
+  id: 'debrief', name: 'Debrief', icon: 'debrief', status: 'v1.0.0', platforms: 'Windows, macOS and Linux',
   accent: { dark: '#5B9BFF', light: '#1D5FD1', fill: '#2F6FE0' },
   headline: ['Make sense of', 'any log file.'],
   sub: ['An IDE for analysing logs and diagnostic files,', 'on your machine.'],
@@ -32,11 +32,11 @@ export default {
       { glyph: 'pulse', title: 'Analyse', text: 'Anomalies, patterns, exceptions and error outliers.' },
       { glyph: 'doc', title: 'Share', text: 'Incident reports and redacted copies.' },
     ],
-    family: 'Pitcrew opens its job logs in Debrief. Sighter run bundles and Pitwall explanations come after version 1.',
+    family: 'Pitcrew opens its job logs in Debrief. Sighter run bundles and Pitwall explanations are planned.',
   },
   worksWith: [
     { app: 'pitcrew', note: 'Job logs' },
     { app: 'sighter', note: 'Run bundles (planned)' },
-    { app: 'pitwall', note: 'Explanations (after v1)' },
+    { app: 'pitwall', note: 'Explanations (planned)' },
   ],
 };

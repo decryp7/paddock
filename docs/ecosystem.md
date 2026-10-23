@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=d3cc4ec0" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=3cc1d67c" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -10,14 +10,14 @@ only: no cloud, no account, no telemetry.
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=be994643) and [dark](images/paddock-ecosystem-dark.png?v=c21c05d9), integrations
-[light](images/paddock-integrations-light.png?v=d2d6cb92) and [dark](images/paddock-integrations-dark.png?v=45c0b7ae).
+hero [light](images/paddock-ecosystem-light.png?v=0f7cacd7) and [dark](images/paddock-ecosystem-dark.png?v=04eb684e), integrations
+[light](images/paddock-integrations-light.png?v=6c1eb46a) and [dark](images/paddock-integrations-dark.png?v=8b3853e3).
 
 Each app's marketing art (hero banner, feature showcase, how it works, 1280x640 social card) is generated from one data file per app
 in [`images/src/apps/`](images/src/apps/) by [`images/src/app-poster.mjs`](images/src/app-poster.mjs), into the app's own
 `docs/images/` (apps are expected as sibling checkouts, or set `PADDOCK_APPS`):
 `node docs/images/src/app-poster.mjs <app|all> --png`. Screenshots come from the app's `docs/screenshots`; planned apps use a
-concept mock. Debrief's data file is prepared but not generated until its release.
+concept mock. 
 
 Image links carry a version, `images/x.svg?v=<first 8 hex of the file's SHA-256>`, so a regenerated image shows immediately through
 Cloudflare and browser caches (the server caches for an hour and Cloudflare's cache key includes the query string). The generators
@@ -31,12 +31,12 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 | App | Status |
 |---|---|
 | Pitcrew | **v1.0.1 released** |
-| Debrief | Releasing today |
+| Debrief | **v1.0.0 released** |
 | Pitwall | **v1.0.2 released** (1.0.3 coming) |
 | Dyno | In development |
 | Spotter | Releasing soon |
 | Sighter | In design |
-| Pacenotes (everything code-related) | In design |
+| Pacenotes (understands code in any language) | In design |
 
 ## The apps
 
@@ -48,7 +48,7 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 - Rust engine with a DuckDB store: flat memory on large folders. Safe on hostile input; saved projects open without the original logs.
 - Built-in local AI as the offline fallback; can use Pitwall instead.
 
-Status: release in progress. Repo: <https://dev.decryptology.net/decryp7/debrief>
+Status: **v1.0.0 released**. Repo: <https://dev.decryptology.net/decryp7/debrief>
 
 ### Pitcrew
 **Purpose.** Keeps CI runners alive, updated and clean.
@@ -102,8 +102,9 @@ Status: releasing soon. Repo: <https://dev.decryptology.net/decryp7/spotter>
 Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/sighter>
 
 ### Pacenotes
-**Purpose.** Its own app for everything code-related: it understands a codebase and serves it, read-only, to people and AI tools.
+**Purpose.** Understands code in any language (v1 language packs: C, C++, C#, Java, TypeScript/JavaScript, Rust, Python, Go): a dependency graph of every link, code review with your own rules, local semantic search, and a read-only MCP server (also an MCP host) for people and AI tools.
 **For.** Developers and reviewers who want local models, Debrief and editors to answer questions about real code instead of guessing.
+- **Works with the family:** Pitwall (optional) for answers, explanations and embeddings; Spotter for "newer version available"; Debrief for stack trace to code.
 - **Core:** the code index, a headless service, the MCP server, the UI shell and a CLI.
 - **Plugins** (out of process, Rust only, each adding its own MCP tools, views declared and rendered by the core):
   language packs; **Understand** (symbols, references, repo map); **Review** (including Markdown review rules from
@@ -118,7 +119,7 @@ Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/pacenotes>
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=d5559b91" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; Sighter's MCP server is driven by Debrief, Pacenotes or any MCP host; apps hand off files and deep links directly" width="100%">
+  <img src="images/paddock-integrations.svg?v=5466837c" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; Sighter's MCP server is driven by Debrief, Pacenotes or any MCP host; apps hand off files and deep links directly" width="100%">
 </picture>
 
 The apps never depend on each other to do their own job. They meet in a few well-defined places:
@@ -137,8 +138,8 @@ The apps never depend on each other to do their own job. They meet in a few well
 | **Plugin platform** (planned) | Debrief, Pacenotes, later Dyno's tier-3 plugins | Debrief's plugin host, IPC and API (the ADR 0017 model) extracted into shared crates: out-of-process, Rust-only plugins. |
 | **`paddock-pitwall`** (planned) | shared crate in each app | One client for discovery, pairing, keychain keys, retries, priorities, cache headers and capability checks, so no app re-implements Pitwall access. |
 
-What each app uses Pitwall for (the dotted lines in the hero): Debrief, explain and research; Pacenotes, MCP tools, review and
-Q&A (a two-way link: it is an MCP server, Pitwall is the client); Sighter, vision; Spotter, "What's new" summaries; Dyno,
+What each app uses Pitwall for (the dotted lines in the hero): Debrief, explain and research; Pacenotes, answers, explanations and
+embeddings (a two-way link: it is an MCP server, Pitwall is the client); Sighter, vision; Spotter, "What's new" summaries; Dyno,
 diagnosis. Pitcrew does not need it.
 
 ## Data and privacy

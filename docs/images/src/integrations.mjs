@@ -33,7 +33,7 @@ d.node('eng', 824, 384, 272, 88, 'process', { name: 'llama.cpp', tech: 'child pr
 d.node('cred', 824, 536, 272, 88, 'process', { name: 'OS credential store', tech: 'Keychain, Credential Manager, Secret Service', desc: 'Holds the per-app keys.' });
 d.note('local', 496, 664, 600, 'Local only: the sole outbound traffic is the model and engine downloads you ask for.');
 
-d.node('code', 1232, 192, 248, null, 'process', { name: `${CODEBASE_TOOL}`, tech: 'MCP server, read-only', desc: 'Symbols, references, repo map, stack-trace explanation.', planned: true });
+d.node('code', 1232, 192, 248, null, 'process', { name: `${CODEBASE_TOOL}`, tech: 'MCP server, read-only', desc: 'Any language: dependency graph, review, local search. MCP server (read-only) and host.', planned: true });
 d.node('mcpc', 1232, 392, 248, 88, 'external', { name: 'Other MCP clients', tech: 'editors, scripts', desc: 'Same server, same tools.' });
 
 link(d, 'debrief', 'R', 'api', 'L', { label: 'HTTP and key' });
@@ -61,6 +61,7 @@ const rows = [
   [['code4', CODEBASE_TOOL], ['debrief6', 'Debrief'], 'Log line checks'],
   [['dyno4', 'Dyno'], ['pitcrew3', 'Pitcrew'], 'Machine health'],
   [['spotter3', 'Spotter'], ['sighter4', 'Sighter'], 'Smoke tests (later)'],
+  [['spotter4', 'Spotter'], ['code6', CODEBASE_TOOL], 'Newer version available'],
 ];
 rows.forEach(([[ia, na], [ib, nb], label], i) => {
   const x = 72 + (i % 2) * 800, y = 856 + Math.floor(i / 2) * 72;
