@@ -73,7 +73,7 @@ watcher). Decision: **Sighter**.
 
 Day-one value needs no training: OCR plus template matching cover many legacy lookups before a model exists.
 
-![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](images/sighter-overview.svg?v=3d5c7994)
+![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](images/sighter-overview.svg?v=e435b117)
 
 The containers behind it (planned):
 
@@ -503,7 +503,7 @@ User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go bac
 
 ### 7.11 Alongside FlaUI (hybrid tests)
 
-![Alongside FlaUI: UIA first, vision where UIA cannot see](images/diagrams/svg/uml-seq-hybrid.svg?v=6c8eef45)
+![Alongside FlaUI: UIA first, vision where UIA cannot see](images/diagrams/svg/uml-seq-hybrid.svg?v=3b425ad8)
 
 User decision 2026-10-23: engineers who code their tests with FlaUI can keep using FlaUI and use the Sighter API for the UI FlaUI cannot handle. This is a key selling point: Sighter is an **add-on, not a replacement**, for existing UIA/FlaUI suites. No suite has to be rewritten to adopt it.
 

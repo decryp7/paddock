@@ -139,7 +139,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <rect class="card" x="1080" y="352" width="214" height="344" rx="20"/>
 <circle class="gc" cx="1122" cy="398" r="24"/><g class="gl" transform="translate(1109 385) scale(1.0833333333333333)"><path d="M4 7l2 2 3-3M4 16l2 2 3-3M12 8h8M12 17h8"/></g>
 <text class="num" x="1162" y="390">05</text><text class="name" x="1162" y="418">Test</text>
-<rect class="lane" x="1094" y="448" width="186" height="110" rx="14"/><text class="lt" x="1108" y="476">Engineers’ tests</text><text class="body sm" x="1108" y="500">C#, Java, C++</text><text class="body sm" x="1108" y="520">alongside FlaUI/UIA</text><text class="body sm" x="1108" y="540">Sees what UIA misses</text>
+<rect class="lane" x="1094" y="448" width="186" height="110" rx="14"/><text class="lt" x="1108" y="476">Engineers’ tests</text><text class="body sm" x="1108" y="500">C#, Java, C++, Python</text><text class="body sm" x="1108" y="520">alongside FlaUI, Appium</text><text class="body sm" x="1108" y="540">and other frameworks</text>
 <rect class="lane" x="1094" y="570" width="186" height="110" rx="14"/><text class="lt" x="1108" y="598">Sighter’s own tests</text><text class="body sm" x="1108" y="622">Recorded flows,</text><text class="body sm" x="1108" y="642">sighter run in CI</text><text class="body sm" x="1108" y="662">One test, several apps</text>
 <path class="flow" d="M1298 398 L1326 398"/><polygon class="ah" points="1334,398 1323,392 1323,404"/>
 <rect class="card" x="1338" y="352" width="214" height="344" rx="20"/>

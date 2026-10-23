@@ -17,9 +17,9 @@ tested like any other. Everything runs on your machine.
 
 ## What it will do
 
-![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](docs/images/sighter-overview.svg?v=3d5c7994)
+![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](docs/images/sighter-overview.svg?v=e435b117)
 
-![Sighter features](docs/images/sighter-features.svg?v=5be41294)
+![Sighter features](docs/images/sighter-features.svg?v=bb5d2164)
 
 ![How Sighter works](docs/images/sighter-how-it-works.svg?v=751b1d5c)
 

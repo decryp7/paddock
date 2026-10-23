@@ -77,7 +77,7 @@ stages.forEach((s, i) => {
     const lh = (CHT - 112 - 12) / 2;
     const lane = (ly, title, ls) => `<rect class="lane" x="${x + 14}" y="${ly}" width="${CW - 28}" height="${lh}" rx="14"/>` +
       `<text class="lt" x="${x + 28}" y="${ly + 28}">${title}</text>` + ls.map((l, k) => `<text class="body sm" x="${x + 28}" y="${ly + 52 + k * 20}">${l}</text>`).join('');
-    o.push(lane(y + 96, 'Engineers’ tests', ['C#, Java, C++', 'alongside FlaUI/UIA', 'Sees what UIA misses']));
+    o.push(lane(y + 96, 'Engineers’ tests', ['C#, Java, C++, Python', 'alongside FlaUI, Appium', 'and other frameworks']));
     o.push(lane(y + 96 + lh + 12, 'Sighter’s own tests', ['Recorded flows,', 'sighter run in CI', 'One test, several apps']));
   }
   // flow arrow into the next card

@@ -116,5 +116,6 @@ seq('uml-seq-hybrid', {
     ['m', 'fl', 'ap', 'Bring app2 to the front; focus is verified'],
     ['m', 't', 'sc', '`FindFirstOrSight(...)` searches with app2’s model'],
     ['c'],
+    ['n', 'sc', 'The same pattern works with pywinauto, Appium and Robot Framework.', 520],
   ],
 });
