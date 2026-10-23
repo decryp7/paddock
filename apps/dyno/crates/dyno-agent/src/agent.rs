@@ -3,6 +3,8 @@
 //! from it. Locks are short and never held across a call into the OS, except process control (which must be serial).
 
 use crate::files;
+use crate::helper_centre::HelperCentre;
+use crate::helper_link::{ElevatedStartup, ElevatedTraffic, ElevatedTuning, HelperLink, IpcHelperLink};
 use crate::paths::Dirs;
 use crate::rollup::HistoryWriter;
 use crate::store::Store;
@@ -179,6 +181,8 @@ pub struct Ports {
     pub startup: Mutex<Box<dyn StartupItems>>,
     /// The few system settings tuning may change (observe-only until a click).
     pub tuning: Mutex<Box<dyn dyno_core::ports::TuningSystem>>,
+    /// The privileged helper's lifecycle: its state, and installing it on a click (WP-01, ADR 0016).
+    pub helper: Mutex<Box<dyn crate::helper_centre::HelperControl>>,
 }
 
 /// Shows a file in the file manager (injectable so tests do not open Finder).
@@ -305,6 +309,27 @@ impl Shared {
             );
         }
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        // One link to the helper (if it is installed) serves the tuning, startup and traffic wrappers and the lifecycle.
+        // Only the agent of the user's own data folder talks to the real helper or opens the real permission prompt; an agent
+        // started on another folder (every test) gets a link to nothing and a lifecycle that cannot install (the suite lesson
+        // about production names: names derive from the data folder).
+        let own_folder = dirs.root() == Dirs::current().root();
+        let link: Arc<dyn HelperLink> = if own_folder {
+            Arc::new(IpcHelperLink::system())
+        } else {
+            Arc::new(IpcHelperLink::new(
+                dirs.root().join("no-helper.sock").to_string_lossy().into_owned(),
+                dirs.root().join("no-helper.token"),
+            ))
+        };
+        let helper_centre = if own_folder {
+            HelperCentre::system(link.clone())
+        } else {
+            HelperCentre::unavailable(
+                link.clone(),
+                "Dyno was started on a folder of its own, so it does not install the helper.",
+            )
+        };
         let Platform {
             sensors,
             processes,
@@ -324,8 +349,9 @@ impl Shared {
                 details: Mutex::new(details),
                 facts: Mutex::new(facts),
                 activity: Mutex::new(activity),
-                startup: Mutex::new(startup),
-                tuning: Mutex::new(Box::new(dyno_platform::tuning::os_tuner())),
+                startup: Mutex::new(Box::new(ElevatedStartup::new(startup, link.clone()))),
+                tuning: Mutex::new(Box::new(ElevatedTuning::new(dyno_platform::tuning::os_tuner(), link.clone()))),
+                helper: Mutex::new(Box::new(helper_centre)),
             },
             subs: Mutex::new(Vec::new()),
             reveal,
@@ -334,7 +360,7 @@ impl Shared {
             network: crate::network::NetCentre::new(
                 Box::new(dyno_platform::network::OsSockets),
                 Arc::new(dyno_platform::network::OsReverseDns),
-                Box::new(dyno_platform::network::OsTraffic),
+                Box::new(ElevatedTraffic::new(dyno_platform::network::OsTraffic, link)),
             ),
             cores,
             stop: AtomicBool::new(false),
