@@ -230,6 +230,8 @@ for (const theme of ['dark', 'light'] as const) {
       // No toast, tooltip or hover state in a documentation shot.
       for (const close of await page.locator('pw-toast-host button[aria-label="Dismiss"]').all()) await close.click();
       await page.mouse.move(WIDTH - 2, 2);
+      // Focusing a control at a card's edge can scroll a table sideways, which slices its first column in the shot.
+      await page.evaluate(() => document.querySelectorAll('*').forEach((e) => e.scrollLeft > 0 && (e.scrollLeft = 0)));
       await page.waitForTimeout(600);
       if (s.element) {
         // The page scrolls inside <main>: make the window tall enough to show the whole element, then shoot it.

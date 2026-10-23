@@ -47,13 +47,13 @@ classes('uml-class-library', {
     ['rs', 0, 1, { name: 'RepoSource', stereotype: 'trait', attrs: [], ops: ['snapshot(RepoId) → RepoSnapshot'] }],
     ['up', 1, 1, { name: 'Updates', attrs: ['state: UpdateState', 'pace, timeout'], ops: ['check(source, Request) → Report', 'dismiss(id, snooze_days, now)', 'downloaded(repo, file)'] }],
     ['un', 2, 1, { name: 'UpdateNotice', attrs: ['id: <model>#<kind>', 'model_id, repo, file', 'kind: UpdateKind', 'size_bytes, quant, summary', 'installed_file, installed_quant', 'found_at, target_sha256'], ops: ['fingerprint() → String'], role: 'core' }],
-    ['en', 1, 2, { name: 'Engine', stereotype: 'trait', attrs: [], ops: ['kind() → EngineKind', 'availability() → Availability', 'start(&Launch) → Running'], role: 'core' }],
+    ['en', 0, 2, { name: 'Engine', stereotype: 'trait', attrs: [], ops: ['kind() → EngineKind', 'availability() → Availability', 'start(&Launch) → Running'], role: 'core' }],
     ['ep', 0, 3, { name: 'EnginePins', attrs: ['global: Option<BuildId>', 'models: Map<String, BuildId> (max 256)', 'history: Vec<BuildId> (max 8)'], ops: ['set_global, set_model(…, installed)', 'remember(BuildId)', 'pins::select(…) → Selection', 'pins::rollback_target(…) → BuildId'], role: 'core' }],
-    ['ll', 1, 3, { name: 'LlamaCpp', attrs: ['pins: EnginePins', 'matrix: Matrix', 'choice: BuildChoice'], ops: ['install(id, …) → BuildInfo', 'select_for(model) → Selection', 'check(model, needed) → Result', 'start(&Launch) → Running'] }],
-    ['rn', 2, 3, { name: 'Running', attrs: ['child: Option<Child>', 'client: loopback::Client', 'port: u16', 'props: llama::Props'] }],
-    ['mx', 1, 4, { name: 'Matrix', attrs: ['entries: Capability → Requirement', 'min_build, unsupported_backends'], ops: ['gate(needed, BuildFacts) → Gate'], role: 'core' }],
+    ['ll', 1, 2, { name: 'LlamaCpp', attrs: ['pins: EnginePins', 'matrix: Matrix', 'choice: BuildChoice'], ops: ['install(id, …) → BuildInfo', 'select_for(model) → Selection', 'check(model, needed) → Result', 'start(&Launch) → Running'] }],
+    ['rn', 2, 2, { name: 'Running', attrs: ['child: Option<Child>', 'client: loopback::Client', 'port: u16', 'props: llama::Props'] }],
+    ['mx', 2, 3, { name: 'Matrix', attrs: ['entries: Capability → Requirement', 'min_build, unsupported_backends'], ops: ['gate(needed, BuildFacts) → Gate'], role: 'core' }],
   ],
-  links: [['lb', 'L', 'lf', 'R', '0..*', comp], ['lb', 'R', 'pv', 'L', 'writes', { arrow: 'open' }], ['lb', 'B', 'up', 'T', 'installed()', { arrow: 'open' }], ['up', 'L', 'rs', 'R', 'asks', imp], ['up', 'R', 'un', 'L', 'raises', { arrow: 'open' }], ['ll', 'T', 'en', 'B', 'implements', imp], ['ll', 'L', 'ep', 'R', 'holds', comp], ['ll', 'R', 'rn', 'L', 'starts', { arrow: 'open' }], ['ll', 'B', 'mx', 'T', 'holds', comp]],
+  links: [['lb', 'L', 'lf', 'R', '0..*', comp], ['lb', 'R', 'pv', 'L', 'writes', { arrow: 'open' }], ['lb', 'B', 'up', 'T', 'installed()', { arrow: 'open' }], ['up', 'L', 'rs', 'R', 'asks', imp], ['up', 'R', 'un', 'L', 'raises', { arrow: 'open' }], ['ll', 'L', 'en', 'R', 'implements', imp], ['ll', 'B', 'ep', 'T', 'holds', { ...comp, lw: [372, 830, 'a'] }], ['ll', 'R', 'rn', 'L', 'starts', { arrow: 'open' }], ['ll', 'B', 'mx', 'T', 'holds', { ...comp, lw: [820, 830, 'a'] }]],
 });
 
 classes('uml-class-access', {
