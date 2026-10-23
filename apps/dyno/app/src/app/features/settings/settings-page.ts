@@ -10,11 +10,12 @@ import { Switch } from '../../shared/switch';
 import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
 import { TrayItemsEditor } from './tray-items-editor';
+import { HelperCard } from '../helper/helper-card';
 
 /** Settings: appearance, start-up, sampling and retention, the tray, alert thresholds, the observe-only posture, plugins and About. */
 @Component({
   selector: 'dy-settings-page',
-  imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor],
+  imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor, HelperCard],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page narrow">
@@ -35,7 +36,7 @@ import { TrayItemsEditor } from './tray-items-editor';
       <dy-async [loaded]="!!draft()" [error]="store.error()" what="settings" [rows]="4" (retry)="store.load()">
         @if (draft(); as d) {
           <div class="stack">
-            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads until you enable a rule or click an action; every change is logged and undoable where the OS allows. Admin changes use a small helper installed on first approval.</p>
+            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads until you enable a rule or click an action; every change is logged and undoable where the OS allows. The few changes that need administrator rights use a small helper that is installed only when you approve one.</p>
 
             <section class="card" aria-label="Appearance">
               <h2>Appearance</h2>
@@ -150,6 +151,8 @@ import { TrayItemsEditor } from './tray-items-editor';
           </div>
         }
       </dy-async>
+
+      <dy-helper-card />
 
       <section class="card" aria-label="Plugins">
         <h2>Plugins</h2>

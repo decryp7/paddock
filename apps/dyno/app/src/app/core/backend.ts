@@ -46,6 +46,7 @@ import type {
   BenchOverview,
   StartBenchmark,
   Timestamp,
+  HelperStatus,
   TuningSuggestion,
   WeeklyReport,
   ReportFormat,
@@ -112,6 +113,12 @@ export interface DynoBackend {
   applyTuning(id: string): Promise<ActivityEntry>;
   /** Puts the previous setting back; `force` overwrites a setting something else changed since Dyno applied it. */
   revertTuning(id: string, force?: boolean): Promise<ActivityEntry>;
+
+  // The privileged helper (ADR 0016). Installing happens only from the confirmation dialog.
+  helperStatus(): Promise<HelperStatus>;
+  /** Starts the install or update (the system's permission prompt opens); resolves at once with state `installing`. */
+  installHelper(): Promise<HelperStatus>;
+  uninstallHelper(): Promise<HelperStatus>;
   startupEntries(): Promise<StartupEntry[]>;
   setStartupState(id: string, state: StartupState): Promise<ActivityEntry>;
 

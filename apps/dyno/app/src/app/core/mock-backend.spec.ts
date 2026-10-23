@@ -553,13 +553,17 @@ describe('health, tuning, startup', () => {
     await expect(b.revertTuning(t.id)).rejects.toEqual({ code: 'badRequest', message: 'It is not applied.' });
     await expect(b.applyTuning('nope')).rejects.toMatchObject({ code: 'notFound' });
   });
-  it('tuning that needs administrator rights is refused, and a setting changed outside Dyno needs a forced revert', async () => {
+  it('tuning that needs administrator rights waits for the helper, and a setting changed outside Dyno needs a forced revert', async () => {
     const b = make();
     const list = await b.tuning();
     const admin = list.find((x) => x.needsAdmin && !x.applied)!;
-    expect(admin.blocked).toContain('administrator rights');
+    expect(admin.blocked).toBeNull();
     expect(list.find((x) => x.id === 'powerPlan')!.preview).toEqual(['Activate the power plan Balanced']);
-    await expect(b.applyTuning(admin.id)).rejects.toMatchObject({ code: 'accessDenied' });
+    await expect(b.applyTuning(admin.id)).rejects.toMatchObject({ code: 'accessDenied', message: expect.stringContaining('Settings > Helper') });
+    expect((await b.helperStatus()).state).toBe('notInstalled');
+    expect((await b.installHelper()).state).toBe('ready');
+    await expect(b.applyTuning(admin.id)).resolves.toMatchObject({ kind: 'tuning' });
+    expect((await b.uninstallHelper()).state).toBe('notInstalled');
     await b.applyTuning('powerPlan');
     b.changeTuningOutside('powerPlan');
     expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(true);
@@ -568,6 +572,16 @@ describe('health, tuning, startup', () => {
     expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(false);
     b.changeTuningOutside('powerPlan'); // not applied: nothing to flag
     expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(false);
+  });
+  it('a startup item for every user needs the helper; the installing state is a pending prompt', async () => {
+    const b = new MockBackend({ latencyMs: 5, now: () => NOW });
+    const all = (await b.startupEntries()).find((e) => e.needsAdmin)!;
+    await expect(b.setStartupState(all.id, 'disabled')).rejects.toMatchObject({ code: 'accessDenied' });
+    expect((await b.installHelper()).state).toBe('installing');
+    expect((await b.helperStatus()).state).toBe('installing');
+    await new Promise((r) => setTimeout(r, 1000));
+    expect((await b.helperStatus()).state).toBe('ready');
+    await expect(b.setStartupState(all.id, 'disabled')).resolves.toMatchObject({ kind: 'startup' });
   });
   it('startup entries change state with the right wording', async () => {
     const b = make();

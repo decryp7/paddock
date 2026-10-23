@@ -47,6 +47,7 @@ import type {
   BenchOverview,
   StartBenchmark,
   Timestamp,
+  HelperStatus,
   TuningSuggestion,
   WeeklyReport,
   ReportFormat,
@@ -308,6 +309,18 @@ export class TauriBackend implements DynoBackend {
 
   revertTuning(id: string, force = false): Promise<ActivityEntry> {
     return this.request({ revertTuning: { id, force } });
+  }
+
+  helperStatus(): Promise<HelperStatus> {
+    return this.request('helperStatus');
+  }
+
+  installHelper(): Promise<HelperStatus> {
+    return this.request('installHelper');
+  }
+
+  uninstallHelper(): Promise<HelperStatus> {
+    return this.request('uninstallHelper');
   }
 
   startupEntries(): Promise<StartupEntry[]> {

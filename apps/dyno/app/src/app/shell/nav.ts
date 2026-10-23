@@ -24,11 +24,10 @@ export const NAV: NavItem[] = [
   { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
   { path: '/tuning', label: 'Tuning', icon: 'sparkle', keywords: 'power plan sleep hibernation battery charge limit indexing visual effects background apps suggestions undo' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },
-  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences' },
+  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences helper administrator install uninstall' },
 ];
 
 /** What is on the roadmap but has no screen: listed in one dialog, never as a route or a page of its own. */
 export const COMING: { label: string; icon: IconName; text: string }[] = [
-  { label: 'Administrator tuning', icon: 'info', text: 'The helper that lets Dyno apply the tuning items that need administrator rights (Defender exclusions, hibernation, charge limit), always after a prompt and with an undo.' },
   { label: 'Issues', icon: 'info', text: 'Crashes, hangs and failing services from the OS logs, with a daily stability score.' },
 ];

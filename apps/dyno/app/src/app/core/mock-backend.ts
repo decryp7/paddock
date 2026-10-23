@@ -52,6 +52,7 @@ import type {
   StartBenchmark,
   SystemSample,
   Timestamp,
+  HelperStatus,
   TuningSuggestion,
   WeeklyReport,
   ReportFormat,
@@ -163,6 +164,7 @@ export class MockBackend implements DynoBackend {
   private alertLog: Alert[];
   private settingsValue: Settings = demoSettings();
   private tuningList: TuningSuggestion[] = demoTuning();
+  private helperValue: HelperStatus = mockHelper('notInstalled');
   private startup: StartupEntry[] = demoStartup();
   private categories: CleanupCategory[] = copy(CLEANUP_CATEGORIES);
   private quarantined: QuarantineEntry[];
@@ -854,12 +856,45 @@ export class MockBackend implements DynoBackend {
     if (!t) throw err('notFound', 'Unknown tuning suggestion.');
     if (t.applied === applied) throw err('badRequest', applied ? 'It is already applied.' : 'It is not applied.');
     if (applied && t.blocked) throw err('accessDenied', t.blocked);
+    if (applied && t.needsAdmin) this.needHelper();
     if (!applied && t.changedOutside && !force) {
       throw err('badRequest', 'Something else changed this setting since Dyno applied it. Revert anyway to put the earlier setting back.');
     }
     t.applied = applied;
     t.changedOutside = false;
     return this.log('tuning', applied ? t.title : `Reverted: ${t.title}`, applied ? t.preview.join('; ') : t.undoPreview.join('; '), applied ? 'available' : 'notUndoable');
+  }
+
+  // ------------------------------------------------------------------------------------ the privileged helper
+
+  helperStatus(): Promise<HelperStatus> {
+    return this.reply('helperStatus', () => this.helperValue);
+  }
+
+  /** Opens the (pretend) permission prompt; the helper is ready a moment later, as the real one is once the prompt is answered. */
+  installHelper(): Promise<HelperStatus> {
+    return this.reply('installHelper', () => {
+      if (this.latencyMs === 0) {
+        this.helperValue = mockHelper('ready');
+        return this.helperValue;
+      }
+      this.helperValue = mockHelper('installing');
+      setTimeout(() => (this.helperValue = mockHelper('ready')), 800);
+      return this.helperValue;
+    });
+  }
+
+  uninstallHelper(): Promise<HelperStatus> {
+    return this.reply('uninstallHelper', () => {
+      this.helperValue = mockHelper('notInstalled');
+      return this.helperValue;
+    });
+  }
+
+  private needHelper(): void {
+    if (this.helperValue.state !== 'ready') {
+      throw err('accessDenied', 'This change needs Dyno\'s helper, which is not installed. Install it under Settings > Helper (the system asks for your permission once); nothing else in Dyno needs it.');
+    }
   }
 
   startupEntries(): Promise<StartupEntry[]> {
@@ -870,6 +905,7 @@ export class MockBackend implements DynoBackend {
     return this.reply('setStartupState', () => {
       const e = this.startup.find((x) => x.id === id);
       if (!e) throw err('notFound', 'That startup entry was removed.');
+      if (e.needsAdmin) this.needHelper();
       e.state = state;
       const what = state === 'enabled' ? 'Enabled' : state === 'disabled' ? 'Disabled' : `Delayed by ${state.delayed} s:`;
       return this.log('startup', `${what} ${e.name} at sign-in`, 'Startup manager', 'available');
@@ -1251,6 +1287,26 @@ export class MockBackend implements DynoBackend {
       else setTimeout(run, delay);
     });
   }
+}
+
+/** The helper as the mock reports it (the real wording comes from the engine). */
+function mockHelper(state: HelperStatus['state']): HelperStatus {
+  const text: Record<HelperStatus['state'], string> = {
+    notInstalled: 'The helper is not installed. Dyno works without it; install it to apply the changes that need administrator rights.',
+    installing: "Waiting for you to answer the system's permission prompt.",
+    ready: 'The helper is installed and ready. It does nothing until you approve a change.',
+    outdated: 'The installed helper is older than this Dyno. Update the helper.',
+    unreachable: 'The helper is installed but did not answer. Install it again from Settings to repair it.',
+    unsupported: 'The helper cannot be installed on this computer.',
+  };
+  return {
+    state,
+    message: text[state],
+    version: state === 'ready' ? '0.1.0' : null,
+    prompt: 'The system asks you to confirm with your account password or a Windows permission prompt.',
+    recent: [],
+    error: null,
+  };
 }
 
 function err(code: CommandError['code'], message: string): CommandError {

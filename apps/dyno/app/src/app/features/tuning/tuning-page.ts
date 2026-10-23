@@ -5,6 +5,7 @@ import { AsyncState } from '../../shared/async-state';
 import { Dialogs } from '../../shared/dialog';
 import { Icon } from '../../shared/icon';
 import { TuningStore } from '../../state/tuning.store';
+import { HelperGate } from '../helper/helper-gate';
 import { TuningDialog, type TuningDialogData } from './tuning-dialog';
 import { actionFor, groupTuning, summary } from './tuning-model';
 
@@ -102,6 +103,7 @@ import { actionFor, groupTuning, summary } from './tuning-model';
 export class TuningPage implements OnInit {
   protected readonly store = inject(TuningStore);
   private readonly dialogs = inject(Dialogs);
+  private readonly gate = inject(HelperGate);
   protected readonly groups = computed(() => groupTuning(this.store.items()));
   protected readonly line = computed(() => (this.store.loaded() ? summary(this.store.items()) : 'Reversible suggestions. Dyno changes nothing until you review one and confirm.'));
   protected readonly action = actionFor;
@@ -115,10 +117,13 @@ export class TuningPage implements OnInit {
   }
 
   protected async review(t: TuningSuggestion): Promise<void> {
+    // A change that needs administrator rights first makes sure the helper is there (explains, then the system asks once).
+    if (t.needsAdmin && !(await this.gate.ensure())) return;
     if (await this.confirm({ suggestion: t, mode: 'apply', force: false })) await this.store.apply(t.id);
   }
 
   protected async revert(t: TuningSuggestion, force: boolean): Promise<void> {
+    if (t.needsAdmin && !(await this.gate.ensure())) return;
     if (await this.confirm({ suggestion: t, mode: 'revert', force })) await this.store.revert(t.id, force);
   }
 
