@@ -4,7 +4,7 @@ Spotter watches for new releases anywhere and tells you the moment one appears. 
 Linux) from the Paddock suite, and it is **local only**: no cloud, no account, no telemetry. Everything it learns stays
 in a local database on your machine.
 
-![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg)
+![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=10df0435)
 
 
 ![Spotter architecture: release places and a supervised Chromium outside; the engine schedules checks, fetches politely, renders JavaScript pages, decides and notifies; the app shows and controls it; a pure Rust core holds the rules](docs/diagrams/spotter-overview.svg)
@@ -12,9 +12,9 @@ in a local database on your machine.
 
 ## What it does
 
-![Spotter features](docs/images/spotter-features.svg)
+![Spotter features](docs/images/spotter-features.svg?v=8aac1722)
 
-![How Spotter works](docs/images/spotter-how-it-works.svg)
+![How Spotter works](docs/images/spotter-how-it-works.svg?v=24cda21a)
 
 ## What it watches
 
