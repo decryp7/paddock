@@ -195,6 +195,9 @@ More findings (2026-10-23, all apps)
 - Segmented (multi-connection) downloads give ~4× on per-connection-throttled CDNs (measured 1→4 connections: 11.0 s →
   2.7 s for 64 MiB at 8 MiB/s per connection) while keeping one in-order checksum and per-segment resume; only for large
   files on hosts with Range support, with per-host caps and 429 back-off.
+- Tests leak temp folders: 98k `debrief-*` folders (55 GB) piled up in $TMPDIR. Every test temp dir is a guard removed on
+  Drop (also on panic), and a check after the test run counts leftovers. Time Machine local snapshots keep deleted
+  space for about a day, so freed space shows up late.
 - Every lesson goes here first, then into the apps' suite-lessons copies when each app is next touched.
 
 ## Platforms (user, 2026-10-22: "same thing for all apps, support linux, mac and windows")
