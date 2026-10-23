@@ -51,7 +51,6 @@ functions. `npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities; 
 
 Left:
 - Done: the detail hero's upgrade line has a Copy command button when the release carries `upgradeCommand`.
-- Check scripts/check-index.mjs against dist/app/browser/index.html.
 
 - Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; done: the watches table shows the schedule text next to Next and `wizard-schedule-*.png` shows the cron mode.
 
