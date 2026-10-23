@@ -19,6 +19,10 @@ if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
 # installer can never be collected into this release (it once shipped as latest.json's Windows download).
 rm -rf "$dir/dist/bundle"
 
+# Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"; fi
+if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"; fi
+
 (
   cd app
   npm ci
