@@ -3,7 +3,7 @@
 use crate::action::Action;
 use crate::filter::VersionFilter;
 use crate::limits::{MAX_ACTIONS, MAX_NAME_CHARS};
-use crate::notify::{DigestMode, NotificationChannel, NotificationPolicy, MAX_CHANNELS};
+use crate::notify::{DigestMode, NotificationChannel, NotificationPolicy, SmtpSettings, MAX_CHANNELS};
 use crate::pattern::{NamePattern, PatternSyntax};
 use crate::release::ReleaseFilter;
 use crate::schedule::Schedule;
@@ -256,6 +256,9 @@ pub struct Settings {
     /// Use an OS webview for JavaScript pages when no Chromium browser is found.
     #[serde(default)]
     pub allow_os_webview: bool,
+    /// The mail server for e-mail channels (the password is in the credential store).
+    #[serde(default)]
+    pub smtp: Option<SmtpSettings>,
 }
 
 impl Default for Settings {
@@ -270,6 +273,7 @@ impl Default for Settings {
             digest: DigestMode::Off,
             quiet_hours: None,
             allow_os_webview: false,
+            smtp: None,
         }
     }
 }

@@ -102,3 +102,29 @@ describe('TauriBackend', () => {
     expect(platformFromUserAgent('curl')).toBe('browser');
   });
 });
+
+describe('TauriBackend: avatars and e-mail', () => {
+  it('maps the avatar and mail methods to their commands', async () => {
+    const calls: [string, Record<string, unknown> | undefined][] = [];
+    const backend = new TauriBackend(<T>(cmd: string, args?: Record<string, unknown>) => {
+      calls.push([cmd, args]);
+      return Promise.resolve(null as T);
+    });
+    await backend.watchAvatar('w1');
+    await backend.presetAvatar('rust');
+    await backend.kindAvatar('github');
+    await backend.mailStatus();
+    await backend.setMailPassword('secret');
+    await backend.setMailPassword(null);
+    await backend.sendTestEmail('me@example.test');
+    expect(calls).toEqual([
+      ['watch_avatar', { id: 'w1' }],
+      ['preset_avatar', { id: 'rust' }],
+      ['kind_avatar', { kind: 'github' }],
+      ['mail_status', undefined],
+      ['set_mail_password', { password: 'secret' }],
+      ['set_mail_password', { password: null }],
+      ['send_test_email', { to: 'me@example.test' }],
+    ]);
+  });
+});

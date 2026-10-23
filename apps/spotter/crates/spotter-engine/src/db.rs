@@ -102,9 +102,9 @@ fn move_aside(path: &Path) -> Option<PathBuf> {
 }
 
 impl Db {
-    /// Opens (creating or migrating) the database at `path`. Never fails: damage is worked around and reported in
-    /// the warnings.
-    pub fn open(path: &Path) -> (Db, Vec<String>) {
+    /// Opens (creating or migrating) the database at `path`. Damage is worked around and reported in the warnings; it
+    /// fails only when SQLite itself is unusable (not even a database in memory can be opened).
+    pub fn open(path: &Path) -> Result<(Db, Vec<String>)> {
         let mut warnings = Vec::new();
         let conn = match open_file(path) {
             Ok(c) => Some(c),
@@ -129,33 +129,38 @@ impl Db {
             }
         };
         match conn {
-            Some(conn) => (
+            Some(conn) => Ok((
                 Db {
                     conn: Mutex::new(conn),
                     path: Some(path.to_path_buf()),
                 },
                 warnings,
-            ),
+            )),
             None => {
                 warnings.push("History is kept in memory only for this run (the database folder is not writable).".into());
-                let (db, mut more) = (Db::in_memory(), Vec::new());
-                warnings.append(&mut more);
-                (db, warnings)
+                Ok((Db::in_memory()?, warnings))
             }
         }
     }
 
-    /// A database in memory (tests, and the fallback).
-    pub fn in_memory() -> Db {
-        let conn = Connection::open_in_memory().unwrap_or_else(|_| {
-            // Opening an in-memory database only fails when SQLite itself is unusable.
-            Connection::open_in_memory().unwrap_or_else(|e| panic_free_exit(&e))
-        });
-        let _ = migrate(&conn);
-        Db {
+    /// A database in memory (tests, and the fallback). Fails only when SQLite itself is unusable.
+    pub fn in_memory() -> Result<Db> {
+        Db::in_memory_from(Connection::open_in_memory())
+    }
+
+    /// [`Db::in_memory`] with the opening result injected, so the failure can be tested.
+    fn in_memory_from(opened: rusqlite::Result<Connection>) -> Result<Db> {
+        let conn = opened.map_err(sqlite_unusable)?;
+        migrate(&conn).map_err(|f| {
+            sqlite_unusable(match f {
+                OpenFailure::Newer(v) => format!("schema {v}"),
+                OpenFailure::Damaged(e) => e,
+            })
+        })?;
+        Ok(Db {
             conn: Mutex::new(conn),
             path: None,
-        }
+        })
     }
 
     /// Where the file is (`None` for a database in memory).
@@ -463,10 +468,10 @@ impl Db {
     }
 }
 
-/// SQLite is unusable (not just a bad file): there is nothing sensible left to do but stop this operation.
-fn panic_free_exit(e: &rusqlite::Error) -> Connection {
-    eprintln!("Spotter cannot use SQLite: {e}");
-    std::process::exit(70)
+fn sqlite_unusable(e: impl std::fmt::Display) -> EngineError {
+    EngineError::Internal(format!(
+        "Spotter cannot use its SQLite database engine ({e}). Reinstall Spotter; if it keeps happening, report it with the log."
+    ))
 }
 
 #[cfg(test)]
@@ -489,7 +494,7 @@ mod tests {
     #[test]
     fn states_round_trip_and_unreadable_rows_are_skipped() {
         let dir = tempfile::tempdir().unwrap();
-        let (db, w) = Db::open(&dir.path().join("s.db"));
+        let (db, w) = Db::open(&dir.path().join("s.db")).unwrap();
         assert!(w.is_empty());
         assert_eq!(db.schema_version().unwrap(), SCHEMA);
         let mut s = WatchState {
@@ -507,7 +512,7 @@ mod tests {
         assert_eq!(states[&id("a")].failures, 4);
         assert_eq!(warnings.len(), 2);
         drop(db);
-        let (again, _) = Db::open(&dir.path().join("s.db"));
+        let (again, _) = Db::open(&dir.path().join("s.db")).unwrap();
         assert_eq!(again.load_states().unwrap().0.len(), 1, "persisted on disk");
         assert!(again.path().is_some());
     }
@@ -521,7 +526,7 @@ mod tests {
             b"this is definitely not a sqlite database, just text that is long enough to be a header",
         )
         .unwrap();
-        let (db, warnings) = Db::open(&path);
+        let (db, warnings) = Db::open(&path).unwrap();
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains(".corrupt"));
         assert!(dir.path().join("s.db.corrupt").exists());
@@ -532,7 +537,7 @@ mod tests {
             b"another broken file that is not a database at all, again long enough to read",
         )
         .unwrap();
-        let (_, w2) = Db::open(&path);
+        let (_, w2) = Db::open(&path).unwrap();
         assert!(w2[0].contains("corrupt-2"), "a second damaged file gets its own name: {w2:?}");
     }
 
@@ -544,7 +549,7 @@ mod tests {
             let c = Connection::open(&path).unwrap();
             c.pragma_update(None, "user_version", SCHEMA + 5).unwrap();
         }
-        let (db, w) = Db::open(&path);
+        let (db, w) = Db::open(&path).unwrap();
         assert!(w[0].contains("newer Spotter"), "{w:?}");
         assert_eq!(db.schema_version().unwrap(), SCHEMA);
     }
@@ -557,7 +562,7 @@ mod tests {
             let c = Connection::open(&path).unwrap();
             c.execute_batch("CREATE TABLE unrelated (x INTEGER);").unwrap();
         }
-        let (db, w) = Db::open(&path);
+        let (db, w) = Db::open(&path).unwrap();
         assert!(w.is_empty());
         assert_eq!(db.schema_version().unwrap(), 1);
         db.kv_set("k", "v").unwrap();
@@ -567,7 +572,7 @@ mod tests {
             let c = Connection::open(&path2).unwrap();
             c.execute_batch("CREATE TABLE kv (a INTEGER);").unwrap();
         }
-        let (_, w2) = Db::open(&path2);
+        let (_, w2) = Db::open(&path2).unwrap();
         assert_eq!(w2.len(), 1);
         assert!(dir.path().join("t.db.corrupt").exists());
     }
@@ -575,7 +580,7 @@ mod tests {
     #[test]
     fn an_unwritable_place_falls_back_to_memory() {
         let dir = tempfile::tempdir().unwrap();
-        let (db, w) = Db::open(&dir.path().join("missing-folder").join("s.db"));
+        let (db, w) = Db::open(&dir.path().join("missing-folder").join("s.db")).unwrap();
         assert!(w.iter().any(|m| m.contains("memory")), "{w:?}");
         db.kv_set("a", "b").unwrap();
         assert_eq!(db.kv_get("a").unwrap().as_deref(), Some("b"));
@@ -584,7 +589,7 @@ mod tests {
 
     #[test]
     fn events_are_bounded_paged_and_newest_first() {
-        let db = Db::in_memory();
+        let db = Db::in_memory().unwrap();
         for i in 0..(MAX_EVENTS as i64 + 20) {
             db.record_event(&event(i, "a")).unwrap();
         }
@@ -609,7 +614,7 @@ mod tests {
 
     #[test]
     fn counts_downloads_and_the_journal() {
-        let db = Db::in_memory();
+        let db = Db::in_memory().unwrap();
         let t = Timestamp(5 * DAY_MS + 7);
         db.count_check(&id("a"), t, true).unwrap();
         db.count_check(&id("a"), t, true).unwrap();
@@ -633,7 +638,7 @@ mod tests {
 
     #[test]
     fn pruning_drops_old_history_and_removed_watches() {
-        let db = Db::in_memory();
+        let db = Db::in_memory().unwrap();
         let now = Timestamp(1000 * DAY_MS);
         db.record_event(&event(now.0 - 500 * DAY_MS, "a")).unwrap();
         db.record_event(&event(now.0, "a")).unwrap();
@@ -664,7 +669,7 @@ mod tests {
 
     #[test]
     fn deleting_a_watch_forgets_everything() {
-        let db = Db::in_memory();
+        let db = Db::in_memory().unwrap();
         let a = id("a");
         db.save_state(&a, &WatchState::default()).unwrap();
         db.record_event(&event(1, "a")).unwrap();
@@ -684,7 +689,7 @@ mod tests {
 
     #[test]
     fn validators_need_the_same_fingerprint() {
-        let db = Db::in_memory();
+        let db = Db::in_memory().unwrap();
         let v = Validators {
             etag: Some("\"e1\"".into()),
             last_modified: Some("Wed, 21 Oct 2026 07:28:00 GMT".into()),
@@ -702,7 +707,7 @@ mod tests {
 
     #[test]
     fn the_digest_queue_is_taken_once_in_order() {
-        let db = Db::in_memory();
+        let db = Db::in_memory().unwrap();
         db.queue_digest(&id("a"), Timestamp(1), "one").unwrap();
         db.queue_digest(&id("b"), Timestamp(2), "two").unwrap();
         assert_eq!(db.digest_len().unwrap(), 2);
@@ -712,7 +717,7 @@ mod tests {
 
     #[test]
     fn a_poisoned_lock_recovers() {
-        let db = std::sync::Arc::new(Db::in_memory());
+        let db = std::sync::Arc::new(Db::in_memory().unwrap());
         let d2 = db.clone();
         let _ = std::thread::spawn(move || {
             let _g = d2.conn();
@@ -730,10 +735,27 @@ mod tests {
     }
 
     #[test]
+    fn an_unusable_sqlite_is_an_error_not_an_exit() {
+        let e = Db::in_memory_from(Err(rusqlite::Error::InvalidQuery)).err().unwrap();
+        assert!(matches!(e, EngineError::Internal(_)), "{e:?}");
+        assert!(e.to_string().contains("Reinstall"), "{e}");
+        // A connection that cannot be migrated is just as unusable: a newer schema, or no schema table.
+        let newer = Connection::open_in_memory().unwrap();
+        newer.execute_batch(&format!("PRAGMA user_version = {}", SCHEMA + 1)).unwrap();
+        assert!(Db::in_memory_from(Ok(newer)).is_err());
+        // A table of the wrong shape in the way of a migration is damage too, and says so.
+        let clash = Connection::open_in_memory().unwrap();
+        clash.execute_batch("CREATE TABLE kv (wrong INTEGER)").unwrap();
+        let e = Db::in_memory_from(Ok(clash)).err().unwrap();
+        assert!(e.to_string().contains("SQLite"), "{e}");
+        assert!(Db::in_memory().is_ok());
+    }
+
+    #[test]
     fn a_database_that_opens_but_fails_its_integrity_check_is_moved_aside() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("s.db");
-        drop(Db::open(&path));
+        drop(Db::open(&path).unwrap());
         {
             let c = Connection::open(&path).unwrap();
             c.execute_batch(
@@ -741,7 +763,7 @@ mod tests {
             )
             .unwrap();
         }
-        let (db, warnings) = Db::open(&path);
+        let (db, warnings) = Db::open(&path).unwrap();
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains(".corrupt"), "{warnings:?}");
         assert!(dir.path().join("s.db.corrupt").exists());
@@ -797,7 +819,7 @@ mod tests {
 
     #[test]
     fn a_database_whose_tables_vanished_reports_errors_and_never_panics() {
-        let db = Db::in_memory();
+        let db = Db::in_memory().unwrap();
         assert_eq!(run_everything(&db), 0, "a healthy database has no failing operation");
         for t in TABLES {
             db.conn().execute_batch(&format!("DROP TABLE {t};")).unwrap();
@@ -810,7 +832,7 @@ mod tests {
 
     #[test]
     fn rows_of_the_wrong_type_are_errors_or_skipped_not_panics() {
-        let db = Db::in_memory();
+        let db = Db::in_memory().unwrap();
         {
             let c = db.conn();
             for t in TABLES {

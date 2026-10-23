@@ -147,7 +147,7 @@ impl Engine {
         })?;
         let loaded = config_store::load(&cfg.data_dir.join("spotter.toml"));
         let mut warnings = loaded.warnings;
-        let (db, db_warnings) = Db::open(&cfg.data_dir.join("spotter.db"));
+        let (db, db_warnings) = Db::open(&cfg.data_dir.join("spotter.db"))?;
         warnings.extend(db_warnings);
         let (mut states, state_warnings) = db.load_states()?;
         warnings.extend(state_warnings);
@@ -288,7 +288,11 @@ impl Engine {
             .collect();
         Ok(WatchDetail {
             summary: self.summary_of(&spec),
-            history: state.history.iter().map(ReleaseView::from).collect(),
+            history: state
+                .history
+                .iter()
+                .map(|k| ReleaseView::from(k).with_upgrade_command(&spec.source))
+                .collect(),
             checks: state.checks.iter().cloned().collect(),
             secrets_set,
             products: product_views(&spec, &state),
@@ -314,7 +318,10 @@ impl Engine {
             source_description: described,
             paused: spec.paused,
             checking,
-            latest: state.latest.as_ref().map(ReleaseView::from),
+            latest: state
+                .latest
+                .as_ref()
+                .map(|k| ReleaseView::from(k).with_upgrade_command(&spec.source)),
             acknowledged: state.acknowledged.as_ref().map(|v| v.text.clone()),
             installed: state.installed.as_ref().map(|v| v.text.clone()),
             unseen: state.has_unseen(),
@@ -783,8 +790,22 @@ impl Engine {
                 settings.downloads_folder = None;
             }
         }
+        if let Some(smtp) = &mut settings.smtp {
+            smtp.check().map_err(EngineError::BadRequest)?;
+            smtp.host = smtp.host.trim().to_string();
+            smtp.from = smtp.from.trim().to_string();
+        }
+        let had_mail = lock(&self.inner.doc).settings.smtp.is_some();
         lock(&self.inner.doc).settings = settings.clone();
         self.save_config()?;
+        if had_mail && settings.smtp.is_none() {
+            // Switching mail off forgets its password too; a store that refuses leaves nothing the app can read.
+            let _ = self
+                .inner
+                .svc
+                .secrets
+                .delete(crate::mail::PASSWORD_SCOPE, crate::mail::PASSWORD_KEY);
+        }
         self.emit(Change::Settings);
         Ok(settings)
     }
@@ -857,6 +878,7 @@ fn blank_spec() -> WatchSpec {
 
 /// The products of a watch as the detail page shows them.
 fn product_views(spec: &WatchSpec, state: &WatchState) -> Vec<ProductView> {
+    let release = |k: &spotter_core::state::KnownRelease| ReleaseView::from(k).with_upgrade_command(&spec.source);
     let settings = &spec.tracking.products;
     state
         .products
@@ -865,9 +887,9 @@ fn product_views(spec: &WatchSpec, state: &WatchState) -> Vec<ProductView> {
             id: id.clone(),
             name: settings.display_name(id).to_string(),
             muted: settings.is_muted(id),
-            latest: p.latest.as_ref().map(ReleaseView::from),
+            latest: p.latest.as_ref().map(release),
             unseen: p.has_unseen(),
-            history: p.history.iter().map(ReleaseView::from).collect(),
+            history: p.history.iter().map(release).collect(),
         })
         .collect()
 }

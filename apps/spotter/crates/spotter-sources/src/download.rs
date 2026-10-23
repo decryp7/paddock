@@ -137,6 +137,11 @@ async fn open_part(part: &Path, offset: u64) -> Result<tokio::fs::File, String> 
 }
 
 async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher) -> Result<u64, String> {
+    fetch_within(http, url, part, hasher, MAX_DOWNLOAD).await
+}
+
+/// [`fetch`] with another size limit (the real one is far too large to reach in a test).
+async fn fetch_within(http: &Http, url: &str, part: &Path, hasher: &mut Hasher, limit: u64) -> Result<u64, String> {
     let have = hash_existing(part, hasher).await?;
     let mut req = http.client().get(url);
     if have > 0 {
@@ -163,8 +168,8 @@ async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher) -> Resu
         s => return Err(format!("{url} answered HTTP {}.", s.as_u16())),
     }
     let total = response.content_length().map(|n| n + offset);
-    if total.is_some_and(|t| t > MAX_DOWNLOAD) {
-        return Err(format!("{url} is larger than {} GiB.", MAX_DOWNLOAD >> 30));
+    if total.is_some_and(|t| t > limit) {
+        return Err(too_large(url, limit));
     }
     let offset = resume_offset(offset, total);
     let mut file = open_part(part, offset).await?;
@@ -175,8 +180,8 @@ async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher) -> Resu
         .map_err(|e| format!("The download of {url} was interrupted ({e}); it resumes next time."))?
     {
         written += chunk.len() as u64;
-        if written > MAX_DOWNLOAD {
-            return Err(format!("{url} is larger than {} GiB.", MAX_DOWNLOAD >> 30));
+        if written > limit {
+            return Err(too_large(url, limit));
         }
         hasher.update(&chunk);
         file.write_all(&chunk)
@@ -185,6 +190,14 @@ async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher) -> Resu
     }
     file.flush().await.map_err(|e| e.to_string())?;
     Ok(written)
+}
+
+fn too_large(what: &str, limit: u64) -> String {
+    if limit >= 1 << 30 {
+        format!("{what} is larger than {} GiB.", limit >> 30)
+    } else {
+        format!("{what} is larger than {limit} bytes.")
+    }
 }
 
 async fn copy(source: &Path, part: &Path, hasher: &mut Hasher) -> Result<u64, String> {
@@ -196,7 +209,7 @@ async fn copy(source: &Path, part: &Path, hasher: &mut Hasher) -> Result<u64, St
     }
     let total = meta.len();
     if total > MAX_DOWNLOAD {
-        return Err(format!("{} is larger than {} GiB.", source.display(), MAX_DOWNLOAD >> 30));
+        return Err(too_large(&source.display().to_string(), MAX_DOWNLOAD));
     }
     let mut have = hash_existing(part, hasher).await?;
     if resume_offset(have, Some(total)) == 0 && have > 0 {
@@ -226,4 +239,41 @@ async fn copy(source: &Path, part: &Path, hasher: &mut Hasher) -> Result<u64, St
     }
     file.flush().await.map_err(|e| e.to_string())?;
     Ok(written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn size_limits_are_worded_in_the_unit_that_fits() {
+        assert_eq!(too_large("x", 64 << 30), "x is larger than 64 GiB.");
+        assert_eq!(too_large("x", 1000), "x is larger than 1000 bytes.");
+    }
+
+    /// A server that streams without announcing a length, so only the bytes actually read can show the file is too big.
+    #[tokio::test]
+    async fn a_stream_that_outgrows_the_limit_is_stopped() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/big.bin", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let Ok((mut s, _)) = listener.accept().await else { return };
+            let mut buf = [0u8; 2048];
+            let _ = tokio::io::AsyncReadExt::read(&mut s, &mut buf).await;
+            let _ = s.write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n").await;
+            for _ in 0..64 {
+                if s.write_all(&[7u8; 512]).await.is_err() {
+                    return;
+                }
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let http = Http::new("test").unwrap();
+        let mut hasher = Hasher::new();
+        let e = fetch_within(&http, &url, &dir.path().join("big.part"), &mut hasher, 4096)
+            .await
+            .unwrap_err();
+        assert!(e.contains("larger than 4096 bytes"), "{e}");
+    }
 }

@@ -519,14 +519,24 @@ async fn new_releases_notify_run_actions_and_deliver_channels() {
         seen.contains("POST /topic") && seen.to_lowercase().contains("click: https://x/1.1.0"),
         "{seen}"
     );
-    let failures = f
+    let failures: Vec<String> = f
         .engine
         .events(20, None)
         .unwrap()
         .into_iter()
         .filter(|e| e.kind == "action-failed")
-        .count();
-    assert_eq!(failures, 1, "the 500 is journalled");
+        .filter_map(|e| e.message)
+        .collect();
+    assert_eq!(
+        failures.len(),
+        2,
+        "the 500 and the e-mail channel without a mail server are journalled: {failures:?}"
+    );
+    assert!(failures.iter().any(|m| m.starts_with("Webhook channel:")), "{failures:?}");
+    assert!(
+        failures.iter().any(|m| m.starts_with("E-mail channel: Set up the mail server")),
+        "{failures:?}"
+    );
 }
 
 #[tokio::test]

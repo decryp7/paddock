@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use spotter_core::action::Action;
 use spotter_core::extract::{GroupSpan, Selection};
 use spotter_core::filter::VersionFilter;
-use spotter_core::notify::{DigestMode, NotificationChannel, NotificationPolicy, NotifyMode};
+use spotter_core::notify::{DigestMode, NotificationChannel, NotificationPolicy, NotifyMode, SmtpSettings};
 use spotter_core::pack::{Preset, SchemeDef};
 use spotter_core::release::LatestBy;
 use spotter_core::schedule::{Schedule, SchedulePreview};
@@ -17,6 +17,8 @@ use spotter_core::state::{CheckRecord, WatchStatus};
 use spotter_core::time::QuietHours;
 use spotter_core::tracking::{ProductSetting, ProductsSpec, Tracking};
 use spotter_core::watch::{Settings, Theme, WatchSpec};
+use spotter_engine::avatar::{AvatarSource, AvatarView};
+use spotter_engine::channels::MailStatus;
 use spotter_engine::error::EngineError;
 use spotter_engine::preview::PatternTest;
 use spotter_engine::view::{self, EventView, ReleaseView};
@@ -80,6 +82,8 @@ pub struct ReleaseDto {
     pub artifacts: Vec<ArtifactDto>,
     /// The same file name came back with new contents.
     pub updated_in_place: bool,
+    /// A command that installs or pulls this release (container tags, package versions); never run by Spotter.
+    pub upgrade_command: Option<String>,
 }
 
 /// `Artifact`: one file of a release.
@@ -135,6 +139,7 @@ impl From<&ReleaseView> for ReleaseDto {
             fields: r.fields.iter().cloned().collect(),
             artifacts: r.artifacts.iter().map(Into::into).collect(),
             updated_in_place: r.updated_in_place,
+            upgrade_command: r.upgrade_command.clone(),
         }
     }
 }
@@ -1188,6 +1193,9 @@ pub struct SettingsDto {
     pub quiet_hours: Option<QuietHours>,
     /// Use an OS webview when no Chromium is found.
     pub allow_os_webview: bool,
+    /// The mail server for e-mail channels; its password is set with `set_mail_password`.
+    #[serde(default)]
+    pub smtp: Option<SmtpSettings>,
 }
 
 impl From<&Settings> for SettingsDto {
@@ -1202,6 +1210,7 @@ impl From<&Settings> for SettingsDto {
             digest: s.digest,
             quiet_hours: s.quiet_hours,
             allow_os_webview: s.allow_os_webview,
+            smtp: s.smtp.clone(),
         }
     }
 }
@@ -1219,6 +1228,52 @@ impl SettingsDto {
             digest: self.digest,
             quiet_hours: self.quiet_hours,
             allow_os_webview: self.allow_os_webview,
+            smtp: self.smtp,
+        }
+    }
+}
+
+/// `Avatar`: a picture for a watch or a catalogue entry (`source` is `remote` or `bundled`). `null` (no avatar) means
+/// the UI draws its monogram.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarDto {
+    /// `remote` (from the watched site, cached) or `bundled` (Spotter's mark for the source kind).
+    pub source: &'static str,
+    /// The media type.
+    pub mime: &'static str,
+    /// The image as a `data:` address.
+    pub data_url: String,
+}
+
+impl From<&AvatarView> for AvatarDto {
+    fn from(a: &AvatarView) -> Self {
+        AvatarDto {
+            source: match a.source {
+                AvatarSource::Remote => "remote",
+                AvatarSource::Bundled => "bundled",
+            },
+            mime: a.mime,
+            data_url: a.data_url(),
+        }
+    }
+}
+
+/// `MailStatus`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailStatusDto {
+    /// A mail server is set up.
+    pub configured: bool,
+    /// The credential store holds a password.
+    pub password_set: bool,
+}
+
+impl From<MailStatus> for MailStatusDto {
+    fn from(s: MailStatus) -> Self {
+        MailStatusDto {
+            configured: s.configured,
+            password_set: s.password_set,
         }
     }
 }
@@ -1459,6 +1514,84 @@ mod tests {
         assert_eq!(j["digest"], "off");
         assert!(j.get("notificationsPausedUntilMs").is_some() && j.get("defaultIntervalSecs").is_some());
         assert_eq!(serde_json::from_value::<SettingsDto>(j).unwrap().into_settings(), s);
+    }
+
+    #[test]
+    fn mail_settings_travel_in_the_settings_and_default_to_none() {
+        let mut s = Settings::default();
+        let j = serde_json::to_value(SettingsDto::from(&s)).unwrap();
+        assert!(j["smtp"].is_null());
+        // A settings object from an older UI (no `smtp` key at all) still parses.
+        let mut without = j.clone();
+        without.as_object_mut().unwrap().remove("smtp");
+        assert_eq!(serde_json::from_value::<SettingsDto>(without).unwrap().into_settings().smtp, None);
+
+        s.smtp = Some(SmtpSettings {
+            host: "smtp.example.test".into(),
+            port: 587,
+            security: spotter_core::notify::SmtpSecurity::StartTls,
+            username: Some("spotter".into()),
+            from: "spotter@example.test".into(),
+        });
+        let j = serde_json::to_value(SettingsDto::from(&s)).unwrap();
+        assert_eq!(j["smtp"]["security"], "start-tls");
+        assert_eq!(j["smtp"]["host"], "smtp.example.test");
+        assert!(
+            !j.to_string().to_lowercase().contains("password"),
+            "the password is never part of the settings"
+        );
+        assert_eq!(serde_json::from_value::<SettingsDto>(j).unwrap().into_settings(), s);
+    }
+
+    #[test]
+    fn avatars_and_mail_status_have_their_wire_shape() {
+        let bundled = AvatarView::bundled("folder").unwrap();
+        let j = serde_json::to_value(AvatarDto::from(&bundled)).unwrap();
+        assert_eq!(j["source"], "bundled");
+        assert_eq!(j["mime"], "image/svg+xml");
+        assert!(j["dataUrl"].as_str().unwrap().starts_with("data:image/svg+xml;base64,"));
+        let remote = AvatarView {
+            source: AvatarSource::Remote,
+            mime: "image/png",
+            bytes: vec![1, 2, 3],
+        };
+        let j = serde_json::to_value(AvatarDto::from(&remote)).unwrap();
+        assert_eq!(
+            (j["source"].as_str(), j["dataUrl"].as_str()),
+            (Some("remote"), Some("data:image/png;base64,AQID"))
+        );
+        let status = serde_json::to_value(MailStatusDto::from(MailStatus {
+            configured: true,
+            password_set: false,
+        }))
+        .unwrap();
+        assert_eq!(status, json!({"configured": true, "passwordSet": false}));
+    }
+
+    #[test]
+    fn a_release_carries_its_upgrade_command() {
+        let mut v = ReleaseView {
+            version: "1.0.0".into(),
+            prerelease: false,
+            name: "n".into(),
+            location: "l".into(),
+            published_at_ms: None,
+            first_seen_ms: 0,
+            size: None,
+            sha256: None,
+            product: None,
+            channel: String::new(),
+            fields: Vec::new(),
+            artifacts: Vec::new(),
+            updated_in_place: false,
+            upgrade_command: Some("npm install x@1.0.0".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(ReleaseDto::from(&v)).unwrap()["upgradeCommand"],
+            "npm install x@1.0.0"
+        );
+        v.upgrade_command = None;
+        assert!(serde_json::to_value(ReleaseDto::from(&v)).unwrap()["upgradeCommand"].is_null());
     }
 
     #[test]

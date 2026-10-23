@@ -71,6 +71,8 @@ pub struct ReleaseView {
     pub artifacts: Vec<ArtifactView>,
     /// The same file name came back with new contents.
     pub updated_in_place: bool,
+    /// A command that installs or pulls this release, for container tags and package versions; Spotter never runs it.
+    pub upgrade_command: Option<String>,
 }
 
 impl From<&KnownRelease> for ReleaseView {
@@ -89,7 +91,16 @@ impl From<&KnownRelease> for ReleaseView {
             fields: k.release.detail.fields.iter().map(|(a, b)| (a.clone(), b.clone())).collect(),
             artifacts: k.release.detail.artifacts.iter().map(ArtifactView::from).collect(),
             updated_in_place: k.release.detail.updated_in_place,
+            upgrade_command: None,
         }
+    }
+}
+
+impl ReleaseView {
+    /// Adds the install command the watch's source offers for this version.
+    pub fn with_upgrade_command(mut self, source: &spotter_core::source::SourceConfig) -> ReleaseView {
+        self.upgrade_command = spotter_core::upgrade::upgrade_command(source, &self.version);
+        self
     }
 }
 
@@ -437,5 +448,42 @@ mod tests {
             |_| None,
         );
         assert_eq!((orphan.watch_id, orphan.watch_name), (None, None));
+    }
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+    use spotter_core::release::Release;
+    use spotter_core::source::SourceConfig;
+    use spotter_core::time::Timestamp;
+    use spotter_core::version::VersionScheme;
+
+    fn known(version: &str) -> KnownRelease {
+        KnownRelease {
+            release: Release {
+                version: VersionScheme::Semver.extract(version).unwrap(),
+                name: "pkg".into(),
+                location: "https://example.test/pkg".into(),
+                published_at: None,
+                size: None,
+                sha256: None,
+                detail: Default::default(),
+            },
+            first_seen: Timestamp(1),
+        }
+    }
+
+    #[test]
+    fn a_release_gets_the_command_its_source_offers() {
+        let plain = ReleaseView::from(&known("2.4.1"));
+        assert_eq!(plain.upgrade_command, None);
+        let package = SourceConfig::new("package", &[("registry", "npm"), ("package", "left-pad")]);
+        assert_eq!(
+            plain.clone().with_upgrade_command(&package).upgrade_command.as_deref(),
+            Some("npm install left-pad@2.4.1")
+        );
+        let folder = SourceConfig::new("folder", &[("path", "/srv")]);
+        assert_eq!(plain.with_upgrade_command(&folder).upgrade_command, None);
     }
 }

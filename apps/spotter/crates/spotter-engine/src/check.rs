@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use spotter_core::filter;
 use spotter_core::journal::{Event, EventKind};
 use spotter_core::limits::MAX_HISTORY;
-use spotter_core::notify::{digest_due, DigestMode};
+use spotter_core::notify::{digest_due, ChannelKind, DigestMode};
 use spotter_core::release::{select, Release};
 use spotter_core::source::folder::Snapshot;
 use spotter_core::source::SourceError;
@@ -406,7 +406,13 @@ impl Engine {
             return Ok(());
         }
         let watch = n.watch_id.as_deref().and_then(|w| WatchId::parse(w).ok());
-        for failure in notifier::deliver(&self.inner.fetcher, &n, allow_local).await {
+        let mail = n
+            .channels
+            .iter()
+            .any(|c| c.kind == ChannelKind::Email)
+            .then(|| self.mail_account())
+            .flatten();
+        for failure in notifier::deliver(&self.inner.fetcher, mail.as_ref(), &n, allow_local).await {
             self.record(
                 now,
                 watch.clone(),

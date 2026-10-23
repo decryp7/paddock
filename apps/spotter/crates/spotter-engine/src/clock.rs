@@ -169,6 +169,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_clock_that_does_not_know_its_zone_says_so() {
+        struct Fixed;
+        impl Clock for Fixed {
+            fn now(&self) -> Timestamp {
+                Timestamp(0)
+            }
+            fn utc_offset_minutes(&self) -> i32 {
+                0
+            }
+        }
+        assert_eq!(Fixed.local_zone_name(), None);
+        assert_eq!(Fixed.now(), Timestamp(0));
+        assert_eq!(Fixed.utc_offset_minutes(), 0);
+    }
+    #[test]
     fn the_manual_clock_moves_when_told() {
         let c = ManualClock::new(Timestamp(1000));
         c.advance_secs(2);

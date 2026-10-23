@@ -1,7 +1,7 @@
 //! Polite fetching: one request at a time per host (a minimum gap between requests), `ETag` / `Last-Modified`
 //! validators, a body cap, timeouts, a redirect cap with loop detection, and the SSRF guard on every hop. Failures
 //! are [`SourceError`]s so the core's backoff and statuses apply unchanged.
-use crate::guard;
+use crate::guard::{self, GuardedResolver};
 use reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION, WWW_AUTHENTICATE,
 };
@@ -12,7 +12,7 @@ use spotter_core::source::http::{parse_token, status_error, BearerChallenge};
 use spotter_core::source::{HttpRequest, SourceError};
 use spotter_sources::http::{read_bounded, transport};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
 use url::Url;
@@ -73,6 +73,8 @@ pub struct FetchOptions {
     pub conditional: Option<Validators>,
     /// Registry credentials (user, token) for a Bearer challenge.
     pub credentials: Option<(String, String)>,
+    /// A smaller body cap than the fetcher's (an avatar is a few KiB); never raises the cap.
+    pub max_body: Option<usize>,
 }
 
 /// The answer of a fetch.
@@ -93,7 +95,11 @@ pub enum Fetched {
 
 /// The shared HTTP client with its manners.
 pub struct PoliteFetcher {
+    /// For watches that are not local: its resolver refuses local addresses at connection time (DNS rebinding).
     client: reqwest::Client,
+    /// For watches marked local: the system resolver.
+    local_client: reqwest::Client,
+    resolver: GuardedResolver,
     cfg: FetchConfig,
     hosts: Mutex<HashMap<String, Instant>>,
 }
@@ -102,17 +108,31 @@ impl PoliteFetcher {
     /// Builds the client (system proxy and certificates, no automatic redirects: they are followed here so each hop is
     /// guarded).
     pub fn new(cfg: FetchConfig) -> Result<PoliteFetcher, String> {
-        let client = reqwest::Client::builder()
-            .user_agent(cfg.user_agent.clone())
-            .connect_timeout(cfg.connect_timeout)
-            .redirect(Policy::none())
-            .build()
-            .map_err(|e| format!("The HTTP client could not be created: {e}"))?;
+        PoliteFetcher::with_resolver(cfg, GuardedResolver::system())
+    }
+
+    /// [`PoliteFetcher::new`] with another resolver for the guarded client (tests).
+    pub fn with_resolver(cfg: FetchConfig, resolver: GuardedResolver) -> Result<PoliteFetcher, String> {
+        let build = |guarded: bool| {
+            let b = reqwest::Client::builder()
+                .user_agent(cfg.user_agent.clone())
+                .connect_timeout(cfg.connect_timeout)
+                .redirect(Policy::none());
+            let b = if guarded { b.dns_resolver(Arc::new(resolver.clone())) } else { b };
+            b.build().map_err(|e| format!("The HTTP client could not be created: {e}"))
+        };
         Ok(PoliteFetcher {
-            client,
+            client: build(true)?,
+            local_client: build(false)?,
+            resolver,
             cfg,
             hosts: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Checks that `url` may be requested, resolving names the way the client connects.
+    pub async fn check_url(&self, url: &Url, allow_local: bool) -> Result<(), SourceError> {
+        guard::check_url_via(&self.resolver, url, allow_local).await
     }
 
     /// The settings in use.
@@ -120,9 +140,14 @@ impl PoliteFetcher {
         &self.cfg
     }
 
-    /// The underlying client (for POSTs to notification channels).
-    pub fn client(&self) -> &reqwest::Client {
-        &self.client
+    /// The client for a watch: the guarded one, or the plain one when the watch is marked local (also used for the
+    /// POSTs to notification channels).
+    pub fn client_for(&self, allow_local: bool) -> &reqwest::Client {
+        if allow_local {
+            &self.local_client
+        } else {
+            &self.client
+        }
     }
 
     /// Waits for this host's turn: requests to one host are at least `min_host_interval` apart, also when many are
@@ -149,16 +174,16 @@ impl PoliteFetcher {
         let mut visited = vec![url.to_string()];
         let mut challenged = false;
         for _ in 0..=self.cfg.max_redirects {
-            guard::check_url(&url, opts.allow_local).await?;
+            self.check_url(&url, opts.allow_local).await?;
             self.wait_turn(url.host_str().unwrap_or("")).await;
             let response = self
-                .client
+                .client_for(opts.allow_local)
                 .get(url.clone())
                 .headers(headers.clone())
                 .timeout(self.cfg.request_timeout)
                 .send()
                 .await
-                .map_err(|e| transport(e, &shown))?;
+                .map_err(|e| request_failure(e, &shown))?;
             let status = response.status();
             if status == StatusCode::NOT_MODIFIED && opts.conditional.is_some() {
                 return Ok(Fetched::NotModified);
@@ -206,7 +231,8 @@ impl PoliteFetcher {
                 last_modified: header_text(response.headers(), &LAST_MODIFIED),
             };
             let final_url = url.to_string();
-            let bytes = read_bounded(response, self.cfg.max_body, &shown).await?;
+            let cap = opts.max_body.map_or(self.cfg.max_body, |m| m.min(self.cfg.max_body));
+            let bytes = read_bounded(response, cap, &shown).await?;
             return Ok(Fetched::Body {
                 bytes,
                 final_url,
@@ -219,19 +245,29 @@ impl PoliteFetcher {
     async fn token(&self, c: &BearerChallenge, opts: &FetchOptions) -> Result<String, SourceError> {
         let url =
             Url::parse(&c.token_url()).map_err(|_| SourceError::InvalidResponse("The registry's token address is not valid.".into()))?;
-        guard::check_url(&url, opts.allow_local).await?;
+        self.check_url(&url, opts.allow_local).await?;
         self.wait_turn(url.host_str().unwrap_or("")).await;
-        let mut req = self.client.get(url).timeout(self.cfg.request_timeout);
+        let mut req = self.client_for(opts.allow_local).get(url).timeout(self.cfg.request_timeout);
         if let Some((user, token)) = &opts.credentials {
             req = req.basic_auth(user, Some(token));
         }
-        let response = req.send().await.map_err(|e| transport(e, &c.realm))?;
+        let response = req.send().await.map_err(|e| request_failure(e, &c.realm))?;
         if let Some(e) = status_error(response.status().as_u16(), &c.realm) {
             return Err(e);
         }
         let body = read_bounded(response, 64 << 10, &c.realm).await?;
         parse_token(&body).ok_or_else(|| SourceError::InvalidResponse("The registry's token answer could not be read.".into()))
     }
+}
+
+/// A failed request as a source error; a name the guard refused at connection time is a configuration problem.
+pub(crate) fn request_failure(e: reqwest::Error, shown: &str) -> SourceError {
+    if guard::refused_as_local(&e) {
+        return SourceError::InvalidConfig(format!(
+            "{shown} points at this computer or its local link, which Spotter only reads when the watch is marked as a local service."
+        ));
+    }
+    transport(e, shown)
 }
 
 fn header_text(h: &HeaderMap, name: &HeaderName) -> Option<String> {

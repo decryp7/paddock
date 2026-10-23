@@ -377,3 +377,31 @@ describe('mock data helpers', () => {
     });
   });
 });
+
+describe('MockBackend: avatars and e-mail', () => {
+  it('has a bundled-style avatar for watches, presets and kinds, and errors for unknown presets', async () => {
+    const b = make();
+    const first = (await b.listWatches())[0]!;
+    const a = await b.watchAvatar(first.id);
+    expect(a?.source).toBe('bundled');
+    expect(a?.dataUrl.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    expect((await b.kindAvatar('github'))?.mime).toBe('image/svg+xml');
+    expect(await b.kindAvatar('')).toBeNull();
+    expect((await b.presetAvatar(PRESETS[0]!.id))?.source).toBe('bundled');
+    expect((await rejection(b.presetAvatar('no-such-preset'))).code).toBe('notFound');
+  });
+
+  it('keeps the mail password out of the settings and checks the test address', async () => {
+    const b = make();
+    expect(await b.mailStatus()).toEqual({ configured: false, passwordSet: false });
+    expect((await rejection(b.sendTestEmail('me@example.test'))).code).toBe('badRequest');
+    expect((await rejection(b.sendTestEmail('nobody'))).code).toBe('badRequest');
+    expect(await b.setMailPassword('secret')).toEqual({ configured: false, passwordSet: true });
+    const settings = await b.getSettings();
+    await b.saveSettings({ ...settings, smtp: { host: 'smtp.example.test', port: 587, security: 'start-tls', username: 'u', from: 'spotter@example.test' } });
+    expect(await b.mailStatus()).toEqual({ configured: true, passwordSet: true });
+    await expect(b.sendTestEmail('me@example.test')).resolves.toBeUndefined();
+    expect(JSON.stringify(await b.getSettings())).not.toContain('secret');
+    expect(await b.setMailPassword(null)).toEqual({ configured: true, passwordSet: false });
+  });
+});
