@@ -20,7 +20,7 @@ jobs:
     name: ui (tokens, contrast, components, gallery)
     runs-on: ubuntu-latest
     container:
-      image: catthehacker/ubuntu:act-latest
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     defaults:
       run:
         working-directory: ui
@@ -58,7 +58,7 @@ jobs:
       contents: write
       packages: write
     container:
-      image: catthehacker/ubuntu:act-latest
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     defaults:
       run:
         working-directory: ui
