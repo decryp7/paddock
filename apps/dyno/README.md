@@ -12,7 +12,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=1082b5ab)
 
 
 > **Status: v0.1.0, unreleased.** The agent (sampling, history, process actions with undo, rules engine, diagnosis,
@@ -48,9 +48,9 @@ Task managers show numbers; cleaners and "boosters" change things behind your ba
 
 ## Key features
 
-![Dyno features](docs/images/dyno-features.svg)
+![Dyno features](docs/images/dyno-features.svg?v=e6189128)
 
-![How Dyno works](docs/images/dyno-how-it-works.svg)
+![How Dyno works](docs/images/dyno-how-it-works.svg?v=21435d87)
 
 Every feature, with its state, is in [docs/features.md](docs/features.md). Built today:
 
