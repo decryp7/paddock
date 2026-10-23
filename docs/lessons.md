@@ -226,3 +226,13 @@ Source: [docs/research/2026-10-angular-and-signalstore.md](research/2026-10-angu
 - `@defer` and lazy routes are the levers for webview start-up; measure the initial chunk before tightening budgets (Debrief uses one `@defer` in 918 files).
 - `@Service`, `injectAsync` and the NgRx events plugin are new or experimental; do not adopt until documented stable.
 - Angular's value is the first-party set (router, forms, DI, HTTP, i18n, CDK/Material, testing, CLI, `ng update`); reaching it elsewhere means 5-8 third-party packages with separate release trains. Performance is bound by the Rust engine and virtualised views, not DOM framework throughput.
+
+## Recurring bugs (Debrief 1.0.x, 2026-10-24)
+- One test round of Debrief 1.0.1/1.1 found the same bug kinds over and over: blank dialog windows (missing providers), a
+  dialog denied the command it needed, dialogs too tall/short/tiny, missing Close buttons, three notifications for one
+  store failure, and each layout fix squeezing the next pane (grid → Home → AI pane at 180 px → one-letter titles).
+  Every instance was fixed on its own and the next one appeared, because each of the 51 dialogs and each pane was
+  configured by hand with no shared contract. The fix is a design rule, not more patches: a dialog kind + declared
+  contract per dialog in one checked registry, one notification and service-health model, and layout by declared
+  min/preferred sizes and priorities. Rule 40: when a bug kind recurs, propose the redesign (ADR) that makes the class
+  impossible or checked, then fix the instances through it.
