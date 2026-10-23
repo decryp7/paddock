@@ -13,7 +13,7 @@ const W = 1600, H = 1500;
 
 // Layout: Pacenotes, Debrief and Sighter form a triangle on top; Pitcrew, Dyno and Spotter below; Pitwall is the band between.
 const row1 = [
-  { id: 'codebase', name: CODEBASE_TOOL, tag: 'In design', placeholder: true, lines: ['Everything code-related:', 'index, review, diagrams,', 'requirements, tests.'] },
+  { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#831826', tag: 'In design', lines: ['Everything code-related:', 'index, review, diagrams,', 'requirements, tests.'] },
   { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
   { id: 'sighter', name: 'Sighter', accent: '#00B8D9', tag: 'In design', lines: ['Finds any UI element by', 'sight, for UI tests.'] },
 ];
@@ -32,11 +32,6 @@ function icon(id, x, y, size) {
   const raw = readFileSync(join(here, 'icons', `${id}.svg`), 'utf8');
   const inner = raw.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '').replace(/<title>[^<]*<\/title>/, '');
   return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="60 60 904 904" overflow="visible">${inner}</svg>`;
-}
-// Neutral placeholder tile (dashed, monogram) until the tool has its own icon.
-function placeholder(name, x, y, size) {
-  return `<rect class="ph" x="${x + 1}" y="${y + 1}" width="${size - 2}" height="${size - 2}" rx="${size * 0.225}"/>` +
-    `<text class="mono" x="${x + size / 2}" y="${y + size / 2 + 12}" text-anchor="middle">${name[0]}</text>`;
 }
 // Label pill centred at (x, y); long labels wrap onto two lines. Returns SVG.
 function pill(x, y, text) {
@@ -78,7 +73,7 @@ function stub(x, y0, y1, label, { both = false } = {}) {
 
 function card(a, i, y) {
   const x = cardX(i);
-  const ico = a.placeholder ? placeholder(a.name, x + 22, y + 24, 64) : icon(a.id, x + 22, y + 24, 64);
+  const ico = icon(a.id, x + 22, y + 24, 64);
   const bar = `<rect x="${x + 104}" y="${y + 28}" width="20" height="3" rx="1.5" fill="${a.accent ?? 'var(--link)'}"/>`;
   const tag = a.tag ? `<rect class="tag" x="${x + CW - 20 - 80}" y="${y + 18}" width="80" height="26" rx="13"/><text class="tagt" x="${x + CW - 20 - 40}" y="${y + 36}" text-anchor="middle">${a.tag}</text>` : '';
   const badge = a.badge ? `<rect class="badge" x="${x + CW - 20 - 128}" y="${y + 18}" width="128" height="26" rx="13"/><text class="badget" x="${x + CW - 20 - 64}" y="${y + 36}" text-anchor="middle">${a.badge}</text>` : '';
@@ -175,8 +170,6 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .badge{fill:var(--soft);stroke:var(--line)}
 .badget{font-size:14px;font-weight:600;fill:var(--ink)}
 .card{fill:var(--card);stroke:var(--line);stroke-width:1}
-.ph{fill:var(--soft);stroke:var(--link);stroke-width:1.5;stroke-dasharray:5 4}
-.mono{font-size:34px;font-weight:600;fill:var(--muted)}
 .name{font-size:25px;font-weight:600;letter-spacing:-.01em}
 .hubname{font-size:30px}
 .promise{font-size:17px;fill:var(--muted)}

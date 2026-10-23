@@ -1,12 +1,13 @@
 # Icons
 
-The family icon set: app icons for Debrief, Pitcrew, Spotter, Pitwall and Dyno, plus a **draft** Sighter icon (awaiting approval).
+The family icon set: app icons for Debrief, Pitcrew, Spotter, Pitwall and Dyno, plus **draft** Sighter and Pacenotes icons (awaiting approval).
 Open `preview.html` to review them, or see the renders in `screenshots/`.
 
 | App | Status |
 |---|---|
 | Debrief, Pitcrew, Spotter, Pitwall, Dyno | Approved |
 | Sighter | Draft, awaiting approval |
+| Pacenotes | Draft, awaiting the user's approval |
 
 ## Build
 
@@ -14,7 +15,7 @@ Open `preview.html` to review them, or see the renders in `screenshots/`.
 cd icons
 npm ci
 npm run all                  # everything: SVG, PNG, tray, Tauri sets, .ico, preview, screenshots
-ONLY=sighter node tools/build.mjs   # one app
+ONLY=pacenotes node tools/build.mjs   # one app
 ```
 
 Edit only `tools/design.mjs`; every SVG is generated from the geometry there. Output is deterministic except `tauri/icon.icns`,
@@ -49,6 +50,7 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 | Spotter | `#F4B315` | `#FFD257` → `#E59600` | `#7A4E00` | `#3A2600` | 7.8:1 |
 | Pitwall | `#5A24B0` | `#7B46DB` → `#43198F` | `#24094F` | white | 9.1:1 |
 | Dyno | `#BE3584` | `#DE559F` → `#A0226A` | `#5E0E3C` | white | 5.2:1 |
+| Pacenotes (draft, awaiting approval) | `#831826` | `#B3283C` → `#66131E` | `#340A0F` | white | 9.9:1 |
 | Sighter (draft, awaiting approval) | `#00B8D9` | `#4FD8F0` → `#0094B8` | `#00485A` | `#00303B` (dark) | ink 6.0:1 on base |
 
 - **Ink rule:** the glyph is white wherever white reaches at least 3:1 on the tile. Spotter's amber tile is the only light one, so it takes dark ink.
@@ -63,6 +65,7 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 - **Spotter:** binoculars and a spark: it watches everywhere and calls the moment a release appears.
 - **Pitwall:** a radio bubble with the voice kept inside it: a private, local model.
 - **Sighter (draft, awaiting the user's approval):** a pointer arrow inside a sighting reticle (four ring arcs with ticks through the gaps): it finds UI elements by sight. Cyan is the only free hue that keeps the CVD minimum of the five unchanged (min dE 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan, so Sighter is never the closest pair). Lime was rejected: 3.3 to 4.3 dE from Spotter or Pitcrew under protan/deutan. Dark ink because a light cyan tile fails 3:1 with white, like Spotter's amber.
+- **Pacenotes (draft, awaiting the user's approval):** a rally co-driver's notebook (spiral binding on top) with `</>` code brackets and the route curve cut through the page: notes about the road ahead, here the shape of a codebase. Deep crimson is the only hue family that keeps all four CVD minimums unchanged with seven apps (normal 17.7, protan 11.6, deutan 13.6, tritan 10.7); every green, indigo-slate, graphite and teal tried lowered at least one (for example deep green `#1B5E3B` tritan 8.7, indigo-slate `#3D4F73` protan 4.3, graphite `#3F454F` tritan 5.7). Crimson is dark enough to sit far from Pitcrew's orange and Dyno's magenta under simulation, and white ink gives 9.9:1. At 16 px the brackets drop out and the page, binding and route remain. Alternative concepts (brackets with a road, notebook with a route, plain page with a route) are in `alternative/pacenotes-*`.
 - **Dyno:** a dynamometer gauge with a load arc and the needle near the redline.
 
 ## Layout

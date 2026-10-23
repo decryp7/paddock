@@ -22,7 +22,7 @@ anywhere.
 | <img src="icons/dyno/dyno-macos.svg" width="40" alt=""> | **[Dyno](https://dev.decryptology.net/decryp7/dyno)** | Measures, explains and tunes your PC, observe first. | In development |
 | <img src="icons/spotter/spotter-macos.svg" width="40" alt=""> | **[Spotter](https://dev.decryptology.net/decryp7/spotter)** | Watches for new releases anywhere and tells you the moment one appears. | In development |
 | <img src="icons/sighter/sighter-macos.svg" width="40" alt=""> | **[Sighter](https://dev.decryptology.net/decryp7/sighter)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | In design |
-| | **[Pacenotes](https://dev.decryptology.net/decryp7/pacenotes)** | Everything code-related: a code index with an MCP server, plus plugins for review, diagrams, requirements and tests. | In design |
+| <img src="icons/pacenotes/pacenotes-macos.svg" width="40" alt=""> | **[Pacenotes](https://dev.decryptology.net/decryp7/pacenotes)** | Everything code-related: a code index with an MCP server, plus plugins for review, diagrams, requirements and tests. | In design |
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 

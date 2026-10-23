@@ -1,9 +1,9 @@
 // Suite icon design system: palette, grid, tile material and per-app glyphs.
 // Every SVG is generated from the hand-placed geometry below (no bitmaps, no tracing).
 
-export const APPS = ['debrief', 'pitcrew', 'spotter', 'pitwall', 'dyno', 'sighter'];
+export const APPS = ['debrief', 'pitcrew', 'spotter', 'pitwall', 'dyno', 'sighter', 'pacenotes'];
 
-export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter' };
+export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter', pacenotes: 'Pacenotes' };
 
 /** One hue per app. `base` is the identity colour (CVD-checked, see tools/cvd.mjs); top/bottom are the tile gradient. */
 export const PALETTE = {
@@ -12,11 +12,12 @@ export const PALETTE = {
   spotter: { top: '#FFD257', base: '#F4B315', bottom: '#E59600', deep: '#7A4E00', light: '#FFE08A' },
   pitwall: { top: '#7B46DB', base: '#5A24B0', bottom: '#43198F', deep: '#24094F', light: '#B99AF2' },
   sighter: { top: '#4FD8F0', base: '#00B8D9', bottom: '#0094B8', deep: '#00485A', light: '#A5ECF8' },
+  pacenotes: { top: '#B3283C', base: '#831826', bottom: '#66131E', deep: '#340A0F', light: '#E0A0A8' },
   dyno: { top: '#DE559F', base: '#BE3584', bottom: '#A0226A', deep: '#5E0E3C', light: '#F29CCB' },
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */
-export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#00303B' };
+export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#00303B', pacenotes: '#FFFFFF' };
 
 export const CARBON = { top: '#30333B', bottom: '#15171B', rim: '#4A4E58' };
 
@@ -28,6 +29,7 @@ export const STATUSES = {
   pitwall: ['idle', 'serving', 'warning'],
   dyno: ['normal', 'high'],
   sighter: ['default'],
+  pacenotes: ['default'],
 };
 
 export const STATUS_COLOURS = { busy: '#2F8FFF', warning: '#F5A524', error: '#E5484D', new: '#E5484D', serving: '#2FB36B', high: '#F2711C' };
@@ -90,6 +92,8 @@ const ringArcs = (cx, cy, r, gap) => [0, 90, 180, 270].map(a => arc(cx, cy, r, a
 const pointer = (x, y, k) =>
   `M${f(x)} ${f(y)}L${f(x)} ${f(y + 300 * k)}L${f(x + 82 * k)} ${f(y + 224 * k)}L${f(x + 142 * k)} ${f(y + 354 * k)}L${f(x + 214 * k)} ${f(y + 324 * k)}L${f(x + 154 * k)} ${f(y + 196 * k)}L${f(x + 268 * k)} ${f(y + 196 * k)}Z`;
 
+const PN_CUT_1024 = 'M384 436L330 500L384 564M640 436L694 500L640 564M468 722C468 606 556 626 556 526C556 466 526 446 526 376';
+
 /** Master glyphs on the 1024 grid (optical centre 512,512; live area ~ 270..754). */
 export const GLYPH_1024 = {
   debrief: () => [
@@ -131,6 +135,11 @@ export const GLYPH_1024 = {
     { kind: 'stroke', d: ringArcs(512, 512, 236, 24), w: 52, tone: 'secondary', cap: 'round' },
     { kind: 'stroke', d: cardinal(512, 512, 216, 300), w: 52, tone: 'secondary', cap: 'round' },
     { kind: 'fill', d: pointer(436, 392, 0.76), tone: 'primary', round: 10 },
+  ],
+  /** Pacenotes: a rally notebook page (spiral binding on top) with code brackets and the route curve cut through it. */
+  pacenotes: () => [
+    { kind: 'fill', d: rr(280, 290, 464, 494, 64), tone: 'primary', cutStroke: { d: PN_CUT_1024, w: 48 } },
+    { kind: 'stroke', d: 'M392 226V326M512 226V326M632 226V326', w: 58, tone: 'secondary' },
   ],
   dyno: () => {
     const cx = 512, cy = 548, r = 248, needle = 318;
@@ -176,6 +185,10 @@ export const GLYPH_SMALL = {
       { kind: 'stroke', d: ringArcs(8, 8, 5.5, 26), w: 1.5, tone: 'secondary', cap: 'butt' },
       { kind: 'fill', d: pointer(5.9, 4.9, 0.0205), tone: 'primary' },
     ],
+    pacenotes: [
+      { kind: 'fill', d: rr(2.5, 4.5, 11, 9.5, 2), tone: 'primary', cutStroke: { d: 'M6.5 12.5C6.5 10.5 9.5 11 9.5 9C9.5 7.8 8.6 7.4 8.6 6.5', w: 1.5, cap: 'butt' } },
+      { kind: 'stroke', d: 'M5.5 2V5M8 2V5M10.5 2V5', w: 1.4, tone: 'secondary', cap: 'butt' },
+    ],
     dyno: [
       { kind: 'stroke', d: arc(8, 9, 5.5, 150, 390), w: 1.75, tone: 'secondary', cap: 'butt' },
       { kind: 'stroke', d: arc(8, 9, 5.5, 150, 318), w: 1.75, tone: 'primary', cap: 'butt' },
@@ -216,6 +229,10 @@ export const GLYPH_SMALL = {
     sighter: [
       { kind: 'stroke', d: ringArcs(16, 16, 11, 24), w: 2.5, tone: 'secondary', cap: 'round' },
       { kind: 'fill', d: pointer(10.3, 8.6, 0.0425), tone: 'primary' },
+    ],
+    pacenotes: [
+      { kind: 'fill', d: rr(5, 8, 22, 19.5, 3), tone: 'primary', cutStroke: { d: 'M10.5 14.5L8.5 17L10.5 19.5M21.5 14.5L23.5 17L21.5 19.5M14.5 25C14.5 21.5 17.5 22 17.5 18.5C17.5 16.5 16.3 15.5 16.3 13', w: 1.7 } },
+      { kind: 'stroke', d: 'M10.5 4.5V8.5M16 4.5V8.5M21.5 4.5V8.5', w: 2.3, tone: 'secondary', cap: 'butt' },
     ],
     dyno: [
       { kind: 'stroke', d: arc(16, 17.5, 9.5, 150, 390), w: 2.5, tone: 'secondary', cap: 'round' },
@@ -392,6 +409,11 @@ function trayGlyph(app, status) {
       return [
         { kind: 'stroke', d: ringArcs(8, 8, 6, 26), w: 1.5, tone: 'secondary', cap: 'butt' },
         { kind: 'fill', d: pointer(5.5, 4.5, 0.0235), tone: 'primary' },
+      ];
+    case 'pacenotes':
+      return [
+        { kind: 'fill', d: rr(2.5, 4, 11, 10.5, 2), tone: 'primary', cutStroke: { d: 'M6.5 12.5C6.5 10.5 9.5 11 9.5 9C9.5 7.8 8.6 7.4 8.6 6.5', w: 1.5, cap: 'butt' } },
+        { kind: 'stroke', d: 'M5.5 1.5V4.5M8 1.5V4.5M10.5 1.5V4.5', w: 1.4, tone: 'primary', cap: 'butt' },
       ];
     case 'dyno': {
       const n = status === 'high' ? 372 : 300;
