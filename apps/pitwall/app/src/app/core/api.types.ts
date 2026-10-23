@@ -413,6 +413,19 @@ export interface Overview {
   pairings: PairingRequest[];
   /** Models whose engine crashed and is being restarted or was given up on. */
   issues: EngineIssue[];
+  /** Pitwall installs llama.cpp by itself when no build is installed. */
+  engineSetup: EngineSetup;
+}
+
+export type EngineSetupState = 'idle' | 'installing' | 'failed';
+
+/** `EngineSetup` in `pitwall_core::mgmt`: the automatic llama.cpp install. */
+export interface EngineSetup {
+  state: EngineSetupState;
+  /** Why it failed, with the next step (failed). */
+  error: string | null;
+  /** The build's download, for progress (installing). */
+  download: Download | null;
 }
 
 export type IssueState = 'restarting' | 'failed';
@@ -502,6 +515,7 @@ export type LiveUpdate =
   | { kind: 'throughput'; throughput: Throughput }
   | { kind: 'event'; event: PitwallEvent }
   | { kind: 'download'; download: Download }
+  | { kind: 'engineSetup'; setup: EngineSetup }
   | { kind: 'pairing'; pairings: PairingRequest[] }
   | { kind: 'server'; server: ServerInfo };
 

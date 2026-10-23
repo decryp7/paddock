@@ -31,6 +31,8 @@ export const LiveStore = signalStore(
     throughput: computed(() => overview()?.throughput ?? null),
     pairings: computed(() => overview()?.pairings ?? []),
     issues: computed(() => overview()?.issues ?? []),
+    /** The automatic llama.cpp install (idle when nothing is being installed). */
+    engineSetup: computed(() => overview()?.engineSetup ?? null),
     server: computed(() => overview()?.server ?? null),
     apps: computed(() => overview()?.apps ?? []),
     paused: computed(() => overview()?.server.serving === 'paused'),
@@ -113,6 +115,13 @@ export const LiveStore = signalStore(
         const done = await act(`pairing:${id}`, () => backend.denyPairing(id).then(() => true), () => 'Pairing denied.');
         const o = store.overview();
         if (done && o) patchState(store, { overview: { ...o, pairings: o.pairings.filter((p) => p.id !== id) } });
+      },
+
+      /** Tries the automatic llama.cpp install again after it failed (offline, network error). */
+      async retryEngineSetup() {
+        const setup = await act('engineSetup', () => backend.retryEngineSetup());
+        const o = store.overview();
+        if (setup && o) patchState(store, { overview: { ...o, engineSetup: setup } });
       },
 
       loadModel(id: string) {

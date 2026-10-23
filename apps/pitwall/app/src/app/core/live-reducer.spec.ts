@@ -39,12 +39,14 @@ describe('live reducer', () => {
     s = applyUpdate(s, { kind: 'throughput', throughput: { promptTps: 1, genTps: 2, ttftP50Ms: 3, requestsPerMin: 4, activeRequests: 0 } });
     expect(s.overview!.throughput.genTps).toBe(2);
     s = applyUpdate(s, { kind: 'issues', issues: [] });
+    s = applyUpdate(s, { kind: 'engineSetup', setup: { state: 'failed', error: 'x', download: null } });
+    expect(s.overview?.engineSetup.state).toBe('failed');
     expect(s.overview!.issues).toEqual([]);
     s = applyUpdate(s, { kind: 'pairing', pairings: [] });
     expect(s.overview!.pairings).toEqual([]);
     s = applyUpdate(s, { kind: 'server', server: { ...overview.server, serving: 'paused' } });
     expect(s.overview!.server.serving).toBe('paused');
-    expect(s.updates).toBe(7);
+    expect(s.updates).toBe(8);
   });
 
   it('keeps updates that arrive before the overview without inventing one', () => {

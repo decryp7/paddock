@@ -15,6 +15,7 @@ import { Panel } from '../../shared/ui/panel';
 import { UsageCard } from '../usage/usage-card';
 import { AppsCard } from './apps-card';
 import { DashboardStore } from './dashboard.store';
+import { EngineSetupBanner } from '../engines/engine-setup-banner';
 import { EngineIssues } from './engine-issues';
 import { EnginesCard } from './engines-card';
 import { EventsFeed } from './events-feed';
@@ -50,7 +51,7 @@ export class PerfMeter {
 /** Home: everything Pitwall is doing right now, how it got here, and the actions you need most. */
 @Component({
   selector: 'pw-dashboard',
-  imports: [MatIconModule, MatTooltipModule, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
+  imports: [MatIconModule, MatTooltipModule, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EngineSetupBanner, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -95,6 +96,7 @@ export class PerfMeter {
         </div>
       }
 
+      <pw-engine-setup />
       <pw-engine-issues [now]="now()" />
 
       @for (p of live.pairings(); track p.id) {

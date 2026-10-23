@@ -16,6 +16,7 @@ import type {
   SlotsChange,
   Download,
   Engine,
+  EngineSetup,
   AppDetail,
   ModelPreset,
   PresetDraft,
@@ -185,6 +186,9 @@ export class TauriBackend implements PitwallBackend {
   }
   installBuild(buildId: string): Promise<Download> {
     return this.run('install_build', { buildId });
+  }
+  retryEngineSetup(): Promise<EngineSetup> {
+    return this.run('retry_engine_setup');
   }
   removeBuild(buildId: string, tag: string): Promise<void> {
     return this.run('remove_build', { buildId, tag });

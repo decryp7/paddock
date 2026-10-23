@@ -831,6 +831,11 @@ impl Serving {
         }
         self.event(EventKind::EngineStarted, Severity::Info, format!("Loading {id}"));
         let engine = self.engine_for(o.engine.as_deref().or(prefs.engine.as_deref()))?;
+        // llama.cpp installs itself when no build is installed: the load waits for it (or fails with its reason).
+        engine.ready().await.map_err(|e| match e {
+            EngineError::Install(m) => api(ErrorKind::Engine, m),
+            e => api(ErrorKind::Engine, e.to_string()),
+        })?;
         // The port is probed and released before the engine binds it, so another program can take it in between:
         // an "address in use" failure gets a fresh port (a few times) instead of failing the request.
         let mut attempt = 0;

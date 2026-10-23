@@ -689,6 +689,32 @@ pub struct EngineIssue {
     pub message: String,
 }
 
+/// Where the automatic llama.cpp install stands (`EngineSetupState`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EngineSetupState {
+    /// Nothing is being installed (a build is installed, or none was needed yet).
+    #[default]
+    Idle,
+    /// The suggested build is downloading, being checked or self-tested.
+    Installing,
+    /// The automatic install failed; the error says why and Retry tries again.
+    Failed,
+}
+
+/// The automatic install of llama.cpp (`EngineSetup`): Pitwall installs the build suggested for this machine whenever no
+/// build is installed, and models loaded or downloaded meanwhile wait for it.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineSetup {
+    /// Where it stands.
+    pub state: EngineSetupState,
+    /// Why it failed (with the next step).
+    pub error: Option<String>,
+    /// The build's download while installing (progress).
+    pub download: Option<Download>,
+}
+
 /// The dashboard (`Overview`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -713,6 +739,8 @@ pub struct Overview {
     pub pairings: Vec<PairingRequest>,
     /// Models whose engine crashed and is being restarted or was given up on.
     pub issues: Vec<EngineIssue>,
+    /// The automatic llama.cpp install.
+    pub engine_setup: EngineSetup,
 }
 
 /// History (`History`).
@@ -1233,6 +1261,11 @@ pub enum LiveUpdate {
     Download {
         /// The download.
         download: Download,
+    },
+    /// The automatic llama.cpp install changed.
+    EngineSetup {
+        /// Where it stands.
+        setup: EngineSetup,
     },
     /// Pairings.
     Pairing {

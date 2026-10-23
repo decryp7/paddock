@@ -326,6 +326,10 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         }
         "disk_usage" => ok(disk_usage(st)),
         "engines" => ok(engines(st)),
+        "retry_engine_setup" => {
+            crate::engine_setup::auto_install(st, Arc::new(st.llama.clone()));
+            ok(crate::engine_setup::dto(st))
+        }
         "install_build" => {
             let id: String = arg(a, "buildId")?;
             install_build(st, &id)
@@ -611,9 +615,13 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
     for v in want {
         let st2 = st.clone();
         let (repo_name, file_name) = (repo.to_string(), v.file.clone());
+        // Models wait for llama.cpp while it installs itself ("Queued"); the engine in use says when it is ready.
+        let engine = st.engines[0].clone();
+        let gate: crate::engines::BoxFuture<'static, Result<(), String>> =
+            Box::pin(async move { engine.ready().await.map_err(|e| e.to_string()) });
         let id = st
             .library
-            .download(repo, v, move |d| {
+            .download_after(Some(gate), repo, v, move |d| {
                 st2.push(&LiveUpdate::Download { download: d.clone() });
                 if matches!(d.state, DownloadState::Done) {
                     st2.event(EventKind::Download, Severity::Info, format!("Downloaded {}", d.name));
@@ -797,98 +805,10 @@ fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
         return install_pack(st, pe);
     }
     let platform = st.llama.platform();
-    let build = st
-        .llama
-        .catalog()
-        .find(&platform, id)
-        .cloned()
-        .ok_or_else(|| err(mgmt::ErrorCode::NotFound, format!("there is no build \"{id}\" for {platform}")))?;
-    let n = lock(&st.installs).len();
-    let dl_id = format!("eng-{n}");
-    let cancel = crate::egress::CancelFlag::default();
-    let host = build
-        .assets
-        .first()
-        .and_then(|a| pitwall_core::privacy::DownloadUrl::parse(&a.url).ok())
-        .map(|u| u.host().to_string())
-        .unwrap_or_default();
-    let dl = Download {
-        id: dl_id.clone(),
-        kind: DownloadKind::Engine,
-        name: format!("llama.cpp {} ({})", builds::label(id), st.llama.catalog().tag),
-        host,
-        bytes_done: 0,
-        bytes_total: build.download_bytes(),
-        speed_bps: 0,
-        state: DownloadState::Downloading,
-        error: None,
-        started_at: now_ms(),
-    };
-    lock(&st.installs).insert(dl_id.clone(), dl.clone());
-    lock(&st.install_cancel).insert(dl_id.clone(), cancel.clone());
-    let (st2, bid) = (st.clone(), id.to_string());
-    tokio::spawn(async move {
-        let upd = |f: &dyn Fn(&mut Download)| {
-            let mut g = lock(&st2.installs);
-            if let Some(d) = g.get_mut(&dl_id) {
-                f(d);
-                st2.push(&LiveUpdate::Download { download: d.clone() });
-            }
-        };
-        let t0 = std::time::Instant::now();
-        let mut last = std::time::Instant::now();
-        let before = crate::engine_pins::current(&st2);
-        let res = st2
-            .llama
-            .install(&bid, &cancel, |done, total| {
-                if last.elapsed().as_millis() > 400 || done == total {
-                    last = std::time::Instant::now();
-                    let bps = (done as f64 / t0.elapsed().as_secs_f64().max(0.001)) as u64;
-                    let mut g = lock(&st2.installs);
-                    if let Some(d) = g.get_mut(&dl_id) {
-                        d.bytes_done = done;
-                        d.speed_bps = bps;
-                        if done >= total {
-                            d.state = DownloadState::SelfTest;
-                        }
-                    }
-                }
-            })
-            .await;
-        match res {
-            Ok(info) => {
-                crate::engine_pins::record_change(&st2, before);
-                upd(&|d| {
-                    d.state = DownloadState::Done;
-                    d.bytes_done = d.bytes_total;
-                });
-                st2.event(
-                    EventKind::EngineStarted,
-                    Severity::Info,
-                    format!("Installed llama.cpp {} ({})", bid, info.tag),
-                );
-            }
-            Err(e) => {
-                let cancelled = matches!(e, crate::engines::EngineError::Download(crate::egress::DownloadError::Cancelled));
-                let msg = e.to_string();
-                upd(&|d| {
-                    d.state = if cancelled {
-                        DownloadState::Cancelled
-                    } else {
-                        DownloadState::Failed
-                    };
-                    d.error = Some(msg.clone());
-                });
-                st2.event(
-                    EventKind::EngineFailed,
-                    Severity::Error,
-                    format!("Installing llama.cpp {bid} failed: {msg}"),
-                );
-            }
-        }
-        lock(&st2.install_cancel).remove(&dl_id);
-    });
-    ok(dl)
+    if st.llama.catalog().find(&platform, id).is_none() {
+        return Err(err(mgmt::ErrorCode::NotFound, format!("there is no build \"{id}\" for {platform}")));
+    }
+    ok(crate::engine_setup::start_install(st, Arc::new(st.llama.clone()), id, false))
 }
 
 fn install_pack(st: &Arc<AppState>, pe: crate::pack_engine::PackEngine) -> R<Value> {
@@ -999,6 +919,7 @@ fn overview(st: &Arc<AppState>) -> mgmt::Overview {
         preset: cfg.memory.preset,
         pairings: st.auth.pairings(now_ms()),
         issues: st.serving.issues(),
+        engine_setup: crate::engine_setup::dto(st),
     }
 }
 

@@ -126,6 +126,7 @@ impl AppState {
             let (p, b) = paths::read_with_backup(&dirs.benchmarks(), pitwall_core::benchmarks::MAX_BYTES);
             pitwall_core::benchmarks::load(p.as_deref(), b.as_deref())
         };
+        let overridden = engine_override.is_some();
         let engine: Arc<dyn Engine> = engine_override.unwrap_or_else(|| Arc::new(llama.clone()));
         let mut engines: Vec<Arc<dyn Engine>> = vec![engine.clone()];
         let planned = |kind, reason: &str| {
@@ -221,6 +222,15 @@ impl AppState {
             caches,
             last_request_at: std::sync::atomic::AtomicU64::new(0),
         });
+        if !overridden {
+            // The real llama.cpp installs the suggested build by itself when a model needs one and none is installed.
+            let weak = Arc::downgrade(&st);
+            st.llama.set_kick(Arc::new(move || {
+                if let Some(st) = weak.upgrade() {
+                    crate::engine_setup::auto_install(&st, Arc::new(st.llama.clone()));
+                }
+            }));
+        }
         st.serving.set_speeds(pitwall_core::benchmarks::speeds(&lock(&st.benchmarks)));
         if stored_presets.damaged || stored_presets.skipped > 0 {
             st.event(
@@ -356,6 +366,8 @@ impl AppState {
 
     /// Start the background tasks: release loop, live feed, metrics sampling.
     pub fn spawn_tasks(self: &Arc<Self>) {
+        // First start (or every start with no build): install the suggested llama.cpp in the background.
+        self.llama.install_if_missing();
         self.serving.spawn_tick_loop();
         self.spawn_cache_sweeper();
         self.start_update_schedule();

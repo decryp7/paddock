@@ -15,6 +15,7 @@ import type {
   SlotsChange,
   Download,
   Engine,
+  EngineSetup,
   AppDetail,
   ModelPreset,
   PresetDraft,
@@ -97,6 +98,8 @@ export interface PitwallBackend {
   // Engines
   engines(): Promise<Engine[]>;
   installBuild(buildId: string): Promise<Download>;
+  /** Tries the automatic llama.cpp install again after it failed. */
+  retryEngineSetup(): Promise<EngineSetup>;
   removeBuild(buildId: string, tag: string): Promise<void>;
   selectBuild(choice: string): Promise<void>;
   /** Goes back to the previous good build and pins it for all models; says which loaded models switch on their next load. */

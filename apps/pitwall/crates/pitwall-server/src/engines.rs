@@ -26,7 +26,7 @@ use std::time::Duration;
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
     /// No usable engine build is installed.
-    #[error("no llama.cpp engine is installed. Open Engines and install one (it is suggested for this machine).")]
+    #[error("llama.cpp is not installed yet. Pitwall installs the build suggested for this machine by itself; try again in a moment.")]
     NotInstalled,
     /// The engine does not exist on this machine.
     #[error("{0}")]
@@ -77,6 +77,11 @@ pub trait Engine: Send + Sync {
     /// Names the build that would serve `model` (part of cache keys, ADR 0019); empty when there is no such notion.
     fn build_tag(&self, _model: &str) -> String {
         String::new()
+    }
+    /// Resolves when the engine can start a model: waits while it is being set up (llama.cpp installing itself) and
+    /// fails with the reason when setup failed. Engines with nothing to set up are ready at once.
+    fn ready(&self) -> BoxFuture<'_, Result<(), EngineError>> {
+        Box::pin(async { Ok(()) })
     }
     /// Whether it can run here, and why not.
     fn availability(&self) -> Availability;
@@ -131,6 +136,48 @@ fn server_name() -> &'static str {
     }
 }
 
+/// Where llama.cpp's automatic installation stands (see [`LlamaCpp::ready`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Setup {
+    /// Nothing is being installed.
+    #[default]
+    Idle,
+    /// The suggested build is being installed.
+    Installing,
+    /// The install failed; the message says what to do.
+    Failed(String),
+}
+
+/// Starts the automatic install (set by the application once it exists; tests with a fake engine never set it).
+pub type Kick = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+/// Installs llama.cpp builds: the seam the automatic install is tested through (no network in tests).
+pub trait BuildInstaller: Send + Sync {
+    /// The build suggested for this machine.
+    fn suggested(&self) -> Option<String>;
+    /// Download, verify, self-test and activate build `id`, reporting `(done, total)` bytes.
+    fn install<'a>(
+        &'a self,
+        id: &'a str,
+        cancel: &'a CancelFlag,
+        progress: &'a mut (dyn FnMut(u64, u64) + Send),
+    ) -> BoxFuture<'a, Result<BuildInfo, EngineError>>;
+}
+
+impl BuildInstaller for LlamaCpp {
+    fn suggested(&self) -> Option<String> {
+        LlamaCpp::suggested(self)
+    }
+    fn install<'a>(
+        &'a self,
+        id: &'a str,
+        cancel: &'a CancelFlag,
+        progress: &'a mut (dyn FnMut(u64, u64) + Send),
+    ) -> BoxFuture<'a, Result<BuildInfo, EngineError>> {
+        Box::pin(async move { LlamaCpp::install(self, id, cancel, |d, t| progress(d, t)).await })
+    }
+}
+
 /// llama.cpp: install management and the [`Engine`] implementation.
 #[derive(Clone)]
 pub struct LlamaCpp {
@@ -143,6 +190,10 @@ pub struct LlamaCpp {
     matrix: std::sync::Arc<Matrix>,
     /// The build each model was last started on (read with the loaded models, so a stale entry is harmless).
     started_on: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, BuildId>>>,
+    /// The automatic install's state; models that need a build wait on it.
+    setup: std::sync::Arc<tokio::sync::watch::Sender<Setup>>,
+    /// Starts the automatic install.
+    kick: std::sync::Arc<std::sync::RwLock<Option<Kick>>>,
 }
 
 impl LlamaCpp {
@@ -157,6 +208,36 @@ impl LlamaCpp {
             pins: std::sync::Arc::new(std::sync::RwLock::new(EnginePins::default())),
             matrix: std::sync::Arc::new(Matrix::embedded()),
             started_on: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            setup: std::sync::Arc::new(tokio::sync::watch::channel(Setup::Idle).0),
+            kick: std::sync::Arc::new(std::sync::RwLock::new(None)),
+        }
+    }
+
+    /// Where the automatic install stands.
+    pub fn setup(&self) -> Setup {
+        self.setup.borrow().clone()
+    }
+
+    /// Records the automatic install's state and wakes everything waiting for a build.
+    pub fn set_setup(&self, s: Setup) {
+        self.setup.send_replace(s);
+    }
+
+    /// Lets the engine start its own installation when a model needs a build and none is installed.
+    pub fn set_kick(&self, k: Kick) {
+        if let Ok(mut g) = self.kick.write() {
+            *g = Some(k);
+        }
+    }
+
+    /// Starts the automatic install now if a build is missing and nothing is running (no-op without a kick).
+    pub fn install_if_missing(&self) {
+        if !matches!(self.binary_for(None), Err(EngineError::NotInstalled)) || self.setup() == Setup::Installing {
+            return;
+        }
+        let kick = self.kick.read().ok().and_then(|g| g.clone());
+        if let Some(k) = kick {
+            k();
         }
     }
 
@@ -534,6 +615,34 @@ impl Engine for LlamaCpp {
             .unwrap_or_default()
     }
 
+    fn ready(&self) -> BoxFuture<'_, Result<(), EngineError>> {
+        Box::pin(async move {
+            let mut rx = self.setup.subscribe();
+            loop {
+                // Anything but "no build" is the start's own business (a pin, an old build): it explains itself.
+                if !matches!(self.binary_for(None), Err(EngineError::NotInstalled)) {
+                    return Ok(());
+                }
+                let state = rx.borrow_and_update().clone();
+                match state {
+                    Setup::Installing => {}
+                    Setup::Failed(m) => return Err(EngineError::Install(m)),
+                    Setup::Idle => {
+                        self.install_if_missing();
+                        if *rx.borrow() == Setup::Idle {
+                            return Err(EngineError::NotInstalled);
+                        }
+                        continue;
+                    }
+                }
+                // A finished install flips the state to Idle (or Failed); a lost sender cannot happen (we hold it).
+                if rx.changed().await.is_err() {
+                    return Err(EngineError::NotInstalled);
+                }
+            }
+        })
+    }
+
     fn availability(&self) -> Availability {
         if self.binary().is_some() {
             Availability::Available
@@ -545,7 +654,7 @@ impl Engine for LlamaCpp {
             }
         } else {
             Availability::NotInstalled {
-                reason: "No llama.cpp build is installed yet. Install the suggested one from the catalog.".into(),
+                reason: "No llama.cpp build is installed yet. Pitwall installs the suggested one; you can also pick another below.".into(),
             }
         }
     }
@@ -915,6 +1024,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ready_is_immediate_when_a_build_is_installed_and_never_installs() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        put(&dirs, "cpu", "b11669", "passed", true);
+        let kicked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let k = kicked.clone();
+        m.set_kick(std::sync::Arc::new(move || {
+            k.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+        assert!(m.ready().await.is_ok());
+        assert_eq!(kicked.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn ready_without_a_build_starts_the_install_and_waits_for_it() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        let (m2, dirs2) = (m.clone(), dirs.clone());
+        m.set_kick(std::sync::Arc::new({
+            let m = m.clone();
+            move || {
+                m.set_setup(Setup::Installing);
+                let (m2, dirs2) = (m2.clone(), dirs2.clone());
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    put(&dirs2, "cpu", "b11669", "passed", true);
+                    m2.set_setup(Setup::Idle);
+                });
+            }
+        }));
+        assert_eq!(m.setup(), Setup::Idle);
+        m.ready().await.unwrap();
+        assert!(m.binary().is_some());
+    }
+
+    #[tokio::test]
+    async fn ready_reports_a_failed_install_and_without_any_way_to_install() {
+        let (_d, dirs) = dirs();
+        let m = mgr(&dirs);
+        // No kick (nothing can install): the plain "not installed" error.
+        assert!(matches!(m.ready().await, Err(EngineError::NotInstalled)));
+        m.set_setup(Setup::Failed("the network is unreachable. Press Retry.".into()));
+        let e = m.ready().await.unwrap_err();
+        assert!(e.to_string().contains("Retry"), "{e}");
+    }
+
+    #[tokio::test]
     async fn with_no_build_installed_the_message_does_not_point_at_the_page_that_shows_it() {
         let (_d, dirs) = dirs();
         let m = mgr(&dirs);
@@ -922,7 +1078,7 @@ mod tests {
             panic!("expected NotInstalled");
         };
         assert!(!reason.contains("in Engines"), "{reason}");
-        assert!(reason.contains("catalog"), "{reason}");
+        assert!(reason.contains("suggested"), "{reason}");
     }
 
     #[tokio::test]

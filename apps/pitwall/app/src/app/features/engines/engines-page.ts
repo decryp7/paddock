@@ -7,12 +7,13 @@ import { availabilityLook } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
 import { Panel } from '../../shared/ui/panel';
 import { EngineCard } from './engine-card';
+import { EngineSetupBanner } from './engine-setup-banner';
 import { EnginesStore } from './engines.store';
 
 /** Engines: llama.cpp builds, catalog and processes; planned engines with the honest reason they aren't here yet. */
 @Component({
   selector: 'pw-engines-page',
-  imports: [MatIconModule, MatTooltipModule, Panel, EngineCard],
+  imports: [MatIconModule, MatTooltipModule, Panel, EngineCard, EngineSetupBanner],
   providers: [EnginesStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -56,6 +57,7 @@ import { EnginesStore } from './engines.store';
             </div>
           </section>
         }
+        <pw-engine-setup />
         <div class="stack">
           @for (e of store.available(); track e.kind) {
             <pw-engine-card [engine]="e" [now]="now()" />

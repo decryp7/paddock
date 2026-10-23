@@ -297,6 +297,18 @@ impl Library {
         variant: &hf::Variant,
         on_change: impl Fn(Download) + Send + Sync + 'static,
     ) -> Result<String, DownloadError> {
+        self.download_after(None, repo, variant, on_change)
+    }
+
+    /// [`Library::download`] that stays queued until `gate` resolves (llama.cpp finishing its own install); a gate
+    /// that fails fails the download with that message.
+    pub fn download_after(
+        &self,
+        gate: Option<crate::engines::BoxFuture<'static, Result<(), String>>>,
+        repo: &str,
+        variant: &hf::Variant,
+        on_change: impl Fn(Download) + Send + Sync + 'static,
+    ) -> Result<String, DownloadError> {
         let repo_id = RepoId::parse(repo).map_err(DownloadError::Network)?;
         let urls: Vec<(DownloadUrl, String)> = variant
             .parts
@@ -346,6 +358,16 @@ impl Library {
                     on_change(s.dl.clone());
                 }
             };
+            if let Some(gate) = gate {
+                if let Err(m) = gate.await {
+                    this.update(&id2, |d| {
+                        d.state = DownloadState::Failed;
+                        d.error = Some(m);
+                    });
+                    notify(&this);
+                    return;
+                }
+            }
             this.update(&id2, |d| d.state = DownloadState::Downloading);
             notify(&this);
             // The repository's commit now, for the provenance record (best effort: a download never waits on it).
@@ -590,5 +612,33 @@ mod tests {
         assert!(dl.error.as_ref().unwrap().contains("offline"));
         assert!(lib.cancel(&id) && !lib.cancel("nope"));
         assert!(lib.download("../x", &v, |_| {}).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_download_waits_queued_for_its_gate_and_fails_with_the_gates_reason() {
+        let d = tempfile::tempdir().unwrap();
+        let lib = Library::new(Dirs::at(d.path()), Egress::new(Arc::new(std::sync::atomic::AtomicBool::new(true))));
+        let v = hf::Variant {
+            file: "m-Q4_K_M.gguf".into(),
+            parts: vec!["m-Q4_K_M.gguf".into()],
+            quant: Some("Q4_K_M".into()),
+            size: 10,
+            sha256: vec![],
+        };
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+        let gate: crate::engines::BoxFuture<'static, Result<(), String>> = Box::pin(async move { rx.await.unwrap_or(Ok(())) });
+        lib.download_after(Some(gate), "o/r", &v, |_| {}).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(lib.downloads()[0].state, DownloadState::Queued);
+        tx.send(Err("llama.cpp could not be installed. Press Retry.".into())).unwrap();
+        for _ in 0..100 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if lib.downloads()[0].state == DownloadState::Failed {
+                break;
+            }
+        }
+        let dl = &lib.downloads()[0];
+        assert_eq!(dl.state, DownloadState::Failed);
+        assert!(dl.error.as_ref().unwrap().contains("Retry"));
     }
 }

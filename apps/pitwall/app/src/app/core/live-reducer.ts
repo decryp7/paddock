@@ -36,6 +36,8 @@ export function applyUpdate(state: LiveState, u: LiveUpdate): LiveState {
       return { ...next, overview: o && { ...o, pairings: u.pairings } };
     case 'server':
       return { ...next, overview: o && { ...o, server: u.server } };
+    case 'engineSetup':
+      return { ...next, overview: o && { ...o, engineSetup: u.setup } };
     case 'event':
       if (state.events.some((e) => e.id === u.event.id)) return state;
       return { ...next, events: [u.event, ...state.events].slice(0, MAX_EVENTS) };

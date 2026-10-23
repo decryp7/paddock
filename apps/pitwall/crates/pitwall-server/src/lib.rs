@@ -9,6 +9,7 @@ pub mod cache_db;
 pub mod caches;
 pub mod egress;
 pub mod engine_pins;
+pub mod engine_setup;
 pub mod engines;
 pub mod fake_engine;
 pub mod http;

@@ -154,6 +154,7 @@ pub fn run() {
             commands::disk_usage,
             commands::engines,
             commands::install_build,
+            commands::retry_engine_setup,
             commands::remove_build,
             commands::select_build,
             commands::rollback_build,

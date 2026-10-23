@@ -77,6 +77,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['packs', (b) => b.packs('code'), 'packs', { tag: 'code' }],
   ['packs without a tag', (b) => b.packs(), 'packs', { tag: null }],
   ['setModelEngine', (b) => b.setModelEngine('m1', 'vllm-pack'), 'set_model_engine', { id: 'm1', engine: 'vllm-pack' }],
+  ['retryEngineSetup', (b) => b.retryEngineSetup(), 'retry_engine_setup', undefined],
   ['installBuild', (b) => b.installBuild('cuda-13'), 'install_build', { buildId: 'cuda-13' }],
   ['removeBuild', (b) => b.removeBuild('cpu', 'b1'), 'remove_build', { buildId: 'cpu', tag: 'b1' }],
   ['selectBuild', (b) => b.selectBuild('auto'), 'select_build', { choice: 'auto' }],

@@ -21,6 +21,7 @@ import type {
   Download,
   Engine,
   EngineIssue,
+  EngineSetup,
   EnginePinState,
   PinChange,
   RollbackTarget,
@@ -162,6 +163,7 @@ export class MockBackend implements PitwallBackend {
   private service: ServiceInstall;
   private autostart_ = false;
   private issues_: EngineIssue[] = [];
+  private engineSetup_: EngineSetup = { state: 'idle', error: null, download: null };
   private readonly updateAvailable: boolean;
   private updateCheck_: UpdateCheckSettings = { enabled: false, schedule: 'weekly' };
   private updateNotices_: UpdateNotice[] = [];
@@ -399,6 +401,7 @@ export class MockBackend implements PitwallBackend {
       preset: this.settings_.memory.preset,
       pairings: this.pairings_,
       issues: this.issues_,
+      engineSetup: clone(this.engineSetup_),
     }));
   }
 
@@ -693,6 +696,20 @@ export class MockBackend implements PitwallBackend {
       this.emit({ kind: 'download', download: clone(d) });
       return d;
     });
+  }
+
+  retryEngineSetup(): Promise<EngineSetup> {
+    return this.reply('retryEngineSetup', () => {
+      this.engineSetup_ = { state: 'idle', error: null, download: null };
+      this.emit({ kind: 'engineSetup', setup: clone(this.engineSetup_) });
+      return clone(this.engineSetup_);
+    });
+  }
+
+  /** Test and demo hook: shows the automatic llama.cpp install in the given state. */
+  setEngineSetup(setup: EngineSetup): void {
+    this.engineSetup_ = setup;
+    this.emit({ kind: 'engineSetup', setup: clone(setup) });
   }
 
   removeBuild(buildId: string, tag: string): Promise<void> {

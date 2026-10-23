@@ -271,6 +271,9 @@ rpc!(
     /// Installs an engine build.
     install_build => "install_build", build_id: String = "buildId");
 rpc!(
+    /// Tries the automatic llama.cpp install again.
+    retry_engine_setup => "retry_engine_setup");
+rpc!(
     /// Removes an installed build.
     remove_build => "remove_build", build_id: String = "buildId", tag: String = "tag");
 rpc!(
