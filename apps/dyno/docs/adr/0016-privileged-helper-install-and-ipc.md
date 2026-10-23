@@ -80,6 +80,12 @@ The daemon serves **one authorised user**, the one who clicked install; installi
    agent. The pid is checked once per connection (a pid could in theory be recycled in that window; the connection is
    short-lived and the token has to match too).
 
+The install step itself runs the helper program that ships with the app, elevated. When the app is installed per user (the
+Windows installer is), that folder is writable by the user, so a program already running as that user could replace the file
+before the user approves the prompt. The same program could equally replace the app and wait for any other elevation, so this
+does not widen what per-user malware can do, but it is the reason the daemon never runs from there and the prompt names the
+program being elevated.
+
 ### 4. What it will do: a closed list, validated twice
 
 - The daemon accepts only `HelperRequest::{Info, Apply, Read, Traffic, Audit, Uninstall}`. `Apply` and `Read` carry a
