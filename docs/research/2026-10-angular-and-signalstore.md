@@ -150,7 +150,7 @@ Scale: 918 non-spec TS files, 117,186 lines (3,457 of them `core/api.types.ts`; 
 
 ---
 
-## 3. Proposed rules (proposed, needs user approval; not added to rules.md)
+## 3. Rules (approved by the user 2026-10-23; now rules 27–39 in docs/rules.md)
 
 Normative, short:
 
