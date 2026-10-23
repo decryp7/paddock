@@ -1081,6 +1081,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyno-cli"
+version = "0.1.0"
+dependencies = [
+ "dyno-agent",
+ "dyno-core",
+ "dyno-ipc",
+ "dyno-platform",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "dyno-core"
 version = "0.1.0"
 dependencies = [
