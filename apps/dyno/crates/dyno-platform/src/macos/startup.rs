@@ -105,7 +105,12 @@ impl LaunchAgents {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         for e in rd.flatten().take(MAX_AGENTS) {
             let path = e.path();
-            if path.extension().and_then(|x| x.to_str()) != Some("plist") {
+            // An all-users agent the helper turned off is renamed (ADR 0016); it is still listed, as disabled.
+            let off_by_dyno = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(&format!(".plist{}", crate::tuning_admin::DISABLED_SUFFIX)));
+            if path.extension().and_then(|x| x.to_str()) != Some("plist") && !off_by_dyno {
                 continue;
             }
             let Ok(bytes) = std::fs::read(&path) else { continue };
@@ -113,7 +118,11 @@ impl LaunchAgents {
             if !agent.starts_at_login() {
                 continue;
             }
-            out.push(entry_of(&agent, location.clone(), disabled));
+            let mut entry = entry_of(&agent, location.clone(), disabled);
+            if off_by_dyno {
+                entry.state = StartupState::Disabled;
+            }
+            out.push(entry);
         }
     }
 }
@@ -235,6 +244,21 @@ mod tests {
         };
         let la = LaunchAgents::with(Some(user), Some(system), Box::new(fake.clone()));
         (dir, fake, la)
+    }
+
+    #[test]
+    fn an_all_users_agent_the_helper_turned_off_is_still_listed_as_disabled() {
+        let (d, _f, mut la) = setup();
+        let system = d.path().join("system");
+        std::fs::rename(system.join("s.plist"), system.join("s.plist.dyno-disabled")).unwrap();
+        std::fs::write(system.join("other.plist.bak"), plist("com.vendor.other", true)).unwrap();
+        let list = la.list().unwrap();
+        let s = list.iter().find(|e| e.name == "com.vendor.s").unwrap();
+        assert_eq!(
+            (s.state, s.location.clone()),
+            (StartupState::Disabled, StartupLocation::SystemLaunchAgent)
+        );
+        assert!(!list.iter().any(|e| e.name == "com.vendor.other"));
     }
 
     #[test]

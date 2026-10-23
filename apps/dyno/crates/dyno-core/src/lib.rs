@@ -16,6 +16,8 @@ pub mod forecast;
 pub mod grouping;
 pub mod health;
 pub mod helper;
+pub mod helper_paths;
+pub mod helper_wire;
 pub mod history;
 pub mod inventory;
 pub mod ip_lookup;

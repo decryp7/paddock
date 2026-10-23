@@ -137,13 +137,15 @@ fn is_disconnect(e: &io::Error) -> bool {
 pub(super) struct Listener {
     pipe: Option<OwnedHandle>,
     name: String,
+    /// The access list of every instance.
+    sddl: String,
 }
 
 /// Creates one instance of the pipe `name`. The first instance is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so a
 /// squatter that created the name earlier makes it fail; later instances (one per accepted client) rely on the owner-only
 /// DACL: nobody else may add an instance to this pipe.
-fn create_instance(name: &str, first: bool) -> io::Result<OwnedHandle> {
-    let sddl = wide(OWNER_ONLY);
+fn create_instance(name: &str, first: bool, sddl: &str) -> io::Result<OwnedHandle> {
+    let sddl = wide(sddl);
     let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
     // SAFETY: `sddl` is NUL-terminated and outlives the call; the descriptor is freed below.
     if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut descriptor, null_mut()) } == 0 {
@@ -184,8 +186,22 @@ fn create_instance(name: &str, first: bool) -> io::Result<OwnedHandle> {
 impl Listener {
     pub(super) fn bind() -> io::Result<Listener> {
         let name = format!(r"\\.\pipe\dyno-{}", random_hex(12)?);
-        let pipe = create_instance(&name, true)?;
-        Ok(Listener { pipe: Some(pipe), name })
+        let pipe = create_instance(&name, true, OWNER_ONLY)?;
+        Ok(Listener {
+            pipe: Some(pipe),
+            name,
+            sddl: OWNER_ONLY.to_string(),
+        })
+    }
+
+    /// A pipe with a fixed `name` and the access list `sddl` (the privileged helper's endpoint, ADR 0016).
+    pub(super) fn bind_fixed(name: &str, access: &super::Access) -> io::Result<Listener> {
+        let pipe = create_instance(name, true, &access.sddl)?;
+        Ok(Listener {
+            pipe: Some(pipe),
+            name: name.to_string(),
+            sddl: access.sddl.clone(),
+        })
     }
 
     pub(super) fn name(&self) -> &str {
@@ -216,7 +232,7 @@ impl Listener {
             .ok_or_else(|| io::Error::other("the endpoint already has its connection"))?;
         // The next client needs a fresh instance of the same pipe; until it exists a connecting client sees "busy" and
         // waits. If it cannot be made, later accepts report that, this connection still works.
-        self.pipe = create_instance(&self.name, false).ok();
+        self.pipe = create_instance(&self.name, false, &self.sddl).ok();
         Ok((Stream::new(connected)?, pid))
     }
 }
