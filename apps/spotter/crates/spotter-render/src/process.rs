@@ -135,6 +135,9 @@ pub type Table = HashMap<u32, (Option<u32>, u64)>;
 fn table_of(sys: &System) -> Table {
     sys.processes()
         .iter()
+        // Linux lists every thread as a process that reports its process's whole resident size again (a browser
+        // with 400 threads would count 400 times over); only real processes belong in the table.
+        .filter(|(_, p)| p.thread_kind().is_none())
         .map(|(pid, p)| (pid.as_u32(), (p.parent().map(Pid::as_u32), p.memory())))
         .collect()
 }
@@ -156,17 +159,42 @@ pub fn descendants(table: &Table, root: u32) -> Vec<u32> {
 
 /// Resident memory of `root` and its descendants, in bytes.
 pub fn tree_memory(table: &Table, root: u32) -> u64 {
-    let own = table.get(&root).map_or(0, |e| e.1);
-    own + descendants(table, root)
-        .iter()
-        .filter_map(|p| table.get(p))
-        .map(|e| e.1)
-        .sum::<u64>()
+    tree_memory_with(table, root, |_| None)
 }
 
-/// A live read of [`tree_memory`] for the process tree at `root`.
+/// Like [`tree_memory`], but `better` may give a process a more exact figure than its resident size (Linux: its
+/// proportional set size, see [`parse_pss`]). Browser processes share large mappings (the binary, the zygote's
+/// heap), so their resident sizes added together count the same pages many times over.
+pub fn tree_memory_with(table: &Table, root: u32, better: impl Fn(u32) -> Option<u64>) -> u64 {
+    std::iter::once(root)
+        .chain(descendants(table, root))
+        .filter_map(|p| better(p).or_else(|| table.get(&p).map(|e| e.1)))
+        .sum()
+}
+
+/// The proportional set size in bytes from the text of `/proc/<pid>/smaps_rollup` (the `Pss:` line, in kB): every
+/// page is divided between the processes that map it, so the sum over a tree is the memory the tree really uses.
+pub fn parse_pss(smaps_rollup: &str) -> Option<u64> {
+    let line = smaps_rollup.lines().find_map(|l| l.strip_prefix("Pss:"))?;
+    let kb: u64 = line.trim().strip_suffix("kB")?.trim().parse().ok()?;
+    kb.checked_mul(1024)
+}
+
+/// The proportional set size of `pid`, where the platform offers it and the process may be read.
+#[cfg(target_os = "linux")]
+fn proportional_size(pid: u32) -> Option<u64> {
+    parse_pss(&std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn proportional_size(_pid: u32) -> Option<u64> {
+    None
+}
+
+/// A live read of [`tree_memory_with`] for the process tree at `root`: proportional sizes on Linux, falling back to
+/// the resident size of any process that cannot be read, resident sizes elsewhere.
 pub fn current_tree_memory(root: u32) -> u64 {
-    tree_memory(&table_of(&snapshot()), root)
+    tree_memory_with(&table_of(&snapshot()), root, proportional_size)
 }
 
 /// Process ids whose command line mentions `needle` (leak checks: a throwaway profile path is unique to a run).
@@ -195,6 +223,79 @@ mod tests {
         assert_eq!(d, vec![2, 3]);
         assert_eq!(tree_memory(&t, 1), 60);
         assert_eq!(tree_memory(&t, 99), 0);
+    }
+
+    const ROLLUP: &str = "55d0c0a00000-7ffd5a7ff000 ---p 00000000 00:00 0                          [rollup]\n\
+Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          90000 kB\nShared_Clean:      70000 kB\n";
+
+    #[test]
+    fn pss_is_read_from_smaps_rollup_in_bytes() {
+        assert_eq!(parse_pss(ROLLUP), Some(131_633 * 1024));
+        assert_eq!(parse_pss("Rss: 5 kB\n"), None);
+        assert_eq!(parse_pss("Pss: lots kB\n"), None);
+        assert_eq!(parse_pss("Pss: 12\n"), None);
+        assert_eq!(parse_pss(""), None);
+        assert_eq!(parse_pss(&format!("Pss: {} kB\n", u64::MAX)), None);
+    }
+
+    #[test]
+    fn shared_pages_are_not_counted_once_per_process() {
+        // A zygote and three renderers that all map the same 100 MB: each one's resident size includes it,
+        // but their proportional sizes add up to the real 100 MB + 4 x 10 MB.
+        const MB: u64 = 1 << 20;
+        let mut t = Table::new();
+        t.insert(1, (None, 110 * MB));
+        for pid in 2..=4 {
+            t.insert(pid, (Some(1), 110 * MB));
+        }
+        assert_eq!(tree_memory(&t, 1), 440 * MB, "resident sizes add the shared 100 MB four times");
+        let pss = |_pid: u32| Some((10 + 25) * MB);
+        assert_eq!(tree_memory_with(&t, 1, pss), 140 * MB);
+    }
+
+    #[test]
+    fn an_unreadable_process_falls_back_to_its_resident_size() {
+        let mut t = Table::new();
+        t.insert(1, (None, 50));
+        t.insert(2, (Some(1), 70));
+        assert_eq!(tree_memory_with(&t, 1, |p| (p == 1).then_some(20)), 90);
+        assert_eq!(tree_memory_with(&t, 1, |_| None), 120);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_real_process_has_a_readable_proportional_size() {
+        let own = proportional_size(std::process::id()).expect("smaps_rollup of this process");
+        assert!(own > 0);
+        assert!(current_tree_memory(std::process::id()) > 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn threads_do_not_multiply_the_tree_memory() {
+        let spin = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let threads: Vec<_> = (0..40)
+            .map(|_| {
+                let s = spin.clone();
+                std::thread::spawn(move || {
+                    while s.load(std::sync::atomic::Ordering::Relaxed) {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                })
+            })
+            .collect();
+        let t = table_of(&snapshot());
+        let me = std::process::id();
+        let own = t.get(&me).map_or(0, |e| e.1);
+        let total = tree_memory(&t, me);
+        spin.store(false, std::sync::atomic::Ordering::Relaxed);
+        for th in threads {
+            let _ = th.join();
+        }
+        assert!(
+            own > 0 && total < own * 4,
+            "own {own}, tree {total}: threads were counted as processes"
+        );
     }
 
     #[cfg(unix)]

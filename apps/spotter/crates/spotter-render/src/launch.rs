@@ -51,6 +51,20 @@ impl LaunchOptions {
     }
 }
 
+/// Whether a window can be shown: headful modes need an X server or a Wayland compositor on Linux (a headless
+/// server, an SSH session). Other platforms always have a window system. Pure: `env` reads one variable.
+pub fn check_display(mode: Mode, linux: bool, env: impl Fn(&str) -> Option<String>) -> Result<()> {
+    let set = |k: &str| env(k).is_some_and(|v| !v.trim().is_empty());
+    if !linux || mode == Mode::Headless || set("DISPLAY") || set("WAYLAND_DISPLAY") {
+        return Ok(());
+    }
+    Err(Error::Launch(
+        "there is no display to open the browser on (neither DISPLAY nor WAYLAND_DISPLAY is set); run Spotter in a desktop session, \
+         or on a server start it under a virtual display, for example `xvfb-run spotter`"
+            .into(),
+    ))
+}
+
 /// The browser's stderr is kept in this file inside the throwaway profile, so a failed start can say why.
 const STDERR_FILE: &str = "browser-stderr.log";
 /// At most this many bytes from the end of the browser's stderr go into an error message.
@@ -176,6 +190,7 @@ fn unique_dir(base: &Path) -> PathBuf {
 impl Chromium {
     /// Starts `exe` with a fresh profile and connects to it.
     pub fn launch(exe: &Browser, opts: &LaunchOptions) -> Result<Chromium> {
+        check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
         std::fs::create_dir_all(&dir).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
         let mut cmd = std::process::Command::new(&exe.path);
@@ -333,6 +348,13 @@ fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
 mod tests {
     use super::*;
 
+    /// Unit tests start fake browsers: no window system is needed for them.
+    fn headless(base: &Path) -> LaunchOptions {
+        let mut o = LaunchOptions::new(base);
+        o.mode = Mode::Headless;
+        o
+    }
+
     #[test]
     fn keeps_the_automation_banner_and_hides_nothing() {
         let a = args(Path::new("/tmp/p"), Mode::OffScreen);
@@ -395,7 +417,7 @@ mod tests {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
         };
-        let e = Chromium::launch(&exe, &LaunchOptions::new(base.path())).err().unwrap().to_string();
+        let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string();
         assert!(
             e.contains("exited right after it started") && e.contains("without --no-sandbox"),
             "{e}"
@@ -423,7 +445,7 @@ mod tests {
             flavor: crate::discover::Flavor::Chromium,
             path: "/nonexistent/chrome".into(),
         };
-        let e = Chromium::launch(&exe, &LaunchOptions::new(base.path())).err().unwrap();
+        let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap();
         assert!(matches!(e, Error::Launch(_)));
         assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
     }
@@ -436,9 +458,27 @@ mod tests {
             flavor: crate::discover::Flavor::Chromium,
             path: "/usr/bin/true".into(),
         };
-        let e = Chromium::launch(&exe, &LaunchOptions::new(base.path())).err().unwrap();
+        let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap();
         assert!(matches!(e, Error::Launch(_)), "{e}");
         assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn headful_modes_need_a_display_on_linux_and_say_what_to_do() {
+        let none = |_: &str| None;
+        let only = |name: &'static str, v: &'static str| move |k: &str| (k == name).then(|| v.to_string());
+        for mode in [Mode::OffScreen, Mode::OnScreen] {
+            let e = check_display(mode, true, none).unwrap_err().to_string();
+            assert!(e.contains("no display") && e.contains("xvfb-run"), "{e}");
+            assert!(check_display(mode, true, only("DISPLAY", ":0")).is_ok());
+            assert!(check_display(mode, true, only("WAYLAND_DISPLAY", "wayland-0")).is_ok());
+            assert!(check_display(mode, true, only("DISPLAY", "  ")).is_err(), "a blank DISPLAY is none");
+            assert!(
+                check_display(mode, false, none).is_ok(),
+                "macOS and Windows always have a window system"
+            );
+        }
+        assert!(check_display(Mode::Headless, true, none).is_ok());
     }
 
     #[test]

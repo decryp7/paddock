@@ -169,8 +169,15 @@ jobs:
           path: ${{ env.SPOTTER_TEST_BROWSER_DIR }}
           key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/spotter-render/src/chromium-manifest.toml') }}
 
+      # The renderer's default window is a real (off-screen) one, which needs a display: a virtual one in the container.
       - name: Tests
-        run: cargo test --workspace
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session -- cargo test --workspace
+          else
+            cargo test --workspace
+          fi
 
       - name: sccache statistics
         if: always() && runner.os == 'Linux'
