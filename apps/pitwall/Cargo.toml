@@ -14,7 +14,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.88"
 repository = "https://dev.decryptology.net/decryp7/pitwall"
-version = "1.0.0"
+version = "1.0.1"
 
 # Versions of the dependencies that two or more members use, so they stay on one version.
 [workspace.dependencies]
