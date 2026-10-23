@@ -93,3 +93,21 @@ you cannot afford to change). Use the release build, and keep the Settings > Hel
 | 33 | Enable a rule in `rules.json` while the agent is stopped (the CPU taming screen is not built yet), start it, burn CPU with a dummy | Steps happen in order; quitting the app or stopping the agent releases them |
 | 34 | Inspect the data folder permissions | `agent.json` is readable by the owner only |
 | 35 | Search the logs for a file path or command line you used | None present |
+
+## Extras, backup health and taming proof (WP-13, WP-14, WP-36)
+
+| # | Steps | Expected |
+| --- | --- | --- |
+| 36 | Extras > Sleep while a video call or music plays (macOS, Linux) | The app appears under "Keeping this computer awake" with its reason; on Windows without administrator rights the tab says only an administrator can list blockers |
+| 37 | Extras > Boot after a restart and after a second one | Two rows; the verdict appears from the fourth boot on. Linux: `systemd-analyze blame` entries; Windows: slow apps from the Diagnostics-Performance log |
+| 38 | Extras > Files, choose a folder with two identical large files | Both listed as one duplicate group; the older is kept by default; removing the other goes to the Trash/quarantine and is restorable; selecting both is refused |
+| 39 | Extras > Files, choose your home folder and select a file in Documents | Refused: "in a personal folder" |
+| 40 | Extras > Inventory > Export report, open the file | Hardware and software lists; nothing else |
+| 41 | Extras > Maintenance: a window that is closed now, wait/inspect | "Next window opens ..."; no log read or backup check starts outside it; Rescan on Issues still works |
+| 42 | Backup health with Time Machine on (macOS) | Healthy with the last backup time; unplug the disk: no-backup/cannot-check sentence with a next step |
+| 43 | Backup health on Windows with File History or Windows Backup enabled | Verify the event IDs used (4 and 201) against your PC; report mismatches |
+| 44 | Install restic through Homebrew, export RESTIC_REPOSITORY and RESTIC_PASSWORD_FILE in the shell profile, restart the agent | Found through the login-shell PATH; healthy or stale |
+| 45 | Set the stale limit to 1 hour with a day-old backup | One alarm "... backup is out of date"; a new backup clears it at the next check |
+| 46 | Enable a temporary rule for 1 minute, burn CPU in a dummy | Steps happen; a "Measured" entry appears about 20 s after a step; at the end the rule switches itself off and the app is given back |
+| 47 | With a rule acting on a dummy, bring the dummy to the front | Its CPU limit is released at once and it is not touched while in front |
+

@@ -75,6 +75,23 @@ Each program says why it is listed; a program that runs from a temporary folder 
 which is a reason to look, not a verdict. **Protect** adds it to the list rules never touch, **Hide** removes it from the list,
 and **Forget** in the menu starts learning again. Dyno never ends or removes a program because of this list.
 
+## Extras and backup health
+
+**Extras** (one page, eight tabs) answers small questions without changing anything: *What changed* before things got slow, *Sleep*
+(why the computer will not sleep and what woke it), *Boot* (how long start-up took and what slowed it), *Apps* (network and energy
+per app), *GPU*, *Files* (large and duplicate files in a folder you choose), *Inventory* (installed software, with an export) and
+*Maintenance* (when Dyno's heavier background work may run). If your system does not tell Dyno something, the tab says what and
+why. In *Files*, Dyno pre-selects every copy but the oldest; removing moves files to the Trash or the 7-day quarantine, and one copy
+of each duplicate always stays.
+
+**Backup health** shows whether your backups ran: Time Machine, Windows Backup, File History, restic and Borg. It never starts or
+changes a backup. A backup older than the limit you set (Settings, Backup health; 48 hours by default) raises an alarm. For restic
+and Borg export their repository variables in your shell profile, or give Dyno the tool's folder in Settings. "No backup tool found"
+is a normal answer.
+
+A CPU taming rule can be **temporary** (Rules: Temporary): it ends at the time you chose, gives everything back and switches itself
+off. Activity shows what each rule achieved, for example "Chrome used 78% CPU before and 31% after 21 s".
+
 ## Undo
 
 Everything Dyno does to a process, a startup entry or (later) a file or setting is logged in **Activity** with an **Undo**
