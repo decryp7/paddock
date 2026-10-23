@@ -452,6 +452,39 @@ win.wait_for([](auto& cf) { return cf.by_text("Saved"); }, std::chrono::seconds(
 
 A thin shim package mapping common FlaUI calls, to migrate existing suites, is a Later idea.
 
+### 7.10 AI-assisted recovery (via Pitwall)
+User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go back to the LLM to find out why and try to continue. This applies to Sighter-authored tests (7.8) and, opt-in, to engineers' code tests through the clients.
+
+**When it triggers** (failure path only):
+- a step cannot resolve its target within its wait;
+- the screen does not match the expected screen fingerprint;
+- an unexpected window or dialog appears;
+- the resolver confidence is under the threshold.
+
+**What happens**
+1. Sighter sends Pitwall's vision model (UI-TARS or Qwen-VL via `sighter-ground`, or a new `sighter-recover` preset) the current screenshot, the step's intent ("click Save in the Order dialog"), the expected screen, and the last few steps with their screenshots.
+2. Pitwall answers with a **diagnosis** ("a 'Session expired' dialog covers the window", "the Save button is below the fold", "the app is still loading") and a **proposed recovery plan** from a closed action vocabulary: dismiss a dialog via a named button, scroll, wait N s, press Escape, re-locate with a new anchor, navigate back. Anything outside the vocabulary is discarded when the answer is parsed.
+3. Sighter executes the plan step by step, then retries the original step.
+
+**Guardrails**
+- Only allowed actions, and **no destructive ones**: never "Delete", "Format", "Uninstall", or anything on the deny-list (section 10).
+- Every action goes through the same resolver and confidence rules, so it is never a blind click; an ambiguous or low-confidence target is refused.
+- Bounded attempts (for example 3) and a time budget per step and per run.
+- Scope-bound windows only (the `act` scope binding applies); the panic key still works.
+- `act` must be enabled for the run; without it, recovery degrades to diagnosis only.
+
+**Honest results**: a recovered step is reported as **"passed with recovery"**, a warning state and not a clean pass. The report shows the diagnosis, the actions taken and before/after screenshots. CI chooses how to treat it: fail, warn or pass; default **warn**, so flakiness stays visible.
+
+**Learning loop**: every recovery becomes a **proposal**: add a "handle 'Session expired' dialog" sub-flow, update the step's anchor or wait, or label new elements. The user accepts proposals in the studio; nothing changes a test silently.
+
+**API users**: the C#/Java/C++ clients (and Python/TypeScript) get an opt-in `RecoveryPolicy` (`Off` / `DiagnoseOnly` / `Recover`). A failure exception always includes Pitwall's diagnosis when available, even with recovery off, which helps debugging.
+
+**Pitwall optional**: without Pitwall, behaviour is exactly as before: fail with a screenshot. With Pitwall, the default is `DiagnoseOnly`; `Recover` is opt-in per suite.
+
+**Debrief**: run bundles include the recovery transcript (prompt metadata, diagnosis, actions, screenshots).
+
+**Performance**: a VLM call takes seconds, so it happens only on the failure path, never on normal steps; the 8 GB one-GPU gating of section 9 applies.
+
 ## 8. The resolver and models
 
 Per request, configurable: **cache** (screen fingerprint + query + model version) -> **template** (stored crop, fingerprint matches) ->
@@ -688,6 +721,8 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Script & test | **Run Sighter's own tests**: studio watch mode with overlay, headless `sighter run`, parallel-safe per screen, retries/waits from the resolver, plans as TOML in git (`paddock-testplan`) (7.8) | v1 | Eggplant, Airtest |
 | Script & test | **FlaUI-style object model** in the C#/Java/C++ clients: sessions/windows, `FindFirst`/`FindAll` condition builder with vision-only conditions, `WaitFor`, typed wrappers (Button, TextBox, CheckBox, ComboBox, ListBox, Grid), element properties with `Confidence`/`ResolvedBy`/`ModelVersion`, typed failures (7.9) | v1 | FlaUI (MIT, style only) |
 | Script & test | FlaUI migration shim package (map common FlaUI calls) | Later | FlaUI |
+| Script & test | **AI-assisted recovery via Pitwall**: diagnose-only (default when Pitwall is present) and recover with guardrails (closed action vocabulary, no destructive actions, bounded attempts, "passed with recovery" state, `RecoveryPolicy`, diagnosis in failure exceptions, recovery transcript in Debrief bundles) (7.10) | v1 | (own idea; Functionize/mabl heal differently) |
+| Script & test | Learned recovery handlers auto-proposed across suites | Later | (own idea) |
 | Script & test | Natural-language steps | Later | Eggplant, Functionize |
 | Plans & model | **`.sighterplan` import** (requirements, screens, cases, steps), dry-run report, diff on re-import, unknown elements to record tasks (7.2) | v1 | (family: codebase tool) |
 | Plans & model | **App state graph** from recordings/runs/plans, screen merge and naming (7.1) | v1 | Eggplant DAI |
@@ -727,9 +762,10 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Accessibility-source quality** (when enabled): stale boxes, DPI, virtualised lists, Electron exposing nothing; pixel-verified.
 - **Safety and privacy**: section 10; recordings contain secrets, `act` is dangerous; evidence screenshots in reports and pushes may show secrets (redaction applies before storage and before any export).
 - **Scope**: recorder, studio, server and now a test layer (plans, graph, management, matrices) are four products; v1 is desktop, remote-session windows and browsers, one OS pair per phase. The test layer is cut to the v1 items in section 13; the rest is Later. Sighter-authored tests (7.8) are now v1 and add scope; the cut line is the Later rows, not this.
+- **AI recovery (7.10)**: non-determinism (a recovered run can differ from the last) and masking real bugs (a dialog that should not appear gets dismissed). Mitigated by the "passed with recovery" warning state, CI default "warn", diagnose-only as the default policy, a closed action vocabulary, bounded attempts, and proposals that need human acceptance.
 - **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing (one GPU rule, section 9).
 
-## 15. Open questions for the user (12; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
+## 15. Open questions for the user (14; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
 1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
 2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client? Is the FlaUI-style object model (7.9) the right default surface, with raw verbs underneath?
 3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
@@ -743,6 +779,9 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 11. **Test layer scope in v1**: model graph with coverage and unreached screens (7.1), traceability and JUnit/TRX/Allure export (7.3), data tables and run matrices (7.4) are proposed v1; TestRail/Xray push, accessibility audit, localisation checks and richer performance reports Later. Agree, or is any Later item wanted earlier (for example the TestRail/Xray push if your team uses one)?
 12. **Remote sessions and research spike**: add one Citrix/RDP/Horizon setup (which products do you actually use?) to the week-1 spike, and which of the five legacy apps for the resolver comparison (no confidential screenshots into samples or docs)?
 
+13. **Recovery default for CI**: with Pitwall present, is `DiagnoseOnly` the right default and `Recover` opt-in per suite, and should CI treat "passed with recovery" as warn (proposed), fail or pass?
+14. **Recovery budget**: attempts per step (proposed 3), time budget per step and per run, and which actions of the closed vocabulary (dismiss dialog, scroll, wait, Escape, re-anchor, navigate back) are allowed by default.
+
 ## 16. Size (one capable agent team, rough, excluding polish and design pass)
 - Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RT-DETRv2 + D-FINE, ONNX in `ort`, measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
 - Recorder (capture, events, encoding, preflight, video import, remote-session windows): large, 4 to 6 weeks (three OS, Wayland hardest).
@@ -752,6 +791,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Test layer (new)**: plan import and task backlog 2 to 3 weeks; app state graph, coverage, path generation 3 to 4 weeks; traceability, run sets, JUnit/TRX/Allure 2 to 3 weeks; data tables and matrices 1 to 2 weeks; visual regression completion (regions, levels, baselines UI) 2 to 3 weeks; `paddock-pitwall` crate and batch-priority jobs 1 to 2 weeks. About 11 to 17 weeks, partly parallel.
 - **Sighter-authored tests (new in v1, 7.8)**: step model and TOML (de)serialisation in `paddock-testplan` 1 to 2 weeks; flow-to-steps conversion from the recorder 1 to 2 weeks; visual step editor, data tables and sub-flows in the studio 4 to 6 weeks; runner (`sighter run`, watch mode with overlay, parallel-safe scheduling, retries) 3 to 4 weeks; guarded `act` driver hardening on two OSes 2 to 3 weeks (moved from optional to required); C#/Java/C++ clients, examples and CI 2 to 3 weeks. About 10 to 15 weeks, partly parallel.
 - FlaUI-style object models for C#/Java/C++ on top of the generated clients (7.9): 2 to 3 weeks, partly inside the 2 to 3 weeks for clients above.
+- **AI-assisted recovery (7.10)** (my estimate, not the user's): `sighter-recover` preset and Pitwall contract extension 1 week; trigger detection, closed-vocabulary plan parser and guarded executor 2 to 3 weeks; "passed with recovery" state, reports, Debrief transcript and `RecoveryPolicy` in the clients 1 to 2 weeks; proposals UI in the studio 1 to 2 weeks. About 5 to 8 weeks, partly parallel; adds roughly 1 month to the total.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
 - Total about 10 to 14 months of one team (was 8 to 11 before the Sighter-authored tests and the extra clients), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
