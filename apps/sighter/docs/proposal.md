@@ -501,20 +501,89 @@ User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go bac
 
 **Performance**: a VLM call takes seconds, so it happens only on the failure path, never on normal steps; the 8 GB one-GPU gating of section 9 applies.
 
-### 7.11 Alongside FlaUI (hybrid tests)
+### 7.11 Alongside your UI test framework (hybrid tests)
+User decisions 2026-10-23: engineers who code their tests with FlaUI can keep using FlaUI and use the Sighter API for the UI FlaUI cannot handle, and the same holds for **any other UI testing framework** (Java and Python have their own). This is a key selling point: Sighter is an **add-on, not a replacement**, for existing UIA/Appium/pywinauto/Robot suites. No suite has to be rewritten to adopt it. FlaUI is the lead example.
 
-![Alongside FlaUI: UIA first, vision where UIA cannot see](images/diagrams/svg/uml-seq-hybrid.svg?v=3b425ad8)
+**The shared integration pattern** (works with any framework):
+1. **Scope**: nearly every framework exposes an element's **bounding rectangle** and/or a **window handle (hwnd) or process id**. The adapter passes that to Sighter, which searches only inside that region or window (`region` in `locate`, or a window-bound session from 7.12). A custom-drawn grid or canvas inside an otherwise accessible window is the typical case.
+2. **Fallback helper** ("framework first, vision when it misses"): `FindFirstOrSight(frameworkLocator, sighterQuery)` tries the framework, falls back to vision when it throws or finds nothing, and logs which one answered, so a team sees where its locators fail.
+3. **Shared input in one coordinate space**: framework mouse/keyboard and Sighter actions both use the OS input, so they interleave safely when the adapter does all coordinate conversion in one helper with per-monitor DPI awareness (the same helper as 7.12). Sighter returns the centre in screen coordinates; the adapter converts for the framework when it needs window-relative ones.
+4. **Shared waits**: a wait that accepts a framework condition, a Sighter condition or either.
+5. **Reports**: a Sighter step inside a framework test still produces screenshots and run-bundle entries, through the test runner's context hook (`ITestContext` for NUnit/xUnit, a JUnit extension, a pytest fixture, a Robot listener).
 
-User decision 2026-10-23: engineers who code their tests with FlaUI can keep using FlaUI and use the Sighter API for the UI FlaUI cannot handle. This is a key selling point: Sighter is an **add-on, not a replacement**, for existing UIA/FlaUI suites. No suite has to be rewritten to adopt it.
+Adapters are thin client-side layers over the HTTP API (section 7); the object model of 7.9 is reused. Frameworks are third-party peer dependencies, never bundled; the adapters are MIT and share no code with them.
 
-A small C# package, **`Sighter.FlaUI`**, with FlaUI (MIT) as a **peer dependency, not bundled**:
-- **Scope from UIA**: `uiaElement.Sighter().FindFirst(cf => ...)` searches only inside a FlaUI `AutomationElement`'s `BoundingRectangle` (for example a custom-drawn grid or a canvas inside an otherwise UIA-friendly window); `window.Sighter()` does the same for a whole FlaUI `Window`. The result is a Sighter element from 7.9.
-- **Fallback helper**: `window.FindFirstOrSight(cf => cf.ByAutomationId("Save"), s => s.ByText("Save").And(s.ByControlType(Button)))` tries UIA first, falls back to vision, and logs which one answered (so a team sees where UIA is failing).
-- **Mixed input**: both sides use the OS input. FlaUI `Mouse` and Sighter actions interleave safely because they share the coordinate space and DPI handling: per-monitor DPI awareness, with all conversions in one helper (the same helper as 7.12).
-- **Shared waits**: `Retry`-style waits that accept a UIA condition, a Sighter condition or either.
-- **Reports**: a Sighter step inside a FlaUI test still produces screenshots and run-bundle entries, through an `ITestContext` hook for NUnit and xUnit.
-- **Java**: the equivalent for UIA-on-Java users is a hybrid with WinAppDriver/Appium-Windows sessions: the Appium element's rectangle scopes a Sighter search, and Sighter is the fallback when a locator fails. (WinAppDriver is unmaintained; Appium's Windows driver is the recommended base, section 13.)
-- **C++**: hybrid through raw coordinates and regions: pass a rectangle from the UIA code to `locate` as `region`, and use the returned centre with the existing input code.
+**Frameworks checked** (status and licence from the GitHub/PyPI/npm records on 2026-10-23; (verify) where I could not confirm from an official record):
+
+| Framework | Language | Status and licence | Scope from the framework | Sighter adapter | v1 / Later |
+|---|---|---|---|---|---|
+| FlaUI (UIA2/UIA3) | C# | Active (pushed 2026-08), MIT ([repo](https://github.com/FlaUI/FlaUI)) | `AutomationElement.BoundingRectangle`; `Window` / process id | `Sighter.FlaUI` | **v1** |
+| WinAppDriver | C# / any (WebDriver server) | MIT, but last push 2025-04: effectively unmaintained ([repo](https://github.com/microsoft/WinAppDriver)); Appium recommends its Windows driver | element rect via WebDriver | `sighter-appium` | Later (recipe; do not depend on it) |
+| Appium Windows Driver / NovaWindows driver | any | Active (pushed 2026-10), Apache-2.0 ([windows](https://github.com/appium/appium-windows-driver), [nova](https://github.com/AutomateThePlanet/appium-novawindows-driver)) | element rect, window handle | `sighter-appium` | **v1** |
+| TestStack.White | C# | Legacy, last push 2023-07, MIT or Apache-2.0 dual ([licence](https://github.com/TestStack/White/blob/master/LICENSE.txt)) | UIA element bounds | `Sighter.FlaUI`-style recipe | Later (recipe) |
+| Ranorex | C# / VB.NET | Commercial; vendor docs only (verify) | element `Element.ScreenRectangle` (verify) | recipe | Later |
+| Appium Java client | Java | Active (pushed 2026-10), Apache-2.0 ([repo](https://github.com/appium/java-client)) | `WebElement.getRect()` | `sighter-appium` (Java) | **v1** |
+| Selenium WebDriver | Java/Python/JS/C# | Active, Apache-2.0 ([repo](https://github.com/SeleniumHQ/selenium)) | `getRect()` of web elements; for web parts of hybrid apps | `sighter-appium` pattern (same rect scope) | Later (recipe) |
+| AssertJ Swing (successor of FEST Swing) | Java | Active (pushed 2026-01); licence per the repo, Apache-2.0 for FEST lineage (verify); FEST itself dead since 2015 | component `getBounds()` + `getLocationOnScreen()` | recipe | Later |
+| TestFX | Java (JavaFX) | Last push 2024-02, slow; licence MIT/Apache-style (verify) | node `localToScreen(getBoundsInLocal())` | recipe | Later |
+| Marathon / Jemmy | Java (Swing/AWT) | Jemmy v2 repo is archived (OpenJDK, GPL-2.0) ([repo](https://github.com/openjdk/jemmy-v2)); Marathon status (verify) | component bounds | recipe | Later |
+| SikuliX Java API | Java | MIT, active (repo moved to oculix-org, pushed 2026-07) ([repo](https://github.com/RaiMan/SikuliX1)); image-based | match region | `sighter-appium`-style drop-in (see positioning) | Later |
+| Winium | C# / Java (WebDriver) | Legacy, last push 2023-12, MPL-2.0 ([repo](https://github.com/2gis/Winium)) | element rect | none | Later (recipe only) |
+| pywinauto (win32 + UIA backends) | Python | Active (release 2026-10), BSD-3-Clause ([repo](https://github.com/pywinauto/pywinauto)) | `element.rectangle()`, `handle`, `process_id()` | `sighter-pywinauto` | **v1** |
+| `uiautomation` (yinkaisheng) | Python | Active enough (2.0.29, 2025-08), Apache-2.0 ([repo](https://github.com/yinkaisheng/Python-UIAutomation-for-Windows)) | `control.BoundingRectangle`, `NativeWindowHandle` | `sighter-pywinauto` pattern | Later |
+| PyAutoGUI | Python | Stale (0.9.54, 2023-05), BSD-3-Clause ([repo](https://github.com/asweigart/pyautogui)); coordinates and image matching | none (screen coordinates) | `sighter-pyautogui` drop-in | Later |
+| Appium Python client | Python | Active (pushed 2026-10), Apache-2.0 ([repo](https://github.com/appium/python-client)) | `element.rect` | `sighter-appium` (Python) | **v1** |
+| Selenium / Playwright for Python | Python | Active, Apache-2.0 ([playwright](https://github.com/microsoft/playwright)) | `bounding_box()` | recipe | Later |
+| Robot Framework + libraries: FlaUILibrary (MIT, release 2026-10), RPA Framework Windows (Apache-2.0, 2026-05), AppiumLibrary (Apache-2.0, 2025-12), SikuliLibrary (Apache-2.0, 2026-05) | Robot (Python/.NET) | Active ([FlaUILibrary](https://github.com/GDATASoftwareAG/robotframework-flaui), [RPA Framework](https://github.com/robocorp/rpaframework)) | each library's element/region keywords | Robot `SighterLibrary` (keywords over the Python client) | **v1** |
+| Playwright / WebdriverIO | JS/TS | Active, Apache-2.0 / MIT ([playwright](https://github.com/microsoft/playwright), [wdio](https://github.com/webdriverio/webdriverio)); web and Electron | `boundingBox()` / `getLocation()`+`getSize()` | `sighter-appium` (JS) | Later (WDIO also speaks Appium) |
+| nut.js | JS/TS | Desktop automation with image matching; licence and maintenance changed over time (verify on the official repo) | screen regions | `sighter-nutjs` | Later |
+| Squish | C++ (scripts in Python/JS) | Commercial (Qt/Froglogic), vendor docs only (verify) | object `screenRectangle` (verify) | recipe | Later |
+| Qt Test | C++ | Part of Qt (LGPL/GPL/commercial, verify) | `QWidget::mapToGlobal(rect)` | raw-region recipe | Later |
+| Raw UIA COM | C++ | Microsoft API | `CurrentBoundingRectangle`, `CurrentNativeWindowHandle` | raw-region recipe | Later |
+| Appium Mac2 driver (XCUITest) | any | Active (pushed 2026-10), Apache-2.0 ([repo](https://github.com/appium/appium-mac2-driver)) | element rect | `sighter-appium` | Later (macOS phase) |
+| AT-SPI / dogtail | Python (Linux) | dogtail active (release 2026-10); licence GPL-style (verify) | `node.position`/`size` | recipe | Later (Linux phase) |
+| LDTP | Python | Legacy, last push 2021-03, LGPL-2.1 ([repo](https://github.com/ldtp/ldtp2)) | | none | Later (recipe only) |
+
+**v1 adapters**: `Sighter.FlaUI` (C#), `sighter-pywinauto` (Python), `sighter-appium` (Java and Python; the JS flavour follows), and the Robot Framework `SighterLibrary`. Everything else is **Later**, with a documented recipe (a few lines using the rectangle or hwnd the framework gives you) rather than a package. Appium is the common base for Java, Python and JS users, so one `sighter-appium` design (element rect or session window as scope) covers all three language bindings.
+
+**Examples**
+
+```csharp
+// C# + FlaUI (NUnit)
+using var app = Application.Launch("Editor.exe");
+using var automation = new UIA3Automation();
+var window = app.GetMainWindow(automation);
+window.FindFirstDescendant(cf => cf.ByAutomationId("Menu")).Click();           // UIA is fine here
+var grid = window.FindFirstDescendant(cf => cf.ByAutomationId("CustomGrid")); // custom-drawn: UIA sees one pane
+grid.Sighter().FindFirst(s => s.ByText("Total").And(s.ByControlType(ControlType.Cell)))   // vision, inside the grid's rectangle
+    .AsCell().Click();
+window.FindFirstOrSight(cf => cf.ByAutomationId("Save"), s => s.ByText("Save").And(s.ByControlType(ControlType.Button))).AsButton().Click();
+```
+
+```python
+# Python + pywinauto
+from pywinauto import Application
+from sighter_pywinauto import sight            # adapter, illustrative names
+app = Application(backend="uia").connect(title_re="Editor.*")
+dlg = app.window(title_re="Editor.*")
+canvas = dlg.child_window(auto_id="Canvas")    # one UIA pane
+sight(canvas).find_first(text="Export", cls="button").click()   # search inside canvas.rectangle()
+dlg.child_window(title="Save", control_type="Button").click()
+```
+
+```java
+// Java + Appium (JUnit 5)
+WebElement pane = driver.findElement(AppiumBy.accessibilityId("CustomGrid"));
+Rectangle r = pane.getRect();                      // scope from the framework
+Sighter.on(driver).inside(r).findFirst(cf -> cf.byText("Total").and(cf.byControlType(ControlType.CELL))).click();
+Sighter.on(driver).findFirstOrSight(AppiumBy.accessibilityId("Save"), cf -> cf.byText("Save")).click();
+```
+
+(All adapter names and methods above are illustrative; the generated surface follows the OpenAPI operation names and 7.9.)
+
+**Java** also covers Swing (AssertJ Swing, Marathon/Jemmy), JavaFX (TestFX) and web parts (Selenium) by the rectangle recipe: component bounds to screen coordinates, then `locate` with `region`. **C++** (Qt Test, Squish, raw UIA COM) uses raw coordinates and regions the same way.
+
+**Positioning against image-based tools** (SikuliX, PyAutoGUI, nut.js, SikuliLibrary): they locate by template images or pixel colours, which breaks on DPI, theme, font and minor UI changes. Sighter replaces brittle template matching with trained detectors plus OCR and layout anchors, and the active-learning loop repairs it when the UI changes. Their users do not have to migrate at once: the same script can call Sighter for the lookups that keep breaking and keep SikuliX/PyAutoGUI/nut.js for input or for the lookups that work, and a drop-in `find`/`click` shim (Later) maps their common calls. Sighter does not compete with the UIA/Appium frameworks; it covers what they cannot see.
 
 ### 7.12 Multi-application tests
 User decision 2026-10-23: a test case may involve multiple applications running and switching.
@@ -763,8 +832,8 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Script & test | **Sighter-authored tests**: record a flow into steps, visual step editor (target, action, assertion, wait), data tables, sub-flows (7.8) | v1 | Eggplant, Airtest, Playwright codegen |
 | Script & test | **Run Sighter's own tests**: studio watch mode with overlay, headless `sighter run`, parallel-safe per screen, retries/waits from the resolver, plans as TOML in git (`paddock-testplan`) (7.8) | v1 | Eggplant, Airtest |
 | Script & test | **FlaUI-style object model** in the C#/Java/C++ clients: sessions/windows, `FindFirst`/`FindAll` condition builder with vision-only conditions, `WaitFor`, typed wrappers (Button, TextBox, CheckBox, ComboBox, ListBox, Grid), element properties with `Confidence`/`ResolvedBy`/`ModelVersion`, typed failures (7.9) | v1 | FlaUI (MIT, style only) |
-| Script & test | **`Sighter.FlaUI` hybrid package** (C#, FlaUI as peer dependency): scope a vision search to a UIA element or window, `FindFirstOrSight` UIA-then-vision fallback with logging, shared waits, `ITestContext` reporting hook (7.11) | v1 | FlaUI (MIT, peer dependency only) |
-| Script & test | Java hybrid with Appium-Windows sessions; C++ hybrid via regions and coordinates (7.11) | v1 as documented recipes, packaged helper Later | Appium |
+| Script & test | **Hybrid adapters v1: `Sighter.FlaUI` (C#), `sighter-pywinauto` (Python), `sighter-appium` (Java, Python), Robot Framework `SighterLibrary`**: scope a vision search to a framework element rect/window, "framework first, vision when it misses" fallback with logging, shared waits, runner reporting hooks (7.11) | v1 | FlaUI, pywinauto, Appium, Robot (peer dependencies only) |
+| Script & test | Further hybrid adapters and recipes: `sighter-appium` JS, `sighter-nutjs`, `sighter-pyautogui` shim, Swing/JavaFX/Selenium/Playwright/Qt/Squish/raw-UIA/Mac2/dogtail recipes; drop-in `find`/`click` shim for SikuliX/PyAutoGUI/nut.js users (7.11) | Later | SikuliX, PyAutoGUI, nut.js |
 | Script & test | **Multi-application tests**: several sessions per test, per-app models plus OS dialogs model, `Activate`/`WaitForWindow`/`WaitForProcess`, cross-app copy/paste/drag, `Sighter.Desktop` search, per-monitor DPI, focus-following recorder (7.12) | v1 | UiPath, Power Automate Desktop |
 | Script & test | FlaUI migration shim package (map common FlaUI calls) | Later | FlaUI |
 | Script & test | **AI-assisted recovery via Pitwall**: diagnose-only (default when Pitwall is present) and recover with guardrails (closed action vocabulary, no destructive actions, bounded attempts, "passed with recovery" state, `RecoveryPolicy`, diagnosis in failure exceptions, recovery transcript in Debrief bundles) (7.10) | v1 | (own idea; Functionize/mabl heal differently) |
@@ -828,7 +897,7 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 13. **Recovery default for CI**: with Pitwall present, is `DiagnoseOnly` the right default and `Recover` opt-in per suite, and should CI treat "passed with recovery" as warn (proposed), fail or pass?
 14. **Recovery budget**: attempts per step (proposed 3), time budget per step and per run, and which actions of the closed vocabulary (dismiss dialog, scroll, wait, Escape, re-anchor, navigate back) are allowed by default.
 
-15. **Hybrid package scope**: is `Sighter.FlaUI` (C#, FlaUI peer dependency) wanted as a first-party package in `sighter-clients`, and which FlaUI versions (FlaUI.UIA3 and UIA2) must it support? For Java, is the Appium-Windows recipe enough, or is a packaged helper wanted?
+15. **Which adapters in v1** (7.11): proposed `Sighter.FlaUI` (UIA2 and UIA3), `sighter-pywinauto`, `sighter-appium` (Java and Python) and the Robot `SighterLibrary`; the rest Later as recipes. Which frameworks do your teams actually use (Swing, JavaFX, Qt/Squish, SikuliX, nut.js), and should any of them move to v1? Adapters live in `sighter-clients` as MIT packages.
 16. **Multi-application limits**: how many concurrent sessions and models per test (VRAM, section 12), and should the OS dialogs model ship as a starter model per OS (it would be trained on our own recordings of OS dialogs, no third-party data)?
 
 ## 16. Size (one capable agent team, rough, excluding polish and design pass)
@@ -841,11 +910,11 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Sighter-authored tests (new in v1, 7.8)**: step model and TOML (de)serialisation in `paddock-testplan` 1 to 2 weeks; flow-to-steps conversion from the recorder 1 to 2 weeks; visual step editor, data tables and sub-flows in the studio 4 to 6 weeks; runner (`sighter run`, watch mode with overlay, parallel-safe scheduling, retries) 3 to 4 weeks; guarded `act` driver hardening on two OSes 2 to 3 weeks (moved from optional to required); C#/Java/C++ clients, examples and CI 2 to 3 weeks. About 10 to 15 weeks, partly parallel.
 - FlaUI-style object models for C#/Java/C++ on top of the generated clients (7.9): 2 to 3 weeks, partly inside the 2 to 3 weeks for clients above.
 - **AI-assisted recovery (7.10)** (my estimate, not the user's): `sighter-recover` preset and Pitwall contract extension 1 week; trigger detection, closed-vocabulary plan parser and guarded executor 2 to 3 weeks; "passed with recovery" state, reports, Debrief transcript and `RecoveryPolicy` in the clients 1 to 2 weeks; proposals UI in the studio 1 to 2 weeks. About 5 to 8 weeks, partly parallel; adds roughly 1 month to the total.
-- **FlaUI hybrid package (7.11)** (my estimate, not the user's): `Sighter.FlaUI` C# package with scoping, fallback, shared waits and the `ITestContext` hook 2 to 3 weeks (shares the DPI helper with 7.12); Java and C++ recipes and examples about 1 week. About 3 to 4 weeks.
+- **Hybrid adapters (7.11)** (my estimate, not the user's): shared adapter core (scope, fallback, DPI helper shared with 7.12, reporting hook) 1 to 2 weeks; `Sighter.FlaUI` 1 to 2 weeks; `sighter-pywinauto` 1 week; `sighter-appium` (Java and Python) 2 weeks; Robot `SighterLibrary` 1 week; recipes and docs for the Later frameworks about 1 week. About 7 to 9 weeks, partly parallel (was 3 to 4 weeks for FlaUI alone). The Later adapters would add roughly 1 to 2 weeks each.
 - **Multi-application tests (7.12)** (my estimate, not the user's): multi-session model, per-app model auto-selection, OS dialogs model, activation/focus verification 3 to 4 weeks; `Desktop` search with occlusion and z-order, per-monitor DPI helper 2 to 3 weeks; focus-following recorder and per-app steps in the editor 2 to 3 weeks; Debrief identity and log correlation about 1 week. About 8 to 11 weeks, partly parallel.
-- Together 7.11 and 7.12 add roughly 1.5 to 2.5 months to the total.
+- Together 7.11 and 7.12 add roughly 2 to 3 months to the total.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
-- Total about 13 to 17 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients, AI recovery, the FlaUI hybrid and multi-application tests), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
+- Total about 13 to 18 months of one team (was 8 to 11 before the Sighter-authored tests, the extra clients, AI recovery, the FlaUI hybrid and multi-application tests), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
 ## 17. Sources
 - RT-DETRv2: https://arxiv.org/pdf/2407.17140 ; DEIMv2 (DINOv3): https://arxiv.org/pdf/2509.20787 ; DEIM repo: https://github.com/Intellindust-AI-Lab/DEIM
