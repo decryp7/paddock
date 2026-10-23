@@ -52,6 +52,19 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  BackupReport,
+  BootReport,
+  ChangeTimeline,
+  ChangesQuery,
+  FinderQuery,
+  FinderResult,
+  GpuReport,
+  InventoryFormat,
+  MaintenanceStatus,
+  SavedInventory,
+  SleepReport,
+  SoftwareInventory,
+  UsageReport,
   IssuesOverview,
   IssuesQuery,
   SavedIssues,
@@ -496,6 +509,63 @@ export class TauriBackend implements DynoBackend {
 
   trayQuit(): Promise<void> {
     return this.command<void>('tray_quit');
+  }
+
+  // ----------------------------------------------------------------------------------------------- extras, backup
+
+  changes(query: ChangesQuery): Promise<ChangeTimeline> {
+    return this.request({ changes: { query } });
+  }
+
+  sleepBlockers(): Promise<SleepReport> {
+    return this.request('sleepBlockers');
+  }
+
+  bootAnalysis(): Promise<BootReport> {
+    return this.request('bootAnalysis');
+  }
+
+  appUsage(): Promise<UsageReport> {
+    return this.request('appUsage');
+  }
+
+  gpuProcesses(): Promise<GpuReport> {
+    return this.request('gpuProcesses');
+  }
+
+  softwareInventory(): Promise<SoftwareInventory> {
+    return this.request('softwareInventory');
+  }
+
+  /** The shell shows the OS save dialog and asks the agent to write the report there. */
+  saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null> {
+    return this.command<SavedInventory | null>('save_inventory_report', { format }, DIALOG_TIMEOUT_MS);
+  }
+
+  /** The shell shows the OS folder dialog and answers the chosen path (or null). */
+  pickFolder(): Promise<string | null> {
+    return this.command<string | null>('pick_folder', undefined, DIALOG_TIMEOUT_MS);
+  }
+
+  findFiles(query: FinderQuery): Promise<FinderResult> {
+    // Walking and hashing a big folder takes a while.
+    return this.request({ findFiles: { query } }, LOG_READ_TIMEOUT_MS);
+  }
+
+  removeFoundFiles(scanId: string, ids: string[], mode: DeleteMode): Promise<CleanupOutcome> {
+    return this.request({ removeFoundFiles: { scanId, ids, mode } }, LOG_READ_TIMEOUT_MS);
+  }
+
+  maintenance(): Promise<MaintenanceStatus> {
+    return this.request('maintenance');
+  }
+
+  backup(): Promise<BackupReport> {
+    return this.request('backup');
+  }
+
+  refreshBackup(): Promise<BackupReport> {
+    return this.request('refreshBackup', LOG_READ_TIMEOUT_MS);
   }
 
   // --------------------------------------------------------------------------------------------------- plumbing

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { IpLookupSettings, Settings, Theme, TrayItem, UnusualSettings } from '../../core/api.types';
+import type { BackupSettings, BackupTool, IpLookupSettings, Settings, Theme, TrayItem, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -11,6 +11,7 @@ import { SettingsStore } from '../../state/settings.store';
 import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-presets';
 import { TrayItemsEditor } from './tray-items-editor';
 import { HelperCard } from '../helper/helper-card';
+import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 
 /** Settings: appearance, start-up, sampling and retention, the tray, alert thresholds, the observe-only posture, plugins and About. */
 @Component({
@@ -29,7 +30,7 @@ import { HelperCard } from '../helper/helper-card';
         }
         @if (dirty()) {
           <button type="button" class="btn" (click)="revert()">Discard changes</button>
-          <button type="button" class="btn primary" [disabled]="store.saving()" (click)="save()">Save changes</button>
+          <button type="button" class="btn primary" [disabled]="store.saving() || !!backupProblem()" (click)="save()">Save changes</button>
         }
       </header>
 
@@ -161,6 +162,30 @@ import { HelperCard } from '../helper/helper-card';
                 <label class="num-in"><input class="input" type="number" min="0" max="60" [disabled]="!unusual().enabled" aria-label="Days of quiet learning" [ngModel]="unusual().learningDays" (ngModelChange)="setUnusual({ learningDays: +$event })" /><span>days</span></label>
               </div>
             </section>
+
+            <section class="card" aria-label="Backup health" id="backup">
+              <h2>Backup health</h2>
+              <p class="sub">Dyno reads the state of Time Machine, Windows Backup, File History, restic, Borg and Duplicati on the Backup health page. It never runs or manages a backup.</p>
+              <div class="row">
+                <div class="lbl"><strong>Tell me when a backup is out of date</strong><small>Checks every 6 hours, inside the maintenance windows, and raises an alarm.</small></div>
+                <dy-switch [checked]="backup().alertWhenStale" (changed)="setBackup({ alertWhenStale: $event })" label="Tell me when a backup is out of date" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Out of date after</strong><small>A backup older than this counts as stale (1 hour to 90 days).</small></div>
+                <label class="num-in"><input class="input" type="number" min="1" max="2160" aria-label="Hours until a backup is out of date" [ngModel]="backup().staleAfterHours" (ngModelChange)="setBackup({ staleAfterHours: +$event })" /><span>hours</span></label>
+              </div>
+              @for (t of overridable; track t.tool) {
+                <div class="row top">
+                  <div class="lbl"><strong>Where {{ t.name }} is installed</strong><small>Only if Dyno cannot find it. Full folder paths, one per line; searched before the usual places.</small></div>
+                  <div class="ipt">
+                    <textarea class="input" rows="2" spellcheck="false" [attr.aria-label]="t.name + ' folders'" [ngModel]="overrideValue(t.tool)" (ngModelChange)="setOverride(t.tool, $event)"></textarea>
+                    @if (overrideProblem(t.tool); as p) {
+                      <small class="problem" role="alert">{{ p }}</small>
+                    }
+                  </div>
+                </div>
+              }
+            </section>
           </div>
         }
       </dy-async>
@@ -208,6 +233,9 @@ import { HelperCard } from '../helper/helper-card';
     .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding: var(--sp-3) 0; border-top: 1px solid var(--border-subtle); }
     .row.off { opacity: 0.55; }
     .ipt { display: flex; gap: var(--sp-2); flex: 1 1 380px; max-width: 560px; }
+    .row.top { align-items: flex-start; }
+    .ipt:has(textarea) { flex-direction: column; gap: var(--sp-1); }
+    textarea.input { resize: vertical; min-height: 56px; font: var(--fw-regular) 12px / 1.4 var(--font-mono); padding: var(--sp-2) var(--sp-3); height: auto; }
     .ipt .input { flex: 1; min-width: 0; }
     .problem { color: var(--bad); font-size: var(--fs-sm); }
     .lbl { display: grid; gap: 2px; min-width: 0; }
@@ -259,7 +287,10 @@ export class SettingsPage implements OnInit {
     // A fresh copy whenever the saved settings change (first load, after saving).
     effect(() => {
       const s = this.store.settings();
-      untracked(() => this.draft.set(s ? structuredClone(s) : null));
+      untracked(() => {
+        this.draft.set(s ? structuredClone(s) : null);
+        this.rawOverrides.set({});
+      });
     });
   }
 
@@ -294,6 +325,28 @@ export class SettingsPage implements OnInit {
   protected setUnusual(p: Partial<UnusualSettings>): void {
     this.draft.update((d) => (d ? { ...d, unusual: { ...(d.unusual ?? { enabled: true, learningDays: 7 }), ...p } } : d));
   }
+  protected readonly backup = computed<BackupSettings>(() => this.draft()?.backup ?? { alertWhenStale: true, staleAfterHours: 48, overrides: [] });
+  protected readonly overridable = BACKUP_TOOLS.filter((t) => OVERRIDABLE.includes(t.tool));
+  /** What the person typed in each folder box (kept as typed, so a new line is not swallowed while they type). */
+  private readonly rawOverrides = signal<Partial<Record<BackupTool, string>>>({});
+  protected readonly backupProblem = computed(() => validateBackup(this.backup()));
+  protected setBackup(p: Partial<BackupSettings>): void {
+    this.draft.update((d) => (d ? { ...d, backup: { ...this.backup(), ...p } } : d));
+  }
+  protected overrideValue(tool: BackupTool): string {
+    return this.rawOverrides()[tool] ?? overrideText(this.backup(), tool);
+  }
+  protected setOverride(tool: BackupTool, text: string): void {
+    this.rawOverrides.update((r) => ({ ...r, [tool]: text }));
+    this.draft.update((d) => (d ? { ...d, backup: withOverride(this.backup(), tool, text) } : d));
+  }
+  protected overrideProblem(tool: BackupTool): string | null {
+    for (const dir of this.backup().overrides.find((o) => o.tool === tool)?.dirs ?? []) {
+      const p = folderProblem(dir);
+      if (p) return p;
+    }
+    return null;
+  }
   protected setAlerts(p: Partial<Settings['alerts']>): void {
     this.draft.update((d) => (d ? { ...d, alerts: { ...d.alerts, ...p } } : d));
   }
@@ -307,6 +360,7 @@ export class SettingsPage implements OnInit {
   protected revert(): void {
     const s = this.store.settings();
     this.draft.set(s ? structuredClone(s) : null);
+    this.rawOverrides.set({});
     if (s) this.store.applyTheme(s.theme);
   }
 

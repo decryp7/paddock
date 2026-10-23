@@ -33,6 +33,8 @@ export const routes: Routes = [
       { path: 'diagnostics', title: 'Diagnostics · Dyno', loadComponent: () => import('./features/diagnostics/diagnostics-page').then((m) => m.DiagnosticsPage) },
       { path: 'cleanup', title: 'Cleanup · Dyno', loadComponent: () => import('./features/cleanup/cleanup-page').then((m) => m.CleanupPage) },
       { path: 'health', title: 'Health · Dyno', loadComponent: () => import('./features/health/health-page').then((m) => m.HealthPage) },
+      { path: 'backup', title: 'Backup health · Dyno', loadComponent: () => import('./features/backup/backup-page').then((m) => m.BackupPage) },
+      { path: 'extras', title: 'Extras · Dyno', loadComponent: () => import('./features/extras/extras-page').then((m) => m.ExtrasPage) },
       { path: 'tuning', title: 'Tuning · Dyno', loadComponent: () => import('./features/tuning/tuning-page').then((m) => m.TuningPage) },
       { path: 'settings', title: 'Settings · Dyno', loadComponent: () => import('./features/settings/settings-page').then((m) => m.SettingsPage) },
       { path: '**', redirectTo: '' },

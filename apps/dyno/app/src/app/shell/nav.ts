@@ -23,6 +23,8 @@ export const NAV: NavItem[] = [
   { path: '/recorder', label: 'Flight recorder', icon: 'camera', keywords: 'timeline capture snapshot last ten minutes' },
   { path: '/cleanup', label: 'Cleanup', icon: 'cleanup', keywords: 'temp caches disk space free up quarantine trash recycle bin developer build output' },
   { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
+  { path: '/backup', label: 'Backup health', icon: 'restore', keywords: 'backup time machine restic borg file history duplicati stale last backup' },
+  { path: '/extras', label: 'Extras', icon: 'layers', keywords: 'what changed installs updates sleep wake blockers boot startup time apps network energy gpu large files duplicates software inventory maintenance windows' },
   { path: '/tuning', label: 'Tuning', icon: 'sparkle', keywords: 'power plan sleep hibernation battery charge limit indexing visual effects background apps suggestions undo' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },
   { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences helper administrator install uninstall' },

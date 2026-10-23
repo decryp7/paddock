@@ -89,7 +89,8 @@ export const RulesStore = signalStore(
       toggleRule(id: string, enabled: boolean): Promise<boolean> {
         const rs = store.ruleSet();
         if (!rs) return Promise.resolve(false);
-        const rules = rs.rules.map((r) => (r.id === id ? { ...r, enabled } : r));
+        // A rule that is off holds no end time: turning it on later starts open-ended.
+        const rules = rs.rules.map((r) => (r.id === id ? { ...r, enabled, expiresAt: enabled ? r.expiresAt : null } : r));
         return mutate(() => backend.saveRules({ ...rs, rules }), () => null);
       },
       setProtected(list: string[]): Promise<boolean> {

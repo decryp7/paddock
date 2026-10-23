@@ -11,7 +11,9 @@ import { RulesStore } from '../../state/rules.store';
 import { RuleDialog, type RuleDialogData } from './rule-dialog';
 import { RulesLive } from './rules-live';
 import { RulesProtected } from './rules-protected';
-import { conditionSummary, duplicateRule, ladderSummary, profilesLabel, stepDetails } from './rules-model';
+import { injectNow } from '../../shared/now';
+import { TemporaryDialog } from './temporary-dialog';
+import { TEMPORARY_CHOICES, type TemporaryChoice, conditionSummary, duplicateRule, expiryFor, ladderSummary, profilesLabel, remainingText, stepDetails } from './rules-model';
 
 /** CPU taming and profiles: the rules (all off until enabled), what is in effect now, what is protected and what happened. */
 @Component({
@@ -38,7 +40,7 @@ import { conditionSummary, duplicateRule, ladderSummary, profilesLabel, stepDeta
         <dy-async [loaded]="store.loaded()" [error]="store.error()" [empty]="store.ruleSet()?.rules?.length === 0" emptyTitle="No rules yet" emptyText="A rule lowers an app that keeps the CPU busy, then lets go when it calms down." emptyIcon="rules" what="rules" [rows]="4" (retry)="store.load()">
           <table class="table" aria-label="Rules">
             <thead>
-              <tr><th class="on">Enabled</th><th>Rule</th><th>Ladder</th><th>Profiles</th><th class="act"><span class="visually-hidden">Actions</span></th></tr>
+              <tr><th class="on">Enabled</th><th>Rule</th><th>Ladder</th><th>Profiles</th><th class="dur">Duration</th><th class="act"><span class="visually-hidden">Actions</span></th></tr>
             </thead>
             <tbody>
               @for (r of store.ruleSet()?.rules ?? []; track r.id) {
@@ -50,6 +52,11 @@ import { conditionSummary, duplicateRule, ladderSummary, profilesLabel, stepDeta
                   </td>
                   <td class="ladder"><span class="truncate" [title]="ladder(r)">{{ ladder(r) }}</span></td>
                   <td class="profiles"><span class="truncate" [title]="profiles(r)">{{ profiles(r) }}</span></td>
+                  <td class="dur">
+                    <button type="button" class="dur-btn" [class.temp]="r.enabled && r.expiresAt !== null" [disabled]="!r.enabled || store.saving()" [attr.aria-label]="'How long ' + r.name + ' stays on'" [title]="r.enabled ? 'Choose how long this rule stays on' : 'Turn the rule on to make it temporary'" [cdkMenuTriggerFor]="durMenu" [cdkMenuTriggerData]="{ rule: r }">
+                      {{ remaining(r) }} <dy-icon name="chevron-down" />
+                    </button>
+                  </td>
                   <td class="act">
                     <span class="acts">
                       <button type="button" class="btn ghost icon sm" [attr.aria-label]="'Edit ' + r.name" matTooltip="Edit" (click)="edit(r)"><dy-icon name="edit" /></button>
@@ -64,9 +71,19 @@ import { conditionSummary, duplicateRule, ladderSummary, profilesLabel, stepDeta
         </dy-async>
       </section>
 
+      <p class="fixed-note"><dy-icon name="shield-check" /> Never touches the app in front; gives it back its CPU the moment you switch to it.</p>
+
       <dy-rules-live />
       <dy-rules-protected />
     </div>
+
+    <ng-template #durMenu let-rule="rule">
+      <div class="menu" cdkMenu [attr.aria-label]="'Duration of ' + rule.name">
+        @for (c of choices; track c.id) {
+          <button type="button" class="menu-item" cdkMenuItem (cdkMenuItemTriggered)="setTemporary(rule, c.id)">{{ c.label }}</button>
+        }
+      </div>
+    </ng-template>
 
     <ng-template #menu let-rule="rule">
       <div class="menu" cdkMenu [attr.aria-label]="'Actions for ' + rule.name">
@@ -88,9 +105,17 @@ import { conditionSummary, duplicateRule, ladderSummary, profilesLabel, stepDeta
     .table td, .table th { overflow: hidden; text-overflow: ellipsis; }
     .table th:first-child, .table td:first-child { padding-left: var(--sp-4); }
     .on { width: 84px; }
-    .name { width: 42%; }
-    .ladder { width: 26%; color: var(--text-2); }
-    .profiles { width: 14%; color: var(--text-2); }
+    .name { width: 36%; }
+    .ladder { width: 24%; color: var(--text-2); }
+    .profiles { width: 12%; color: var(--text-2); }
+    .dur { width: 164px; }
+    .dur-btn { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 26px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3); font: var(--fw-regular) var(--fs-sm) / 1 var(--font-sans); cursor: pointer; white-space: nowrap; }
+    .dur-btn dy-icon { --icon-size: 13px; opacity: 0.6; }
+    .dur-btn:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
+    .dur-btn.temp { color: var(--accent-text); font-weight: var(--fw-medium); }
+    .dur-btn:disabled { cursor: default; opacity: 0.6; }
+    .fixed-note { margin: 0; display: flex; gap: var(--sp-2); align-items: center; color: var(--text-3); font-size: var(--fs-sm); }
+    .fixed-note dy-icon { --icon-size: 15px; }
     .act { width: 112px; text-align: right; padding-right: var(--sp-2) !important; }
     .table tbody tr { outline: none; }
     .table tbody tr:focus-visible td { background: var(--surface-hover); }
@@ -111,12 +136,30 @@ export class RulesPage implements OnInit {
   protected readonly store = inject(RulesStore);
   private readonly dialogs = inject(Dialogs);
   private readonly confirmed = new Set<string>();
+  private readonly now = injectNow();
+  protected readonly choices = TEMPORARY_CHOICES;
   /** Subscribes to the live summary (the "in effect" table reads it). */
   private readonly live = inject(LiveStore);
 
   protected readonly summary = conditionSummary;
   protected readonly ladder = (r: Rule): string => ladderSummary(r.ladder);
   protected readonly profiles = (r: Rule): string => profilesLabel(r.profiles, this.store.profiles());
+
+  /** "Until turned off" or "Ends in 2 h 10 min". */
+  protected readonly remaining = (r: Rule): string => remainingText(r.expiresAt, this.now());
+
+  /** Sets (or clears) the end time of a rule that is on; "Until a time…" asks for the time first. */
+  protected async setTemporary(rule: Rule, choice: TemporaryChoice): Promise<void> {
+    let time = '';
+    if (choice === 'custom') {
+      const ref = this.dialogs.open<string | null>(TemporaryDialog);
+      const picked = await new Promise<string | null>((resolve) => ref.closed.subscribe((t) => resolve((t as string | null | undefined) ?? null)));
+      if (!picked) return;
+      time = picked;
+    }
+    const expiresAt = expiryFor(choice, Date.now(), time);
+    await this.store.saveRule({ ...rule, expiresAt });
+  }
 
   ngOnInit(): void {
     void this.store.ensure();

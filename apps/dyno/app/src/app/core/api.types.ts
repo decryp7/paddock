@@ -451,6 +451,8 @@ export interface Rule {
   releaseAfterSecs: number;
   /** Profiles the rule is active in; empty = every profile. */
   profiles: ProfileId[];
+  /** A temporary rule: when this moment passes (ms since the epoch) the rule gives everything back and switches itself off; null = until turned off. */
+  expiresAt: Timestamp | null;
 }
 
 export interface Profile {
@@ -478,6 +480,10 @@ export interface ActiveAction {
   step: number;
   description: string;
   since: Timestamp;
+  /** The app's CPU (percent of the machine) when the rule started acting. */
+  cpuBefore: number;
+  /** The app's CPU measured about 20 s after the latest step took effect; null until it has been measured. */
+  cpuAfter: number | null;
 }
 
 export type ActivityKind = 'rule' | 'release' | 'manual' | 'cleanup' | 'tuning' | 'startup' | 'alert' | 'system';
@@ -794,6 +800,10 @@ export interface Settings {
   notifications?: boolean;
   /** New and unusual programs: the baseline and its learning period (the engine fills the default when absent). */
   unusual?: UnusualSettings;
+  /** Maintenance windows: when Dyno's own heavier background work may run. */
+  maintenance: MaintenanceSettings;
+  /** Backup health checks. */
+  backup: BackupSettings;
 }
 
 export interface PluginInfo {
@@ -1507,4 +1517,225 @@ export interface UnusualSettings {
   enabled: boolean;
   /** 0 to 60 days of silent learning. */
   learningDays: number;
+}
+
+// ------------------------------------------------------------------------------------------------------- extras
+// Mirrors `dyno_core::extras` (WP-13): read-only views of what changed, sleep blockers, boot, per-app use, GPU,
+// installed software, large and duplicate files, and the maintenance windows. Dyno only reads; removal goes through
+// the cleanup policy.
+
+export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved' | 'setting' | 'cleanup';
+
+export interface Change {
+  at: Timestamp;
+  kind: ChangeKind;
+  title: string;
+  detail: string;
+}
+
+/** The window of "What changed": `hours` back from `around` (or from now); 0 means the default 72. */
+export interface ChangesQuery {
+  around?: Timestamp | null;
+  hours: number;
+}
+
+export interface ChangeTimeline {
+  from: Timestamp;
+  to: Timestamp;
+  /** Newest first. */
+  changes: Change[];
+  /** When Dyno started keeping the record, when known. */
+  watchingSince: Timestamp | null;
+}
+
+export type Prevents = 'sleep' | 'displaySleep' | 'other';
+
+export interface SleepBlocker {
+  name: string;
+  pid: number | null;
+  prevents: Prevents;
+  reason: string;
+  /** How long it has held on, as the tool printed it ("00:12:03"). */
+  heldFor: string | null;
+}
+
+export interface WakeEvent {
+  /** When, as the tool printed it (local time). */
+  when: string | null;
+  reason: string;
+}
+
+export interface SleepReport {
+  blockers: SleepBlocker[];
+  /** Newest first. */
+  wakes: WakeEvent[];
+  blockersUnavailable: string | null;
+  wakesUnavailable: string | null;
+}
+
+export interface BootStep {
+  name: string;
+  secs: number;
+}
+
+export interface BootRow {
+  at: Timestamp;
+  bootSecs: number | null;
+  readySecs: number | null;
+}
+
+export interface BootReport {
+  /** Newest first. */
+  boots: BootRow[];
+  /** What slowed the last start-up, slowest first. */
+  slowest: BootStep[];
+  lastTotalSecs: number | null;
+  verdict: string | null;
+  stepsUnavailable: string | null;
+}
+
+export interface AppUsageRow {
+  app: string;
+  bytesIn: number | null;
+  bytesOut: number | null;
+  energyImpact: number | null;
+}
+
+export interface UsageReport {
+  apps: AppUsageRow[];
+  networkUnavailable: string | null;
+  energyUnavailable: string | null;
+}
+
+export interface GpuProcess {
+  pid: number;
+  name: string;
+  gpuPercent: number;
+  memoryBytes: number | null;
+}
+
+export interface GpuReport {
+  processes: GpuProcess[];
+  source: string | null;
+  unavailable: string | null;
+}
+
+export interface SoftwareItem {
+  name: string;
+  version: string | null;
+  publisher: string | null;
+}
+
+export interface SoftwareInventory {
+  items: SoftwareItem[];
+  truncated: boolean;
+  unavailable: string | null;
+}
+
+export type InventoryFormat = 'markdown' | 'json';
+
+/** The inventory report that was written. */
+export interface SavedInventory {
+  path: string;
+  bytes: number;
+}
+
+export type FinderMode = 'large' | 'duplicates' | 'both';
+
+export interface FinderQuery {
+  /** The folder the person picked (absolute). */
+  folder: string;
+  mode: FinderMode;
+  /** Ignore files smaller than this many bytes (the engine enforces a floor of 1 MiB). */
+  minBytes: number;
+}
+
+export interface FoundFile {
+  /** Id within the result; a selection refers to it. */
+  id: string;
+  path: string;
+  bytes: number;
+  modified: Timestamp;
+}
+
+export interface DuplicateGroup {
+  bytesEach: number;
+  wastedBytes: number;
+  /** The copies, oldest first (the oldest is the one kept by default). */
+  files: FoundFile[];
+}
+
+export interface FinderResult {
+  /** Id of this result; a removal refers to it and it expires after an hour. */
+  scanId: string;
+  folder: string;
+  large: FoundFile[];
+  duplicates: DuplicateGroup[];
+  scanned: number;
+  /** The scan stopped early (file or time limit); more exists. */
+  truncated: boolean;
+  wastedBytes: number;
+}
+
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+/** Some weekdays, from a local time to a local time; an end at or before the start runs past midnight. */
+export interface MaintenanceWindow {
+  days: Weekday[];
+  /** Minutes after local midnight (0 to 1439). */
+  startMinute: number;
+  /** Minutes after local midnight (0 to 1439); not equal to the start. */
+  endMinute: number;
+}
+
+export interface MaintenanceSettings {
+  enabled: boolean;
+  windows: MaintenanceWindow[];
+}
+
+export interface MaintenanceStatus {
+  enabled: boolean;
+  openNow: boolean;
+  closesAt: Timestamp | null;
+  nextOpensAt: Timestamp | null;
+}
+
+// ------------------------------------------------------------------------------------------------------- backup
+// Mirrors `dyno_core::backup` (WP-14). Dyno reads each tool's own state with timeouts; it never runs or manages a backup.
+
+export type BackupTool = 'timeMachine' | 'windowsBackup' | 'fileHistory' | 'restic' | 'borg' | 'duplicati';
+
+export type BackupState = 'healthy' | 'stale' | 'noBackupYet' | 'notConfigured' | 'cannotCheck';
+
+export interface BackupStatus {
+  tool: BackupTool;
+  name: string;
+  state: BackupState;
+  /** When the last successful backup finished, when known. */
+  lastBackup: Timestamp | null;
+  summary: string;
+  nextStep: string | null;
+}
+
+export interface BackupReport {
+  statuses: BackupStatus[];
+  /** When it was checked; null while the first check is still running. */
+  checkedAt: Timestamp | null;
+  checking: boolean;
+  loginPathUsed: boolean;
+}
+
+/** Folders to look in before the PATH for one tool installed somewhere unusual. */
+export interface ToolOverride {
+  tool: BackupTool;
+  /** Absolute folders, searched first. */
+  dirs: string[];
+}
+
+export interface BackupSettings {
+  /** Check in the background and raise an alarm for a stale backup. */
+  alertWhenStale: boolean;
+  /** A backup older than this many hours is stale (1 to 2160). */
+  staleAfterHours: number;
+  overrides: ToolOverride[];
 }

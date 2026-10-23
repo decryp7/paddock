@@ -1,5 +1,5 @@
 import type { Profile, ProfileId, Rule, RuleStep, StepAction } from '../../core/api.types';
-import { formatDuration } from '../../shared/format';
+import { formatDuration, formatPercent } from '../../shared/format';
 
 /** The kinds of ladder step, for the editor's picker. */
 export type StepKind = 'lowerPriority' | 'efficiencyMode' | 'cpuCap' | 'notify';
@@ -61,6 +61,7 @@ export function blankRule(id: string): Rule {
     ladder: [{ action: 'lowerPriority', afterSecs: 0 }],
     releaseAfterSecs: 60,
     profiles: [],
+    expiresAt: null,
   };
 }
 
@@ -98,4 +99,61 @@ export const parseApps = (text: string): string[] => [...new Set(text.split(/[,\
 
 export function newStep(kind: StepKind, afterSecs: number, cap = 50): RuleStep {
   return { action: kind === 'cpuCap' ? { cpuCap: cap } : kind, afterSecs };
+}
+
+// ------------------------------------------------------------------------------------------------- temporary rules
+
+/** How long a rule stays on: until it is turned off, for a while, until tomorrow morning or until a time the person picks. */
+export type TemporaryChoice = 'off' | 'hour' | 'fourHours' | 'tomorrow' | 'custom';
+
+export const TEMPORARY_CHOICES: readonly { id: TemporaryChoice; label: string }[] = [
+  { id: 'off', label: 'Until I turn it off' },
+  { id: 'hour', label: '1 hour' },
+  { id: 'fourHours', label: '4 hours' },
+  { id: 'tomorrow', label: 'Until tomorrow' },
+  { id: 'custom', label: 'Until a time…' },
+];
+
+const HOUR_MS = 3_600_000;
+
+/** The next local moment that reads `HH:MM`, today when it is still ahead and tomorrow otherwise; null for text that is not a time. */
+export function nextOccurrence(time: string, now: number): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return null;
+  const at = new Date(now);
+  at.setHours(Number(m[1]), Number(m[2]), 0, 0);
+  if (at.getTime() <= now) at.setDate(at.getDate() + 1);
+  return at.getTime();
+}
+
+/** The `expiresAt` a choice gives at `now` ("tomorrow" is 06:00 the next local day; `custom` needs `time`); null means until turned off. */
+export function expiryFor(choice: TemporaryChoice, now: number, time = ''): number | null {
+  switch (choice) {
+    case 'hour':
+      return now + HOUR_MS;
+    case 'fourHours':
+      return now + 4 * HOUR_MS;
+    case 'tomorrow': {
+      const at = new Date(now);
+      at.setDate(at.getDate() + 1);
+      at.setHours(6, 0, 0, 0);
+      return at.getTime();
+    }
+    case 'custom':
+      return nextOccurrence(time, now);
+    default:
+      return null;
+  }
+}
+
+/** The row's duration text: "Until turned off", "Ends in 2 h 10 min" or "Ending now" once the time has come. */
+export function remainingText(expiresAt: number | null, now: number): string {
+  if (expiresAt === null) return 'Until turned off';
+  const secs = Math.ceil((expiresAt - now) / 60_000) * 60;
+  return secs <= 0 ? 'Ending now' : `Ends in ${formatDuration(secs)}`;
+}
+
+/** "CPU 78% → 31%", or "CPU 78% → measuring…" until the engine has measured the effect. */
+export function cpuProofText(before: number, after: number | null): string {
+  return `CPU ${formatPercent(before)} → ${after === null ? 'measuring…' : formatPercent(after)}`;
 }

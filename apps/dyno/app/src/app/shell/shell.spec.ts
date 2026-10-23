@@ -20,6 +20,17 @@ async function make() {
   return { f, mock, el: f.nativeElement as HTMLElement, live: TestBed.inject(LiveStore) };
 }
 
+describe('navigation entries', () => {
+  it('lists Backup health and Extras, each once, and nothing is left under Coming', () => {
+    const labels = NAV.map((n) => n.label);
+    expect(labels.filter((l) => l === 'Backup health')).toHaveLength(1);
+    expect(labels.filter((l) => l === 'Extras')).toHaveLength(1);
+    expect(NAV.find((n) => n.label === 'Backup health')!.path).toBe('/backup');
+    expect(NAV.find((n) => n.label === 'Extras')!.path).toBe('/extras');
+    expect(COMING).toEqual([]);
+  });
+});
+
 describe('NAV', () => {
   it('has unique paths and starts at the dashboard', () => {
     expect(new Set(NAV.map((n) => n.path)).size).toBe(NAV.length);

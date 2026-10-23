@@ -51,6 +51,19 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  BackupReport,
+  BootReport,
+  ChangeTimeline,
+  ChangesQuery,
+  FinderQuery,
+  FinderResult,
+  GpuReport,
+  InventoryFormat,
+  MaintenanceStatus,
+  SavedInventory,
+  SleepReport,
+  SoftwareInventory,
+  UsageReport,
   IssuesOverview,
   IssuesQuery,
   SavedIssues,
@@ -190,6 +203,34 @@ export interface DynoBackend {
   unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview>;
   /** Forgets the baseline of programs; learning starts again. */
   forgetBaseline(): Promise<UnusualOverview>;
+
+  // Extras (read-only views) and backup health.
+  /** Installs, updates, new start-up items and setting changes in a window. */
+  changes(query: ChangesQuery): Promise<ChangeTimeline>;
+  /** What keeps the computer awake now and what woke it. */
+  sleepBlockers(): Promise<SleepReport>;
+  /** Recent boots and what slowed the last one. */
+  bootAnalysis(): Promise<BootReport>;
+  /** Network traffic and energy impact per app. */
+  appUsage(): Promise<UsageReport>;
+  /** GPU use per process. */
+  gpuProcesses(): Promise<GpuReport>;
+  /** The installed software. */
+  softwareInventory(): Promise<SoftwareInventory>;
+  /** Asks where to save (the OS save dialog) and writes the hardware and software report there; `null` when they cancel. */
+  saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null>;
+  /** Asks for a folder (the OS folder dialog; the webview never invents a path); `null` when they cancel. */
+  pickFolder(): Promise<string | null>;
+  /** Looks for large and duplicate files in a folder the person chose. Deletes nothing. */
+  findFiles(query: FinderQuery): Promise<FinderResult>;
+  /** Removes selected files of a finder result through the cleanup policy; the engine keeps one copy of every duplicate group. */
+  removeFoundFiles(scanId: string, ids: string[], mode: DeleteMode): Promise<CleanupOutcome>;
+  /** Where the maintenance windows stand now. */
+  maintenance(): Promise<MaintenanceStatus>;
+  /** The last backup check (the engine runs one when there is none yet). */
+  backup(): Promise<BackupReport>;
+  /** Checks the backup tools now and answers the report. */
+  refreshBackup(): Promise<BackupReport>;
 
   // The tray dropdown window.
   /** Shows and focuses the main window (and hides the tray dropdown). */
