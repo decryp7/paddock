@@ -77,6 +77,10 @@ Releasing (Pitcrew, Pitwall and Spotter 1.0, 2026-10-23)
   `codesign --verify --deep --strict` on the .app and on the .app inside the DMG: Debrief 1.0.0 shipped linker-signed
   only (no sealed resources), and a downloaded copy said "Debrief.app is damaged". Release verification runs codesign on
   the published DMG, not only a look at the icon and version.
+- A valid signature is not enough on macOS: hardened-runtime ad-hoc sidecars refuse a bundled dylib that keeps its vendor's
+  Developer ID ("different Team IDs"), so Debrief 1.0.1's store worker could not load libduckdb. Re-sign bundled
+  third-party libraries ad-hoc before sealing; the verify step checks one TeamIdentifier across all Mach-Os and actually
+  starts each sidecar from the built .app; CI runs a macOS real-app smoke test.
 - `cargo deny` advisories can turn red overnight (a RUSTSEC advisory for a transitive crate blocked Spotter's release):
   run `cargo deny check advisories` right before tagging and update the crate (`cargo update -p <crate>`) in every app
   that has it.
