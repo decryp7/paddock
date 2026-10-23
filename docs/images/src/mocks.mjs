@@ -72,6 +72,20 @@ export function panel(app, kind) {
   } else if (k === 'sighter:api') {
     g = r(40, 28, 592, 224, 'mcode', 12) + mono(64, 66, 'POST /v1/locate', 'mmonoa') + mono(64, 96, '{ "query": "the Save button" }') +
       r(64, 114, 544, 1, 'mrule', 0) + mono(64, 144, '{ "box": [412, 288, 96, 32],') + mono(64, 170, '  "confidence": 0.97,') + mono(64, 196, '  "layer": "detector" }') + t(608, 66, '127.0.0.1', 'mm', 'end');
+  } else if (k === 'sighter:flaui') {
+    const tag = (x, y, label, c) => r(x, y, 74, 24, c === 'uia' ? 'mact' : 'maccf', 12) + t(x + 37, y + 16.5, label, c === 'uia' ? 'mta' : 'mtw', 'middle');
+    g = r(40, 28, 592, 224, 'mcode', 12) + mono(64, 58, 'FlaUI test  (C#)', 'mmonoa') +
+      mono(64, 98, 'var win = app.GetMainWindow(auto);') + tag(546, 80, 'UIA', 'uia') +
+      mono(64, 130, 'win.FindFirst(cf.ByName("Save"))') + tag(546, 112, 'UIA', 'uia') +
+      mono(64, 162, 'chart.FindFirstOrSight(cf.ByText("Pump 3"))') + tag(546, 144, 'Sighter', 'sight') +
+      r(64, 184, 544, 1, 'mrule', 0) + t(64, 214, 'UIA miss, found by sight: 0.96 via detector', 'mm') + t(608, 214, 'then Click()', 'mm', 'end');
+  } else if (k === 'sighter:apps') {
+    const win = (x, y, name, model, on) => r(x, y, 188, 118, on ? 'mcon' : 'mc', 10) + r(x, y, 188, 26, 'mside', 10) + sk(x + 14, y + 9, 60) +
+      t(x + 14, y + 52, name, 'mt') + r(x + 14, y + 66, 120, 8, 'ms', 4) + r(x + 14, y + 82, 88, 8, 'ms', 4) + r(x + 14, y + 98, 76, 10, on ? 'maccf' : 'ms', 5) +
+      t(x + 94, y + 107, '', 'mm') + r(x + 104, y + 90, 74, 20, 'mact', 10) + t(x + 141, y + 104, model, 'mta', 'middle');
+    g = win(40, 32, 'Editor', 'editor@3', true) + win(242, 32, 'Browser', 'web@2', false) + win(444, 32, 'Terminal', 'term@1', false) +
+      `<path class="medge" d="M232 90 L242 90 M434 90 L444 90"/>` + t(136, 176, 'focus verified before each step', 'mm', 'middle') +
+      r(40, 196, 592, 44, 'mc', 12) + r(54, 208, 24, 20, 'maccf', 5) + t(90, 223, 'OS dialogs model, shared by every session', 'mt') + t(618, 223, 'file pickers, prompts', 'mm', 'end');
   } else if (k === 'pacenotes:graph') {
     g = r(40, 24, 592, 232, 'mc', 12) + graph(40, 24, 592, 232);
   } else if (k === 'pacenotes:review') {
@@ -93,4 +107,4 @@ export const MOCK_CSS = `.mbg{fill:var(--soft)}.mc{fill:var(--card);stroke:var(-
 .mfield{fill:var(--soft);stroke:var(--line)}.mact{fill:var(--acc);fill-opacity:.14}.maccf{fill:var(--accf)}.mbox{fill:var(--acc);fill-opacity:.12;stroke:var(--acc);stroke-width:2}
 .mt{font-size:14px;font-weight:500;fill:var(--ink)}.mm{font-size:13px;fill:var(--muted)}.mta{font-size:13px;font-weight:600;fill:var(--acct)}.mtw{font-size:12.5px;font-weight:600;fill:#fff}.mh{font-size:20px;font-weight:600;fill:var(--ink)}
 .medge{fill:none;stroke:var(--link);stroke-width:1.5}.mcode{fill:var(--codebg);stroke:var(--line)}.mmono{font:13px ui-monospace,"SF Mono",Menlo,Consolas,monospace;fill:var(--ink)}.mmonoa{font:600 13px ui-monospace,"SF Mono",Menlo,Consolas,monospace;fill:var(--acct)}
-.madd{fill:#2EA043;fill-opacity:.18}.mdel{fill:#F85149;fill-opacity:.16}.mrec{fill:#E5484D}`;
+.madd{fill:#2EA043;fill-opacity:.18}.mdel{fill:#F85149;fill-opacity:.16}.mrec{fill:#E5484D}.mcon{fill:var(--card);stroke:var(--acc);stroke-width:2}`;

@@ -2,14 +2,14 @@ export default {
   id: 'sighter', name: 'Sighter', icon: 'sighter', planned: true, status: 'Planned', platforms: 'Windows, macOS and Linux',
   accent: { dark: '#00B8D9', light: '#00788F', fill: '#00788F' },
   headline: ['Find any UI', 'element by sight.'],
-  sub: ['Vision-based automation for apps with or without', 'accessibility. Everything runs on your machine.'],
+  sub: ['Vision-based UI automation that works alongside your', 'FlaUI tests. Everything runs on your machine.'],
   features: {
     heading: 'Test any interface, even the ones no tool can read.',
     panels: [
-      { mock: 'record', title: 'Record windows and input', text: 'In the studio or headlessly on test machines.' },
       { mock: 'detect', title: 'Find elements from pixels', text: 'Boxes, confidence and which layer answered.' },
       { mock: 'review', title: 'Review what it is unsure of', text: 'A queue for everything not identified automatically.' },
-      { mock: 'api', title: 'Locate from your tests', text: 'A loopback API your scripts and CLI call.' },
+      { mock: 'flaui', title: 'Works with your FlaUI tests', text: 'Keep UIA where it works; let Sighter see the rest.' },
+      { mock: 'apps', title: 'Across apps', text: 'One test, several applications, each with its own model.' },
     ],
   },
   how: {
