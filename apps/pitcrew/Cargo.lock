@@ -2569,7 +2569,7 @@ dependencies = [
 
 [[package]]
 name = "notify-channels"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "lettre",
  "serde",
@@ -3144,7 +3144,7 @@ dependencies = [
 
 [[package]]
 name = "pitcrew-app"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "keyring",
  "notify-channels",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "pitcrew-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "proptest",
  "regex",
@@ -3186,7 +3186,7 @@ dependencies = [
 
 [[package]]
 name = "pitcrew-service"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "chrono",
  "ctrlc",
