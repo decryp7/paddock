@@ -209,6 +209,27 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     },
   },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my PC slow?' })).toBeVisible()) },
+  {
+    name: 'issues',
+    path: '/#/issues',
+    size: { width: 1440, height: 1100 },
+    ready: async (page) => {
+      await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
+      await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+      await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Slack/ }).first().click();
+      await expect(page.getByRole('complementary', { name: 'Issue details' })).toBeVisible();
+    },
+  },
+  {
+    name: 'unusual',
+    path: '/#/issues',
+    size: { width: 1440, height: 900 },
+    ready: async (page) => {
+      await page.getByRole('button', { name: /New and unusual/ }).click();
+      await page.getByRole('row', { name: /updater-helper/ }).click();
+      await expect(page.getByRole('complementary', { name: 'Program details' })).toBeVisible();
+    },
+  },
   { name: 'reports', path: '/#/reports', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible()) },
   {
     name: 'coming',

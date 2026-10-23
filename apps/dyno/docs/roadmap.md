@@ -25,8 +25,8 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-03 | Health score and startup manager screen | built: Health page with reasons, fixes and startup manager (switch, delay, undo); machine-wide entries wait for WP-01 |
 | WP-05 | Tuning catalogue | built: catalogue, previews with inverse, undo with outside-change detection, Tuning page; administrator items wait for WP-01; startup trimming stays on the Health page |
 | WP-04 | Cleanup with quarantine and undo | built: scanner, re-checking deleter, quarantine with restore, Cleanup page, disk map engine, TOML packs, Linux; scheduled cleanups, Docker removal and a disk-map screen planned |
-| WP-06 | Issues with statistics | planned |
-| WP-07 | New and unusual processes | planned |
+| WP-06 | Issues with statistics | built: macOS crash reports and unified log, Windows Event Log (`wevtutil`), Linux journal and `coredumpctl`; stored in SQLite; stability score, leaderboards, trend, JSON-lines export for Debrief; crashes chart, health reason and weekly report filled (G4); crash-loop alert and serious-issue alarms. Linux and Windows readers are verified by fixtures only (see Status) |
+| WP-07 | New and unusual processes | built: baseline with silent learning, scoring (first seen, location, system-name lookalikes, signature, many children or connections, new startup entry), "New and unusual" view with protect, hide and restore. Windows signatures wait for G8 |
 | WP-08 | Alerts and the weekly report | built: weekly report from stored data (health trend, apps, disk forecast, issues, changes), Reports page with week selector, Markdown/HTML export; Why slow page (G10). Planned: alert history on the page, weekly OS notification (superseded in part by WP-26) |
 | WP-09 | Right-click search | planned |
 | WP-10 | Watched folders with keep-for times | planned |
@@ -61,11 +61,11 @@ WP-09 to WP-17; WP-23 to WP-25, WP-27 to WP-30.
 
 ## Still open in v1 (2026-10-23)
 
-Built this round: WP-02, WP-03, WP-04, WP-05, WP-08 (Why slow and Reports pages), WP-26, WP-28, WP-29, WP-37 (Linux traffic via
+Built this round: WP-02, WP-03, WP-04, WP-05, WP-06, WP-07, WP-08 (Why slow and Reports pages), WP-26, WP-28, WP-29, WP-37 (Linux traffic via
 `sock_diag`; Windows says it needs administrator rights). **Not built and still in v1**, so the release waits for them:
 
 - WP-01 privileged helper (every administrator item in Tuning, machine-wide startup entries, Windows per-program traffic, Defender exclusions).
-- WP-06 Issues, WP-07 unusual processes, WP-09 right-click search, WP-10 watched folders, WP-12 counters browser, WP-13 extras,
+- WP-09 right-click search, WP-10 watched folders, WP-12 counters browser, WP-13 extras,
   WP-14 backup checks, WP-15 pack data beyond the cleanup packs, WP-16 web API, WP-17 Explain via Pitwall, WP-23 to WP-25,
   WP-27 CLI, WP-30 suite tie-ins, WP-31 session recording, WP-33 to WP-36.
 - Parts of built packages: scheduled cleanups, a disk-map screen, Docker image removal, the weekly OS notification (needs an
@@ -90,7 +90,7 @@ What the code does today, read from the code on 2026-10-22. Each is a small task
 | G1 | Done in WP-04 (`Os::Linux`, XDG roots, Linux categories). Was: the cleanup category `Os` enum has `Windows`, `Macos`, `Any` but no `Linux`, so Linux has no categories or roots | `crates/dyno-core/src/cleanup/catalog.rs`, `crates/dyno-agent/src/cleanup/roots.rs` | Add `Os::Linux`, XDG roots (`~/.cache`, `~/.local/share/Trash`, `~/.cargo`, …), catalogue entries and tests |
 | G2 | `StartupLocation` has Windows and macOS variants only; the Linux startup adapter (XDG autostart, systemd user units) has nowhere to put its entries | `crates/dyno-core/src/startup.rs`, `crates/dyno-platform/src/linux/startup.rs` | Add `XdgAutostart`, `SystemdUserUnit` (and `needs_admin` for system units), map them, keep the wire contract in step |
 | G3 | On Linux the shared Unix `SetPriority` calls `setpriority` on the main thread only (Linux priorities are per thread); efficiency mode and affinity already walk the threads | `crates/dyno-platform/src/unix_control.rs`, `linux/os_control.rs` | Walk the process's threads for `SetPriority` on Linux (best effort for threads that exit); test with a multi-thread dummy |
-| G4 | The history `crashes` list is always empty and the health report gets `crashes_7d: 0`, so the crashes chart and the "crashing apps" health reason have no data | `crates/dyno-agent/src/handlers.rs` (`history`, `health`) | Filled by WP-06 (Issues) |
+| G4 | The history `crashes` list is always empty and the health report gets `crashes_7d: 0`, so the crashes chart and the "crashing apps" health reason have no data | `crates/dyno-agent/src/handlers.rs` (`history`, `health`) | Done in WP-06: `history.crashes` is per local day from stored AppCrash issues, `crashes_7d` and the weekly report count them |
 | G5 | Plugins are wired minimally: the agent starts the host on first `Request::Plugins` and lists plugins; sensor, cleanup-proposal and rule-action contributions are not connected to the sampler, the scanner or the engine | `crates/dyno-agent/src/handlers.rs`, `sampler.rs`, `crates/dyno-plugin-host` | Connect contributions through guarded adapters (ADR 0007), trim the host to sensors, cleanup proposals and rule actions |
 | G6 | The helper is not built: `crates/dyno-helper/src/main.rs` is `fn main() {}`; only `HelperAction` and its validation exist | `crates/dyno-helper` | WP-01 |
 | G7 | Cleanup, `DiskUsage`, tuning and the weekly report are built (WP-04, WP-05, WP-08); no request answers `Unsupported` for being unbuilt any more | `crates/dyno-agent/src/handlers.rs` | done |
@@ -186,6 +186,17 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
 - **Acceptance.** Sources are read with timeouts and without file contents in logs; an unreadable source is an
   "unavailable: reason" entry, never an error for the page; the score is a pure function with tests; an issue links to the
   evidence (event text is shown, never `[innerHTML]`).
+- **Status (built).** `dyno_core::issues` (types, text hygiene, `day_score`, leaderboards, trend, crash loops, JSON-lines export),
+  `dyno_platform::issues` (pure parsers for every OS plus readers behind `IssueSource` and a `ToolRunner` seam), the agent's
+  `issues` centre (background read every 15 minutes, panic-contained readers, "unavailable: reason" per source), the `issues`
+  table, the Issues page. Deviations and gaps: Windows reads the Event Log through `wevtutil` (the OS's own front end to the
+  API, with timeouts) instead of native `EvtQuery` FFI, which could not be type-checked on the build Mac; there is no
+  reliability-record reader and no overheating source on Windows; "Open in Debrief" is **Export for Debrief** (JSON lines you
+  open in Debrief), launching Debrief waits for WP-30; hang reports on macOS come from `.hang` and `.spin` files only; the
+  Windows and Linux readers have run only against fixtures (CI runs the parsers on every OS, the real tools only on their own
+  runners); `restarts` in the crashes chart stays 0 (no OS log says an app was relaunched). Wording: serious issues raise
+  alarms (`issue:<kind>`, one per issue, only when recent); a crash loop (3 crashes of one app in an hour) feeds the
+  crash-loop alert and Why slow.
 - **Depends on.** G4, WP-15 optional for source packs; Debrief export format.
 - **Touches.** new `crates/dyno-core/src/issues.rs`, `crates/dyno-platform/src/{windows,macos,linux}/issues.rs`, `store.rs` (migration),
   handlers, `app/src/app/features/issues/**` (new page), nav, mock, screenshots.
@@ -199,6 +210,13 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
 - **Acceptance.** No verdicts ("malware"): wording is "unusual because …"; a pure scoring function with tests for each flag;
   a fresh install learns a baseline silently for a configurable period instead of flagging everything; flags never trigger an
   action by themselves.
+- **Status (built).** `dyno_core::unusual` (pure `assess` with a test per flag; `Baseline::observe` with silent learning,
+  default 7 days, 0 to 60 in Settings, the very first look always silent), agent `unusual` centre (look every 30 s, signatures
+  of programs never seen checked 3 at a time off the sampler, one activity line when a program becomes unusual), tables
+  `baseline` and `baseline_startup`, "New and unusual" view on the Issues page. Actions: Protect (adds to the protected list),
+  Hide, Restore; none acts on the program. Gaps: "search the web" waits for WP-09; "sudden network" is approximated as many
+  open connections (a rate needs per-process traffic, WP-37 has it on macOS and Linux only); signatures need process details,
+  so Windows flags no "unsigned" until G8.
 - **Depends on.** G8 (Windows details and signatures), WP-06 for the shared page.
 - **Touches.** new `crates/dyno-core/src/unusual.rs`, `store.rs`, handlers, `app/src/app/features/issues/**` or `processes/**`.
 
@@ -468,8 +486,8 @@ feature needs its images; a row is done when both exist and show the built scree
 | Cleanup | `cleanup-*.png` | page built; recapture the screenshots |
 | Health and tuning | `health-*.png` | placeholder; real screen with WP-03 and WP-05 |
 | Reports and alerts | `reports-*.png` | real screen built; capture pending |
-| Issues with statistics | `issues-*.png` | not started (WP-06) |
-| Unusual processes | `unusual-*.png` | not started (WP-07) |
+| Issues with statistics | `issues-*.png` | built |
+| Unusual processes | `unusual-*.png` | built |
 | Watched folders | `watched-folders-*.png` | not started (WP-10) |
 | Benchmarks | `benchmarks-*.png`, `benchmarks-running-*.png`, `benchmarks-compare-*.png` | built |
 | Network | `network-*.png`, `network-connections-*.png` | built |

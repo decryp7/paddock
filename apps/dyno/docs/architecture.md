@@ -30,7 +30,7 @@ code.
 `rules` (rule model, profiles, the `Engine` state machine, ADR 0004), `diagnosis`, `anomaly`, `forecast`, `health`,
 `tuning`, `history` (tiers and min/avg/max downsampling), `sampling` (adaptive intervals), `cleanup` (catalogue and
 admission policy, ADR 0005), `activity` (undo records), `helper` (action types and validation), `startup`, `alerts`,
-`report`, `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
+`report`, `issues` (OS problem events, the stability score), `unusual` (the baseline of programs), `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
 contract, `PROTOCOL_VERSION`). The ports are in `ports.rs`: `SystemSensors`, `ProcessSource`, `ProcessControl`,
 `FileLocks`, `StartupItems`, `FactsSource`, `UserActivity`, with `PlatformError`. Their contract (no panics, unavailable
 readings with a reason, bounded calls, start-time check on every `ProcessRef`) is documented there and binding on every
@@ -69,6 +69,9 @@ block with a `// SAFETY:` comment.
 - **`handlers`**: one function per `Request`. Every action is validated, checked against the protected list, applied to
   a `ProcessRef`, and recorded as an `ActivityEntry` with its inverse. A panic becomes an internal error for that request.
   Cleanup, tuning, disk usage and the weekly report currently answer `Unsupported: "<x> is not built yet."`.
+- **`issues`** and **`unusual`**: two background threads. The first reads the platform's `IssueSource`s every 15 minutes
+  (panic-contained, "unavailable: reason" per source), stores new events and raises alarms; the second compares the process
+  table with the baseline every 30 s ([ADR 0016](adr/0016-issues-and-the-program-baseline.md)).
 - **`store`** and **`rollup`**: the SQLite store (ADR 0008) and the `HistoryWriter` that records raw points and rolls
   closed buckets up through the minute, 15-minute and hour tiers.
 - **`service`**: install, uninstall, status and `ensure` of the per-user registration (ADR 0010); the unit text is pure.

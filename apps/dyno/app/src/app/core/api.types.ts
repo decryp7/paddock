@@ -764,6 +764,8 @@ export interface Settings {
   networkAlerts?: NetworkAlerts;
   /** Desktop notifications for new alarms (quiet hours and muted rules still apply). */
   notifications?: boolean;
+  /** New and unusual programs: the baseline and its learning period (the engine fills the default when absent). */
+  unusual?: UnusualSettings;
 }
 
 export interface PluginInfo {
@@ -1346,3 +1348,135 @@ export interface IpLookupSettings {
 // END rust-agent additions. Also appended to `Settings` (all optional in the JSON): dashboard, trayItems, alarms,
 // flightRecorder (see the widgets, alarms and recorder blocks above).
 // ===================================================================================================================
+
+// ---------------------------------------------------------------------------------------------------------- issues
+// Mirrors `dyno_core::issues` (WP-06). Observe-only: problems the OS itself recorded, shown as plain text.
+
+export type IssueKind =
+  | 'appCrash'
+  | 'appHang'
+  | 'badShutdown'
+  | 'diskError'
+  | 'memoryError'
+  | 'overheating'
+  | 'serviceFailure'
+  | 'memoryExhaustion'
+  | 'updateFailure'
+  | 'driverFailure';
+
+export type IssueSourceId = 'macReports' | 'macLog' | 'windowsEvents' | 'journal' | 'coredumps';
+
+export interface Issue {
+  id: string;
+  at: Timestamp;
+  kind: IssueKind;
+  /** How serious one occurrence of its kind is (decided by the engine). */
+  severity: Severity;
+  /** The application, service or device it concerns; empty when none applies. */
+  app: string;
+  title: string;
+  /** The OS's own words (bounded plain text: shown with text interpolation, never as HTML). */
+  evidence: string;
+  source: IssueSourceId;
+}
+
+/** How a log source was last read. */
+export type SourceState = { read: number } | { unavailable: string } | 'pending';
+
+export interface SourceStatus {
+  source: IssueSourceId;
+  label: string;
+  state: SourceState;
+  at: Timestamp | null;
+}
+
+export type Stability = 'stable' | 'someProblems' | 'unstable';
+
+export interface DayScore {
+  /** The start of the local day. */
+  day: Timestamp;
+  score: number;
+  issues: number;
+}
+
+export interface AppTally {
+  name: string;
+  count: number;
+  last: Timestamp;
+  kind: IssueKind;
+}
+
+export interface KindTally {
+  kind: IssueKind;
+  count: number;
+}
+
+export interface IssuesQuery {
+  /** 1 to 90. */
+  days: number;
+}
+
+export interface IssuesOverview {
+  from: Timestamp;
+  to: Timestamp;
+  days: number;
+  /** Today's stability score; null when no source could be read. */
+  score: number | null;
+  rating: Stability | null;
+  daily: DayScore[];
+  trend: { current: number; previous: number };
+  apps: AppTally[];
+  kinds: KindTally[];
+  issues: Issue[];
+  total: number;
+  sources: SourceStatus[];
+  scannedAt: Timestamp | null;
+}
+
+export interface SavedIssues {
+  path: string;
+  bytes: number;
+  count: number;
+}
+
+// ------------------------------------------------------------------------------------------------ unusual programs
+// Mirrors `dyno_core::unusual` (WP-07). A transparency tool: reasons, never verdicts.
+
+export type UnusualLevel = 'new' | 'unusual';
+export type UnusualStatus = 'new' | 'known' | 'ignored' | 'protected';
+export type UnusualAction = 'ignore' | 'protect' | 'restore';
+
+export interface UnusualItem {
+  /** What an action refers to. */
+  key: string;
+  name: string;
+  exe: string | null;
+  publisher: string | null;
+  firstSeen: Timestamp;
+  /** 0 when it was found only through a new startup entry and has not run since. */
+  lastSeen: Timestamp;
+  running: boolean;
+  level: UnusualLevel;
+  score: number;
+  status: UnusualStatus;
+  /** Plain words that follow "Unusual because it": "runs from a temporary folder". */
+  reasons: string[];
+}
+
+export interface UnusualOverview {
+  /** The engine's clock when the list was built; ages are measured against it. */
+  at: Timestamp;
+  enabled: boolean;
+  learning: { active: boolean; until: Timestamp | null };
+  learningDays: number;
+  known: number;
+  ignored: number;
+  items: UnusualItem[];
+}
+
+/** `Settings.unusual`. */
+export interface UnusualSettings {
+  enabled: boolean;
+  /** 0 to 60 days of silent learning. */
+  learningDays: number;
+}

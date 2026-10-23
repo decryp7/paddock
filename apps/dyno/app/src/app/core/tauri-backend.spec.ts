@@ -58,6 +58,11 @@ describe('TauriBackend: request shapes', () => {
     ['settings', (b) => b.settings(), 'settings'],
     ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS } }],
     ['plugins', (b) => b.plugins(), 'plugins'],
+    ['issues', (b) => b.issues({ days: 14 }), { issues: { query: { days: 14 } } }],
+    ['rescanIssues', (b) => b.rescanIssues({ days: 7 }), { rescanIssues: { query: { days: 7 } } }],
+    ['unusual', (b) => b.unusual(true), { unusual: { includeIgnored: true } }],
+    ['unusualAct', (b) => b.unusualAct('/a', 'protect'), { unusualAct: { key: '/a', action: 'protect' } }],
+    ['forgetBaseline', (b) => b.forgetBaseline(), 'forgetBaseline'],
   ];
 
   it.each(cases)('%s sends the externally tagged request through the dyno command', async (_name, call, request) => {
@@ -71,6 +76,12 @@ describe('TauriBackend: request shapes', () => {
     const { backend, invoke } = fake();
     await backend.saveReport('markdown', 1);
     expect(invoke).toHaveBeenCalledWith('save_report', { format: 'markdown', weeksAgo: 1 });
+  });
+
+  it('saveIssues asks the shell for the dialog with the window', async () => {
+    const { backend, invoke } = fake();
+    await backend.saveIssues(30);
+    expect(invoke).toHaveBeenCalledWith('save_issues', { days: 30 });
   });
 
   it('popoverResize sends the measured height to popover_resize', async () => {

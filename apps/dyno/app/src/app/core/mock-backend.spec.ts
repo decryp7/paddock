@@ -607,6 +607,34 @@ describe('reports, settings, plugins, tray', () => {
       { format: 'markdown', weeksAgo: 0 },
     ]);
   });
+  it('issues: a scored window, leaderboards and sources; the window is clamped', async () => {
+    const b = make();
+    const o = await b.issues({ days: 14 });
+    expect(o.daily).toHaveLength(14);
+    expect(o.score).toBe(o.daily[13]!.score);
+    expect(o.apps[0]!.name).toBe('Mail');
+    expect(o.total).toBe(o.issues.length);
+    expect(o.issues[0]!.at).toBeGreaterThan(o.issues[1]!.at);
+    expect((await b.issues({ days: 7 })).total).toBeLessThan(o.total);
+    expect((await b.issues({ days: 999 })).days).toBe(90);
+    expect(await b.rescanIssues({ days: 14 })).toMatchObject({ days: 14 });
+    expect(await b.saveIssues(14)).toMatchObject({ count: 13 });
+    expect(b.savedIssues).toEqual([14]);
+  });
+  it('unusual: protect adds to the protected list, ignore hides, restore brings back, forget starts learning again', async () => {
+    const b = make();
+    const first = await b.unusual(false);
+    const helper = first.items.find((i) => i.name === 'updater-helper')!;
+    await b.unusualAct(helper.key, 'protect');
+    expect((await b.rules()).protected).toContain(helper.exe);
+    expect((await b.unusual(false)).items.some((i) => i.key === helper.key)).toBe(false);
+    expect((await b.unusual(true)).items.some((i) => i.key === helper.key)).toBe(true);
+    await b.unusualAct(helper.key, 'restore');
+    expect((await b.unusual(false)).items.some((i) => i.key === helper.key)).toBe(true);
+    await expect(b.unusualAct('nope', 'ignore')).rejects.toMatchObject({ code: 'notFound' });
+    const forgotten = await b.forgetBaseline();
+    expect(forgotten).toMatchObject({ known: 0, items: [], learning: { active: true } });
+  });
   it('whySlow names the apps behind a cause and how long it looked', async () => {
     const d = await make().whySlow();
     expect(d.windowSecs).toBeGreaterThan(0);

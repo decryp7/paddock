@@ -51,6 +51,11 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  IssuesOverview,
+  IssuesQuery,
+  SavedIssues,
+  UnusualAction,
+  UnusualOverview,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import { toCommandError } from './command-error';
@@ -67,6 +72,8 @@ export type DynoRequest = string | Record<string, Record<string, unknown>>;
 export const REQUEST_TIMEOUT_MS = 15_000;
 /** A command that waits for the person at an OS dialog may take as long as they do (within reason). */
 export const DIALOG_TIMEOUT_MS = 10 * 60_000;
+/** Reading the system logs can take a minute or two on a busy PC (the shell waits 150 s for the agent). */
+export const LOG_READ_TIMEOUT_MS = 160_000;
 
 /** The push events of the shell. */
 export const EVENTS = {
@@ -423,6 +430,31 @@ export class TauriBackend implements DynoBackend {
     return this.command<SavedReport | null>('save_report', { format, weeksAgo }, DIALOG_TIMEOUT_MS);
   }
 
+  issues(query: IssuesQuery): Promise<IssuesOverview> {
+    return this.request({ issues: { query } });
+  }
+
+  rescanIssues(query: IssuesQuery): Promise<IssuesOverview> {
+    // Reading a day of system log can take a minute on a busy PC.
+    return this.request({ rescanIssues: { query } }, LOG_READ_TIMEOUT_MS);
+  }
+
+  saveIssues(days: number): Promise<SavedIssues | null> {
+    return this.command<SavedIssues | null>('save_issues', { days }, DIALOG_TIMEOUT_MS);
+  }
+
+  unusual(includeIgnored: boolean): Promise<UnusualOverview> {
+    return this.request({ unusual: { includeIgnored } });
+  }
+
+  unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview> {
+    return this.request({ unusualAct: { key, action } });
+  }
+
+  forgetBaseline(): Promise<UnusualOverview> {
+    return this.request('forgetBaseline');
+  }
+
   alerts(limit: number): Promise<Alert[]> {
     return this.request({ alerts: { limit } });
   }
@@ -455,8 +487,8 @@ export class TauriBackend implements DynoBackend {
 
   // --------------------------------------------------------------------------------------------------- plumbing
 
-  private request<T>(request: DynoRequest): Promise<T> {
-    return this.command<T>('dyno', { request });
+  private request<T>(request: DynoRequest, timeoutMs?: number): Promise<T> {
+    return this.command<T>('dyno', { request }, timeoutMs);
   }
 
   private async command<T>(cmd: string, args?: Record<string, unknown>, timeoutMs: number = this.timeoutMs): Promise<T> {
