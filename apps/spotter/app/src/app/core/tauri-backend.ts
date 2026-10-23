@@ -197,6 +197,9 @@ export class TauriBackend implements SpotterBackend {
   hideTray(): Promise<void> {
     return this.run('hide_tray');
   }
+  fitTray(height: number): Promise<void> {
+    return this.run('fit_tray', { height });
+  }
 
   onState(handler: (push: StatePush) => void): Promise<() => void> {
     return this.listenTo<StatePush>(STATE_EVENT, (e) => handler(e.payload));

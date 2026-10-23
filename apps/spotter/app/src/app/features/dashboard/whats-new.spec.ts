@@ -118,7 +118,7 @@ describe('WhatsNew', () => {
     const { f, backend } = await make([item({ unseen: true }, { location: 'https://x/y', sha256: 'abc123', version: '9.9.9' })]);
     const copy = vi.spyOn(TestBed.inject(Clipboard), 'copy').mockResolvedValue(true as never);
     const entries = await openMenu(f);
-    expect(entries.map((e) => text(e))).toEqual(['Mark as seen', 'Copy link', 'Copy SHA-256']);
+    expect(entries.map((e) => text(e))).toEqual(['Open watch', 'Open release', 'Download', 'Mark as seen', 'Copy link', 'Copy SHA-256']);
     byText(document.body, '[cdkMenuItem]', 'Copy link')!.click();
     expect(copy).toHaveBeenCalledWith('https://x/y', 'Link');
     await openMenu(f);
@@ -133,6 +133,6 @@ describe('WhatsNew', () => {
   it('leaves out Mark as seen and the checksum when they do not apply', async () => {
     const { f } = await make([item()]);
     const entries = await openMenu(f);
-    expect(entries.map((e) => text(e))).toEqual(['Copy link']);
+    expect(entries.map((e) => text(e))).toEqual(['Open watch', 'Open release', 'Download', 'Copy link']);
   });
 });

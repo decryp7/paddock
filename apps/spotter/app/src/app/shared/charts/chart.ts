@@ -21,7 +21,7 @@ async function loadEcharts(tokens: PaddockChartTokens): Promise<ChartFactory> {
     import('echarts/components'),
     import('echarts/renderers'),
   ]);
-  core.use([charts.BarChart, charts.LineChart, components.GridComponent, components.TooltipComponent, components.LegendComponent, renderers.CanvasRenderer]);
+  core.use([charts.BarChart, charts.LineChart, components.GridComponent, components.TooltipComponent, components.LegendComponent, components.AriaComponent, renderers.CanvasRenderer]);
   const theme = registerPaddockTheme(core, tokens);
   return (el) => core.init(el, theme) as unknown as ChartInstance;
 }

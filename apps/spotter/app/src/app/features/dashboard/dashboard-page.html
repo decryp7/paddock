@@ -91,6 +91,28 @@
           </div>
         </section>
       }
+
+      @if (reliability().total > 0) {
+        <section class="section" aria-labelledby="rel-h">
+          <div class="section-head"><h2 id="rel-h">Check reliability</h2></div>
+          @if (reliability().failed > 0) {
+            <div class="surface chart" data-testid="reliability-chart">
+              <sp-chart [option]="reliabilityOption()" [label]="reliabilityLabel()" />
+            </div>
+          } @else {
+            <p class="quiet" data-testid="reliability-quiet">All {{ reliability().total }} checks in this range succeeded.</p>
+          }
+        </section>
+      }
+
+      @if (downloads().total > 0) {
+        <section class="section" aria-labelledby="dl-h">
+          <div class="section-head"><h2 id="dl-h">Downloads</h2></div>
+          <div class="surface chart tall" data-testid="downloads-chart">
+            <sp-chart [option]="downloadsOption()" [label]="downloadsLabel()" />
+          </div>
+        </section>
+      }
     </sp-panel>
 
     <section class="section" aria-labelledby="events-h">

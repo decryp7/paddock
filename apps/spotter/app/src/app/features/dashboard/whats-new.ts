@@ -1,3 +1,4 @@
+import { CdkContextMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { Router } from '@angular/router';
@@ -9,7 +10,8 @@ import { groupByDay } from '../../shared/day-groups';
 import { formatBytes } from '../../shared/format';
 import { Avatar } from '../../shared/ui/avatar';
 import { AgoShortPipe } from '../../shared/ui/ago.pipe';
-import { MenuButton, type MenuEntry } from '../../shared/ui/row-menu';
+import { MenuButton, MenuPanel, type MenuEntry } from '../../shared/ui/row-menu';
+import { RowItem, RowList } from '../../shared/ui/row-nav';
 import { Version } from '../../shared/ui/version';
 import { WatchesStore } from '../../state/watches.store';
 
@@ -19,16 +21,17 @@ import { WatchesStore } from '../../state/watches.store';
  */
 @Component({
   selector: 'sp-whats-new',
-  imports: [MatIcon, SuEmptyState, Avatar, Version, AgoShortPipe, MenuButton],
+  imports: [MatIcon, SuEmptyState, Avatar, Version, AgoShortPipe, MenuButton, MenuPanel, CdkContextMenuTrigger, RowItem, RowList],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (groups().length) {
+      <div class="days" spRowList>
       @for (g of groups(); track g.label) {
         <section class="day" [attr.aria-label]="g.label">
           <h3>{{ g.label }}</h3>
           <ul class="list">
             @for (item of g.items; track item.watchId + item.release.version + (item.release.product ?? '')) {
-              <li class="item" [class.seen]="!item.unseen" tabindex="0" (click)="goto(item)" (keydown.enter)="goto(item)" (keydown.e)="seen(item)">
+              <li class="item" spRowItem [cdkContextMenuTriggerFor]="ctx" [class.seen]="!item.unseen" (click)="goto(item)" tabindex="-1" (spRowActivate)="goto(item)" (keydown.e)="seen(item)">
                 <span class="unseen-dot" [class.off]="!item.unseen" [attr.title]="item.unseen ? 'Not seen yet' : null"></span>
                 <sp-avatar [name]="item.watchName" />
                 <div class="main">
@@ -58,17 +61,20 @@ import { WatchesStore } from '../../state/watches.store';
                   </button>
                   <sp-menu-button class="more-wrap" [label]="'More actions for ' + item.watchName + ' ' + item.release.version" [entries]="entries(item)" (picked)="run($event, item)" />
                 </div>
+                <ng-template #ctx><sp-menu-panel [label]="'Actions for ' + item.watchName + ' ' + item.release.version" [entries]="entries(item)" (picked)="run($event, item)" /></ng-template>
               </li>
             }
           </ul>
         </section>
       }
+      </div>
     } @else {
       <pd-empty-state heading="No releases yet" description="New releases show up here as soon as a watch finds one." />
     }
   `,
   styles: `
-    :host {
+    :host,
+    .days {
       display: grid;
       gap: var(--pd-space-4);
     }
@@ -157,14 +163,21 @@ export class WhatsNew {
 
   protected entries(item: WhatsNewItem): MenuEntry[] {
     return [
-      ...(item.unseen ? [{ id: 'seen', label: 'Mark as seen', icon: 'check' }] : []),
-      { id: 'link', label: 'Copy link', icon: 'link' },
+      { id: 'details', label: 'Open watch', icon: 'watches' },
+      { id: 'open', label: 'Open release', icon: 'external' },
+      { id: 'download', label: 'Download', icon: 'download' },
+      ...(item.unseen ? [{ id: 'seen', label: 'Mark as seen', icon: 'check', separated: true }] : []),
+      { id: 'link', label: 'Copy link', icon: 'link', separated: !item.unseen },
       ...(item.release.sha256 ? [{ id: 'sha', label: 'Copy SHA-256', icon: 'lock' }] : []),
     ];
   }
 
   protected run(id: string, item: WhatsNewItem): void {
-    if (id === 'seen') this.seen(item);
+    const target = { product: item.release.product };
+    if (id === 'details') this.goto(item);
+    else if (id === 'open') void this.store.openRelease(item.watchId, item.release.version, target);
+    else if (id === 'download') void this.store.download(item.watchId, item.release.version, target);
+    else if (id === 'seen') this.seen(item);
     else if (id === 'link') void this.clipboard.copy(item.release.location, 'Link');
     else if (id === 'sha' && item.release.sha256) void this.clipboard.copy(item.release.sha256, 'Checksum');
   }

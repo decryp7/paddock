@@ -55,7 +55,7 @@ Left:
 - Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command": the engine field exists (`Release.upgradeCommand`, container tags and registry packages) and the UI does not show it yet.
 - Check scripts/check-index.mjs against dist/app/browser/index.html.
 
-- Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; add a screenshot of the cron mode and let the watches table show the schedule text next to Next.
+- Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; done: the watches table shows the schedule text next to Next and `wizard-schedule-*.png` shows the cron mode.
 
 ## Engine
 - Done: SQLite state/history (migrations, corrupt-DB recovery), atomic config, polite fetcher (per-host gap, ETag/Last-Modified, body cap, manual redirects with loop detection, SSRF guard), pipeline, scheduler, Engine facade, webhook/ntfy delivery.

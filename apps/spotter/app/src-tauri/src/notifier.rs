@@ -6,7 +6,7 @@
 //! E-mail channels are not delivered yet (the engine leaves them to the shell); see `docs/roadmap.md`.
 
 use spotter_core::action::{command_args, Action};
-use spotter_engine::notifier::{ActionRequest, Notification, Notifier};
+use spotter_engine::notifier::{ActionRequest, Notification, NotificationKind, Notifier};
 use spotter_engine::Engine;
 use spotter_sources::http::Http;
 use std::path::{Path, PathBuf};
@@ -20,6 +20,12 @@ pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 pub trait OsToast: Send + Sync {
     /// Shows `title` and `body`.
     fn show(&self, title: &str, body: &str);
+
+    /// Shows a toast about a watch: where the system supports it, with buttons (Open, Mark as seen) and a click that opens
+    /// the watch. Systems without them show the plain toast, which is what this does by default.
+    fn show_for_watch(&self, title: &str, body: &str, _kind: NotificationKind, _watch_id: &str) {
+        self.show(title, body);
+    }
 }
 
 /// Opens a release's location with the system's handler. Contract: returns an error message the user can act on.
@@ -143,7 +149,13 @@ impl ShellNotifier {
 
 impl Notifier for ShellNotifier {
     fn notify(&self, notification: &Notification) {
-        self.inner.toast.show(&notification.title, &notification.body);
+        match &notification.watch_id {
+            Some(id) => self
+                .inner
+                .toast
+                .show_for_watch(&notification.title, &notification.body, notification.kind, id),
+            None => self.inner.toast.show(&notification.title, &notification.body),
+        }
     }
 
     fn run_actions(&self, request: &ActionRequest) {
@@ -204,6 +216,9 @@ mod tests {
         fn show(&self, title: &str, body: &str) {
             self.0.lock().unwrap().push((title.into(), body.into()));
         }
+        fn show_for_watch(&self, title: &str, body: &str, _kind: NotificationKind, watch_id: &str) {
+            self.0.lock().unwrap().push((format!("{title} [{watch_id}]"), body.into()));
+        }
     }
 
     #[derive(Default)]
@@ -261,8 +276,18 @@ mod tests {
         });
         assert_eq!(
             toasts.0.lock().unwrap().as_slice(),
-            [("App 1.2.0".to_string(), "A new release".to_string())]
+            [("App 1.2.0 [w1]".to_string(), "A new release".to_string())],
+            "a toast about a watch is shown for that watch, so it can carry buttons"
         );
+        n.notify(&Notification {
+            kind: spotter_engine::notifier::NotificationKind::Digest,
+            watch_id: None,
+            title: "3 new releases".into(),
+            body: "Digest".into(),
+            release: None,
+            channels: Vec::new(),
+        });
+        assert_eq!(toasts.0.lock().unwrap()[1], ("3 new releases".to_string(), "Digest".to_string()));
     }
 
     #[test]

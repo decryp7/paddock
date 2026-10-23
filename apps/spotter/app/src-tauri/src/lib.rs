@@ -11,6 +11,7 @@ pub mod lifecycle;
 pub mod native_feel;
 pub mod notifier;
 pub mod state;
+pub mod toast;
 pub mod tray;
 pub mod updater;
 
@@ -77,6 +78,7 @@ pub fn run() {
             commands::mail_status,
             commands::set_mail_password,
             commands::send_test_email,
+            commands::fit_tray,
         ])
         .setup(|app| {
             // The engine opens before the event loop runs, so no command can arrive before it exists; nothing here

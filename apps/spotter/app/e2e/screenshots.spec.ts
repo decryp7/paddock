@@ -53,10 +53,35 @@ for (const scheme of ['dark', 'light'] as const) {
       await page.screenshot({ path: `${OUT}/watch-detail-panel-${scheme}.png` });
     });
     test(`tray ${scheme}`, async ({ page }) => {
-      await page.setViewportSize({ width: 372, height: 500 });
+      // The shell sizes the popup window to its content; the browser build fits the viewport the same way.
+      await page.setViewportSize({ width: 372, height: 600 });
       await page.goto('/#/tray');
       await settle(page, 1200);
+      const height = await page.locator('pd-tray-popover').evaluate((e) => Math.ceil(e.getBoundingClientRect().height));
+      await page.setViewportSize({ width: 372, height: height + 12 });
+      await settle(page, 300);
       await page.screenshot({ path: `${OUT}/tray-${scheme}.png` });
+    });
+    test(`charts ${scheme}`, async ({ page }) => {
+      await page.goto('/');
+      await settle(page, 1400);
+      await page.locator('#rel-h').evaluate((e) => e.scrollIntoView({ block: 'start' }));
+      await settle(page, 700);
+      await page.screenshot({ path: `${OUT}/dashboard-charts-${scheme}.png` });
+    });
+    test(`row menu ${scheme}`, async ({ page }) => {
+      await page.goto('/#/watches');
+      await settle(page, 1200);
+      await page.locator('tbody tr', { hasText: 'Orbit server' }).click({ button: 'right', position: { x: 160, y: 24 } });
+      await settle(page, 400);
+      await page.screenshot({ path: `${OUT}/watches-menu-${scheme}.png` });
+    });
+    test(`feed menu ${scheme}`, async ({ page }) => {
+      await page.goto('/');
+      await settle(page, 1200);
+      await page.locator('sp-whats-new li.item').nth(1).click({ button: 'right', position: { x: 220, y: 24 } });
+      await settle(page, 400);
+      await page.screenshot({ path: `${OUT}/dashboard-menu-${scheme}.png` });
     });
     test(`schedule ${scheme}`, async ({ page }) => {
       await page.goto('/#/watches/new');

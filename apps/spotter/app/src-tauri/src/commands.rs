@@ -526,6 +526,14 @@ pub async fn hide_tray<R: Runtime>(app: AppHandle<R>) -> Out<()> {
         .map_err(|e| CommandError::internal(e.to_string()))
 }
 
+/// `fit_tray`: fits the tray popup's height to its content (logical pixels, as the page measured it).
+#[tauri::command]
+pub async fn fit_tray<R: Runtime>(app: AppHandle<R>, height: f64) -> Out<()> {
+    let handle = app.clone();
+    app.run_on_main_thread(move || tray::fit_popup(&handle, height))
+        .map_err(|e| CommandError::internal(e.to_string()))
+}
+
 /// Runs blocking work off the async threads.
 async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Out<T> + Send + 'static) -> Out<T> {
     tauri::async_runtime::spawn_blocking(work)
