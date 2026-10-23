@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/icon-512.png" alt="Pacenotes icon (draft)" width="128">
+
 # Pacenotes
 
 **Understands your code: navigate, review, diagram and trace it, and serve it to local AI over MCP.**
