@@ -47,7 +47,7 @@ keyring = "4.2"
 # The taskbar's light/dark setting, to pick the tray icon variant.
 winreg = "0.56"
 webview2-com = "0.39"
-windows = { version = "0.62", features = ["Win32_Foundation"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
 
 [dev-dependencies]
 tempfile.workspace = true

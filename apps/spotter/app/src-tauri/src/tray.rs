@@ -31,8 +31,10 @@ const PAUSE: &str = "pause";
 const RESUME: &str = "resume";
 const WATCH_PREFIX: &str = "watch:";
 
-/// The popup's size in logical pixels.
+/// The popup's size in logical pixels (the height is replaced by the content's height once the page reports it).
 pub const POPUP_SIZE: (f64, f64) = (360.0, 440.0);
+/// The shortest and tallest the popup gets when it is fitted to its content, in logical pixels.
+pub const POPUP_HEIGHT_RANGE: (f64, f64) = (120.0, 520.0);
 /// How many unseen releases the right-click menu lists.
 const MENU_WATCHES: usize = 8;
 /// A click on the icon within this time after the popup lost focus is the click that closed it, not a new one.
@@ -180,6 +182,26 @@ pub fn popup_position(icon: Rect, work: Rect, popup: (i32, i32)) -> (i32, i32) {
     let below = icon.y + icon.h / 2 < work.y + work.h / 2;
     let y = if below { icon.y + icon.h + GAP } else { icon.y - h - GAP };
     (x, y.clamp(work.y + GAP, (work.y + work.h - h - GAP).max(work.y + GAP)))
+}
+
+/// The popup height for a content height the page reported (logical pixels): within [`POPUP_HEIGHT_RANGE`], and the
+/// default for a value that is not a number (the webview is untrusted).
+pub fn fitted_height(content: f64) -> f64 {
+    if content.is_finite() {
+        content.ceil().clamp(POPUP_HEIGHT_RANGE.0, POPUP_HEIGHT_RANGE.1)
+    } else {
+        POPUP_SIZE.1
+    }
+}
+
+/// The top edge after a resize from `old_h` to `new_h`: a popup above a taskbar icon keeps its bottom edge (it grows
+/// and shrinks upwards, staying next to the icon), one below a menu-bar icon keeps its top edge.
+pub fn fitted_top(top: i32, old_h: i32, new_h: i32, anchored_bottom: bool) -> i32 {
+    if anchored_bottom {
+        top + old_h - new_h
+    } else {
+        top
+    }
 }
 
 /// Marks an app whose tray icon could not be created (Linux without an appindicator): there is no way back to a
@@ -345,6 +367,10 @@ pub fn toggle_popup<R: Runtime>(app: &AppHandle<R>, icon: tauri::Rect) {
         Ok(w) => {
             let _ = w.set_position(PhysicalPosition::new(at.0, at.1));
             crate::native_feel::apply(&w);
+            #[cfg(windows)]
+            if let Err(e) = round_corners(&w) {
+                crate::applog::write(&format!("the tray popup keeps square corners: {e}"));
+            }
             let handle = app.clone();
             w.on_window_event(move |e| {
                 if matches!(e, tauri::WindowEvent::Focused(false)) {
@@ -357,6 +383,54 @@ pub fn toggle_popup<R: Runtime>(app: &AppHandle<R>, icon: tauri::Rect) {
         }
         Err(e) => crate::applog::write(&format!("the tray popup could not be opened: {e}")),
     }
+}
+
+/// Fits the popup's height to its content (`content` is what the page reported, in logical pixels), keeping it next to
+/// the tray icon. Does nothing when the popup is closed.
+pub fn fit_popup<R: Runtime>(app: &AppHandle<R>, content: f64) {
+    let Some(w) = app.get_webview_window(POPUP) else { return };
+    let (Ok(pos), Ok(size), Ok(scale)) = (w.outer_position(), w.outer_size(), w.scale_factor()) else {
+        return;
+    };
+    let height = fitted_height(content);
+    let new_h = (height * scale).round() as i32;
+    if new_h == size.height as i32 {
+        return;
+    }
+    // Above the middle of the monitor means the popup hangs from a menu bar; below it, it sits on a taskbar.
+    let anchored_bottom = w.current_monitor().ok().flatten().is_some_and(|m| {
+        let a = m.work_area();
+        pos.y + size.height as i32 / 2 > a.position.y + a.size.height as i32 / 2
+    });
+    let _ = w.set_size(tauri::LogicalSize::new(POPUP_SIZE.0, height));
+    let _ = w.set_position(PhysicalPosition::new(
+        pos.x,
+        fitted_top(pos.y, size.height as i32, new_h, anchored_bottom),
+    ));
+}
+
+/// Asks Windows 11 for rounded corners on a frameless window (`DWMWCP_ROUND`, 8 px). Windows 10 does not know the
+/// attribute: the call fails and the corners stay square, which is how that system draws every window.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn round_corners<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Result<(), String> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
+    };
+    // Tauri may use another version of the `windows` crate, so only the raw handle crosses over.
+    let hwnd = HWND(window.hwnd().map_err(|e| e.to_string())?.0);
+    let preference: DWM_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND;
+    // SAFETY: `hwnd` is the live popup window and the pointer and size describe one `DWM_WINDOW_CORNER_PREFERENCE`.
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            std::ptr::from_ref(&preference).cast(),
+            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        )
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// Closes the popup if it is open.
@@ -546,6 +620,27 @@ mod tests {
         assert_eq!(y, 1040 - 440 - 6, "above the taskbar");
         let left = popup_position(Rect { x: 2, y: 0, w: 20, h: 20 }, work, (360, 440));
         assert_eq!(left.0, 6, "kept inside on the left");
+    }
+
+    #[test]
+    fn the_popup_height_follows_the_content_within_limits() {
+        assert_eq!(fitted_height(200.2), 201.0);
+        assert_eq!(
+            fitted_height(10.0),
+            POPUP_HEIGHT_RANGE.0,
+            "an empty page still leaves a usable popup"
+        );
+        assert_eq!(fitted_height(9000.0), POPUP_HEIGHT_RANGE.1);
+        assert_eq!(fitted_height(f64::NAN), POPUP_SIZE.1, "the webview is untrusted");
+        assert_eq!(fitted_height(f64::INFINITY), POPUP_SIZE.1);
+        assert_eq!(fitted_height(-5.0), POPUP_HEIGHT_RANGE.0);
+    }
+
+    #[test]
+    fn a_popup_above_the_taskbar_keeps_its_bottom_edge_and_one_below_the_menu_bar_its_top() {
+        assert_eq!(fitted_top(500, 440, 300, true), 640, "bottom stays at 940");
+        assert_eq!(fitted_top(500, 300, 440, true), 360);
+        assert_eq!(fitted_top(30, 440, 300, false), 30);
     }
 
     #[test]

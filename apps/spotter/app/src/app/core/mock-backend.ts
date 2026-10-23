@@ -706,6 +706,10 @@ export class MockBackend implements SpotterBackend {
     return this.call('hideTray', () => undefined);
   }
 
+  fitTray(_height: number): Promise<void> {
+    return this.call('fitTray', () => undefined);
+  }
+
   async onState(handler: (push: StatePush) => void): Promise<() => void> {
     this.stateHandlers.add(handler);
     return () => this.stateHandlers.delete(handler);

@@ -114,6 +114,8 @@ export interface SpotterBackend {
   showMainWindow(route: string | null): Promise<void>;
   /** Hides the tray popup. */
   hideTray(): Promise<void>;
+  /** Fits the tray popup's window to its content: `height` in CSS pixels as the page measured it (the shell clamps it). */
+  fitTray(height: number): Promise<void>;
   /** The main window is asked to show a route (Tauri event `spotter://navigate`, payload: the route string). */
   onNavigate(handler: (route: string) => void): Promise<() => void>;
 }

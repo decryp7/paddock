@@ -5,8 +5,9 @@
 use crate::dto::{StatePush, WatchSummaryDto};
 use crate::notifier::{OpenLocation, OsToast, ShellNotifier};
 use crate::state::{resolve_data_dir, AppState, Shared, DATA_DIR_ENV};
-use crate::{applog, credentials, tray};
+use crate::{applog, credentials, toast, tray};
 use spotter_engine::engine::Change;
+use spotter_engine::notifier::NotificationKind;
 use spotter_engine::{Engine, EngineConfig, Scheduler, Services};
 use spotter_render::ChromiumRenderer;
 use spotter_sources::http::Http;
@@ -25,6 +26,22 @@ struct TauriToast<R: Runtime>(AppHandle<R>);
 impl<R: Runtime> OsToast for TauriToast<R> {
     fn show(&self, title: &str, body: &str) {
         if let Err(e) = self.0.notification().builder().title(title).body(body).show() {
+            applog::write(&format!("a notification could not be shown: {e}"));
+        }
+    }
+
+    fn show_for_watch(&self, title: &str, body: &str, kind: NotificationKind, watch_id: &str) {
+        let mut toast = self
+            .0
+            .notification()
+            .builder()
+            .title(title)
+            .body(body)
+            .extra(toast::WATCH_KEY, watch_id);
+        if let Some(actions) = toast::action_type_for(kind, Some(watch_id)) {
+            toast = toast.action_type_id(actions);
+        }
+        if let Err(e) = toast.show() {
             applog::write(&format!("a notification could not be shown: {e}"));
         }
     }
@@ -84,6 +101,8 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
         http.clone(),
         default_downloads.clone(),
     );
+    // Before the first toast: the plugin shows buttons only for toasts that are shown after a handler exists.
+    toast::register(app);
     let clock = Arc::new(spotter_engine::clock::SystemClock::new());
     refresh_local_time(&clock);
     let mut services = Services::new(Arc::new(credentials::KeyringSecrets));

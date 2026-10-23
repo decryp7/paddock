@@ -11,6 +11,7 @@ pub mod lifecycle;
 pub mod native_feel;
 pub mod notifier;
 pub mod state;
+pub mod toast;
 pub mod tray;
 pub mod updater;
 
@@ -71,6 +72,7 @@ pub fn run() {
             commands::install_app_update,
             commands::show_main_window,
             commands::hide_tray,
+            commands::fit_tray,
         ])
         .setup(|app| {
             // The engine opens before the event loop runs, so no command can arrive before it exists; nothing here
