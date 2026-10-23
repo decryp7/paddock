@@ -11,10 +11,17 @@ your local AI the same view over MCP. Everything runs on your machine.
 
 </div>
 
+![Pacenotes: Understand your code, locally](docs/images/pacenotes-hero.svg)
+
+
 > **Status: in design; implementation starts after Debrief's release.** There is no product code in this repository.
 > The design is in [docs/proposal.md](docs/proposal.md) and open questions are pending.
 
 ## What it will do
+
+![Pacenotes features](docs/images/pacenotes-features.svg)
+
+![How Pacenotes works](docs/images/pacenotes-how-it-works.svg)
 
 Pacenotes is a small core (code index, headless service, MCP server, UI shell) with its functions as plugins:
 
