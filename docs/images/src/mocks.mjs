@@ -74,11 +74,11 @@ export function panel(app, kind) {
       r(64, 114, 544, 1, 'mrule', 0) + mono(64, 144, '{ "box": [412, 288, 96, 32],') + mono(64, 170, '  "confidence": 0.97,') + mono(64, 196, '  "layer": "detector" }') + t(608, 66, '127.0.0.1', 'mm', 'end');
   } else if (k === 'sighter:flaui') {
     const tag = (x, y, label, c) => r(x, y, 74, 24, c === 'uia' ? 'mact' : 'maccf', 12) + t(x + 37, y + 16.5, label, c === 'uia' ? 'mta' : 'mtw', 'middle');
-    g = r(40, 28, 592, 224, 'mcode', 12) + mono(64, 58, 'FlaUI test  (C#)', 'mmonoa') +
+    g = r(40, 28, 592, 224, 'mcode', 12) + mono(64, 58, 'Your test  (C#)', 'mmonoa') +
       mono(64, 98, 'var win = app.GetMainWindow(auto);') + tag(546, 80, 'UIA', 'uia') +
-      mono(64, 130, 'win.FindFirst(cf.ByName("Save"))') + tag(546, 112, 'UIA', 'uia') +
-      mono(64, 162, 'chart.FindFirstOrSight(cf.ByText("Pump 3"))') + tag(546, 144, 'Sighter', 'sight') +
-      r(64, 184, 544, 1, 'mrule', 0) + t(64, 214, 'UIA miss, found by sight: 0.96 via detector', 'mm') + t(608, 214, 'then Click()', 'mm', 'end');
+      mono(64, 130, 'win.FindFirstDescendant(ByName("Save"))') + tag(546, 112, 'UIA', 'uia') +
+      mono(64, 162, 'chart.Sighter().GetByText("Pump 3")') + tag(546, 144, 'Sighter', 'sight') +
+      r(64, 184, 544, 1, 'mrule', 0) + t(64, 214, 'Auto-waits, exactly one match: 0.96 via detector', 'mm') + t(608, 214, 'then ClickAsync()', 'mm', 'end');
   } else if (k === 'sighter:apps') {
     const win = (x, y, name, model, on) => r(x, y, 188, 118, on ? 'mcon' : 'mc', 10) + r(x, y, 188, 26, 'mside', 10) + sk(x + 14, y + 9, 60) +
       t(x + 14, y + 52, name, 'mt') + r(x + 14, y + 66, 120, 8, 'ms', 4) + r(x + 14, y + 82, 88, 8, 'ms', 4) + r(x + 14, y + 98, 76, 10, on ? 'maccf' : 'ms', 5) +
