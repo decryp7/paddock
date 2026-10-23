@@ -2,7 +2,7 @@ Status: proposal, open questions pending
 
 # Proposal: Sighter, a local vision locator server for UI automation
 
-Date 2026-10-23, revision 3 (clean rewrite; supersedes revisions 1 and 2). Research proposal, nothing built. Items marked (verify) come
+Date 2026-10-23, revision 4 (feature research pass 2: test layer, plans, remote sessions, family rules; supersedes revisions 1 to 3). Research proposal, nothing built. Items marked (verify) come
 from secondary sources (Roboflow catalog pages, mirrors, blogs, forum posts) and must be checked against the official repo or paper
 first. Speeds and accuracy figures are published or order-of-magnitude, not measured on our data; a week-1 spike must measure.
 
@@ -14,10 +14,11 @@ with boxes, confidence and which layer found it. **It works from pixels alone**,
 old desktop tools, custom-drawn UIs, remote sessions, games. Accessibility trees (UIA, AX, AT-SPI, DOM) are an optional label source that
 speeds up labelling; nothing at run time depends on them. It is a built-in optional module, not a plugin process.
 
-Three parts:
+Four parts:
 1. **Recorder**: captures windows/screens plus input events from the studio or headlessly on test machines.
 2. **Studio** (Tauri + Angular, Label Studio/CVAT-like): label, review, train, evaluate and version a computer-vision model **per app**.
 3. **Server** (`sighter-server`) with a layered resolver. Engineers write unit tests and scripts against `/v1/*`, via generated clients or CLI.
+4. **Test layer**: imports test plans (`.sighterplan`) from the codebase tool or by hand, builds an app state graph with coverage, runs data-driven matrices and reports with requirement traceability (7.1 to 7.7). Remote sessions (Citrix, RDP, VNC viewer windows) are a first-class target (7.6). Pitwall is optional throughout (section 9).
 
 Everything is local: loopback only, no cloud, no telemetry. YOLO is not the headline; the detector is one interchangeable backend and the
 product is the resolver.
@@ -181,7 +182,7 @@ crops), hard-cases gallery, held-out session test (different theme/scale/OS), si
 Accelerators: CUDA (Windows/Linux), ROCm (Linux, best effort), Apple MPS (smaller models, op gaps fall back to CPU), CPU everywhere.
 Import of an externally trained ONNX model with a compatibility check (input size, output layout, class list).
 
-## 7. The server API and clients
+## 7. The server API, clients and test layer
 
 **Process**: `sighter-server`, a background service per OS (Windows service/user task, launchd agent, systemd user unit; same pattern as
 Pitwall's `paddock-service`), loopback only (`127.0.0.1`/`::1`, optional unix socket/named pipe), per-app API keys in the OS credential
@@ -221,6 +222,107 @@ contains no non-Rust code. Strict alternative: OpenAPI + CLI + 20-line examples 
 anchor under 100 ms with a region, 150 to 500 ms full screen on CPU (cache OCR by fingerprint); detector under 50 ms on a discrete/Apple
 GPU at 640 px (5 to 20 ms inference + 10 to 25 ms capture/pre-processing), "under 250 ms at 640" on an 8-core CPU for a small model
 (dense 1080p at 960 to 1280 px reaches 300 to 800 ms); VLM 1 to 5 s on GPU, 10+ s on CPU, never in those budgets.
+
+### 7.1 Test model: the app state graph
+Screens are nodes, actions are edges, both built from recordings and run history (this is the Eggplant DAI idea, without the cloud: DAI models
+states and actions as a graph, with the engine choosing paths and a coverage heatmap showing how often states and actions were hit
+([DAI docs](https://docs.eggplantsoftware.com/dai/DAI%2026.1/dai-using-eggplant-dai), [coverage report](https://docs.eggplantsoftware.com/dai/DAI%207.2/dai-coverage-report))).
+- **Nodes** are screen fingerprints (section 7, perceptual + layout hash), merged by similarity so "Login" with a typed username is still one node. The studio proposes names (Pitwall `screen-state` description, or a human name; non-AI path: window title + dominant OCR heading); a human confirms and merges.
+- **Edges** are recorded actions (click on element X, press key, wait) from node A to node B, with the resolved query (not coordinates), a timing sample and an observed-count. Edges carry guards where seen (data-dependent: "after valid login").
+- **Built from** recordings (each session is a walk), runs (observed transitions add edges and counts) and `.sighterplan` expected screens (section 7.2). The graph is a derived, versioned artefact in the project (SQLite tables), pure data in `sighter-model`.
+- **Coverage**: screens reached / known, transitions exercised / known, per run set and over time; "unreached screens" (in the graph or plan, not visited by any passing run), "untested transitions", and 2-step and 3-step coverage like DAI's Extended type (counts of action sequences).
+- **Path generation** (pure, deterministic given a seed): shortest path to a target screen, all-edges cover (Chinese-postman style) and random walk with weights; each path is emitted as a normal script/flow so it runs through the same resolver. Paths that need unreviewed elements or unrecorded edges are listed as "needs recording", never guessed.
+- **Drift detection**: a run that lands on an unknown fingerprint creates a candidate node, flagged for review (also the self-healing signal for navigation).
+- v1 ships graph building, coverage and "unreached/untested" reports plus shortest-path and all-edges generation; weighted/learned path selection is Later.
+
+### 7.2 Test plans in: the `.sighterplan` import
+The codebase tool (name pending) reads requirements and acceptance criteria and drafts UI test cases; it hands them to Sighter as a **`.sighterplan` file**.
+Sighter never trusts it: it is parsed once at the edge into typed values (size caps, unknown keys rejected with a message naming the line), then
+resolved against what Sighter already knows. Plain TOML (same family as profiles; reviewable in a pull request). Sketch (v1 of the schema):
+
+```toml
+format = "sighterplan"
+version = 1
+[plan]
+id = "checkout-2026-10"            # stable; re-import updates by id
+title = "Checkout"
+app = "shopfront-win"              # Sighter project/app
+generated_by = { tool = "pacenotes", revision = "a1b2c3d", at = "2026-10-23T10:00:00Z" }
+
+[[requirement]]
+id = "REQ-142"                     # id from the tracker or the codebase tool; free text, max 64 chars
+title = "Guest checkout"
+acceptance = ["AC-1: a guest can pay by card", "AC-2: totals include tax"]
+source = "docs/requirements/checkout.md#guest"   # a link back, never file contents
+
+[[screen]]                         # screens the plan expects to exist
+name = "cart"                      # matched to a known fingerprint by name; else an unknown screen
+description = "Cart page with line items and a Checkout button"
+
+[[case]]
+id = "TC-142-1"
+title = "Guest pays by card"
+requirements = ["REQ-142"]         # AC refs allowed: "REQ-142#AC-1"
+priority = "high"                  # low|normal|high
+tags = ["smoke"]
+data = "cards"                     # optional parameter table (7.4)
+  [[case.step]]
+  action = "click"                 # click|type|press|select|wait_for|assert_screen|assert_text|wait
+  target = { text = "Checkout", class = "button", inside = "cart" }
+  [[case.step]]
+  action = "type"
+  target = { name = "Card number", class = "textbox" }
+  value = "{{data.card}}"          # secrets only by reference: {{secret:NAME}}, never inline
+  [[case.step]]
+  action = "assert_screen"
+  expect_screen = "order-confirmed"
+  timeout_ms = 8000
+```
+
+**Import behaviour** (a dry-run report first, then apply):
+- Steps resolve to **known** (target found in the model/templates or an existing screen), **ambiguous** (several matches) or **unknown**.
+- Every unknown screen or target becomes a **"record this screen" task** in the studio (a to-do list with the plan step, the requirement id, the description and a suggested walk through the graph to reach the screen). Cases with open tasks are **Needs recording** and will not run unattended.
+- Recordings made from a task are linked back: recording -> task -> step -> case -> requirement id(s). Linking is stored as ids in the project; re-importing a changed plan shows a diff (new, changed, removed steps) and keeps links where the case id and step text still match.
+- Guarded: a plan can ask only for the same actions as scripts; `{{secret:NAME}}` resolves from the OS credential store at run time and is never written into reports; destructive-looking steps follow the `act` deny-list. The importer never executes anything.
+- Export back: results per case (pass/fail/blocked/needs-recording, evidence links) as `.sighterresult` plus the standard reports (7.5) so the codebase tool can show requirement coverage. The schema lives in a small shared crate (`paddock-testplan`) used by both tools so they cannot drift (open question 10). Hand-written plans are valid; the codebase tool is just one author.
+- Without the codebase tool or Pitwall, plans are written by hand or exported from the studio's flow editor; nothing about plan import needs AI.
+
+### 7.3 Test management and traceability
+- **Requirement ids everywhere**: cases, steps, recordings, runs and results carry requirement ids; the studio has a traceability matrix (requirement x case x last result x last run) with filters for "requirement without case", "case without recording", "failing".
+- **Test runs**: a run set = cases + environment (OS, DPI, theme, language, resolution, model version) + results; history per case, flakiness (pass/fail flips, retries), run-to-run comparison.
+- **Results out (v1)**: JUnit XML (de facto CI format, Pitcrew ingests it), TRX (Visual Studio / Azure DevOps), Allure results directory (`*-result.json` plus attachments; format per secondary sources, verify against allurereport.org), and Sighter's own JSON with evidence.
+  Requirement ids go in JUnit `properties` and Allure labels so tools can link them.
+- **Push to TestRail / Xray (Later)**: opt-in, user-supplied URL and token in the credential store, user-initiated or per-run. TestRail's CLI maps JUnit `test_id` properties or an automation id to cases; Xray accepts JUnit on `POST /api/v2/import/execution/junit?projectKey=...`, and Xray keeps requirement links natively in Jira ([TestRail mapping](https://support.testrail.com/hc/en-us/articles/12989737200276), [Xray via Qt Test Center](https://www.qt.io/quality-assurance/blog/test-center-4.3-release-xray-cloud-integration-and-traceability-as-code); both secondary, verify against vendor API docs).
+  Both are a user-chosen network egress to the user's own server and so are off by default and explained in Settings; screenshots are not uploaded unless the user ticks it. Batch calls to respect rate limits (TestRail is reported at 180 requests/minute, verify).
+
+### 7.4 Data-driven tests and run matrices
+- **Parameter tables** (CSV/TOML/inline) feed `{{data.col}}` into steps; one row = one iteration with its own result; secrets columns are references into the credential store. Row selection by tag.
+- **Matrices**: a run set expands over axes (resolution, DPI 100/125/150/200 %, theme light/dark/high contrast, language/locale, OS), each with its own model/template variants. The recorder's session metadata (section 4) defines which axes have coverage; the matrix report shows "cell not covered by training data" so a failure there is attributed to the model rather than the app.
+- Matrices run on the machines that can produce the cell (a runner with that DPI/theme; Sighter can set theme/DPI only through the OS or a test hook, otherwise the cell is "needs a runner"). Pitcrew runner labels carry the axes.
+
+### 7.5 Visual regression and assertions (`assert_screen` completeness)
+Baselines per (app, screen, OS, DPI, theme, language); anything below is configuration, not code.
+- **Match levels** like Applitools (strict, content, layout; exact for pixel-identical) ([docs](https://applitools.com/tutorials/guides/advanced-use-cases/match-levels-&-regions); level names for content/exact (verify)): `exact`, `strict` (ignore anti-aliasing and colour noise below a threshold), `layout` (structure and positions via the detector/OCR boxes, ignoring text content), `content` (text via OCR, ignoring styling).
+- **Regions**: ignore, floating (may move within a bound), layout-only, and "dynamic" regions (clock, counters, avatars) found automatically by comparing several baseline captures; regions are defined by box, by element query or by named element so they follow the UI.
+- **Tolerance** per level (pixel colour distance, fraction of pixels), anti-aliasing and sub-pixel text shift handling, and a size limit on the diff.
+- **Workflow**: diff overlay and side-by-side/slider, "accept as new baseline" with a reason (a reviewed, versioned change, never automatic), baseline history, per-theme baselines created from the matrix.
+- **Result**: score, status (match, match with ignored, mismatch, new screen), regions that differ, and the OCR text that changed. Used by `assert_screen`, plans (`assert_screen` steps) and the model graph (a node is "stable" when its baseline passes).
+
+### 7.6 Virtual desktop, Citrix, RDP and VNC as first-class targets
+UiPath built its Computer Vision product mainly for virtual desktops such as Citrix, where selectors are missing or unreliable: it sends an image of the window to a neural network that labels elements, using anchors and "relative to" offsets ([UiPath docs](https://docs.uipath.com/activities/other/latest/ui-automation/computer-vision-activities)).
+Automation Anywhere's AISense targets Citrix, RDP and legacy toolkits (Delphi, Qt, Flex) the same way ([docs](https://docs.automationanywhere.com/bundle/enterprise-v11.3/page/enterprise/topics/aae-client/metabots/md-in-enterprise-client/aisense-overview.html)).
+Power Automate Desktop switches its recorder to image mode in Citrix and RDP sessions ([June 2021 update](https://powerautomate.microsoft.com/ar-sa/blog/power-automate-desktop-june-2021-update/)).
+Sighter is pixels-only, so this is its natural home, not an extra.
+- **Target type `remote_session`**: the thing captured is the local client window (mstsc/RDP, Citrix Workspace, VMware Horizon, VNC viewer, VM console) or a VNC/RDP pixel stream; the query and models treat it as a window with a "remote" flag.
+- **What differs**: lossy codecs (blur, banding, text edges: lower template tolerance, OCR on 2x upscaled crops, train with JPEG/H.264 augmentation and record on the same codec settings), variable latency (`wait_for` defaults longer, change detection waits for N stable frames), scaling/high-DPI mismatches between client and session (store both scales), keyboard layout and key mapping (type via the viewer's input path, offer a clipboard-free typing mode), and reconnect/lock screens (recognised as screens in the graph).
+- **Input**: `act` targets the client window with the usual guards; coordinates are mapped client-window -> session using the recorded geometry. Where the viewer filters injected input (UIPI, secure-attention sequences), it fails with a message and a next step instead of clicking elsewhere. (Details by viewer: verify per product.)
+- **Recording on the host**: the recorder captures the viewer window; nothing is installed in the remote machine (no agent, no extension), which is the point for locked-down VDI.
+- **v1**: capture the viewer window of RDP/Citrix/Horizon/VNC and run everything on it, with a "remote codec" augmentation preset and the longer stability defaults. **Later**: a direct RDP/VNC pixel stream capture without a client window.
+
+### 7.7 Accessibility audit, localisation and performance (by-products of what Sighter already sees)
+- **Accessibility audit (Later)**: from pixels, per detected element: foreground/background contrast ratio (WCAG 1.4.3 thresholds: 4.5:1 normal text, 3:1 large text (from general knowledge, verify)), pointer target size against WCAG 2.2 SC 2.5.8 (at least 24 by 24 CSS px, with a spacing exception; [W3C](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html)); focus-ring visibility by diffing before/after Tab; text-over-image warnings. Useful for legacy apps that have no accessibility tree to audit. Limits: pixels do not give semantic roles, names or reading order, and DPI-to-CSS-pixel mapping needs the recorded scale. Reported as advisory findings with crops, not as conformance.
+- **Localisation testing (Later; per-language runs of the same flow)**: OCR the same screen across languages and flag text that is clipped (text region touches or exceeds its container/box, ends mid-glyph, or a pseudo-localised delimiter is missing, as in pseudo-localisation checks ([OpenHarmony i18n docs](https://gitcode.com/openharmony/docs/blob/master/en/application-dev/internationalization/pseudo-i18n-testing-translation.md), [Applitools](https://applitools.com/blog/localization-testing/))), overflows or overlaps, **untranslated** (OCR language id says the source language, or text equals the baseline language string), mojibake/tofu boxes, and RTL layout mirroring (layout match level). Side-by-side screenshots per language for linguist review. Supports the pseudo-locale idea: run once with a pseudo-localised build to find truncation before translations exist.
+- **Performance-ish measures (v1 basic, Later richer)**: **time-to-screen** (action timestamp to the first frame where the target fingerprint matches and stays stable), **response latency** (action to first visible change), step durations, p50/p95 per step across runs, and regression alerts against a baseline. Measured from frame timestamps, so the resolution is the capture frame interval (about 16 to 33 ms at 30 to 60 fps; the recorder switches to a fixed high rate while measuring) and the report states its resolution. Dyno CPU/GPU/memory and throttling samples overlay the timeline so "slow because the machine was throttling" is visible. Not a profiler: it measures what a user sees.
 
 ## 8. The resolver and models
 
@@ -287,10 +389,27 @@ runner has no GPU/Pitwall, or icons have no text.
 
 ## 9. Family integrations
 - **Debrief**: a run produces `run.mp4` (from capture frames), a step timeline JSON and a clock-offset record; "Open run in Debrief" imports via the video feature (ADR 0033) with steps as markers so a failed step at 10:42:07 sits beside the app's log lines. Needs a small versioned file contract (Paddock ADR). Shared `paddock-video` crate.
-- **Pitwall**: yes, Sighter talks to Pitwall for vision. Contract in 9.1.
-- **Pitcrew**: runs engineers' scripts on a runner that has `sighter-server` as a service plus an interactive logged-in desktop session (headless Windows services cannot capture or drive the desktop); Pitcrew verifies this, warns, and shows Sighter health. JUnit and artifacts (videos, overlays). Unreviewed-dependent flows are refused.
-- **Dyno**: CPU/GPU/memory samples during a run attached to the report; "step slow because the machine was throttling" via Dyno's throttling detector. Optional.
-- **Paddock**: `paddock-ui`, `paddock-notify`, `paddock-service`, `paddock-cli`, `chromium-driver`, proposed `paddock-video`.
+- **Pitwall**: optional, never required (rules below). Contract in 9.1, client in the shared crate `paddock-pitwall`.
+- **Codebase tool (name pending)**: drafts UI test cases from requirements and acceptance criteria and hands them over as `.sighterplan` (7.2); reads back `.sighterresult` (requirement coverage, failing cases). File-based and CLI-based hand-off first (`sighter plan import`), no live coupling; each tool works alone. Its read-only MCP server may expose "which requirements have recordings" later (Later).
+- **Pitcrew**: runs engineers' scripts on a runner that has `sighter-server` as a service plus an interactive logged-in desktop session (headless Windows services cannot capture or drive the desktop); Pitcrew verifies this, warns, and shows Sighter health. JUnit, TRX and artifacts (videos, overlays). Runner labels carry matrix axes (DPI, theme, language, remote-session capable). Unreviewed-dependent flows are refused.
+- **Dyno**: CPU/GPU/memory samples during a run attached to the report; "step slow because the machine was throttling" via Dyno's throttling detector; overlay on time-to-screen charts. Optional.
+- **Spotter**: new release detected -> run the smoke plan (Later).
+- **Paddock**: `paddock-ui`, `paddock-notify`, `paddock-service`, `paddock-cli`, `chromium-driver`, proposed `paddock-video`, `paddock-pitwall` (shared Pitwall client: discovery, pairing, key in the credential store, priorities, cancel, caps, `ground`/chat helpers, a "needs local AI" status type; Sighter, the codebase tool, Spotter and Debrief all use it instead of four copies), `paddock-testplan` (the plan/result schema shared with the codebase tool).
+
+### Family rules applied to Sighter
+- **Pitwall is optional.** Every Pitwall-assisted feature has a non-AI path and a visible state `needs local AI` (a banner with "Install/start Pitwall" and the list of features it would enable). Nothing fails because Pitwall is absent; the review queue absorbs the work.
+
+  | Pitwall-assisted feature | Non-AI path (always works) | Without Pitwall you lose |
+  |---|---|---|
+  | Label suggestions (list elements on a frame) | OCR + template + detector pre-labels + click-derived boxes + optional Florence-2 ONNX on CPU (MIT) + edge/connected-component heuristics | speed on a new app |
+  | Element naming ("Settings (gear)") | OCR text of the element or its neighbours; otherwise `icon-17` with a human name in the queue; "same as..." | automatic icon names |
+  | Grounding fallback at run time | none: step fails or pauses as "needs labelling" (the safe default anyway) | recovery from unseen UI changes |
+  | Step descriptions in reports | templated text from the recorded step ("Click 'Checkout' (button) on Cart") | prose descriptions |
+  | Screen-state names | window title + the largest OCR heading + a human name | auto names |
+  | Plan drafting | the codebase tool is a separate decision; hand-written plans work | AI-drafted cases (the codebase tool's concern) |
+  | Localisation language id / "is this translated" | OCR language detection (PaddleOCR lang models) and string comparison | semantic checks |
+- **One GPU.** Batch labelling and description jobs go to Pitwall at **batch priority and run only when idle** (no training, no interactive Playground request, optionally only when the machine is not in use); they pause and resume, are cancellable, and show an estimate and a per-project cap. Training reserves the GPU: Sighter asks Pitwall to unload the VLM first and restores it after. Interactive `locate` never waits on a batch job.
+- **Licences and privacy**: no AGPL/GPL/non-commercial models or code (section 8 table; UI-TARS Desktop and OmniParser's detector excluded as code or weights as stated there); strictly local (loopback, no cloud model, no telemetry); recordings may contain secrets (section 10: redaction before storage, no key text, secrets only by reference in plans and data tables, nothing leaves the machine except the two opt-in egresses: model/runtime downloads and the user-chosen test-management or training host); never click blindly.
 
 ### 9.1 Sighter to Pitwall contract (vision)
 **What Sighter sends**: Pitwall's OpenAI-compatible `/v1/chat/completions` with images inline (base64), under a Pitwall app key for Sighter
@@ -329,7 +448,8 @@ VLM fallback, and the review queue picks up the slack (Florence-2 ONNX optionall
 - `sighter-core`: domain types, taxonomy, fusion/confidence, dataset assembly, resolver, fingerprints, metrics (mAP, confusion), active-learning scoring, version registry. Pure. Ports: `ScreenSource`, `LabelSource`, `Detector`, `Trainer`, `Vlm`, `InputDriver`, `Store`.
 - `sighter-record`: per-OS `ScreenSource` and event-capture adapters (WGC/DXGI, ScreenCaptureKit, PipeWire/XShm), out-of-process helper, optional a11y snapshot adapters.
 - `paddock-video` (shared, extracted from Debrief): ffmpeg runtime, encoders, frame extraction. `sighter-frames`: sampling, scene-change, dedup (`image`, `fast_image_resize`, perceptual hash, SSIM).
-- `sighter-ocr`, `sighter-infer` (`ort`/`tract`), `sighter-train` (`ManagedPython` default, `ExportOnly`, later `Burn`), `sighter-pitwall` (client + job queue).
+- `sighter-model` (state graph, coverage, path generation; pure), `sighter-plan` (`.sighterplan` parser, resolution, task list, traceability; uses shared `paddock-testplan`), `sighter-report` (JUnit/TRX/Allure/JSON writers, matrices, visual-diff levels).
+- `sighter-ocr`, `sighter-infer` (`ort`/`tract`), `sighter-train` (`ManagedPython` default, `ExportOnly`, later `Burn`), `sighter-pitwall` (job queue and prompts on top of the shared `paddock-pitwall` client).
 - `sighter-server` (axum-style HTTP, OpenAPI generation), `sighter-input` (optional `act`: SendInput, CGEvent, XTEST, RemoteDesktop portal/libei, scoped), `sighter` CLI (reuse `paddock-cli`).
 - `app/src-tauri` + `app/src` (Angular 22, `paddock-ui`): Home dashboard, Recordings, Label (canvas + queue), Models, Playground (drop a screenshot or capture live, type a query, see every layer's candidates and timing), Runs, Keys and permissions, Settings. Backend service by DI token with a mock for browser dev.
 
@@ -354,20 +474,43 @@ Silicon uses MPS for training smaller models and CoreML for inference.
 
 ## 13. Feature catalogue (v1 vs Later)
 
-Survey of neighbours (vendor pages are marketing; claims marked (verify) are unconfirmed). Eggplant/Keysight: computer vision + OCR + self-healing,
-adds image variants as the app changes ([Keysight brief](https://www.keysight.com/sg/en/assets/3125-1455/solution-briefs/Complex-UI-Testing-Deliver-Seamless-Digital-Journeys-Across-Every-Platform.pdf), [press release](https://www.businesswire.com/news/home/20210211005635/en/Keysight-Technologies-Enhances-Eggplant-Digital-Automation-Intelligence-Platform-with-High-Speed-Computer-Vision)).
-TestComplete: hybrid property + AI visual recognition; screenshots go to a vendor AI service (cloud, which we avoid) ([SmartBear](https://smartbear.com/news/news-releases/smartbear-advances-testcomplete-with-vision-ai/), [DZone](https://dzone.com/events/video-library/092226SmartBearTestComplete10MT)).
+### Survey of neighbours (two passes)
+Vendor pages are marketing; claims marked (verify) are unconfirmed. First pass:
+Eggplant/Keysight: computer vision + OCR + self-healing, adds image variants as the app changes ([Keysight brief](https://www.keysight.com/sg/en/assets/3125-1455/solution-briefs/Complex-UI-Testing-Deliver-Seamless-Digital-Journeys-Across-Every-Platform.pdf), [press release](https://www.businesswire.com/news/home/20210211005635/en/Keysight-Technologies-Enhances-Eggplant-Digital-Automation-Intelligence-Platform-with-High-Speed-Computer-Vision)).
+TestComplete: hybrid property + AI visual recognition; screenshots go to a vendor AI service (cloud, which we avoid) ([SmartBear](https://smartbear.com/news/news-releases/smartbear-advances-testcomplete-with-vision-ai/)).
 Tosca Vision AI: CNN + heuristics, self-healing, tests from a mockup, no trees/tab bars, VisionScript escape hatch ([docs](https://docs.tricentis.com/tosca-2026.1/en-us/content/vision_ai/vision_ai_introduction.htm)).
-UI.Vision RPA: visual assertions, OCR, desktop automation via XModules, CLI for CI; core is AGPL, so reference only ([site](https://ui.vision/rpa)).
-Airtest/Poco (NetEase, Apache-2.0): image locating for games, HTML reports with screen recording, device farms ([overview](https://dev.co/testing/open-source/airtest)).
-Applitools Eyes: baselines, ignore/floating regions, match levels strict/layout ([docs](https://applitools.com/tutorials/guides/advanced-use-cases/match-levels-&-regions)).
-Roboflow: dataset health check (class balance, missing labels), versions with augmentation, active-learning upload ([Ultralytics tutorial](https://docs.ultralytics.com/yolov5/tutorials/roboflow_datasets_integration), [Workflows block](https://inference.roboflow.com/workflows/blocks/roboflow_dataset_upload/)).
-CVAT: keyframes with linear interpolation, SAM 2 tracker ([CVAT](https://www.cvat.ai/academy/track-mode), [blog](https://www.cvat.ai/blog/video-annotation-sam-2)).
-Playwright codegen: records actions into scripts, role/text/test-id locators, assertion recording ([docs](https://playwright.dev/docs/codegen)).
-Anthropic computer use: screenshots downscaled to about XGA and coordinates mapped back (third-party descriptions, verify against official docs).
-Not confirmed by search, from general knowledge (verify): SikuliX, Ranorex, Katalon, Appium image plugin, Label Studio, OBS, Windows Steps Recorder (deprecated), UI-TARS Desktop, OmniTool.
+UI.Vision RPA: visual assertions, OCR, desktop automation, CLI for CI; core is AGPL, reference only ([site](https://ui.vision/rpa)).
+Airtest/Poco (Apache-2.0): image locating for games, HTML reports with screen recording ([overview](https://dev.co/testing/open-source/airtest)).
+Applitools Eyes: baselines, ignore/floating regions, match levels ([docs](https://applitools.com/tutorials/guides/advanced-use-cases/match-levels-&-regions)).
+Playwright codegen: records actions into scripts, role/text locators, assertion recording ([docs](https://playwright.dev/docs/codegen)).
 
-Realistic v1 for about 3 to 6 months: everything marked v1 below, on two OSes, Windows + macOS first.
+Second pass, with what was confirmed and what we take from each:
+
+| Product | Confirmed (source) | Take for Sighter | Still (verify) |
+|---|---|---|---|
+| **UiPath Computer Vision** | Built mainly for virtual desktops such as Citrix; sends the window image to a neural network that labels elements (buttons, text fields, checkboxes, dropdowns, text, tables); smart anchors; "Relative To" offsets; every anchor must be found at runtime; fails on repeated identical labels; variable app scale hurts relative offsets; activities live inside one `CV Screen Scope` that connects to the network server ([docs](https://docs.uipath.com/activities/other/latest/ui-automation/computer-vision-activities)) | Remote-session target (7.6); anchors and relative queries (already `near`/`inside`); table extraction (cell by row/column names, v1 `locate` on tables, Later `extract_table`); a *scope* concept = our screen-state/window binding | Whether the server is local or cloud (docs do not say); accuracy numbers |
+| **Automation Anywhere AISense** | Computer vision for Citrix, RDP and legacy toolkits (Delphi, Qt, Flex); creates UI objects from an image; "resolution, scale and position independent" ([docs](https://docs.automationanywhere.com/bundle/enterprise-v11.3/page/enterprise/topics/aae-client/metabots/md-in-enterprise-client/aisense-overview.html)) | Same market: legacy toolkits are the proof the pixels-first angle is wanted | Current product state (11.3 docs are old) |
+| **Power Automate Desktop** | Capture image + "Move mouse to image" (occurrences, wait timeout, tolerance, offsets); recorder switches to image mode in Citrix/RDP; image can be a **fallback** to a selector; images brittle at other zoom/DPI ([learn](https://learn.microsoft.com/en-nz/power-automate/desktop-flows/images), [fallback](https://learn.microsoft.com/en-us/power-automate/desktop-flows/ui-elements-fallback-mechanism), [troubleshooting](https://learn.microsoft.com/en-us/troubleshoot/power-platform/power-automate/desktop-flows/ui-automation/element-picker-cant-see-elements)) | Per-step settings: occurrences, timeout, tolerance, click offset; "fallback chain" idea = our resolver layers | OCR action details |
+| **Squish (Qt)** | Property, image-based and OCR recognition in one tool, combinable; OCR via Tesseract by default, pluggable ([Qt](https://www.qt.io/blog/why-squish-is-the-best-choice-for-gui-testing), [6.5](https://embeddedcomputing.com/technology/debug-and-test/rf-network-testing/available-now-squish-6-5-release-with-ai-driven-ocr-support)) | Mixed recognition per step; pluggable OCR engine behind a trait | Image-based matching algorithm details |
+| **Ranorex** | Image-based testing is a fallback when object recognition fails; image mode toggles inside the recorder, can be mixed ([support](https://support.ranorex.com/hc/en-us/articles/38038420878225-Image-based-Testing-Basics)) | Recorder mode toggle; mixing in one recording | |
+| **Katalon Studio** | Web image locators need Enterprise licence, pixel compare against the displayed element; mobile uses Appium image finding with OpenCV ([web](https://docs.katalon.com/katalon-studio/test-objects/web-test-objects/web-image-based-testing), [mobile](https://docs.katalon.com/katalon-studio/manage-projects/set-up-projects/mobile-testing/mobile-image-based-testing-in-katalon-studio)) | Nothing new; image locators are a paid add-on there | |
+| **SikuliX** | `Pattern` with similarity and target offset, `find`/`wait`/`exists`, event handlers (appear/vanish/change), OpenCV template matching, scores 0 to 1 ([basics](https://sikulix-2014.readthedocs.io/en/latest/basicinfo.html)) | Similarity + offset per target; appear/vanish/change events as `wait_for`; the classic pitfall that settings chains drop the offset (builder API must be immutable and tested) | OCR support, current maintenance |
+| **AutoIt** | Not searched in detail; known for `PixelSearch`/`PixelGetColor` and window/control automation (general knowledge) | Pixel-colour probes as a cheap `assert_pixel` | everything (verify) |
+| **FlaUI** | MIT .NET wrapper over UIA2/UIA3 for Win32/WinForms/WPF/Store; 5.0.0 reported Feb 2025 ([listing](https://dev.co/testing/open-source/flaui), third-party) | Reference for the optional `A11yUia` label source; we stay Rust (`windows` crate UIA), no .NET | Release/licence from the repo itself |
+| **WinAppDriver** | Unmaintained for years; Appium recommends NovaWindows driver ([appium](https://github.com/appium/appium-windows-driver)) | Do not depend on it; UIA via the OS API | Exact archive status |
+| **Eggplant DAI** | Model of states and actions (screens, dialogs, menus as states), transitions, parameters; learning algorithms choose paths each run; coverage heatmap, Extended coverage = sequences of three actions/states; max coverage may be below 100 % ([docs](https://docs.eggplantsoftware.com/dai/DAI%2026.1/dai-using-eggplant-dai), [coverage](https://docs.eggplantsoftware.com/dai/DAI%207.2/dai-coverage-report)) | App state graph, coverage, weighted path generation (7.1) | Learning algorithm details |
+| **Testim / mabl / Functionize** | Testim Smart Locators weigh hundreds of attributes; mabl auto-heals across web/API; Functionize Architect is an AI recorder and a Create Agent from plain language (all vendor/secondary: [Momentic](https://momentic.ai/blog/ai-test-automation-tools), [Functionize](https://www.functionize.com/blog/a-beginners-guide-to-creating-tests-with-functionize-architect)). Two healing styles: stored alternative locators tried in order vs intent-based re-resolution ([Shiplight](https://www.shiplight.ai/blog/best-self-healing-test-tools), vendor) | Our resolver is already both: ordered layers and intent (query) re-resolution; healing = explicit proposals | Web-only mostly; no evidence on desktop |
+| **Applitools Autonomous** | Not confirmed (search returned only Eyes/visual testing) | Plain-language test creation stays with the codebase tool + Pitwall | all (verify) |
+| **TestRail / Xray** | TestRail CLI maps JUnit to cases via `test_id` or automation id; Xray imports JUnit via API and holds requirement links in Jira; batch to avoid rate limits ([TestRail](https://support.testrail.com/hc/en-us/articles/12989737200276), [Qt Test Center](https://www.qt.io/quality-assurance/blog/test-center-4.3-release-xray-cloud-integration-and-traceability-as-code), secondary) | JUnit with ids; opt-in push (7.3, Later) | Endpoint and limits against vendor docs |
+| **Label Studio** | Apache-2.0 (only a listing site found), pre-annotation / ML backend | Pre-annotation review UX, import of its JSON | Licence and which active-learning parts are Enterprise-only: official repo |
+| **CVAT** | MIT, bundles FFmpeg under LGPL ([docs](https://docs.cvat.ai/docs/_print)); keyframes + interpolation, SAM 2 tracker (first pass) | Tracking, import/export | |
+| **Roboflow** | Dataset Upload block with probabilistic sampling for active learning ([docs](https://docs.roboflow.com/workflows/blocks/blocks/data-storage/roboflow-dataset-upload)); Health Check: class counts, object histogram, annotation heatmap ([docs](https://docs.roboflow.com/datasets/dataset-health-check)); a class is "balanced" at 75 % to 200 % of the mean count (forum, [thread](https://discuss.roboflow.com/t/what-is-the-calculation-for-a-class-being-called-over-representation-and-under-representation/564)) | Dataset health incl. annotation position heatmap and balance bands; sampled capture of uncertain run frames into the queue (active learning) | Current UI thresholds |
+| **UI-TARS Desktop** | Apache-2.0 TypeScript desktop agent around UI-TARS models, macOS-first (mirrors/reviews, [repo mirror](https://github.com/uebylive/UI-TARS-desktop)) | Not a dependency (it is an agent that acts autonomously); model is a Pitwall candidate | Licence in the official ByteDance repo |
+| **OmniParser / OmniTool** | Model cards: icon_detect AGPL (inherited from YOLO), captioning models (BLIP-2, Florence) MIT; OmniTool controls a Windows 11 VM ([card](https://huggingface.co/yuxin111222/OmniParser-v2.0)) | Detect+caption idea only; never the detector; VM-driven agent is out of scope | Official repo licence files |
+
+**Insights that change the plan**: (1) the strongest commercial CV products are aimed at **virtual desktops and legacy toolkits**, so remote sessions move to v1; (2) Eggplant's differentiator is the **model**, not the locator, so a graph with coverage is added; (3) mainstream tools treat images as a **fallback**; ours is the main path, so reporting what layer found it matters; (4) every competitor couples to a cloud or licence; our local, per-app model and plain files are the differentiator; (5) healing is two techniques (ordered fallbacks, intent re-resolution) which the resolver already has.
+
+Realistic v1 for about 3 to 6 months for the core (recorder through serve) on two OSes, Windows + macOS first; the test layer v1 items follow (section 16).
 
 | Area | Feature | v1 / Later | Seen in |
 |---|---|---|---|
@@ -376,74 +519,107 @@ Realistic v1 for about 3 to 6 months: everything marked v1 below, on two OSes, W
 | Record | Video import (mp4/mkv/webm) | v1 | CVAT, Label Studio |
 | Record | Headless CLI/tray recorder for CI runners and VMs | v1 | Airtest (screen recording in reports) |
 | Record | Multi-monitor and per-monitor DPI handling | v1 | Eggplant, Applitools |
-| Record | Remote/VM targets (RDP/VNC pixel streams) | Later | Eggplant |
+| Record | **Remote-session client windows (RDP, Citrix, Horizon, VNC viewer) as capture targets**, remote-codec augmentation, stability defaults | v1 | UiPath CV, AISense, Power Automate (recorder image mode in Citrix/RDP) |
+| Record | Direct RDP/VNC pixel stream capture (no client window) | Later | Eggplant |
+| Record | Recorder mode toggle: pixel-only vs with optional a11y track | v1 | Ranorex |
 | Record | Android/iOS capture (scrcpy/adb) | Later | Airtest, Appium |
 | Label | Frame timeline, scene-change + near-duplicate removal | v1 | CVAT, Roboflow |
 | Label | Box + polygon editor, taxonomy, "same as...", keyboard review queue | v1 | Label Studio, CVAT |
-| Label | Auto-suggestions with source/confidence (OCR, template, detector, Pitwall) | v1 | Label Studio pre-annotation, OmniParser |
+| Label | Auto-suggestions with source/confidence (OCR, template, detector, Pitwall if present) | v1 | Label Studio pre-annotation, OmniParser |
+| Label | Non-AI bootstrap (Florence-2 ONNX on CPU, OCR, click boxes) and visible "needs local AI" state | v1 | (family rule) |
+| Label | Batch labelling via Pitwall at batch priority, only when idle (one GPU) | v1 | (family rule) |
 | Label | Box-from-click suggestions | v1 | (own idea) |
 | Label | Tracking with interpolation | v1 | CVAT |
+| Label | **"Record this screen" task list** (from plans and graph gaps) | v1 | (own idea) |
 | Label | SAM 2 mask tracking | Later | CVAT |
-| Label | Optional a11y label sources (UIA/AX/AT-SPI/DOM) | Later (Windows UIA first) | Tosca/TestComplete hybrid |
+| Label | Optional a11y label sources (UIA/AX/AT-SPI/DOM) | Later (Windows UIA first) | Tosca/TestComplete hybrid, FlaUI (ref) |
 | Dataset | Splits by session, COCO/YOLO export, COCO/YOLO/Label Studio import | v1 | Roboflow, Label Studio |
-| Dataset | Dataset health: class balance, near-duplicates, tiny/overlapping boxes, missing labels | v1 | Roboflow |
+| Dataset | Dataset health: class balance bands, near-duplicates, tiny/overlapping boxes, missing labels, annotation position heatmap | v1 | Roboflow |
 | Dataset | Dataset versions/snapshots, augmentation, synthetic compositing | v1 | Roboflow |
-| Dataset | Variation coverage view (DPI/theme/language gaps) | v1 | (own idea) |
+| Dataset | Variation coverage view (DPI/theme/language/codec gaps) | v1 | (own idea) |
+| Dataset | Sampled capture of uncertain run frames into the queue (active-learning loop) | v1 | Roboflow Dataset Upload |
 | Dataset | CVAT XML import/export | Later | CVAT |
 | Train & evaluate | Managed training, presets, export-only, remote SSH host | v1 (SSH Later) | Roboflow |
 | Train & evaluate | mAP, confusion matrix, hard cases, held-out session test | v1 | Roboflow |
 | Train & evaluate | Active learning (uncertainty to review queue) | v1 | Roboflow |
 | Train & evaluate | Per-app model registry, versions, promote/rollback, compare | v1 | Roboflow, Tosca |
 | Serve & locate | Layered resolver, `/v1/locate`, `locate_all`, `wait_for`, `ocr`, `capture`, `flag` | v1 | Eggplant, Tosca, SikuliX |
+| Serve & locate | Per-query similarity, occurrences, click offset, timeout | v1 | SikuliX, Power Automate |
 | Serve & locate | Determinism, model pinning, screen-state fingerprints | v1 | (own idea) |
-| Serve & locate | Relative queries (near, inside, nth), OCR text anchors | v1 | Eggplant, UI.Vision |
+| Serve & locate | Relative queries (near, inside, nth, anchors), OCR text anchors | v1 | Eggplant, UI.Vision, UiPath |
+| Serve & locate | Table cell lookup by row/column name, table extract | v1 lookup, Later extract | UiPath CV |
+| Serve & locate | `assert_pixel` colour probe | v1 | AutoIt (verify) |
 | Serve & locate | Mockup-based tests (locate from a design image) | Later | Tosca |
 | Serve & locate | `act` (guarded) | Open question 3 | UI.Vision, Airtest |
 | Script & test | Generated clients (Python, TS) and CLI | v1 | Appium, Playwright |
 | Script & test | Script skeletons from a recording (Python/TS/C#/Robot from the click sequence) | v1 Python/TS, Later C#/Robot | Playwright codegen, Airtest IDE |
-| Script & test | Visual assertions, baselines with ignore regions and match levels (`assert_screen`) | v1 | Applitools, UI.Vision |
-| Script & test | Self-healing: re-resolve through later layers, propose a label/template update when an element moved (explicit, never silent) | v1 proposal only | Eggplant, Tosca, TestComplete |
-| Script & test | Flow recorder/replayer, natural-language steps | Later | Eggplant, Airtest |
+| Script & test | Visual assertions, baselines (`assert_screen`) | v1 | Applitools, UI.Vision |
+| Script & test | Match levels (exact/strict/layout/content), ignore/floating/layout/dynamic regions, per-level tolerance, accept-baseline workflow, per-theme/DPI baselines (7.5) | v1 | Applitools |
+| Script & test | Self-healing: re-resolve through later layers, propose a label/template update (explicit, never silent) | v1 proposal only | Eggplant, Tosca, TestComplete, Testim/mabl |
+| Script & test | Flow recorder/replayer; natural-language steps | Later | Eggplant, Airtest, Functionize |
+| Plans & model | **`.sighterplan` import** (requirements, screens, cases, steps), dry-run report, diff on re-import, unknown elements to record tasks (7.2) | v1 | (family: codebase tool) |
+| Plans & model | **App state graph** from recordings/runs/plans, screen merge and naming (7.1) | v1 | Eggplant DAI |
+| Plans & model | **Coverage** of screens and transitions, unreached screens, untested transitions | v1 | Eggplant DAI coverage |
+| Plans & model | **Path generation** (shortest path, all-edges) emitted as flows | v1 | Eggplant DAI |
+| Plans & model | Weighted/learned path selection, 2- and 3-step coverage | Later | Eggplant DAI |
+| Plans & model | Drift detection (unknown fingerprint during a run) | v1 | Eggplant, Tosca |
+| Test management | **Requirement traceability matrix**, ids on cases/recordings/runs | v1 | TestRail, Xray |
+| Test management | **Run sets**, history, flakiness, run-to-run compare | v1 | TestRail, Allure |
+| Test management | **JUnit, TRX, Allure results** export with requirement ids | v1 | TestRail CLI, Xray, Allure |
+| Test management | `.sighterresult` back to the codebase tool | v1 | (family) |
+| Test management | TestRail / Xray push (opt-in egress) | Later | TestRail, Xray |
+| Data & matrix | **Parameter tables** (data-driven), secrets by reference | v1 | Katalon, Tosca (verify) |
+| Data & matrix | **Cross-resolution / DPI / theme / language run matrices** with coverage-gap attribution | v1 | Applitools, Eggplant |
+| Quality by-products | **Accessibility audit** from pixels: contrast, target size, focus ring | Later | (own idea; WCAG 1.4.3 / 2.5.8) |
+| Quality by-products | **Localisation checks**: truncated/overflowing text, untranslated strings, RTL, pseudo-locale run | Later | Applitools localisation |
+| Quality by-products | **Time-to-screen and response latency** (visual), step p50/p95, regression alerts, Dyno overlay | v1 basic, Later richer | (own idea) |
 | Report & debug | Playground (every layer's candidates, timings), run folders with overlays | v1 | Airtest reports |
 | Report & debug | Flaky-locator report (hit rate per layer/element, healed counts) | v1 | Tosca, TestComplete (verify) |
-| Report & debug | JUnit/JSON reports, step descriptions via Pitwall | v1 | Airtest |
+| Report & debug | JUnit/JSON reports, step descriptions (templated; Pitwall prose if present) | v1 | Airtest |
 | Report & debug | Debrief bundle (video + step timeline) | v1 | (family) |
-| Integrations | Pitwall (9.1), Pitcrew runner template, Dyno samples | v1 | (family) |
+| Integrations | Pitwall (9.1) via `paddock-pitwall`, Pitcrew runner template, Dyno samples | v1 | (family) |
+| Integrations | Codebase tool hand-off (`.sighterplan` / `.sighterresult`) | v1 | (family) |
 | Integrations | Spotter hook (run smoke on new release), Robot library | Later | (family) |
 | Admin & safety | Loopback keys, rate limits, run retention, redaction, encrypted-at-rest option | v1 | (own) |
 | Admin & safety | Team model packs on a shared folder/NAS, starter model | Later | Roboflow |
 
 ## 14. Risks
-- **Licences**: exclusions in section 8 (Ultralytics, YOLOv10, YOLOv9, icon_detect, YOLO-NAS weights, MMYOLO). Check DINOv2/DINOv3, Gemma, MiniCPM, CogAgent licences, COCO-weight provenance, PyTorch (BSD), python-build-standalone (MPL/PSF), CUDA redistribution (download on request, never redistribute). Add `cargo deny` and a runtime-manifest licence report. UI.Vision core is AGPL: reference only.
+- **Licences**: exclusions in section 8 (Ultralytics, YOLOv10, YOLOv9, icon_detect, YOLO-NAS weights, MMYOLO). Check DINOv2/DINOv3, Gemma, MiniCPM, CogAgent licences, COCO-weight provenance, PyTorch (BSD), python-build-standalone (MPL/PSF), CUDA redistribution (download on request, never redistribute). Add `cargo deny` and a runtime-manifest licence report. UI.Vision core is AGPL: reference only. Tesseract (Squish's OCR default) is not needed.
 - **OS permissions**: macOS Screen Recording/Accessibility prompts, signing/notarisation, no sandbox; Windows UIPI blocks injection into elevated windows, DRM content captures black; Wayland forbids silent capture and input (portals, libei), X11 works; AT-SPI needs enabling. Preflight per OS.
 - **Detector limits**: text-only elements and near-identical controls need OCR/context; theme shifts, animations, UI version drift (active learning, versions); COCO numbers do not transfer, benchmark our own.
-- **Label effort**: pure vision means more human review than the accessibility-first design; mitigations are click-derived boxes, tracking, "same as...", template auto-apply.
+- **Label effort**: pure vision means more human review than the accessibility-first design; mitigations are click-derived boxes, tracking, "same as...", template auto-apply. Plan import adds "record this screen" tasks: a large plan creates a large recording backlog, so the studio ranks tasks by requirement priority and shares walks across cases.
+- **Remote sessions**: lossy codecs, latency and scaling reduce accuracy; competitors with a cloud service-side network (UiPath) have more training data than we do per app (their server location is not stated in the docs); expect lower hit rates and test them in the spike on one Citrix/RDP setup.
+- **Model graph drift**: fingerprint merging can wrongly merge or split screens, silently skewing coverage. Mitigation: human confirm/merge, similarity thresholds shown, coverage reports list low-confidence merges.
+- **Plan trust**: a generated plan (possibly by an LLM) may be wrong or hostile; the importer is a pure parser, plans never execute without review, secrets by reference only, destructive steps follow the deny-list.
+- **Test-management push**: third-party API drift (TestRail, Xray), tokens and an extra network egress; Later, opt-in, JUnit/Allure files first.
 - **Accessibility-source quality** (when enabled): stale boxes, DPI, virtualised lists, Electron exposing nothing; pixel-verified.
-- **Safety and privacy**: section 10; recordings contain secrets, `act` is dangerous.
-- **Scope**: recorder, studio and server are three products; v1 is desktop and browser, one OS pair per phase.
-- **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing.
+- **Safety and privacy**: section 10; recordings contain secrets, `act` is dangerous; evidence screenshots in reports and pushes may show secrets (redaction applies before storage and before any export).
+- **Scope**: recorder, studio, server and now a test layer (plans, graph, management, matrices) are four products; v1 is desktop, remote-session windows and browsers, one OS pair per phase. The test layer is cut to the v1 items in section 13; the rest is Later.
+- **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing (one GPU rule, section 9).
 
-## 15. Open questions for the user
+## 15. Open questions for the user (12; merged from revision 3)
 1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
 2. Generated clients in a separate `sighter-clients` repo (Python, TS, C#, Robot), or OpenAPI + CLI + examples only?
-3. Is `/v1/act` in v1 or Later (default off, guarded either way)?
-4. First OS pair and targets: Windows + macOS, then Linux X11, then Wayland; desktop + browsers only, mobile Later?
+3. Is `/v1/act` in v1 or Later (default off, guarded either way)? Note: pixels-only remote-session runs need it, or the engineer's own driver.
+4. First OS pair and targets: Windows + macOS, then Linux X11, then Wayland; desktop + browsers + **remote-session client windows (Citrix/RDP/Horizon/VNC) in v1**, mobile Later?
 5. How important is unattended CI (interactive logged-in session on runners; implications for Pitcrew)? Is recording on CI runners wanted, or studio-only recording?
-6. The no-Pitwall path: must Florence-2 ONNX + OCR + review be good enough for v1, or may Pitwall be a hard dependency for imported videos?
-7. Thresholds: auto-accept 0.85, flag below 0.6, impact sorting; or stricter (never auto-accept without two agreeing sources)?
-8. Extract Debrief's video crate into `paddock-video` now (affects Debrief mid-rename), or copy and consolidate later?
-9. May we ever ship a starter model trained on third-party datasets, or strictly the user's own recordings?
-10. Safety acceptance: panic key, scope binding, overlay, deny-list; and "no unattended run of flows with unreviewed dependencies" as a hard rule?
-11. Recorder consent: is input capture (clicks/keys) opt-in per project, with key text off by default? Hard-require redaction regions on first run? Auto-pause on password fields acceptable as best effort only?
-12. Recorder storage: PNG/WebP frames by default vs 4:4:4 video; retention and encryption defaults for recordings that show real data?
+6. No-Pitwall and starter models (merged 6+9): confirm the rule "Pitwall optional, non-AI path for everything" (table in section 9) and that Florence-2 ONNX + OCR + review is good enough for imported videos; and may we ever ship a starter model trained on third-party datasets, or strictly the user's own recordings?
+7. Confidence and safety rules (merged 7+10): auto-accept 0.85 / flag below 0.6 or stricter (two agreeing sources); panic key, scope binding, overlay, deny-list; "no unattended run of flows with unreviewed dependencies or Needs-recording cases" as a hard rule?
+8. Extract Debrief's video crate into `paddock-video` now (affects Debrief mid-rename), or copy and consolidate later? Same question for the new `paddock-pitwall` client crate (extract from Pitwall's or Debrief's existing client, or write fresh).
+9. Recorder consent and storage (merged 11+12): input capture opt-in per project, key text off, redaction regions required on first run, auto-pause on password fields as best effort; PNG/WebP vs 4:4:4 video; retention and encryption defaults for recordings showing real data.
+10. **Plan format ownership**: is `.sighterplan` (TOML, `format`/`version`, requirements, screens, cases, steps, secrets by reference; section 7.2) agreed, living in a shared `paddock-testplan` crate owned jointly with the codebase tool, with `.sighterresult` for the way back? Or should the codebase tool only emit JUnit-like text and Sighter own the schema?
+11. **Test layer scope in v1**: model graph with coverage and unreached screens (7.1), traceability and JUnit/TRX/Allure export (7.3), data tables and run matrices (7.4) are proposed v1; TestRail/Xray push, accessibility audit, localisation checks and richer performance reports Later. Agree, or is any Later item wanted earlier (for example the TestRail/Xray push if your team uses one)?
+12. **Remote sessions and research spike**: add one Citrix/RDP/Horizon setup (which products do you actually use?) to the week-1 spike, and which of the five legacy apps for the resolver comparison (no confidential screenshots into samples or docs)?
 
 ## 16. Size (one capable agent team, rough, excluding polish and design pass)
-- Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RT-DETRv2 + D-FINE, ONNX in `ort`, measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps.
-- Recorder (capture, events, encoding, preflight, video import): large, 4 to 6 weeks (three OS, Wayland hardest).
+- Spike (2 to 3 weeks): recorder on one OS, 500 labelled frames, train RT-DETRv2 + D-FINE, ONNX in `ort`, measure mAP, wrong-click rate, latency on CPU/GPU, resolver layers on 5 legacy apps, plus one remote-session capture to measure the accuracy loss.
+- Recorder (capture, events, encoding, preflight, video import, remote-session windows): large, 4 to 6 weeks (three OS, Wayland hardest).
 - Studio labelling (timeline, editor, tracking, review queue, import/export): large, 6 to 8 weeks; the canvas and queue are the biggest UI.
 - Managed training runtime + evaluate + versioning: 4 to 6 weeks, mostly cross-platform packaging.
 - Server, resolver, OpenAPI, CLI, clients, integrations, docs: 5 to 7 weeks.
-- Total about 6 to 8 months of one team, roughly 60 to 90k lines Rust plus 25 to 40k lines Angular/TS. A thin slice (record, label, train, locate on one OS) is about 3 months.
+- **Test layer (new)**: plan import and task backlog 2 to 3 weeks; app state graph, coverage, path generation 3 to 4 weeks; traceability, run sets, JUnit/TRX/Allure 2 to 3 weeks; data tables and matrices 1 to 2 weeks; visual regression completion (regions, levels, baselines UI) 2 to 3 weeks; `paddock-pitwall` crate and batch-priority jobs 1 to 2 weeks. About 11 to 17 weeks, partly parallel.
+- Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
+- Total about 8 to 11 months of one team, roughly 80 to 120k lines Rust plus 35 to 55k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
 ## 17. Sources
 - RT-DETRv2: https://arxiv.org/pdf/2407.17140 ; DEIMv2 (DINOv3): https://arxiv.org/pdf/2509.20787 ; DEIM repo: https://github.com/Intellindust-AI-Lab/DEIM
@@ -466,3 +642,12 @@ Realistic v1 for about 3 to 6 months: everything marked v1 below, on two OSes, W
 - Family context: debrief/docs/adr/0033-video-sources-ffmpeg-runtime.md ; pitwall/docs/features.md (vision capability gating, `auto:vision`)
 - Feature survey (section 13): Keysight, Tricentis, SmartBear, UI.Vision, Airtest, Applitools, Roboflow, CVAT, Playwright links inline there.
 - Capture APIs named in section 4 (Windows.Graphics.Capture, ScreenCaptureKit, xdg-desktop-portal ScreenCast) are from general platform knowledge; add doc links when verifying.
+- Feature survey, second pass (section 13): UiPath Computer Vision https://docs.uipath.com/activities/other/latest/ui-automation/computer-vision-activities ; Automation Anywhere AISense https://docs.automationanywhere.com/bundle/enterprise-v11.3/page/enterprise/topics/aae-client/metabots/md-in-enterprise-client/aisense-overview.html ; Power Automate images https://learn.microsoft.com/en-nz/power-automate/desktop-flows/images , fallback https://learn.microsoft.com/en-us/power-automate/desktop-flows/ui-elements-fallback-mechanism , picker troubleshooting https://learn.microsoft.com/en-us/troubleshoot/power-platform/power-automate/desktop-flows/ui-automation/element-picker-cant-see-elements , June 2021 https://powerautomate.microsoft.com/ar-sa/blog/power-automate-desktop-june-2021-update/
+- Squish (Qt): https://www.qt.io/blog/why-squish-is-the-best-choice-for-gui-testing , 6.5 OCR https://embeddedcomputing.com/technology/debug-and-test/rf-network-testing/available-now-squish-6-5-release-with-ai-driven-ocr-support ; Ranorex https://support.ranorex.com/hc/en-us/articles/38038420878225-Image-based-Testing-Basics ; Katalon https://docs.katalon.com/katalon-studio/test-objects/web-test-objects/web-image-based-testing and mobile https://docs.katalon.com/katalon-studio/manage-projects/set-up-projects/mobile-testing/mobile-image-based-testing-in-katalon-studio ; SikuliX https://sikulix-2014.readthedocs.io/en/latest/basicinfo.html
+- Eggplant DAI https://docs.eggplantsoftware.com/dai/DAI%2026.1/dai-using-eggplant-dai , coverage https://docs.eggplantsoftware.com/dai/DAI%207.2/dai-coverage-report
+- FlaUI (MIT, UIA2/UIA3; third-party listings) https://dev.co/testing/open-source/flaui ; WinAppDriver (unmaintained, Appium recommends NovaWindows driver) https://github.com/appium/appium-windows-driver and https://learn.microsoft.com/en-au/answers/questions/1455246/is-the-tool-winappdriver-dead-or-not
+- AI test tools (vendor/secondary): https://momentic.ai/blog/ai-test-automation-tools , https://www.shiplight.ai/blog/best-self-healing-test-tools , Functionize https://www.functionize.com/blog/a-beginners-guide-to-creating-tests-with-functionize-architect
+- Test management: https://support.testrail.com/hc/en-us/articles/12989737200276 ; https://www.qt.io/quality-assurance/blog/test-center-4.3-release-xray-cloud-integration-and-traceability-as-code ; Allure history files https://allurereport.org/docs/how-it-works-history-files/
+- Roboflow dataset upload (active learning) https://docs.roboflow.com/workflows/blocks/blocks/data-storage/roboflow-dataset-upload ; health check https://docs.roboflow.com/datasets/dataset-health-check ; forum on the 75% to 200% balance rule https://discuss.roboflow.com/t/what-is-the-calculation-for-a-class-being-called-over-representation-and-under-representation/564
+- CVAT licence/docs https://docs.cvat.ai/docs/_print ; UI-TARS Desktop (Apache-2.0 per mirrors/reviews) https://github.com/uebylive/UI-TARS-desktop ; OmniParser v2 licence split https://huggingface.co/yuxin111222/OmniParser-v2.0
+- WCAG 2.2 target size https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html ; localisation testing https://applitools.com/blog/localization-testing/ , https://gitcode.com/openharmony/docs/blob/master/en/application-dev/internationalization/pseudo-i18n-testing-translation.md
