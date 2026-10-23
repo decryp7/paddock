@@ -41,6 +41,11 @@ import type {
   StartupState,
   SystemInventory,
   BenchComparison,
+  CounterHistory,
+  CounterHit,
+  CounterObject,
+  CounterObjectList,
+  CounterReading,
   NetworkQuery,
   NetworkSnapshot,
   BenchOverview,
@@ -117,6 +122,14 @@ export interface DynoBackend {
 
   // What is installed (memory modules, CPU, disks) and hints.
   inventory(): Promise<SystemInventory>;
+
+  // Performance counters (observe-only): browse, search, read now, and the readings kept with the app's events.
+  counterObjects(): Promise<CounterObjectList>;
+  counterObject(name: string): Promise<CounterObject>;
+  counterSearch(query: string, limit: number): Promise<CounterHit[]>;
+  /** Reads up to 32 counters now; the engine also adds the readings to their history. */
+  counterValues(paths: string[]): Promise<CounterReading[]>;
+  counterHistory(paths: string[], minutes: number): Promise<CounterHistory>;
 
   // Open ports and connections (observe-only), and "Look up IP" (the shell opens the browser; Dyno never fetches).
   network(query: NetworkQuery): Promise<NetworkSnapshot>;

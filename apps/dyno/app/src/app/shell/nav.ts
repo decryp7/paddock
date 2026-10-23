@@ -15,6 +15,7 @@ export const NAV: NavItem[] = [
   { path: '/why-slow', label: 'Why slow', icon: 'why', keywords: 'diagnosis slow cause evidence lag freeze cpu memory disk heat' },
   { path: '/inventory', label: 'Inventory', icon: 'memory', keywords: 'memory ram modules slots upgrade hardware dimm' },
   { path: '/network', label: 'Network', icon: 'network', keywords: 'ports listening connections sockets firewall exposed ip remote host' },
+  { path: '/counters', label: 'Counters', icon: 'trend', keywords: 'performance counters perfmon pdh raw metrics browse search chart pin disk queue page faults network interface proc' },
   { path: '/benchmarks', label: 'Benchmarks', icon: 'gauge', keywords: 'benchmark speed score cpu memory disk before after compare' },
   { path: '/rules', label: 'CPU taming', icon: 'rules', keywords: 'rules profiles throttle cap protected gaming meeting battery' },
   { path: '/alarms', label: 'Alarms', icon: 'bell', keywords: 'alerts notifications acknowledge shelve mute thresholds custom rules' },

@@ -126,6 +126,27 @@ report ("Nothing to report"). The **Reports** page has a week selector and expor
 for it (the dashboard and Reports do), so a week with no visit has no trend. A weekly OS notification is not built.
 [WP-08](roadmap.md#wp-08-alerts-and-the-weekly-report).
 
+## Performance counters
+
+**Built.** The **Counters** page browses the raw performance counters the OS offers, found by name: first the objects, then an
+object's counters with its instances, or a search by words (every word must match; best match first). Any counter can be charted
+next to Dyno's own events (rule actions, cleanups, tuning, alerts) for 5 minutes, 15 minutes or an hour, up to 32 at once with two
+units on the axes at most. A counter that has gone (a device unplugged, a program ended) is shown as unavailable with the reason,
+never as zero. Counters can be pinned (kept in settings, so they survive a restart), saved as named sets, and added to the
+dashboard as a graph widget. Counters are read only while the page or a dashboard widget needs them; the engine bounds objects,
+counters, instances, history points and results, and every call into the OS has a deadline. Windows uses PDH, with the names in the
+user's language; macOS reads `vm_stat`, `netstat -inb`, `iostat -Id` and `sysctl`; Linux reads `/proc` (memory, paging, network,
+disks, load, context switches and pressure). Running totals are shown as the rate per second. Per-device IOKit statistics are not
+read. [WP-12](roadmap.md#wp-12-performance-counters-browser).
+
+## Command line
+
+The `dyno` command speaks the agent's own local protocol (ADR 0014). Read-only by default: `status`, `why-slow`, `top`, `alarms`,
+`snapshot` and `counters`, as text or `--json`. `end`, `cap` and `undo` change something and do nothing without `--yes`; they go
+through the same validation, protected list and activity log as a click, so a protected process is refused and a cap can be undone.
+A `dyno` built for another protocol version than the running Dyno refuses with a message. [cli.md](cli.md).
+[WP-27](roadmap.md#wp-27-dyno-cli).
+
 ## Tray, window and settings
 
 **Built.** A tray icon with a live metric (CPU, memory, …, chosen in Settings; a template image on macOS) and a compact dropdown
@@ -154,7 +175,7 @@ Declarative TOML packs are planned ([WP-15](roadmap.md#wp-15-declarative-toml-pa
 ## Planned features
 
 All in [roadmap.md](roadmap.md): Issues with statistics, new and unusual processes, right-click search, watched folders with
-keep-for times, benchmarks on click, a performance-counter browser, the tuning catalogue, extras (what changed, why won't it
+keep-for times, benchmarks on click, the tuning catalogue, extras (what changed, why won't it
 sleep, boot analysis, network and energy per app, inventory report, GPU per process, large and duplicate file finder,
 maintenance windows), backup health checks, declarative packs, a local web API, "Explain this" via Pitwall, a multi-PC LAN view
 later.

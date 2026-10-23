@@ -764,6 +764,8 @@ export interface Settings {
   networkAlerts?: NetworkAlerts;
   /** Desktop notifications for new alarms (quiet hours and muted rules still apply). */
   notifications?: boolean;
+  /** Pinned performance counters and saved counter sets (empty until the user adds some). */
+  counters?: CounterSettings;
 }
 
 export interface PluginInfo {
@@ -1346,3 +1348,85 @@ export interface IpLookupSettings {
 // END rust-agent additions. Also appended to `Settings` (all optional in the JSON): dashboard, trayItems, alarms,
 // flightRecorder (see the widgets, alarms and recorder blocks above).
 // ===================================================================================================================
+
+// ------------------------------------------------------------------------------------- performance counters (WP-12)
+
+/** What a counter's value measures (after any rate conversion). */
+export type CounterUnit = 'percent' | 'bytes' | 'bytesPerSec' | 'perSec' | 'count' | 'milliseconds' | 'seconds' | 'number';
+
+/** A level (`gauge`) or a running total that the engine turns into a rate per second (`cumulative`). */
+export type CounterKind = 'gauge' | 'cumulative';
+
+export interface CounterInfo {
+  name: string;
+  unit: CounterUnit;
+  kind: CounterKind;
+  help: string | null;
+}
+
+/** One object with its counters and instances (opened from the browser's first level). */
+export interface CounterObject {
+  name: string;
+  counters: CounterInfo[];
+  /** At most 100; `instancesTotal` says how many the OS has. */
+  instances: string[];
+  instancesTotal: number;
+}
+
+export interface CounterObjectSummary {
+  name: string;
+  counters: number;
+  instancesTotal: number;
+}
+
+/** The browser's first level: names and sizes only. */
+export interface CounterObjectList {
+  objects: CounterObjectSummary[];
+  /** Something was left out to keep the catalog small. */
+  truncated: boolean;
+}
+
+/** One search match: a counter (of one instance). Paths are `\Object(Instance)\Counter`. */
+export interface CounterHit {
+  path: string;
+  object: string;
+  counter: string;
+  instance: string | null;
+  unit: CounterUnit;
+}
+
+/** One counter read now; unavailable carries the reason (gone, needs a second reading, refused...). */
+export interface CounterReading {
+  path: string;
+  unit: CounterUnit;
+  value: Reading<number>;
+}
+
+export interface CounterPoint {
+  at: number;
+  value: number;
+}
+
+export interface CounterSeries {
+  path: string;
+  unit: CounterUnit;
+  points: CounterPoint[];
+}
+
+/** The readings kept for counters over the last minutes, with the app's events in the same window. */
+export interface CounterHistory {
+  from: number;
+  to: number;
+  series: CounterSeries[];
+  events: TimelineEvent[];
+}
+
+export interface CounterSet {
+  name: string;
+  paths: string[];
+}
+
+export interface CounterSettings {
+  pinned: string[];
+  sets: CounterSet[];
+}

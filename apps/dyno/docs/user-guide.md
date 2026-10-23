@@ -96,6 +96,23 @@ dyno-agent service install|uninstall|status|ensure   # register it to start at l
 dyno-agent run                         # run in the foreground (what the service starts)
 ```
 
+`dyno` reads Dyno's status from a terminal or a script (full reference: [cli.md](cli.md)):
+
+```sh
+dyno status --json                 # how the PC is doing, as JSON
+dyno top --by memory -n 5          # the busiest apps
+dyno why-slow                      # the diagnosis in words
+dyno counters search disk queue    # find a performance counter
+dyno end 4242 --yes                # changes something: only with --yes
+```
+
+## Counters
+
+Open **Counters** in the sidebar. Search for a counter by words, or open an object and pick an instance, then choose **+** to chart
+it. The chart marks what Dyno did (cleanups, rule actions, alerts) so you can see whether a spike followed one. Pin a counter to
+keep it listed, save the charted ones as a **set**, or use the row's **...** menu to add one to the dashboard. A counter that has
+disappeared shows *Unavailable* with the reason. Rates (per second) need two readings, so a new line starts a moment later.
+
 ## Files and logs
 
 - Data folder: `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno` or `~/.local/share/dyno`: `dyno.db` (history),

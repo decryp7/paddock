@@ -44,6 +44,11 @@ import type {
   StartupState,
   SystemInventory,
   BenchComparison,
+  CounterHistory,
+  CounterHit,
+  CounterObject,
+  CounterObjectList,
+  CounterReading,
   NetworkQuery,
   NetworkSnapshot,
   BenchOverview,
@@ -75,6 +80,7 @@ import {
   healthReasons,
 } from './mock/data';
 import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
+import { MockCounters, demoCounterSettings } from './mock/counters';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHistory } from './mock/history';
@@ -162,6 +168,7 @@ export class MockBackend implements DynoBackend {
   private activityLog: ActivityEntry[];
   private alertLog: Alert[];
   private settingsValue: Settings = demoSettings();
+  private counters!: MockCounters;
   private tuningList: TuningSuggestion[] = demoTuning();
   private startup: StartupEntry[] = demoStartup();
   private categories: CleanupCategory[] = copy(CLEANUP_CATEGORIES);
@@ -188,6 +195,8 @@ export class MockBackend implements DynoBackend {
     this.profile =
       options.cpu === 'uniform' ? { ...base, hybrid: null } : options.cpu === 'hybrid' && !base.hybrid ? { ...base, hybrid: { efficiency: 8, performance: 8, efficiencyFirst: false } } : base;
     this.kinds = coreKindsOf(this.profile.hybrid);
+    this.counters = new MockCounters(this.profile.os);
+    this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
@@ -880,6 +889,26 @@ export class MockBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.reply('inventory', () => mockInventory(this.profile.os));
+  }
+
+  counterObjects(): Promise<CounterObjectList> {
+    return this.reply('counterObjects', () => this.counters.objects());
+  }
+
+  counterObject(name: string): Promise<CounterObject> {
+    return this.reply('counterObject', () => this.counters.object(name));
+  }
+
+  counterSearch(query: string, limit: number): Promise<CounterHit[]> {
+    return this.reply('counterSearch', () => this.counters.search(query, limit));
+  }
+
+  counterValues(paths: string[]): Promise<CounterReading[]> {
+    return this.reply('counterValues', () => this.counters.values(paths, this.now()));
+  }
+
+  counterHistory(paths: string[], minutes: number): Promise<CounterHistory> {
+    return this.reply('counterHistory', () => this.counters.history(paths, minutes, this.now()));
   }
 
   network(query: NetworkQuery): Promise<NetworkSnapshot> {

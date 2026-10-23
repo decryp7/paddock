@@ -42,6 +42,11 @@ import type {
   StartupState,
   SystemInventory,
   BenchComparison,
+  CounterHistory,
+  CounterHit,
+  CounterObject,
+  CounterObjectList,
+  CounterReading,
   NetworkQuery,
   NetworkSnapshot,
   BenchOverview,
@@ -322,6 +327,26 @@ export class TauriBackend implements DynoBackend {
 
   inventory(): Promise<SystemInventory> {
     return this.request('inventory');
+  }
+
+  counterObjects(): Promise<CounterObjectList> {
+    return this.request('counterObjects');
+  }
+
+  counterObject(name: string): Promise<CounterObject> {
+    return this.request({ counterObject: { name } });
+  }
+
+  counterSearch(query: string, limit: number): Promise<CounterHit[]> {
+    return this.request({ counterSearch: { query, limit } });
+  }
+
+  counterValues(paths: string[]): Promise<CounterReading[]> {
+    return this.request({ counterValues: { paths } });
+  }
+
+  counterHistory(paths: string[], minutes: number): Promise<CounterHistory> {
+    return this.request({ counterHistory: { paths, minutes } });
   }
 
   network(query: NetworkQuery): Promise<NetworkSnapshot> {

@@ -1,9 +1,29 @@
 import type { SystemSample } from '../../core/api.types';
 import { MockBackend } from '../../core/mock-backend';
 import { builtinPresets, layoutFromPreset } from '../../core/mock/widget-presets';
-import { accepts, applyPreset, defaultMetric, isPercent, metricLabel, moveWidget, newTrayItem, newWidget, readMetric, removeWidget, resizeWidget, seriesFor, styleFromId, thresholdTone, trayStyleId } from './widget-model';
+import { accepts, applyPreset, defaultMetric, isPercent, metricLabel, moveWidget, newTrayItem, newWidget, readCounter, readMetric, removeWidget, resizeWidget, seriesFor, styleFromId, thresholdTone, trayStyleId } from './widget-model';
 
 const sample = (): SystemSample => new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 }).liveUpdate('summary').system;
+
+describe('performance counter widgets', () => {
+  it('reads a counter reading with its unit, a percentage scale only for percent counters', () => {
+    const r = readCounter({ path: '\\A\\b', unit: 'bytesPerSec', value: { available: 1572864 } });
+    expect(r).toEqual({ value: 1572864, text: ['1.5', 'MB/s'], percent: null, reason: null });
+    expect(readCounter({ path: 'p', unit: 'percent', value: { available: 130 } }).percent).toBe(100);
+    expect(readCounter({ path: 'p', unit: 'percent', value: { available: 42 } }).text).toEqual(['42', '%']);
+  });
+
+  it('says why a counter has no value', () => {
+    expect(readCounter(undefined).reason).toMatch(/Waiting/);
+    const gone = readCounter({ path: 'p', unit: 'count', value: { unavailable: 'The device is gone.' } });
+    expect([gone.value, gone.reason]).toEqual([null, 'The device is gone.']);
+  });
+
+  it('titles a counter widget by the counter, not by its path', () => {
+    expect(metricLabel({ perfCounter: '\\PhysicalDisk(0 C:)\\Disk Read Bytes/sec' })).toBe('Disk Read Bytes/sec (0 C:)');
+    expect(metricLabel({ perfCounter: 'x' })).toBe('Counter x');
+  });
+});
 
 describe('widget model', () => {
   it('mirrors the engine rules for which kind accepts which metric', () => {

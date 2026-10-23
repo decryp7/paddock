@@ -50,6 +50,32 @@ const SCREENS: { name: string; path: string; mock?: string; ready: (page: Page) 
     },
   },
   {
+    name: 'counters',
+    path: '/#/counters',
+    ready: async (page) => {
+      await page.getByRole('button', { name: /Sets/ }).click();
+      await page.getByRole('menuitem', { name: /^Disk and network \d/ }).click();
+      await page.getByRole('list', { name: 'Objects' }).getByRole('button', { name: /^Network Interface/ }).click();
+      await expect(page.getByRole('table', { name: 'Charted counters' })).toBeVisible();
+      await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+      await page.clock.runFor(2_500);
+    },
+  },
+  {
+    name: 'counters-search',
+    path: '/#/counters',
+    ready: async (page) => {
+      await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes');
+      await page.clock.runFor(300);
+      await expect(page.getByRole('list', { name: 'Search results' })).toBeVisible();
+      await page.getByRole('button', { name: /Chart Bytes Received \(en0\)/ }).click();
+      await page.getByRole('button', { name: /Chart Bytes Sent \(en0\)/ }).click();
+      await page.getByRole('button', { name: /Chart Bytes Transferred \(disk0\)/ }).click();
+      await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+      await page.clock.runFor(2_500);
+    },
+  },
+  {
     name: 'network',
     path: '/#/network',
     ready: async (page) => {

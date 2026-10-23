@@ -301,6 +301,42 @@ test.describe('widgets', () => {
   });
 });
 
+test.describe('counters', () => {
+  test('browse an object, chart a counter with the events marked, pin it and put it on the dashboard', async ({ page }) => {
+    await page.goto(url('/counters'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Counters' })).toBeVisible();
+    await expect(page.getByText('Nothing charted yet')).toBeVisible();
+    const objects = page.getByRole('list', { name: 'Objects' });
+    await objects.getByRole('button', { name: /^Network Interface/ }).click();
+    await page.getByLabel('Instance').selectOption('en0');
+    await page.getByRole('button', { name: 'Chart Bytes Sent' }).click();
+    const table = page.getByRole('table', { name: 'Charted counters' });
+    await expect(table.getByRole('row', { name: /Bytes Sent \(en0\)/ })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Events on the timeline' })).toContainText('Cleanup');
+    await expect(page.locator('dy-chart canvas').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Pin Bytes Sent (en0)' }).click();
+    await expect(page.getByText('Counter pinned')).toBeVisible();
+    await page.getByRole('button', { name: 'More actions for Bytes Sent (en0)' }).click();
+    await page.getByRole('menuitem', { name: 'Add to the dashboard' }).click();
+    await expect(page.getByText('Added to the dashboard')).toBeVisible();
+    await page.getByRole('link', { name: 'Dashboard' }).first().click();
+    await expect(page.getByRole('group', { name: 'Bytes Sent (en0)' })).toBeVisible();
+  });
+
+  test('search finds counters by words, a set charts several at once and an empty search is explained', async ({ page }) => {
+    await page.goto(url('/counters'));
+    await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes received');
+    const results = page.getByRole('list', { name: 'Search results' });
+    await expect(results.getByRole('listitem')).toHaveCount(2);
+    await results.getByRole('button', { name: /Chart Bytes Received \(en0\)/ }).click();
+    await page.getByRole('button', { name: /Sets/ }).click();
+    await page.getByRole('menuitem', { name: /^Disk and network \d/ }).click();
+    await expect(page.getByRole('table', { name: 'Charted counters' }).getByRole('row')).toHaveCount(4);
+    await page.getByRole('searchbox', { name: 'Search counters' }).fill('zzzz');
+    await expect(page.getByText('No counter matches')).toBeVisible();
+  });
+});
+
 test.describe('network', () => {
   test('one dense table: grouped by program with collapsible group rows, loopback hidden, Look up IP only for public peers', async ({ page }) => {
     await page.goto(url('/network'));

@@ -31,7 +31,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-09 | Right-click search | planned |
 | WP-10 | Watched folders with keep-for times | planned |
 | WP-11 | Benchmarks on click | built: CPU, memory and disk (GPU reported unavailable), out of process with a timeout, load stored, before/after comparison, results page (ADR 0015) |
-| WP-12 | Performance counters browser | planned |
+| WP-12 | Performance counters browser | built: Counters page (objects, search, instances), chart any counter with the app's events marked, pinned counters and saved sets in settings, "Add to the dashboard" as a counter widget, `dyno counters`; Windows PDH (`PdhEnumObjectsW`, `PdhEnumObjectItemsW`, one persistent query; type-checked and linted from macOS, run by the Windows runner), macOS `vm_stat`/`netstat -inb`/`iostat -Id`/`sysctl`, Linux `/proc`; IOKit per-device statistics are not read |
 | WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Linux `sock_diag` byte counters + `/proc/<pid>/fd`, no admin; Windows per-connection TCP statistics, which need administrator rights, so it says so until the helper), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
 | WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | planned |
 | WP-14 | Backup health checks | planned |
@@ -46,7 +46,7 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 | WP-24 | Disk and battery life forecasts | planned |
 | WP-25 | "Is this normal?" learned baselines | planned |
 | WP-26 | Alarms view and custom alerts (ADR 0013) | built: Alarms page (active, history, rules), custom alert rules evaluated by the agent, desktop notifications (tauri-plugin-notification), quiet hours |
-| WP-27 | `dyno` CLI (ADR 0014) | planned |
+| WP-27 | `dyno` CLI (ADR 0014) | built: `dyno status\|why-slow\|top\|alarms\|snapshot\|counters` (text or `--json`) and `end`, `cap`, `undo` only with `--yes`; refuses another protocol version; the binary is built with `cargo build -p dyno-cli` and is not yet in the installers |
 | WP-28 | Flight recorder | built: ring, capture, alarm capture and the timeline page |
 | WP-29 | Diagnostics bundle | built: redaction (IPv4 and IPv6), preview, zip, a redacted sockets file, the page and the OS save dialog |
 | WP-30 | Suite tie-ins (Spotter, Debrief, Pitcrew, Pitwall) | planned |
@@ -473,7 +473,7 @@ feature needs its images; a row is done when both exist and show the built scree
 | Watched folders | `watched-folders-*.png` | not started (WP-10) |
 | Benchmarks | `benchmarks-*.png`, `benchmarks-running-*.png`, `benchmarks-compare-*.png` | built |
 | Network | `network-*.png`, `network-connections-*.png` | built |
-| Performance counters | `counters-*.png` | not started (WP-12) |
+| Performance counters | `counters-*.png`, `counters-search-*.png` | built |
 | Backup health | `backup-*.png` | not started (WP-14) |
 | Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-*.png` | in progress (WP-19) |
 | CPU detail with per-core heatmap | `cpu-detail-*.png` | in progress (WP-19) |
