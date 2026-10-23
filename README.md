@@ -1,23 +1,74 @@
-# paddock
+# Paddock
 
 <p align="center">
-  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg" alt="Paddock: Pitcrew, Sighter, Debrief, Pitwall, Dyno and Spotter, six local-first apps built on one shared foundation" width="100%"></a>
+  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%"></a>
 </p>
 
-<p align="center"><a href="docs/ecosystem.md">Meet the family</a> · <a href="icons/README.md">Icons</a></p>
+<p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>
 
-Everything the Paddock app family shares: **Debrief, Pitcrew, Pitwall, Dyno, Spotter, Sighter**. One repo, one semver tag
-(`v0.1.0`, ...) that versions every part together.
+Paddock is a family of seven desktop tools for people who keep software and the machines it runs on healthy, and the
+foundation they share. Each app does one job well and is useful alone. Together they cover the loop from an incident in
+production, through understanding the code and writing a test, to running it on CI. Everything runs on your computer: no
+cloud, no account, no telemetry. Optional local AI, served by one app, makes each of them smarter without sending a byte
+anywhere.
 
-| Part | Path | What | How apps consume it |
+## The apps
+
+| | App | What it does | Status |
 |---|---|---|---|
-| UI package `@decryp7/paddock-ui` | [`ui/`](ui/README.md) | design tokens (dark/light, five accents, three densities), base styles, Angular components, ECharts theme, gallery | npm dependency from the Gitea npm registry |
-| Rust crates | [`crates/`](crates/README.md) | Cargo workspace for shared Rust code (empty until the first crate is extracted) | git dependency pinned to a repo tag |
-| Design guide | [`docs/design-guide.md`](docs/design-guide.md) | the Paddock design guide (principles, layout, type, colour, charts, components, motion, microcopy, polish checklist) | read; `ui/` is its executable form |
-| Diagram kit | [`diagrams/`](diagrams/README.md) | the diagram style spec, draw.io shape library, starting templates, canonical export script | copy a template and the export script; apply the app's accent |
-| Lessons | [`docs/lessons.md`](docs/lessons.md) | what Debrief and Pitcrew taught (build, window, service, native feel, tests, process) | read before starting an app |
+| <img src="icons/debrief/debrief-macos.svg" width="40" alt=""> | **[Debrief](https://dev.decryptology.net/decryp7/debrief)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | Release in progress (the code still says IMT while the rename lands) |
+| <img src="icons/pitcrew/pitcrew-macos.svg" width="40" alt=""> | **[Pitcrew](https://dev.decryptology.net/decryp7/pitcrew)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.0 released** |
+| <img src="icons/pitwall/pitwall-macos.svg" width="40" alt=""> | **[Pitwall](https://dev.decryptology.net/decryp7/pitwall)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | Feature-complete, release next |
+| <img src="icons/dyno/dyno-macos.svg" width="40" alt=""> | **[Dyno](https://dev.decryptology.net/decryp7/dyno)** | Measures, explains and tunes your PC, observe first. | In development |
+| <img src="icons/spotter/spotter-macos.svg" width="40" alt=""> | **[Spotter](https://dev.decryptology.net/decryp7/spotter)** | Watches for new releases anywhere and tells you the moment one appears. | In development |
+| <img src="icons/sighter/sighter-macos.svg" width="40" alt=""> | **[Sighter](https://dev.decryptology.net/decryp7/sighter)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | In design |
+| | **Pacenotes** (working name) | Understands a codebase and serves it, read-only, to AI tools over MCP. | In design |
 
-## Consuming the UI package
+Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
+
+## How they work together
+
+**A production incident.** Support gets a zip of logs from three machines. In **Debrief** the merged timeline shows the
+crash and the errors it caused elsewhere. Debrief asks **Pitwall** to explain the stack trace; Pitwall calls the codebase
+tool (**Pacenotes**) over MCP, which maps the frames to files, callers and recent commits, so the explanation is grounded
+in the real code. A regression test is drafted from it, **Sighter** turns the reproduction into a UI test, and **Pitcrew**
+keeps the runner that executes it on CI healthy. Sighter's run bundle opens next to the logs in Debrief.
+
+**A vendor release.** **Spotter** sees a new version of a tool you depend on. **Pitwall** summarises the release notes
+locally. A Sighter smoke test checks that your workflow still works on the new build, and **Dyno** watches CPU and memory
+for a regression over the following days. Anything odd opens in Debrief with one click.
+
+**A slow build machine.** **Dyno** explains in plain words that a background process is taking the runner's disk and CPU,
+and shows it next to the runner in **Pitcrew**. A taming rule or cleanup you enable fixes it, with an undo. Pitcrew's
+job logs open in **Debrief** when a build fails.
+
+**No AI installed.** Nothing above stops working. Every app does its core job alone; AI features show "Needs local AI,
+set up Pitwall" instead of an error. Install Pitwall later and they light up.
+
+The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#integration-architecture).
+
+## Principles
+
+- **Local only and private.** No cloud, no telemetry. Nothing leaves your computer unless you ask for it.
+- **Windows, macOS and Linux are all first-class**, with a native feel on each.
+- **Rust engines, Angular UI, Tauri 2 shell.** The engine is the source of truth; the UI renders what it returns.
+- **Pitwall is always optional.** Every app's core works without it; AI features appear when it is present.
+- **Observe before acting.** Changes need a click or an enabled rule, and have an undo.
+- **Calm by default.** Neutral surfaces, colour for action and the one thing that needs attention.
+
+## What is in this repo
+
+| Part | Path | What | Consume it |
+|---|---|---|---|
+| UI package `@decryp7/paddock-ui` | [`ui/`](ui/README.md) | design tokens (dark and light, five accents, three densities, a colour-vision-safe chart palette), Angular components, ECharts theme, gallery | npm, Gitea registry |
+| Design guide | [`docs/design-guide.md`](docs/design-guide.md) | principles, layout, type, colour, charts, components, motion, microcopy, polish checklist | read; `ui/` is its executable form |
+| Diagram kit | [`diagrams/`](diagrams/README.md) | style spec, draw.io shape library, templates, canonical export script | draw.io library URL |
+| Icon set | [`icons/`](icons/README.md) | the family app icons per platform and the tooling that builds them | copy the app's folder |
+| Release practices | [`docs/lessons.md`](docs/lessons.md), [`CHANGELOG.md`](CHANGELOG.md) | tag workflow, signed updates, `latest.json`, the release script | follow the lessons |
+| Rust crates | [`crates/`](crates/README.md) | shared Rust code; `paddock-pitwall`, the Pitwall client, is planned | git dependency on a tag |
+| Lessons | [`docs/lessons.md`](docs/lessons.md) | what building Debrief and Pitcrew taught | read before starting an app |
+
+### Use the UI package
 
 ```ini
 # .npmrc (public package, no token needed to install)
@@ -28,32 +79,41 @@ Everything the Paddock app family shares: **Debrief, Pitcrew, Pitwall, Dyno, Spo
 "@decryp7/paddock-ui": "^0.1.0"
 ```
 
-`npm ci` installs it from `package-lock.json` (which records the registry URL and the sha512). Usage, tokens, components and
-migration notes per app are in [`ui/README.md`](ui/README.md).
+`npm ci` installs it from `package-lock.json`. Tokens, components and migration notes: [`ui/README.md`](ui/README.md).
 
-## Consuming a crate (later)
+### Use the diagram kit
+
+In draw.io choose File, Open Library from, URL, and paste:
+
+```
+https://dev.decryptology.net/decryp7/paddock/raw/branch/main/diagrams/paddock.xml
+```
+
+Then apply an app's accent with `node diagrams/tools/apply-accent.mjs <app> <template> <out>`; see
+[`diagrams/README.md`](diagrams/README.md).
+
+### Use a crate (planned)
 
 ```toml
-paddock-foo = { git = "https://dev.decryptology.net/decryp7/paddock", tag = "v0.2.0" }
+paddock-pitwall = { git = "https://dev.decryptology.net/decryp7/paddock", tag = "v0.2.0" }
 ```
+
+## Status and roadmap
+
+| Now | Next | Later |
+|---|---|---|
+| Pitcrew v1.0.0 is out. Debrief is in release. Pitwall is feature-complete. | Pitwall release. `paddock-pitwall` client crate. Dyno and Spotter to release. | Sighter and the codebase tool are designed, then built. Each is local only, Pitwall optional. |
+
+Paddock itself is pre-1.0: a minor bump may change tokens or component APIs, and removed things are deleted rather than
+deprecated.
 
 ## Versioning and releases
 
-One semver tag for the whole repo: `vMAJOR.MINOR.PATCH`. Pre-1.0 a minor bump may change tokens or component APIs (there is no
-backward-compatibility promise before Paddock's v1: removed things are deleted, not deprecated). Pushing a `v*` tag runs CI,
-which publishes `@decryp7/paddock-ui` to the Gitea npm registry and creates the Gitea release with notes (no asset). Releases
-are made only by CI, never from a workstation. Steps: update the version in `ui/projects/paddock-ui/package.json` and
-`CHANGELOG.md`, commit, tag, push the tag. Re-running a tag for an already published version is reported as "already
-published" and is not an error. `cd ui && npm run release` is a local dry run (build and list the package contents).
+One semver tag for the whole repo (`vMAJOR.MINOR.PATCH`). Pushing a `v*` tag runs CI, which publishes
+`@decryp7/paddock-ui` to the Gitea npm registry and creates the release notes. Releases are made only by CI. Steps: update
+the version in `ui/projects/paddock-ui/package.json` and `CHANGELOG.md`, commit, tag, push the tag. `cd ui && npm run release`
+is a local dry run.
 
-## Layout
+## Licence
 
-```
-ui/                Angular workspace: projects/paddock-ui (library, scss, css), projects/gallery (demo), test/tokens, e2e
-crates/            Cargo workspace (no members yet)
-diagrams/          diagram kit: STYLE.md, paddock.xml (draw.io library), templates/, scripts/, tools/
-docs/              design guide, lessons
-.gitea/workflows/  ci.yml: UI tests and contrast checks now, Rust jobs later
-```
-
-Licence: MIT OR Apache-2.0.
+MIT OR Apache-2.0, at your option: [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE).
