@@ -63,8 +63,8 @@ jobs:
             ~/.cargo/git
             target
             !target/debug/incremental
-          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: clippy-${{ runner.os }}-
+          key: clippy-garage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: clippy-garage-${{ runner.os }}-
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -77,7 +77,7 @@ jobs:
             ~/.cargo/git
             target
             !target/debug/incremental
-          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: clippy-garage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
 
   rust-test:
     name: rust tests (${{ matrix.os }})
