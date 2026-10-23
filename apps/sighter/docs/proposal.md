@@ -2,9 +2,20 @@ Status: proposal, open questions pending
 
 # Proposal: Sighter, a local vision locator server for UI automation
 
-Date 2026-10-23, revision 4 (feature research pass 2: test layer, plans, remote sessions, family rules; supersedes revisions 1 to 3). Research proposal, nothing built. Items marked (verify) come
+Date 2026-10-23, revision 4 plus user decisions of the same day: core idea, C#/Java/C++ clients, own tests in v1 (feature research pass 2: test layer, plans, remote sessions, family rules; supersedes revisions 1 to 3). Research proposal, nothing built. Items marked (verify) come
 from secondary sources (Roboflow catalog pages, mirrors, blogs, forum posts) and must be checked against the official repo or paper
 first. Speeds and accuracy figures are published or order-of-magnitude, not measured on our data; a week-1 spike must measure.
+
+## Core idea (user decision, 2026-10-23)
+
+UI automation testing needs computer vision, so a fast model like YOLO; an LLM is too slow but helps classify data to train the model; then Sighter runs the model and exposes an API for engineers to create test cases in their own way (C# unit tests, Java or C++) by calling the API.
+
+Refinements:
+- **Identity comes from detector + OCR + layout anchors**, not from the detector alone: the detector gives class and box, OCR gives text, layout anchors (near, inside, nth) disambiguate repeats.
+- **A permissive YOLO-style detector**: RT-DETR, D-FINE or YOLOX (Apache-2.0/MIT). Ultralytics YOLO is AGPL and is excluded (section 8).
+- **Active-learning loop on UI change**: when the UI changes, low-confidence or unknown results are flagged, the LLM/VLM (Pitwall, optional) proposes labels, a human reviews them, and the model is retrained.
+- **Training for variation**: DPI, theme and size variation (section 6) so one model survives scaling, dark/light and resized windows.
+- **Two ways to test, one engine**: engineers' own code tests through the API, and tests Sighter authors and runs itself (section 7.8), both on the same models and resolver.
 
 ## 1. Pitch
 
@@ -14,14 +25,14 @@ with boxes, confidence and which layer found it. **It works from pixels alone**,
 old desktop tools, custom-drawn UIs, remote sessions, games. Accessibility trees (UIA, AX, AT-SPI, DOM) are an optional label source that
 speeds up labelling; nothing at run time depends on them. It is a built-in optional module, not a plugin process.
 
-Four parts:
+Five parts:
 1. **Recorder**: captures windows/screens plus input events from the studio or headlessly on test machines.
 2. **Studio** (Tauri + Angular, Label Studio/CVAT-like): label, review, train, evaluate and version a computer-vision model **per app**.
 3. **Server** (`sighter-server`) with a layered resolver. Engineers write unit tests and scripts against `/v1/*`, via generated clients or CLI.
 4. **Test layer**: imports test plans (`.sighterplan`) from the codebase tool or by hand, builds an app state graph with coverage, runs data-driven matrices and reports with requirement traceability (7.1 to 7.7). Remote sessions (Citrix, RDP, VNC viewer windows) are a first-class target (7.6). Pitwall is optional throughout (section 9).
+5. **Sighter's own tests** (v1): author tests in the studio (record, step editor, data tables, sub-flows), store them as versionable TOML files and run them from the studio or headless with `sighter run` (7.8).
 
-Everything is local: loopback only, no cloud, no telemetry. YOLO is not the headline; the detector is one interchangeable backend and the
-product is the resolver.
+Everything is local: loopback only, no cloud, no telemetry. A fast permissive YOLO-style detector is the core; it is an interchangeable backend inside the resolver (detector + OCR + layout anchors), which is what engineers actually call.
 
 ## 2. Name: Sighter (confirmed)
 
@@ -199,7 +210,7 @@ PNG/JPEG/WebP, multipart, or `capture` descriptors.
 - `POST /v1/assert_screen`: `{expect:"login" | fingerprint | baseline_image, mask?, tolerance}` -> match score, diff overlay.
 - `POST /v1/ocr`, `POST /v1/capture` (screen/window/region), `POST /v1/flag` (send a result to the labelling queue by `trace_id`, correct box optional).
 - `GET /v1/models`, `GET /v1/models/{id}`, `POST /v1/models/{id}/promote` (studio only); `GET /healthz`, `GET /v1/status` (layers, hardware, loaded models, p50/p95 per layer).
-- `POST /v1/act` (optional, **off by default**, per-key `act` permission, scope-bound to a window/process, deny-list, dry-run, panic key): click, double_click, right_click, type, press, drag, scroll, or "locate then click". Many teams prefer their own driver, so every other endpoint works without it.
+- `POST /v1/act` (optional, **off by default**, per-key `act` permission, scope-bound to a window/process, deny-list, dry-run, panic key): click, double_click, right_click, type, press, drag, scroll, or "locate then click". Many teams prefer their own driver, so every other endpoint works without it. **Sighter's own tests (7.8) need `act`** (its guarded input driver performs their actions), so `act` is a v1 feature; the guards apply unchanged.
 
 **Determinism and model pinning**: same image bytes + query + model version + server version -> identical result (fixed ONNX runtime
 thread settings, FP32 reference path option, stable candidate ordering by score then position). Responses carry `model_version`,
@@ -213,10 +224,39 @@ dialog"), constrain searches ("inside this dialog"), power `assert_screen`/`wait
 (`runs/<run_id>/<seq>-*.png/json`, retention caps, redaction applied before storing). `X-Sighter-Run: <id>` groups calls. A run folder
 opens in the studio and exports a Debrief bundle.
 
-**Clients**: OpenAPI is the contract. Thin generated MIT clients live **outside the app repo** in `sighter-clients`: Python (pytest
-fixtures, `httpx`), TypeScript (Playwright/Node), C#/.NET (legacy Windows shops), a Robot Framework keyword library wrapping the Python
-client; plus the Rust `sighter` CLI shipped with the app (`sighter serve|locate|wait-for|assert|ocr|record|models`). The app itself
-contains no non-Rust code. Strict alternative: OpenAPI + CLI + 20-line examples per language. Recommendation: allow the generated clients.
+**Clients**: OpenAPI is the contract. Thin generated MIT clients live **outside the app repo** in `sighter-clients`. First-class, generated and versioned with the API: **C#/.NET** (NuGet), **Java** (Maven Central), **C++** (header-only over a small HTTP/JSON dependency), **Python** (pytest fixtures, `httpx`) and **TypeScript** (Playwright/Node); plus a Robot Framework keyword library wrapping the Python client and the Rust `sighter` CLI shipped with the app (`sighter serve|locate|wait-for|assert|ocr|record|run|models`). The app itself contains no non-Rust code. Each client ships a tiny example; all of them call the same three verbs:
+
+```csharp
+// C# (NUnit; xUnit is the same with [Fact])
+[Test] public async Task SavesDocument() {
+    var s = new SighterClient("app@3");
+    await s.Locate(new Query { Name = "Save", Class = "button" }).Click();   // locate (+ act, if enabled)
+    await s.WaitFor(new Query { Text = "Saved" }, timeout: 5000);           // wait_for
+    await s.AssertScreen("main");                                           // assert_screen
+}
+```
+
+```java
+// Java (JUnit 5)
+@Test void savesDocument() {
+    var s = new SighterClient("app@3");
+    s.locate(Query.name("Save").clazz("button")).click();
+    s.waitFor(Query.text("Saved"), Duration.ofSeconds(5));
+    s.assertScreen("main");
+}
+```
+
+```cpp
+// C++ (GoogleTest)
+TEST(Editor, SavesDocument) {
+  sighter::Client s{"app@3"};
+  s.locate({.name = "Save", .cls = "button"}).click();
+  s.wait_for({.text = "Saved"}, std::chrono::seconds(5));
+  s.assert_screen("main");
+}
+```
+
+(Method names are illustrative; the generated surface follows the OpenAPI operation names.) Python and TypeScript clients mirror these.
 
 **Performance targets** (goals to confirm in the spike; p50, 1080p screenshot in memory): cache under 5 ms; template under 30 ms; OCR
 anchor under 100 ms with a region, 150 to 500 ms full screen on CPU (cache OCR by fingerprint); detector under 50 ms on a discrete/Apple
@@ -323,6 +363,32 @@ Sighter is pixels-only, so this is its natural home, not an extra.
 - **Accessibility audit (Later)**: from pixels, per detected element: foreground/background contrast ratio (WCAG 1.4.3 thresholds: 4.5:1 normal text, 3:1 large text (from general knowledge, verify)), pointer target size against WCAG 2.2 SC 2.5.8 (at least 24 by 24 CSS px, with a spacing exception; [W3C](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html)); focus-ring visibility by diffing before/after Tab; text-over-image warnings. Useful for legacy apps that have no accessibility tree to audit. Limits: pixels do not give semantic roles, names or reading order, and DPI-to-CSS-pixel mapping needs the recorded scale. Reported as advisory findings with crops, not as conformance.
 - **Localisation testing (Later; per-language runs of the same flow)**: OCR the same screen across languages and flag text that is clipped (text region touches or exceeds its container/box, ends mid-glyph, or a pseudo-localised delimiter is missing, as in pseudo-localisation checks ([OpenHarmony i18n docs](https://gitcode.com/openharmony/docs/blob/master/en/application-dev/internationalization/pseudo-i18n-testing-translation.md), [Applitools](https://applitools.com/blog/localization-testing/))), overflows or overlaps, **untranslated** (OCR language id says the source language, or text equals the baseline language string), mojibake/tofu boxes, and RTL layout mirroring (layout match level). Side-by-side screenshots per language for linguist review. Supports the pseudo-locale idea: run once with a pseudo-localised build to find truncation before translations exist.
 - **Performance-ish measures (v1 basic, Later richer)**: **time-to-screen** (action timestamp to the first frame where the target fingerprint matches and stays stable), **response latency** (action to first visible change), step durations, p50/p95 per step across runs, and regression alerts against a baseline. Measured from frame timestamps, so the resolution is the capture frame interval (about 16 to 33 ms at 30 to 60 fps; the recorder switches to a fixed high rate while measuring) and the report states its resolution. Dyno CPU/GPU/memory and throttling samples overlay the timeline so "slow because the machine was throttling" is visible. Not a profiler: it measures what a user sees.
+
+### 7.8 Sighter's own tests (v1)
+Besides the API for engineers' code, Sighter can author and run test cases itself (user decision 2026-10-23). It uses the same models, resolver and run artefacts; nothing in it needs AI.
+
+**Authoring (studio)**
+- **Record a flow**: the click/key track from the recorder (section 4) becomes steps, each with a resolved query (element name or class plus text anchor), not coordinates.
+- **Visual step editor**: per step, a target (element name or class plus a text anchor), an action (click, type, press, drag, scroll), an assertion (element present/absent, text, `assert_screen`) and a wait (appears/disappears, timeout).
+- **Data-driven parameter tables**: a step or whole test runs once per table row (7.4).
+- **Reusable sub-flows**: a named sequence (for example "log in") called from many tests, with parameters.
+- **Import `.sighterplan` from Pacenotes** (7.2): imported cases become editable tests; unknown elements become record tasks.
+
+**Storage**: tests are plain, versionable text files in the TOML test-plan format shared with Pacenotes (crate `paddock-testplan`), so they live in git next to the app, are reviewable in a pull request, and diff cleanly. Secrets are references (`{{secret:NAME}}`), never values.
+
+**Running**
+- From the studio: watch mode with an overlay showing the resolved box, layer and confidence per step.
+- Headless: `sighter run <plan|folder>` on a machine or a CI runner (Pitcrew), exit code and reports for the pipeline.
+- Parallel-safe per screen/session: one run owns a screen or remote session at a time; the scheduler never interleaves two runs on one desktop.
+- Actions go through Sighter's own guarded input driver (`sighter-input`), so **`act` is required for Sighter's own tests** and its rules apply: per-key permission, scope binding to a window/process, panic key, deny-list, dry-run.
+- Retries and waits come from the resolver (re-resolve, frame-diff stability, per-step timeouts), not from fixed sleeps.
+
+**Results**
+- JUnit, TRX and Allure export (7.3).
+- Run bundles (video plus steps plus screenshots) that open in Debrief.
+- Traceability back to requirement ids (Pacenotes) through the plan's requirement links.
+
+**Two ways to test, one engine**: engineers' own code tests via the API (C#, Java, C++, Python, TypeScript) and Sighter-authored tests both go through `sighter-server`, the same pinned models and the same resolver, so results are comparable and a flagged failure feeds the same labelling queue.
 
 ## 8. The resolver and models
 
@@ -550,13 +616,15 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 | Serve & locate | Table cell lookup by row/column name, table extract | v1 lookup, Later extract | UiPath CV |
 | Serve & locate | `assert_pixel` colour probe | v1 | AutoIt (verify) |
 | Serve & locate | Mockup-based tests (locate from a design image) | Later | Tosca |
-| Serve & locate | `act` (guarded) | Open question 3 | UI.Vision, Airtest |
-| Script & test | Generated clients (Python, TS) and CLI | v1 | Appium, Playwright |
-| Script & test | Script skeletons from a recording (Python/TS/C#/Robot from the click sequence) | v1 Python/TS, Later C#/Robot | Playwright codegen, Airtest IDE |
+| Serve & locate | `act` (guarded; required for Sighter's own tests, 7.8) | v1 (decided) | UI.Vision, Airtest |
+| Script & test | **Generated clients: C#, Java, C++, Python, TypeScript** (from OpenAPI) and CLI, each with a tiny NUnit/xUnit, JUnit, GoogleTest, pytest or Playwright example | v1 | Appium, Playwright |
+| Script & test | Script skeletons from a recording (Python/TS/C#/Robot from the click sequence) | v1 Python/TS/C#/Java/C++, Later Robot | Playwright codegen, Airtest IDE |
 | Script & test | Visual assertions, baselines (`assert_screen`) | v1 | Applitools, UI.Vision |
 | Script & test | Match levels (exact/strict/layout/content), ignore/floating/layout/dynamic regions, per-level tolerance, accept-baseline workflow, per-theme/DPI baselines (7.5) | v1 | Applitools |
 | Script & test | Self-healing: re-resolve through later layers, propose a label/template update (explicit, never silent) | v1 proposal only | Eggplant, Tosca, TestComplete, Testim/mabl |
-| Script & test | Flow recorder/replayer; natural-language steps | Later | Eggplant, Airtest, Functionize |
+| Script & test | **Sighter-authored tests**: record a flow into steps, visual step editor (target, action, assertion, wait), data tables, sub-flows (7.8) | v1 | Eggplant, Airtest, Playwright codegen |
+| Script & test | **Run Sighter's own tests**: studio watch mode with overlay, headless `sighter run`, parallel-safe per screen, retries/waits from the resolver, plans as TOML in git (`paddock-testplan`) (7.8) | v1 | Eggplant, Airtest |
+| Script & test | Natural-language steps | Later | Eggplant, Functionize |
 | Plans & model | **`.sighterplan` import** (requirements, screens, cases, steps), dry-run report, diff on re-import, unknown elements to record tasks (7.2) | v1 | (family: codebase tool) |
 | Plans & model | **App state graph** from recordings/runs/plans, screen merge and naming (7.1) | v1 | Eggplant DAI |
 | Plans & model | **Coverage** of screens and transitions, unreached screens, untested transitions | v1 | Eggplant DAI coverage |
@@ -594,13 +662,13 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - **Test-management push**: third-party API drift (TestRail, Xray), tokens and an extra network egress; Later, opt-in, JUnit/Allure files first.
 - **Accessibility-source quality** (when enabled): stale boxes, DPI, virtualised lists, Electron exposing nothing; pixel-verified.
 - **Safety and privacy**: section 10; recordings contain secrets, `act` is dangerous; evidence screenshots in reports and pushes may show secrets (redaction applies before storage and before any export).
-- **Scope**: recorder, studio, server and now a test layer (plans, graph, management, matrices) are four products; v1 is desktop, remote-session windows and browsers, one OS pair per phase. The test layer is cut to the v1 items in section 13; the rest is Later.
+- **Scope**: recorder, studio, server and now a test layer (plans, graph, management, matrices) are four products; v1 is desktop, remote-session windows and browsers, one OS pair per phase. The test layer is cut to the v1 items in section 13; the rest is Later. Sighter-authored tests (7.8) are now v1 and add scope; the cut line is the Later rows, not this.
 - **8 GB ceiling**: Accurate presets and concurrent VLM + training do not fit; handled by gating and queueing (one GPU rule, section 9).
 
-## 15. Open questions for the user (12; merged from revision 3)
+## 15. Open questions for the user (12; merged from revision 3; questions 2 and 3 narrowed by the 2026-10-23 decisions)
 1. Is a downloaded sandboxed Python/PyTorch **training runtime** an acceptable exception to "Rust + Angular only" (data, not shipped code), Burn-native later?
-2. Generated clients in a separate `sighter-clients` repo (Python, TS, C#, Robot), or OpenAPI + CLI + examples only?
-3. Is `/v1/act` in v1 or Later (default off, guarded either way)? Note: pixels-only remote-session runs need it, or the engineer's own driver.
+2. Generated clients (C#, Java, C++, Python, TS are decided as first-class): in a separate `sighter-clients` repo as proposed, and is Robot Framework wanted in v1 or Later? Which C++ HTTP/JSON dependency is acceptable for the C++ client?
+3. Decided (2026-10-23): `/v1/act` and the flow recorder/runner are in v1, because Sighter runs its own tests (7.8); `act` stays default off and guarded. Remaining: which guard defaults for unattended CI runs?
 4. First OS pair and targets: Windows + macOS, then Linux X11, then Wayland; desktop + browsers + **remote-session client windows (Citrix/RDP/Horizon/VNC) in v1**, mobile Later?
 5. How important is unattended CI (interactive logged-in session on runners; implications for Pitcrew)? Is recording on CI runners wanted, or studio-only recording?
 6. No-Pitwall and starter models (merged 6+9): confirm the rule "Pitwall optional, non-AI path for everything" (table in section 9) and that Florence-2 ONNX + OCR + review is good enough for imported videos; and may we ever ship a starter model trained on third-party datasets, or strictly the user's own recordings?
@@ -618,8 +686,9 @@ Realistic v1 for about 3 to 6 months for the core (recorder through serve) on tw
 - Managed training runtime + evaluate + versioning: 4 to 6 weeks, mostly cross-platform packaging.
 - Server, resolver, OpenAPI, CLI, clients, integrations, docs: 5 to 7 weeks.
 - **Test layer (new)**: plan import and task backlog 2 to 3 weeks; app state graph, coverage, path generation 3 to 4 weeks; traceability, run sets, JUnit/TRX/Allure 2 to 3 weeks; data tables and matrices 1 to 2 weeks; visual regression completion (regions, levels, baselines UI) 2 to 3 weeks; `paddock-pitwall` crate and batch-priority jobs 1 to 2 weeks. About 11 to 17 weeks, partly parallel.
+- **Sighter-authored tests (new in v1, 7.8)**: step model and TOML (de)serialisation in `paddock-testplan` 1 to 2 weeks; flow-to-steps conversion from the recorder 1 to 2 weeks; visual step editor, data tables and sub-flows in the studio 4 to 6 weeks; runner (`sighter run`, watch mode with overlay, parallel-safe scheduling, retries) 3 to 4 weeks; guarded `act` driver hardening on two OSes 2 to 3 weeks (moved from optional to required); C#/Java/C++ clients, examples and CI 2 to 3 weeks. About 10 to 15 weeks, partly parallel.
 - Later items: TestRail/Xray push 1 to 2 weeks, accessibility audit 2 weeks, localisation checks 2 to 3 weeks, richer performance reports 1 to 2 weeks.
-- Total about 8 to 11 months of one team, roughly 80 to 120k lines Rust plus 35 to 55k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
+- Total about 10 to 14 months of one team (was 8 to 11 before the Sighter-authored tests and the extra clients), roughly 95 to 145k lines Rust plus 45 to 70k lines Angular/TS (revision 3: 6 to 8 months, 60 to 90k plus 25 to 40k). A thin slice (record, label, train, locate on one OS) is still about 3 months; the test layer follows it.
 
 ## 17. Sources
 - RT-DETRv2: https://arxiv.org/pdf/2407.17140 ; DEIMv2 (DINOv3): https://arxiv.org/pdf/2509.20787 ; DEIM repo: https://github.com/Intellindust-AI-Lab/DEIM
