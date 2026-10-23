@@ -27,7 +27,7 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
       <dy-async [loaded]="!!overview()" [error]="store.error()" what="the throttling check" [rows]="4" (retry)="store.load()">
         @if (overview(); as d) {
           <div class="stack">
-            <section class="card hero" aria-label="Right now">
+            <section class="card now" aria-label="Right now">
               <div class="status" role="status">
                 <span class="dot" [attr.data-tone]="tone()" aria-hidden="true"></span>
                 <h2>{{ d.reading.headline }}</h2>
@@ -120,7 +120,7 @@ import { CAUSE_LABEL, CAUSE_TONE, type SortDirection, confidenceText, episodeSec
     .page-head { margin-bottom: 0; }
     .stack { display: grid; gap: var(--sp-4); min-width: 0; align-content: start; }
     .num { font-variant-numeric: tabular-nums; }
-    .hero { padding: var(--sp-4) var(--sp-5); display: grid; gap: var(--sp-2); }
+    .now { padding: var(--sp-4) var(--sp-5); display: grid; gap: var(--sp-2); }
     .status { display: flex; align-items: center; gap: var(--sp-3); }
     .status h2 { font-size: 15px; font-weight: var(--fw-semibold); margin: 0; }
     .why { margin: 0; color: var(--text-2); max-width: 78ch; }

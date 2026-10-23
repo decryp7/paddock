@@ -418,7 +418,7 @@ test.describe('network', () => {
     const card = page.getByRole('region', { name: 'Is this normal?' });
     await expect(card.getByText('Higher than usual for Tuesday mornings').first()).toBeVisible();
     await expect(card.getByText('71% now · usually 14%')).toBeVisible();
-    await expect(card.getByText('Usual for')).toHaveCount(0);
+    await expect(card.getByText(/^Usual for/)).toHaveCount(0);
   });
 
   test('dashboard: ?hw=learning shows one quiet line while Dyno learns', async ({ page }) => {
