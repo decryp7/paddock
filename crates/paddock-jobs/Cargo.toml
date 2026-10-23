@@ -1,0 +1,25 @@
+[package]
+name = "paddock-jobs"
+version = "0.1.0"
+description = "Long operations for the Paddock apps: phases, throttled progress, cancel tokens, streaming hashes and bounded parallel helpers."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[lib]
+# Behaviour is tested through the public API in tests/ (an empty unit-test binary only adds unexecuted generic instances to coverage).
+test = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+proptest = "1"
+serde_json = "1"
+tempfile = "3"
+
+[[bench]]
+name = "walk"
+harness = false

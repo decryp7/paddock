@@ -13,6 +13,7 @@ const SECTIONS = [
   'empty-state',
   'error-state',
   'skeleton',
+  'job',
   'segmented-control',
   'tray-popover',
   'chart-theme',

@@ -1,6 +1,6 @@
 # Shared Rust crates
 
-A Cargo workspace for Rust code the five apps share. It has no members yet; crates are extracted from the apps one at a
+A Cargo workspace for Rust code the five apps share. Members so far: `paddock-jobs` (ADR 0007). Crates are extracted from the apps one at a
 time (a crate moves here when a second app needs it, rule of three for new abstractions, two for copied code).
 
 Rules for a crate here:
@@ -16,6 +16,7 @@ Planned crates, with their designs in [`docs/adr/`](../docs/adr/README.md) (ADRs
 
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
+| `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0007) | yes (all five apps); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |

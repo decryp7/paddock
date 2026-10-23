@@ -8,3 +8,4 @@
 | [0004](0004-paddock-pitwall-client.md) | `paddock-pitwall`: discovery, pairing, requests, "Pitwall is optional" |
 | [0005](0005-paddock-testplan.md) | `paddock-testplan`: `.sighterplan` / `.sighterresult` |
 | [0006](0006-rollout-versioning-consumption.md) | Rollout order, other crates, versioning, consumption, open questions |
+| [0007](0007-long-operations.md) | Long operations: phases, progress, cancel and parallel work (`paddock-jobs`, `pd-job`) |

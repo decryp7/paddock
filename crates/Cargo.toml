@@ -2,7 +2,7 @@
 # (native feel, update state machine, ...) are extracted here later, one at a time, by the agents that own them.
 [workspace]
 resolver = "3"
-members = []
+members = ["paddock-jobs"]
 
 [workspace.package]
 edition = "2024"

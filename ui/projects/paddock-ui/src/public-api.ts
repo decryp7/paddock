@@ -5,6 +5,19 @@ export { SuSparkline, sparklineGeometry, type SparklineGeometry } from './lib/sp
 export { SuCard } from './lib/card';
 export { SuEmptyState, SuErrorState } from './lib/states';
 export { SuSkeleton, type SuSkeletonShape } from './lib/skeleton';
+export { SuJob } from './lib/job';
+export {
+  formatBytes,
+  formatCount,
+  formatEta,
+  jobView,
+  type SuJobPhase,
+  type SuJobSnapshot,
+  type SuJobState,
+  type SuJobTone,
+  type SuJobUnit,
+  type SuJobView,
+} from './lib/job-view';
 export { SuSegmentedControl, nextEnabled, type SuSegment } from './lib/segmented-control';
 export { SuTrayPopover, type SuTrayPlatform } from './lib/tray-popover';
 export {

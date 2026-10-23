@@ -1,0 +1,291 @@
+use crate::clock::{Clock, SystemClock};
+use crate::eta::EtaEstimator;
+use crate::model::{JobId, JobKind, JobSnapshot, JobState, Phase, PhaseProgress};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+/// Default floor between two events of one job: 10 per second.
+pub const DEFAULT_MIN_INTERVAL_MS: u64 = 100;
+const NEVER: u64 = u64::MAX;
+
+/// Where snapshots go (Tauri: `app.emit(EVENT_NAME, snapshot)`). Called with the reporter's lock held so events arrive in `seq`
+/// order: it must be quick and must not call back into the reporter. A panic in a sink is contained and dropped.
+pub trait EventSink: Send + Sync {
+    fn emit(&self, snapshot: &JobSnapshot);
+}
+
+/// Something workers can add progress to from many threads; [`Reporter`] is one, an `AtomicU64` another, `()` ignores it.
+pub trait Counter: Sync {
+    fn add(&self, n: u64);
+}
+
+impl Counter for () {
+    fn add(&self, _: u64) {}
+}
+
+impl Counter for AtomicU64 {
+    fn add(&self, n: u64) {
+        self.fetch_add(n, Ordering::Relaxed);
+    }
+}
+
+struct Inner {
+    state: JobState,
+    seq: u64,
+    eta: EtaEstimator,
+    eta_ms: Option<u64>,
+    cancellable: bool,
+    reason: Option<String>,
+}
+
+struct Shared {
+    id: JobId,
+    kind: JobKind,
+    title: String,
+    subject: Option<String>,
+    sink: Arc<dyn EventSink>,
+    clock: Arc<dyn Clock>,
+    min_interval_ms: u64,
+    start_ms: u64,
+    done: AtomicU64,
+    last_emit_ms: AtomicU64,
+    dirty: AtomicBool,
+    inner: Mutex<Inner>,
+}
+
+/// Publishes one job's progress: cheap to call from many threads, throttled to one event per interval with the newest value
+/// winning (coalescing), while phase and state changes go out at once. Clones share the job.
+#[derive(Clone)]
+pub struct Reporter(Arc<Shared>);
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+impl Reporter {
+    /// A queued job. Emits its first snapshot immediately.
+    pub fn new(
+        id: JobId,
+        kind: JobKind,
+        title: &str,
+        subject: Option<&str>,
+        sink: Arc<dyn EventSink>,
+    ) -> Self {
+        Self::with_clock(
+            id,
+            kind,
+            title,
+            subject,
+            sink,
+            Arc::new(SystemClock::new()),
+            DEFAULT_MIN_INTERVAL_MS,
+        )
+    }
+
+    /// As [`new`](Self::new) with an injected clock and interval (tests, or a slower channel).
+    pub fn with_clock(
+        id: JobId,
+        kind: JobKind,
+        title: &str,
+        subject: Option<&str>,
+        sink: Arc<dyn EventSink>,
+        clock: Arc<dyn Clock>,
+        min_interval_ms: u64,
+    ) -> Self {
+        let start_ms = clock.now_ms();
+        let r = Reporter(Arc::new(Shared {
+            id,
+            kind,
+            title: title.to_string(),
+            subject: subject.map(str::to_string),
+            sink,
+            clock,
+            min_interval_ms,
+            start_ms,
+            done: AtomicU64::new(0),
+            last_emit_ms: AtomicU64::new(NEVER),
+            dirty: AtomicBool::new(false),
+            inner: Mutex::new(Inner {
+                state: JobState::Queued,
+                seq: 0,
+                eta: EtaEstimator::new(start_ms),
+                eta_ms: None,
+                cancellable: true,
+                reason: None,
+            }),
+        }));
+        let g = lock(&r.0.inner);
+        r.emit_locked(g);
+        r
+    }
+
+    pub fn id(&self) -> JobId {
+        self.0.id
+    }
+
+    /// The current snapshot (does not count as an emit).
+    pub fn snapshot(&self) -> JobSnapshot {
+        self.build(&lock(&self.0.inner))
+    }
+
+    fn build(&self, g: &Inner) -> JobSnapshot {
+        let mut state = g.state.clone();
+        if let JobState::Running { phase: Some(p) } = &mut state {
+            p.done = self.0.done.load(Ordering::Relaxed);
+        }
+        JobSnapshot {
+            id: self.0.id,
+            kind: self.0.kind.clone(),
+            title: self.0.title.clone(),
+            subject: self.0.subject.clone(),
+            state,
+            seq: g.seq,
+            elapsed_ms: self.0.clock.now_ms().saturating_sub(self.0.start_ms),
+            eta_ms: g.eta_ms,
+            cancellable: g.cancellable,
+            not_cancellable_reason: g.reason.clone(),
+        }
+    }
+
+    fn emit_locked(&self, mut g: MutexGuard<'_, Inner>) {
+        let now = self.0.clock.now_ms();
+        if let JobState::Running { phase: Some(p) } = &g.state {
+            let (done, total) = (self.0.done.load(Ordering::Relaxed), p.phase.total);
+            g.eta_ms = g.eta.observe(now, done, total);
+        }
+        g.seq += 1;
+        let snap = self.build(&g);
+        self.0.dirty.store(false, Ordering::Relaxed);
+        self.0.last_emit_ms.store(now, Ordering::Relaxed);
+        let _ = catch_unwind(AssertUnwindSafe(|| self.0.sink.emit(&snap)));
+    }
+
+    /// Progress after the end of the job is dropped: the terminal snapshot is the last event.
+    fn emit_live(&self, g: MutexGuard<'_, Inner>) {
+        if g.state.is_terminal() {
+            self.0.dirty.store(false, Ordering::Relaxed);
+        } else {
+            self.emit_locked(g);
+        }
+    }
+
+    /// Moves queued to running (no phase yet). No-op in any other state.
+    pub fn start(&self) {
+        let mut g = lock(&self.0.inner);
+        if matches!(g.state, JobState::Queued) {
+            g.state = JobState::Running { phase: None };
+            self.emit_locked(g);
+        }
+    }
+
+    /// Starts a new phase on its own scale: the count restarts at 0 and the event goes out at once. Starts the job if needed.
+    pub fn begin_phase(&self, phase: Phase) {
+        let mut g = lock(&self.0.inner);
+        if g.state.is_terminal() {
+            return;
+        }
+        self.0.done.store(0, Ordering::Relaxed);
+        g.eta = EtaEstimator::new(self.0.clock.now_ms());
+        g.eta_ms = None;
+        g.state = JobState::Running {
+            phase: Some(PhaseProgress { phase, done: 0 }),
+        };
+        self.emit_locked(g);
+    }
+
+    /// Adds to the current phase's count; throttled.
+    pub fn add(&self, n: u64) {
+        self.0.done.fetch_add(n, Ordering::Relaxed);
+        self.throttled();
+    }
+
+    /// Sets the current phase's count (for sources that report absolute values); throttled.
+    pub fn set(&self, done: u64) {
+        self.0.done.store(done, Ordering::Relaxed);
+        self.throttled();
+    }
+
+    /// The total became known (or changed) during the phase; the event goes out at once so the bar switches from indeterminate.
+    pub fn set_total(&self, total: u64) {
+        let mut g = lock(&self.0.inner);
+        if let JobState::Running { phase: Some(p) } = &mut g.state
+            && p.phase.total != Some(total)
+        {
+            p.phase.total = Some(total);
+            self.emit_locked(g);
+        }
+    }
+
+    fn throttled(&self) {
+        let s = &self.0;
+        let last = s.last_emit_ms.load(Ordering::Relaxed);
+        if last != NEVER && s.clock.now_ms().saturating_sub(last) < s.min_interval_ms {
+            s.dirty.store(true, Ordering::Relaxed);
+            return;
+        }
+        // Busy (another thread is emitting) or poisoned: leave it pending; the next call or `flush` publishes the newest value.
+        match self.0.inner.try_lock() {
+            Ok(g) => self.emit_live(g),
+            Err(_) => s.dirty.store(true, Ordering::Relaxed),
+        }
+    }
+
+    /// Emits the newest value if a throttled update is waiting. Call at the end of a loop and before blocking for a long time.
+    pub fn flush(&self) {
+        if self.0.dirty.load(Ordering::Relaxed) {
+            self.emit_live(lock(&self.0.inner));
+        }
+    }
+
+    /// Declares that the next step cannot be interrupted (a database checkpoint, a rename); the UI shows `reason` instead of an
+    /// enabled Cancel. The returned guard restores cancelling when dropped.
+    pub fn uncancellable(&self, reason: &str) -> UncancellableGuard {
+        let mut g = lock(&self.0.inner);
+        if !g.state.is_terminal() {
+            g.cancellable = false;
+            g.reason = Some(reason.to_string());
+            self.emit_locked(g);
+        }
+        UncancellableGuard(self.clone())
+    }
+
+    /// Ends the job in a terminal state. Returns false (and changes nothing) if it already ended or the transition is illegal.
+    pub fn finish(&self, to: JobState) -> bool {
+        let mut g = lock(&self.0.inner);
+        if !to.is_terminal() {
+            return false;
+        }
+        match g.state.clone().transition(to) {
+            Ok(next) => {
+                g.state = next;
+                g.cancellable = false;
+                g.reason = None;
+                g.eta_ms = None;
+                self.emit_locked(g);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
+
+impl Counter for Reporter {
+    fn add(&self, n: u64) {
+        Reporter::add(self, n);
+    }
+}
+
+/// Restores cancelling when dropped; see [`Reporter::uncancellable`].
+pub struct UncancellableGuard(Reporter);
+
+impl Drop for UncancellableGuard {
+    fn drop(&mut self) {
+        let mut g = lock(&(self.0).0.inner);
+        if !g.state.is_terminal() {
+            g.cancellable = true;
+            g.reason = None;
+            self.0.emit_locked(g);
+        }
+    }
+}

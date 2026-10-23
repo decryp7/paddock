@@ -13,6 +13,8 @@ import {
   SuMetric,
   SuSegmentedControl,
   SuSkeleton,
+  SuJob,
+  type SuJobSnapshot,
   SuSparkline,
   SuStatusPill,
   SuTrayPopover,
@@ -40,7 +42,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 @Component({
   selector: 'gal-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuSegmentedControl, SuTrayPopover],
+  imports: [SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover],
   template: `
     <main class="gal-page">
       <header class="gal-bar">
@@ -141,6 +143,15 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         </div>
       </section>
 
+      <section class="gal-section" data-testid="job" aria-labelledby="h-job">
+        <h2 id="h-job">Job / long operation</h2>
+        <div class="gal-grid">
+          @for (j of jobs; track j.id) {
+            <pd-job [job]="j" [stalled]="j.id === 4" />
+          }
+        </div>
+      </section>
+
       <section class="gal-section" data-testid="segmented-control" aria-labelledby="h-seg">
         <h2 id="h-seg">Segmented control</h2>
         <div class="gal-row">
@@ -189,6 +200,18 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
   `,
 })
 export class Gallery {
+  protected readonly jobs: SuJobSnapshot[] = [
+    { id: 1, kind: 'import', title: 'Import logs', subject: '3 folders', state: 'running', seq: 9, elapsedMs: 4000, cancellable: true,
+      phase: { id: 'walk', label: 'Finding files', unit: 'items', total: null, done: 12345 } },
+    { id: 2, kind: 'download', title: 'Download model', subject: 'model.gguf', state: 'running', seq: 9, elapsedMs: 30000, etaMs: 90000, cancellable: true,
+      phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: 123731968, done: 44040192 } },
+    { id: 3, kind: 'save', title: 'Save project', state: 'running', seq: 9, elapsedMs: 9000, cancellable: false, notCancellableReason: 'Writing the database',
+      phase: { id: 'save', label: 'Saving', unit: 'items', total: 4, done: 3 } },
+    { id: 4, kind: 'scan', title: 'Scan disk', state: 'running', seq: 9, elapsedMs: 120000, cancellable: true,
+      phase: { id: 'scan', label: 'Reading folders', unit: 'items', total: null, done: 880000 } },
+    { id: 5, kind: 'export', title: 'Export events', state: 'done', seq: 9, elapsedMs: 3000, cancellable: false },
+    { id: 6, kind: 'export', title: 'Export events', state: 'failed', message: 'The disk is full. Free some space and retry.', seq: 9, elapsedMs: 3000, cancellable: false },
+  ];
   protected readonly cpu = CPU;
   protected readonly mem = MEM;
   protected readonly net = NET;

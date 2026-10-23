@@ -1,6 +1,5 @@
 # Checks the shared UI package on every push and pull request; a v* tag also publishes @decryp7/paddock-ui to the Gitea npm
 # registry and creates the Gitea release with notes. Releases are made only by this workflow, never from a workstation.
-# Rust jobs are added with the first crate in crates/.
 
 name: ci
 
@@ -49,9 +48,29 @@ jobs:
           npx playwright install --with-deps chromium
           npx playwright test
 
+  crates:
+    name: crates (fmt, clippy, test, coverage, deny)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: crates
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      # Merged line coverage over all test binaries (the per-binary summary counts unused generic instances).
+      - name: Coverage (>= 99 % lines)
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          awk -F'[:,]' '/^DA:/{t++; if($3>0)h++} END{p=100*h/t; printf "lines %d/%d = %.2f%%\n", h, t, p; if(p<99) exit 1}' lcov.info
+      - run: cargo deny check
+
   release:
     name: release (npm registry)
-    needs: ui
+    needs: [ui, crates]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
