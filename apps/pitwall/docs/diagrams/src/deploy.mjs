@@ -10,7 +10,7 @@ function deployment(file, os, o) {
   d.node('cred', c2, ya, 288, 128, 'process', o.cred);
   d.node('svc', c1, ys, 296, 264, 'accent', o.svc);
   d.node('sm', c2, ys, 288, 128, 'process', o.sm);
-  d.node('data', c2, ys + 128 + 40, 288, 112, 'process', o.data);
+  d.node('data', c2, ys + 128 + 40, 288, 128, 'process', o.data);
   d.node('run', c1, yr, 296, 104, 'process', o.run);
   const rx = gx + gw + 128;
   d.node('hosts', rx, Math.round(y0 + gh / 2 - 68), 248, 136, 'external', { name: 'Download hosts', tech: 'HTTPS, allow-listed', desc: 'Hugging Face for models (plus the opt-in, read-only update check); GitHub releases for llama.cpp builds. Only what you ask for.' });

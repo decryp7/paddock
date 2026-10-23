@@ -52,7 +52,7 @@ group(AX, top, AW, ph, 'Pitwall app and CLI: see and control');
 
 // service
 box(SX + 24, 208, SW - 48, 128, 'accent', 'One gate', 'OpenAI, Anthropic and Ollama APIs plus /x/v1 on 127.0.0.1:11435. Every call passes Host, Origin and key checks; the window uses the admin key.');
-box(SX + 24, 352, SW - 48, 104, 'accent', 'Queue and serving', 'Aliases and presets pick the model; priorities and caps queue it; caches answer repeats; it loads on first use with its parallel slots and is released when idle.');
+box(SX + 24, 352, SW - 48, 104, 'accent', 'Queue and serving', 'Aliases and presets pick the model; priorities and caps queue it; caches answer repeats; it loads on first use and is released when idle.');
 box(SX + 24, 472, SW - 48, 96, 'accent', 'Model library', 'Search, fit check, resumable verified downloads with their origin, and opt-in update notices that only ever check.');
 box(SX + 24, 584, SW - 48, 80, 'accent', 'Engines', 'llama.cpp builds: self-test, pin, roll back; missing features are refused with a reason.');
 box(SX + 24, 680, SW - 48, 80, 'accent', 'Keys, limits and usage', 'Per-app keys and limits; tokens, requests and attributed memory over time.');
