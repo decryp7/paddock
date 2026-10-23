@@ -33,7 +33,7 @@ tested like any other. Everything runs on your machine.
   licences only).
 - **Serve** a loopback-only API (`/v1/locate` and friends) with a layered resolver (cache, template, OCR, detector,
   vision model, "needs labelling") that your tests call from scripts, generated clients or the CLI.
-- **Drive desktops, not only tests.** An MCP server and an agent mode (`sighter do "<goal>"`, Pitwall as the optional local
+- **Drive desktops, not only tests.** An MCP server and an agent mode in v1 (`sighter do "<goal>"`, Pitwall as the optional local
   planner) act on this PC or on a remote PC over RDP, including UAC prompts, under safety rules enforced in the server.
 - **Stay safe.** It never clicks blindly, redacts recordings before they are stored, and sends nothing off the machine.
 
@@ -283,7 +283,7 @@ try {
 ## Desktop automation, MCP and agent mode
 
 > **Planned; names may change.** Design only (see [the proposal](docs/proposal.md), sections 7.14 and 7.15). The `Target`
-> interface and the MCP server are v1; agent mode and IP-KVM come later.
+> interface, the MCP server and agent mode are v1 (agent mode decided for v1 on 2026-10-23); IP-KVM comes later.
 
 Besides test code, Sighter can drive a desktop for people and agents. The same detection, locators and plans sit above a
 small `Target` interface, so something written once runs on any target:
@@ -317,9 +317,10 @@ its own model.
 }
 ```
 
-**Agent mode.** `sighter do "<goal>"` runs a built-in loop with [Pitwall](https://dev.decryptology.net/decryp7/pitwall)
+**Agent mode (v1).** `sighter do "<goal>"` runs a built-in loop with [Pitwall](https://dev.decryptology.net/decryp7/pitwall)
 as the local planner. Each step is observe, the model picks one tool call, safety check, act, verify. Pitwall is optional:
-scripted runs and the MCP server work without any LLM, and scripted plans stay the default for CI.
+without it agent mode shows a clear "needs Pitwall (or an MCP host that brings its own model)" state, while scripted runs and the
+MCP server work without any LLM, and scripted plans stay the default for CI.
 
 ```sh
 sighter do "Open Settings, turn on Dark mode, and confirm the title bar turns dark" --target local --max-steps 25 --timeout 5m
