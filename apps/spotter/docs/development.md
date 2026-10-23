@@ -56,6 +56,15 @@ node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs sc
 
 `npx playwright install --with-deps` needs root on Linux; on macOS and Windows omit `--with-deps`.
 
+## Real-browser tests
+
+The renderer tests (`crates/spotter-render/tests/real_browser.rs`) launch a browser, but never an installed Chrome, Edge
+or Chromium: killing a launched system Chrome left a code-sign clone of the whole app behind on macOS (hundreds of GB).
+They use only the pinned Chrome for Testing of the renderer's own manifest (ADR 0004), installed once with
+`node scripts/install-test-browser.mjs` into `~/.cache/spotter-test-browser` (or `$SPOTTER_TEST_BROWSER_DIR`), or an
+explicit executable in `SPOTTER_TEST_BROWSER`. With neither, those tests skip with a message. Every browser a test
+starts is asked to quit (`Browser.close`) and given a few seconds before any kill.
+
 ## CI
 
 `.gitea/workflows/build.yml` runs on pushes to `main` and `wip/**`, `v*` tags, pull requests and manual runs:

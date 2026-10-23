@@ -101,6 +101,9 @@ pub fn lifetime_for(page_budget: Duration) -> Duration {
     START_LIMIT + page_budget + Duration::from_secs(10)
 }
 
+/// How long a browser gets to quit by itself after `Browser.close` before it is killed.
+pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
+
 const NONE: u8 = 0;
 const TIMED_OUT: u8 = 1;
 const OVER_MEMORY: u8 = 2;
@@ -171,7 +174,7 @@ impl Chromium {
             }),
             Err(e) => {
                 alive.store(false, Ordering::Release);
-                process.kill();
+                process.terminate(CLOSE_GRACE);
                 cleanup(&dir);
                 Err(e)
             }
@@ -207,6 +210,21 @@ impl Chromium {
         Page::attach(self.conn.clone())
     }
 
+    /// Asks the browser to quit (`Browser.close` over DevTools) and waits up to [`CLOSE_GRACE`] for the process to
+    /// end, then ends whatever is left. A browser that is killed while it still starts up can leave a copy of
+    /// itself behind on macOS (the code-sign clone), so every normal end goes through here. Idempotent.
+    pub fn close(&mut self) {
+        if self.alive.load(Ordering::Acquire) && self.process.is_running() && !self.conn.is_closed() {
+            let _ = self.conn.call(None, "Browser.close", serde_json::json!({}), Duration::from_secs(2));
+            let end = Instant::now() + CLOSE_GRACE;
+            while self.process.is_running() && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        self.alive.store(false, Ordering::Release);
+        self.process.terminate(Duration::from_millis(500));
+    }
+
     /// Ends the browser at once.
     pub fn kill(&mut self) {
         self.alive.store(false, Ordering::Release);
@@ -216,7 +234,7 @@ impl Chromium {
 
 impl Drop for Chromium {
     fn drop(&mut self) {
-        self.kill();
+        self.close();
         cleanup(&self.dir);
     }
 }

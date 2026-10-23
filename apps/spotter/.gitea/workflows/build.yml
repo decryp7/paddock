@@ -224,7 +224,7 @@ jobs:
         run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
 
       - name: Script tests
-        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs scripts/pin-chromium.test.mjs scripts/style-guard.test.mjs scripts/ci/*.test.mjs
+        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/*.test.mjs
 
       - name: App icons fill the canvas
         run: node scripts/ci/check-icons.mjs

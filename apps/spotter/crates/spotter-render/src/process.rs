@@ -39,6 +39,28 @@ impl Supervised {
         }
     }
 
+    /// Asks the process to quit (SIGTERM on Unix; Windows has no polite equivalent without a window) and waits up to
+    /// `grace` for it, then ends the tree. For browsers, where an abrupt kill during start-up can leave a copy of the
+    /// app behind on macOS. Idempotent.
+    pub fn terminate(&mut self, grace: std::time::Duration) {
+        #[cfg(unix)]
+        if let Some(id) = self.id().filter(|_| self.is_running()) {
+            let _ = Command::new("kill")
+                .args(["-TERM", &id.to_string()])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            let end = std::time::Instant::now() + grace;
+            while self.is_running() && std::time::Instant::now() < end {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = grace;
+        self.kill();
+    }
+
     /// Ends the process tree now and reaps it. Idempotent.
     pub fn kill(&mut self) {
         let Some(mut c) = self.child.take() else { return };
@@ -200,6 +222,30 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert!(!processes_alive(pid), "process leaked");
         assert!(processes_mentioning("sleep 61").is_empty() || !processes_mentioning("sleep 61").iter().any(|p| processes_alive(*p)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_ends_a_polite_process_without_waiting_for_the_grace_period() {
+        let mut cmd = Command::new("sleep");
+        cmd.arg("64");
+        let mut s = Supervised::spawn(cmd).unwrap();
+        let t = std::time::Instant::now();
+        s.terminate(std::time::Duration::from_secs(10));
+        assert!(t.elapsed() < std::time::Duration::from_secs(5), "took {:?}", t.elapsed());
+        assert!(!s.is_running());
+        s.terminate(std::time::Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_kills_a_process_that_ignores_sigterm_after_the_grace_period() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "trap '' TERM; while :; do sleep 1; done"]);
+        let mut s = Supervised::spawn(cmd).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        s.terminate(std::time::Duration::from_millis(400));
+        assert!(!s.is_running());
     }
 
     #[cfg(unix)]

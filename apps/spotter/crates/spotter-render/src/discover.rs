@@ -127,6 +127,40 @@ pub fn find_installed_with(os: Os, env: &dyn Fn(&str) -> Option<String>, exists:
     candidates(os, env).into_iter().find(|b| exists(&b.path))
 }
 
+/// Environment variable naming the one browser executable tests may launch.
+pub const TEST_BROWSER_ENV: &str = "SPOTTER_TEST_BROWSER";
+
+/// Environment variable overriding the folder that holds the test browser (default: see [`test_browser_dir`]).
+pub const TEST_BROWSER_DIR_ENV: &str = "SPOTTER_TEST_BROWSER_DIR";
+
+/// Where the pinned Chrome for Testing build for tests is installed (`node scripts/install-test-browser.mjs`).
+pub fn test_browser_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    if let Some(d) = env(TEST_BROWSER_DIR_ENV).filter(|d| !d.is_empty()) {
+        return Some(PathBuf::from(d));
+    }
+    let home = env("HOME").or_else(|| env("USERPROFILE"))?;
+    Some(PathBuf::from(home).join(".cache").join("spotter-test-browser"))
+}
+
+/// The browser tests may launch: `SPOTTER_TEST_BROWSER` or the pinned Chrome for Testing in the test cache folder.
+/// Never an installed Edge, Chrome or Chromium: killing a launched system Chrome leaves a code-sign clone of the
+/// whole app behind on macOS, and tests must not touch the browser the user works in.
+pub fn find_for_tests() -> Option<Browser> {
+    find_for_tests_with(Os::CURRENT, &|k| std::env::var(k).ok(), &|p| p.is_file())
+}
+
+/// [`find_for_tests`] with the OS, environment and file check injected.
+pub fn find_for_tests_with(os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
+    if let Some(p) = env(TEST_BROWSER_ENV).filter(|p| !p.is_empty()).map(PathBuf::from) {
+        return exists(&p).then_some(Browser {
+            flavor: Flavor::Chromium,
+            path: p,
+        });
+    }
+    let dir = test_browser_dir(env)?;
+    crate::install::locate_executable(&dir, os)
+}
+
 /// Where [`crate::install`] puts a downloaded Chromium inside the app data folder.
 pub fn downloaded_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("chromium")
@@ -186,6 +220,36 @@ mod tests {
         );
         assert!(find_installed_with(Os::Linux, &env, &|_| false).is_none());
         assert!(find_installed_with(Os::Windows, &|_| None, &|_| true).is_none());
+    }
+
+    #[test]
+    fn test_discovery_never_returns_a_system_install() {
+        // Everything a user could have installed exists, and SPOTTER_CHROMIUM_PATH is set: tests still get nothing.
+        let all = |k: &str| match k {
+            "HOME" => Some("/nonexistent-home".to_string()),
+            "SPOTTER_CHROMIUM_PATH" => Some("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".to_string()),
+            _ => None,
+        };
+        for os in [Os::Windows, Os::Mac, Os::Linux] {
+            assert!(find_for_tests_with(os, &all, &|_| true).is_none(), "{os:?}");
+        }
+        // The explicit variable is honoured only when the file exists.
+        let explicit = |k: &str| (k == TEST_BROWSER_ENV).then(|| "/opt/cft/chrome".to_string());
+        assert_eq!(
+            find_for_tests_with(Os::Linux, &explicit, &|p| p == Path::new("/opt/cft/chrome"))
+                .unwrap()
+                .path,
+            PathBuf::from("/opt/cft/chrome")
+        );
+        assert!(find_for_tests_with(Os::Linux, &explicit, &|_| false).is_none());
+    }
+
+    #[test]
+    fn test_browser_dir_defaults_below_the_cache_and_can_be_overridden() {
+        assert_eq!(test_browser_dir(&env), Some(PathBuf::from("/Users/u/.cache/spotter-test-browser")));
+        let over = |k: &str| (k == TEST_BROWSER_DIR_ENV).then(|| "/t".to_string());
+        assert_eq!(test_browser_dir(&over), Some(PathBuf::from("/t")));
+        assert_eq!(test_browser_dir(&|_| None), None);
     }
 
     #[test]

@@ -1,10 +1,10 @@
-//! Runs a real Chromium-family browser when one is installed (skipped cleanly otherwise) against a local server.
+//! Runs the dedicated test browser (pinned Chrome for Testing; skipped cleanly when absent, never the system Chrome) against a local server.
 //! Profiles live in temp folders; nothing touches a user profile or a real host.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::await_holding_lock)] // the lock is what serialises the tests
 
 mod support;
 
-use spotter_render::discover::{find_installed, Browser};
+use spotter_render::discover::{find_for_tests, Browser};
 use spotter_render::launch::{Chromium, EndedBy, LaunchOptions, Mode};
 use spotter_render::process::processes_mentioning;
 use spotter_render::{ChromiumRenderer, PageRenderer, RenderError};
@@ -24,9 +24,13 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn browser() -> Option<Browser> {
-    let b = find_installed();
+    // Only the dedicated test browser, never an installed Chrome/Edge (see `find_for_tests`).
+    let b = find_for_tests();
     if b.is_none() {
-        eprintln!("skipped: no Chromium-based browser installed");
+        eprintln!(
+            "skipped: no test browser. Run `node scripts/install-test-browser.mjs` (pinned Chrome for Testing) or set \
+             SPOTTER_TEST_BROWSER to its executable; installed browsers are never used in tests"
+        );
     }
     b
 }
@@ -214,5 +218,26 @@ fn dropping_a_running_browser_kills_it_and_removes_the_profile() {
     let marker = dir.to_string_lossy().to_string();
     drop(c);
     assert!(!dir.exists());
+    assert_no_leftovers(&marker);
+}
+
+#[test]
+fn closing_quits_the_browser_by_itself_before_any_kill() {
+    let _turn = serial();
+    let Some(b) = browser() else { return };
+    let base = tempfile::tempdir().unwrap();
+    let mut opts = LaunchOptions::new(base.path());
+    opts.mode = Mode::Headless;
+    let mut c = Chromium::launch(&b, &opts).unwrap();
+    let marker = c.profile_dir().to_string_lossy().to_string();
+    let t = Instant::now();
+    c.close();
+    assert!(!c.is_running());
+    assert!(
+        t.elapsed() < spotter_render::launch::CLOSE_GRACE,
+        "needed a kill: {:?}",
+        t.elapsed()
+    );
+    assert_eq!(c.ended_by(), EndedBy::Nothing);
     assert_no_leftovers(&marker);
 }
