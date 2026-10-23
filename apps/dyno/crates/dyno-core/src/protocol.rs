@@ -359,6 +359,49 @@ pub enum Request {
         /// How far back, 1-60 minutes.
         minutes: u32,
     },
+    // ---- the privileged helper (WP-01, ADR 0016) ----
+    /// Whether the privileged helper is installed and usable (answers `Helper`). Appended.
+    HelperStatus,
+    /// Installs or updates the helper after the user confirmed; the system's permission prompt opens. Answers `Helper`
+    /// at once with the state `installing`; poll `HelperStatus`. Sent only from the confirmation dialog. Appended.
+    InstallHelper,
+    /// Removes the helper (answers `Helper`). Appended.
+    UninstallHelper,
+
+    // ---- issues and unusual programs (WP-06, WP-07) ----
+    /// The Issues page: crashes, hangs and other problems the OS recorded, with the stability score, leaderboards and how
+    /// each log source was read. A query: it reads what the agent stored. Appended.
+    Issues {
+        /// The window.
+        query: crate::issues::IssuesQuery,
+    },
+    /// Reads the OS logs now (instead of waiting for the next scheduled read) and answers the Issues page. Appended.
+    RescanIssues {
+        /// The window.
+        query: crate::issues::IssuesQuery,
+    },
+    /// Writes the issues of the last `days` as JSON lines (for Debrief) to a path the user picked in the OS save dialog;
+    /// answers `IssuesSaved`. Appended.
+    SaveIssues {
+        /// Where (absolute, ending in `.jsonl`, in an existing folder).
+        path: String,
+        /// How many days back (1 to 90).
+        days: u32,
+    },
+    /// New and unusual programs. A query. Appended.
+    Unusual {
+        /// Also list the programs the user ignored or protected.
+        include_ignored: bool,
+    },
+    /// Ignores, protects or restores a program on the list; answers the list. Appended.
+    UnusualAct {
+        /// The program's key from the list.
+        key: String,
+        /// What to do.
+        action: crate::unusual::baseline::UnusualAction,
+    },
+    /// Forgets the baseline of programs; learning starts again. Appended.
+    ForgetBaseline,
 }
 
 /// Dyno's own cost.
@@ -614,6 +657,17 @@ pub enum Reply {
     CounterValues(Vec<crate::counters::CounterReading>),
     /// Counter history with events. Appended.
     CounterHistory(Box<crate::counters::CounterHistory>),
+    // ---- the privileged helper (WP-01, ADR 0016) ----
+    /// The helper's state. Appended.
+    Helper(Box<crate::helper_wire::HelperStatus>),
+
+    // ---- issues and unusual programs (WP-06, WP-07) ----
+    /// The Issues page. Appended.
+    Issues(Box<crate::issues::IssuesOverview>),
+    /// The issues file was written. Appended.
+    IssuesSaved(crate::issues::SavedIssues),
+    /// New and unusual programs. Appended.
+    Unusual(Box<crate::unusual::UnusualOverview>),
 }
 
 impl Reply {
@@ -665,6 +719,10 @@ impl Reply {
             Reply::CounterHits(x) => v(x),
             Reply::CounterValues(x) => v(x),
             Reply::CounterHistory(x) => v(x),
+            Reply::Helper(x) => v(x),
+            Reply::Issues(x) => v(x),
+            Reply::IssuesSaved(x) => v(x),
+            Reply::Unusual(x) => v(x),
         }
     }
 }
@@ -906,9 +964,20 @@ mod tests {
             })),
             Reply::Url("https://example.com/".into()),
             Reply::RecorderSnapshots(vec![]),
+            Reply::Helper(Box::new(crate::helper_wire::assess(
+                crate::helper::TuningHost::Linux,
+                Ok(()),
+                crate::helper_wire::Probe::Absent,
+                "1",
+            ))),
             Reply::ReportSaved(crate::report::SavedReport {
                 path: "/x.md".into(),
                 bytes: 1,
+            }),
+            Reply::IssuesSaved(crate::issues::SavedIssues {
+                path: "/x.jsonl".into(),
+                bytes: 1,
+                count: 1,
             }),
             Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {
                 path: "/x.zip".into(),
@@ -924,6 +993,23 @@ mod tests {
         for r in all {
             assert!(r.into_json().is_ok());
         }
+    }
+
+    #[test]
+    fn helper_requests_and_status_have_the_json_shape_of_api_types() {
+        for (name, r) in [
+            ("helperStatus", Request::HelperStatus),
+            ("installHelper", Request::InstallHelper),
+            ("uninstallHelper", Request::UninstallHelper),
+        ] {
+            assert_eq!(serde_json::to_value(&r).unwrap(), name);
+            assert_eq!(serde_json::from_value::<Request>(serde_json::json!(name)).unwrap(), r);
+        }
+        let status = crate::helper_wire::assess(crate::helper::TuningHost::Macos, Ok(()), crate::helper_wire::Probe::Absent, "1");
+        let j = Reply::Helper(Box::new(status)).into_json().unwrap();
+        assert_eq!(j["state"], "notInstalled");
+        assert_eq!(j["error"], serde_json::Value::Null);
+        assert!(j["prompt"].as_str().unwrap().contains("password"));
     }
 
     #[test]

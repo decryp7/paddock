@@ -37,12 +37,16 @@ pub struct Tool {
     pub program: String,
     /// Its arguments.
     pub args: Vec<String>,
+    /// Environment variables for this call (a value that must reach a program unparsed travels here, never in text a
+    /// shell or a script would read as code).
+    pub env: Vec<(String, String)>,
 }
 
-fn tool(program: impl Into<String>, args: &[&str]) -> Tool {
+pub(crate) fn tool(program: impl Into<String>, args: &[&str]) -> Tool {
     Tool {
         program: program.into(),
         args: args.iter().map(|a| a.to_string()).collect(),
+        env: Vec::new(),
     }
 }
 
@@ -59,6 +63,9 @@ impl ToolRunner for SystemRunner {
     fn run(&mut self, t: &Tool) -> Result<ToolOutput, PlatformError> {
         let mut cmd = command(&t.program);
         cmd.args(&t.args);
+        for (k, v) in &t.env {
+            cmd.env(k, v);
+        }
         let out = run_with_timeout(cmd, TOOL_TIMEOUT)?;
         let stderr = String::from_utf8_lossy(&out.stderr);
         Ok(ToolOutput {
@@ -76,22 +83,22 @@ impl ToolRunner for SystemRunner {
     }
 }
 
-fn windows_tool(name: &str) -> String {
+pub(crate) fn windows_tool(name: &str) -> String {
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
     format!("{root}\\System32\\{name}")
 }
 
 const VISUAL_FX_KEY: &str = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects";
 const BACKGROUND_KEY: &str = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications";
-const HIBERNATE_KEY: &str = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Power";
+pub(crate) const HIBERNATE_KEY: &str = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Power";
 
-fn denied(what: &str) -> PlatformError {
+pub(crate) fn denied(what: &str) -> PlatformError {
     PlatformError::AccessDenied(format!(
         "{what} needs administrator rights, which only Dyno's privileged helper can ask for."
     ))
 }
 
-fn unsupported(what: &str, host: TuningHost) -> PlatformError {
+pub(crate) fn unsupported(what: &str, host: TuningHost) -> PlatformError {
     let os = match host {
         TuningHost::Windows => "Windows",
         TuningHost::Macos => "macOS",
@@ -279,6 +286,16 @@ impl<R: ToolRunner> OsTuner<R> {
         }
     }
 
+    /// The system this tuner changes.
+    pub fn host_kind(&self) -> TuningHost {
+        self.host
+    }
+
+    /// Runs one tool and returns what it answered, whether or not it succeeded.
+    pub(crate) fn run_tool(&mut self, t: &Tool) -> Result<ToolOutput, PlatformError> {
+        self.runner.run(t)
+    }
+
     fn charge_file(&self) -> Option<PathBuf> {
         let dir = std::fs::read_dir(&self.power_supply).ok()?;
         let mut names: Vec<PathBuf> = dir.filter_map(Result::ok).map(|e| e.path()).collect();
@@ -289,7 +306,7 @@ impl<R: ToolRunner> OsTuner<R> {
             .find(|f| f.is_file())
     }
 
-    fn run_ok(&mut self, t: &Tool) -> Result<String, PlatformError> {
+    pub(crate) fn run_ok(&mut self, t: &Tool) -> Result<String, PlatformError> {
         let out = self.runner.run(t)?;
         if out.ok {
             Ok(out.stdout)

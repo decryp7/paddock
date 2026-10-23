@@ -553,13 +553,17 @@ describe('health, tuning, startup', () => {
     await expect(b.revertTuning(t.id)).rejects.toEqual({ code: 'badRequest', message: 'It is not applied.' });
     await expect(b.applyTuning('nope')).rejects.toMatchObject({ code: 'notFound' });
   });
-  it('tuning that needs administrator rights is refused, and a setting changed outside Dyno needs a forced revert', async () => {
+  it('tuning that needs administrator rights waits for the helper, and a setting changed outside Dyno needs a forced revert', async () => {
     const b = make();
     const list = await b.tuning();
     const admin = list.find((x) => x.needsAdmin && !x.applied)!;
-    expect(admin.blocked).toContain('administrator rights');
+    expect(admin.blocked).toBeNull();
     expect(list.find((x) => x.id === 'powerPlan')!.preview).toEqual(['Activate the power plan Balanced']);
-    await expect(b.applyTuning(admin.id)).rejects.toMatchObject({ code: 'accessDenied' });
+    await expect(b.applyTuning(admin.id)).rejects.toMatchObject({ code: 'accessDenied', message: expect.stringContaining('Settings > Helper') });
+    expect((await b.helperStatus()).state).toBe('notInstalled');
+    expect((await b.installHelper()).state).toBe('ready');
+    await expect(b.applyTuning(admin.id)).resolves.toMatchObject({ kind: 'tuning' });
+    expect((await b.uninstallHelper()).state).toBe('notInstalled');
     await b.applyTuning('powerPlan');
     b.changeTuningOutside('powerPlan');
     expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(true);
@@ -568,6 +572,16 @@ describe('health, tuning, startup', () => {
     expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(false);
     b.changeTuningOutside('powerPlan'); // not applied: nothing to flag
     expect((await b.tuning()).find((x) => x.id === 'powerPlan')!.changedOutside).toBe(false);
+  });
+  it('a startup item for every user needs the helper; the installing state is a pending prompt', async () => {
+    const b = new MockBackend({ latencyMs: 5, now: () => NOW });
+    const all = (await b.startupEntries()).find((e) => e.needsAdmin)!;
+    await expect(b.setStartupState(all.id, 'disabled')).rejects.toMatchObject({ code: 'accessDenied' });
+    expect((await b.installHelper()).state).toBe('installing');
+    expect((await b.helperStatus()).state).toBe('installing');
+    await new Promise((r) => setTimeout(r, 1000));
+    expect((await b.helperStatus()).state).toBe('ready');
+    await expect(b.setStartupState(all.id, 'disabled')).resolves.toMatchObject({ kind: 'startup' });
   });
   it('startup entries change state with the right wording', async () => {
     const b = make();
@@ -606,6 +620,34 @@ describe('reports, settings, plugins, tray', () => {
       { format: 'html', weeksAgo: 2 },
       { format: 'markdown', weeksAgo: 0 },
     ]);
+  });
+  it('issues: a scored window, leaderboards and sources; the window is clamped', async () => {
+    const b = make();
+    const o = await b.issues({ days: 14 });
+    expect(o.daily).toHaveLength(14);
+    expect(o.score).toBe(o.daily[13]!.score);
+    expect(o.apps[0]!.name).toBe('Mail');
+    expect(o.total).toBe(o.issues.length);
+    expect(o.issues[0]!.at).toBeGreaterThan(o.issues[1]!.at);
+    expect((await b.issues({ days: 7 })).total).toBeLessThan(o.total);
+    expect((await b.issues({ days: 999 })).days).toBe(90);
+    expect(await b.rescanIssues({ days: 14 })).toMatchObject({ days: 14 });
+    expect(await b.saveIssues(14)).toMatchObject({ count: 13 });
+    expect(b.savedIssues).toEqual([14]);
+  });
+  it('unusual: protect adds to the protected list, ignore hides, restore brings back, forget starts learning again', async () => {
+    const b = make();
+    const first = await b.unusual(false);
+    const helper = first.items.find((i) => i.name === 'updater-helper')!;
+    await b.unusualAct(helper.key, 'protect');
+    expect((await b.rules()).protected).toContain(helper.exe);
+    expect((await b.unusual(false)).items.some((i) => i.key === helper.key)).toBe(false);
+    expect((await b.unusual(true)).items.some((i) => i.key === helper.key)).toBe(true);
+    await b.unusualAct(helper.key, 'restore');
+    expect((await b.unusual(false)).items.some((i) => i.key === helper.key)).toBe(true);
+    await expect(b.unusualAct('nope', 'ignore')).rejects.toMatchObject({ code: 'notFound' });
+    const forgotten = await b.forgetBaseline();
+    expect(forgotten).toMatchObject({ known: 0, items: [], learning: { active: true } });
   });
   it('whySlow names the apps behind a cause and how long it looked', async () => {
     const d = await make().whySlow();

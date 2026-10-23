@@ -11,6 +11,7 @@ import { Notifier } from '../../shared/notifier';
 import { Ring } from '../../shared/ring';
 import { HealthStore } from '../../state/health.store';
 import { TuningStore } from '../../state/tuning.store';
+import { HelperGate } from '../helper/helper-gate';
 import { FixDialog } from './fix-dialog';
 
 /** The health score with its top reasons and one-click fixes. Each fix explains and previews itself first. */
@@ -99,6 +100,7 @@ import { FixDialog } from './fix-dialog';
 export class HealthHero implements OnInit {
   protected readonly store = inject(HealthStore);
   private readonly tuning = inject(TuningStore);
+  private readonly gate = inject(HelperGate);
   private readonly dialogs = inject(Dialogs);
   private readonly router = inject(Router);
   private readonly notifier = inject(Notifier);
@@ -134,6 +136,7 @@ export class HealthHero implements OnInit {
     const ref = this.dialogs.open<boolean, HealthReason>(FixDialog, reason);
     if ((await firstValueFrom(ref.closed)) !== true) return;
     const kind = fix.kind;
+    if (fix.needsAdmin && !(await this.gate.ensure())) return;
     if (typeof kind === 'object') await this.tuning.apply(kind.tuning);
     else if (kind === 'openCleanup') void this.router.navigateByUrl('/cleanup');
     else if (kind === 'openStartup') void this.router.navigateByUrl('/health');

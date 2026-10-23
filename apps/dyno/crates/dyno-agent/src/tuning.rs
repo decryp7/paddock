@@ -2,7 +2,8 @@
 //! every change is a typed [`HelperAction`] shown as a preview first, recorded in the activity log with its inverse
 //! ([`UndoRecord::Tuning`]) and verified by reading the setting back. Before a revert the setting is read again: if
 //! something else changed it since, the revert is refused unless the user insists. Changes that need administrator
-//! rights are listed with the reason and are not applicable until the privileged helper (ADR 0006) exists.
+//! rights go through the privileged helper (ADR 0016), installed on the user's click; where it cannot be installed they
+//! are listed with the reason and are not applicable.
 
 use crate::agent::{lock, now, Shared};
 use dyno_core::activity::{ActivityEntry, ActivityKind, UndoRecord};
@@ -12,9 +13,6 @@ use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{AgentError, ErrorCode, Message};
 use dyno_core::tuning::catalog::{catalogue, mark_blocked};
 use dyno_core::tuning::{applied_entry, find, Plan, TuningSuggestion};
-
-/// Whether the privileged helper is installed. It is not built yet (WP-01), so changes that need it are not applicable.
-const HELPER_AVAILABLE: bool = false;
 
 fn bad(msg: impl Into<String>) -> AgentError {
     AgentError::new(ErrorCode::BadRequest, msg)
@@ -74,7 +72,10 @@ pub fn plans(shared: &Shared) -> Vec<Plan> {
     let host = system.host();
     let mut plans = catalogue(host, &facts, power, &done, &mut **system);
     drop(system);
-    mark_blocked(&mut plans, host, HELPER_AVAILABLE);
+    // A change that needs administrator rights is applicable when the helper is installed or can be installed on the
+    // user's click (the first click then asks first); it is blocked only where the helper cannot exist.
+    let helper_possible = lock(&shared.ports.helper).can_install().is_ok();
+    mark_blocked(&mut plans, host, helper_possible);
     plans
 }
 

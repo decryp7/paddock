@@ -51,6 +51,7 @@ pub fn platform(state_file: PathBuf) -> Platform {
         startup: Box::new(startup::LinuxStartup::for_this_user(tools.clone())),
         facts: Box::new(facts::LinuxFacts::new(paths, facts::FactPaths::host(), tools.clone())),
         activity: Box::new(activity::LinuxActivity::from_env(tools)),
+        issues: crate::issues::os_sources(),
     }
 }
 

@@ -36,8 +36,27 @@ apps by CPU and memory, and "Dyno: x % CPU, y MB" (its own overhead, measured; [
 **Built.** The agent keeps raw points for a day, then 1-minute, 15-minute and hourly rollups with min, average and max (so a
 short spike stays visible at every zoom level), per-app minutes for "top consumers", disk space for the forecast, timeline
 events and boot records, in SQLite ([ADR 0008](adr/0008-storage-sqlite-and-retention.md)). History keeps running with the
-window closed. Retention is configurable. A damaged database is moved aside and recreated. The **crashes** series is empty
-until Issues is built ([roadmap G4](roadmap.md#known-gaps-in-the-foundation)).
+window closed. Retention is configurable. A damaged database is moved aside and recreated. The **crashes** series comes from the Issues log below.
+
+## Issues
+
+**Built.** The agent reads what the OS itself recorded, read-only and with timeouts: macOS crash reports in
+`~/Library/Logs/DiagnosticReports` and the unified log (`log show`), the Windows Event Log (Application, System, Windows
+Update), the Linux journal and `coredumpctl`. Crashes, hangs, unexpected shutdowns, disk and memory errors, overheating, failing
+services, running out of memory, update and driver failures are normalised, stored in SQLite and shown with a daily
+**stability score** (0 to 100, a pure function of how often each kind happened), the apps and kinds with the most trouble, the
+trend against the period before and each event's own text (plain text, never HTML). A log that cannot be read is listed as
+"could not be read: reason", never an error, and no score is claimed when none can be read. **Export for Debrief** saves the
+period as JSON lines. Serious issues raise alarms; a crash loop raises the crash-loop alert; the health reason "crashing apps"
+and the weekly report count crashes. See [ADR 0017](adr/0017-issues-and-the-program-baseline.md).
+
+## New and unusual programs
+
+**Built.** A transparency tool, not an antivirus. Dyno keeps a baseline of the programs seen on this PC, learning silently for a
+configurable period (7 days by default) so a fresh install does not flag everything. After that it lists programs it has not
+seen, and says **why** one may be worth a look ("unusual because it runs from a temporary folder, is not signed"): an unusual
+place, a name one letter from a system program, an invalid or missing signature, many child programs or connections, a new
+startup entry. Protect (rules never touch it), Hide and Restore are the only actions; nothing ends or removes a program.
 
 ## Processes
 
@@ -52,8 +71,8 @@ process list can be taken and compared.
 
 
 **Network traffic per program** (Network page, process details): macOS from `nettop`, Linux from the kernel's per-socket TCP byte
-counters (no root; other users' programs are not attributed), Windows needs administrator rights for the OS counters and says so
-until the helper does it. Where it cannot be read the page shows the reason instead of zeros.
+counters (no root; other users' programs are not attributed), Windows needs administrator rights for the OS counters, so the helper (when installed) reads them and
+the page says to install it otherwise. Where it cannot be read the page shows the reason instead of zeros.
 
 ## Why is it slow?
 
@@ -92,7 +111,10 @@ Each previews its exact change and its exact inverse; applying records an undoab
 confirm it took effect; before a revert the setting is read again and a change made outside Dyno since is detected (Revert
 anyway overwrites it on purpose). The changes are a closed set of typed actions behind a port with a fake for tests; nothing
 runs text as a command. Changes that need administrator rights (Defender, hibernation, charge limit, macOS sleep and Low Power
-Mode) are listed with the reason and are not applicable until the privileged helper exists ([WP-01](roadmap.md#wp-01-privileged-helper)).
+Mode) go through the privileged helper ([WP-01](roadmap.md#wp-01-privileged-helper), [ADR 0016](adr/0016-privileged-helper-install-and-ipc.md)):
+the first click explains the helper and the OS asks once to install it; each change is then previewed, validated again in the
+helper, read back, logged by the helper and recorded with its undo. Where the helper cannot be installed (no polkit, no systemd)
+the item says why.
 Really applicable now: Windows power plan, sleep timer, visual effects, background apps and indexing; Linux power profile;
 macOS indexing exclusions (Spotlight markers). Windows commands are unit-tested through a fake runner, not yet run on Windows.
 
@@ -112,8 +134,7 @@ to run `docker image prune`), a disk-map screen, Linux Trash is never emptied by
 
 ## Tuning
 
-**Planned.** The core has the plan and `TuningSuggestion` types and the `HelperAction` set; the agent answers "Tuning is not
-built yet." Work packages [WP-01](roadmap.md#wp-01-privileged-helper), [WP-05](roadmap.md#wp-05-tuning-catalogue).
+**Built.** See the Tuning list above. Work packages [WP-01](roadmap.md#wp-01-privileged-helper), [WP-05](roadmap.md#wp-05-tuning-catalogue).
 
 ## Alerts and reports
 
@@ -162,8 +183,8 @@ Dyno's own Copy menu, no browser keys.
 
 **Built.** Observe-only by default; rules disabled; the protected list (critical OS processes, antivirus, audio engine, Dyno,
 your entries) cannot be overridden; actions name a `ProcessRef`; every action is logged and undoable; the agent never runs
-elevated; tests act only on processes and folders they create. The privileged helper for system changes is planned
-([ADR 0006](adr/0006-privileged-helper-and-observe-only.md)).
+elevated; tests act only on processes and folders they create. The privileged helper for system changes is installed only on a click and serves one user and one program
+([ADR 0006](adr/0006-privileged-helper-and-observe-only.md), [ADR 0016](adr/0016-privileged-helper-install-and-ipc.md)).
 
 ## Extensibility
 
@@ -176,6 +197,8 @@ Declarative TOML packs are planned ([WP-15](roadmap.md#wp-15-declarative-toml-pa
 
 All in [roadmap.md](roadmap.md): Issues with statistics, new and unusual processes, right-click search, watched folders with
 keep-for times, benchmarks on click, the tuning catalogue, extras (what changed, why won't it
+All in [roadmap.md](roadmap.md): right-click search, watched folders with
+keep-for times, benchmarks on click, a performance-counter browser, the tuning catalogue, extras (what changed, why won't it
 sleep, boot analysis, network and energy per app, inventory report, GPU per process, large and duplicate file finder,
 maintenance windows), backup health checks, declarative packs, a local web API, "Explain this" via Pitwall, a multi-PC LAN view
 later.

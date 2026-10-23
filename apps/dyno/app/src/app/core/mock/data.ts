@@ -305,8 +305,6 @@ export function healthReasons(): HealthReason[] {
   ];
 }
 
-const ADMIN_REASON = "Needs administrator rights. Dyno's privileged helper is not installed yet, so this cannot be applied from here.";
-
 export function demoTuning(): TuningSuggestion[] {
   const t = (
     id: string,
@@ -317,7 +315,7 @@ export function demoTuning(): TuningSuggestion[] {
     [preview, undoPreview]: [string[], string[]],
     needsAdmin = false,
     applied = false,
-  ): TuningSuggestion => ({ id, category, title, explanation, current, proposed, preview, undoPreview, needsAdmin, applied, blocked: needsAdmin && !applied ? ADMIN_REASON : null, changedOutside: false });
+  ): TuningSuggestion => ({ id, category, title, explanation, current, proposed, preview, undoPreview, needsAdmin, applied, blocked: null, changedOutside: false });
   return [
     t('powerPlan', 'power', 'Use the Balanced power plan while plugged in', 'Power saver keeps the CPU slow even on mains power. Balanced speeds up when you need it and still saves power when idle.', ['Power saver', 'Balanced'], [['Activate the power plan Balanced'], ['Activate the power plan Power saver']]),
     t('sleepOnBattery', 'sleep', 'Sleep sooner when on battery', 'An idle laptop that never sleeps drains its battery in your bag. A short timer saves it; waking takes a keypress.', ['Never', '15 minutes'], [['Sleep after 15 minutes of idling when on battery'], ['Never sleep when on battery']]),
@@ -478,6 +476,7 @@ export function demoSettings(): Settings {
     customAlerts: [{ id: 'gpu-limit', name: 'GPU limit', metric: 'gpuLoad', op: 'above', limit: 90, forSecs: 120, severity: 'warning', enabled: true }],
     networkAlerts: { newExposedListener: false, newRemoteHost: false },
     notifications: true,
+    unusual: { enabled: true, learningDays: 7 },
   };
 }
 

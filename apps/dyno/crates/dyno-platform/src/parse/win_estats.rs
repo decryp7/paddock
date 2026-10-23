@@ -26,7 +26,7 @@ pub fn enable_failure(code: u32) -> PlatformError {
     if code == ERROR_ACCESS_DENIED {
         PlatformError::Unsupported(
             "Traffic per program is not available without administrator rights on Windows: switching on TCP statistics needs them \
-             (event tracing too). It will come with the helper."
+             (event tracing too). Install Dyno's helper under Settings > Helper to see it."
                 .into(),
         )
     } else {

@@ -28,7 +28,7 @@ integrations and never get data unless the user clicks.
 ![Containers](../diagrams/svg/c4-2-containers.svg)
 
 The app (Angular UI in a Tauri shell) and the agent run as the user; every arrow between Dyno processes is the one
-`dyno-ipc` crate. The agent is the single writer of the data folder. Plugins run out of process; the helper is planned.
+`dyno-ipc` crate. The agent is the single writer of the data folder. Plugins run out of process; the helper is a separate system service installed on a click (ADR 0016).
 
 ### Level 3 — core components
 
@@ -58,7 +58,7 @@ The CLI, the service registration, the shared state, the plugin host and the ben
 ![Deployment on Linux](../diagrams/svg/uml-deployment-linux.svg)
 
 Per OS: the app bundle, the OS's way of starting the agent at login (launchd through `SMAppService`, a systemd user
-unit, a per-user `Run` entry on Windows), the agent process, the data folder, and the planned helper started on demand.
+unit, a per-user `Run` entry on Windows), the agent process, the data folder, and the helper, a system service that exists only after the user installed it.
 
 ## Use cases
 
@@ -94,11 +94,11 @@ subscriber at its detail level, dropping frames for a slow subscriber.
 
 Validate, check the protected list, apply to a `ProcessRef`, record the inverse; `Undo` applies it.
 
-### First admin action installs the helper (planned)
+### First admin action installs the helper
 
 ![Helper install](../diagrams/svg/uml-seq-helper-install.svg)
 
-Preview, approve, the OS's own prompt, install, a second validation inside the helper, the inverse recorded.
+Review, the helper's explanation, the OS's own prompt (the install runs `dyno-helper install` elevated), then the change: a second validation inside the helper, the setting read back, the helper's audit line and the activity entry with its inverse (ADR 0016).
 
 ### Agent restart after an update
 

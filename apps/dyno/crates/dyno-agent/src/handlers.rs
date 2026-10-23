@@ -205,6 +205,15 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             ))))
         }
         Request::Inventory => Ok(Reply::Inventory(Box::new(crate::inventory::get(shared)))),
+        Request::Issues { query } => crate::issues::overview(shared, query).map(|o| Reply::Issues(Box::new(o))),
+        Request::RescanIssues { query } => {
+            shared.issues.scan(shared);
+            crate::issues::overview(shared, query).map(|o| Reply::Issues(Box::new(o)))
+        }
+        Request::SaveIssues { path, days } => crate::issues::save(shared, &path, days).map(Reply::IssuesSaved),
+        Request::Unusual { include_ignored } => Ok(Reply::Unusual(Box::new(shared.unusual.overview(shared, include_ignored)))),
+        Request::UnusualAct { key, action } => shared.unusual.act(shared, &key, action).map(|o| Reply::Unusual(Box::new(o))),
+        Request::ForgetBaseline => shared.unusual.forget(shared).map(|o| Reply::Unusual(Box::new(o))),
         Request::Alarms { filter } => {
             let t = now();
             Ok(Reply::Alarms(lock(&shared.core).alarms.list(&filter, t)))
@@ -279,6 +288,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Health => Ok(Reply::Health(Box::new(health(shared)?))),
         Request::StartupEntries => Ok(Reply::Startup(lock(&shared.ports.startup).list()?)),
         Request::SetStartupState { id, state } => set_startup(shared, &id, state).map(Reply::Activity),
+        Request::HelperStatus => Ok(Reply::Helper(Box::new(lock(&shared.ports.helper).status()))),
+        Request::InstallHelper => lock(&shared.ports.helper).install().map(|s| Reply::Helper(Box::new(s))),
+        Request::UninstallHelper => uninstall_helper(shared).map(|s| Reply::Helper(Box::new(s))),
         Request::Shutdown => {
             shared.request_stop();
             Ok(Reply::Ok)
@@ -295,6 +307,21 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
+}
+
+/// Removes the helper (on the user's click) and records that in the activity log.
+fn uninstall_helper(shared: &Shared) -> Result<dyno_core::helper_wire::HelperStatus, AgentError> {
+    let status = lock(&shared.ports.helper).uninstall()?;
+    let entry = lock(&shared.core).log(
+        now(),
+        ActivityKind::System,
+        "Removed the privileged helper".into(),
+        "Changes it made stay in force; undoing them needs the helper again.".into(),
+        UndoRecord::None,
+        None,
+    );
+    shared.broadcast(&Message::Activity(entry));
+    Ok(status)
 }
 
 fn known_alarm(shared: &Shared, id: u64) -> Result<(), AgentError> {
@@ -616,7 +643,12 @@ fn history(shared: &Shared, range: dyno_core::history::HistoryRange, end: Option
         top_consumers: top_consumers(&rows, 8),
         disk_trends,
         boots: s.boots(w.from.minus(30 * DAY), w.to).map_err(internal)?,
-        crashes: Vec::new(),
+        crashes: dyno_core::issues::crash_days(
+            &s.issues(w.from, w.to, 20_000).map_err(internal)?,
+            w.from,
+            w.to,
+            core.settings.alarms.utc_offset_minutes,
+        ),
         core_points: {
             let raw = s.core_points(w.tier, w.from, w.to).map_err(internal)?;
             if w.resolution_ms > w.tier.step_ms() {
@@ -655,6 +687,7 @@ fn anomalies(shared: &Shared) -> Vec<dyno_core::anomaly::Anomaly> {
     let points = core.store.points(Tier::Minute, t.minus(6 * HOUR), t).unwrap_or_default();
     let mut out = anomaly::memory_growth(&rows);
     out.extend(anomaly::periodic_spikes(&points, &rows));
+    out.extend(core.crash_loops.clone());
     out
 }
 
@@ -701,7 +734,10 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
         forecasts: &trends,
         startup: &startup,
         anomalies: &anomalies,
-        crashes_7d: 0,
+        crashes_7d: core
+            .store
+            .count_issues(dyno_core::issues::IssueKind::AppCrash, t.minus(7 * DAY), t)
+            .unwrap_or(0),
         tuning: &tuning,
     });
     // Bookkeeping for the weekly report's trend (one row per hour; a failed write loses one point, nothing else).
@@ -769,12 +805,7 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
             detail: a.detail,
         })
         .collect();
-    let crashes = s
-        .app_events(from, to)
-        .map_err(internal)?
-        .iter()
-        .filter(|(_, _, k)| *k == crate::store::AppEvent::Crash)
-        .count() as u32;
+    let crashes = s.count_issues(dyno_core::issues::IssueKind::AppCrash, from, to).map_err(internal)?;
     let disks = s
         .disk_free(from.minus(14 * DAY), to)
         .map_err(internal)?

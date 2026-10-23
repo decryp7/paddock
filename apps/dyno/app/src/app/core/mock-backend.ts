@@ -57,10 +57,17 @@ import type {
   StartBenchmark,
   SystemSample,
   Timestamp,
+  HelperStatus,
   TuningSuggestion,
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  IssuesOverview,
+  IssuesQuery,
+  SavedIssues,
+  UnusualAction,
+  UnusualItem,
+  UnusualOverview,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
 import {
@@ -82,6 +89,7 @@ import {
 import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
 import { mockHostName, mockNetwork } from './mock/network';
+import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHistory } from './mock/history';
 import { mockInventory } from './mock/inventory';
@@ -170,6 +178,7 @@ export class MockBackend implements DynoBackend {
   private settingsValue: Settings = demoSettings();
   private counters!: MockCounters;
   private tuningList: TuningSuggestion[] = demoTuning();
+  private helperValue: HelperStatus = mockHelper('notInstalled');
   private startup: StartupEntry[] = demoStartup();
   private categories: CleanupCategory[] = copy(CLEANUP_CATEGORIES);
   private quarantined: QuarantineEntry[];
@@ -183,6 +192,10 @@ export class MockBackend implements DynoBackend {
   private readonly activityListeners = new Set<(a: ActivityEntry) => void>();
   private readonly agentListeners = new Set<(s: AgentStatus) => void>();
   private readonly alarmListeners = new Set<(c: AlarmChange) => void>();
+  private unusualItems: UnusualItem[] = seedUnusual();
+  private unusualForgotten = false;
+  /** Issue exports the mock "saved", for tests. */
+  readonly savedIssues: number[] = [];
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
@@ -863,12 +876,45 @@ export class MockBackend implements DynoBackend {
     if (!t) throw err('notFound', 'Unknown tuning suggestion.');
     if (t.applied === applied) throw err('badRequest', applied ? 'It is already applied.' : 'It is not applied.');
     if (applied && t.blocked) throw err('accessDenied', t.blocked);
+    if (applied && t.needsAdmin) this.needHelper();
     if (!applied && t.changedOutside && !force) {
       throw err('badRequest', 'Something else changed this setting since Dyno applied it. Revert anyway to put the earlier setting back.');
     }
     t.applied = applied;
     t.changedOutside = false;
     return this.log('tuning', applied ? t.title : `Reverted: ${t.title}`, applied ? t.preview.join('; ') : t.undoPreview.join('; '), applied ? 'available' : 'notUndoable');
+  }
+
+  // ------------------------------------------------------------------------------------ the privileged helper
+
+  helperStatus(): Promise<HelperStatus> {
+    return this.reply('helperStatus', () => this.helperValue);
+  }
+
+  /** Opens the (pretend) permission prompt; the helper is ready a moment later, as the real one is once the prompt is answered. */
+  installHelper(): Promise<HelperStatus> {
+    return this.reply('installHelper', () => {
+      if (this.latencyMs === 0) {
+        this.helperValue = mockHelper('ready');
+        return this.helperValue;
+      }
+      this.helperValue = mockHelper('installing');
+      setTimeout(() => (this.helperValue = mockHelper('ready')), 800);
+      return this.helperValue;
+    });
+  }
+
+  uninstallHelper(): Promise<HelperStatus> {
+    return this.reply('uninstallHelper', () => {
+      this.helperValue = mockHelper('notInstalled');
+      return this.helperValue;
+    });
+  }
+
+  private needHelper(): void {
+    if (this.helperValue.state !== 'ready') {
+      throw err('accessDenied', 'This change needs Dyno\'s helper, which is not installed. Install it under Settings > Helper (the system asks for your permission once); nothing else in Dyno needs it.');
+    }
   }
 
   startupEntries(): Promise<StartupEntry[]> {
@@ -879,6 +925,7 @@ export class MockBackend implements DynoBackend {
     return this.reply('setStartupState', () => {
       const e = this.startup.find((x) => x.id === id);
       if (!e) throw err('notFound', 'That startup entry was removed.');
+      if (e.needsAdmin) this.needHelper();
       e.state = state;
       const what = state === 'enabled' ? 'Enabled' : state === 'disabled' ? 'Disabled' : `Delayed by ${state.delayed} s:`;
       return this.log('startup', `${what} ${e.name} at sign-in`, 'Startup manager', 'available');
@@ -1169,6 +1216,53 @@ export class MockBackend implements DynoBackend {
   /** The reports the mock "saved", for tests. */
   readonly savedReports: { format: ReportFormat; weeksAgo: number }[] = [];
 
+  issues(query: IssuesQuery): Promise<IssuesOverview> {
+    return this.reply('issues', () => mockIssuesOverview(query, this.now(), mockSources(this.now())));
+  }
+
+  rescanIssues(query: IssuesQuery): Promise<IssuesOverview> {
+    return this.reply('rescanIssues', () => mockIssuesOverview(query, this.now(), mockSources(this.now())));
+  }
+
+  saveIssues(days: number): Promise<SavedIssues | null> {
+    return this.reply('saveIssues', () => {
+      this.savedIssues.push(days);
+      return { path: '/Users/me/dyno-issues.jsonl', bytes: 3_412, count: 13 };
+    });
+  }
+
+  unusual(includeIgnored: boolean): Promise<UnusualOverview> {
+    return this.reply('unusual', () => this.unusualView(includeIgnored));
+  }
+
+  unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview> {
+    return this.reply('unusualAct', () => {
+      const item = this.unusualItems.find((i) => i.key === key);
+      if (!item) throw err('notFound', 'Dyno no longer lists that program.');
+      if (action === 'ignore') item.status = 'ignored';
+      else if (action === 'protect') {
+        item.status = 'protected';
+        const target = item.exe ?? item.name;
+        if (!this.ruleSet.protected.includes(target)) this.ruleSet = { ...this.ruleSet, protected: [...this.ruleSet.protected, target] };
+      } else if (item.status === 'ignored' || item.status === 'protected') item.status = 'new';
+      return this.unusualView(false);
+    });
+  }
+
+  forgetBaseline(): Promise<UnusualOverview> {
+    return this.reply('forgetBaseline', () => {
+      this.unusualItems = [];
+      this.unusualForgotten = true;
+      return this.unusualView(false);
+    });
+  }
+
+  private unusualView(includeIgnored: boolean): UnusualOverview {
+    const view = mockUnusual(this.unusualItems, this.now(), includeIgnored, 2);
+    if (!this.unusualForgotten) return view;
+    return { ...view, known: 0, ignored: 0, learning: { active: true, until: this.now() + this.settingsValue.unusual!.learningDays * DAY } };
+  }
+
   saveReport(format: ReportFormat, weeksAgo: number): Promise<SavedReport | null> {
     return this.reply('saveReport', () => {
       this.savedReports.push({ format, weeksAgo });
@@ -1280,6 +1374,26 @@ export class MockBackend implements DynoBackend {
       else setTimeout(run, delay);
     });
   }
+}
+
+/** The helper as the mock reports it (the real wording comes from the engine). */
+function mockHelper(state: HelperStatus['state']): HelperStatus {
+  const text: Record<HelperStatus['state'], string> = {
+    notInstalled: 'The helper is not installed. Dyno works without it; install it to apply the changes that need administrator rights.',
+    installing: "Waiting for you to answer the system's permission prompt.",
+    ready: 'The helper is installed and ready. It does nothing until you approve a change.',
+    outdated: 'The installed helper is older than this Dyno. Update the helper.',
+    unreachable: 'The helper is installed but did not answer. Install it again from Settings to repair it.',
+    unsupported: 'The helper cannot be installed on this computer.',
+  };
+  return {
+    state,
+    message: text[state],
+    version: state === 'ready' ? '0.1.0' : null,
+    prompt: 'The system asks you to confirm with your account password or a Windows permission prompt.',
+    recent: [],
+    error: null,
+  };
 }
 
 function err(code: CommandError['code'], message: string): CommandError {

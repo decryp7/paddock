@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 //! Tuning end to end over the fake platform and a fake tuning system: observe-only until a click, previews with the
-//! inverse, a recorded undo, outside-change detection, administrator-only items refused, failures contained.
+//! inverse, a recorded undo, outside-change detection, administrator-only items blocked where no helper can exist, failures contained.
 
 use dyno_agent::agent::lock;
 use dyno_agent::cli::{ask, connect};
@@ -19,6 +19,35 @@ use dyno_core::tuning::TuningSuggestion;
 use dyno_ipc::Peer;
 use dyno_platform::fake::{quiet_sample, Fake};
 use dyno_platform::tuning::FakeTuning;
+
+/// A computer where the privileged helper cannot be installed (never the real one: tests do not look at the machine).
+struct NoHelper;
+
+impl dyno_agent::helper_centre::HelperControl for NoHelper {
+    fn can_install(&self) -> Result<(), String> {
+        Err("no helper in tests".into())
+    }
+    fn status(&mut self) -> dyno_core::helper_wire::HelperStatus {
+        dyno_core::helper_wire::assess(
+            TuningHost::Macos,
+            Err("no helper in tests".into()),
+            dyno_core::helper_wire::Probe::Absent,
+            "1",
+        )
+    }
+    fn install(&mut self) -> Result<dyno_core::helper_wire::HelperStatus, dyno_core::protocol::AgentError> {
+        Err(dyno_core::protocol::AgentError::new(
+            dyno_core::protocol::ErrorCode::Unsupported,
+            "no helper in tests",
+        ))
+    }
+    fn uninstall(&mut self) -> Result<dyno_core::helper_wire::HelperStatus, dyno_core::protocol::AgentError> {
+        Err(dyno_core::protocol::AgentError::new(
+            dyno_core::protocol::ErrorCode::Unsupported,
+            "no helper in tests",
+        ))
+    }
+}
 
 struct Harness {
     running: Option<Running>,
@@ -51,6 +80,7 @@ impl Harness {
         let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
         let tuning = FakeTuning::new(host);
         *lock(&running.shared.ports.tuning) = Box::new(tuning.clone());
+        *lock(&running.shared.ports.helper) = Box::new(NoHelper);
         let peer = connect(&dirs).unwrap().0;
         let h = Harness {
             running: Some(running),
@@ -160,7 +190,7 @@ fn a_change_made_outside_dyno_is_detected_before_undo() {
 }
 
 #[test]
-fn administrator_items_are_listed_but_not_applicable() {
+fn administrator_items_are_listed_but_not_applicable_where_the_helper_cannot_be_installed() {
     let h = Harness::start(TuningHost::Macos, Some(PowerSource::Battery), None);
     h.tuning.set_value(&sleep(0), "0");
     let l = h.list();

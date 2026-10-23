@@ -13,6 +13,7 @@ export const NAV: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: 'dashboard', keywords: 'home overview health live' },
   { path: '/processes', label: 'Processes', icon: 'processes', keywords: 'task manager apps end kill suspend' },
   { path: '/why-slow', label: 'Why slow', icon: 'why', keywords: 'diagnosis slow cause evidence lag freeze cpu memory disk heat' },
+  { path: '/issues', label: 'Issues', icon: 'alert', keywords: 'crashes hangs problems errors stability score unexpected shutdown new programs unusual first seen baseline' },
   { path: '/inventory', label: 'Inventory', icon: 'memory', keywords: 'memory ram modules slots upgrade hardware dimm' },
   { path: '/network', label: 'Network', icon: 'network', keywords: 'ports listening connections sockets firewall exposed ip remote host' },
   { path: '/counters', label: 'Counters', icon: 'trend', keywords: 'performance counters perfmon pdh raw metrics browse search chart pin disk queue page faults network interface proc' },
@@ -25,11 +26,9 @@ export const NAV: NavItem[] = [
   { path: '/health', label: 'Health', icon: 'health', keywords: 'score reasons startup apps sign-in' },
   { path: '/tuning', label: 'Tuning', icon: 'sparkle', keywords: 'power plan sleep hibernation battery charge limit indexing visual effects background apps suggestions undo' },
   { path: '/diagnostics', label: 'Diagnostics', icon: 'file', keywords: 'bundle zip bug report redacted support' },
-  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences' },
+  { path: '/settings', label: 'Settings', icon: 'settings', keywords: 'theme tray plugins about preferences helper administrator install uninstall' },
 ];
 
 /** What is on the roadmap but has no screen: listed in one dialog, never as a route or a page of its own. */
 export const COMING: { label: string; icon: IconName; text: string }[] = [
-  { label: 'Administrator tuning', icon: 'info', text: 'The helper that lets Dyno apply the tuning items that need administrator rights (Defender exclusions, hibernation, charge limit), always after a prompt and with an undo.' },
-  { label: 'Issues', icon: 'info', text: 'Crashes, hangs and failing services from the OS logs, with a daily stability score.' },
 ];

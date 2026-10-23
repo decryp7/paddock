@@ -51,10 +51,16 @@ import type {
   BenchOverview,
   StartBenchmark,
   Timestamp,
+  HelperStatus,
   TuningSuggestion,
   WeeklyReport,
   ReportFormat,
   SavedReport,
+  IssuesOverview,
+  IssuesQuery,
+  SavedIssues,
+  UnusualAction,
+  UnusualOverview,
 } from './api.types';
 
 /** Stops a subscription. */
@@ -117,6 +123,12 @@ export interface DynoBackend {
   applyTuning(id: string): Promise<ActivityEntry>;
   /** Puts the previous setting back; `force` overwrites a setting something else changed since Dyno applied it. */
   revertTuning(id: string, force?: boolean): Promise<ActivityEntry>;
+
+  // The privileged helper (ADR 0016). Installing happens only from the confirmation dialog.
+  helperStatus(): Promise<HelperStatus>;
+  /** Starts the install or update (the system's permission prompt opens); resolves at once with state `installing`. */
+  installHelper(): Promise<HelperStatus>;
+  uninstallHelper(): Promise<HelperStatus>;
   startupEntries(): Promise<StartupEntry[]>;
   setStartupState(id: string, state: StartupState): Promise<ActivityEntry>;
 
@@ -177,6 +189,20 @@ export interface DynoBackend {
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
   plugins(): Promise<PluginInfo[]>;
+
+  // Issues and unusual programs (observe-only).
+  /** Crashes, hangs and other problems the OS recorded, with the stability score and how each log was read. */
+  issues(query: IssuesQuery): Promise<IssuesOverview>;
+  /** Reads the OS logs now and answers the same as `issues`. */
+  rescanIssues(query: IssuesQuery): Promise<IssuesOverview>;
+  /** Asks where to save (the OS save dialog) and writes the last `days` days as JSON lines for Debrief; `null` when they cancel. */
+  saveIssues(days: number): Promise<SavedIssues | null>;
+  /** Programs that are new or unusual on this computer. */
+  unusual(includeIgnored: boolean): Promise<UnusualOverview>;
+  /** Ignores, protects (adds to the protected list) or restores a program on the list. */
+  unusualAct(key: string, action: UnusualAction): Promise<UnusualOverview>;
+  /** Forgets the baseline of programs; learning starts again. */
+  forgetBaseline(): Promise<UnusualOverview>;
 
   // The tray dropdown window.
   /** Shows and focuses the main window (and hides the tray dropdown). */
