@@ -7,6 +7,7 @@ pub mod alarms;
 pub mod bench;
 pub mod cleanup;
 pub mod cli;
+pub mod counters;
 pub mod diagnostics;
 pub mod discovery;
 pub mod files;

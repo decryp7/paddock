@@ -13,6 +13,7 @@ pub mod linux_tools;
 pub mod lnk;
 pub mod lsof;
 pub mod mac_tools;
+pub mod pdh_list;
 pub mod powercfg;
 pub mod sock_diag;
 pub mod startup_approved;

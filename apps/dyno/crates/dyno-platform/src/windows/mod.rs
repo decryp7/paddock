@@ -5,6 +5,7 @@ pub mod activity;
 pub mod control;
 #[cfg(test)]
 mod control_tests;
+pub mod counters;
 pub mod handle;
 pub mod net;
 pub mod pdh;

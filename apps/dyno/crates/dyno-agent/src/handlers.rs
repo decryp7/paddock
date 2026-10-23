@@ -169,6 +169,16 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             };
             settings.url(&ip).map(Reply::Url).map_err(|e| bad(e.to_string()))
         }
+        Request::CounterObjects => shared.counters.objects().map(|o| Reply::CounterObjects(Box::new(o))),
+        Request::CounterObject { name } => shared.counters.object(&name).map(|o| Reply::CounterObject(Box::new(o))),
+        Request::CounterSearch { query, limit } => shared.counters.search(&query, limit).map(Reply::CounterHits),
+        Request::CounterValues { paths } => shared.counters.values(&paths, now()).map(Reply::CounterValues),
+        Request::CounterHistory { paths, minutes } => shared
+            .counters
+            .history(&paths, minutes, now(), |from, to| {
+                lock(&shared.core).store.events(from, to).map_err(internal)
+            })
+            .map(|h| Reply::CounterHistory(Box::new(h))),
         Request::Benchmarks => Ok(Reply::Benchmarks(Box::new(shared.bench.overview()))),
         Request::StartBenchmark {
             kinds,

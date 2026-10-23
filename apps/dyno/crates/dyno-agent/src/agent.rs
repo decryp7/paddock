@@ -203,6 +203,8 @@ pub struct Shared {
     pub reveal: Reveal,
     /// Open ports and connections (observe-only).
     pub network: crate::network::NetCentre,
+    /// The performance counters browser (observe-only).
+    pub counters: crate::counters::CounterCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
     /// Cleanup: categories, scans and the quarantine (deletes only on the user's confirmed click).
@@ -331,6 +333,7 @@ impl Shared {
             reveal,
             bench,
             cleanup,
+            counters: crate::counters::CounterCentre::new(Arc::new(dyno_platform::counters::OsCounters)),
             network: crate::network::NetCentre::new(
                 Box::new(dyno_platform::network::OsSockets),
                 Arc::new(dyno_platform::network::OsReverseDns),

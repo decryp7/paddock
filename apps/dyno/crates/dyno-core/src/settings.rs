@@ -173,6 +173,8 @@ pub struct Settings {
     pub custom_alerts: Vec<crate::alarms::custom::CustomAlertRule>,
     /// Desktop notifications for new alarms (quiet hours and muted rules still apply).
     pub notifications: bool,
+    /// Pinned performance counters and saved counter sets.
+    pub counters: crate::counters::CounterSettings,
 }
 
 impl Default for Settings {
@@ -195,6 +197,7 @@ impl Default for Settings {
             network_alerts: Default::default(),
             custom_alerts: Vec::new(),
             notifications: true,
+            counters: Default::default(),
         }
     }
 }
@@ -225,6 +228,7 @@ impl Settings {
         self.alarms = self.alarms.clamped();
         self.ip_lookup = self.ip_lookup.normalised();
         self.custom_alerts = crate::alarms::custom::normalise_rules(self.custom_alerts);
+        self.counters = self.counters.normalised();
         self
     }
 }

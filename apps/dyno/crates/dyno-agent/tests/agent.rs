@@ -740,3 +740,75 @@ fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html
         assert!(ask(&peer, request).is_err());
     }
 }
+
+/// The counters browser against this machine's real counters (read-only): browse, search, read twice, chart.
+#[test]
+fn the_counters_browser_lists_searches_reads_and_charts_this_machines_counters() {
+    let h = Harness::start();
+    let peer = h.client();
+    let ask_slow = |r| ask_within(&peer, r, Duration::from_secs(30));
+    let Reply::CounterObjects(objects) = ask_slow(Request::CounterObjects).unwrap() else {
+        panic!("objects")
+    };
+    assert!(objects.objects.iter().any(|o| o.name == "Memory" && o.counters > 0));
+    let Reply::CounterObject(memory) = ask_slow(Request::CounterObject { name: "Memory".into() }).unwrap() else {
+        panic!("object")
+    };
+    let path = format!("\\Memory\\{}", memory.counters[0].name);
+    let Reply::CounterHits(hits) = ask_slow(Request::CounterSearch {
+        query: memory.counters[0].name.clone(),
+        limit: 5,
+    })
+    .unwrap() else {
+        panic!("hits")
+    };
+    assert!(hits.iter().any(|x| x.path == path));
+    for _ in 0..2 {
+        let Reply::CounterValues(values) = ask_slow(Request::CounterValues { paths: vec![path.clone()] }).unwrap() else {
+            panic!("values")
+        };
+        assert_eq!(values[0].path, path);
+        std::thread::sleep(Duration::from_millis(1100));
+    }
+    let Reply::CounterHistory(history) = ask_slow(Request::CounterHistory {
+        paths: vec![path.clone()],
+        minutes: 5,
+    })
+    .unwrap() else {
+        panic!("history")
+    };
+    assert_eq!(history.series.len(), 1);
+    assert!(!history.series[0].points.is_empty());
+    // Bad input is refused by the engine, not trusted.
+    let bad = ask_slow(Request::CounterValues {
+        paths: vec!["junk".into()],
+    });
+    assert!(bad.is_err());
+    let missing = ask_slow(Request::CounterObject {
+        name: "No Such Object".into(),
+    });
+    assert!(missing.unwrap_err().contains("no counter object"));
+}
+
+#[test]
+fn pinned_counters_and_saved_sets_are_validated_and_survive_a_restart() {
+    let h = Harness::start();
+    let peer = h.client();
+    let Reply::Settings(mut s) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    s.counters.pinned = vec!["\\Memory\\Free".into(), "junk".into(), "\\Memory\\Free".into()];
+    s.counters.sets = vec![dyno_core::counters::CounterSet {
+        name: "Memory".into(),
+        paths: vec!["\\Memory\\Free".into(), "bad".into()],
+    }];
+    let Reply::Settings(saved) = ask(&peer, Request::SaveSettings { settings: s }).unwrap() else {
+        panic!("settings")
+    };
+    assert_eq!(saved.counters.pinned, ["\\Memory\\Free"]);
+    assert_eq!(saved.counters.sets[0].paths, ["\\Memory\\Free"]);
+    let text = std::fs::read_to_string(h.dirs.settings()).unwrap();
+    let (reloaded, warning) = dyno_core::settings::parse(&text);
+    assert!(warning.is_none());
+    assert_eq!(reloaded.counters, saved.counters);
+}

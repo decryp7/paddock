@@ -9,6 +9,7 @@
 
 pub mod battery;
 pub mod control_state;
+pub mod counters;
 pub mod dev_folders;
 pub mod fake;
 pub mod inventory;

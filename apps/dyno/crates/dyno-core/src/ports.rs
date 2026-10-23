@@ -57,6 +57,15 @@ pub trait ProcessTraffic: Send + Sync {
     fn counters(&self) -> Result<Vec<crate::network_traffic::TrafficCounter>, PlatformError>;
 }
 
+/// The OS's performance counters (WP-12): what exists and what they read now. Observe-only. Reading is bounded by a
+/// timeout inside the implementation; a counter that disappeared is an error for that counter only.
+pub trait CounterSource: Send + Sync {
+    /// Everything the OS offers, as paths are written (`\Object(Instance)\Counter`). The core bounds the result.
+    fn catalog(&self) -> Result<crate::counters::CounterCatalog, PlatformError>;
+    /// One raw reading per path, in the same order. A path the OS no longer has fails alone, with the reason.
+    fn read(&self, paths: &[crate::counters::CounterPath]) -> Vec<crate::counters::RawCounter>;
+}
+
 /// System-wide sensors. Called once per tick from the sampling thread.
 pub trait SystemSensors: Send {
     /// Measures everything at `now`. Rates (CPU, disk, network) cover the time since the previous call.

@@ -330,6 +330,35 @@ pub enum Request {
         /// Which week, as for `WeeklyReport`.
         weeks_ago: u32,
     },
+
+    // ---- performance counters browser (WP-12) ----
+    /// The counter objects the OS offers, with sizes only (answers `CounterObjects`). Appended.
+    CounterObjects,
+    /// One object with its counters and instances (answers `CounterObject`). Appended.
+    CounterObject {
+        /// The object's name.
+        name: String,
+    },
+    /// Counters matching the words typed, best first (answers `CounterHits`). Appended.
+    CounterSearch {
+        /// The words; every one must match.
+        query: String,
+        /// At most this many (1-200).
+        limit: u32,
+    },
+    /// Reads up to 32 counters now (answers `CounterValues`) and adds them to their charts. Appended.
+    CounterValues {
+        /// The paths, as `\Object(Instance)\Counter`.
+        paths: Vec<String>,
+    },
+    /// The readings kept for counters over the last minutes, with the app's events in the same window (answers
+    /// `CounterHistory`). Appended.
+    CounterHistory {
+        /// The paths (up to 32).
+        paths: Vec<String>,
+        /// How far back, 1-60 minutes.
+        minutes: u32,
+    },
 }
 
 /// Dyno's own cost.
@@ -573,6 +602,18 @@ pub enum Reply {
     // ---- weekly report export (WP-08) ----
     /// The report file was written. Appended.
     ReportSaved(crate::report::SavedReport),
+
+    // ---- performance counters browser (WP-12) ----
+    /// The counter objects. Appended.
+    CounterObjects(Box<crate::counters::CounterObjectList>),
+    /// One counter object. Appended.
+    CounterObject(Box<crate::counters::CounterObject>),
+    /// Counters found by search. Appended.
+    CounterHits(Vec<crate::counters::CounterHit>),
+    /// Counter readings. Appended.
+    CounterValues(Vec<crate::counters::CounterReading>),
+    /// Counter history with events. Appended.
+    CounterHistory(Box<crate::counters::CounterHistory>),
 }
 
 impl Reply {
@@ -619,6 +660,11 @@ impl Reply {
             Reply::BenchComparison(x) => v(x),
             Reply::HostNames(x) => v(x),
             Reply::ReportSaved(x) => v(x),
+            Reply::CounterObjects(x) => v(x),
+            Reply::CounterObject(x) => v(x),
+            Reply::CounterHits(x) => v(x),
+            Reply::CounterValues(x) => v(x),
+            Reply::CounterHistory(x) => v(x),
         }
     }
 }
@@ -779,6 +825,21 @@ mod tests {
     }
 
     #[test]
+    fn counter_requests_have_the_json_shape_of_api_types() {
+        let r: Request = serde_json::from_value(serde_json::json!({"counterHistory": {"paths": ["\\a\\b"], "minutes": 5}})).unwrap();
+        assert_eq!(
+            r,
+            Request::CounterHistory {
+                paths: vec!["\\a\\b".into()],
+                minutes: 5
+            }
+        );
+        assert_eq!(serde_json::to_value(Request::CounterObjects).unwrap(), "counterObjects");
+        let r: Request = serde_json::from_value(serde_json::json!({"counterSearch": {"query": "pages", "limit": 20}})).unwrap();
+        assert!(matches!(r, Request::CounterSearch { limit: 20, .. }));
+    }
+
+    #[test]
     fn messages_survive_postcard() {
         let live = LiveUpdate {
             system: sample(1),
@@ -833,6 +894,16 @@ mod tests {
             Reply::Benchmarks(Box::default()),
             Reply::Network(Box::default()),
             Reply::HostNames(vec![]),
+            Reply::CounterObjects(Box::default()),
+            Reply::CounterHits(vec![]),
+            Reply::CounterValues(vec![]),
+            Reply::CounterHistory(Box::default()),
+            Reply::CounterObject(Box::new(crate::counters::CounterObject {
+                name: "Memory".into(),
+                counters: vec![],
+                instances: vec![],
+                instances_total: 0,
+            })),
             Reply::Url("https://example.com/".into()),
             Reply::RecorderSnapshots(vec![]),
             Reply::ReportSaved(crate::report::SavedReport {
