@@ -471,3 +471,18 @@ async fn parts_that_cannot_be_read_or_written_are_reported() {
     let d = download(&http, &release(f2.to_str().unwrap()), dest.path(), true).await.unwrap();
     assert!(!d.verified);
 }
+
+#[tokio::test]
+async fn an_answer_cut_off_mid_body_is_a_transport_message() {
+    // Announces 100 bytes, sends 5 and closes.
+    let base = serve(|_, _, _| "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nhello".to_string()).await;
+    let http = Http::new("test").unwrap();
+    let e = http.get(&HttpRequest::get(format!("{base}/cut")), None, 1024).await.unwrap_err();
+    assert!(
+        matches!(
+            e,
+            SourceError::Unreachable(_) | SourceError::Failed(_) | SourceError::InvalidResponse(_)
+        ),
+        "{e:?}"
+    );
+}

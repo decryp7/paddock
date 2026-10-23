@@ -23,7 +23,11 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
    click-through (Open, Mark as seen). E-mail channel delivery is done in the engine (SMTP through lettre, TLS, timeouts,
    password in the credential store, typed errors with a next step; commands `mail_status`, `set_mail_password`,
    `send_test_email`); the UI has no mail form yet (feat/ui-gaps), and no test against a real TLS server has been run (the tests use a local fake SMTP server; STARTTLS and TLS failure paths are covered, a successful TLS session is not).
-5. Coverage: see Engine below for the numbers of round 4; what is left are `?`/`map_err` regions on SQLite and file errors that need fault-injection seams (see the list in the commit 5af6ee0).
+5. Coverage (done 2026-10-23, release prep): `spotter-sources` 99.0% and `spotter-engine` 98.8% lines (`cargo llvm-cov`, summary
+   method); the rest are `?` regions on SQLite and file operations (seek, flush, write, pragma, transactions) that need a
+   fault-injecting database or file layer. Added seams: the in-memory database returns an error (not an exit) and takes an injected opener, a size limit
+   parameter for downloads, platform parameters for folder error messages, `Gathered::into_candidates`, `feeds_in`.
+6. App icons are guarded in CI (`scripts/ci/check-icons.mjs`, copied from Pitwall): the artwork must fill the canvas.
 
 ## Renderer
 
@@ -42,11 +46,12 @@ Done: shell (splash, sidebar, banner, toasts, native feel, theme via paddock), T
 dashboard, settings, toasts, editor, detail), pages (dashboard, watches, detail, wizard, settings, tray), 18 Playwright
 flows (Chromium and WebKit, port 4370), `ng build` and `ng lint` clean.
 
+Unit tests (done 2026-10-23): 50 spec files, 402 tests (Vitest + TestBed) covering mock-backend, every store, draft-utils,
+panel/ago/confirm/clipboard/chart and all page components; coverage 99.4% lines, 98.5% statements, 93.1% branches, 96.7%
+functions. `npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities; the suite also passes under
+`TZ=Pacific/Auckland`.
+
 Left:
-- Unit tests: specs exist for core services, format/labels/chart-options and copied utilities (59 tests); still missing for
-  mock-backend, watches/dashboard/settings/editor stores, draft-utils, panel/ago/confirm/clipboard/chart, and every page
-  component. Overall Angular coverage is therefore below the 80% target until these land (run `ng test --coverage`).
-- `npm audit --omit=dev --audit-level=high` not run yet; run a second `ng test` under another TZ.
 - Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command": the engine field exists (`Release.upgradeCommand`, container tags and registry packages) and the UI does not show it yet.
 - Check scripts/check-index.mjs against dist/app/browser/index.html.
 

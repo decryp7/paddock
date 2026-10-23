@@ -209,6 +209,21 @@ mod tests {
     }
 
     #[test]
+    fn a_clock_without_a_zone_name_reports_none() {
+        struct Fixed;
+        impl Clock for Fixed {
+            fn now(&self) -> Timestamp {
+                Timestamp(0)
+            }
+            fn utc_offset_minutes(&self) -> i32 {
+                0
+            }
+        }
+        assert_eq!((Fixed.now(), Fixed.utc_offset_minutes()), (Timestamp(0), 0));
+        assert_eq!(Fixed.local_zone_name(), None);
+    }
+
+    #[test]
     fn local_parts_follow_the_offset() {
         // 2026-10-22 (Thursday) 23:30 UTC.
         let t = Timestamp::parse("2026-10-22T23:30:00Z").unwrap();

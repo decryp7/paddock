@@ -148,11 +148,14 @@ where
         ))
     };
     let port = url.port_or_known_default().unwrap_or(80);
-    match url.host() {
-        None => Err(SourceError::InvalidConfig(format!("{} has no host name.", shown(url)))),
-        Some(Host::Ipv4(ip)) => (!is_local_ip(IpAddr::V4(ip))).then_some(()).ok_or_else(refuse),
-        Some(Host::Ipv6(ip)) => (!is_local_ip(IpAddr::V6(ip))).then_some(()).ok_or_else(refuse),
-        Some(Host::Domain(name)) => {
+    // http(s) addresses always have a host; the message is for a future scheme.
+    let host = url
+        .host()
+        .ok_or_else(|| SourceError::InvalidConfig(format!("{} has no host name.", shown(url))))?;
+    match host {
+        Host::Ipv4(ip) => (!is_local_ip(IpAddr::V4(ip))).then_some(()).ok_or_else(refuse),
+        Host::Ipv6(ip) => (!is_local_ip(IpAddr::V6(ip))).then_some(()).ok_or_else(refuse),
+        Host::Domain(name) => {
             let addrs = resolve(name.to_string(), port)
                 .await
                 .map_err(|_| SourceError::Unreachable(format!("{name} could not be found. Spotter will try again.")))?;

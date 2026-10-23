@@ -326,4 +326,30 @@ mod tests {
         let text = email_body(&with_release);
         assert!(text.starts_with("Body\n\napp 1.0.0\nhttps://x/app\n"), "{text}");
     }
+
+    #[tokio::test]
+    async fn a_location_that_is_not_a_valid_header_value_is_left_out_of_the_click_target() {
+        let fetcher = PoliteFetcher::new(crate::fetch::FetchConfig::new("test")).unwrap();
+        let n = note(
+            "https://x/line\nbreak",
+            NotificationChannel {
+                kind: ChannelKind::Ntfy,
+                target: "http://127.0.0.1:1/topic".into(),
+            },
+        );
+        let failures = deliver(&fetcher, None, &n, true).await;
+        assert_eq!(
+            failures.len(),
+            1,
+            "the delivery still fails only because nothing listens: {failures:?}"
+        );
+        assert!(failures[0].starts_with("ntfy channel:"), "{failures:?}");
+        let mut plain = n.clone();
+        plain.release = None;
+        assert_eq!(
+            deliver(&fetcher, None, &plain, true).await.len(),
+            1,
+            "a notification without a release has no click target either"
+        );
+    }
 }
