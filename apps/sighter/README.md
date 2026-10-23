@@ -33,6 +33,8 @@ tested like any other. Everything runs on your machine.
   licences only).
 - **Serve** a loopback-only API (`/v1/locate` and friends) with a layered resolver (cache, template, OCR, detector,
   vision model, "needs labelling") that your tests call from scripts, generated clients or the CLI.
+- **Drive desktops, not only tests.** An MCP server and an agent mode (`sighter do "<goal>"`, Pitwall as the optional local
+  planner) act on this PC or on a remote PC over RDP, including UAC prompts, under safety rules enforced in the server.
 - **Stay safe.** It never clicks blindly, redacts recordings before they are stored, and sends nothing off the machine.
 
 ## Examples
@@ -277,6 +279,89 @@ try {
 }
 ```
 </details>
+
+## Desktop automation, MCP and agent mode
+
+> **Planned; names may change.** Design only (see [the proposal](docs/proposal.md), sections 7.14 and 7.15). The `Target`
+> interface and the MCP server are v1; agent mode and IP-KVM come later.
+
+Besides test code, Sighter can drive a desktop for people and agents. The same detection, locators and plans sit above a
+small `Target` interface, so something written once runs on any target:
+
+| Target | What it is | When |
+|---|---|---|
+| **Local** | Screenshots plus guarded input on this PC | v1 |
+| **RDP** | A remote PC (or VM) driven from a controller PC running Sighter, through Sighter's own embedded, headless RDP client. UAC prompts and elevated apps are shown in the session, so they can be reached, which local input cannot do | v1 |
+| **VNC** | A VNC client | with RDP if cheap, else later |
+| **IP-KVM** | An existing open IP-KVM device, only for what RDP cannot show: BIOS/UEFI and the pre-logon screen | later, optional |
+
+![Desktop automation components](docs/images/diagrams/svg/c4-3-desktop-automation.svg?v=0614eabe)
+
+**MCP server.** Sighter exposes a Model Context Protocol server over stdio or loopback only. Its tools act on the
+selected target:
+
+- `observe`: a screenshot plus the detected, labelled elements with boxes (`#1 Save button`, `#2 Cancel`), so a model
+  refers to elements by label and never guesses pixels;
+- `observe_image`: detect and label elements on a given image (for example a recorded video frame); no input, no target;
+- `locate`, `click`, `type`, `press`, `drag`, `launch_app`, `wait_for`.
+
+Any MCP host can drive it: Sighter's own runner, [Debrief](https://dev.decryptology.net/decryp7/debrief),
+[Pacenotes](https://dev.decryptology.net/decryp7/pacenotes), Claude Desktop or Claude Code, or a script. The host brings
+its own model.
+
+```json
+{
+  "mcpServers": {
+    "sighter": { "command": "sighter", "args": ["mcp", "--target", "rdp:lab-pc-07"] }
+  }
+}
+```
+
+**Agent mode.** `sighter do "<goal>"` runs a built-in loop with [Pitwall](https://dev.decryptology.net/decryp7/pitwall)
+as the local planner. Each step is observe, the model picks one tool call, safety check, act, verify. Pitwall is optional:
+scripted runs and the MCP server work without any LLM, and scripted plans stay the default for CI.
+
+```sh
+sighter do "Open Settings, turn on Dark mode, and confirm the title bar turns dark" --target local --max-steps 25 --timeout 5m
+```
+
+![One agent-mode step](docs/images/diagrams/svg/uml-seq-agent-step.svg?v=201c19c3)
+
+**Targeting an RDP session.** The locator API is unchanged; only the session's target differs. The same in a plan:
+
+```csharp
+await using var pc = await Sighter.ConnectAsync(Target.Rdp("lab-pc-07", credential: "lab-admin"));   // credential by reference
+await pc.Screen.GetByText("Yes").RightOf("Do you want to allow this app").ClickAsync();            // a UAC prompt
+```
+
+```toml
+[plan]
+id = "install-needs-uac"
+target = { kind = "rdp", host = "lab-pc-07", credential = "lab-admin" }   # secret stays in the OS credential store
+
+[[case]]
+id = "TC-UAC-1"
+title = "Installer asks for elevation"
+  [[case.step]]
+  action = "click"
+  target = { class = "button", name = "Yes", right_of = "Do you want to allow this app" }
+```
+
+**Safety, enforced in Sighter's server** so it holds for every host and for scripts: allow-listed apps and windows only;
+confirmation by the user (never the model) before destructive actions; a step and time budget; a visible "agent in
+control" overlay with a stop hotkey, and physical input pauses the run; a full replay log kept in the run bundle and
+openable in Debrief; local only, with no cloud model and no remote MCP. Credentials come from the OS credential store and
+never appear in plans or logs.
+
+### Reproduce a bug from a Debrief video
+
+Debrief turns a screen recording into candidate steps (using `observe_image` to name the clicked elements), connects to
+Sighter's MCP server, selects the RDP target of the PC under test, and drives the steps with Pitwall choosing the tools
+while watching that PC's logs for the same error signature. It stops when the failure reproduces or a budget runs out,
+then saves the executed steps as a `.sighterplan` regression test that later runs with no LLM. The user confirms before
+anything runs on a remote PC.
+
+![Reproduce a bug from a Debrief video](docs/images/diagrams/svg/uml-seq-repro-from-video.svg?v=16ea23e7)
 
 ## How it fits the family
 
