@@ -67,6 +67,9 @@ Releasing (Pitcrew, Pitwall and Spotter 1.0, 2026-10-23)
 - Verify the artifact, not only `latest.json`: install the DMG/installer and look at the icon and the first launch.
 - Without a Developer ID and notarization, macOS shows "Apple could not verify…" (Open Anyway in Privacy & Security);
   Windows SmartScreen needs a code-signing certificate. Say so in the release notes until the apps are signed.
+  Decision 2026-10-23: Apple notarization and Windows code signing are deferred until after the releases settle. Every app's
+  release notes carry a "First launch" section (macOS **Open Anyway**; Windows **More info > Run anyway**), appended by the
+  release workflow after git-cliff (Debrief, Pitcrew, Pitwall, Spotter, Dyno).
 - Seal the macOS bundle ad-hoc (`signingIdentity: "-"` in tauri.macos.conf.json) and verify it in CI with
   `codesign --verify --deep --strict` on the .app and on the .app inside the DMG: Debrief 1.0.0 shipped linker-signed
   only (no sealed resources), and a downloaded copy said "Debrief.app is damaged". Release verification runs codesign on

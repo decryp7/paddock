@@ -8,3 +8,4 @@
 | [0004](0004-paddock-pitwall-client.md) | `paddock-pitwall`: discovery, pairing, requests, "Pitwall is optional" |
 | [0005](0005-paddock-testplan.md) | `paddock-testplan`: `.sighterplan` / `.sighterresult` |
 | [0006](0006-rollout-versioning-consumption.md) | Rollout order, other crates, versioning, consumption, open questions |
+| [0007](0007-mcp-servers-across-the-family.md) | MCP servers across the family: who serves, who hosts, `paddock-mcp`, shared safety rules, rollout |
