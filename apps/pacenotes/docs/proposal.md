@@ -938,8 +938,7 @@ Added 2026-10-23 (sections 20-26):
 
 22. ~~Vector store~~ **Decided 2026-10-23: SQLite is the source of truth, the ANN index is derived data behind a `VectorIndex` port; the engine is chosen by the
     spike among hannoy (preferred, low RAM), libSQL, usearch and sqlite-vec, LanceDB as fallback (sections 21.3-21.4).** Still open: should the vector index later also supply candidates for requirement traceability, or stay code-search only?
-23. **Tier 3 and the hard rule**: is an opt-in, per-repository "trust this repository" that starts language servers (which may run build scripts and proc
-    macros) acceptable, with SCIP import as the no-execution alternative? Or tier 3 by SCIP import only?
+23. ~~Tier 3 and the hard rule~~ **Decided 2026-10-23: tier 3 language servers that may run build scripts (rust-analyzer build.rs and proc macros, MSBuild, Gradle) are opt-in per repository through an explicit "Trust this repository" (off by default). Untrusted repositories use a pre-built SCIP index or tiers 1-2.** Trust is local, stored per repository on this machine, never inferred (not from git remotes, owners, file contents or a shared config) and never synced or shipped in a project file; it can be revoked at any time (section 20.4).
 24. ~~Embeddings source~~ **Decided 2026-10-23: Pitwall's Qwen3-Embedding (llama.cpp `/v1/embeddings`), else a small code-embedding model downloaded on the user's
     click, else text and structure only (section 21.2).** Still open: which small model after a benchmark (`CodeRankEmbed` or `jina-embeddings-v2-base-code`),
     the per-repository cap defaults (500k chunks / 2 GB), and whether semantic search is off by default.
@@ -1026,8 +1025,14 @@ shown with its label, and the UI says what installing the toolchain would add.
 **Tier 3 and the hard rule** (detail in 20.4). Language servers can run build scripts and procedural macros, which is executing repository code. So tier 3 is
 **opt-in per repository** ("trust this repository"), runs out of process under the plugin host's timeouts and memory caps, never starts without
 the user's click (CLI: an explicit flag), and has a safe alternative that needs no trust: **import a SCIP index** produced elsewhere (for example
-by Pitcrew on the user's runner). This is the one deliberate, opt-in exception to the no-execution rule and is recorded as a decision to confirm
-(question 23).
+by Pitcrew on the user's runner). This is the one deliberate, opt-in exception to the no-execution rule and is a decision (2026-10-23, question 23).
+
+**UI for trust (decided 2026-10-23).** (1) *Trust prompt*: the first time tier 3 would start for a repository, a dialog names the repository path, the
+server and what it may run (build scripts, proc macros, MSBuild targets, Gradle tasks), and offers **Trust this repository**, **Use SCIP / tiers 1-2 only**
+(default button) and Cancel; it never appears twice in a session for the same answer. (2) *Per-repository setting*: the repository's settings show
+Trust (Off by default) with the date it was granted. (3) *Revoke*: one click stops the running server (kill-tree) and removes the trust record; the CLI has
+`pacenotes trust <path>` and `pacenotes untrust <path>` with an explicit flag, never an implicit grant. Trust is keyed by the canonical path, so a moved or
+re-cloned repository is untrusted again.
 
 ### 20.2 The walkthrough
 
@@ -1136,7 +1141,7 @@ named in the packs' `[scip]` section and are normally run by Pitcrew or the user
 **Trust and the hard rule.** A server may execute repository code (build scripts, proc macros, MSBuild targets, Gradle). So a pack's server starts only
 after **"trust this repository"** (per repository, remembered, revocable), with the pack's least-execution `init_options`, and the UI states what the
 server may run. Without trust, tier 2 plus any imported SCIP index still work. Pacenotes' own code still never runs repository code; the server does,
-under the user's explicit consent (question 23).
+under the user's explicit consent (decision 2026-10-23, question 23; trust is local and never inferred).
 
 **Robustness (each has a test that triggers the failure).** Per-request and startup **timeouts**; **memory and CPU limits** on the child (job objects
 on Windows, rlimits/cgroups elsewhere, best effort); **restart with exponential backoff**, then **quarantine** of a server that keeps crashing, with the

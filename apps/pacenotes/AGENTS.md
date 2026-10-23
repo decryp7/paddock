@@ -31,6 +31,8 @@ Apply these deliberately. They are not decoration:
   generators against the analysed repository, unless the user explicitly opts in for that workspace. The only
   subprocesses are our own workers, git (in-process), the optional draw.io export (with a timeout), the user's editor and, only after "trust this repository", the supervised language
   server of a tier 3 language pack (proposal section 20.4).
+  Decision 2026-10-23: "Trust this repository" is the only exception to this rule. It is off by default, per repository, set by an explicit user action
+  (prompt, setting or CLI flag), local to this machine, revocable, and never inferred or shared. Untrusted repositories use a pre-built SCIP index or tiers 1-2.
 - **Read-only towards repositories.** Pacenotes writes only inside its own data folder and to destinations the user
   picks (a diagram file, an export). Only workspaces on the user's allow-list are readable; paths are canonicalized and
   symlinks cannot escape the workspace. Tools that write are never exposed over MCP.

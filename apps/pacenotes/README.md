@@ -95,7 +95,7 @@ Pacenotes is a small core (code index, headless service, MCP server, UI shell) w
 Proposed, to be confirmed: an upgrade-impact planner, API change detection between revisions, a test-gap finder, "explain this diff", documentation views
 with stale-doc detection, onboarding notes pinned to code, and history views.
 
-It never executes repository code (the one opt-in exception is a language server you choose to run for a repository you trust), is read-only towards your
+It never executes repository code (the one opt-in exception is a language server you choose to run for a repository you trust: off by default, per repository, through "Trust this repository", revocable, and never inferred), is read-only towards your
 repositories, redacts secrets from what it returns, and sends nothing off the machine.
 
 ## What uses Pitwall and what doesn't
