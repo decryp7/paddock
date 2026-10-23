@@ -23,7 +23,7 @@ hero [light](images/paddock-ecosystem-light.png) and [dark](images/paddock-ecosy
 | Dyno | In development |
 | Spotter | In development |
 | Sighter | In design |
-| Pacenotes (codebase tool, working name) | In design |
+| Pacenotes (everything code-related) | In design |
 
 ## The apps
 
@@ -53,7 +53,7 @@ Status: **v1.0.0 released**. Repo: <https://dev.decryptology.net/decryp7/pitcrew
 - OpenAI-, Anthropic- and Ollama-compatible APIs over models on your own machine, plus `/x/v1` extensions built for the family.
 - Engine and model management with checksums, "will it fit?" guidance, presets and idle unloading.
 - One key per app, job priorities (interactive first, batch when idle), prompt-prefix and opt-in response caching, usage and limits per app.
-- MCP client and tool router for tool servers such as the codebase tool.
+- MCP client and tool router for tool servers such as Pacenotes.
 - Local only by design: no cloud models, no telemetry; the only traffic is downloads you asked for.
 
 Status: feature-complete, release next. Repo: <https://dev.decryptology.net/decryp7/pitwall>
@@ -87,19 +87,24 @@ Status: in development. Repo: <https://dev.decryptology.net/decryp7/spotter>
 
 Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/sighter>
 
-### Pacenotes (working name)
-**Purpose.** Understands a codebase and serves it, read-only, to AI tools over MCP.
-**For.** Developers who want local models, Debrief and editors to answer questions about real code instead of guessing.
-- Symbol, reference and repo-map queries; "explain this stack trace" mapped to files, callers and recent commits.
-- A read-only MCP server (no tool writes, executes or fetches), a desktop viewer and a CLI.
-- Feeds test plans to Sighter and grounds Pitwall's answers in the code.
+### Pacenotes
+**Purpose.** Its own app for everything code-related: it understands a codebase and serves it, read-only, to people and AI tools.
+**For.** Developers and reviewers who want local models, Debrief and editors to answer questions about real code instead of guessing.
+- **Core:** the code index, a headless service, the MCP server, the UI shell and a CLI.
+- **Plugins** (out of process, Rust only, each adding its own MCP tools, views declared and rendered by the core):
+  language packs; **Understand** (symbols, references, repo map); **Review** (including Markdown review rules from
+  `AGENTS.md` and `REVIEW.md`); **Diagrams** (draw.io, preserving manual edits); **Requirements** (Word, Excel, PowerPoint
+  and ReqIF traceability); **Tests and coverage** (coverage import, gaps, unit-test drafts, Sighter test plans); and the
+  **Debrief bridge** (stack trace to code, log checks).
+- Phasing: core, Understand, Review, Debrief bridge and the core language packs first; then Diagrams; then Requirements;
+  then Tests and coverage.
 
-Status: **in design**; the name is not final.
+Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/pacenotes>
 
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to the codebase tool; apps hand off files and deep links directly" width="100%">
+  <img src="images/paddock-integrations.svg" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; apps hand off files and deep links directly" width="100%">
 </picture>
 
 The apps never depend on each other to do their own job. They meet in a few well-defined places:
@@ -107,11 +112,13 @@ The apps never depend on each other to do their own job. They meet in a few well
 | Contract | Between | How it works |
 |---|---|---|
 | **Pitwall local API** | every app to Pitwall | HTTP on loopback; OpenAI-, Anthropic- and Ollama-compatible, plus `/x/v1`. One key per app (held in the OS credential store), job priorities, prompt and response caching, usage and limits per app. |
-| **MCP** | Pitwall to the codebase tool, and any MCP client | The codebase tool is a read-only MCP server; Pitwall is the MCP client and tool router, offering tools to local models. |
+| **MCP** | Pitwall to Pacenotes, and any MCP client | Pacenotes is a read-only MCP server; Pitwall is the MCP client and tool router, offering tools to local models. |
 | **Deep links** | Pitcrew, Dyno to Debrief; Dyno to Spotter | "Open job log in Debrief", "Open in Debrief", "Watch for updates". The target app opens at the right place; nothing is shared but the link. |
 | **Run bundles** | Sighter to Debrief | A file with video, steps and results; Debrief opens it next to the app's logs. |
-| **Test plans** | codebase tool to Sighter | A file proposing UI flows to cover a change; Sighter turns them into tests. |
+| **Test plans and results** | Pacenotes and Sighter | Pacenotes owns requirements and traceability and drafts test plans (`.sighterplan`); Sighter owns UI test execution and results, which flow back to Pacenotes. |
+| **`paddock-testplan`** (planned) | Pacenotes and Sighter | The shared test-plan format behind `.sighterplan`. |
 | **CI** | Pitcrew to every repo | Pitcrew keeps the runners that build and test all of these apps alive, updated and clean. |
+| **Plugin platform** (planned) | Debrief, Pacenotes, later Dyno's tier-3 plugins | Debrief's plugin host, IPC and API (the ADR 0017 model) extracted into shared crates: out-of-process, Rust-only plugins. |
 | **`paddock-pitwall`** (planned) | shared crate in each app | One client for discovery, pairing, keychain keys, retries, priorities, cache headers and capability checks, so no app re-implements Pitwall access. |
 
 ## Data and privacy
@@ -139,6 +146,7 @@ Pitwall is the AI hub, never a dependency. Every app's core works without it:
 - **Design guide and tokens**: five accents and a colour-vision-safe categorical palette ([design guide](design-guide.md)).
 - **Diagram kit**: draw.io shape library, templates and canonical export ([`diagrams/`](../diagrams/README.md)).
 - **Icon set**: one icon per app, per platform ([`icons/`](../icons/README.md)).
+- **Shared Rust crates** (planned): the plugin platform, `paddock-pitwall` and `paddock-testplan` ([`crates/`](../crates/README.md)).
 - **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script.
 - **Lessons**: what Debrief and Pitcrew taught about build, windows, services, native feel and tests ([lessons](lessons.md)).
 
@@ -155,4 +163,4 @@ Motorsport vocabulary, because the family is about keeping things running fast a
 | **Dyno** | The rig that measures a car's power | Measures and tunes your PC |
 | **Spotter** | Watches the track and calls what is coming | Calls out new releases |
 | **Sighter** | A sighting lap before the race | Looks at the UI before tests drive it |
-| **Pacenotes** (working name) | The co-driver's notes describing the road ahead | Describes the shape of a codebase to whoever is navigating it |
+| **Pacenotes** | The co-driver's notes describing the road ahead | Describes the shape of a codebase to whoever is navigating it |

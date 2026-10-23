@@ -22,15 +22,15 @@ anywhere.
 | <img src="icons/dyno/dyno-macos.svg" width="40" alt=""> | **[Dyno](https://dev.decryptology.net/decryp7/dyno)** | Measures, explains and tunes your PC, observe first. | In development |
 | <img src="icons/spotter/spotter-macos.svg" width="40" alt=""> | **[Spotter](https://dev.decryptology.net/decryp7/spotter)** | Watches for new releases anywhere and tells you the moment one appears. | In development |
 | <img src="icons/sighter/sighter-macos.svg" width="40" alt=""> | **[Sighter](https://dev.decryptology.net/decryp7/sighter)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | In design |
-| | **Pacenotes** (working name) | Understands a codebase and serves it, read-only, to AI tools over MCP. | In design |
+| | **[Pacenotes](https://dev.decryptology.net/decryp7/pacenotes)** | Everything code-related: a code index with an MCP server, plus plugins for review, diagrams, requirements and tests. | In design |
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 
 ## How they work together
 
 **A production incident.** Support gets a zip of logs from three machines. In **Debrief** the merged timeline shows the
-crash and the errors it caused elsewhere. Debrief asks **Pitwall** to explain the stack trace; Pitwall calls the codebase
-tool (**Pacenotes**) over MCP, which maps the frames to files, callers and recent commits, so the explanation is grounded
+crash and the errors it caused elsewhere. Debrief asks **Pitwall** to explain the stack trace; Pitwall calls **Pacenotes**
+over MCP, which maps the frames to files, callers and recent commits, so the explanation is grounded
 in the real code. A regression test is drafted from it, **Sighter** turns the reproduction into a UI test, and **Pitcrew**
 keeps the runner that executes it on CI healthy. Sighter's run bundle opens next to the logs in Debrief.
 
@@ -65,7 +65,7 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 | Diagram kit | [`diagrams/`](diagrams/README.md) | style spec, draw.io shape library, templates, canonical export script | draw.io library URL |
 | Icon set | [`icons/`](icons/README.md) | the family app icons per platform and the tooling that builds them | copy the app's folder |
 | Release practices | [`docs/lessons.md`](docs/lessons.md), [`CHANGELOG.md`](CHANGELOG.md) | tag workflow, signed updates, `latest.json`, the release script | follow the lessons |
-| Rust crates | [`crates/`](crates/README.md) | shared Rust code; `paddock-pitwall`, the Pitwall client, is planned | git dependency on a tag |
+| Rust crates | [`crates/`](crates/README.md) | shared Rust code. Planned: the plugin platform (host, IPC and API, extracted from Debrief's ADR 0017 model), `paddock-pitwall` (the Pitwall client) and `paddock-testplan` (the `.sighterplan` format) | git dependency on a tag |
 | Lessons | [`docs/lessons.md`](docs/lessons.md) | what building Debrief and Pitcrew taught | read before starting an app |
 
 ### Use the UI package
@@ -95,14 +95,21 @@ Then apply an app's accent with `node diagrams/tools/apply-accent.mjs <app> <tem
 ### Use a crate (planned)
 
 ```toml
+# planned: paddock-pitwall, paddock-testplan, the plugin platform
 paddock-pitwall = { git = "https://dev.decryptology.net/decryp7/paddock", tag = "v0.2.0" }
 ```
 
 ## Status and roadmap
 
-| Now | Next | Later |
-|---|---|---|
-| Pitcrew v1.0.0 is out. Debrief is in release. Pitwall is feature-complete. | Pitwall release. `paddock-pitwall` client crate. Dyno and Spotter to release. | Sighter and the codebase tool are designed, then built. Each is local only, Pitwall optional. |
+Pitcrew v1.0.0 is released. The order of work:
+
+1. Debrief v1 release (in progress).
+2. Pitwall release.
+3. The shared Paddock crates: the plugin platform and `paddock-pitwall`.
+4. Debrief switches its AI to Pitwall.
+5. Spotter and Dyno finish.
+6. Pitcrew 1.1: local autoscaling.
+7. Pacenotes and Sighter implementation.
 
 Paddock itself is pre-1.0: a minor bump may change tokens or component APIs, and removed things are deleted rather than
 deprecated.

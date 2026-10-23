@@ -47,7 +47,7 @@ link(d, 'mcpc', 'T', 'code', 'B', { label: 'MCP', arrow: 'block' });
 d.group('ho', 48, 808, 1432, 272, 'Hand-offs between apps (none of them needs Pitwall)');
 const rows = [
   [['sighter2', 'Sighter'], ['debrief2', 'Debrief'], 'Run bundle: video, steps'],
-  [[ 'code2', CODEBASE_TOOL], ['sighter3', 'Sighter'], 'Test plan: a file'],
+  [[ 'code2', CODEBASE_TOOL], ['sighter3', 'Sighter'], 'Test plan, results back'],
   [['pitcrew', 'Pitcrew'], ['debrief3', 'Debrief'], 'Deep link: open job log'],
   [['dyno2', 'Dyno'], ['debrief4', 'Debrief'], 'Deep link: open issue'],
   [['dyno3', 'Dyno'], ['spotter2', 'Spotter'], 'Deep link: watch for updates'],

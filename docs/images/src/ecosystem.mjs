@@ -12,7 +12,7 @@ const W = 1600, H = 1150;
 
 // Row 1: understand and test. Row 3: keep things running. Pitwall is the hub between them.
 const row1 = [
-  { id: 'codebase', name: CODEBASE_TOOL, tag: 'In design', placeholder: true, lines: ['Understands your code and', 'serves it to AI tools', 'over MCP.'], stub: 'MCP' },
+  { id: 'codebase', name: CODEBASE_TOOL, tag: 'In design', placeholder: true, lines: ['Everything code-related:', 'index, review, diagrams,', 'requirements and tests.'], stub: 'MCP' },
   { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
   { id: 'sighter', name: 'Sighter', accent: '#00B8D9', tag: 'In design', lines: ['Finds any UI element by', 'sight. Vision models for', 'your UI tests.'] },
 ];
