@@ -12,6 +12,9 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 </div>
 
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg)
+
+
 > **Status: v0.1.0, unreleased.** The agent (sampling, history, process actions with undo, rules engine, diagnosis,
 > health, startup list, service registration), the dashboard, processes, settings and tray are built and tested. CPU
 > taming, Health and Cleanup screens may still be placeholders in the UI; cleanup, tuning and the privileged helper are not built. [docs/features.md](docs/features.md) says exactly what is real and
@@ -44,6 +47,10 @@ Task managers show numbers; cleaners and "boosters" change things behind your ba
 - **Cross-platform.** Windows, macOS and Linux, each with its own service manager and process-control methods.
 
 ## Key features
+
+![Dyno features](docs/images/dyno-features.svg)
+
+![How Dyno works](docs/images/dyno-how-it-works.svg)
 
 Every feature, with its state, is in [docs/features.md](docs/features.md). Built today:
 
