@@ -80,11 +80,11 @@ watcher). Decision: **Sighter**.
 
 Day-one value needs no training: OCR plus template matching cover many legacy lookups before a model exists.
 
-![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](images/sighter-overview.svg?v=e435b117)
+![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](images/sighter-overview.svg?v=51430f13)
 
 The containers behind it (planned):
 
-![Sighter containers](images/diagrams/svg/c4-2-containers.svg?v=bfb1ffff)
+![Sighter containers](images/diagrams/svg/c4-2-containers.svg?v=1b8e84ed)
 
 The lifecycle of one label, from suggestion to model and back to review:
 
@@ -391,7 +391,7 @@ User decision 2026-10-23: **one client API style only, Playwright-style locators
 
 One `Locator.ClickAsync()` from a C# test, through the client, the HTTP API, the resolver layers and the guarded input driver:
 
-![Locate and click an element](images/diagrams/svg/uml-seq-locate.svg?v=fd576cdc)
+![Locate and click an element](images/diagrams/svg/uml-seq-locate.svg?v=7b1c72d7)
 
 ```csharp
 // C# (NUnit; xUnit is the same with [Fact])

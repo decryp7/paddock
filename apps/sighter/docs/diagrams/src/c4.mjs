@@ -7,7 +7,7 @@ const NW = 208, NH = 128, EW = 216;
 const lx = 48, gx = 360, cx = [384, 688, 992], rx = 1320;
 const r0 = 144, g1 = r0 + NH + 64, row = (i) => g1 + 48 + i * (NH + 56), gh = 48 + NH * 2 + 56 + 24, gw = 24 + 3 * NW + 2 * 96 + 24;
 
-d.node('cli', cx[2], r0, NW, NH, 'accent', { name: 'Client libraries', tech: 'C#, Java, C++, Python, TypeScript', desc: 'FlaUI-style object model over the HTTP API; used by engineers\' tests.' });
+d.node('cli', cx[2], r0, NW, NH, 'accent', { name: 'Client libraries', tech: 'C#, Java, C++, Python, TypeScript', desc: 'Playwright-style locators over the HTTP API; used by engineers\' tests.' });
 d.node('pit', rx, r0, EW, NH, 'external', { name: 'Pitcrew runners', tech: 'CI runners', desc: 'Run the tests and `sighter run` on a machine with a desktop session.' });
 
 d.group('g1', gx, g1, gw, gh, 'Sighter machine [one user session, loopback only]');

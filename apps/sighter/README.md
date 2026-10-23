@@ -17,9 +17,9 @@ tested like any other. Everything runs on your machine.
 
 ## What it will do
 
-![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](docs/images/sighter-overview.svg?v=e435b117)
+![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](docs/images/sighter-overview.svg?v=51430f13)
 
-![Sighter features](docs/images/sighter-features.svg?v=bb5d2164)
+![Sighter features](docs/images/sighter-features.svg?v=604d3cc2)
 
 ![How Sighter works](docs/images/sighter-how-it-works.svg?v=751b1d5c)
 
@@ -289,8 +289,8 @@ Sighter as a service. See the
 ## Documentation
 
 - Design diagrams (all planned; sources in [docs/diagrams](docs/diagrams)):
-  - [Containers (C4 level 2)](docs/images/diagrams/svg/c4-2-containers.svg?v=bfb1ffff)
-  - [Locate and click an element (sequence)](docs/images/diagrams/svg/uml-seq-locate.svg?v=fd576cdc)
+  - [Containers (C4 level 2)](docs/images/diagrams/svg/c4-2-containers.svg?v=1b8e84ed)
+  - [Locate and click an element (sequence)](docs/images/diagrams/svg/uml-seq-locate.svg?v=7b1c72d7)
   - [Recover a stuck step (sequence)](docs/images/diagrams/svg/uml-seq-recovery.svg?v=2a42aa9c)
   - [Element label lifecycle (state)](docs/images/diagrams/svg/uml-state-element-label.svg?v=41a65dc5)
 - [Design proposal](docs/proposal.md) (status: proposal, open questions pending)

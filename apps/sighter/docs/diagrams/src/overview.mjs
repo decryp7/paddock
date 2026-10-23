@@ -50,7 +50,7 @@ const stages = [
   { n: '01', name: 'Record', g: 'record', out: 'Frames and events', lines: ['Screen and input events', 'Studio or headless CLI', 'Follows app focus', 'Accessibility optional'] },
   { n: '02', name: 'Label', g: 'tag', lines: ['Suggestions from OCR,', 'templates and detector', 'Human review queue for', 'anything unidentified'], pw: 'Pitwall vision helper' },
   { n: '03', name: 'Train', g: 'cube', out: 'Immutable model vN', lines: ['Permissive YOLO-style', 'detector per app', 'DPI, theme and size', 'variation, augmentation', 'Versioned model registry'] },
-  { n: '04', name: 'Serve', g: 'server', lines: ['Local API, loopback only'], resolver: true },
+  { n: '04', name: 'Serve', g: 'server', lines: ['Locator API, loopback'], resolver: true },
   { n: '05', name: 'Test', g: 'checklist', lanes: true },
   { n: '06', name: 'Results', g: 'doc', out: 'For CI and Debrief', lines: ['JUnit, TRX and Allure', 'Debrief run bundles with', 'video and screenshots', 'Requirement traceability', 'with Pacenotes'] },
 ];
@@ -151,7 +151,7 @@ const Hh = LY + 34;
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${Hh}" viewBox="0 0 ${W} ${Hh}" role="img" aria-labelledby="t d">
 <title id="t">How Sighter works</title>
-<desc id="d">Planned, nothing built yet. Six stages left to right: record screen and input events; label with OCR, template and detector suggestions, optional Pitwall vision and a human review queue; train a permissive YOLO-style detector with variation and a model registry; serve a local API with a layered resolver (cache, template, OCR anchor, detector, Pitwall grounding, needs labelling); test, in engineers' C#, Java or C++ tests through a FlaUI-style client and in Sighter's own recorded flows; results as JUnit, TRX, Allure, Debrief run bundles and Pacenotes traceability. A retrain loop sends low-confidence results or UI changes to the review queue and on to retraining. A recovery loop sends a stuck step to Pitwall for a diagnosis and plan, runs a guarded recovery, reports passed with recovery and sends a proposal to the studio.</desc>
+<desc id="d">Planned, nothing built yet. Six stages left to right: record screen and input events; label with OCR, template and detector suggestions, optional Pitwall vision and a human review queue; train a permissive YOLO-style detector with variation and a model registry; serve a local API with a layered resolver (cache, template, OCR anchor, detector, Pitwall grounding, needs labelling); test, in engineers' C#, Java or C++ tests through the locator client and in Sighter's own recorded flows; results as JUnit, TRX, Allure, Debrief run bundles and Pacenotes traceability. A retrain loop sends low-confidence results or UI changes to the review queue and on to retraining. A recovery loop sends a stuck step to Pitwall for a diagnosis and plan, runs a guarded recovery, reports passed with recovery and sends a proposal to the studio.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--hand:#566070;--acc:#0A8CA8;--accf:#E3F4F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--warn:#B25E00;--warnf:#FBF0E1;--bgc:#F6F8FA}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--hand:#A6AEBC;--acc:#00B8D9;--accf:#0F2E36;--hubf:#242040;--hubs:#A58BFA;--warn:#F2A33A;--warnf:#33281A;--bgc:#12151A}}

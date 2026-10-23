@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1182" viewBox="0 0 1600 1182" role="img" aria-labelledby="t d">
 <title id="t">How Sighter works</title>
-<desc id="d">Planned, nothing built yet. Six stages left to right: record screen and input events; label with OCR, template and detector suggestions, optional Pitwall vision and a human review queue; train a permissive YOLO-style detector with variation and a model registry; serve a local API with a layered resolver (cache, template, OCR anchor, detector, Pitwall grounding, needs labelling); test, in engineers' C#, Java or C++ tests through a FlaUI-style client and in Sighter's own recorded flows; results as JUnit, TRX, Allure, Debrief run bundles and Pacenotes traceability. A retrain loop sends low-confidence results or UI changes to the review queue and on to retraining. A recovery loop sends a stuck step to Pitwall for a diagnosis and plan, runs a guarded recovery, reports passed with recovery and sends a proposal to the studio.</desc>
+<desc id="d">Planned, nothing built yet. Six stages left to right: record screen and input events; label with OCR, template and detector suggestions, optional Pitwall vision and a human review queue; train a permissive YOLO-style detector with variation and a model registry; serve a local API with a layered resolver (cache, template, OCR anchor, detector, Pitwall grounding, needs labelling); test, in engineers' C#, Java or C++ tests through the locator client and in Sighter's own recorded flows; results as JUnit, TRX, Allure, Debrief run bundles and Pacenotes traceability. A retrain loop sends low-confidence results or UI changes to the review queue and on to retraining. A recovery loop sends a stuck step to Pitwall for a diagnosis and plan, runs a guarded recovery, reports passed with recovery and sends a proposal to the studio.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--hand:#566070;--acc:#0A8CA8;--accf:#E3F4F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--warn:#B25E00;--warnf:#FBF0E1;--bgc:#F6F8FA}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--hand:#A6AEBC;--acc:#00B8D9;--accf:#0F2E36;--hubf:#242040;--hubs:#A58BFA;--warn:#F2A33A;--warnf:#33281A;--bgc:#12151A}}
@@ -123,7 +123,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <rect class="card" x="822" y="352" width="214" height="344" rx="20"/>
 <circle class="gc" cx="864" cy="398" r="24"/><g class="gl" transform="translate(851 385) scale(1.0833333333333333)"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></g>
 <text class="num" x="904" y="390">04</text><text class="name" x="904" y="418">Serve</text>
-<text class="body" x="846" y="470">Local API, loopback only</text>
+<text class="body" x="846" y="470">Locator API, loopback</text>
 <rect class="lay" x="838" y="476" width="182" height="28" rx="9"/><text class="layt" x="852" y="495">Cache</text>
 <text class="layn" x="1006" y="496" text-anchor="end">1</text>
 <rect class="lay" x="838" y="510" width="182" height="28" rx="9"/><text class="layt" x="852" y="529">Template</text>
