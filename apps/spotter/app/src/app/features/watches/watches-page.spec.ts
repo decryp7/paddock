@@ -94,13 +94,13 @@ describe('WatchesPage', () => {
     (f.nativeElement.querySelector('button[aria-label="Open the latest release of Acme Installer"]') as HTMLButtonElement).click();
     await settle(f);
     let items = await openMenu(f, 'More actions for Acme Installer');
-    expect(items.map((i) => text(i))).toEqual(['Open details', 'Mark as seen', 'Pause']);
-    items[1]!.click();
+    expect(items.map((i) => text(i))).toEqual(['Open details', 'Check now', 'Open latest release', 'Mark as seen', 'Pause', 'Copy address', 'Edit', 'Delete watch']);
+    items[3]!.click();
     await settle(f);
     expect(rows(f)[0]!.querySelector('.unseen-dot')!.classList.contains('off')).toBe(true);
     items = await openMenu(f, 'More actions for Acme Installer');
-    expect(items.map((i) => text(i))).toEqual(['Open details', 'Pause']);
-    items[1]!.click();
+    expect(items.map((i) => text(i))).toEqual(['Open details', 'Check now', 'Open latest release', 'Pause', 'Copy address', 'Edit', 'Delete watch']);
+    items[3]!.click();
     await settle(f);
     items = await openMenu(f, 'More actions for Acme Installer');
     expect(items.map((i) => text(i))).toContain('Resume');

@@ -33,8 +33,8 @@
 
       @if (store.visible().length) {
         <div class="surface table-wrap">
-          <table class="table fixed">
-            <colgroup><col /><col class="c-latest" /><col class="c-status" /><col class="c-time" /><col class="c-time" /><col class="c-act" /></colgroup>
+          <table class="table fixed sticky">
+            <colgroup><col /><col class="c-latest" /><col class="c-status" /><col class="c-time" /><col class="c-next" /><col class="c-act" /></colgroup>
             <thead>
               <tr>
                 <th scope="col" [attr.aria-sort]="ariaSort('name')"><button type="button" class="sort" (click)="store.setSort('name')">Watch<span class="arrow" [class.on]="store.sort() === 'name'">↓</span></button></th>
@@ -45,9 +45,9 @@
                 <th scope="col"><span class="pd-visually-hidden">Actions</span></th>
               </tr>
             </thead>
-            <tbody>
+            <tbody spRowList>
               @for (w of store.visible(); track w.id) {
-                <tr (click)="open(w.id)">
+                <tr spRowItem [cdkContextMenuTriggerFor]="ctx" (click)="open(w.id)" (spRowActivate)="open(w.id)">
                   <td>
                     <div class="who">
                       <span class="unseen-dot" [class.off]="!w.unseen" [attr.title]="w.unseen ? 'New release' : null"></span>
@@ -76,7 +76,12 @@
                     <sp-status-dot [watch]="w" />
                   </td>
                   <td class="nowrap muted" [attr.title]="w.lastCheckMs ? (w.lastCheckMs | ago) : null">{{ w.lastCheckMs | agoShort }}</td>
-                  <td class="nowrap muted">{{ w.paused ? 'Paused' : (w.nextCheckMs ? (w.nextCheckMs | untilShort) : '—') }}</td>
+                  <td class="muted">
+                    <div class="next">
+                      <span class="nowrap">{{ w.paused ? 'Paused' : (w.nextCheckMs ? (w.nextCheckMs | untilShort) : '—') }}</span>
+                      <span class="sched truncate" [attr.title]="w.scheduleText">{{ w.scheduleText }}</span>
+                    </div>
+                  </td>
                   <td>
                     <div class="hover-actions" role="presentation" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
                       <button type="button" class="btn ghost icon sm reveal" (click)="store.checkNow(w.id)" [disabled]="w.checking" [attr.aria-label]="'Check ' + w.name + ' now'" title="Check now">
@@ -89,6 +94,7 @@
                       }
                       <sp-menu-button [label]="'More actions for ' + w.name" [entries]="rowEntries(w)" (picked)="onRow($event, w)" />
                     </div>
+                    <ng-template #ctx><sp-menu-panel [label]="'Actions for ' + w.name" [entries]="rowEntries(w)" (picked)="onRow($event, w)" /></ng-template>
                   </td>
                 </tr>
               }

@@ -1,0 +1,46 @@
+import { Component, signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { Avatar } from './avatar';
+
+@Component({ imports: [Avatar], template: `<sp-avatar name="Acme Installer" [src]="src()" />` })
+class Host {
+  readonly src = signal<string | null>(null);
+}
+
+function make() {
+  const f = TestBed.createComponent(Host);
+  f.detectChanges();
+  const el = f.nativeElement as HTMLElement;
+  return { f, el };
+}
+
+describe('Avatar image', () => {
+  it('shows the monogram while the engine has no image', () => {
+    const { el } = make();
+    expect(el.querySelector('img')).toBeNull();
+    expect(el.textContent).toContain('AI');
+  });
+
+  it('shows the cached image when there is one, decorative and not draggable', () => {
+    const { f, el } = make();
+    f.componentInstance.src.set('data:image/png;base64,AAAA');
+    f.detectChanges();
+    const img = el.querySelector('img')!;
+    expect(img.getAttribute('alt')).toBe('');
+    expect(img.getAttribute('draggable')).toBe('false');
+    expect(el.textContent).not.toContain('AI');
+  });
+
+  it('falls back to the monogram when the image fails, and tries a new image again', () => {
+    const { f, el } = make();
+    f.componentInstance.src.set('data:image/png;base64,AAAA');
+    f.detectChanges();
+    el.querySelector('img')!.dispatchEvent(new Event('error'));
+    f.detectChanges();
+    expect(el.querySelector('img')).toBeNull();
+    expect(el.textContent).toContain('AI');
+    f.componentInstance.src.set('data:image/png;base64,BBBB');
+    f.detectChanges();
+    expect(el.querySelector('img')).not.toBeNull();
+  });
+});

@@ -58,7 +58,7 @@ load rules are in [docs/development.md](docs/development.md); releases in [docs/
 | ![Dashboard](docs/screenshots/dashboard-dark.png) | ![Watches](docs/screenshots/watches-dark.png) |
 | ![Dashboard, light](docs/screenshots/dashboard-light.png) | ![Watches, light](docs/screenshots/watches-light.png) |
 
-Also in `docs/screenshots`: release cadence, watch detail (with the release panel and a multi-product watch), the add-watch wizard, settings, the tray popup and the empty states.
+Also in `docs/screenshots`: row menus (`watches-menu`, `dashboard-menu`), reliability and downloads charts (`dashboard-charts`), the schedule editor in cron mode (`wizard-schedule`), release cadence, watch detail (with the release panel and a multi-product watch), the add-watch wizard, settings, the tray popup and the empty states.
 
 ## Diagrams
 

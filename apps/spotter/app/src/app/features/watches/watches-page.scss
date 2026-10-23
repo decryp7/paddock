@@ -30,10 +30,11 @@
 }
 .fixed {
   table-layout: fixed;
-  min-width: 860px;
+  min-width: 1020px;
   .c-latest { width: 250px; }
   .c-status { width: 150px; }
   .c-time { width: 90px; }
+  .c-next { width: 250px; }
   .c-act { width: 112px; }
   thead th {
     position: sticky;
@@ -52,6 +53,17 @@
   tbody tr {
     cursor: default;
   }
+}
+.next {
+  display: flex;
+  align-items: baseline;
+  gap: var(--pd-space-2);
+  min-width: 0;
+}
+.sched {
+  min-width: 0;
+  color: var(--pd-text-subtle);
+  font-size: var(--pd-text-caption);
 }
 .sort {
   display: inline-flex;

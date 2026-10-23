@@ -251,8 +251,10 @@ describe('WatchDetailPage', () => {
     await click(f, q(f, `button[aria-label="Download ${version.version}"]`));
     const label = `More actions for ${version.version}`;
     const entries = await openMenu(f, label);
-    expect(entries.map((e) => text(e))).toEqual(version.sha256 ? ['Copy link', 'Copy SHA-256', 'Mark as installed', 'Mark as seen'] : ['Copy link', 'Mark as installed', 'Mark as seen']);
-    entries[0]!.click();
+    expect(entries.map((e) => text(e))).toEqual(version.sha256
+        ? ['Show details', 'Open release', 'Download', 'Copy link', 'Copy SHA-256', 'Mark as installed', 'Mark as seen']
+        : ['Show details', 'Open release', 'Download', 'Copy link', 'Mark as installed', 'Mark as seen']);
+    byText(document.body, '[cdkMenuItem]', 'Copy link')!.click();
     expect(writeText).toHaveBeenCalledWith(version.location);
     await pick(f, label, 'Mark as seen');
     await pick(f, label, 'Mark as installed');

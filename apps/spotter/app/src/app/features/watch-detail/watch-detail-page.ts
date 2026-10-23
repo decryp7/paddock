@@ -1,8 +1,9 @@
+import { CdkContextMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
 import { SuEmptyState } from '@decryp7/paddock-ui';
-import type { CheckRecord, Release, WatchAction } from '../../core/api.types';
+import type { CheckRecord, Product, Release, WatchAction } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { Clipboard } from '../../shared/clipboard';
 import { formatBytes, formatDateTime, formatDuration, formatShortDateTime, mebibytes } from '../../shared/format';
@@ -12,7 +13,8 @@ import { AgoPipe, AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { Avatar } from '../../shared/ui/avatar';
 import { Confirm } from '../../shared/ui/confirm-dialog';
 import { Panel } from '../../shared/ui/panel';
-import { MenuButton, type MenuEntry } from '../../shared/ui/row-menu';
+import { MenuButton, MenuPanel, type MenuEntry } from '../../shared/ui/row-menu';
+import { RowItem, RowList } from '../../shared/ui/row-nav';
 import { StatusDot } from '../../shared/ui/status-dot';
 import { Version } from '../../shared/ui/version';
 import { WatchesStore } from '../../state/watches.store';
@@ -26,7 +28,7 @@ function choice(a: { variant?: string; extension?: string }): string {
 /** One watch: its latest release, history, recent checks and settings, with every action on it. */
 @Component({
   selector: 'sp-watch-detail-page',
-  imports: [MatIcon, RouterLink, SuEmptyState, Panel, Avatar, StatusDot, Version, MenuButton, AgoPipe, AgoShortPipe],
+  imports: [MatIcon, RouterLink, SuEmptyState, Panel, Avatar, StatusDot, Version, MenuButton, MenuPanel, CdkContextMenuTrigger, RowItem, RowList, AgoPipe, AgoShortPipe],
   providers: [WatchDetailStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'onEscape()' },
@@ -122,15 +124,34 @@ export class WatchDetailPage {
 
   protected releaseEntries(r: Release): MenuEntry[] {
     return [
-      { id: 'link', label: 'Copy link', icon: 'link' },
+      { id: 'files', label: 'Show details', icon: 'chevron-right' },
+      { id: 'open', label: 'Open release', icon: 'external' },
+      { id: 'download', label: 'Download', icon: 'download' },
+      { id: 'link', label: 'Copy link', icon: 'link', separated: true },
       ...(r.sha256 ? [{ id: 'sha', label: 'Copy SHA-256', icon: 'lock' }] : []),
       { id: 'installed', label: 'Mark as installed', icon: 'package', separated: true },
       { id: 'seen', label: 'Mark as seen', icon: 'check' },
     ];
   }
 
+  protected productEntries(p: Product): MenuEntry[] {
+    return [
+      { id: 'files', label: 'Show files', icon: 'chevron-right', disabled: !p.latest },
+      { id: 'seen', label: 'Mark as seen', icon: 'check', disabled: !p.unseen },
+    ];
+  }
+
+  protected onProduct(id: string, p: Product): void {
+    if (id === 'files' && p.latest) this.select(p.latest);
+    else if (id === 'seen') void this.watches.acknowledgeProduct(this.id(), p.id);
+  }
+
   protected onRelease(id: string, r: Release): void {
-    if (id === 'link') this.copy(r.location, 'Link');
+    const target = { product: r.product };
+    if (id === 'files') this.select(r);
+    else if (id === 'open') void this.watches.openRelease(this.id(), r.version, target);
+    else if (id === 'download') void this.watches.download(this.id(), r.version, target);
+    else if (id === 'link') this.copy(r.location, 'Link');
     else if (id === 'sha' && r.sha256) this.copy(r.sha256, 'Checksum');
     else if (id === 'installed') void this.setInstalled(r.version);
     else if (id === 'seen') void this.watches.acknowledge(this.id(), r.version);

@@ -17,10 +17,16 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
    before launch returned; test now allows for START_LIMIT) and `challenges_become_needs_you` (a DevTools call timed out because 8 browsers started at once
    on the runner; the file's tests now take turns via `serial()`). Next: dispatch/push once Debrief has shipped, read logs with /tmp-style
    `actions/runs/<run>/jobs` then `actions/jobs/<id>/logs`. Also added: stale-bundle guards in the bundle job (not yet run in CI).
-2. Avatars are monograms only: fetch and cache favicons / org avatars in the engine, bundle marks for the catalogue entries.
-3. Right-click context menus and Up/Down row navigation in the feed and tables; sticky headers on the detail tables.
-4. Tray extras: popup height fitted to content, rounded corners on Windows 11 (DWMWCP_ROUND), toast action buttons and
-   click-through (Open, Mark as seen), e-mail channel delivery.
+2. Avatars are monograms only: fetch and cache favicons / org avatars in the engine, bundle marks for the catalogue entries. The UI side is ready: `sp-avatar` takes an optional `src` (falls back to the monogram when null or when the image fails); the call sites pass nothing until the engine exposes the image.
+3. Done (feat/ui-gaps): right-click menus (Angular CDK menu) on feed rows, watch rows and the release/product tables, the same
+   list as the "..." button; Up/Down/Home/End/Enter and Shift+F10 / Menu on rows with a visible focus outline (`RowList`/`RowItem`,
+   CDK `FocusKeyManager`, one tab stop per list); sticky headers on the detail tables.
+4. Tray (feat/ui-gaps): popup height fitted to its content (`fit_tray`, the page measures, the shell clamps 120-520 px and keeps the
+   popup next to the icon); Windows 11 rounded corners (`DWMWCP_ROUND`; type-checked with `cargo check --target
+   x86_64-pc-windows-msvc`, not run on Windows: rely on the Windows CI runner); toast buttons Open and Mark as seen plus click-through
+   through `tauri-plugin-notification` 2.7 actions (`toast.rs`). Not verified on real OS toasts: Windows reports clicks only while the
+   toast is on screen, macOS folds two buttons into an "Options" menu, Linux depends on the notification server; where nothing is
+   reported the toast stays a plain message. Still open: e-mail channel delivery (engine agent).
 5. Coverage: spotter-engine and spotter-sources are below 99% lines; the rest are `?`/`map_err` regions on SQLite and file
    errors that need fault-injection seams (see the list in the commit 5af6ee0).
 
@@ -46,10 +52,10 @@ Left:
   mock-backend, watches/dashboard/settings/editor stores, draft-utils, panel/ago/confirm/clipboard/chart, and every page
   component. Overall Angular coverage is therefore below the 80% target until these land (run `ng test --coverage`).
 - `npm audit --omit=dev --audit-level=high` not run yet; run a second `ng test` under another TZ.
-- Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command" needs an engine field.
+- Done: reliability chart (stacked checks, failures hatched; a calm sentence instead of a chart when nothing failed) and downloads chart (two panels: counts above, MiB below), colours checked for colour-vision deficiency (failures are told apart by hatching, not hue alone). Open: the "copyable upgrade command" needs an engine field (nothing in `WatchSummary`/`Release` carries one): note for the engine agent, then a Copy button in the detail hero's upgrade line.
 - Check scripts/check-index.mjs against dist/app/browser/index.html.
 
-- Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; add a screenshot of the cron mode and let the watches table show the schedule text next to Next.
+- Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; done: the watches table shows the schedule text next to Next and `wizard-schedule-*.png` shows the cron mode.
 
 ## Engine
 - Done: SQLite state/history (migrations, corrupt-DB recovery), atomic config, polite fetcher (per-host gap, ETag/Last-Modified, body cap, manual redirects with loop detection, SSRF guard), pipeline, scheduler, Engine facade, webhook/ntfy delivery.
