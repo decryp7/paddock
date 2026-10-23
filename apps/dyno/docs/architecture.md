@@ -1,7 +1,7 @@
 # Dyno architecture
 
 Dyno is built from a pure Rust core, thin OS adapters, a per-user agent that measures and keeps history, a Tauri app that
-shows it, and (planned) a privileged helper. This page describes how the pieces fit and what is true today; the diagrams
+shows it, and a privileged helper that exists only after the user installed it. This page describes how the pieces fit and what is true today; the diagrams
 are in [design.md](design.md) and the reasoning is in the [ADRs](adr/README.md). Anything marked *planned* is not in the
 code.
 
@@ -17,7 +17,7 @@ code.
 | Adapters | `crates/dyno-platform` | library | The core's ports per OS (Windows, macOS, Linux), plus fakes for tests |
 | IPC | `crates/dyno-ipc` | library | The one local IPC: length-prefixed postcard frames, token handshake |
 | Agent | `crates/dyno-agent` (`dyno-agent`) | user process, started at login | Sampling, SQLite history, rules, process control, request handlers |
-| Helper | `crates/dyno-helper` | elevated on demand, **planned** | A closed set of `HelperAction`s with inverses (ADR 0006) |
+| Helper | `crates/dyno-helper` | a system service (root / LocalSystem) installed on a click | The administrator changes: a closed set of `HelperAction`s, authenticated caller, audit log (ADR 0006, 0016) |
 | Plugin API and host | `crates/dyno-plugin-api`, `dyno-plugin-host`, `plugins/` | out-of-process | Vendor sensors, benchmarks; guarded (ADR 0007) |
 | Shell | `app/src-tauri` | user process | Window and tray, commands, the link to the agent, native feel |
 | UI | `app/src` | webview | Angular presentation: pages, SignalStores, charts |
@@ -29,7 +29,7 @@ code.
 `dyno_core` holds the model (`metrics`, `process`), `grouping` (ADR 0003), `protect` (the absolute protected list),
 `rules` (rule model, profiles, the `Engine` state machine, ADR 0004), `diagnosis`, `anomaly`, `forecast`, `health`,
 `tuning`, `history` (tiers and min/avg/max downsampling), `sampling` (adaptive intervals), `cleanup` (catalogue and
-admission policy, ADR 0005), `activity` (undo records), `helper` (action types and validation), `startup`, `alerts`,
+admission policy, ADR 0005), `activity` (undo records), `helper` (action types and validation), `helper_wire` (the helper's requests, replies, audit entries and state), `helper_paths`, `startup`, `alerts`,
 `report`, `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
 contract, `PROTOCOL_VERSION`). The ports are in `ports.rs`: `SystemSensors`, `ProcessSource`, `ProcessControl`,
 `FileLocks`, `StartupItems`, `FactsSource`, `UserActivity`, with `PlatformError`. Their contract (no panics, unavailable
@@ -68,7 +68,7 @@ block with a `// SAFETY:` comment.
   one thread per connection, and a bounded push queue per subscriber.
 - **`handlers`**: one function per `Request`. Every action is validated, checked against the protected list, applied to
   a `ProcessRef`, and recorded as an `ActivityEntry` with its inverse. A panic becomes an internal error for that request.
-  Cleanup, tuning, disk usage and the weekly report currently answer `Unsupported: "<x> is not built yet."`.
+  The helper requests (`HelperStatus`, `InstallHelper`, `UninstallHelper`) are answered by the helper centre.
 - **`store`** and **`rollup`**: the SQLite store (ADR 0008) and the `HistoryWriter` that records raw points and rolls
   closed buckets up through the minute, 15-minute and hour tiers.
 - **`service`**: install, uninstall, status and `ensure` of the per-user registration (ADR 0010); the unit text is pure.
@@ -87,7 +87,17 @@ implementation calls the shell's one `dyno` command and whose mock serves the br
 
 ### Helper and plugins
 
-The helper is *planned* (ADR 0006): only `dyno_core::helper::HelperAction` and its validation exist. Plugins are
+The helper (ADR 0006, 0016) is `dyno-helper`, one program with three commands: `serve` (the daemon), `install` and `uninstall`.
+The agent never elevates itself: on the user's click it asks the OS to run `dyno-helper install --user … --agent-exe …`
+elevated (`dyno_platform::elevate`: `osascript` on macOS, `pkexec` on Linux, `ShellExecuteExW runas` on Windows), and that
+command copies the helper to a system-owned folder, writes its configuration and a token readable by the user, and registers
+a LaunchDaemon, a systemd unit or a Windows service. The daemon speaks `dyno-ipc` on a fixed endpoint
+(`HelperMessage`), accepts a connection only from the authorised user (kernel-reported uid; a pipe ACL on Windows) running the
+recorded agent program with the token, accepts only the typed administrator `HelperAction`s, validates them again, applies them
+through `dyno_platform::tuning_admin::AdminTuner`, reads the setting back and writes an audit line before and after.
+On the agent side `dyno_agent::helper_link` holds the link and three wrappers that route what needs the helper
+(`ElevatedTuning`, `ElevatedStartup`, `ElevatedTraffic`), and `dyno_agent::helper_centre` the lifecycle (status, install on a
+click in the background, remove). Plugins are
 out-of-process Rust programs speaking `dyno-ipc`; the agent starts the host on first use of the plugins page
 (`Request::Plugins`) and the host guards them (timeouts, memory cap, quarantine). Plugin wiring into sensors and cleanup
 proposals is minimal today ([roadmap](roadmap.md#known-gaps-in-the-foundation)).
@@ -104,6 +114,7 @@ proposals is minimal today ([roadmap](roadmap.md#known-gaps-in-the-foundation)).
 | [0004](adr/0004-cpu-taming-and-throttling-methods.md) | Rules with an escalation ladder; job objects and SIGSTOP duty cycles; crash recovery |
 | [0005](adr/0005-cleanup-safety.md) | Admission policy, preview, re-check, recoverable deletes |
 | [0006](adr/0006-privileged-helper-and-observe-only.md) | Observe-only default; helper installed on first admin use |
+| [0016](adr/0016-privileged-helper-install-and-ipc.md) | The helper: a system service installed on a click, one authorised user and program, audit log |
 | [0007](adr/0007-extensibility-three-tiers.md) | Core, TOML packs, out-of-process plugins |
 | [0008](adr/0008-storage-sqlite-and-retention.md) | SQLite, tiers, versioned schema |
 | [0009](adr/0009-native-feel.md) | Desktop feel in a webview |
@@ -175,8 +186,8 @@ working in memory.
   again. Open only what the user chose.
 - **Never trust another process.** Frames are bounded; the handshake needs the per-launch token (constant-time compare)
   and, where the OS tells, the peer pid. The discovery file is owner-only.
-- **Least privilege.** Nothing Dyno runs is elevated; the helper (planned) has a closed action set, validates again and
-  exits when idle. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
+- **Least privilege.** Nothing Dyno runs is elevated; the helper has a closed action set, serves one user and one program, validates again and
+  audits every change. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
   origin; `scripts/check-capabilities.mjs` enforces it in CI.
 - **Contain failures.** Per-request and per-tick panics are caught, locks recover from poisoning, plugins are guarded and
   quarantined, a failing sensor is an unavailable reading, the app restarts a dead agent and an agent without an app keeps

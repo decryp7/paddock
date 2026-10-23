@@ -20,10 +20,10 @@ is committed, re-check `git log`), **planned** (nothing in the code).
 
 | WP | Feature | Status (2026-10-23) |
 | --- | --- | --- |
-| WP-01 | Privileged helper | planned (core types only) |
+| WP-01 | Privileged helper | built (feat/wp01-helper): `dyno-helper` daemon, authenticated endpoint, audit log, per-OS install/removal plans, agent link and wrappers (administrator tuning, all-users startup items, Windows traffic, Defender exclusions), Settings > Helper and the install dialog ([ADR 0016](adr/0016-privileged-helper-install-and-ipc.md)). Real installs on each OS are checked by hand (testing-manual H1-H15); macOS uses the password dialog, not SMAppService, until a Developer ID exists |
 | WP-02 | CPU taming screen and profiles | built: rules table, profiles, in-effect list with release, protected list, activity with undo |
-| WP-03 | Health score and startup manager screen | built: Health page with reasons, fixes and startup manager (switch, delay, undo); machine-wide entries wait for WP-01 |
-| WP-05 | Tuning catalogue | built: catalogue, previews with inverse, undo with outside-change detection, Tuning page; administrator items wait for WP-01; startup trimming stays on the Health page |
+| WP-03 | Health score and startup manager screen | built: Health page with reasons, fixes and startup manager (switch, delay, undo); machine-wide entries go through the helper (WP-01) |
+| WP-05 | Tuning catalogue | built: catalogue, previews with inverse, undo with outside-change detection, Tuning page; administrator items go through the helper (WP-01); startup trimming stays on the Health page |
 | WP-04 | Cleanup with quarantine and undo | built: scanner, re-checking deleter, quarantine with restore, Cleanup page, disk map engine, TOML packs, Linux; scheduled cleanups, Docker removal and a disk-map screen planned |
 | WP-06 | Issues with statistics | planned |
 | WP-07 | New and unusual processes | planned |
@@ -64,7 +64,7 @@ WP-09 to WP-17; WP-23 to WP-25, WP-27 to WP-30.
 Built this round: WP-02, WP-03, WP-04, WP-05, WP-08 (Why slow and Reports pages), WP-26, WP-28, WP-29, WP-37 (Linux traffic via
 `sock_diag`; Windows says it needs administrator rights). **Not built and still in v1**, so the release waits for them:
 
-- WP-01 privileged helper (every administrator item in Tuning, machine-wide startup entries, Windows per-program traffic, Defender exclusions).
+- WP-01 is built; what is left of it is verification on real machines (testing-manual H1-H15: install, prompt, kill, remove on each OS), a code-signature check of the caller once there is a Developer ID / Authenticode certificate, SMAppService registration on macOS, on-demand start (the helper stays resident and idle), a Windows installer hook that offers to remove the helper, and a Linux entry for all-users startup (system units).
 - WP-06 Issues, WP-07 unusual processes, WP-09 right-click search, WP-10 watched folders, WP-12 counters browser, WP-13 extras,
   WP-14 backup checks, WP-15 pack data beyond the cleanup packs, WP-16 web API, WP-17 Explain via Pitwall, WP-23 to WP-25,
   WP-27 CLI, WP-30 suite tie-ins, WP-31 session recording, WP-33 to WP-36.
@@ -92,7 +92,7 @@ What the code does today, read from the code on 2026-10-22. Each is a small task
 | G3 | On Linux the shared Unix `SetPriority` calls `setpriority` on the main thread only (Linux priorities are per thread); efficiency mode and affinity already walk the threads | `crates/dyno-platform/src/unix_control.rs`, `linux/os_control.rs` | Walk the process's threads for `SetPriority` on Linux (best effort for threads that exit); test with a multi-thread dummy |
 | G4 | The history `crashes` list is always empty and the health report gets `crashes_7d: 0`, so the crashes chart and the "crashing apps" health reason have no data | `crates/dyno-agent/src/handlers.rs` (`history`, `health`) | Filled by WP-06 (Issues) |
 | G5 | Plugins are wired minimally: the agent starts the host on first `Request::Plugins` and lists plugins; sensor, cleanup-proposal and rule-action contributions are not connected to the sampler, the scanner or the engine | `crates/dyno-agent/src/handlers.rs`, `sampler.rs`, `crates/dyno-plugin-host` | Connect contributions through guarded adapters (ADR 0007), trim the host to sensors, cleanup proposals and rule actions |
-| G6 | The helper is not built: `crates/dyno-helper/src/main.rs` is `fn main() {}`; only `HelperAction` and its validation exist | `crates/dyno-helper` | WP-01 |
+| G6 | Done in WP-01 (ADR 0016). Was: the helper was not built; `crates/dyno-helper/src/main.rs` was `fn main() {}` | `crates/dyno-helper` | done |
 | G7 | Cleanup, `DiskUsage`, tuning and the weekly report are built (WP-04, WP-05, WP-08); no request answers `Unsupported` for being unbuilt any more | `crates/dyno-agent/src/handlers.rs` | done |
 | G8 | Windows wires sensors (PDH), process control and user activity only. Process details use `NoDetails`; file locks (Restart Manager), startup entries and facts are the in-memory fakes | `crates/dyno-platform/src/windows/mod.rs` | Windows details probe (command line, modules, connections, signature), Restart Manager locks, registry / Startup folder / scheduled-task startup, facts (disk health, updates, power plan); verify on the Windows CI runner |
 | G9 | The doc comments on `Overhead::agent_cpu` and `Load::own_cpu` say "percent of the machine", but the sampler multiplies by the core count: the value is a share of one core (ADR 0002 section 4) | `crates/dyno-core/src/protocol.rs`, `sampling.rs` | Fix the comments (and the UI label) or change the unit; keep the budget comparison consistent |
@@ -124,6 +124,13 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
 - **Touches.** `crates/dyno-helper/**`, `crates/dyno-core/src/helper.rs`, `crates/dyno-agent/src/handlers.rs` (a helper client
   module, new file), `crates/dyno-ipc` (peer checks), installer config (`app/src-tauri/windows`, `macos`), docs/adr (a new ADR
   for the install flow if it deviates).
+- **Built (2026-10-23).** [ADR 0016](adr/0016-privileged-helper-install-and-ipc.md) settles the install flow (one elevated
+  `dyno-helper install` command, a resident idle system service, one authorised user and program, token, audit log). Code:
+  `crates/dyno-helper` (daemon, `dispatch`, `auth`, `audit`, `install` plans, `winsvc`), `dyno_core::{helper, helper_wire,
+  helper_paths}`, `dyno_ipc` (fixed endpoints, peer uid), `dyno_platform::{elevate, tuning_admin}`, `dyno_agent::{helper_link,
+  helper_centre}`, the Settings > Helper card and the install dialog in the UI. Verified: unit and in-process IPC tests with a
+  fake system everywhere, the agent-to-daemon path end to end with its real authentication, Windows and Linux type-check and
+  clippy from the Mac, the Windows-only code on the Windows CI runner. Not verified: a real install on any OS (manual list H1-H15).
 
 ## WP-02 CPU taming screen and profiles
 
