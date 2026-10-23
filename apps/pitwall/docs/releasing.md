@@ -92,3 +92,7 @@ reinstall from the releases page and revoke the old secrets.
 
 Installing and running on Windows and Linux, and CUDA and Vulkan engine builds, have not been verified on real
 machines yet; say so in the release notes of any early build. See [roadmap.md](roadmap.md).
+
+## First launch note
+
+Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
