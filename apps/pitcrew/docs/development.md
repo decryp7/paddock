@@ -162,3 +162,22 @@ See [releasing.md](releasing.md).
 | UI unit and component tests | `app/src/**/*.spec.ts` | `npx ng test --watch=false` |
 | Browser flows with the mock backend | `app/e2e` | `npx playwright test` |
 | Things that need a real desktop | [testing-manual.md](testing-manual.md) | by hand before a release |
+
+## CI image and compile cache
+
+Linux CI jobs run in the [garage](https://dev.decryptology.net/decryp7/garage) image (Rust, Tauri libraries, Node,
+Playwright browsers, sccache), so the jobs no longer install system packages. The Rust test and bundle jobs compile with
+`sccache`; its cache directory `/sccache` is saved and restored with `actions/cache`, keyed on `Cargo.lock`. The
+step `sccache statistics` in each job shows the hit rate.
+
+Optional upgrade (faster, needs a change to each runner's `config.yaml`): keep the cache on the runner host so no
+restore or save is needed, then drop the two `actions/cache` steps named after sccache:
+
+```yaml
+container:
+  options: "-v /var/cache/sccache:/sccache"
+  valid_volumes:
+    - /var/cache/sccache
+```
+
+See the [garage README](https://dev.decryptology.net/decryp7/garage) for the measurements.
