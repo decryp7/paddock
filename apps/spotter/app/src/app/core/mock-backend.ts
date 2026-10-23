@@ -1,4 +1,6 @@
 import type {
+  Avatar,
+  MailStatus,
   AppEvent,
   AppInfo,
   AppUpdateCheck,
@@ -67,6 +69,13 @@ const OK: WatchStatus = { kind: 'ok', message: null };
 
 function problem(code: CommandError['code'], message: string, problems: string[] = []): CommandError {
   return { code, message, problems };
+}
+
+/** A simple bundled-style mark for a source kind (the mock never fetches a picture). */
+function mockMark(kind: string): Avatar | null {
+  if (!kind) return null;
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#0E8577" stroke-width="1.8"><circle cx="12" cy="12" r="8"/></svg>';
+  return { source: 'bundled', mime: 'image/svg+xml', dataUrl: 'data:image/svg+xml;base64,' + btoa(svg) };
 }
 
 /** The mock's seed watches: invented names, addresses and versions. */
@@ -193,6 +202,7 @@ const DEFAULT_SETTINGS: Settings = {
   digest: 'off',
   quietHours: null,
   allowOsWebview: false,
+  smtp: null,
 };
 
 /**
@@ -207,6 +217,7 @@ export class MockBackend implements SpotterBackend {
   private watches: MockWatch[];
   private settings: Settings = { ...DEFAULT_SETTINGS };
   private autostart = false;
+  private mailPassword = false;
   private renderer: RendererStatus = { kind: 'none', detail: 'No Chromium-based browser was found. Install one, or download the pinned Chromium (about 150 MB).', canDownload: true };
   private updateCount = 0;
   private nextId = 100;
@@ -677,6 +688,44 @@ export class MockBackend implements SpotterBackend {
       }
       return { drafts, skipped };
     });
+  }
+
+  watchAvatar(id: string): Promise<Avatar | null> {
+    return this.call(`watchAvatar:${id}`, () => mockMark(this.find(id).spec.source.kind));
+  }
+
+  presetAvatar(id: string): Promise<Avatar | null> {
+    return this.call(`presetAvatar:${id}`, () => {
+      const preset = PRESETS.find((p) => p.id === id);
+      if (!preset) throw problem('notFound', `There is no preset "${id}".`);
+      return mockMark(preset.draft.source.kind);
+    });
+  }
+
+  kindAvatar(kind: string): Promise<Avatar | null> {
+    return this.call(`kindAvatar:${kind}`, () => mockMark(kind));
+  }
+
+  mailStatus(): Promise<MailStatus> {
+    return this.call('mailStatus', () => this.mail());
+  }
+
+  setMailPassword(password: string | null): Promise<MailStatus> {
+    return this.call('setMailPassword', () => {
+      this.mailPassword = !!password;
+      return this.mail();
+    });
+  }
+
+  sendTestEmail(to: string): Promise<void> {
+    return this.call('sendTestEmail', () => {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to.trim())) throw problem('badRequest', 'Enter an e-mail address like name@example.org.');
+      if (!this.settings.smtp) throw problem('badRequest', 'Set up the mail server first (server, port and sender), then send the test.');
+    });
+  }
+
+  private mail(): MailStatus {
+    return { configured: !!this.settings.smtp, passwordSet: this.mailPassword };
   }
 
   appUpdateStatus(): Promise<AppUpdateStatus> {

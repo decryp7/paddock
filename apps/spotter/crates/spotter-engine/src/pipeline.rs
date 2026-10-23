@@ -108,6 +108,7 @@ impl Checker {
                     allow_local: watch.allow_local,
                     conditional: conditional.filter(|c| !c.is_empty()),
                     credentials: watch.source.registry_credentials(secrets),
+                    max_body: None,
                 };
                 match self.fetcher.get(&request, &opts).await? {
                     Fetched::NotModified => return Ok(Gathered::Unchanged),

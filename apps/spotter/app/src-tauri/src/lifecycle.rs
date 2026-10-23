@@ -189,3 +189,22 @@ pub fn stop(app: &AppHandle<impl Runtime>) {
         let _ = s.stop.send(true);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spotter_engine::clock::{Clock, SystemClock};
+
+    #[test]
+    fn the_clock_learns_the_machines_offset_and_zone() {
+        let clock = SystemClock::new();
+        assert_eq!(clock.utc_offset_minutes(), 0, "UTC until the shell says otherwise");
+        refresh_local_time(&clock);
+        // Whatever zone this machine is in, the offset is a real one and agrees with the helper the shell uses.
+        assert_eq!(clock.utc_offset_minutes(), local_offset_minutes());
+        assert!((-14 * 60..=14 * 60).contains(&clock.utc_offset_minutes()));
+        if let Some(name) = clock.local_zone_name() {
+            assert!(!name.is_empty() && name.len() < 64, "{name}");
+        }
+    }
+}

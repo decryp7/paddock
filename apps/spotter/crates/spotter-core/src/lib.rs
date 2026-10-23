@@ -13,6 +13,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod action;
+pub mod avatar;
 pub mod calendar;
 pub mod checksum;
 pub mod config;
@@ -35,6 +36,7 @@ pub mod state;
 pub mod store;
 pub mod time;
 pub mod tracking;
+pub mod upgrade;
 pub mod user_regex;
 pub mod version;
 pub mod watch;

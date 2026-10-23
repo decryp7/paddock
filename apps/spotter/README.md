@@ -79,6 +79,7 @@ are in [docs/diagrams/](docs/diagrams/). They follow your light or dark setting.
 - [docs/development.md](docs/development.md) - building, testing, CI
 - [docs/releasing.md](docs/releasing.md) - tags, signed updates
 - [docs/adr/](docs/adr/) - architecture decisions
+- [docs/features.md](docs/features.md) - what the avatar, e-mail and install-command features do
 - [docs/roadmap.md](docs/roadmap.md) - state and known gaps
 - [docs/suite-lessons.md](docs/suite-lessons.md) - lessons shared across the suite
 - [AGENTS.md](AGENTS.md) - engineering rules for contributors

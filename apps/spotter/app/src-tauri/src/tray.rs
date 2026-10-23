@@ -433,6 +433,7 @@ mod tests {
                 fields: Vec::new(),
                 artifacts: Vec::new(),
                 updated_in_place: false,
+                upgrade_command: None,
             }),
             acknowledged: None,
             installed: None,

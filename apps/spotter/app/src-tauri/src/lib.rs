@@ -71,6 +71,12 @@ pub fn run() {
             commands::install_app_update,
             commands::show_main_window,
             commands::hide_tray,
+            commands::watch_avatar,
+            commands::preset_avatar,
+            commands::kind_avatar,
+            commands::mail_status,
+            commands::set_mail_password,
+            commands::send_test_email,
         ])
         .setup(|app| {
             // The engine opens before the event loop runs, so no command can arrive before it exists; nothing here

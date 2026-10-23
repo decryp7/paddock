@@ -54,6 +54,8 @@ export interface Release {
   artifacts: Artifact[];
   /** The same file name came back with new contents. */
   updatedInPlace: boolean;
+  /** A command that installs or pulls this release (container tags, package versions); Spotter never runs it. Always sent by the engine; null for none. */
+  upgradeCommand?: string | null;
 }
 
 /** Version schemes (`spotter_core::version::VersionScheme`). */
@@ -484,6 +486,36 @@ export interface Settings {
   quietHours: QuietHours | null;
   /** Use an OS webview when no Chromium browser is found (labelled as such). */
   allowOsWebview: boolean;
+  /** The mail server for e-mail channels (its password is set with `setMailPassword`). Always sent by the engine; null for none. */
+  smtp?: SmtpSettings | null;
+}
+
+/** How the connection to the mail server is secured: STARTTLS (port 587), TLS from the first byte (465), or none (trusted networks only). */
+export type SmtpSecurity = 'start-tls' | 'tls' | 'none';
+
+export interface SmtpSettings {
+  host: string;
+  port: number;
+  security: SmtpSecurity;
+  /** The account to sign in with; null or empty for a relay that needs none. */
+  username: string | null;
+  /** The sender address. */
+  from: string;
+}
+
+/** Whether e-mail can be sent. The password itself is never returned. */
+export interface MailStatus {
+  configured: boolean;
+  passwordSet: boolean;
+}
+
+/** A picture for a watch or catalogue entry. A null avatar means: draw the monogram. */
+export interface Avatar {
+  /** `remote`: from the watched site (cached); `bundled`: Spotter's mark for the source kind. */
+  source: 'remote' | 'bundled';
+  mime: string;
+  /** The image as a `data:` address (the content security policy allows it). */
+  dataUrl: string;
 }
 
 export interface AppInfo {
