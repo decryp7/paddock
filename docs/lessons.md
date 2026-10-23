@@ -109,6 +109,10 @@ Long operations, progress and parallelism (user, 2026-10-23; audit in docs/audit
   (build new data, then swap; never delete first).
 - The UI never times out a running job: it subscribes to progress events. UI call timeouts shorter than the engine's work
   showed errors while the work carried on (Pitcrew, Spotter, Dyno).
+- Multi-stage work is a pipeline: producer threads → bounded queue → worker threads, with stage-specific thread counts
+  (I/O stages few, CPU stages cores−1), back-pressure, cancel across stages and per-stage progress. Keep results
+  deterministic with commit-time ordering: number only new items, in sorted canonical relative path order; existing IDs
+  never change; a moved or renamed file is matched by path, then by fingerprint (paddock-jobs `pipeline_ordered`).
 - Every operation runs on a background thread or worker pool, never on the UI thread, the Tauri main thread or an IPC
   handler's thread; commands return at once and report through events (user rule). Split work across threads wherever
   it can be split.
