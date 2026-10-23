@@ -150,7 +150,8 @@
 }
 .table-wrap {
   padding: 0;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 420px;
 }
 .fixed {
   table-layout: fixed;

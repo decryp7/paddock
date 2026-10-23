@@ -21,7 +21,7 @@ describe('SettingsStore', () => {
     const { store } = setup();
     await store.loadAll();
     expect(store.settings().value?.theme).toBe('system');
-    expect(store.info().value?.version).toBe('0.1.0');
+    expect(store.info().value?.version).toBe('1.0.0');
     expect(store.renderer().value?.kind).toBe('none');
     expect(store.update().value?.available).toBe(true);
     expect(store.autostart()).toBe(false);

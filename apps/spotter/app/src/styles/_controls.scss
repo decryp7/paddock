@@ -183,6 +183,23 @@ textarea.input {
   }
 }
 
+/* A table whose header stays in view while its own body scrolls (give the wrapper a max-height and overflow: auto). */
+.table.sticky thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--pd-surface-1);
+  box-shadow: inset 0 -1px 0 var(--pd-hairline);
+  border-bottom: 0;
+}
+
+/* The row the keyboard is on (Up/Down/Home/End move it, Enter opens it, Shift+F10 or Menu opens its menu). */
+.row-item:focus-visible {
+  outline: 2px solid var(--pd-accent);
+  outline-offset: -2px;
+  background: var(--pd-hover);
+}
+
 .mono {
   font-family: var(--pd-font-mono);
   font-variant-numeric: tabular-nums;

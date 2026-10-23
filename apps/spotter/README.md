@@ -4,6 +4,8 @@ Spotter watches for new releases anywhere and tells you the moment one appears. 
 Linux) from the Paddock suite, and it is **local only**: no cloud, no account, no telemetry. Everything it learns stays
 in a local database on your machine.
 
+**Status: v1.0.0.** Releases are built and published by the tag workflow; the roadmap lists what is still open ([docs/roadmap.md](docs/roadmap.md)).
+
 ![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=10df0435)
 
 
@@ -58,7 +60,7 @@ load rules are in [docs/development.md](docs/development.md); releases in [docs/
 | ![Dashboard](docs/screenshots/dashboard-dark.png) | ![Watches](docs/screenshots/watches-dark.png) |
 | ![Dashboard, light](docs/screenshots/dashboard-light.png) | ![Watches, light](docs/screenshots/watches-light.png) |
 
-Also in `docs/screenshots`: release cadence, watch detail (with the release panel and a multi-product watch), the add-watch wizard, settings, the tray popup and the empty states.
+Also in `docs/screenshots`: row menus (`watches-menu`, `dashboard-menu`), reliability and downloads charts (`dashboard-charts`), the schedule editor in cron mode (`wizard-schedule`), release cadence, watch detail (with the release panel and a multi-product watch), the add-watch wizard, settings, the tray popup and the empty states.
 
 ## Diagrams
 
@@ -79,6 +81,7 @@ are in [docs/diagrams/](docs/diagrams/). They follow your light or dark setting.
 - [docs/development.md](docs/development.md) - building, testing, CI
 - [docs/releasing.md](docs/releasing.md) - tags, signed updates
 - [docs/adr/](docs/adr/) - architecture decisions
+- [docs/features.md](docs/features.md) - what the avatar, e-mail and install-command features do
 - [docs/roadmap.md](docs/roadmap.md) - state and known gaps
 - [docs/suite-lessons.md](docs/suite-lessons.md) - lessons shared across the suite
 - [AGENTS.md](AGENTS.md) - engineering rules for contributors

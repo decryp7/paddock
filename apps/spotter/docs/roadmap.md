@@ -17,12 +17,15 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
    before launch returned; test now allows for START_LIMIT) and `challenges_become_needs_you` (a DevTools call timed out because 8 browsers started at once
    on the runner; the file's tests now take turns via `serial()`). Next: dispatch/push once Debrief has shipped, read logs with /tmp-style
    `actions/runs/<run>/jobs` then `actions/jobs/<id>/logs`. Also added: stale-bundle guards in the bundle job (not yet run in CI).
-2. Avatars are monograms only: fetch and cache favicons / org avatars in the engine, bundle marks for the catalogue entries.
+2. Avatars: done (ADR 0006). Owner avatars and favicons are fetched from the watched site, checked, cached on disk with expiry and fall back to a bundled mark per source kind, then to the monogram. The UI asks once per identity (`AvatarsStore`; `sp-avatar` takes `watch` or `preset`) in the feed, watches table, dashboard attention list, cadence cards, detail hero, tray and the wizard's preset tiles. Bundled marks exist per source kind, not per preset (brand logos are not licensed for bundling).
 3. Right-click context menus and Up/Down row navigation in the feed and tables; sticky headers on the detail tables.
 4. Tray extras: popup height fitted to content, rounded corners on Windows 11 (DWMWCP_ROUND), toast action buttons and
-   click-through (Open, Mark as seen), e-mail channel delivery.
-5. Coverage: spotter-engine and spotter-sources are below 99% lines; the rest are `?`/`map_err` regions on SQLite and file
-   errors that need fault-injection seams (see the list in the commit 5af6ee0).
+   click-through (Open, Mark as seen). E-mail channel delivery is done: the engine sends through SMTP (lettre, TLS, timeouts, typed errors) and Settings > Notifications has the form (server, port, security, sender, account, password in the credential store, "Send test e-mail" with the error shown inline). No test against a real TLS server has been run (the tests use a local fake SMTP server; STARTTLS and TLS failure paths are covered, a successful TLS session is not).
+5. Coverage (2026-10-23, after the engine-gaps round): `spotter-core` 99.4%, `spotter-sources` 99.0% and `spotter-engine` 98.9% lines (`cargo llvm-cov`, summary
+   method); the rest are `?` regions on SQLite and file operations (seek, flush, write, pragma, transactions) that need a
+   fault-injecting database or file layer. Added seams: the in-memory database returns an error (not an exit) and takes an injected opener, a size limit
+   parameter for downloads, platform parameters for folder error messages, `Gathered::into_candidates`, `feeds_in`.
+6. App icons are guarded in CI (`scripts/ci/check-icons.mjs`, copied from Pitwall): the artwork must fill the canvas.
 
 ## Renderer
 
@@ -41,17 +44,18 @@ Done: shell (splash, sidebar, banner, toasts, native feel, theme via paddock), T
 dashboard, settings, toasts, editor, detail), pages (dashboard, watches, detail, wizard, settings, tray), 18 Playwright
 flows (Chromium and WebKit, port 4370), `ng build` and `ng lint` clean.
 
-Left:
-- Unit tests: specs exist for core services, format/labels/chart-options and copied utilities (59 tests); still missing for
-  mock-backend, watches/dashboard/settings/editor stores, draft-utils, panel/ago/confirm/clipboard/chart, and every page
-  component. Overall Angular coverage is therefore below the 80% target until these land (run `ng test --coverage`).
-- `npm audit --omit=dev --audit-level=high` not run yet; run a second `ng test` under another TZ.
-- Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command" needs an engine field.
-- Check scripts/check-index.mjs against dist/app/browser/index.html.
+Unit tests (done 2026-10-23): 50 spec files, 402 tests (Vitest + TestBed) covering mock-backend, every store, draft-utils,
+panel/ago/confirm/clipboard/chart and all page components; coverage 99.4% lines, 98.5% statements, 93.1% branches, 96.7%
+functions. `npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities; the suite also passes under
+`TZ=Pacific/Auckland`.
 
-- Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; add a screenshot of the cron mode and let the watches table show the schedule text next to Next.
+Left:
+- Done: the detail hero's upgrade line has a Copy command button when the release carries `upgradeCommand`.
+
+- Check schedules (ADR 0005): the wizard's Schedule section has Every / At times / Cron (`sp-schedule-editor`) with the engine's live preview; done: the watches table shows the schedule text next to Next and `wizard-schedule-*.png` shows the cron mode.
 
 ## Engine
 - Done: SQLite state/history (migrations, corrupt-DB recovery), atomic config, polite fetcher (per-host gap, ETag/Last-Modified, body cap, manual redirects with loop detection, SSRF guard), pipeline, scheduler, Engine facade, webhook/ntfy delivery.
-- Open: more failure-path tests (oversize body, redirect loop, timeout, bad webhook, digest flush, soak through the engine, rendered pages with a fake PageRenderer, page change mode end-to-end); coverage run for spotter-engine; E-mail channel delivery (shell/SMTP); local UTC offset must be set by the shell via SystemClock::set_utc_offset_minutes; DNS-rebinding pinning for the SSRF guard; Engine::download is the shell's job (use spotter-sources::download, then Engine::record_download); a `Db::in_memory` failure calls process::exit (SQLite unusable) - consider returning an error; Cargo.lock holds shared changes, commit it with the integration.
+- Done in round 4 (ADR 0006): failure-path tests through the engine (slow server, oversize body, redirect loop, bad webhooks, soak of 400 checks, rendered pages and page change mode with a fake renderer, digest flush); local UTC offset set by the shell (`lifecycle::refresh_local_time`, hourly); DNS-rebinding pinning (`GuardedResolver`: the client resolves through the guard, and the pre-check uses the same resolver); `Db::open` and `Db::in_memory` return an error instead of exiting the process; `Engine::download` stays the shell's job (the shell calls `spotter-sources::download`, then `Engine::record_download`); e-mail delivery; avatars; install commands.
+- Open: a successful TLS session against a real mail server (no test server speaks TLS); `Cargo.lock` holds shared changes, commit it with the integration.
 - Check schedules (ADR 0005): done in `spotter-core` (`schedule.rs`, `calendar.rs`) and the scheduler: every / at times / cron, per-source minimum interval, jitter, DST rules, one catch-up check after sleep, `preview_schedule`. Open: a cron description in other languages; calendar schedules do not yet follow the machine's zone change until the hourly refresh.

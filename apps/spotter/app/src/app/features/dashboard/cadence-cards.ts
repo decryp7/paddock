@@ -24,7 +24,7 @@ interface Card {
       @for (c of cards(); track c.watch.id) {
         <a class="card" [routerLink]="['/watches', c.watch.id]" [attr.aria-label]="c.watch.name + ', ' + c.total + ' releases in ' + rangeLabel()">
           <div class="top">
-            <sp-avatar [name]="c.watch.name" [size]="28" />
+            <sp-avatar [name]="c.watch.name" [watch]="c.watch.id" [size]="28" />
             <div class="who">
               <span class="name truncate">{{ c.watch.name }}</span>
               <span class="sub">{{ c.total }} {{ c.total === 1 ? 'release' : 'releases' }} · {{ c.average ? 'about every ' + c.average : 'in ' + rangeLabel() }}</span>

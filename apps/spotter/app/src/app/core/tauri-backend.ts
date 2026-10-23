@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
+  Avatar,
+  MailStatus,
   AppEvent,
   AppInfo,
   AppUpdateCheck,
@@ -162,6 +164,24 @@ export class TauriBackend implements SpotterBackend {
   importList(format: ImportFormat, text: string): Promise<ImportResult> {
     return this.run('import_list', { format, text });
   }
+  watchAvatar(id: string): Promise<Avatar | null> {
+    return this.run('watch_avatar', { id });
+  }
+  presetAvatar(id: string): Promise<Avatar | null> {
+    return this.run('preset_avatar', { id });
+  }
+  kindAvatar(kind: string): Promise<Avatar | null> {
+    return this.run('kind_avatar', { kind });
+  }
+  mailStatus(): Promise<MailStatus> {
+    return this.run('mail_status');
+  }
+  setMailPassword(password: string | null): Promise<MailStatus> {
+    return this.run('set_mail_password', { password });
+  }
+  sendTestEmail(to: string): Promise<void> {
+    return this.run('send_test_email', { to });
+  }
   appUpdateStatus(): Promise<AppUpdateStatus> {
     return this.run('app_update_status');
   }
@@ -176,6 +196,9 @@ export class TauriBackend implements SpotterBackend {
   }
   hideTray(): Promise<void> {
     return this.run('hide_tray');
+  }
+  fitTray(height: number): Promise<void> {
+    return this.run('fit_tray', { height });
   }
 
   onState(handler: (push: StatePush) => void): Promise<() => void> {

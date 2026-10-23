@@ -31,7 +31,7 @@ describe('SettingsPage', () => {
   it('shows what the engine reports', async () => {
     const { f } = await make();
     const t = text(f.nativeElement);
-    expect(t).toContain('Version 0.1.0');
+    expect(t).toContain('Version 1.0.0');
     expect(t).toContain('/home/demo/.config/spotter-demo/config.toml');
     expect(t).toContain('Notifications are on.');
     expect(t).toContain('No browser available');
@@ -138,7 +138,7 @@ describe('SettingsPage', () => {
     const { f, backend } = await make();
     (byText(f.nativeElement, 'button', 'Check for updates') as HTMLButtonElement).click();
     await settle(f);
-    expect(text(f.nativeElement)).toContain('Version 0.2.0 is available. Faster checks');
+    expect(text(f.nativeElement)).toContain('Version 1.1.0 is available. Faster checks');
     (byText(f.nativeElement, 'button', 'Install') as HTMLButtonElement).click();
     await settle(f);
     expect(backend.calls).toContain('installAppUpdate');

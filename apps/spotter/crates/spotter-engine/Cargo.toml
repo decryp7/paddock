@@ -22,6 +22,8 @@ time.workspace = true
 toml.workspace = true
 url = "2.5"
 rusqlite = { version = "0.40", features = ["bundled"] }
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls", "aws-lc-rs", "rustls-platform-verifier"] }
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile.workspace = true

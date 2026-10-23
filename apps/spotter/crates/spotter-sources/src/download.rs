@@ -53,7 +53,7 @@ pub async fn download(http: &Http, release: &Release, folder: &Path, verify: boo
     };
     let mut hasher = Hasher::new();
     let size = if remote {
-        fetch(http, location, &part, &mut hasher).await?
+        fetch(http, location, &part, &mut hasher, MAX_DOWNLOAD).await?
     } else {
         copy(Path::new(location), &part, &mut hasher).await?
     };
@@ -136,7 +136,8 @@ async fn open_part(part: &Path, offset: u64) -> Result<tokio::fs::File, String> 
     Ok(f)
 }
 
-async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher) -> Result<u64, String> {
+/// Downloads `url` into `part` (resuming it), refusing anything larger than `max` bytes, announced or streamed.
+async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher, max: u64) -> Result<u64, String> {
     let have = hash_existing(part, hasher).await?;
     let mut req = http.client().get(url);
     if have > 0 {
@@ -163,8 +164,8 @@ async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher) -> Resu
         s => return Err(format!("{url} answered HTTP {}.", s.as_u16())),
     }
     let total = response.content_length().map(|n| n + offset);
-    if total.is_some_and(|t| t > MAX_DOWNLOAD) {
-        return Err(format!("{url} is larger than {} GiB.", MAX_DOWNLOAD >> 30));
+    if total.is_some_and(|t| t > max) {
+        return Err(format!("{url} is larger than {} GiB.", max >> 30));
     }
     let offset = resume_offset(offset, total);
     let mut file = open_part(part, offset).await?;
@@ -175,8 +176,8 @@ async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher) -> Resu
         .map_err(|e| format!("The download of {url} was interrupted ({e}); it resumes next time."))?
     {
         written += chunk.len() as u64;
-        if written > MAX_DOWNLOAD {
-            return Err(format!("{url} is larger than {} GiB.", MAX_DOWNLOAD >> 30));
+        if written > max {
+            return Err(format!("{url} is larger than {} GiB.", max >> 30));
         }
         hasher.update(&chunk);
         file.write_all(&chunk)
@@ -226,4 +227,39 @@ async fn copy(source: &Path, part: &Path, hasher: &mut Hasher) -> Result<u64, St
     }
     file.flush().await.map_err(|e| e.to_string())?;
     Ok(written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    /// Serves one chunked answer (no length announced) on a local port and returns its address.
+    fn chunked_server() -> String {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/stream", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            if let Ok((mut s, _)) = l.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = s.read(&mut buf);
+                let _ = s.write_all(
+                    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n6\r\nabcdef\r\n6\r\nghijkl\r\n0\r\n\r\n",
+                );
+            }
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_outgrows_the_limit_is_refused_while_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("a.part");
+        let http = Http::new("test").unwrap();
+        let e = fetch(&http, &chunked_server(), &part, &mut Hasher::new(), 8).await.unwrap_err();
+        assert!(e.contains("larger than 0 GiB"), "{e}");
+        let ok = fetch(&http, &chunked_server(), &dir.path().join("b.part"), &mut Hasher::new(), 64)
+            .await
+            .unwrap();
+        assert_eq!(ok, 12);
+    }
 }

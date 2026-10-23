@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
 import { BACKEND } from '../../core/backend';
 import { platformFromUserAgent } from '../../core/tauri-backend';
+import { observeHeight } from '../../shared/observe-height';
 import { AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { Avatar } from '../../shared/ui/avatar';
 import { Version } from '../../shared/ui/version';
@@ -31,7 +32,7 @@ import { WatchesStore } from '../../state/watches.store';
           @for (w of unseen(); track w.id) {
             <li>
               <button type="button" class="item" (click)="open(w.id)" [attr.aria-label]="w.name + ' ' + w.latest?.version + ', open'">
-                <sp-avatar [name]="w.name" [size]="32" />
+                <sp-avatar [name]="w.name" [watch]="w.id" [size]="32" />
                 <span class="main">
                   <span class="name truncate">{{ w.name }}</span>
                   <span class="meta truncate">
@@ -164,6 +165,13 @@ export class TrayPage {
 
   constructor() {
     this.store.start();
+    // The window is as tall as the popup's content (no empty gap under a short list); the shell clamps the height.
+    const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    const destroy = inject(DestroyRef);
+    afterNextRender(() => {
+      const popup = host.querySelector('pd-tray-popover');
+      if (popup) destroy.onDestroy(observeHeight(popup, (h) => void this.backend.fitTray(h).catch(() => undefined)));
+    });
   }
 
   protected close(): void {

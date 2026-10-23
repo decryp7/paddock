@@ -31,5 +31,5 @@ Spotter runs for days in the tray and must feel like a native app, never blank, 
   the user's real data.
 
 ## Consequences
-The engine can be exercised without the shell and the shell without a webview. E-mail channels, toast action buttons
-and click-through from a notification are not built yet (docs/roadmap.md).
+The engine can be exercised without the shell and the shell without a webview. Toast action buttons and click-through from a
+notification are not built yet (docs/roadmap.md). E-mail channels are delivered by the engine (ADR 0006).

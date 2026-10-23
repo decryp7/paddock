@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use spotter_core::filter;
 use spotter_core::journal::{Event, EventKind};
 use spotter_core::limits::MAX_HISTORY;
-use spotter_core::notify::{digest_due, DigestMode};
+use spotter_core::notify::{digest_due, ChannelKind, DigestMode};
 use spotter_core::release::{select, Release};
 use spotter_core::source::folder::Snapshot;
 use spotter_core::source::SourceError;
@@ -197,9 +197,11 @@ impl Engine {
         if let Ok(Gathered::Fresh { validators, baseline, .. }) = &gathered {
             self.inner.db.store_validators(id, &fp, validators)?;
             if let Some(b) = baseline {
-                if let Ok(json) = serde_json::to_string(b) {
-                    self.inner.db.kv_set(&page_key, &json)?;
-                }
+                // A snapshot is plain data and always serialises; the Option keeps this path free of a dead branch.
+                serde_json::to_string(b)
+                    .ok()
+                    .map(|json| self.inner.db.kv_set(&page_key, &json))
+                    .transpose()?;
             }
         }
         let settings = self.settings();
@@ -380,9 +382,10 @@ impl Engine {
                     name: release.name.clone(),
                     location: release.location.clone(),
                 };
-                if let Ok(json) = serde_json::to_string(&item) {
-                    self.inner.db.queue_digest(&watch.id, now, &json)?;
-                }
+                serde_json::to_string(&item)
+                    .ok()
+                    .map(|json| self.inner.db.queue_digest(&watch.id, now, &json))
+                    .transpose()?;
             }
         }
         if !watch.actions.is_empty() {
@@ -406,7 +409,13 @@ impl Engine {
             return Ok(());
         }
         let watch = n.watch_id.as_deref().and_then(|w| WatchId::parse(w).ok());
-        for failure in notifier::deliver(&self.inner.fetcher, &n, allow_local).await {
+        let mail = n
+            .channels
+            .iter()
+            .any(|c| c.kind == ChannelKind::Email)
+            .then(|| self.mail_account())
+            .flatten();
+        for failure in notifier::deliver(&self.inner.fetcher, mail.as_ref(), &n, allow_local).await {
             self.record(
                 now,
                 watch.clone(),

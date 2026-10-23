@@ -5,7 +5,7 @@ installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`
 updater reads. Installers are also built for the nightly run of `main` and manual runs (`workflow_dispatch`).
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+git tag v1.0.0 && git push origin v0.2.0
 ```
 
 The version in the tag must match `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`. Pre-releases are

@@ -81,16 +81,87 @@ impl NotificationChannel {
                 }
             }
             ChannelKind::Email => {
-                let ok = t.split_once('@').is_some_and(|(local, domain)| {
-                    !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.') && !t.contains(' ')
-                });
-                if ok {
+                if is_email_address(t) {
                     Ok(())
                 } else {
                     Err("Enter an e-mail address like name@example.org.".into())
                 }
             }
         }
+    }
+}
+
+/// How the connection to the mail server is secured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SmtpSecurity {
+    /// Starts in plain text and requires `STARTTLS` (usually port 587). A server that does not offer it is refused.
+    #[default]
+    StartTls,
+    /// TLS from the first byte (usually port 465).
+    Tls,
+    /// No encryption: only for a relay on a trusted network, since the password and the mail cross it in plain text.
+    None,
+}
+
+/// The mail server Spotter sends e-mail channels through. The password is never stored here; it lives in the
+/// credential store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SmtpSettings {
+    /// The server's name or address.
+    pub host: String,
+    /// The port.
+    pub port: u16,
+    /// How the connection is secured.
+    #[serde(default)]
+    pub security: SmtpSecurity,
+    /// The account to sign in with; empty or absent for a relay that needs none.
+    #[serde(default)]
+    pub username: Option<String>,
+    /// The sender address (`spotter@example.org`).
+    pub from: String,
+}
+
+/// Whether `text` is a plain e-mail address (`name@example.org`).
+pub fn is_email_address(text: &str) -> bool {
+    let t = text.trim();
+    t.len() <= 254
+        && !t.contains(char::is_control)
+        && t.split_once('@').is_some_and(|(local, domain)| {
+            !local.is_empty()
+                && !local.contains(['<', '>', ',', ';', '"'])
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+                && !t.contains(' ')
+                && t.matches('@').count() == 1
+        })
+}
+
+impl SmtpSettings {
+    /// Checks the settings; the message says what to fix.
+    pub fn check(&self) -> Result<(), String> {
+        let host = self.host.trim();
+        if host.is_empty() || host.len() > 253 || host.contains(|c: char| c.is_whitespace() || c.is_control() || "/@:".contains(c)) {
+            return Err("Enter the mail server's name, like smtp.example.org.".into());
+        }
+        if self.port == 0 {
+            return Err("Enter the mail server's port (587 for STARTTLS, 465 for TLS).".into());
+        }
+        if let Some(u) = &self.username {
+            if u.len() > 256 || u.contains(char::is_control) {
+                return Err("The mail account name is not valid.".into());
+            }
+        }
+        if !is_email_address(&self.from) {
+            return Err("Enter the sender's e-mail address, like spotter@example.org.".into());
+        }
+        Ok(())
+    }
+
+    /// The account to sign in with, when there is one.
+    pub fn account(&self) -> Option<&str> {
+        self.username.as_deref().map(str::trim).filter(|u| !u.is_empty())
     }
 }
 
@@ -220,5 +291,115 @@ mod tests {
         assert_eq!(q.mode, NotifyMode::NewerThanInstalled);
         assert!(q.nag && q.quiet_hours.is_some());
         assert_eq!(toml::from_str::<NotificationPolicy>(&toml::to_string(&q).unwrap()).unwrap(), q);
+    }
+}
+
+#[cfg(test)]
+mod smtp_tests {
+    use super::*;
+
+    fn ok() -> SmtpSettings {
+        SmtpSettings {
+            host: "smtp.example.org".into(),
+            port: 587,
+            security: SmtpSecurity::StartTls,
+            username: Some("spotter".into()),
+            from: "spotter@example.org".into(),
+        }
+    }
+
+    #[test]
+    fn addresses_are_plain_mailboxes() {
+        for good in ["a@b.test", "first.last+tag@sub.example.org"] {
+            assert!(is_email_address(good), "{good}");
+        }
+        for bad in [
+            "",
+            "a",
+            "a@b",
+            "@b.test",
+            "a@.test",
+            "a@b.",
+            "a b@c.test",
+            "a@b@c.test",
+            "Name <a@b.test>",
+            "a,b@c.test",
+            "a\n@b.test",
+            "x@y.test\r\nBcc: z@y.test",
+        ] {
+            assert!(!is_email_address(bad), "{bad:?}");
+        }
+        assert!(!is_email_address(&format!("{}@b.test", "a".repeat(260))));
+    }
+
+    #[test]
+    fn smtp_settings_say_what_to_fix() {
+        assert!(ok().check().is_ok());
+        assert_eq!(ok().account(), Some("spotter"));
+        let mut s = ok();
+        s.username = Some("  ".into());
+        assert_eq!(s.account(), None);
+        s.username = None;
+        assert_eq!(s.account(), None);
+        assert!(s.check().is_ok(), "a relay may need no account");
+        for (tweak, word) in [
+            (SmtpSettings { host: " ".into(), ..ok() }, "server"),
+            (
+                SmtpSettings {
+                    host: "smtp.example.org/x".into(),
+                    ..ok()
+                },
+                "server",
+            ),
+            (
+                SmtpSettings {
+                    host: "u@smtp.example.org".into(),
+                    ..ok()
+                },
+                "server",
+            ),
+            (
+                SmtpSettings {
+                    host: "a".repeat(300),
+                    ..ok()
+                },
+                "server",
+            ),
+            (SmtpSettings { port: 0, ..ok() }, "port"),
+            (
+                SmtpSettings {
+                    username: Some("a\nb".into()),
+                    ..ok()
+                },
+                "account",
+            ),
+            (
+                SmtpSettings {
+                    username: Some("a".repeat(300)),
+                    ..ok()
+                },
+                "account",
+            ),
+            (
+                SmtpSettings {
+                    from: "nobody".into(),
+                    ..ok()
+                },
+                "sender",
+            ),
+        ] {
+            let e = tweak.check().unwrap_err();
+            assert!(e.contains(word), "{e}");
+        }
+    }
+
+    #[test]
+    fn smtp_settings_round_trip_and_default_to_starttls() {
+        let json = serde_json::to_string(&ok()).unwrap();
+        assert!(json.contains("\"start-tls\""), "{json}");
+        let back: SmtpSettings = serde_json::from_str(r#"{"host":"h.test","port":25,"from":"a@b.test"}"#).unwrap();
+        assert_eq!((back.security, back.username), (SmtpSecurity::StartTls, None));
+        let none: SmtpSecurity = serde_json::from_str("\"none\"").unwrap();
+        assert_eq!(none, SmtpSecurity::None);
     }
 }

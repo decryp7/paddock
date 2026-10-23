@@ -147,7 +147,7 @@ impl Engine {
         })?;
         let loaded = config_store::load(&cfg.data_dir.join("spotter.toml"));
         let mut warnings = loaded.warnings;
-        let (db, db_warnings) = Db::open(&cfg.data_dir.join("spotter.db"));
+        let (db, db_warnings) = Db::open(&cfg.data_dir.join("spotter.db"))?;
         warnings.extend(db_warnings);
         let (mut states, state_warnings) = db.load_states()?;
         warnings.extend(state_warnings);
@@ -288,7 +288,11 @@ impl Engine {
             .collect();
         Ok(WatchDetail {
             summary: self.summary_of(&spec),
-            history: state.history.iter().map(ReleaseView::from).collect(),
+            history: state
+                .history
+                .iter()
+                .map(|k| ReleaseView::from(k).with_upgrade_command(&spec.source))
+                .collect(),
             checks: state.checks.iter().cloned().collect(),
             secrets_set,
             products: product_views(&spec, &state),
@@ -314,7 +318,10 @@ impl Engine {
             source_description: described,
             paused: spec.paused,
             checking,
-            latest: state.latest.as_ref().map(ReleaseView::from),
+            latest: state
+                .latest
+                .as_ref()
+                .map(|k| ReleaseView::from(k).with_upgrade_command(&spec.source)),
             acknowledged: state.acknowledged.as_ref().map(|v| v.text.clone()),
             installed: state.installed.as_ref().map(|v| v.text.clone()),
             unseen: state.has_unseen(),
@@ -340,14 +347,29 @@ impl Engine {
 
     /// Finds the feeds a page advertises.
     pub async fn discover_feeds(&self, url: &str) -> Result<Vec<DiscoveredFeed>> {
+        self.discover_feeds_at(url, false).await
+    }
+
+    /// [`Engine::discover_feeds`] with the local-address rule passed in (a page on this computer is for tests only).
+    async fn discover_feeds_at(&self, url: &str, allow_local: bool) -> Result<Vec<DiscoveredFeed>> {
         let request = spotter_core::source::HttpRequest::get(url).header("Accept", "text/html, application/xhtml+xml");
         let parsed = url::Url::parse(url).map_err(|_| EngineError::BadRequest(format!("\"{url}\" is not a web address.")))?;
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err(EngineError::BadRequest("Enter an http:// or https:// address.".into()));
         }
-        match self.inner.fetcher.get(&request, &Default::default()).await {
-            Ok(crate::fetch::Fetched::Body { bytes, final_url, .. }) => Ok(discover_feeds(&String::from_utf8_lossy(&bytes), &final_url)),
-            Ok(crate::fetch::Fetched::NotModified) => Ok(Vec::new()),
+        match self
+            .inner
+            .fetcher
+            .get(
+                &request,
+                &crate::fetch::FetchOptions {
+                    allow_local,
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            Ok(fetched) => Ok(feeds_in(fetched)),
             Err(e) => Err(EngineError::Unavailable(e.message().to_string())),
         }
     }
@@ -439,10 +461,14 @@ impl Engine {
                 };
                 Ok((scan.candidates, Some(facts)))
             }
-            _ => match self.inner.checker.gather(watch, secrets, None, None, None, now).await? {
-                crate::pipeline::Gathered::Unchanged => Ok((Vec::new(), None)),
-                crate::pipeline::Gathered::Fresh { candidates, .. } => Ok((candidates, None)),
-            },
+            _ => Ok((
+                self.inner
+                    .checker
+                    .gather(watch, secrets, None, None, None, now)
+                    .await?
+                    .into_candidates(),
+                None,
+            )),
         }
     }
 
@@ -537,11 +563,11 @@ impl Engine {
             // overdue under the new schedule runs once, not repeatedly).
             let last = lock(&self.inner.states).get(&id).and_then(|s| s.last_check);
             let next = self.next_check_after(&draft, last.unwrap_or_else(|| self.now()), 0);
-            if let Some(state) = lock(&self.inner.states).get_mut(&id) {
+            let snapshot = lock(&self.inner.states).get_mut(&id).map(|state| {
                 state.next_check = Some(next);
-                let snapshot = state.clone();
-                self.inner.db.save_state(&id, &snapshot)?;
-            }
+                state.clone()
+            });
+            snapshot.map(|snapshot| self.inner.db.save_state(&id, &snapshot)).transpose()?;
         }
         self.save_config()?;
         self.emit(Change::Watches);
@@ -783,8 +809,22 @@ impl Engine {
                 settings.downloads_folder = None;
             }
         }
+        if let Some(smtp) = &mut settings.smtp {
+            smtp.check().map_err(EngineError::BadRequest)?;
+            smtp.host = smtp.host.trim().to_string();
+            smtp.from = smtp.from.trim().to_string();
+        }
+        let had_mail = lock(&self.inner.doc).settings.smtp.is_some();
         lock(&self.inner.doc).settings = settings.clone();
         self.save_config()?;
+        if had_mail && settings.smtp.is_none() {
+            // Switching mail off forgets its password too; a store that refuses leaves nothing the app can read.
+            let _ = self
+                .inner
+                .svc
+                .secrets
+                .delete(crate::mail::PASSWORD_SCOPE, crate::mail::PASSWORD_KEY);
+        }
         self.emit(Change::Settings);
         Ok(settings)
     }
@@ -857,6 +897,7 @@ fn blank_spec() -> WatchSpec {
 
 /// The products of a watch as the detail page shows them.
 fn product_views(spec: &WatchSpec, state: &WatchState) -> Vec<ProductView> {
+    let release = |k: &spotter_core::state::KnownRelease| ReleaseView::from(k).with_upgrade_command(&spec.source);
     let settings = &spec.tracking.products;
     state
         .products
@@ -865,9 +906,63 @@ fn product_views(spec: &WatchSpec, state: &WatchState) -> Vec<ProductView> {
             id: id.clone(),
             name: settings.display_name(id).to_string(),
             muted: settings.is_muted(id),
-            latest: p.latest.as_ref().map(ReleaseView::from),
+            latest: p.latest.as_ref().map(release),
             unseen: p.has_unseen(),
-            history: p.history.iter().map(ReleaseView::from).collect(),
+            history: p.history.iter().map(release).collect(),
         })
         .collect()
+}
+
+/// The feeds a fetched page advertises (none for "not modified", which a request without validators should not get).
+fn feeds_in(fetched: crate::fetch::Fetched) -> Vec<DiscoveredFeed> {
+    match fetched {
+        crate::fetch::Fetched::Body { bytes, final_url, .. } => discover_feeds(&String::from_utf8_lossy(&bytes), &final_url),
+        crate::fetch::Fetched::NotModified => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_page_on_this_computer_is_refused_unless_allowed_and_then_lists_its_feeds() {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/page", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            while let Ok((mut s, _)) = l.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = s.read(&mut buf);
+                let page = r#"<link rel="alternate" type="application/rss+xml" href="/f.xml">"#;
+                let _ = s.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
+                        page.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(
+            EngineConfig::new(dir.path(), "test"),
+            Services::new(Arc::new(crate::secrets::MemorySecrets::new())),
+        )
+        .unwrap();
+        assert!(matches!(engine.discover_feeds(&url).await, Err(EngineError::Unavailable(_))));
+        assert_eq!(engine.discover_feeds_at(&url, true).await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_page_advertises_its_feeds_and_not_modified_has_none() {
+        let page = r#"<link rel="alternate" type="application/rss+xml" href="/feed.xml">"#;
+        let body = crate::fetch::Fetched::Body {
+            bytes: page.as_bytes().to_vec(),
+            final_url: "https://example.test/".into(),
+            validators: Default::default(),
+        };
+        assert_eq!(feeds_in(body).len(), 1);
+        assert!(feeds_in(crate::fetch::Fetched::NotModified).is_empty());
+    }
 }

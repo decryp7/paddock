@@ -148,6 +148,20 @@ describe('WatchDetailPage', () => {
     expect(backend.calls).toEqual(expect.arrayContaining(['downloadRelease', 'openRelease']));
   });
 
+  it('copies the upgrade command from the upgrade line when the release has one, and shows no button when it has none', async () => {
+    const { f } = await make('w-6');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const copy = q(f, '.upgrade button[aria-label^="Copy the upgrade command"]');
+    expect(copy.getAttribute('title')).toMatch(/^npm install tinyparse@/);
+    await click(f, copy);
+    expect(writeText).toHaveBeenCalledWith(copy.getAttribute('title'));
+    expect(TestBed.inject(ToastStore).toasts().map((t) => t.title)).toContain('Upgrade command copied');
+    TestBed.resetTestingModule();
+    const other = await make('w-1');
+    expect(q(other.f, '.upgrade button[aria-label^="Copy the upgrade command"]')).toBeNull();
+  });
+
   it('copies the address from the header button and the menu', async () => {
     const { f } = await make();
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -251,8 +265,10 @@ describe('WatchDetailPage', () => {
     await click(f, q(f, `button[aria-label="Download ${version.version}"]`));
     const label = `More actions for ${version.version}`;
     const entries = await openMenu(f, label);
-    expect(entries.map((e) => text(e))).toEqual(version.sha256 ? ['Copy link', 'Copy SHA-256', 'Mark as installed', 'Mark as seen'] : ['Copy link', 'Mark as installed', 'Mark as seen']);
-    entries[0]!.click();
+    expect(entries.map((e) => text(e))).toEqual(version.sha256
+        ? ['Show details', 'Open release', 'Download', 'Copy link', 'Copy SHA-256', 'Mark as installed', 'Mark as seen']
+        : ['Show details', 'Open release', 'Download', 'Copy link', 'Mark as installed', 'Mark as seen']);
+    byText(document.body, '[cdkMenuItem]', 'Copy link')!.click();
     expect(writeText).toHaveBeenCalledWith(version.location);
     await pick(f, label, 'Mark as seen');
     await pick(f, label, 'Mark as installed');

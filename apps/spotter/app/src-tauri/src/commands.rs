@@ -383,6 +383,59 @@ pub async fn choose_program<R: Runtime>(app: AppHandle<R>) -> Out<Option<String>
     Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.display().to_string()))
 }
 
+// ---- avatars ----
+
+/// `watch_avatar`: the picture of a watch (`null` when there is none: the UI draws a monogram).
+#[tauri::command]
+pub async fn watch_avatar(state: State<'_, Shared>, id: String) -> Out<Option<AvatarDto>> {
+    text_ok("watch id", &id)?;
+    Ok(state.engine.watch_avatar(&id).await?.as_ref().map(Into::into))
+}
+
+/// `preset_avatar`: the picture of a catalogue preset.
+#[tauri::command]
+pub async fn preset_avatar(state: State<'_, Shared>, id: String) -> Out<Option<AvatarDto>> {
+    text_ok("preset id", &id)?;
+    Ok(state.engine.preset_avatar(&id).await?.as_ref().map(Into::into))
+}
+
+/// `kind_avatar`: the mark bundled for a source kind (no network).
+#[tauri::command]
+pub async fn kind_avatar(state: State<'_, Shared>, kind: String) -> Out<Option<AvatarDto>> {
+    text_ok("source kind", &kind)?;
+    Ok(state.engine.kind_avatar(&kind).as_ref().map(Into::into))
+}
+
+// ---- e-mail channel ----
+
+/// `mail_status`: whether a mail server and a password are set up.
+#[tauri::command]
+pub async fn mail_status(state: State<'_, Shared>) -> Out<MailStatusDto> {
+    let engine = state.engine.clone();
+    blocking(move || Ok(engine.mail_status().into())).await
+}
+
+/// `set_mail_password`: stores the mail account's password in the credential store (`null` or empty removes it).
+#[tauri::command]
+pub async fn set_mail_password(state: State<'_, Shared>, password: Option<String>) -> Out<MailStatusDto> {
+    if password.as_ref().is_some_and(|p| p.len() > crate::credentials::MAX_SECRET_LEN) {
+        return Err(CommandError::bad("The password is too long."));
+    }
+    let engine = state.engine.clone();
+    blocking(move || {
+        engine.set_mail_password(password.as_deref())?;
+        Ok(engine.mail_status().into())
+    })
+    .await
+}
+
+/// `send_test_email`: sends a test message through the saved mail settings; the error says what to check.
+#[tauri::command]
+pub async fn send_test_email(state: State<'_, Shared>, to: String) -> Out<()> {
+    text_ok("address", &to)?;
+    Ok(state.engine.send_test_email(&to).await?)
+}
+
 // ---- presets, discovery, rendering, imports ----
 
 /// `presets`.
@@ -470,6 +523,14 @@ pub async fn show_main_window<R: Runtime>(app: AppHandle<R>, route: Option<Strin
 pub async fn hide_tray<R: Runtime>(app: AppHandle<R>) -> Out<()> {
     let handle = app.clone();
     app.run_on_main_thread(move || tray::hide_popup(&handle))
+        .map_err(|e| CommandError::internal(e.to_string()))
+}
+
+/// `fit_tray`: fits the tray popup's height to its content (logical pixels, as the page measured it).
+#[tauri::command]
+pub async fn fit_tray<R: Runtime>(app: AppHandle<R>, height: f64) -> Out<()> {
+    let handle = app.clone();
+    app.run_on_main_thread(move || tray::fit_popup(&handle, height))
         .map_err(|e| CommandError::internal(e.to_string()))
 }
 

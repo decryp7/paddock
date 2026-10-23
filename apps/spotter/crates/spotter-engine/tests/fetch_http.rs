@@ -90,7 +90,7 @@ async fn redirects_are_followed_and_capped() {
     let e = few.get(&HttpRequest::get(format!("{base}/a")), &local()).await.unwrap_err();
     assert!(e.message().contains("too often"), "{}", e.message());
     assert_eq!(f.config().max_redirects, FetchConfig::new("x").max_redirects);
-    let _ = f.client();
+    let _ = f.client_for(false);
 }
 
 #[tokio::test]
@@ -104,6 +104,7 @@ async fn validators_give_not_modified_and_bad_requests_fail_early() {
             last_modified: Some("Wed, 21 Oct 2026 07:28:00 GMT".into()),
         }),
         credentials: None,
+        max_body: None,
     };
     assert!(matches!(
         f.get(&HttpRequest::get(format!("{base}/")), &opts).await.unwrap(),
@@ -167,6 +168,7 @@ async fn registries_hand_out_tokens_once() {
         allow_local: true,
         conditional: None,
         credentials: Some(("user".into(), "pw".into())),
+        max_body: None,
     };
     // The server keeps answering 401 (it only checks nothing): the second 401 is the final answer.
     let e = f.get(&HttpRequest::get(format!("{base}/v2/x")), &opts).await.unwrap_err();

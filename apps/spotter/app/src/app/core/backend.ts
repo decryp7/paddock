@@ -1,5 +1,7 @@
 import { InjectionToken } from '@angular/core';
 import type {
+  Avatar,
+  MailStatus,
   AppEvent,
   AppInfo,
   AppUpdateCheck,
@@ -101,6 +103,19 @@ export interface SpotterBackend {
   /** Builds drafts from a winget export, Brewfile or OPML text. */
   importList(format: ImportFormat, text: string): Promise<ImportResult>;
 
+  // Avatars and e-mail
+  /** The picture of a watch: from its site (cached, offline-safe), else the bundled mark for its kind, else null (monogram). */
+  watchAvatar(id: string): Promise<Avatar | null>;
+  /** The picture of a catalogue preset. */
+  presetAvatar(id: string): Promise<Avatar | null>;
+  /** The mark bundled for a source kind (no network). */
+  kindAvatar(kind: string): Promise<Avatar | null>;
+  mailStatus(): Promise<MailStatus>;
+  /** Stores the mail account's password in the credential store (null removes it). */
+  setMailPassword(password: string | null): Promise<MailStatus>;
+  /** Sends a test message through the saved mail settings; rejects with what to check. */
+  sendTestEmail(to: string): Promise<void>;
+
   // Spotter's own updates
   appUpdateStatus(): Promise<AppUpdateStatus>;
   checkAppUpdate(): Promise<AppUpdateCheck>;
@@ -114,6 +129,8 @@ export interface SpotterBackend {
   showMainWindow(route: string | null): Promise<void>;
   /** Hides the tray popup. */
   hideTray(): Promise<void>;
+  /** Fits the tray popup's window to its content: `height` in CSS pixels as the page measured it (the shell clamps it). */
+  fitTray(height: number): Promise<void>;
   /** The main window is asked to show a route (Tauri event `spotter://navigate`, payload: the route string). */
   onNavigate(handler: (route: string) => void): Promise<() => void>;
 }

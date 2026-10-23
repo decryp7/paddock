@@ -111,14 +111,14 @@ describe('DashboardPage', () => {
     const f = TestBed.createComponent(DashboardPage);
     await settle(f);
     expect(text(q(f, '#chart-h'))).toBe('Releases per day');
-    expect(q(f, 'sp-chart [role=img]').getAttribute('aria-label')).toMatch(/^Releases found per day: \d+ in total across \d+ watch/);
-    expect(charts[0]!.options).toHaveLength(1);
+    expect(q(f, 'section[aria-labelledby=chart-h] sp-chart [role=img]').getAttribute('aria-label')).toMatch(/^Releases found per day: \d+ in total across \d+ watch/);
+    expect(charts.flatMap((c) => c.options as { series?: { name: string }[] }[]).filter((o) => o.series?.[0]?.name === 'Releases').length).toBeGreaterThanOrEqual(1);
     const year = qa(f, '.seg-tabs button').find((b) => text(b) === '1 year')!;
     year.click();
     await settle(f);
     expect(backend.calls).toContain('dashboard');
     expect(text(q(f, '#chart-h'))).toBe('Releases per week');
-    expect(q(f, 'sp-chart [role=img]').getAttribute('aria-label')).toContain('per week');
+    expect(q(f, 'section[aria-labelledby=chart-h] sp-chart [role=img]').getAttribute('aria-label')).toContain('per week');
     expect(qa(f, '.seg-tabs button').find((b) => text(b) === '1 year')!.getAttribute('aria-pressed')).toBe('true');
     // Choosing the current range again does not ask again.
     const calls = backend.calls.length;
@@ -135,9 +135,8 @@ describe('DashboardPage', () => {
       return { ...d, watches: d.watches.map((w) => ({ ...w, releases: w.releases.map(() => 0) })) };
     });
     const { f } = await make(backend);
-    expect(f.nativeElement.querySelector('sp-chart')).toBeNull();
-    expect(f.nativeElement.querySelector('sp-cadence-cards')).toBeNull();
     expect(q(f, '#chart-h')).toBeNull();
+    expect(f.nativeElement.querySelector('sp-cadence-cards')).toBeNull();
   });
 
   it('opens a watch from a feed row', async () => {

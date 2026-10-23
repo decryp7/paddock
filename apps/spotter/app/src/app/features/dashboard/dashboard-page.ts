@@ -4,8 +4,19 @@ import { RouterLink } from '@angular/router';
 
 import type { DashboardRange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
+import { ThemeService } from '../../core/theme.service';
 import { Chart } from '../../shared/charts/chart';
-import { releaseChartSummary, releaseSeries, releasesOption } from '../../shared/charts/chart-options';
+import {
+  downloadCounts,
+  downloadsOption,
+  downloadsSummary,
+  releaseChartSummary,
+  releaseSeries,
+  releasesOption,
+  reliabilityCounts,
+  reliabilityOption,
+  reliabilitySummary,
+} from '../../shared/charts/chart-options';
 import { formatDuration } from '../../shared/format';
 import { AgoPipe, AgoShortPipe } from '../../shared/ui/ago.pipe';
 import { Avatar } from '../../shared/ui/avatar';
@@ -38,6 +49,7 @@ export class DashboardPage {
   protected readonly watches = inject(WatchesStore);
   protected readonly settings = inject(SettingsStore);
   private readonly backend = inject(BACKEND);
+  private readonly theme = inject(ThemeService);
   protected readonly ranges = RANGES;
 
   protected readonly dashboard = computed(() => this.store.dashboard().value);
@@ -63,6 +75,31 @@ export class DashboardPage {
   protected readonly chartLabel = computed(() => {
     const d = this.dashboard();
     return d ? releaseChartSummary(d, this.series()) : '';
+  });
+  /** Checks in the range; the chart is only drawn when some failed (a chart of all-good bars says nothing). */
+  protected readonly reliability = computed(() => {
+    const d = this.dashboard();
+    return d ? reliabilityCounts(d) : { total: 0, failed: 0 };
+  });
+  protected readonly reliabilityOption = computed(() => {
+    const d = this.dashboard();
+    return d ? reliabilityOption(d, this.theme.chartTokens()) : {};
+  });
+  protected readonly reliabilityLabel = computed(() => {
+    const d = this.dashboard();
+    return d ? reliabilitySummary(d) : '';
+  });
+  protected readonly downloads = computed(() => {
+    const d = this.dashboard();
+    return d ? downloadCounts(d) : { total: 0, failed: 0 };
+  });
+  protected readonly downloadsOption = computed(() => {
+    const d = this.dashboard();
+    return d ? downloadsOption(d, this.theme.chartTokens()) : {};
+  });
+  protected readonly downloadsLabel = computed(() => {
+    const d = this.dashboard();
+    return d ? downloadsSummary(d) : '';
   });
   protected readonly computed = computed(() => {
     const d = this.dashboard();

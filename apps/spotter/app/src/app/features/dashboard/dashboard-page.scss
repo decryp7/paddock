@@ -64,6 +64,13 @@
 }
 .chart {
   height: 240px;
+  &.tall {
+    height: 340px;
+  }
+}
+.quiet {
+  margin: 0;
+  color: var(--pd-text-muted);
 }
 .empty {
   display: grid;
