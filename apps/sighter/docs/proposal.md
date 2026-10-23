@@ -354,7 +354,7 @@ Besides the API for engineers' code, Sighter can author and run test cases itsel
 
 **Authoring (studio)**
 - **Record a flow**: the click/key track from the recorder (section 4) becomes steps, each with a resolved query (element name or class plus text anchor), not coordinates.
-- **Visual step editor**: per step, a target (element name or class plus a text anchor), an action (click, type, press, drag, scroll), an assertion (element present/absent, text, `assert_screen`) and a wait (appears/disappears, timeout).
+- **Visual step editor** (a step target mirrors the locator API of 7.9: `class`, `name`, `text`, `right_of`/`near`/`inside`, `cell = {row, column}`; see the README example): per step, a target (element name or class plus a text anchor), an action (click, type, press, drag, scroll), an assertion (element present/absent, text, `assert_screen`) and a wait (appears/disappears, timeout).
 - **Data-driven parameter tables**: a step or whole test runs once per table row (7.4).
 - **Reusable sub-flows**: a named sequence (for example "log in") called from many tests, with parameters.
 - **Import `.sighterplan` from Pacenotes** (7.2): imported cases become editable tests; unknown elements become record tasks.
@@ -385,7 +385,7 @@ User decision 2026-10-23: **one client API style only, Playwright-style locators
 - **Retrying assertions**: `Expect(locator).ToHaveTextAsync("Saved")`, `ToBeVisibleAsync()`, `ToBeEnabledAsync()` retry until the timeout, so tests need no sleeps.
 - **Finding**: `GetByText`, `GetByKind(Kind.Button, name: "Save")` (the detector class plus OCR name), `.Near("label")`, `.RightOf`, `.Below`, `.Within(region | window)`, `.Filter(...)`, `.ByImage(template)`, `.MinConfidence(0.8)`; `Locator.And/Or` to combine.
 - **Grid helpers**: `grid.Cell(row, column)` by row and column header (7.13).
-- **Actions**: `ClickAsync`, `FillAsync` (focus click plus typing), `PressAsync`, `DragToAsync`, `CaptureAsync`; all go through the guarded input driver (`act`) or the engineer's own.
+- **Actions**: `ClickAsync`, `FillAsync` (focus click plus typing), `PressAsync`, `DragToAsync`, `CaptureAsync`; session-level `Sighter.Keyboard.PressAsync("Control+C")`, `Sighter.Mouse` and `Sighter.Clipboard.ReadAsync()` for cross-app flows; all go through the guarded input driver (`act`) or the engineer's own.
 - **Element info**: box, text, kind, confidence, `resolvedBy` (cache, template, OCR, detector or VLM) and `modelVersion`.
 - **Sessions**: `Sighter.Launch(...)` / `Attach(processName | title | pid)` give an app with `MainWindow`; the model pin goes in the session options (`app@3`).
 
@@ -439,7 +439,7 @@ TypeScript and C++ (`win.getByText("Save").click()`, `win.get_by_text("Save").cl
 - No `AutomationId`: stable names come from Sighter's labels instead.
 - `IsEnabled`, checked and toggle state are inferred from detector classes and can be wrong where the app draws states unusually; confidence is exposed so tests can assert on it. Value comes from OCR; expand/collapse is `act` plus a verifying locator.
 
-**Failures** throw typed exceptions (`ElementNotFound`, `Ambiguous`, `NeedsLabelling`, `LowConfidence`, `NotActionable`) carrying the screenshot path, the candidates and the review-queue link (`/v1/flag`); **never a blind click**: an action on an ambiguous or below-threshold match is refused, not guessed.
+**Failures** throw typed exceptions (`ElementNotFound`, `Ambiguous`, `NeedsLabelling`, `LowConfidence`, `NotActionable`) carrying the screenshot path (`ScreenshotPath`), the candidates, the review-queue link (`ReviewLink`, `/v1/flag`) and, when Pitwall is available, its diagnosis (`Diagnosis`, 7.10); **never a blind click**: an action on an ambiguous or below-threshold match is refused, not guessed.
 
 Familiar to Playwright users; FlaUI users keep their FlaUI code and add Sighter locators where UIA cannot see (7.11).
 
@@ -565,7 +565,7 @@ firstOf(driver.findElement(AppiumBy.accessibilityId("Save")), Sighter.on(driver)
 ### 7.12 Multi-application tests
 User decision 2026-10-23: a test case may involve multiple applications running and switching.
 - **Sessions**: one test can hold several sessions: `Sighter.Launch(...)` / `Attach(processName | title | pid)`, each with its own window tracking and **its own model** (per-app models in the registry, auto-selected by process name and window class), plus an **OS dialogs model** for file pickers, UAC-like prompts and message boxes, shared across apps.
-- **Switching**: `app.Activate()` brings the app to the front and waits until focused, verified through the foreground-window API and the screen fingerprint. Windows from child or helper processes are handled through `app.Windows` and `WaitForWindow(title|class)`.
+- **Switching**: `app.ActivateAsync()` brings the app to the front and waits until focused, verified through the foreground-window API and the screen fingerprint. Windows from child or helper processes are handled through `app.Windows` and `WaitForWindow(title|class)`.
 - **Cross-app flows**: copy in A and paste in B; drag between windows; one app launching another (for example an installer opening the product), with `WaitForProcess` and `WaitForWindow`.
 - **Screen-level search**: `Sighter.Desktop.GetByText("Update available")` (a locator over all windows and monitors) searches across all windows and monitors when you do not know which app shows the thing (for example a toast or tray balloon). It is occlusion-aware: only visible pixels count, and z-order is checked before acting.
 - **Multiple monitors and DPI**: per-monitor coordinates; regions are always relative to the window and converted centrally.
