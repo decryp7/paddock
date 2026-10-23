@@ -251,12 +251,11 @@ bounds. The target is at most about 1 % of the machine. See [architecture.md](ar
 
 ## WP-10 Watched folders with keep-for times
 
-- **Scope.** The user watches folders and sets a keep-for time (from 10 minutes to 10 days); file-change notifications (FSEvents,
-  inotify, `ReadDirectoryChangesW`) plus a periodic sweep remove expired files to the Trash or quarantine, with a dry run,
+- **Scope.** The user watches folders and sets a keep-for time (measured in days); a periodic sweep only (decision 2026-10-23: no live file-change notifications, no watchers;
+  [ADR 0019](adr/0019-watched-folders-and-browser-lookups.md)) removes expired files to the quarantine, with a dry run,
   templates (Downloads installers, screenshots, build output) and an activity entry with undo per sweep.
 - **Acceptance.** Admission through the same policy as cleanup (ADR 0005): never links, never outside the watched root, never a
-  personal folder unless the user chose it; a dry run shows exactly what would go; notifications are debounced and a missed
-  event is caught by the sweep.
+  personal folder unless the user chose it; a dry run shows exactly what would go; the periodic sweep is the only trigger.
 - **Depends on.** WP-04 (policy, quarantine, Trash).
 - **Touches.** new `crates/dyno-core/src/watch.rs`, `crates/dyno-agent/src/watch/**`, settings (versioned migration), UI page.
 

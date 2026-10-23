@@ -23,7 +23,9 @@ web. WP-35 reads the network interfaces in the background.
    housekeeping files are never moved. A file counts from the later of its creation and modification time.
 5. **A periodic sweep, no file-change notifications.** FSEvents/inotify/`ReadDirectoryChangesW` add three platform code paths and
    a dependency for a keep-for time measured in minutes at best; a sweep every tenth of the keep time (1 to 15 minutes)
-   is exact enough and also catches anything an event would miss. Revisit if sub-minute times are wanted.
+   is exact enough and also catches anything an event would miss. **Resolved (user decision, 2026-10-23): watched folders use the periodic
+   sweep only, with no live file-change notifications and no watchers, because keep-for times are in days.** The former open point
+   ("revisit if sub-minute times are wanted") is closed: it is not planned.
 6. **Searches open the default browser on a click.** The agent builds the address (`weblinks`) from a typed value: a
    redacted, user-edited text, or a 64-digit hash. The shell opens only `https://` addresses. Dyno fetches and uploads
    nothing; the file hash is computed locally and shown before anything opens.
