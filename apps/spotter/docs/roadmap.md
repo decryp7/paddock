@@ -12,7 +12,11 @@ calm tables, wizard tiles, tray, empty states, both themes); check schedules (ev
 `real_browser` fix (page budget starts after the browser is up, stability flags, lighter process snapshots); engine and sources
 coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs/screenshots` (dark and light).
 
-1. **CI on three OSes:** confirm the newest run is green (Windows `real_browser` fix is inferred from logs, not reproduced).
+1. **CI on three OSes (paused 2026-10-23 for Debrief, run 6125 cancelled):** push adbd36d is not yet verified. Run 6115 (2f0c152): all green except Windows `real_browser`.
+   Run 0053a21 showed the 3 slow-load tests fixed and 2 left: the watchdog test (its 4 s limit counts from spawn, so a slow start killed the browser
+   before launch returned; test now allows for START_LIMIT) and `challenges_become_needs_you` (a DevTools call timed out because 8 browsers started at once
+   on the runner; the file's tests now take turns via `serial()`). Next: dispatch/push once Debrief has shipped, read logs with /tmp-style
+   `actions/runs/<run>/jobs` then `actions/jobs/<id>/logs`. Also added: stale-bundle guards in the bundle job (not yet run in CI).
 2. Avatars are monograms only: fetch and cache favicons / org avatars in the engine, bundle marks for the catalogue entries.
 3. Right-click context menus and Up/Down row navigation in the feed and tables; sticky headers on the detail tables.
 4. Tray extras: popup height fitted to content, rounded corners on Windows 11 (DWMWCP_ROUND), toast action buttons and
