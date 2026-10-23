@@ -698,7 +698,7 @@ export class MockBackend implements SpotterBackend {
     return this.call(`presetAvatar:${id}`, () => {
       const preset = PRESETS.find((p) => p.id === id);
       if (!preset) throw problem('notFound', `There is no preset "${id}".`);
-      return mockMark(preset.spec.source.kind);
+      return mockMark(preset.draft.source.kind);
     });
   }
 

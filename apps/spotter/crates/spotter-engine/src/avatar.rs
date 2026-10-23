@@ -315,3 +315,132 @@ impl Engine {
         AvatarView::bundled(kind)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{EngineConfig, Services};
+    use crate::secrets::MemorySecrets;
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    fn png() -> Vec<u8> {
+        let mut b = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
+        b.extend_from_slice(b"IHDR");
+        b.extend_from_slice(&16u32.to_be_bytes());
+        b.extend_from_slice(&16u32.to_be_bytes());
+        b.extend_from_slice(&[8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        b
+    }
+
+    async fn serve(body: Vec<u8>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = listener.accept().await else { return };
+                let body = body.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let _ = s.read(&mut buf).await;
+                    let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                    let _ = s.write_all(head.as_bytes()).await;
+                    let _ = s.write_all(&body).await;
+                });
+            }
+        });
+        base
+    }
+
+    fn fetcher() -> PoliteFetcher {
+        let mut cfg = crate::fetch::FetchConfig::new("test");
+        cfg.min_host_interval = std::time::Duration::ZERO;
+        PoliteFetcher::new(cfg).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_picture_is_fetched_cached_reused_and_replaced_by_the_mark_when_unusable() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = AvatarCache::new(dir.path().join("avatars"));
+        let source = |base: &str| SourceConfig::new("feed", &[("url", &format!("{base}/feed.xml"))]);
+        let good = serve(png()).await;
+        let first = avatar_for(&cache, &fetcher(), &source(&good), true, 1000).await.unwrap();
+        assert_eq!((first.source, first.mime), (AvatarSource::Remote, "image/png"));
+        assert!(first.data_url().starts_with("data:image/png;base64,"));
+        // Fresh: served from disk even when the site is gone.
+        let again = avatar_for(
+            &cache,
+            &fetcher(),
+            &SourceConfig::new("feed", &[("url", &format!("{good}/other"))]),
+            true,
+            2000,
+        )
+        .await;
+        assert_eq!(again.unwrap(), first);
+
+        let junk = serve(b"<html>not an image</html>".to_vec()).await;
+        let mark = avatar_for(&cache, &fetcher(), &source(&junk), true, 1000).await.unwrap();
+        assert_eq!(mark.source, AvatarSource::Bundled);
+        // A watch that may not reach local addresses never asks this computer.
+        let empty = AvatarCache::new(dir.path().join("elsewhere"));
+        let refused = avatar_for(&empty, &fetcher(), &source(&good), false, 1000).await.unwrap();
+        assert_eq!(refused.source, AvatarSource::Bundled);
+        // A folder has no site, only the mark; an unknown kind has nothing.
+        let folder = SourceConfig::new("folder", &[("path", "/srv")]);
+        assert_eq!(
+            avatar_for(&cache, &fetcher(), &folder, true, 0).await.unwrap().source,
+            AvatarSource::Bundled
+        );
+        assert!(avatar_for(&cache, &fetcher(), &SourceConfig::new("nope", &[]), true, 0)
+            .await
+            .is_none());
+    }
+
+    #[test]
+    fn the_cache_remembers_images_and_absence_and_forgets_damage() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = AvatarCache::new(dir.path());
+        let image = Entry {
+            fetched_ms: 10,
+            image: Some((ImageKind::Png, png())),
+        };
+        cache.store("a", &image);
+        assert_eq!(cache.load("a"), Some(image.clone()));
+        assert!(image.fresh(10) && !image.fresh(10 + FRESH_MS) && !image.fresh(5));
+        let absent = Entry {
+            fetched_ms: 10,
+            image: None,
+        };
+        cache.store("a", &absent);
+        assert_eq!(cache.load("a"), Some(absent.clone()));
+        assert!(absent.fresh(10 + ABSENT_MS - 1) && !absent.fresh(10 + ABSENT_MS));
+        std::fs::write(dir.path().join("b.json"), b"{broken").unwrap();
+        assert_eq!(cache.load("b"), None);
+        cache.store("c", &image);
+        std::fs::write(dir.path().join("c.img"), b"<svg onload='x()'/>").unwrap();
+        assert_eq!(cache.load("c"), None, "a changed file is checked again and refused");
+        std::fs::create_dir_all(dir.path().join("d.img")).unwrap();
+        cache.store("d", &image);
+        assert_eq!(cache.load("d"), None);
+    }
+
+    #[tokio::test]
+    async fn the_engine_answers_for_kinds_unknown_ids_and_registry_presets() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(EngineConfig::new(dir.path(), "test"), Services::new(Arc::new(MemorySecrets::new()))).unwrap();
+        assert_eq!(engine.kind_avatar("github").unwrap().source, AvatarSource::Bundled);
+        assert!(engine.kind_avatar("nope").is_none());
+        assert!(matches!(engine.watch_avatar("missing").await, Err(EngineError::NotFound(_))));
+        assert!(matches!(engine.preset_avatar("missing").await, Err(EngineError::NotFound(_))));
+        let mark = engine.preset_avatar("serde").await.unwrap().unwrap();
+        assert_eq!(mark.source, AvatarSource::Bundled);
+        let spec = spotter_core::watch::WatchSpec {
+            id: String::new(),
+            name: "Feed".into(),
+            source: SourceConfig::new("folder", &[("path", &dir.path().display().to_string())]),
+            ..engine.presets().iter().find(|p| p.id == "serde").unwrap().spec.clone()
+        };
+        let id = engine.save_watch(spec, &Default::default()).unwrap().id;
+        assert_eq!(engine.watch_avatar(&id).await.unwrap().unwrap().source, AvatarSource::Bundled);
+    }
+}

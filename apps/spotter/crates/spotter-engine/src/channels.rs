@@ -66,3 +66,53 @@ impl Engine {
             .map_err(|e| EngineError::Unavailable(e.message()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{EngineConfig, Services};
+    use crate::secrets::MemorySecrets;
+    use spotter_core::notify::{SmtpSecurity, SmtpSettings};
+    use std::sync::Arc;
+
+    fn engine(dir: &std::path::Path) -> Engine {
+        Engine::open(EngineConfig::new(dir, "test"), Services::new(Arc::new(MemorySecrets::new()))).unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_test_message_needs_an_address_a_server_and_a_reachable_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = engine(dir.path());
+        assert_eq!(
+            engine.mail_status(),
+            MailStatus {
+                configured: false,
+                password_set: false
+            }
+        );
+        assert_eq!(engine.send_test_email("nobody").await.unwrap_err().code(), "badRequest");
+        assert_eq!(engine.send_test_email("me@example.test").await.unwrap_err().code(), "badRequest");
+
+        let mut settings = engine.settings();
+        settings.smtp = Some(SmtpSettings {
+            host: "127.0.0.1".into(),
+            port: 1,
+            security: SmtpSecurity::None,
+            username: None,
+            from: "spotter@example.test".into(),
+        });
+        engine.save_settings(settings).unwrap();
+        assert!(engine.mail_status().configured);
+        let e = engine.send_test_email("me@example.test").await.unwrap_err();
+        assert_eq!(e.code(), "unavailable");
+        assert!(e.to_string().contains("could not be reached"), "{e}");
+
+        engine.set_mail_password(Some("pw")).unwrap();
+        assert!(engine.mail_status().password_set);
+        assert!(
+            engine.mail_account().unwrap().password.is_none(),
+            "no account name: the password is not used"
+        );
+        engine.set_mail_password(None).unwrap();
+    }
+}

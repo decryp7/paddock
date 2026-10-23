@@ -208,3 +208,96 @@ fn classify(e: &lettre::transport::smtp::Error, host: &str) -> MailError {
     }
     MailError::Connect(host.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(port: u16, security: SmtpSecurity) -> MailAccount {
+        MailAccount {
+            settings: SmtpSettings {
+                host: "127.0.0.1".into(),
+                port,
+                security,
+                username: None,
+                from: "spotter@example.test".into(),
+            },
+            password: None,
+        }
+    }
+
+    fn message() -> MailMessage {
+        MailMessage {
+            to: "me@example.test".into(),
+            subject: "Subject".into(),
+            body: "€".repeat(30_000),
+        }
+    }
+
+    #[test]
+    fn subjects_lose_control_characters_and_long_bodies_are_cut_on_a_character() {
+        assert_eq!(single_line("a\r\nb\tc", 10), "abc");
+        assert_eq!(single_line("  padded  ", 10), "padded");
+        assert_eq!(single_line(&"x".repeat(500), 200).len(), 200);
+        let built = build_message(&account(25, SmtpSecurity::None), &message()).unwrap();
+        let text = String::from_utf8_lossy(&built.formatted()).into_owned();
+        assert!(text.contains("Subject: Subject"), "{text}");
+        let bad = MailMessage {
+            to: "x".into(),
+            ..message()
+        };
+        assert!(matches!(
+            build_message(&account(25, SmtpSecurity::None), &bad),
+            Err(MailError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn errors_read_as_advice_and_never_show_the_password() {
+        let a = MailAccount {
+            password: Some("hunter2".into()),
+            ..account(25, SmtpSecurity::None)
+        };
+        assert!(!format!("{a:?}").contains("hunter2"));
+        for e in [
+            MailError::NoPassword,
+            MailError::Tls("h".into()),
+            MailError::Auth("h".into()),
+            MailError::Timeout("h".into()),
+        ] {
+            assert_eq!(e.to_string(), e.message());
+            assert!(e.message().len() > 20);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_server_and_bad_settings_fail_before_anything_is_sent() {
+        let e = send(&account(1, SmtpSecurity::None), &message()).await.unwrap_err();
+        assert!(matches!(e, MailError::Connect(_)), "{e:?}");
+        let mut a = account(1, SmtpSecurity::Tls);
+        a.settings.port = 0;
+        assert!(matches!(send(&a, &message()).await.unwrap_err(), MailError::Invalid(_)));
+        let mut a = account(1, SmtpSecurity::StartTls);
+        a.settings.username = Some("u".into());
+        assert_eq!(send(&a, &message()).await.unwrap_err(), MailError::NoPassword);
+    }
+
+    #[tokio::test]
+    async fn a_silent_server_hits_the_total_limit() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _keep = tokio::spawn(async move {
+            let _held = listener.accept().await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        let e = send_within(
+            &account(port, SmtpSecurity::None),
+            &message(),
+            Duration::from_secs(5),
+            Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(e, MailError::Timeout(_)), "{e:?}");
+    }
+}
