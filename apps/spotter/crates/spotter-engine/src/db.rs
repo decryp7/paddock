@@ -147,9 +147,15 @@ impl Db {
 
     /// A database in memory (tests, and the fallback).
     pub fn in_memory() -> Db {
-        let conn = Connection::open_in_memory().unwrap_or_else(|_| {
-            // Opening an in-memory database only fails when SQLite itself is unusable.
-            Connection::open_in_memory().unwrap_or_else(|e| panic_free_exit(&e))
+        Self::in_memory_with(Connection::open_in_memory, std::process::exit)
+    }
+
+    /// [`Db::in_memory`] with the opener and the way out injected. Opening an in-memory database only fails when
+    /// SQLite itself is unusable; after one retry there is nothing sensible left but to stop (`exit`).
+    fn in_memory_with(open: impl Fn() -> rusqlite::Result<Connection>, exit: fn(i32) -> !) -> Db {
+        let conn = open().or_else(|_| open()).unwrap_or_else(|e| {
+            eprintln!("Spotter cannot use SQLite: {e}");
+            exit(70)
         });
         let _ = migrate(&conn);
         Db {
@@ -463,12 +469,6 @@ impl Db {
     }
 }
 
-/// SQLite is unusable (not just a bad file): there is nothing sensible left to do but stop this operation.
-fn panic_free_exit(e: &rusqlite::Error) -> Connection {
-    eprintln!("Spotter cannot use SQLite: {e}");
-    std::process::exit(70)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,6 +476,29 @@ mod tests {
 
     fn id(s: &str) -> WatchId {
         WatchId::parse(s).unwrap()
+    }
+
+    fn no_exit(code: i32) -> ! {
+        panic!("exit {code}")
+    }
+
+    #[test]
+    fn an_unusable_sqlite_is_retried_once_and_then_stops_with_code_70() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let flaky = || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 {
+                Err(rusqlite::Error::InvalidQuery)
+            } else {
+                Connection::open_in_memory()
+            }
+        };
+        assert!(Db::in_memory_with(flaky, no_exit).path.is_none(), "one failure is retried");
+        assert_eq!(calls.get(), 2);
+        let stopped = std::panic::catch_unwind(|| Db::in_memory_with(|| Err(rusqlite::Error::InvalidQuery), no_exit));
+        let message = *stopped.err().unwrap().downcast::<String>().unwrap();
+        assert_eq!(message, "exit 70");
     }
 
     fn event(at: i64, w: &str) -> Event {

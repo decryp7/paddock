@@ -307,12 +307,12 @@ fn walk(req: &ScanRequest, root: &Path, started: Instant) -> Result<Walked, Stop
                     } else {
                         item.metadata()
                     };
-                    if let Ok(md) = md {
-                        if matched.len() >= spotter_core::limits::MAX_FOLDER_MATCHES {
-                            return Err(Stop::TooManyMatches);
-                        }
-                        matched.push((entry_of(&item.path(), name, &rel, &md), None));
+                    // An entry that vanished since it was listed is simply not there any more.
+                    let Ok(md) = md else { continue };
+                    if matched.len() >= spotter_core::limits::MAX_FOLDER_MATCHES {
+                        return Err(Stop::TooManyMatches);
                     }
+                    matched.push((entry_of(&item.path(), name, &rel, &md), None));
                 }
                 Verdict::Skip(why) if ignored_seen.len() < req.sample_ignored => ignored_seen.push((join_rel(&rel, &name), why)),
                 Verdict::Skip(_) | Verdict::NotThisKind => {}
@@ -445,9 +445,14 @@ mod errno {
 }
 
 pub(crate) fn explain(path: &str, e: std::io::Error) -> SourceError {
+    explain_on(path, e, errno::LOGON, cfg!(target_os = "macos"))
+}
+
+/// [`explain`] with the platform's logon error codes and the macOS privacy hint passed in, so both are testable anywhere.
+fn explain_on(path: &str, e: std::io::Error, logon: &[i32], macos: bool) -> SourceError {
     let code = e.raw_os_error();
     let has = |list: &[i32]| code.is_some_and(|c| list.contains(&c));
-    if has(errno::LOGON) {
+    if has(logon) {
         return SourceError::Unauthorized(format!(
             "{path} needs credentials. Open it once in Explorer and sign in (tick \"Remember my credentials\"), or connect it with \"net use\"; Spotter uses your own sign-in."
         ));
@@ -466,7 +471,7 @@ pub(crate) fn explain(path: &str, e: std::io::Error) -> SourceError {
     match e.kind() {
         ErrorKind::PermissionDenied => SourceError::Unauthorized(format!(
             "You have no access to {path}. Spotter uses your own sign-in: open the folder once in Explorer or Finder to connect, ask for access{}.",
-            if cfg!(target_os = "macos") {
+            if macos {
                 ", or allow Spotter under System Settings > Privacy & Security > Files and Folders"
             } else {
                 ""
@@ -771,6 +776,15 @@ mod tests {
     #[test]
     fn errors_map_to_statuses_with_a_next_step() {
         let io = |k: ErrorKind| std::io::Error::from(k);
+        let logon = explain_on("//srv/share", std::io::Error::from_raw_os_error(86), &[86], false);
+        assert!(
+            matches!(&logon, SourceError::Unauthorized(m) if m.contains("needs credentials")),
+            "{logon:?}"
+        );
+        for (macos, wanted) in [(true, true), (false, false)] {
+            let e = explain_on("/x", io(ErrorKind::PermissionDenied), &[], macos);
+            assert_eq!(e.message().contains("Privacy & Security"), wanted, "{e:?}");
+        }
         let denied = explain("/x", io(ErrorKind::PermissionDenied));
         assert!(matches!(denied, SourceError::Unauthorized(_)) && denied.message().contains("access"));
         let unc = explain(r"\\srv\share", io(ErrorKind::NotFound));
@@ -902,6 +916,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         touch(d.path(), "real.bin", "abc");
         symlink(d.path().join("real.bin"), d.path().join("link.bin")).unwrap();
+        symlink(d.path().join("gone.bin"), d.path().join("dangling.bin")).unwrap();
         touch(d.path(), "locked/inner.bin", "x");
         let locked = d.path().join("locked");
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
@@ -909,16 +924,20 @@ mod tests {
         let s = scan(request(source(d.path(), &[("depth", "1")]))).await.unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(names(&s).contains(&"link.bin".to_string()), "{:?}", names(&s));
-        if !readable {
-            assert!(!names(&s).contains(&"inner.bin".to_string()), "an unreadable sub-folder is skipped");
-        }
+        assert!(
+            !names(&s).contains(&"dangling.bin".to_string()),
+            "a link to nothing has no size or time and is left out"
+        );
+        // (Running as root, the folder stays readable and so is listed.)
+        assert!(
+            readable || !names(&s).contains(&"inner.bin".to_string()),
+            "an unreadable sub-folder is skipped"
+        );
         // An unreadable root is an access message.
         std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
         let denied = std::fs::read_dir(d.path()).is_err();
         let r = scan(request(source(d.path(), &[]))).await;
         std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-        if denied {
-            assert!(matches!(r, Err(SourceError::Unauthorized(_))), "{r:?}");
-        }
+        assert!(!denied || matches!(r, Err(SourceError::Unauthorized(_))), "{r:?}");
     }
 }

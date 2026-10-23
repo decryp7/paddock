@@ -197,9 +197,11 @@ impl Engine {
         if let Ok(Gathered::Fresh { validators, baseline, .. }) = &gathered {
             self.inner.db.store_validators(id, &fp, validators)?;
             if let Some(b) = baseline {
-                if let Ok(json) = serde_json::to_string(b) {
-                    self.inner.db.kv_set(&page_key, &json)?;
-                }
+                // A snapshot is plain data and always serialises; the Option keeps this path free of a dead branch.
+                serde_json::to_string(b)
+                    .ok()
+                    .map(|json| self.inner.db.kv_set(&page_key, &json))
+                    .transpose()?;
             }
         }
         let settings = self.settings();
@@ -380,9 +382,10 @@ impl Engine {
                     name: release.name.clone(),
                     location: release.location.clone(),
                 };
-                if let Ok(json) = serde_json::to_string(&item) {
-                    self.inner.db.queue_digest(&watch.id, now, &json)?;
-                }
+                serde_json::to_string(&item)
+                    .ok()
+                    .map(|json| self.inner.db.queue_digest(&watch.id, now, &json))
+                    .transpose()?;
             }
         }
         if !watch.actions.is_empty() {

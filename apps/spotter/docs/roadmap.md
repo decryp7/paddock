@@ -21,8 +21,11 @@ coverage (98.6% / 98.2% lines, see Engine); screenshots at 1440x900 @2x in `docs
 3. Right-click context menus and Up/Down row navigation in the feed and tables; sticky headers on the detail tables.
 4. Tray extras: popup height fitted to content, rounded corners on Windows 11 (DWMWCP_ROUND), toast action buttons and
    click-through (Open, Mark as seen), e-mail channel delivery.
-5. Coverage: spotter-engine and spotter-sources are below 99% lines; the rest are `?`/`map_err` regions on SQLite and file
-   errors that need fault-injection seams (see the list in the commit 5af6ee0).
+5. Coverage (done 2026-10-23, release prep): `spotter-sources` 99.0% and `spotter-engine` 98.8% lines (`cargo llvm-cov`, summary
+   method); the rest are `?` regions on SQLite and file operations (seek, flush, write, pragma, transactions) that need a
+   fault-injecting database or file layer. Added seams: injected opener and exit for the in-memory database, a size limit
+   parameter for downloads, platform parameters for folder error messages, `Gathered::into_candidates`, `feeds_in`.
+6. App icons are guarded in CI (`scripts/ci/check-icons.mjs`, copied from Pitwall): the artwork must fill the canvas.
 
 ## Renderer
 
@@ -41,11 +44,12 @@ Done: shell (splash, sidebar, banner, toasts, native feel, theme via paddock), T
 dashboard, settings, toasts, editor, detail), pages (dashboard, watches, detail, wizard, settings, tray), 18 Playwright
 flows (Chromium and WebKit, port 4370), `ng build` and `ng lint` clean.
 
+Unit tests (done 2026-10-23): 50 spec files, 402 tests (Vitest + TestBed) covering mock-backend, every store, draft-utils,
+panel/ago/confirm/clipboard/chart and all page components; coverage 99.4% lines, 98.5% statements, 93.1% branches, 96.7%
+functions. `npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities; the suite also passes under
+`TZ=Pacific/Auckland`.
+
 Left:
-- Unit tests: specs exist for core services, format/labels/chart-options and copied utilities (59 tests); still missing for
-  mock-backend, watches/dashboard/settings/editor stores, draft-utils, panel/ago/confirm/clipboard/chart, and every page
-  component. Overall Angular coverage is therefore below the 80% target until these land (run `ng test --coverage`).
-- `npm audit --omit=dev --audit-level=high` not run yet; run a second `ng test` under another TZ.
 - Reliability chart and downloads chart (only releases-over-time exists); "copyable upgrade command" needs an engine field.
 - Check scripts/check-index.mjs against dist/app/browser/index.html.
 

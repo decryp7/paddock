@@ -43,6 +43,16 @@ pub enum Gathered {
     },
 }
 
+impl Gathered {
+    /// The candidates found (none when the server said nothing changed).
+    pub fn into_candidates(self) -> Vec<Candidate> {
+        match self {
+            Gathered::Unchanged => Vec::new(),
+            Gathered::Fresh { candidates, .. } => candidates,
+        }
+    }
+}
+
 /// Reads sources.
 pub struct Checker {
     /// The HTTP fetcher.
@@ -207,6 +217,18 @@ mod tests {
                 .with("mode", "change"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn unchanged_has_no_candidates_and_fresh_hands_them_over() {
+        assert!(Gathered::Unchanged.into_candidates().is_empty());
+        let fresh = Gathered::Fresh {
+            candidates: vec![Candidate::named("app", "https://a.b/app")],
+            validators: Validators::default(),
+            baseline: None,
+            folder: None,
+        };
+        assert_eq!(fresh.into_candidates().len(), 1);
     }
 
     #[test]
