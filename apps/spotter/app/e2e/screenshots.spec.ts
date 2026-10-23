@@ -107,7 +107,7 @@ for (const scheme of ['dark', 'light'] as const) {
       await page.getByRole('button', { name: 'Next' }).click();
       await page.getByRole('button', { name: 'Next' }).click();
       await page.getByRole('group', { name: 'How to schedule checks' }).getByRole('button', { name: 'Cron' }).click();
-      await page.getByLabel('Cron expression').fill('0 9,14 * * 1-5');
+      await page.getByLabel('Cron expression').fill('0 * * * *');
       await settle(page, 1200);
       await page.screenshot({ path: `${OUT}/wizard-schedule-${scheme}.png` });
     });
