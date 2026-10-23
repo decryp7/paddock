@@ -98,10 +98,28 @@ with stale-doc detection, onboarding notes pinned to code, and history views.
 It never executes repository code (the one opt-in exception is a language server you choose to run for a repository you trust), is read-only towards your
 repositories, redacts secrets from what it returns, and sends nothing off the machine.
 
+## What uses Pitwall and what doesn't
+
+Pacenotes analyses the code itself; [Pitwall](https://dev.decryptology.net/decryp7/pitwall), the family's local LLM
+server, explains what Pacenotes found and answers questions about it. Graphs and paths are facts from the index, never
+guesses, and the model only explains facts Pacenotes has already found, with citations.
+
+| Without a model (always available) | With Pitwall (optional) |
+| --- | --- |
+| Index, symbols, references, call graphs, the dependency graph with every link | Answers in plain language ("where is login handled?"), citing files and lines |
+| Architecture maps and diagrams, sequence diagrams from traces, change impact | Explanations and summaries: modules, files, "explain this diff", the reading tour's narrative |
+| Metrics, hot spots, ownership, coverage, duplicates, TODOs, SBOM and licences | Plain-English names for groups in generated diagrams |
+| Structural review rules, SARIF linter results, architecture rules | Review rules written in Markdown |
+| Text and structural search | Search by meaning (embeddings) and reranking |
+
+Without Pitwall you keep every graph, view, metric and structural review; only the natural-language features are off.
+Pitwall loads a model only when you ask something in words, so analysing a repository needs no model memory.
+
 ## How it fits the family
 
 Pacenotes is the seventh app of the Paddock family. [Pitwall](https://dev.decryptology.net/decryp7/pitwall) is the
-local AI that calls Pacenotes over MCP and can supply embeddings (and is optional: every function works without it),
+local model server Pacenotes uses for the features above and for embeddings (and is optional: every other function
+works without it); MCP hosts such as Claude Code, Debrief or Sighter's agent query Pacenotes' read-only MCP tools,
 [Debrief](https://dev.decryptology.net/decryp7/debrief) checks stack traces and log lines against the code,
 [Sighter](https://dev.decryptology.net/decryp7/sighter) runs the UI tests whose plans Pacenotes can draft from
 requirements, and [Pitcrew](https://dev.decryptology.net/decryp7/pitcrew) runs the headless service in CI. See the
