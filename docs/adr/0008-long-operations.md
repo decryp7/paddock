@@ -1,4 +1,4 @@
-# 7. Long operations: phases, progress, cancel and parallel work
+# 8. Long operations: phases, progress, cancel and parallel work
 
 - Status: accepted (2026-10-23, user decision "ADR + shared crate first")
 - Related: ADR 0006 (consumption, versioning), `docs/audits/2026-10-23-long-operations.md` (the findings this fixes),

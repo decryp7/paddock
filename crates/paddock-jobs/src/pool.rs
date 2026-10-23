@@ -1,4 +1,4 @@
-//! Background execution: commands return at once, work runs on a bounded pool and reports through events (ADR 0007).
+//! Background execution: commands return at once, work runs on a bounded pool and reports through events (ADR 0008).
 
 use crate::error::{JobError, panic_text};
 use crate::job::JobContext;

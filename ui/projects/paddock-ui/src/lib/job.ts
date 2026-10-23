@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { jobView, type SuJobSnapshot } from './job-view';
 
 /**
- * One long operation (ADR 0007): title and subject, the current phase with its own count, a determinate bar or an indeterminate
+ * One long operation (ADR 0008): title and subject, the current phase with its own count, a determinate bar or an indeterminate
  * bar with a growing count, ETA only when the engine has a trustworthy one, Cancel (disabled with the reason while a step cannot be
  * interrupted) and a polite live region that announces phase and state changes, not every tick. Presentational: the app feeds it the
  * latest `paddock-job` snapshot and handles `cancel`. Set `stalled` when no event arrived for a while; the job is never timed out.

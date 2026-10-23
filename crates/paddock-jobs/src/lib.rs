@@ -1,4 +1,4 @@
-//! Long operations for the Paddock apps (ADR 0007).
+//! Long operations for the Paddock apps (ADR 0008).
 //!
 //! The crate is pure Rust with no UI or Tauri dependency. An app wires one [`EventSink`] (for Tauri: `app.emit("paddock-job", &snapshot)`)
 //! and everything else is shared:

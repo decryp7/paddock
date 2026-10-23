@@ -128,6 +128,7 @@ The apps never depend on each other to do their own job. They meet in a few well
 |---|---|---|
 | **Pitwall local API** | every app to Pitwall | HTTP on loopback; OpenAI-, Anthropic- and Ollama-compatible, plus `/x/v1`. One key per app (held in the OS credential store), job priorities, prompt and response caching, usage and limits per app. |
 | **MCP** | Pitwall to Pacenotes, and any MCP client | Pacenotes is a read-only MCP server; Pitwall is the MCP client and tool router, offering tools to local models. |
+| **MCP servers** (decided 2026-10-23, [ADR 0007](adr/0007-mcp-servers-across-the-family.md)) | Pacenotes, Sighter, Debrief, then Spotter, Pitcrew, Dyno | Each serves read-only tools locally (Sighter acts, with allow-list, confirmation, budgets and a stop key); off by default, every call logged, results bounded; Pitwall hosts and serves none. Debrief first, after 1.0.2. |
 | **Deep links** | Pitcrew and Dyno to Debrief; Dyno to Spotter and Pitcrew | "Job logs" and "Issues" open in Debrief; Dyno's installed software becomes Spotter's watch list; Dyno's machine health shows next to the runners in Pitcrew. The target app opens at the right place. |
 | **Debrief bridge** | Debrief and Pacenotes, both ways | Stack trace to code, and log-line checks against the code. |
 | **Run bundles** | Sighter to Debrief | A file with video, steps and results; Debrief opens it next to the app's logs. |
@@ -168,7 +169,7 @@ Pitwall is the AI hub, never a dependency. Every app's core works without it:
 - **Diagram kit**: draw.io shape library, templates and canonical export ([`diagrams/`](../diagrams/README.md)).
 - **Icon set**: one icon per app, per platform ([`icons/`](../icons/README.md)).
 - **Shared Rust crates** (planned): the plugin platform, `paddock-pitwall` and `paddock-testplan` ([`crates/`](../crates/README.md)).
-- **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script.
+- **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script. Apple notarization and Windows code signing are deferred until the releases settle (2026-10-23); every app's release notes carry a "First launch" note (macOS Open Anyway, Windows More info > Run anyway).
 - **Lessons**: what Debrief and Pitcrew taught about build, windows, services, native feel and tests ([lessons](lessons.md)).
 
 ## Glossary: why these names

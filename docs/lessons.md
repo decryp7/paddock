@@ -67,6 +67,83 @@ Releasing (Pitcrew, Pitwall and Spotter 1.0, 2026-10-23)
 - Verify the artifact, not only `latest.json`: install the DMG/installer and look at the icon and the first launch.
 - Without a Developer ID and notarization, macOS shows "Apple could not verify…" (Open Anyway in Privacy & Security);
   Windows SmartScreen needs a code-signing certificate. Say so in the release notes until the apps are signed.
+  Decision 2026-10-23: Apple notarization and Windows code signing are deferred until after the releases settle. Every app's
+  release notes carry a "First launch" section (macOS **Open Anyway**; Windows **More info > Run anyway**), appended by the
+  release workflow after git-cliff (Debrief, Pitcrew, Pitwall, Spotter, Dyno).
+- Seal the macOS bundle ad-hoc (`signingIdentity: "-"` in tauri.macos.conf.json) and verify it in CI with
+  `codesign --verify --deep --strict` on the .app and on the .app inside the DMG: Debrief 1.0.0 shipped linker-signed
+  only (no sealed resources), and a downloaded copy said "Debrief.app is damaged". Release verification runs codesign on
+  the published DMG, not only a look at the icon and version.
+- `cargo deny` advisories can turn red overnight (a RUSTSEC advisory for a transitive crate blocked Spotter's release):
+  run `cargo deny check advisories` right before tagging and update the crate (`cargo update -p <crate>`) in every app
+  that has it.
+- Read the version from its single source in tests (changelog / backend status) and assert only its shape: a hard-coded
+  `0.1.0` broke the What's new e2e at the 1.0.0 bump and cost a release build, and a hard-coded "Debrief 0.1.0" in the
+  status bar shipped. Mocks derive the app version from the same source.
+- A tag that has not been published can be moved to the fixed commit; check that no release exists for it first.
+
+Tests and CI environments (2026-10-23)
+- Tests never launch the user's installed Google Chrome: every killed launch leaves a 0.7 GB code-sign clone in
+  `/var/folders/…/X/com.google.Chrome.code_sign_clone` (620 clones filled 441 GB of the Mac). Browser tests use a pinned
+  Chrome for Testing (installed by a script, SHA-256 checked) or an explicit env var, close it with CDP `Browser.close`
+  before any kill, and fail instead of skipping when CI requires the browser (`*_REQUIRE_TEST_BROWSER=1`).
+- Chrome refuses to run as root with its sandbox (CI containers run as root): pass `--no-sandbox` only through a
+  test-only switch set in the Linux CI job; the product keeps the sandbox. Headful browser tests on Linux need a display:
+  run them under `xvfb-run … dbus-run-session`. Capture the browser's stderr tail in launch errors so failures are
+  diagnosable.
+- sysinfo on Linux lists every thread as a process, and each reports its parent's full RSS: Spotter measured an idle
+  Chrome as ~17 GB and its 2 GiB watchdog killed every render. Skip `thread_kind().is_some()` and measure PSS from
+  `/proc/<pid>/smaps_rollup`. Check every place an app sums process memory.
+- A test that relies on a background write finishing before a read is a race (Pitwall's cache expiry test): use fresh
+  data per assertion or wait for the write explicitly; repeat a fixed flaky test 20–50 times before calling it fixed.
+- Unit tests never open real windows (Tauri MockRuntime); agents pick test binaries from
+  `cargo test --no-run --message-format=json`, never with `ls -t` (that picked the app executable and opened a blank
+  window on the user's desktop).
+
+Long operations, progress and parallelism (user, 2026-10-23; audit in docs/audits/2026-10-23-long-operations.md)
+- Every operation that can take noticeable time shows live, phase-labelled progress from the first moment: a growing count
+  ("Finding files… 12,345 found") when the total is unknown, never a static 0. Each phase has its own label and scale
+  (Downloading → Checking → Unpacking); never restart one bar under the same label (Debrief's checksum pass looked like a
+  second download).
+- Hash while writing; never re-read a file you just downloaded. Cancel works in every phase and leaves state consistent
+  (build new data, then swap; never delete first).
+- The UI never times out a running job: it subscribes to progress events. UI call timeouts shorter than the engine's work
+  showed errors while the work carried on (Pitcrew, Spotter, Dyno).
+- Every operation runs on a background thread or worker pool, never on the UI thread, the Tauri main thread or an IPC
+  handler's thread; commands return at once and report through events (user rule). Split work across threads wherever
+  it can be split.
+- Bulk file and data work is multi-threaded (bounded pools, parallel walks, parallel sniffing/hashing) and pipelined
+  (process while discovery continues), deterministic, and within the app's CPU/memory limits. Shared mechanism:
+  `paddock-jobs` (ADR in progress).
+
+Configuration (user, 2026-10-23)
+- Tunables (thresholds, intervals, limits, learning periods) are versioned Settings with defaults; knowledge lists
+  (cleanup categories, detectors, known names and locations, catalogues, presets) are TOML packs: a built-in pack plus user
+  packs in the data folder's `packs/`, parsed once with limits, never executing code, rejected whole with a named reason,
+  only ever narrowing safety rules, and reloaded without a restart.
+
+UX findings (2026-10-23)
+- Panes lay out by container queries, not viewport media queries: Debrief's Home cut off "Needs attention" and Health
+  in a narrow pane. Paths and file names truncate in the middle with the full value in a tooltip and copyable; long words
+  wrap; buttons wrap below text; no horizontal scroll at any width ≥ 320 px.
+- Search finds identifiers however they are written: index whole names, their parts (dots, camelCase, `_`, `-`, path
+  segments) and adjacent-part joins; phrases ignore separators and case. The AI resolves the user's words to concrete
+  values first (an entity catalogue with typo-tolerant lookup), then queries, and broadens when nothing matches ("graphic
+  builder" vs `CompanyA.Graphic.Builder.exe`).
+- Fit checks must use the same calculation before and after download: weights + KV cache for the context actually used +
+  compute buffer, against free VRAM / RAM in use now, with "fits this computer" vs "fits right now" shown with numbers.
+- An app that needs an engine installs it itself on first start (Pitwall's llama.cpp was not installable because a
+  not-installed engine was listed as "planned"); never a message that points at the page it is shown on.
+- macOS service registration needs visible repair: detect a Login Item that is off or a stale registration, retry it,
+  and show a notice with Open Login Items (Pitcrew, then Pitwall).
+
+Agents and the shared Mac (2026-10-23)
+- Every agent that edits a repo works in its own git worktree; the main checkout stays on main. Two Debrief agents
+  editing one checkout at once mixed their changes.
+- Max ~5 heavy agents; check `uptime` before starting more (load 30–76 slowed every build to hours). Pause lower-priority
+  work rather than overload; stopped agents' worktrees keep their work for a later resume.
+- Every drawing, diagram and screenshot gets an independent review before release; every Paddock image or status change
+  also refreshes the profile repo (decryp7/.profile).
 
 ## Platforms (user, 2026-10-22: "same thing for all apps, support linux, mac and windows")
 Every app supports Windows, macOS and Linux as first-class platforms: the app, its service/agent/helper per OS

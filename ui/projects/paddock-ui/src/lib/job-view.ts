@@ -1,4 +1,4 @@
-/** Wire model of `paddock-jobs` (Rust, ADR 0007): one snapshot is the whole job as of `seq`. */
+/** Wire model of `paddock-jobs` (Rust, ADR 0008): one snapshot is the whole job as of `seq`. */
 export type SuJobUnit = 'items' | 'bytes';
 
 export interface SuJobPhase {

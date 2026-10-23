@@ -1,4 +1,4 @@
-/// Estimates time left from a smoothed rate. Rules (ADR 0007): never for an unknown total; not before 2 s of work and 3 % done
+/// Estimates time left from a smoothed rate. Rules (ADR 0008): never for an unknown total; not before 2 s of work and 3 % done
 /// (early rates lie); smoothed with an exponential average so one slow second does not jump the estimate; hidden past 99 hours.
 #[derive(Debug, Clone)]
 pub struct EtaEstimator {
