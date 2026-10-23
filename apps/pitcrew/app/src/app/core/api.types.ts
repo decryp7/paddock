@@ -562,6 +562,17 @@ export interface ServiceInstall {
   /** Installing asks for the OS's own permission (UAC on Windows, Login Items approval on macOS). */
   canInstall: boolean;
   message: string | null;
+  /** macOS: the automatic re-registration of a service launchd refused, while it works and after. */
+  repair: RepairNotice | null;
+  /** macOS: the user switched Pitcrew's background item off in System Settings ▸ General ▸ Login Items. */
+  disabledInLoginItems: boolean;
+}
+
+/** Progress of the background repair of the service's registration (macOS). */
+export interface RepairNotice {
+  state: 'working' | 'succeeded' | 'failed';
+  /** Ready to show. */
+  message: string;
 }
 
 /** Something the backend pushes. */
@@ -979,6 +990,8 @@ export interface CacheCleaned {
 export interface DebriefStatus {
   installed: boolean;
   program: string | null;
+  /** Only the pre-rename `imt` program was found: update Debrief to use "Open in Debrief". */
+  needsUpdate: boolean;
   /** The command-line name Pitcrew looks for. */
   cliName: string;
 }

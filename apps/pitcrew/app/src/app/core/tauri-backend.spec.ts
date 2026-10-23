@@ -58,6 +58,7 @@ describe('TauriBackend commands', () => {
     ['serviceInstall', (b) => b.serviceInstall(), 'service_install_state', undefined],
     ['installService', (b) => b.installService(), 'install_service', undefined],
     ['uninstallService', (b) => b.uninstallService(), 'uninstall_service', undefined],
+    ['openLoginItems', (b) => b.openLoginItems(), 'open_login_items', undefined],
     ['appUpdateStatus', (b) => b.appUpdateStatus(), 'app_update_status', undefined],
     ['checkAppUpdate', (b) => b.checkAppUpdate(), 'check_app_update', undefined],
     ['installAppUpdate', (b) => b.installAppUpdate(), 'install_app_update', undefined],

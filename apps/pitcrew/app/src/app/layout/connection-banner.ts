@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
+import { ServiceNotices } from '../shared/ui/service-notices';
 import { ServiceStore } from '../state/service.store';
 import { StatusStore } from '../state/status.store';
 
 /** Shown when the app cannot talk to the service: not installed, not running, or a different version. */
 @Component({
   selector: 'pc-connection-banner',
-  imports: [MatIcon],
+  imports: [MatIcon, ServiceNotices],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (status.offline(); as off) {
@@ -15,6 +16,7 @@ import { StatusStore } from '../state/status.store';
         <div class="text">
           <strong>{{ title() }}</strong>
           <span>{{ off.message }} {{ hint() }}</span>
+          <pc-service-notices />
         </div>
         <div class="btn-row">
           @if (canInstall()) {
@@ -67,7 +69,7 @@ export class ConnectionBanner {
 
   protected readonly canInstall = computed(() => {
     const s = this.service.registration().value;
-    return this.status.offline()?.kind === 'unavailable' && s !== null && !s.installed && s.canInstall;
+    return this.status.offline()?.kind === 'unavailable' && s !== null && !s.installed && s.canInstall && !s.disabledInLoginItems && !s.repair;
   });
   protected readonly title = computed(() => {
     const off = this.status.offline();

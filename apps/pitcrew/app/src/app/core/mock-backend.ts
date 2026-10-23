@@ -146,6 +146,8 @@ export class MockBackend implements PitcrewBackend {
       running: this.scenario !== 'notInstalled' && this.scenario !== 'unavailable',
       canInstall: true,
       message: null,
+      repair: null,
+      disabledInLoginItems: false,
     };
   }
 
@@ -591,7 +593,7 @@ export class MockBackend implements PitcrewBackend {
 
   async debriefStatus(): Promise<DebriefStatus> {
     await this.delay();
-    return { installed: this.debrief, program: this.debrief ? '/Applications/Debrief.app/Contents/MacOS/imt' : null, cliName: 'imt' };
+    return { installed: this.debrief, program: this.debrief ? '/Applications/Debrief.app/Contents/MacOS/debrief' : null, needsUpdate: false, cliName: 'debrief' };
   }
 
   async openInDebrief(runner: string, label: string, startedAt: number | null, finishedAt: number | null): Promise<Handoff> {
@@ -601,7 +603,7 @@ export class MockBackend implements PitcrewBackend {
     const file = `~/Library/Application Support/Pitcrew/debrief-handoff/${runner}-${label.replace(/[^A-Za-z0-9-]/g, '_')}.log`;
     return this.debrief
       ? { result: 'opened', file }
-      : { result: 'notInstalled', file, message: 'Debrief was not found (looked for `imt`). Install Debrief, or open this file in it by hand.' };
+      : { result: 'notInstalled', file, message: 'Debrief was not found (looked for `debrief`). Install Debrief, or open this file in it by hand.' };
   }
 
   async channels(): Promise<ChannelSettings> {
@@ -740,6 +742,14 @@ export class MockBackend implements PitcrewBackend {
     this.service = { ...this.service, installed: true, running: true, message: null };
     this.emit({ kind: 'connection', connection: this.connection() });
     this.pushStatus();
+  }
+
+  /** How often "Open Login Items" was asked for (tests). */
+  loginItemsOpened = 0;
+
+  async openLoginItems(): Promise<void> {
+    await this.delay();
+    this.loginItemsOpened += 1;
   }
 
   async uninstallService(): Promise<void> {
