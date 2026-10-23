@@ -17,6 +17,8 @@ describe('TrayPage', () => {
     const items = f.nativeElement.querySelectorAll('li');
     expect(items).toHaveLength(5);
     expect(text(f.nativeElement.querySelector('.pill'))).toMatch(/^\d+ new$/);
+    const total = Number.parseInt(text(f.nativeElement.querySelector('.pill')), 10);
+    expect(f.nativeElement.querySelector('.more')?.textContent?.trim() ?? null).toBe(total > 5 ? `+${total - 5} more in Spotter` : null);
     expect(text(items[0])).toMatch(/\d+\.\d+/);
     expect(items[0].querySelector('sp-avatar')).not.toBeNull();
     expect(items[0].querySelector('.check')).not.toBeNull();

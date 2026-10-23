@@ -103,7 +103,8 @@ export class DashboardPage {
   });
   protected readonly computed = computed(() => {
     const d = this.dashboard();
-    return d ? `Computed in ${formatDuration(d.computeMicros / 1000)}` : '';
+    if (!d) return '';
+    return d.computeMicros < 1000 ? 'Computed in under 1 ms' : `Computed in ${formatDuration(d.computeMicros / 1000)}`;
   });
   protected readonly nextCheck = computed(() => {
     const times = this.watches.watches().map((w) => w.nextCheckMs).filter((t): t is number => t !== null);

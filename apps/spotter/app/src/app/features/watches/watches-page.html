@@ -5,7 +5,7 @@
       <p class="sub">{{ store.watches().length }} {{ store.watches().length === 1 ? 'watch' : 'watches' }}@if (store.unseen().length) { · {{ store.unseen().length }} with new releases }</p>
     </div>
     <div class="actions">
-      <a class="btn primary" routerLink="/watches/new"><mat-icon svgIcon="sp:plus" aria-hidden="true" />Add watch</a>
+      <a class="btn" [class.primary]="store.watches().length" routerLink="/watches/new"><mat-icon svgIcon="sp:plus" aria-hidden="true" />Add watch</a>
       <sp-menu-button label="Watches actions" [small]="false" [entries]="headEntries()" (picked)="onHead($event)" />
     </div>
   </header>

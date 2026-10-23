@@ -46,6 +46,14 @@ describe('DashboardPage', () => {
     expect(text(q(f, 'footer.foot'))).toMatch(/^Computed in/);
   });
 
+  it('never says the computation took 0 ms', async () => {
+    const backend = makeMock();
+    const real = backend.dashboard.bind(backend);
+    vi.spyOn(backend, 'dashboard').mockImplementation(async (r) => ({ ...(await real(r)), computeMicros: 420 }));
+    const { f } = await make(backend);
+    expect(text(q(f, 'footer.foot'))).toBe('Computed in under 1 ms');
+  });
+
   it('lists the watches that need attention with the reason, linking to them', async () => {
     const { f } = await make();
     const rows = qa(f, 'ul.attention li');

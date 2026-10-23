@@ -89,7 +89,7 @@ function read(s: Sample, hasId: boolean): ReadResult {
 function artifact(s: Sample, now: number): Artifact {
   return {
     name: s.file,
-    location: `/srv/drops/${s.file}`,
+    location: `/Volumes/Builds/${s.file}`,
     kind: s.file.split('.').pop() ?? '',
     variant: s.variant,
     size: s.size,

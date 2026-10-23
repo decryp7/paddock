@@ -8,6 +8,12 @@
 @include cdk.overlay();
 @include cdk.a11y-visually-hidden();
 
+/* The suite's mono stack ends in the generic `monospace`, which Chromium resolves to a Courier-like face where neither
+   `ui-monospace` nor SF Mono exists (a capture browser, WebKit builds). Menlo, DejaVu and Liberation ship with the OS. */
+:root {
+  --pd-font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, 'Cascadia Mono', Consolas, 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+}
+
 .sp-backdrop {
   background: var(--pd-scrim);
 }

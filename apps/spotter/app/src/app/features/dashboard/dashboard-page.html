@@ -15,7 +15,7 @@
       </p>
     </div>
     <div class="actions">
-      <a class="btn primary" routerLink="/watches/new">
+      <a class="btn" [class.primary]="watches.watches().length" routerLink="/watches/new">
         <mat-icon svgIcon="sp:plus" aria-hidden="true" />
         Add watch
       </a>

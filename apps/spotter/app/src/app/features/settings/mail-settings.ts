@@ -29,7 +29,7 @@ const defaultPort = (s: SmtpSecurity): number => SECURITY.find((x) => x.value ==
           <input class="input" name="host" autocomplete="off" spellcheck="false" placeholder="smtp.example.org" [value]="host()" (input)="host.set(val($event))" />
         </label>
         <label class="f port"><span class="l">Port</span>
-          <input class="input num" name="port" inputmode="numeric" autocomplete="off" [value]="port()" (input)="port.set(val($event))" />
+          <input class="input digits" name="port" inputmode="numeric" autocomplete="off" [value]="port()" (input)="port.set(val($event))" />
         </label>
         <div class="f sec"><span class="l" id="sec-l">Security</span>
           <div class="seg-tabs" role="group" aria-label="Mail security">
@@ -106,7 +106,7 @@ const defaultPort = (s: SmtpSecurity): number => SECURITY.find((x) => x.value ==
       min-width: 0;
     }
     .l { font-weight: var(--pd-weight-medium); font-size: var(--pd-text-caption); }
-    .num { font-variant-numeric: tabular-nums; }
+    .digits { font-variant-numeric: tabular-nums; }
     .test {
       display: flex;
       align-items: end;

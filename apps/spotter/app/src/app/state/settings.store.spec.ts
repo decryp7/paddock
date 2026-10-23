@@ -148,7 +148,7 @@ describe('SettingsStore', () => {
     const { backend, store, toasts } = setup();
     await store.loadSettings();
     await store.chooseDownloads();
-    expect(store.settings().value?.downloadsFolder).toContain('Spotter-demo');
+    expect(store.settings().value?.downloadsFolder).toContain('Downloads/Spotter');
     vi.spyOn(backend, 'chooseFolder').mockResolvedValueOnce(null);
     await store.chooseDownloads();
     expect(backend.calls.filter((c) => c === 'saveSettings')).toHaveLength(1);

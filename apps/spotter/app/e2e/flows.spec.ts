@@ -94,7 +94,7 @@ test.describe('Spotter against the mock backend', () => {
   test('a watch with products lists them in a table', async ({ page }) => {
     await page.goto('/?mock=products#/watches/w-9');
     await expect(page.getByRole('heading', { name: 'Products' })).toBeVisible();
-    await expect(page.getByRole('cell', { name: /Acme Installer Pro/ }).first()).toBeVisible();
+    await expect(page.getByRole('cell', { name: /Acme Installer/ }).first()).toBeVisible();
   });
 
   test('the watches table does not wrap or clip at 1100 px', async ({ page }) => {

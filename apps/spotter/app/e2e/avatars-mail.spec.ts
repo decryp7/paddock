@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('avatars, e-mail settings and the upgrade command', () => {
-  test('watch rows, the feed and the detail hero show the engine pictures, and the wizard shows them for presets', async ({ page }) => {
+  test('watch rows, the feed and the detail hero show the engine pictures, and the wizard shows a monogram tile for each preset', async ({ page }) => {
     await page.goto('/#/watches');
     await expect(page.locator('tbody tr sp-avatar img').first()).toBeVisible();
     await page.goto('/');
@@ -9,7 +9,9 @@ test.describe('avatars, e-mail settings and the upgrade command', () => {
     await page.goto('/#/watches/w-2');
     await expect(page.locator('.head sp-avatar img')).toBeVisible();
     await page.goto('/#/watches/new');
-    await expect(page.locator('sp-source-step sp-avatar img, .grid sp-avatar img').first()).toBeVisible();
+    // Presets are not looked up (no network in the wizard): each is a distinct monogram, never a wrong glyph.
+    await expect(page.locator('.grid sp-avatar img')).toHaveCount(0);
+    await expect(page.locator('.grid sp-avatar').first()).toHaveText('NJ');
   });
 
   test('the e-mail form saves the server, takes a password, and sends a test message', async ({ page }) => {

@@ -49,6 +49,9 @@ import { WatchesStore } from '../../state/watches.store';
             </li>
           }
         </ul>
+        @if (hidden() > 0) {
+          <p class="more muted">+{{ hidden() }} more in Spotter</p>
+        }
       } @else {
         <div class="empty">
           <mat-icon svgIcon="sp:check-all" aria-hidden="true" />
@@ -68,6 +71,11 @@ import { WatchesStore } from '../../state/watches.store';
   styles: `
     :host {
       display: block;
+    }
+    .more {
+      margin: 0;
+      padding: var(--pd-space-2) var(--pd-space-4);
+      font-size: var(--pd-text-caption);
     }
     .head {
       display: flex;
@@ -158,6 +166,8 @@ export class TrayPage {
   protected readonly store = inject(WatchesStore);
   private readonly backend = inject(BACKEND);
   protected readonly unseen = computed(() => this.store.unseen().slice(0, 5));
+  /** New releases beyond the rows shown. */
+  protected readonly hidden = computed(() => Math.max(0, this.store.unseen().length - this.unseen().length));
   protected readonly platform: SuTrayPlatform = (() => {
     const p = platformFromUserAgent(navigator.userAgent);
     return p === 'windows' ? 'windows' : p === 'linux' ? 'linux' : 'macos';

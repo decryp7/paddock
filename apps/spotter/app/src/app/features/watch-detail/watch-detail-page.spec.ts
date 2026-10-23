@@ -380,7 +380,7 @@ describe('WatchDetailPage', () => {
       expect(rows).toHaveLength(2);
       expect(text(q(f, '#prod-h'))).toBe('Products');
       expect(text(q(f, 'section[aria-labelledby=prod-h] .help'))).toBe('2 followed separately');
-      expect(text(rows[0]!.querySelector('.name'))).toBe('Acme Installer Pro');
+      expect(text(rows[0]!.querySelector('.name'))).toBe('Acme Installer');
       expect(text(rows[0]!.querySelector('.who'))).toContain('PRO'); // the id is shown when it differs from the name
       expect(text(rows[1]!.querySelector('.who'))).toBe('QA'); // and not repeated when it does not
       expect(rows[0]!.querySelector('.unseen-dot:not(.off)')).not.toBeNull();
@@ -397,7 +397,7 @@ describe('WatchDetailPage', () => {
       expect(text(q(f, 'aside.panel'))).toContain('Product');
       expect(productRows(f)[1]!.classList.contains('on')).toBe(true);
       expect(productRows(f)[0]!.classList.contains('on')).toBe(false);
-      await click(f, q(f, 'button[aria-label="Show the files of Acme Installer Pro"]'));
+      await click(f, q(f, 'button[aria-label="Show the files of Acme Installer"]'));
       expect(text(q(f, 'aside.panel h2'))).toBe('R3.10.00T32');
       expect(productRows(f)[0]!.classList.contains('on')).toBe(true);
       expect(q(f, 'aside.panel ul.files')).not.toBeNull();
@@ -405,10 +405,10 @@ describe('WatchDetailPage', () => {
 
     it('marks one product seen without selecting its row', async () => {
       const { f, backend } = await make9();
-      await click(f, q(f, 'button[aria-label="Mark Acme Installer Pro as seen"]'));
+      await click(f, q(f, 'button[aria-label="Mark Acme Installer as seen"]'));
       expect(backend.calls).toContain('acknowledgeProduct');
       expect(q(f, 'aside.panel')).toBeNull();
-      expect(q(f, 'button[aria-label="Mark Acme Installer Pro as seen"]')).toBeNull();
+      expect(q(f, 'button[aria-label="Mark Acme Installer as seen"]')).toBeNull();
     });
   });
 

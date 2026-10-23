@@ -28,14 +28,21 @@ const toggle = async (f: Parameters<typeof settle>[0], input: HTMLInputElement, 
 describe('SettingsPage', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('says when the watches were brought over from the old configuration', async () => {
+    const backend = makeMock();
+    const real = backend.appInfo.bind(backend);
+    vi.spyOn(backend, 'appInfo').mockImplementation(async () => ({ ...(await real()), migratedFromLegacy: true }));
+    const { f } = await make(backend);
+    expect(text(f.nativeElement)).toContain('Your watches were brought over from Release Monitor.');
+  });
+
   it('shows what the engine reports', async () => {
     const { f } = await make();
     const t = text(f.nativeElement);
     expect(t).toContain('Version 1.0.0');
-    expect(t).toContain('/home/demo/.config/spotter-demo/config.toml');
+    expect(t).toContain('/Users/demo/Library/Application Support/Spotter/spotter.toml');
     expect(t).toContain('Notifications are on.');
     expect(t).toContain('No browser available');
-    expect(t).toContain('Your watches were brought over from Release Monitor.');
     expect(text(el(f, '.note.warn'))).toContain('Old mirror');
     expect(el<HTMLInputElement>(f, '#autostart').checked).toBe(false);
     expect(pressed(f, 'Default check interval')).toEqual(['6 hours']);
@@ -156,7 +163,7 @@ describe('SettingsPage', () => {
     (byText(f.nativeElement, 'button', 'Choose…') as HTMLButtonElement).click();
     await settle(f);
     expect(backend.calls).toEqual(expect.arrayContaining(['open:config', 'open:logs', 'open:downloads', 'chooseFolder', 'saveSettings']));
-    expect(text(f.nativeElement)).toContain('/home/demo/Downloads/Spotter-demo');
+    expect(text(f.nativeElement)).toContain('/Users/demo/Downloads/Spotter');
   });
 
   it('keeps the page and lists the engine problems when a save is refused', async () => {

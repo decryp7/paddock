@@ -40,7 +40,7 @@ export const SOURCE_KINDS: SourceKind[] = [
     description: 'A local folder or a network share (UNC, SMB, NFS mount) with one entry per build.',
     group: 'files',
     fields: [
-      text('path', 'Folder', { kind: 'folder', help: 'Each file or sub-folder name is a release.', placeholder: '/srv/drops/acme' }),
+      text('path', 'Folder', { kind: 'folder', help: 'Each file or sub-folder name is a release.', placeholder: '/Volumes/Builds/acme' }),
       text('matchAgainst', 'Read the version from', {
         kind: 'choice',
         required: false,
@@ -181,6 +181,13 @@ export const PRESETS: Preset[] = [
   preset('postgres', 'PostgreSQL', 'Major and minor server releases.', 'Databases', 'feed', { url: 'https://www.postgresql.org/versions.rss' }),
   preset('nginx', 'nginx', 'Mainline releases.', 'Servers', 'http-dir', { url: 'https://nginx.org/download/' }),
   preset('7zip', '7-Zip', 'The archiver, from its download page.', 'Utilities', 'web-page', { url: 'https://www.7-zip.org/download.html', selector: 'b' }, { versions: 'numeric' }),
+  preset('go', 'Go', 'The Go toolchain, stable releases.', 'Runtimes', 'json-api', { url: 'https://go.dev/dl/?mode=json', path: '[].version' }),
+  preset('deno', 'Deno', 'The Deno runtime.', 'Runtimes', 'github', { repo: 'denoland/deno' }),
+  preset('neovim', 'Neovim', 'The modal editor, stable releases.', 'Editors', 'github', { repo: 'neovim/neovim' }),
+  preset('ripgrep', 'ripgrep', 'Fast recursive search.', 'Developer tools', 'github', { repo: 'BurntSushi/ripgrep' }),
+  preset('grafana', 'Grafana', 'Dashboards and alerting.', 'Servers', 'github', { repo: 'grafana/grafana' }),
+  preset('caddy', 'Caddy', 'The web server with automatic HTTPS.', 'Servers', 'github', { repo: 'caddyserver/caddy' }),
+  preset('sqlite', 'SQLite', 'The embedded database, from its download page.', 'Databases', 'web-page', { url: 'https://www.sqlite.org/download.html', selector: 'td' }, { versions: 'numeric' }),
 ];
 
 const SCHEME_FORMATS: Record<VersionSchemeId, (major: number, minor: number, patch: number, r: () => number) => string> = {
@@ -192,12 +199,18 @@ const SCHEME_FORMATS: Record<VersionSchemeId, (major: number, minor: number, pat
 };
 
 /** `count` releases, oldest first, spread over `spanDays` ending at `end`. */
-export function makeReleases(seed: number, scheme: VersionSchemeId, count: number, end: number, spanDays: number, namePrefix: string): Release[] {
+export function makeReleases(
+  seed: number,
+  scheme: VersionSchemeId,
+  count: number,
+  end: number,
+  spanDays: number,
+  namePrefix: string,
+  base: [number, number, number] = [1, 0, 0],
+): Release[] {
   const r = rng(seed);
   const out: Release[] = [];
-  let major = 1;
-  let minor = 0;
-  let patch = 0;
+  let [major, minor, patch] = base;
   const gaps: number[] = [];
   for (let i = 0; i < count; i++) gaps.push(0.3 + r());
   const total = gaps.reduce((a, b) => a + b, 0);

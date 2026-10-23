@@ -207,7 +207,7 @@ describe('EditorPage: adding a watch', () => {
     await check(f, labelled('Download it'), true);
     await fill(f, '#dl-folder', '/tmp/spotter-test');
     await click(f, byText(f.nativeElement, 'button', 'Browse…'));
-    expect((q(f, '#dl-folder') as HTMLInputElement).value).toBe('/home/demo/Downloads/Spotter-demo');
+    expect((q(f, '#dl-folder') as HTMLInputElement).value).toBe('/Users/demo/Downloads/Spotter');
     await check(f, labelled('Verify the checksum'), false);
     await check(f, labelled('Run a program'), true);
     expect(text(q(f, '.warn'))).toContain('does not go through a shell');
@@ -227,7 +227,7 @@ describe('EditorPage: adding a watch', () => {
     expect(spec.notify.nag).toBe(true);
     expect(spec.notify.quietHours).toBeNull();
     expect(spec.actions).toEqual([
-      { kind: 'download', folder: '/home/demo/Downloads/Spotter-demo', verify: false },
+      { kind: 'download', folder: '/Users/demo/Downloads/Spotter', verify: false },
       { kind: 'run-command', program: '/usr/local/bin/installer', args: ['--flag', '{path}'] },
     ]);
   });
@@ -408,7 +408,7 @@ describe('FieldForm kinds (through the wizard)', () => {
     // folder: a folder picker and a toggle
     await click(f, card(f, 'Folder'));
     await click(f, byText(f.nativeElement, 'sp-field-form button', 'Browse…'));
-    expect((q(f, '#f-path') as HTMLInputElement).value).toBe('/home/demo/Downloads/Spotter-demo');
+    expect((q(f, '#f-path') as HTMLInputElement).value).toBe('/Users/demo/Downloads/Spotter');
     const toggle = q<HTMLInputElement>(f, 'sp-field-form input[type=checkbox]');
     expect(toggle.checked).toBe(false);
     await check(f, toggle, true);

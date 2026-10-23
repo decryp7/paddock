@@ -125,45 +125,51 @@ function demoWatches(now: number): MockWatch[] {
       ...extra,
     };
   };
-  const acme = mk(1, 'Acme Installer', 'folder', { path: '/srv/drops/acme-installer' }, 'build-number', 36, 'AcmeSetup-');
+  const acme = mk(1, 'Acme Installer', 'folder', { path: '/Volumes/Builds/acme-installer' }, 'build-number', 36, 'AcmeSetup-');
   acme.ack = acme.releases[2]?.version ?? null;
   const lumen = mk(2, 'Lumen CLI', 'github', { repo: 'lumen-labs/lumen' }, 'semver', 28, 'lumen-');
+  lumen.spec.schedule = { mode: 'every', secs: 2 * 3600 };
   lumen.ack = lumen.releases[0]?.version ?? null;
   lumen.installed = lumen.releases[0]?.version ?? null;
   const fjord = mk(3, 'Fjord UI kit', 'gitea', { server: 'https://codeberg.example', repo: 'fjord/ui-kit' }, 'semver', 18, 'fjord-ui-');
+  fjord.spec.schedule = { mode: 'times', days: ['mon', 'tue', 'wed', 'thu', 'fri'], times: ['09:00', '17:00'], zone: null };
   const orbit = mk(4, 'Orbit server', 'gitlab', { server: 'https://gitlab.example', project: 'orbit/server' }, 'semver', 22, 'orbit-', {
     status: { kind: 'unreachable', message: 'gitlab.example did not answer within 20 seconds. It will be tried again in 15 minutes.' },
     failures: 3,
     lastCheckMs: now - 11 * MINUTE,
   });
+  orbit.spec.schedule = { mode: 'every', secs: 1800 };
   const image = mk(5, 'Orbit API image', 'oci', { image: 'registry.example/orbit/api' }, 'semver', 32, 'api:', {
     status: { kind: 'authNeeded', message: 'The registry asked for a token. Add one in the watch settings.' },
     failures: 1,
   });
+  image.spec.schedule = { mode: 'every', secs: 86_400 };
   const pkg = mk(6, 'tinyparse', 'npm', { package: 'tinyparse' }, 'semver', 14, 'tinyparse-');
+  pkg.spec.schedule = { mode: 'times', days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], times: ['06:00', '18:00'], zone: null };
   for (const r of pkg.releases) r.upgradeCommand = `npm install tinyparse@${r.version}`;
   const vendor = mk(7, 'Vendor download page', 'web-page', { url: 'https://vendor.example/download', selector: 'h2', render: 'auto' }, 'numeric', 10, 'Vendor-', {
     status: { kind: 'needsYou', message: 'The page asks for a login before it shows the download. Open it, sign in, then check again.' },
   });
+  vendor.spec.schedule = { mode: 'every', secs: 12 * 3600 };
   const docs = mk(8, 'Nightly docs feed', 'feed', { url: 'https://docs.example/releases.atom' }, 'date', 12, 'docs-', {}, { paused: true });
   return [acme, lumen, fjord, orbit, image, pkg, vendor, docs];
 }
 
 /** A watch whose pattern has an `id` group: three products, each with its own releases and files (invented names). */
 function productWatch(now: number): MockWatch {
-  const file = (name: string, variant: string, at: number): Release['artifacts'][number] => ({
+  const file = (name: string, variant: string, at: number, size: number): Release['artifacts'][number] => ({
     name,
-    location: `/srv/drops/${name}`,
+    location: `/Volumes/Builds/${name}`,
     kind: name.split('.').pop() ?? '',
     variant,
-    size: 600_000_000,
+    size,
     modifiedMs: at,
     createdMs: null,
     checksumFile: variant === 'x64' ? `${name}.sha256` : null,
   });
-  const rel = (product: string, version: string, ago: number, variants: string[]): Release => {
+  const rel = (product: string, version: string, ago: number, variants: string[], sizes: number[]): Release => {
     const at = now - ago;
-    const artifacts = variants.map((v) => file(`Acme-${product}-${version}${v ? '_' + v : ''}.${v ? 'exe' : 'iso'}`, v, at));
+    const artifacts = variants.map((v, i) => file(`Acme-${product}-${version}${v ? '_' + v : ''}.${v ? 'exe' : product === 'QA' ? 'zip' : 'iso'}`, v, at, sizes[i] ?? 0));
     return {
       version,
       prerelease: false,
@@ -171,7 +177,7 @@ function productWatch(now: number): MockWatch {
       location: artifacts[0]!.location,
       publishedAtMs: at,
       firstSeenMs: at + 5 * MINUTE,
-      size: 600_000_000,
+      size: artifacts[0]!.size,
       sha256: null,
       product,
       channel: '',
@@ -180,15 +186,15 @@ function productWatch(now: number): MockWatch {
       updatedInPlace: false,
     };
   };
-  const pro = [rel('PRO', 'R3.10.00T32', 3 * HOUR, ['', 'x64']), rel('PRO', 'R3.09.00T40', 9 * DAY, [''])];
-  const qa = [rel('QA', 'R1.01.00T07', 2 * DAY, [''])];
+  const pro = [rel('PRO', 'R3.10.00T32', 3 * HOUR, ['', 'x64'], [4_100_000_000, 612_000_000]), rel('PRO', 'R3.09.00T40', 9 * DAY, [''], [4_000_000_000])];
+  const qa = [rel('QA', 'R1.01.00T07', 2 * DAY, [''], [88_000_000])];
   const product = (id: string, name: string, history: Release[], unseen: boolean): Product => ({ id, name, muted: false, latest: history[0] ?? null, unseen, history });
-  const products = [product('PRO', 'Acme Installer Pro', pro, true), product('QA', 'QA', qa, false)];
+  const products = [product('PRO', 'Acme Installer', pro, true), product('QA', 'QA', qa, false)];
   return {
     spec: blankDraft({
       id: 'w-9',
       name: 'Acme Installer Suite',
-      source: { kind: 'folder', values: { path: '/srv/drops/acme-suite', depth: '1' } },
+      source: { kind: 'folder', values: { path: '/Volumes/Builds/acme-suite', depth: '1' } },
       versions: 'custom',
       versionPattern: 'Acme-(?<id>[A-Z]+)-R(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)T(?<build>\\d+)(?:_(?<variant>x64|arm64))?',
     }),
@@ -244,7 +250,7 @@ export class MockBackend implements SpotterBackend {
     this.latency = options.latencyMs ?? 0;
     this.scenario = options.scenario ?? 'demo';
     this.platform = options.platform ?? 'macos';
-    this.watches = this.scenario === 'empty' ? [] : this.scenario === 'products' ? [...demoWatches(this.now()), productWatch(this.now())] : demoWatches(this.now());
+    this.watches = this.scenario === 'empty' ? [] : this.scenario === 'products' ? [...demoWatches(this.now()).filter((w) => w.spec.id !== 'w-7'), productWatch(this.now())] : demoWatches(this.now());
   }
 
   /** Test helper: delivers a pushed state to subscribers. */
@@ -337,11 +343,11 @@ export class MockBackend implements SpotterBackend {
   appInfo(): Promise<AppInfo> {
     return this.call('appInfo', () => ({
       version: '1.0.0',
-      configPath: '/home/demo/.config/spotter-demo/config.toml',
-      logsDir: '/home/demo/.local/share/spotter-demo/logs',
-      downloadsDir: '/home/demo/Downloads/Spotter-demo',
+      configPath: '/Users/demo/Library/Application Support/Spotter/spotter.toml',
+      logsDir: '/Users/demo/Library/Logs/Spotter',
+      downloadsDir: '/Users/demo/Downloads/Spotter',
       warnings: this.scenario === 'demo' ? ['The watch "Old mirror" had an unknown source kind and was left out.'] : [],
-      migratedFromLegacy: this.scenario === 'demo',
+      migratedFromLegacy: false,
       platform: this.platform,
     }));
   }
@@ -382,7 +388,7 @@ export class MockBackend implements SpotterBackend {
       if (/unreachable|offline/i.test(target)) {
         return { ...empty, error: { kind: 'unreachable', message: 'The server did not answer. Check the address and your connection.' }, tookMs: 20_000 };
       }
-      const all = makeReleases(target.length * 7 + 3, draft.versions, 14, this.now(), 200, '').reverse();
+      const all = makeReleases(target.length * 7 + 3, draft.versions, 14, this.now(), 200, '', [18 + (target.length % 7), 0, target.length % 3]).reverse();
       let prereleasesSkipped = 0;
       let namesSkipped = 0;
       const releases = all.filter((r) => {
@@ -505,7 +511,7 @@ export class MockBackend implements SpotterBackend {
     return this.call('downloadRelease', () => {
       const r = this.release(id, version, target);
       const file = target?.artifact ?? r.name;
-      return `/home/demo/Downloads/Spotter-demo/${file}`;
+      return `/Users/demo/Downloads/Spotter/${file}`;
     });
   }
 
@@ -589,7 +595,7 @@ export class MockBackend implements SpotterBackend {
         })
         .sort((a, b) => b.releasedAtMs - a.releasedAtMs)
         .slice(0, 8);
-      return { range, bucketsMs: starts, whatsNew, watches, downloads, computeMicros: 420 };
+      return { range, bucketsMs: starts, whatsNew, watches, downloads, computeMicros: 3800 };
     });
   }
 
@@ -609,7 +615,7 @@ export class MockBackend implements SpotterBackend {
       const first = this.watches[0];
       if (first?.releases[0]) {
         const r = first.releases[0];
-        list.push({ ...base, atMs: r.firstSeenMs + 20 * MINUTE, kind: 'download-finished', watchId: first.spec.id, watchName: first.spec.name, version: r.version, name: r.name, path: `/home/demo/Downloads/Spotter-demo/${r.name}`, size: r.size, verified: true });
+        list.push({ ...base, atMs: r.firstSeenMs + 20 * MINUTE, kind: 'download-finished', watchId: first.spec.id, watchName: first.spec.name, version: r.version, name: r.name, path: `/Users/demo/Downloads/Spotter/${r.name}`, size: r.size, verified: true });
         list.push({ ...base, atMs: r.firstSeenMs + HOUR, kind: 'recovered', watchId: first.spec.id, watchName: first.spec.name });
       }
       return list
@@ -651,7 +657,7 @@ export class MockBackend implements SpotterBackend {
   }
 
   chooseFolder(): Promise<string | null> {
-    return this.call('chooseFolder', () => '/home/demo/Downloads/Spotter-demo');
+    return this.call('chooseFolder', () => '/Users/demo/Downloads/Spotter');
   }
 
   chooseProgram(): Promise<string | null> {
