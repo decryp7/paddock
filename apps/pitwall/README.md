@@ -10,7 +10,7 @@ Dyno). Like the pit wall in a race, it is where every car radios in.
 
 </div>
 
-![Pitwall: One private AI for every app](docs/images/pitwall-hero.svg)
+![Pitwall: One private AI for every app](docs/images/pitwall-hero.svg?v=cbab1055)
 
 
 > **Local only.** Nothing you ask and nothing the model answers ever leaves your computer. No cloud models, no
@@ -69,9 +69,9 @@ loaded model in its own engine process; a Tauri app with a tray and an Angular U
 
 ## Features
 
-![Pitwall features](docs/images/pitwall-features.svg)
+![Pitwall features](docs/images/pitwall-features.svg?v=a1d3151b)
 
-![How Pitwall works](docs/images/pitwall-how-it-works.svg)
+![How Pitwall works](docs/images/pitwall-how-it-works.svg?v=d8019830)
 
 Every feature, with its status, is in [docs/features.md](docs/features.md).
 
