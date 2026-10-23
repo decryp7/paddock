@@ -70,8 +70,8 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <text class="num" x="130" y="390">01</text><text class="name" x="130" y="418">Record</text>
 <text class="body" x="72" y="470">Screen and input events</text>
 <text class="body" x="72" y="494">Studio or headless CLI</text>
-<text class="body" x="72" y="518">Accessibility tree is</text>
-<text class="body" x="72" y="542">an optional extra</text>
+<text class="body" x="72" y="518">Follows app focus</text>
+<text class="body" x="72" y="542">Accessibility optional</text>
 <path class="outl" d="M72 644 L238 644"/><text class="outt" x="72" y="672">→ Frames and events</text>
 <path class="flow" d="M266 398 L294 398"/><polygon class="ah" points="302,398 291,392 291,404"/>
 <rect class="card" x="306" y="352" width="214" height="344" rx="20"/>
@@ -139,8 +139,8 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <rect class="card" x="1080" y="352" width="214" height="344" rx="20"/>
 <circle class="gc" cx="1122" cy="398" r="24"/><g class="gl" transform="translate(1109 385) scale(1.0833333333333333)"><path d="M4 7l2 2 3-3M4 16l2 2 3-3M12 8h8M12 17h8"/></g>
 <text class="num" x="1162" y="390">05</text><text class="name" x="1162" y="418">Test</text>
-<rect class="lane" x="1094" y="448" width="186" height="110" rx="14"/><text class="lt" x="1108" y="476">Engineers’ tests</text><text class="body sm" x="1108" y="502">C#, Java, C++ through</text><text class="body sm" x="1108" y="522">the FlaUI-style client</text>
-<rect class="lane" x="1094" y="570" width="186" height="110" rx="14"/><text class="lt" x="1108" y="598">Sighter’s own tests</text><text class="body sm" x="1108" y="624">Recorded flows,</text><text class="body sm" x="1108" y="644">sighter run in CI</text>
+<rect class="lane" x="1094" y="448" width="186" height="110" rx="14"/><text class="lt" x="1108" y="476">Engineers’ tests</text><text class="body sm" x="1108" y="500">C#, Java, C++</text><text class="body sm" x="1108" y="520">alongside FlaUI/UIA</text><text class="body sm" x="1108" y="540">Sees what UIA misses</text>
+<rect class="lane" x="1094" y="570" width="186" height="110" rx="14"/><text class="lt" x="1108" y="598">Sighter’s own tests</text><text class="body sm" x="1108" y="622">Recorded flows,</text><text class="body sm" x="1108" y="642">sighter run in CI</text><text class="body sm" x="1108" y="662">One test, several apps</text>
 <path class="flow" d="M1298 398 L1326 398"/><polygon class="ah" points="1334,398 1323,392 1323,404"/>
 <rect class="card" x="1338" y="352" width="214" height="344" rx="20"/>
 <circle class="gc" cx="1380" cy="398" r="24"/><g class="gl" transform="translate(1367 385) scale(1.0833333333333333)"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></g>

@@ -47,7 +47,7 @@ o.push(`<rect class="chip-plan" x="${W - 48 - pw}" y="52" width="${pw}" height="
 
 // ---- stage cards ----
 const stages = [
-  { n: '01', name: 'Record', g: 'record', out: 'Frames and events', lines: ['Screen and input events', 'Studio or headless CLI', 'Accessibility tree is', 'an optional extra'] },
+  { n: '01', name: 'Record', g: 'record', out: 'Frames and events', lines: ['Screen and input events', 'Studio or headless CLI', 'Follows app focus', 'Accessibility optional'] },
   { n: '02', name: 'Label', g: 'tag', lines: ['Suggestions from OCR,', 'templates and detector', 'Human review queue for', 'anything unidentified'], pw: 'Pitwall vision helper' },
   { n: '03', name: 'Train', g: 'cube', out: 'Immutable model vN', lines: ['Permissive YOLO-style', 'detector per app', 'DPI, theme and size', 'variation, augmentation', 'Versioned model registry'] },
   { n: '04', name: 'Serve', g: 'server', lines: ['Local API, loopback only'], resolver: true },
@@ -74,10 +74,11 @@ stages.forEach((s, i) => {
     });
   }
   if (s.lanes) {
-    const lane = (ly, title, l1, l2) => `<rect class="lane" x="${x + 14}" y="${ly}" width="${CW - 28}" height="${(CHT - 112 - 12) / 2}" rx="14"/>` +
-      `<text class="lt" x="${x + 28}" y="${ly + 28}">${title}</text><text class="body sm" x="${x + 28}" y="${ly + 54}">${l1}</text><text class="body sm" x="${x + 28}" y="${ly + 74}">${l2}</text>`;
-    o.push(lane(y + 96, 'Engineers’ tests', 'C#, Java, C++ through', 'the FlaUI-style client'));
-    o.push(lane(y + 96 + (CHT - 112 - 12) / 2 + 12, 'Sighter’s own tests', 'Recorded flows,', 'sighter run in CI'));
+    const lh = (CHT - 112 - 12) / 2;
+    const lane = (ly, title, ls) => `<rect class="lane" x="${x + 14}" y="${ly}" width="${CW - 28}" height="${lh}" rx="14"/>` +
+      `<text class="lt" x="${x + 28}" y="${ly + 28}">${title}</text>` + ls.map((l, k) => `<text class="body sm" x="${x + 28}" y="${ly + 52 + k * 20}">${l}</text>`).join('');
+    o.push(lane(y + 96, 'Engineers’ tests', ['C#, Java, C++', 'alongside FlaUI/UIA', 'Sees what UIA misses']));
+    o.push(lane(y + 96 + lh + 12, 'Sighter’s own tests', ['Recorded flows,', 'sighter run in CI', 'One test, several apps']));
   }
   // flow arrow into the next card
   if (i < stages.length - 1) {

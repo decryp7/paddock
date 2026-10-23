@@ -9,7 +9,7 @@ tested like any other. Everything runs on your machine.
 
 </div>
 
-![Sighter: Find any UI element by sight](docs/images/sighter-hero.svg?v=c99b3b41)
+![Sighter: Find any UI element by sight](docs/images/sighter-hero.svg?v=b73862d0)
 
 
 > **Status: in design; not usable yet.** There is no product code in this repository. The design is in
@@ -17,11 +17,11 @@ tested like any other. Everything runs on your machine.
 
 ## What it will do
 
-![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](docs/images/sighter-overview.svg?v=6abeda28)
+![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](docs/images/sighter-overview.svg?v=3d5c7994)
 
-![Sighter features](docs/images/sighter-features.svg?v=254b7ef8)
+![Sighter features](docs/images/sighter-features.svg?v=5be41294)
 
-![How Sighter works](docs/images/sighter-how-it-works.svg?v=b8cce25d)
+![How Sighter works](docs/images/sighter-how-it-works.svg?v=751b1d5c)
 
 - **Find elements from pixels alone.** Send a screenshot (or ask for a window capture) and a query ("the Save button",
   text "Export"); get boxes, confidence and which layer answered. Accessibility trees are an optional label source,
