@@ -1,0 +1,240 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1182" viewBox="0 0 1600 1182" role="img" aria-labelledby="t d">
+<title id="t">How Sighter works</title>
+<desc id="d">Planned, nothing built yet. Six stages left to right: record screen and input events; label with OCR, template and detector suggestions, optional Pitwall vision and a human review queue; train a permissive YOLO-style detector with variation and a model registry; serve a local API with a layered resolver (cache, template, OCR anchor, detector, Pitwall grounding, needs labelling); test, in engineers' C#, Java or C++ tests through a FlaUI-style client and in Sighter's own recorded flows; results as JUnit, TRX, Allure, Debrief run bundles and Pacenotes traceability. A retrain loop sends low-confidence results or UI changes to the review queue and on to retraining. A recovery loop sends a stuck step to Pitwall for a diagnosis and plan, runs a guarded recovery, reports passed with recovery and sends a proposal to the studio.</desc>
+<style>
+:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--hand:#566070;--acc:#0A8CA8;--accf:#E3F4F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--warn:#B25E00;--warnf:#FBF0E1;--bgc:#F6F8FA}
+@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--hand:#A6AEBC;--acc:#00B8D9;--accf:#0F2E36;--hubf:#242040;--hubs:#A58BFA;--warn:#F2A33A;--warnf:#33281A;--bgc:#12151A}}
+text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;fill:var(--ink)}
+.eyebrow{font-size:15px;font-weight:600;letter-spacing:.18em;fill:var(--acc)}
+.eyebrow2{font-size:13px;font-weight:600;letter-spacing:.14em;fill:var(--muted)}
+.h1{font-size:42px;font-weight:600;letter-spacing:-.02em}
+.sub{font-size:19px;fill:var(--muted)}.sub2{font-size:15px;font-weight:500;letter-spacing:.04em;fill:var(--muted)}.outl{stroke:var(--line);stroke-width:1}.outt{font-size:15px;font-weight:500;fill:var(--ink)}
+.chip-plan{fill:none;stroke:var(--muted);stroke-dasharray:3 3}.chipt{font-size:14px;font-weight:500;fill:var(--muted)}
+.card{fill:var(--card);stroke:var(--line)}
+.gc{fill:var(--accf);stroke:var(--acc);stroke-width:1.2}
+.gl{fill:none;stroke:var(--acc);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.num{font-size:13px;font-weight:600;letter-spacing:.14em;fill:var(--acc)}
+.name{font-size:25px;font-weight:600;letter-spacing:-.01em}
+.body{font-size:16px;fill:var(--muted)}.sm{font-size:15px}.mut{fill:var(--muted)}
+.mut2{font-size:15px;fill:var(--muted)}
+.lay{fill:var(--soft);stroke:var(--line)}.layt{font-size:15px;font-weight:500}.layn{font-size:13px;fill:var(--muted)}
+.pwlay{fill:var(--hubf);stroke:var(--hubs);stroke-dasharray:3 3}.needs{fill:none;stroke:var(--acc);stroke-width:1.5}
+.pwchip{fill:var(--hubf);stroke:var(--hubs);stroke-dasharray:3 3}.pwt{font-size:14px;font-weight:500}
+.lane{fill:var(--soft);stroke:var(--line)}.lt{font-size:16px;font-weight:600}
+.flow{fill:none;stroke:var(--hand);stroke-width:2;stroke-linecap:round}.ah{fill:var(--hand)}
+.loopa{fill:none;stroke:var(--acc);stroke-width:2.5;stroke-linecap:round}.aha{fill:var(--acc)}
+.loopb{fill:none;stroke:var(--hand);stroke-width:2;stroke-linecap:round}
+.pill{fill:var(--card);stroke:var(--line)}.pillacc{fill:var(--accf);stroke:var(--acc)}.lbl{font-size:16px;font-weight:500}
+.cap{fill:var(--bgc);stroke:var(--line)}
+.rc{fill:var(--card);stroke:var(--line)}.rcpw{fill:var(--hubf);stroke:var(--hubs);stroke-dasharray:3 3}.rcwarn{fill:var(--warnf);stroke:var(--warn)}
+.rt{font-size:14.5px;font-weight:500}
+.stub{fill:none;stroke:var(--hubs);stroke-width:2;stroke-linecap:round;stroke-dasharray:1 6}.ahp{fill:var(--hubs)}
+.hub{fill:var(--hubf);stroke:var(--hubs);stroke-width:1.5}.hubname{font-size:28px;font-weight:600}.hubt{font-size:15px;font-weight:600}.hubs{font-size:15px;fill:var(--muted)}
+.vt{font-size:17px;font-weight:600}.vs{font-size:16px;fill:var(--muted)}.legt{font-size:15px;fill:var(--muted)}.rule{fill:var(--line)}
+</style>
+<svg x="48" y="44" width="92" height="92" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="s0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4FD8F0"/><stop offset="0.55" stop-color="#00B8D9"/><stop offset="1" stop-color="#0094B8"/>
+    </linearGradient>
+    <radialGradient id="s0sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s0edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="s0clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="s0gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#00485A" flood-opacity="0.32"/></filter>
+    <filter id="s0ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#s0bg)" filter="url(#s0ts)"/>
+  <g clip-path="url(#s0clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#s0sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#s0edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#s0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M727.6 607.99A236 236 0 0 1 607.99 727.6M416.01 727.6A236 236 0 0 1 296.4 607.99M296.4 416.01A236 236 0 0 1 416.01 296.4M607.99 296.4A236 236 0 0 1 727.6 416.01" fill="none" stroke="#00303B" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><path d="M728 512L812 512M512 728L512 812M296 512L212 512M512 296L512 212" fill="none" stroke="#00303B" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M436 392L436 620L498.32 562.24L543.92 661.04L598.64 638.24L553.04 540.96L639.68 540.96Z" fill="#00303B" stroke="#00303B" stroke-width="20" stroke-linejoin="round"/></g>
+</svg>
+<text class="eyebrow" x="164" y="76">SIGHTER</text>
+<text class="h1" x="164" y="126">Record it. Label it. Train it. Test it.</text>
+<text class="sub" x="164" y="160">A local vision locator for UI automation: your tests find any element by sight, on your machine.</text>
+<text class="sub2" x="164" y="188">Local only  ·  never a blind click  ·  permissive licences only</text>
+<rect class="chip-plan" x="1317" y="52" width="235" height="30" rx="15"/><text class="chipt" x="1434.5" y="72" text-anchor="middle">Planned: nothing is built yet</text>
+<rect class="card" x="48" y="352" width="214" height="344" rx="20"/>
+<circle class="gc" cx="90" cy="398" r="24"/><g class="gl" transform="translate(77 385) scale(1.0833333333333333)"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6" fill="currentColor"/></g>
+<text class="num" x="130" y="390">01</text><text class="name" x="130" y="418">Record</text>
+<text class="body" x="72" y="470">Screen and input events</text>
+<text class="body" x="72" y="494">Studio or headless CLI</text>
+<text class="body" x="72" y="518">Accessibility tree is</text>
+<text class="body" x="72" y="542">an optional extra</text>
+<path class="outl" d="M72 644 L238 644"/><text class="outt" x="72" y="672">→ Frames and events</text>
+<path class="flow" d="M266 398 L294 398"/><polygon class="ah" points="302,398 291,392 291,404"/>
+<rect class="card" x="306" y="352" width="214" height="344" rx="20"/>
+<circle class="gc" cx="348" cy="398" r="24"/><g class="gl" transform="translate(335 385) scale(1.0833333333333333)"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.2"/></g>
+<text class="num" x="388" y="390">02</text><text class="name" x="388" y="418">Label</text>
+<text class="body" x="330" y="470">Suggestions from OCR,</text>
+<text class="body" x="330" y="494">templates and detector</text>
+<text class="body" x="330" y="518">Human review queue for</text>
+<text class="body" x="330" y="542">anything unidentified</text>
+<rect class="pwchip" x="322" y="634" width="182" height="40" rx="12"/><svg x="334" y="642" width="24" height="24" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7B46DB"/><stop offset="0.55" stop-color="#5A24B0"/><stop offset="1" stop-color="#43198F"/>
+    </linearGradient>
+    <radialGradient id="p19sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="p19edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="p19clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="p19gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#24094F" flood-opacity="0.32"/></filter>
+    <filter id="p19ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="p19m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M392 448V528M452 404V572M512 364V612M572 404V572M632 448V528" fill="none" stroke="#000" stroke-width="34" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p19bg)" filter="url(#p19ts)"/>
+  <g clip-path="url(#p19clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#p19sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p19edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
+</svg><text class="pwt" x="368" y="659">Pitwall vision helper</text>
+<path class="flow" d="M524 398 L552 398"/><polygon class="ah" points="560,398 549,392 549,404"/>
+<rect class="card" x="564" y="352" width="214" height="344" rx="20"/>
+<circle class="gc" cx="606" cy="398" r="24"/><g class="gl" transform="translate(593 385) scale(1.0833333333333333)"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12 4 7.5"/></g>
+<text class="num" x="646" y="390">03</text><text class="name" x="646" y="418">Train</text>
+<text class="body" x="588" y="470">Permissive YOLO-style</text>
+<text class="body" x="588" y="494">detector per app</text>
+<text class="body" x="588" y="518">DPI, theme and size</text>
+<text class="body" x="588" y="542">variation, augmentation</text>
+<text class="body" x="588" y="566">Versioned model registry</text>
+<path class="outl" d="M588 644 L754 644"/><text class="outt" x="588" y="672">→ Immutable model vN</text>
+<path class="flow" d="M782 398 L810 398"/><polygon class="ah" points="818,398 807,392 807,404"/>
+<rect class="card" x="822" y="352" width="214" height="344" rx="20"/>
+<circle class="gc" cx="864" cy="398" r="24"/><g class="gl" transform="translate(851 385) scale(1.0833333333333333)"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></g>
+<text class="num" x="904" y="390">04</text><text class="name" x="904" y="418">Serve</text>
+<text class="body" x="846" y="470">Local API, loopback only</text>
+<rect class="lay" x="838" y="476" width="182" height="28" rx="9"/><text class="layt" x="852" y="495">Cache</text>
+<text class="layn" x="1006" y="496" text-anchor="end">1</text>
+<rect class="lay" x="838" y="510" width="182" height="28" rx="9"/><text class="layt" x="852" y="529">Template</text>
+<text class="layn" x="1006" y="530" text-anchor="end">2</text>
+<rect class="lay" x="838" y="544" width="182" height="28" rx="9"/><text class="layt" x="852" y="563">OCR anchor</text>
+<text class="layn" x="1006" y="564" text-anchor="end">3</text>
+<rect class="lay" x="838" y="578" width="182" height="28" rx="9"/><text class="layt" x="852" y="597">Detector</text>
+<text class="layn" x="1006" y="598" text-anchor="end">4</text>
+<rect class="lay pwlay" x="838" y="612" width="182" height="28" rx="9"/><text class="layt" x="852" y="631">Pitwall grounding</text>
+<text class="layn" x="1006" y="632" text-anchor="end">5</text>
+<rect class="lay needs" x="838" y="646" width="182" height="28" rx="9"/><text class="layt" x="852" y="665">Needs labelling</text>
+<path class="flow" d="M1040 398 L1068 398"/><polygon class="ah" points="1076,398 1065,392 1065,404"/>
+<rect class="card" x="1080" y="352" width="214" height="344" rx="20"/>
+<circle class="gc" cx="1122" cy="398" r="24"/><g class="gl" transform="translate(1109 385) scale(1.0833333333333333)"><path d="M4 7l2 2 3-3M4 16l2 2 3-3M12 8h8M12 17h8"/></g>
+<text class="num" x="1162" y="390">05</text><text class="name" x="1162" y="418">Test</text>
+<rect class="lane" x="1094" y="448" width="186" height="110" rx="14"/><text class="lt" x="1108" y="476">Engineers’ tests</text><text class="body sm" x="1108" y="502">C#, Java, C++ through</text><text class="body sm" x="1108" y="522">the FlaUI-style client</text>
+<rect class="lane" x="1094" y="570" width="186" height="110" rx="14"/><text class="lt" x="1108" y="598">Sighter’s own tests</text><text class="body sm" x="1108" y="624">Recorded flows,</text><text class="body sm" x="1108" y="644">sighter run in CI</text>
+<path class="flow" d="M1298 398 L1326 398"/><polygon class="ah" points="1334,398 1323,392 1323,404"/>
+<rect class="card" x="1338" y="352" width="214" height="344" rx="20"/>
+<circle class="gc" cx="1380" cy="398" r="24"/><g class="gl" transform="translate(1367 385) scale(1.0833333333333333)"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></g>
+<text class="num" x="1420" y="390">06</text><text class="name" x="1420" y="418">Results</text>
+<text class="body" x="1362" y="470">JUnit, TRX and Allure</text>
+<text class="body" x="1362" y="494">Debrief run bundles with</text>
+<text class="body" x="1362" y="518">video and screenshots</text>
+<text class="body" x="1362" y="542">Requirement traceability</text>
+<text class="body" x="1362" y="566">with Pacenotes</text>
+<path class="outl" d="M1362 644 L1528 644"/><text class="outt" x="1362" y="672">→ For CI and Debrief</text>
+<path class="loopa" d="M929 337 C929 258, 453 258, 453 337"/><polygon class="aha" points="453,348 447,337 459,337"/>
+<rect class="pillacc" x="495" y="263.75" width="392" height="34" rx="17"/><text class="lbl" x="691" y="286.25" text-anchor="middle">Low confidence or UI change → retrain</text>
+<path class="loopb" d="M1187 337 C1187 196, 373 196, 373 337"/><polygon class="ah" points="373,348 367,337 379,337"/>
+<rect class="pill" x="634" y="214.25" width="292" height="34" rx="17"/><text class="lbl" x="780" y="236.75" text-anchor="middle">Recovery proposals → studio</text>
+<rect class="cap" x="1080" y="748" width="472" height="204" rx="20"/>
+<text class="eyebrow2" x="1104" y="780">RECOVERY LOOP</text>
+<rect class="rc" x="1104" y="798" width="168" height="52" rx="12"/><text class="rt" x="1188" y="829" text-anchor="middle">Step is stuck</text>
+<path class="flow" d="M1278 824 L1300 824"/><polygon class="ah" points="1308,824 1297,818 1297,830"/>
+<rect class="rc rcpw" x="1316" y="798" width="212" height="52" rx="12"/><svg x="1328" y="812" width="24" height="24" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7B46DB"/><stop offset="0.55" stop-color="#5A24B0"/><stop offset="1" stop-color="#43198F"/>
+    </linearGradient>
+    <radialGradient id="p19sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="p19edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="p19clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="p19gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#24094F" flood-opacity="0.32"/></filter>
+    <filter id="p19ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="p19m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M392 448V528M452 404V572M512 364V612M572 404V572M632 448V528" fill="none" stroke="#000" stroke-width="34" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p19bg)" filter="url(#p19ts)"/>
+  <g clip-path="url(#p19clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#p19sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p19edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
+</svg><text class="rt" x="1362" y="820">Pitwall diagnosis</text><text class="rt" x="1362" y="839">and plan</text>
+<rect class="rc" x="1410.6666666666665" y="888" width="117.33333333333333" height="52" rx="12"/><text class="rt" x="1469.3333333333333" y="909.5" text-anchor="middle">Guarded</text><text class="rt" x="1469.3333333333333" y="928.5" text-anchor="middle">recovery</text>
+<rect class="rc rcwarn" x="1257.3333333333333" y="888" width="117.33333333333333" height="52" rx="12"/><text class="rt" x="1316" y="909.5" text-anchor="middle">Passed with</text><text class="rt" x="1316" y="928.5" text-anchor="middle">recovery</text>
+<rect class="rc" x="1104" y="888" width="117.33333333333333" height="52" rx="12"/><text class="rt" x="1162.6666666666667" y="909.5" text-anchor="middle">Proposal for</text><text class="rt" x="1162.6666666666667" y="928.5" text-anchor="middle">the studio</text>
+<path class="flow" d="M1253.3333333333333 914 L1233.3333333333333 914"/><polygon class="ah" points="1223.3333333333333,914 1234.3333333333333,908 1234.3333333333333,920"/>
+<path class="flow" d="M1406.6666666666665 914 L1386.6666666666665 914"/><polygon class="ah" points="1376.6666666666665,914 1387.6666666666665,908 1387.6666666666665,920"/>
+<path class="flow" d="M1469.3333333333333 854 L1469.3333333333333 874"/><polygon class="ah" points="1469.3333333333333,884 1463.3333333333333,873 1475.3333333333333,873"/>
+<path class="flow" d="M1187 700 L1187 736"/><polygon class="ah" points="1187,744 1181,733 1193,733"/>
+<text class="mut2" x="1201" y="730">A step fails</text>
+<rect class="hub" x="48" y="1008" width="1504" height="92" rx="22"/>
+<svg x="74" y="1024" width="60" height="60" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7B46DB"/><stop offset="0.55" stop-color="#5A24B0"/><stop offset="1" stop-color="#43198F"/>
+    </linearGradient>
+    <radialGradient id="p19sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="p19edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="p19clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="p19gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#24094F" flood-opacity="0.32"/></filter>
+    <filter id="p19ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="p19m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M392 448V528M452 404V572M512 364V612M572 404V572M632 448V528" fill="none" stroke="#000" stroke-width="34" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p19bg)" filter="url(#p19ts)"/>
+  <g clip-path="url(#p19clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#p19sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p19edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
+</svg>
+<text class="hubname" x="154" y="1050">Pitwall</text><text class="body mut" x="154" y="1076">The local AI hub. Optional: Sighter works without it.</text>
+<rect x="594" y="1032" width="2" height="44" rx="1" class="rule"/><text class="hubt" x="608" y="1052">Label</text>
+<text class="hubs" x="608" y="1076">Suggests and names labels</text>
+<rect x="844" y="1032" width="2" height="44" rx="1" class="rule"/><text class="hubt" x="858" y="1052">Serve</text>
+<text class="hubs" x="858" y="1076">Grounds an unseen element</text>
+<rect x="1094" y="1032" width="2" height="44" rx="1" class="rule"/><text class="hubt" x="1108" y="1052">Test</text>
+<text class="hubs" x="1108" y="1076">Diagnoses a stuck step and plans a recovery</text>
+<path class="stub" d="M413 700 L413 1005"/><polygon class="ahp" points="413,1005 407,994 419,994"/><path class="stub" d="M413 1005 L413 700" opacity="0"/><rect class="pill" x="340.5" y="827.5" width="145" height="34" rx="17"/><text class="lbl" x="413" y="850" text-anchor="middle">Suggestions</text>
+<path class="stub" d="M929 700 L929 1005"/><polygon class="ahp" points="929,1005 923,994 935,994"/><path class="stub" d="M929 1005 L929 700" opacity="0"/><rect class="pill" x="867" y="827.5" width="124" height="34" rx="17"/><text class="lbl" x="929" y="850" text-anchor="middle">Grounding</text>
+<path class="stub" d="M1422 954 L1422 1005"/><polygon class="ahp" points="1422,1005 1416,994 1428,994"/>
+<path class="flow" d="M48 1148 L82 1148"/><polygon class="ah" points="92,1148 81,1142 81,1154"/><text class="legt" x="110" y="1153">Flow</text>
+<path class="loopa" d="M218 1148 L258 1148"/><polygon class="aha" points="268,1148 257,1142 257,1154"/><text class="legt" x="286" y="1153">Retrain loop</text>
+<path class="stub" d="M448 1148 L488 1148"/><polygon class="ahp" points="498,1148 487,1142 487,1154"/><text class="legt" x="516" y="1153">Uses Pitwall (optional)</text>
+</svg>

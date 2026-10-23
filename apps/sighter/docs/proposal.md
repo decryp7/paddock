@@ -73,6 +73,16 @@ watcher). Decision: **Sighter**.
 
 Day-one value needs no training: OCR plus template matching cover many legacy lookups before a model exists.
 
+![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](images/sighter-overview.svg?v=6abeda28)
+
+The containers behind it (planned):
+
+![Sighter containers](images/diagrams/svg/c4-2-containers.svg?v=bfb1ffff)
+
+The lifecycle of one label, from suggestion to model and back to review:
+
+![Element label lifecycle](images/diagrams/svg/uml-state-element-label.svg?v=41a65dc5)
+
 ## 4. The recorder
 
 A small capture component, usable inside the studio and as a headless CLI/tray recorder (`sighter record`) on test machines and CI runners.
@@ -393,6 +403,10 @@ Besides the API for engineers' code, Sighter can author and run test cases itsel
 ### 7.9 FlaUI-style client API
 The C#, Java and C++ clients expose an object model **similar to FlaUI** ([FlaUI](https://github.com/FlaUI/FlaUI), MIT, the .NET UIA library many Windows testers know), backed by vision instead of UIA. The HTTP/OpenAPI API stays the wire contract underneath; these object models are client-side layers over it. The raw verbs (`locate`, `wait_for`, `assert_screen`) remain available in every client.
 
+One `FindFirst(...).AsButton().Click()` from a C# test, through the client, the HTTP API, the resolver layers and the guarded input driver:
+
+![Locate and click an element](images/diagrams/svg/uml-seq-locate.svg?v=fd576cdc)
+
 **Familiarity, not compatibility**: not a drop-in FlaUI replacement (different namespaces and types), but familiar enough that a FlaUI user is productive at once. **Licence**: FlaUI is MIT; this is an API style, not code reuse.
 
 | FlaUI | Sighter client | Notes |
@@ -454,6 +468,8 @@ A thin shim package mapping common FlaUI calls, to migrate existing suites, is a
 
 ### 7.10 AI-assisted recovery (via Pitwall)
 User decision 2026-10-23: include Pitwall in the mix; if a test is stuck, go back to the LLM to find out why and try to continue. This applies to Sighter-authored tests (7.8) and, opt-in, to engineers' code tests through the clients.
+
+![Recover a stuck step](images/diagrams/svg/uml-seq-recovery.svg?v=2a42aa9c)
 
 **When it triggers** (failure path only):
 - a step cannot resolve its target within its wait;

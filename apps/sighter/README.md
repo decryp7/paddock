@@ -17,6 +17,8 @@ tested like any other. Everything runs on your machine.
 
 ## What it will do
 
+![Sighter overview: record, label, train, serve, test, results, with the retrain and recovery loops](docs/images/sighter-overview.svg?v=6abeda28)
+
 ![Sighter features](docs/images/sighter-features.svg?v=254b7ef8)
 
 ![How Sighter works](docs/images/sighter-how-it-works.svg?v=b8cce25d)
@@ -43,6 +45,11 @@ Sighter as a service. See the
 
 ## Documentation
 
+- Design diagrams (all planned; sources in [docs/diagrams](docs/diagrams)):
+  - [Containers (C4 level 2)](docs/images/diagrams/svg/c4-2-containers.svg?v=bfb1ffff)
+  - [Locate and click an element (sequence)](docs/images/diagrams/svg/uml-seq-locate.svg?v=fd576cdc)
+  - [Recover a stuck step (sequence)](docs/images/diagrams/svg/uml-seq-recovery.svg?v=2a42aa9c)
+  - [Element label lifecycle (state)](docs/images/diagrams/svg/uml-state-element-label.svg?v=41a65dc5)
 - [Design proposal](docs/proposal.md) (status: proposal, open questions pending)
 - [Lessons from the suite](docs/suite-lessons.md)
 - [Engineering rules](AGENTS.md)
