@@ -67,7 +67,7 @@ describe('TuningStore', () => {
   it('a refused change toasts and frees the busy flag', async () => {
     const { store, notifier } = setup();
     await store.load();
-    const admin = store.items().find((x) => x.blocked)!;
+    const admin = store.items().find((x) => x.needsAdmin && !x.applied)!;
     expect(await store.apply(admin.id)).toBe(false);
     expect(await store.apply('nope')).toBe(false);
     expect(store.busy()).toEqual([]);
