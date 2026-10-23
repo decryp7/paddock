@@ -692,7 +692,7 @@ never leave the machine.
 
 - **Link candidates** from (a) explicit tags: configurable patterns (`REQ-\d+`, `[A-Z]+-\d+`, `@req(..)`) in code comments, test names/attributes,
   commit messages and PR text (Gitea API); (b) structural/lexical candidates from the index: identifiers and strings matching requirement terms,
-  files touched by commits that mention the ID, tests in the same module; (c) **Pitwall judge** (no vector DB in v1; see question 22): for each requirement with weak or no
+  files touched by commits that mention the ID, tests in the same module; (c) **Pitwall judge** (no vector DB in v1; see question 22 and section 21): for each requirement with weak or no
   links, pass the requirement plus a small set of candidate symbols (retrieved by FTS5 identifier search and call-graph neighbourhood) and ask for
   a verdict with a quoted reason. Research reports modest recall for LLM-only traceability, so candidates are shown as **suggested, with evidence,
   never auto-confirmed**; confirmed links are stored (and may live in a committable `requirements/links.toml`).
@@ -935,13 +935,13 @@ cached. Local-only: requirement documents and code never leave the machine. This
 
 Added 2026-10-23 (sections 20-26):
 
-22. **Vector store**: confirm `usearch` behind a `VectorIndex` port with chunks and FTS5 in SQLite (section 21.3), after a two-day spike; LanceDB is the fallback.
-    Should the vector index later also supply candidates for requirement traceability, or stay code-search only?
+22. ~~Vector store~~ **Decided 2026-10-23: SQLite is the source of truth, the ANN index is derived data behind a `VectorIndex` port; the engine is chosen by the
+    spike among usearch (default), hannoy, libSQL and sqlite-vec, LanceDB as fallback (section 21.3).** Still open: should the vector index later also supply candidates for requirement traceability, or stay code-search only?
 23. **Tier 3 and the hard rule**: is an opt-in, per-repository "trust this repository" that starts language servers (which may run build scripts and proc
     macros) acceptable, with SCIP import as the no-execution alternative? Or tier 3 by SCIP import only?
-24. **Embeddings source**: Pitwall first (Qwen3-Embedding), then a small local model Pacenotes runs itself and downloads on the user's click (not in the
-    installer), then none; which small model after a benchmark (`CodeRankEmbed` MIT or `jina-embeddings-v2-base-code` Apache-2.0)? Acceptable defaults for the
-    per-repository cap (500k chunks / 2 GB)? Semantic search off by default?
+24. ~~Embeddings source~~ **Decided 2026-10-23: Pitwall's Qwen3-Embedding (llama.cpp `/v1/embeddings`), else a small code-embedding model downloaded on the user's
+    click, else text and structure only (section 21.2).** Still open: which small model after a benchmark (`CodeRankEmbed` or `jina-embeddings-v2-base-code`),
+    the per-repository cap defaults (500k chunks / 2 GB), and whether semantic search is off by default.
 25. **MCP host**: should Pacenotes also be an MCP client for deterministic flows (Sighter run after a drafted plan), with every non-read-only call behind a click?
 26. **Dependency graph**: which node and edge kinds are in v1 (internal modules, packages, files, symbols, imports, calls first; services, tables,
     topics, endpoints as recognisers grow)? Which advisory source for the offline mirror (OSV), and is a user-triggered refresh enough?
@@ -989,7 +989,7 @@ draw.io form, requirement links/suspect model, coverage import, wasm packs, no-e
 - M4 (about 3 weeks): review (rule engine, agents-md pack, LLM pass, suppressions, SARIF, CI mode); coverage import and patch coverage; test inventory.
 - M5 (about 3 weeks): requirements (xlsx/docx/csv/md, mappings, tags, matrix, reports, impact, review integration); language packs; UI polish;
   hardening, screenshots, docs.
-- M2b (about 3-4 weeks, after M2): tier model and orientation page, the LSP client and the first language packs (Rust, C/C++, C#, TypeScript, Python; Java and Go follow in M3), vector index and hybrid retrieval (after the store spike), the views marked v1 and the
+- M2b (about 3-4 weeks, after M2): tier model and orientation page, the LSP client and the first language packs (Rust, C/C++, C#, TypeScript, Python; Java and Go follow in M3), vector index and hybrid retrieval (after the store spike, now a few days with four candidates; section 21.3), the views marked v1 and the
   dependency graph (core), with the matching MCP tools; Angular adds the graph view (progressive, engine-laid-out), the orientation page and the
   ask box. Review additions land in M4 with the rest of Review.
 - v1.1 items (Pitwall extraction/semantic links, pptx/pdf/ReqIF, xlsx write-back, Gitea posting, test drafts, JUnit results, Pitcrew triggers,
@@ -1154,7 +1154,7 @@ is unaffected; the two apps share no index.
 
 - **Hybrid retrieval.** A query runs three searches: text (ripgrep and FTS5 over identifiers and comments), structural (symbols, tree-sitter
   queries) and vector (nearest chunks by embedding). The ranked lists are fused with reciprocal rank fusion (RRF), then a **re-ranking** step
-  orders the top candidates (a cross-encoder or small reranker when available, otherwise a deterministic score: exact identifier hits, symbol kind,
+  orders the top candidates (a small reranker such as Qwen3-Reranker or a chat LLM through Pitwall on the top 20-50 hits, otherwise a deterministic score: exact identifier hits, symbol kind,
   path proximity, recency, hot-spot weight). Every result carries `path:line`, its tier and which searches found it. Semantic search never
   replaces exact search: it widens recall for concept queries ("where do we retry network calls?").
 - **Chunking along syntax.** Chunks are the functions, methods, classes and top-level items that tree-sitter finds (tier 2), with a header of
@@ -1173,44 +1173,58 @@ is unaffected; the two apps share no index.
   of float16 vectors at 1024 dimensions plus graph overhead (estimate, to be measured). Embedding throughput on CPU is the main time cost and is
   unmeasured (open question 24).
 
-### 21.2 Where the embeddings come from (decision to confirm)
+### 21.2 Where the embeddings come from (decided, user, 2026-10-23)
 
 An `Embedder` port with three implementations, chosen in this order:
 
-1. **Pitwall** (optional, preferred when present): its embedding endpoint with **Qwen3-Embedding** (Apache-2.0, 0.6B for modest machines, larger
-   sizes for better recall). Pitwall already manages local model files and hardware, so Pacenotes does not duplicate that.
-2. **A small local model run by Pacenotes itself**, so semantic search works without Pitwall: an embedding worker process (a plugin on the usual
-   isolation model) running a small code-aware model through `candle` or ONNX Runtime (`ort`); candidates are `CodeRankEmbed` (MIT) and
-   `jina-embeddings-v2-base-code` (Apache-2.0), to be benchmarked on real repositories before choosing. **It is not bundled in the installer** (size,
-   licence notices): it is downloaded once, on the user's click, with a hash check, and cached. Until then, and for users who decline, option 3
-   applies.
-3. **No embeddings**: hybrid search degrades to text and structural search. This is always available and is the default state.
+1. **Pitwall** (optional, preferred when present): its llama.cpp `/v1/embeddings` endpoint with **Qwen3-Embedding** (Apache-2.0, 0.6B for modest
+   machines, larger sizes for better recall). Pitwall already manages local model files and hardware, so Pacenotes does not duplicate that.
+2. **A small code-embedding model downloaded on the user's click**, so semantic search works without Pitwall: an embedding worker process (a plugin on
+   the usual isolation model) running it through `candle` or ONNX Runtime (`ort`); candidates are `CodeRankEmbed` (MIT) and
+   `jina-embeddings-v2-base-code` (Apache-2.0), benchmarked on real repositories before choosing. **It is not bundled in the installer** (size,
+   licence notices): downloaded once, with a hash check, and cached.
+3. **No embeddings** (text + structure only): always available and the default state.
+
+**Chat LLMs are not used to make embeddings**: retrieval quality is worse than a purpose-trained embedding model and they are far too slow and heavy
+for hundreds of thousands of chunks. They are used for three other jobs, all optional and all through Pitwall: (a) **reranking** the top 20-50 hits
+(a chat LLM as judge, or a small dedicated reranker, below); (b) **one-line summaries of important chunks**, embedded together with the code to help
+concept queries; (c) the **cited answer** built from the retrieved chunks.
+
+Reranker model: Qwen3-Reranker (Apache-2.0) exists in sizes 0.6B/4B/8B and **is servable by llama.cpp**: `llama-server` documents a `/v1/rerank`
+endpoint that needs a reranker model and `--reranking` (or `--embedding --pooling rank`). Caveat: many community GGUF conversions of Qwen3-Reranker
+give near-zero scores because they lack the reranker-specific tensors (llama.cpp issue #16407); only conversions made with the current official
+`convert_hf_to_gguf.py` work, e.g. the community repository `Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp`. No official `Qwen/Qwen3-Reranker-*-GGUF`
+page was reachable in this check (unverified whether one exists). Pitwall must pin a verified conversion; the spike checks scores end to end.
 
 The vectors record the model id and dimension; vectors from different models are never mixed, and changing the embedder rebuilds the index. This
 keeps "Pitwall is optional" true for every function.
 
-### 21.3 Choosing the vector store (decision to confirm)
+### 21.3 Storage (decided, user, 2026-10-23) and vector index shortlist (spike pending)
 
-Requirements: embedded in a Rust app (no server), permissive licence, maintained, on-disk with low memory, incremental insert and delete, metadata
-or a clean way to keep it beside the vectors, fits a repository-sized index (up to a few hundred thousand chunks), builds on Windows, macOS and
-Linux. Checked 2026-10-23 (licences from the crates.io and GitHub metadata; items marked (unverified) come from documentation or memory and were
-not confirmed from source in this run):
+**Decided.** SQLite is the **source of truth**: chunks, index, metadata and FTS5. Embeddings live in an **embedded ANN index beside it behind a
+`VectorIndex` port**. The vector index is **derived data**: it is rebuilt from SQLite when missing, corrupt or stale (staleness is detected per
+chunk by chunk id + text hash). **Hybrid search** = FTS5 + vector, fused with reciprocal rank fusion; filters (path, language, tier) and enrichment
+(symbol, signature, tier, hot-spot weight) come from SQLite. **No vector database server and no second primary database.**
 
-| Store | Licence | Maintenance (checked 2026-10-23) | Fit |
+Requirements for the index: embedded in a Rust app, permissive licence, maintained, low memory or on disk, incremental insert and delete, a few
+hundred thousand chunks, builds on Windows, macOS and Linux. Checked 2026-10-23 (items marked (unverified) are not confirmed from source):
+
+| Candidate | Licence | Maintenance (checked 2026-10-23) | Fit |
 |---|---|---|---|
-| **LanceDB** (embedded Rust crate `lancedb` on the Lance format) | Apache-2.0 | very active: `lancedb` 0.40.0 on crates.io, repository pushed the same day, `lance` 13.0.0 (2026-10-07) | Full embedded database: columnar on-disk tables, ANN indexes (IVF-based, (unverified) product quantisation), full-text and hybrid search (unverified), versioned data. Heaviest dependency set (Arrow, DataFusion), long compile times and a larger binary, a second storage engine beside SQLite |
-| **sqlite-vec** (SQLite extension, Rust crate `sqlite-vec`) | MIT/Apache-2.0 (crate), Apache-2.0 (repository) | pre-v1: crate `0.1.10-alpha.4` (2026-05-18), repository last pushed 2026-05-18, five months before this check; upstream warns of breaking changes | Smallest and simplest: vectors live in the same SQLite file as the chunks and FTS5, one transaction, hybrid by SQL. Brute-force scan only (unverified), so cost grows linearly with chunks; fine for tens of thousands, slow at a few hundred thousand. Loading an extension into SQLite also needs care with the bundled SQLite build |
-| **Qdrant Edge** (`qdrant-edge` crate, the embedded Qdrant shard) | Apache-2.0 | active but young: `qdrant-edge` 0.9.0 (2026-10-22), about 20k downloads, announced as a beta in July 2025 | In-process engine with HNSW and payload filtering, small footprint, no background service; the Rust API is still moving (0.x) |
-| **usearch** (`usearch` crate, HNSW) | Apache-2.0 | very active: 2.26.5 (2026-10-18), repository pushed 2026-10-18, 1.5M downloads | A vector index only, no payloads: a small, fast, on-disk (memory-mappable, (unverified)) HNSW with f16/int8 quantisation (unverified); a C++ core built by the crate, so a C++ compiler is needed at build time (the app's own code stays Rust) |
+| **usearch** (`usearch` crate, HNSW). **Current default** | Apache-2.0 | very active: 2.26.5 (2026-10-18), 1.5M downloads | Vector index only, no payloads; C++ core with Rust bindings, very fast; save/load and memory-mapped view (unverified); f16/int8 quantisation (unverified). Needs a C++ compiler at build time (the app's own code stays Rust) |
+| **hannoy** (Meilisearch's pure-Rust HNSW on LMDB; successor to `arroy`) | MIT (crate and repository) | active: `hannoy` 0.3.0 (2026-10-22), 626k downloads. The version is 0.3.0, not 0.1.x; the repository shows 190 commits, 87 stars | Disk-backed on LMDB (datasets larger than RAM, so low RAM), dynamic insert and delete without a full rebuild, quantized metrics (kind of quantisation unverified), pure Rust, no C++ toolchain. Adds LMDB as a second on-disk store (derived data only); young project, "production-ready" is the project's own claim; the repository is not Meilisearch's own (owner `nnethercott`) |
+| **libSQL native vectors** (Turso's SQLite fork) | MIT | "actively maintained, but new features are being developed in Turso" (the from-scratch Rust database, in beta, recommended for new projects); `libsql` crate 0.10.0 (2026-10-13) | `F32_BLOB(n)` columns (also f16/f8/1-bit) and a DiskANN index (`libsql_vector_idx`, `vector_top_k`) inside the database: one file, transactional consistency, no sync problem. But it **replaces stock SQLite with a fork**, whose feature work has moved elsewhere. Based on SQLite 3.43 (shell banner); **FTS5 support not confirmed from the docs read (unverified)**; the vector index needs a rowid or single-column primary key |
+| **sqlite-vec** (extension, crate `sqlite-vec`) | MIT/Apache-2.0 | pre-v1: `0.1.10-alpha.4` (2026-05-18), last push five months before this check; upstream warns of breaking changes | Prototype and small repositories only: same SQLite file, one transaction, hybrid by SQL, but brute-force scan (unverified), linear in chunk count |
+| **LanceDB** (`lancedb` 0.40.0) | Apache-2.0 | very active; `lance` 13.0.0 (2026-10-07) | **All-in-one fallback**: columnar tables, ANN indexes, full-text and hybrid search (unverified). Heaviest dependency set (Arrow, DataFusion), long compile times, and a second storage engine, which the decision above rules out unless the spike fails |
 
-**Recommendation: `usearch` behind a `VectorIndex` port, with chunks, metadata and FTS5 staying in the existing SQLite store.** Reasons: Pacenotes
-already has SQLite for everything else and the vectors are **derived, rebuildable data**, so a database that duplicates storage, transactions and
-schema is more than needed; usearch gives approximate search that scales past what brute force handles, in a small dependency with a permissive
-licence and a very active project; the port keeps the choice reversible (AGENTS.md: depend on abstractions). Fusion (RRF) and re-ranking are our own
-pure functions, tested in the core. **Fallbacks:** LanceDB if we later want filtered ANN and hybrid search inside one engine and accept its weight;
-sqlite-vec only as a zero-dependency prototype for small repositories. A two-day spike on a 500k-chunk corpus (build time, query latency at k=50,
-recall against brute force, binary size, Windows build) decides before M2b; the recommendation is **to confirm** (question 22). Not chosen:
-Qdrant Edge for being young and still 0.x, which is a revisit later, not a rejection.
+Not shortlisted: Qdrant Edge (`qdrant-edge` 0.9.0, 2026-10-22; young and 0.x), a revisit later, not a rejection.
+
+**Spike (planned, before M2b).** Same 500k-chunk corpus and the same 1024-dimension vectors for usearch, hannoy, libSQL and sqlite-vec (as the
+brute-force baseline); measure build time, query latency (k=10 and k=50, filtered and unfiltered), **recall@10 against exact search**, RAM, disk, and
+**incremental update and delete cost** (churn of 1%, 10%), plus Windows build and binary size, and for libSQL whether FTS5 is present. The default is
+`usearch` until the numbers say otherwise; the `VectorIndex` port keeps the choice reversible. Fusion (RRF) and re-ranking are our own pure
+functions, tested in the core.
+
 
 ## 22. Views (what to look at while analysing code)
 
@@ -1360,6 +1374,9 @@ All are read-only and local, and each also becomes an MCP tool where it makes se
 Vector stores and models
 - LanceDB: https://github.com/lancedb/lancedb (Apache-2.0), https://crates.io/crates/lancedb , https://crates.io/crates/lance , Lance format: https://github.com/lance-format/lance
 - sqlite-vec: https://github.com/asg017/sqlite-vec , https://crates.io/crates/sqlite-vec ; release state and the pre-v1 warning (secondary): https://depscope.dev/pkg/npm/sqlite-vec
+- hannoy: https://github.com/nnethercott/hannoy , https://crates.io/crates/hannoy (MIT, 0.3.0 checked 2026-10-23)
+- libSQL: https://github.com/tursodatabase/libsql (MIT; maintenance note), https://crates.io/crates/libsql , vector search docs: https://docs.turso.tech/features/ai-and-embeddings
+- llama.cpp server (rerank and embeddings endpoints): https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md ; Qwen3-Reranker GGUF conversion that works with llama.cpp: https://huggingface.co/Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp (Apache-2.0; issue #16407 on broken conversions)
 - Qdrant Edge: https://qdrant.tech/documentation/edge/ , https://crates.io/crates/qdrant-edge , https://github.com/qdrant/qdrant ; launch (secondary): https://www.blocksandfiles.com/ai-ml/2025/07/29/qdrant-launches-lightweight-vector-database-for-edge-devices/1615914
 - usearch: https://github.com/unum-cloud/usearch , https://crates.io/crates/usearch
 - Models: https://huggingface.co/Qwen/Qwen3-Embedding-0.6B (Apache-2.0), https://huggingface.co/nomic-ai/CodeRankEmbed (MIT), https://huggingface.co/jinaai/jina-embeddings-v2-base-code (Apache-2.0); runtimes: https://crates.io/crates/candle-core (MIT or Apache-2.0), https://crates.io/crates/ort (MIT or Apache-2.0)
