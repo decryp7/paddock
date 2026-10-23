@@ -100,7 +100,7 @@ const PACENOTES = {
   left: {
     g1024: [
       { kind: 'fill', d: rr(366, 276, 380, 496, 40), tone: 'secondary', cut: [rr(334, 246, 380, 496, 40)] },
-      { kind: 'fill', d: rr(334, 246, 380, 496, 40), tone: 'primary', cut: [circle(388, 330, 21), circle(388, 494, 21), circle(388, 658, 21)], cutStroke: { d: 'M452 360H672M452 428H610M470 706C470 636 548 650 548 590C548 556 530 548 530 520M610 566L580 610L610 654M678 566L708 610L678 654M656 560L634 660', w: 26, cap: 'round' } },
+      { kind: 'fill', d: rr(334, 246, 380, 496, 40), tone: 'primary', cut: [circle(388, 330, 21), circle(388, 494, 21), circle(388, 658, 21)], cutStroke: { d: 'M452 346H664M452 406H600M486 462L456 508L486 554M536 456L516 560M566 462L596 508L566 554M456 700C530 700 520 636 592 636C630 636 650 650 662 676', w: 26, cap: 'round' } },
       { kind: 'stroke', d: 'M300 330H388M300 494H388M300 658H388', w: 34, tone: 'primary' },
     ],
     g32: [
