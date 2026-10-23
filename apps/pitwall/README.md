@@ -18,11 +18,11 @@ Dyno). Like the pit wall in a race, it is where every car radios in.
 > mode turns even that off. This is the first architecture decision and is enforced in code and tests:
 > [ADR 0001](docs/adr/0001-local-only.md).
 
-**Status: in development.** The server works end to end on macOS (Apple Silicon): a Metal llama.cpp build was
+**Status: v1.0.0.** The server works end to end on macOS (Apple Silicon): a Metal llama.cpp build was
 installed through the app flow with checksum and self-test, a Hugging Face model downloaded with its SHA-256 verified,
 and OpenAI, Anthropic and Ollama requests (streaming and not, plus JSON-schema output) were answered at about 213
-tokens per second with a 0.5B model on an M4 Pro. The Tauri app exists, but no installer has been published and the Windows and Linux real-model
-runs have not been done; see the [roadmap](docs/roadmap.md) for exactly what is verified and what is planned.
+tokens per second with a 0.5B model on an M4 Pro. The Tauri app ships as installers for Windows, macOS and Linux; the Windows and Linux real-model
+runs have not been done yet; see the [roadmap](docs/roadmap.md) for exactly what is verified and what is planned.
 
 ## Screenshots
 
