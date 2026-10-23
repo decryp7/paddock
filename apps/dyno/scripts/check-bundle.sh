@@ -26,9 +26,9 @@ case "$(uname -s)" in
     tree=$(mktemp -d)
     trap 'rm -rf "$tree"' EXIT
     dpkg-deb -x "$deb" "$tree"
-    found_app=0 found_agent=0
+    found_app=0 found_agent=0 found_helper=0
     while IFS= read -r f; do
-      case "$(basename "$f")" in dyno-app|dyno) found_app=1 ;; dyno-agent) found_agent=1 ;; esac
+      case "$(basename "$f")" in dyno-app|dyno) found_app=1 ;; dyno-agent) found_agent=1 ;; dyno-helper) found_helper=1 ;; esac
       file -b "$f" | grep -q '^ELF' || continue
       paths=$(readelf -d "$f" 2>/dev/null | sed -n 's/.*(R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')
       echo "run paths of ${f#"$tree"}: ${paths:-none}"
@@ -39,15 +39,17 @@ case "$(uname -s)" in
     done < <(find "$tree" -type f -perm -u+x)
     (( found_app )) || err "the .deb has no dyno-app / dyno executable"
     (( found_agent )) || err "the .deb has no dyno-agent executable"
+    (( found_helper )) || err "the .deb has no dyno-helper executable"
     ;;
   Darwin)
     app=$(find "$bundle/macos" -maxdepth 1 -name '*.app' 2>/dev/null | head -n 1)
     [[ -n "$app" ]] || { echo "::error::no .app under $bundle/macos"; exit 1; }
     codesign --verify --deep --strict "$app" || err "$app does not verify (broken or missing seal)"
     codesign -dv "$app" 2>&1 | grep -E 'Signature|Identifier|flags' || true
-    found_agent=0
+    found_agent=0 found_helper=0
     while IFS= read -r f; do
       [[ "$(basename "$f")" == dyno-agent ]] && found_agent=1
+      [[ "$(basename "$f")" == dyno-helper ]] && found_helper=1
       file -b "$f" | grep -q 'Mach-O' || continue
       paths=$(otool -l "$f" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }')
       echo "run paths of ${f#"$app"/}: $(echo "$paths" | paste -sd: -)"
@@ -56,6 +58,7 @@ case "$(uname -s)" in
       done <<< "$paths"
     done < <(find "$app/Contents" -type f -perm -u+x)
     (( found_agent )) || err "the .app has no dyno-agent executable"
+    (( found_helper )) || err "the .app has no dyno-helper executable"
     ;;
   *)
     echo "check-bundle: nothing to check on $(uname -s)"

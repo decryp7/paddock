@@ -5,6 +5,7 @@ pub mod activity;
 pub mod control;
 #[cfg(test)]
 mod control_tests;
+pub mod elevate;
 pub mod handle;
 pub mod net;
 pub mod pdh;
@@ -26,6 +27,7 @@ pub fn platform(state_file: PathBuf) -> Platform {
         control: Box::new(control::WinControl::new(state_file)),
         processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails))),
         activity: Box::new(activity::WinActivity),
+        issues: crate::issues::os_sources(),
         ..f
     }
 }

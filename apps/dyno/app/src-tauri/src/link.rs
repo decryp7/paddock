@@ -19,6 +19,16 @@ use std::time::{Duration, Instant};
 
 /// Every request fails after this long.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a request that reads the system logs may take (the unified log of a busy Mac takes a minute or two).
+pub const LOG_READ_TIMEOUT: Duration = Duration::from_secs(150);
+
+/// How long to wait for the agent's answer to `request`.
+pub fn timeout_for(request: &Request) -> Duration {
+    match request {
+        Request::RescanIssues { .. } => LOG_READ_TIMEOUT,
+        _ => REQUEST_TIMEOUT,
+    }
+}
 /// How long a freshly started agent has to write `agent.json` and accept a connection.
 pub const SPAWN_WAIT: Duration = Duration::from_secs(5);
 /// A request made before the first connection waits this long for it (the window asks for data the moment it opens,
@@ -208,7 +218,8 @@ impl AgentLink {
     /// ([`AgentLink::set_detail`]).
     pub fn call(&self, request: Request) -> Result<Reply, CommandError> {
         let peer = self.peer_or_wait().ok_or_else(CommandError::unavailable)?;
-        match peer.call(Message::Request(Box::new(request)), REQUEST_TIMEOUT) {
+        let timeout = timeout_for(&request);
+        match peer.call(Message::Request(Box::new(request)), timeout) {
             Ok(Message::Reply(r)) => (*r).map_err(CommandError::from),
             Ok(_) => Err(CommandError::internal("The agent sent something unexpected.")),
             Err(IpcError::Timeout(_)) => Err(CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.")),
@@ -521,6 +532,24 @@ mod tests {
     use dyno_platform::fake::{process, Fake};
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc::{channel, Receiver, Sender};
+
+    #[test]
+    fn only_reading_the_system_logs_may_take_minutes() {
+        use dyno_core::issues::IssuesQuery;
+        assert_eq!(
+            timeout_for(&Request::RescanIssues {
+                query: IssuesQuery::default()
+            }),
+            LOG_READ_TIMEOUT
+        );
+        assert_eq!(
+            timeout_for(&Request::Issues {
+                query: IssuesQuery::default()
+            }),
+            REQUEST_TIMEOUT
+        );
+        assert_eq!(timeout_for(&Request::Settings), REQUEST_TIMEOUT);
+    }
 
     fn disc(version: &str, protocol: u32) -> Discovery {
         Discovery {

@@ -183,12 +183,14 @@ pub fn catalogue(
     plans
 }
 
-/// Why `plan` cannot run now, or `None` when it can. Changes that need administrator rights wait for the privileged
-/// helper (ADR 0006); until it exists they are shown and explained but not applicable.
+/// Why `plan` cannot run now, or `None` when it can. Changes that need administrator rights go through the privileged
+/// helper (ADR 0016); `helper_available` is whether it is installed or can be installed here. Where it cannot, they are
+/// shown and explained but not applicable.
 pub fn blocked_reason(plan: &Plan, host: TuningHost, helper_available: bool) -> Option<String> {
     if plan.apply.needs_admin_on(host) && !helper_available {
         return Some(
-            "Needs administrator rights. Dyno's privileged helper is not installed yet, so this cannot be applied from here.".into(),
+            "Needs administrator rights, and Dyno's privileged helper cannot be installed on this computer (Settings > Helper says why)."
+                .into(),
         );
     }
     None

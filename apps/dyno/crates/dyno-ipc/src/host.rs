@@ -16,9 +16,15 @@ pub struct Connection {
     pub(crate) stream: Stream,
     pub(crate) limit: FrameLimit,
     peer_pid: Option<u32>,
+    peer_uid: Option<u32>,
 }
 
 impl Connection {
+    /// The other side's user id where the OS tells (Unix, host side); `None` otherwise.
+    pub fn peer_uid(&self) -> Option<u32> {
+        self.peer_uid
+    }
+
     /// The other side's process id: what the OS reports (host side) or the host's `Hello` was answered by (`None` on
     /// the client side).
     pub fn peer_pid(&self) -> Option<u32> {
@@ -44,6 +50,15 @@ pub struct Host {
 }
 
 impl Host {
+    /// A host on a fixed endpoint with a known `token` (the privileged helper, ADR 0016: its clients are not its children).
+    pub fn listen_at(name: &str, access: &crate::endpoint::Access, token: Token, limit: FrameLimit) -> io::Result<Host> {
+        Ok(Host {
+            listener: Listener::bind_fixed(name, access)?,
+            token,
+            limit,
+        })
+    }
+
     /// A fresh endpoint and token with the default frame limit. Give [`Host::name`] and [`Host::token`] to the child.
     pub fn listen() -> io::Result<Host> {
         Host::listen_with(FrameLimit::default())
@@ -156,10 +171,12 @@ impl Host {
         }
         stream.set_read_timeout(None)?;
         write_frame::<Frame<()>>(&mut stream, &Frame::Welcome { version: PROTOCOL_VERSION }, self.limit)?;
+        let peer_uid = stream.peer_uid();
         Ok(Connection {
             stream,
             limit: self.limit,
             peer_pid: os_pid.or(Some(claimed)),
+            peer_uid,
         })
     }
 }
@@ -200,6 +217,7 @@ impl Client {
                     stream,
                     limit,
                     peer_pid: None,
+                    peer_uid: None,
                 })
             }
             Frame::Welcome { version: theirs } | Frame::Hello { version: theirs, .. } => Err(IpcError::Version { ours: version, theirs }),
@@ -233,6 +251,85 @@ mod tests {
         assert_eq!(conn.limit(), FrameLimit::default());
         let client = c.join().unwrap().unwrap();
         assert_eq!(client.peer_pid(), None);
+    }
+
+    /// A fixed endpoint name that cannot clash with another test or a real endpoint.
+    fn fixed_name() -> String {
+        let id = crate::token::random_hex(6).unwrap();
+        if cfg!(windows) {
+            format!(r"\\.\pipe\dyno-test-fixed-{id}")
+        } else {
+            std::env::temp_dir()
+                .join(format!("dyno-fx-{id}.sock"))
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
+    fn open_access() -> crate::endpoint::Access {
+        crate::endpoint::Access {
+            mode: 0o600,
+            sddl: "D:P(A;;GA;;;OW)".into(),
+        }
+    }
+
+    #[test]
+    fn a_fixed_endpoint_with_its_own_token_welcomes_a_client_and_tells_the_users_id() {
+        let name = fixed_name();
+        let token = Token::random().unwrap();
+        let mut h = Host::listen_at(&name, &open_access(), token.clone(), FrameLimit::default()).unwrap();
+        assert_eq!(h.name(), name);
+        let n = name.clone();
+        let c = std::thread::spawn(move || Client::connect(&n, &token));
+        let conn = h.accept(Duration::from_secs(5)).unwrap();
+        c.join().unwrap().unwrap();
+        #[cfg(unix)]
+        {
+            // The test process connected to itself, so the kernel's answer is the owner of the socket file it created.
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(conn.peer_uid(), Some(std::fs::metadata(&name).unwrap().uid()));
+        }
+        #[cfg(windows)]
+        assert_eq!(conn.peer_uid(), None);
+        drop(conn);
+        drop(h);
+        #[cfg(unix)]
+        assert!(!std::path::Path::new(&name).exists(), "the socket file goes away with the host");
+    }
+
+    #[test]
+    fn a_fixed_endpoint_refuses_a_second_host_and_a_wrong_token() {
+        let name = fixed_name();
+        let token = Token::random().unwrap();
+        let mut h = Host::listen_at(&name, &open_access(), token, FrameLimit::default()).unwrap();
+        #[cfg(windows)]
+        assert!(Host::listen_at(&name, &open_access(), Token::random().unwrap(), FrameLimit::default()).is_err());
+        let n = name.clone();
+        let c = std::thread::spawn(move || Client::connect(&n, &Token::from_bytes([1; 32])));
+        assert!(matches!(h.accept(Duration::from_secs(5)), Err(IpcError::Auth(_))));
+        assert!(c.join().unwrap().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fixed_socket_replaces_a_stale_socket_but_never_another_kind_of_file() {
+        let name = fixed_name();
+        // A leftover socket (a crashed helper) is replaced.
+        let stale = std::os::unix::net::UnixListener::bind(&name).unwrap();
+        drop(stale);
+        let h = Host::listen_at(&name, &open_access(), Token::random().unwrap(), FrameLimit::default()).unwrap();
+        drop(h);
+        // A regular file is not touched.
+        std::fs::write(&name, b"keep").unwrap();
+        let err = Host::listen_at(&name, &open_access(), Token::random().unwrap(), FrameLimit::default())
+            .err()
+            .unwrap();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&name).unwrap(), b"keep");
+        std::fs::remove_file(&name).unwrap();
+        // A path that cannot be a socket path.
+        let long = format!("{}/{}", std::env::temp_dir().display(), "x".repeat(120));
+        assert!(Host::listen_at(&long, &open_access(), Token::random().unwrap(), FrameLimit::default()).is_err());
     }
 
     #[test]

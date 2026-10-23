@@ -1,10 +1,13 @@
 //! The history database (SQLite, ADR 0008): points per tier, per-app minutes, disk free space, timeline events,
-//! the activity log, alerts, snapshots, boots, app starts and crashes, and health scores.
+//! the activity log, alerts, snapshots, boots and health scores (crashes come from the `issues` table).
 //!
 //! Tables added after v1 (all `IF NOT EXISTS`, so the schema number stays 1): `alarms` and `alarm_events`
 //! (`store/alarms.rs`), `recorder_snapshots` (`store/recorder.rs`), `hardware_readings` and `throttle_episodes`
 //! (`store/hardware.rs`: SSD wear and battery capacity over time, finished throttling episodes). Baselines are learned from
 //! the history tiers on demand and not stored.
+//! (`store/alarms.rs`), `recorder_snapshots` (`store/recorder.rs`), `issues`, `baseline` and `baseline_startup`
+//! (`store/issues.rs`). Names reserved for later work, not created yet: `baselines`
+//! (per-metric time-of-week learned statistics), `ssd_wear` and `battery_trend` (slow health trends).
 //!
 //! The database is a cache of the past, never the only copy of anything the user made: a damaged file is moved
 //! aside and a fresh one created. Values are JSON text (small, debuggable, versioned by serde defaults).
@@ -23,6 +26,7 @@ use std::path::{Path, PathBuf};
 
 mod alarms;
 mod hardware;
+mod issues;
 mod recorder;
 
 pub use hardware::kind as hardware_kind;
@@ -65,8 +69,6 @@ CREATE INDEX IF NOT EXISTS activity_at ON activity (at);
 CREATE TABLE IF NOT EXISTS alerts (id TEXT PRIMARY KEY, at INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshots (id TEXT PRIMARY KEY, at INTEGER NOT NULL, info TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS boots (at INTEGER PRIMARY KEY, boot_secs REAL, ready_secs REAL);
-CREATE TABLE IF NOT EXISTS app_events (at INTEGER NOT NULL, app TEXT NOT NULL, kind TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS app_events_at ON app_events (at);
 CREATE TABLE IF NOT EXISTS scores (at INTEGER PRIMARY KEY, score INTEGER NOT NULL);
 ";
 
@@ -112,15 +114,6 @@ fn parse<T: DeserializeOwned>(s: &str) -> Option<T> {
     serde_json::from_str(s).ok()
 }
 
-/// What an app did: started (after it had no process) or crashed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppEvent {
-    /// Started.
-    Start,
-    /// Crashed.
-    Crash,
-}
-
 impl Store {
     /// Opens (or creates) the database at `path`. A file that isn't a usable database is renamed to
     /// `<name>.damaged-<at>` and a fresh one created; the returned note says so.
@@ -146,6 +139,7 @@ impl Store {
         conn.execute_batch(alarms::SCHEMA_SQL)?;
         conn.execute_batch(hardware::SCHEMA_SQL)?;
         conn.execute_batch(recorder::SCHEMA_SQL)?;
+        conn.execute_batch(issues::SCHEMA_SQL)?;
         Ok(Store { conn })
     }
 
@@ -155,6 +149,7 @@ impl Store {
         conn.execute_batch(alarms::SCHEMA_SQL)?;
         conn.execute_batch(hardware::SCHEMA_SQL)?;
         conn.execute_batch(recorder::SCHEMA_SQL)?;
+        conn.execute_batch(issues::SCHEMA_SQL)?;
         let version: Option<String> = conn
             .query_row("SELECT value FROM meta WHERE key = 'schema'", [], |r| r.get(0))
             .optional()?;
@@ -485,33 +480,6 @@ impl Store {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
-    /// Records an app start or crash.
-    pub fn put_app_event(&self, at: Timestamp, app: &str, kind: AppEvent) -> Result<()> {
-        let k = match kind {
-            AppEvent::Start => "start",
-            AppEvent::Crash => "crash",
-        };
-        self.conn.execute(
-            "INSERT INTO app_events (at, app, kind) VALUES (?1, ?2, ?3)",
-            params![at.millis(), app, k],
-        )?;
-        Ok(())
-    }
-
-    /// App events in `[from, to)`: (app, when, kind).
-    pub fn app_events(&self, from: Timestamp, to: Timestamp) -> Result<Vec<(String, Timestamp, AppEvent)>> {
-        let mut st = self
-            .conn
-            .prepare_cached("SELECT app, at, kind FROM app_events WHERE at >= ?1 AND at < ?2 ORDER BY at")?;
-        let rows = st.query_map(params![from.millis(), to.millis()], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
-        })?;
-        Ok(rows
-            .filter_map(|r| r.ok())
-            .map(|(a, at, k)| (a, Timestamp(at), if k == "crash" { AppEvent::Crash } else { AppEvent::Start }))
-            .collect())
-    }
-
     /// Records the health score (one per hour is plenty).
     pub fn put_score(&self, at: Timestamp, score: u32) -> Result<()> {
         self.conn.execute(
@@ -574,7 +542,7 @@ impl Store {
         let long = r.cutoff(Tier::Hour, now).millis();
         let minute = r.cutoff(Tier::Minute, now).millis();
         self.conn.execute("DELETE FROM app_minutes WHERE at < ?1", [minute])?;
-        for table in ["disk_free", "events", "boots", "app_events", "scores", "alerts"] {
+        for table in ["disk_free", "events", "boots", "scores", "alerts", "issues"] {
             self.conn.execute(&format!("DELETE FROM {table} WHERE at < ?1"), [long])?;
         }
         self.conn.execute(
@@ -668,10 +636,6 @@ mod tests {
         assert!(!s.put_boot(&b).unwrap(), "once per boot");
         s.set_boot_ready(Timestamp(100), 30.0).unwrap();
         assert_eq!(s.boots(Timestamp(0), Timestamp(200)).unwrap()[0].ready_secs, Some(30.0));
-        s.put_app_event(Timestamp(5), "X", AppEvent::Start).unwrap();
-        s.put_app_event(Timestamp(6), "X", AppEvent::Crash).unwrap();
-        let ev = s.app_events(Timestamp(0), Timestamp(10)).unwrap();
-        assert_eq!(ev[1].2, AppEvent::Crash);
         s.put_score(Timestamp(HOUR + 5), 80).unwrap();
         assert_eq!(s.score_at(Timestamp(2 * HOUR)).unwrap(), Some(80));
         assert_eq!(s.score_at(Timestamp(0)).unwrap(), None);

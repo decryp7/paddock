@@ -16,6 +16,33 @@ pub enum MachineStartup {
     RunKey,
     /// The all-users Startup folder.
     StartupFolder,
+    /// A scheduled task that runs at log-on (a top-level task name).
+    ScheduledTask,
+    /// A macOS launch agent in `/Library/LaunchAgents` (by label).
+    LaunchAgent,
+}
+
+impl MachineStartup {
+    /// The helper's location for a startup entry that needs administrator rights, if the helper can change it.
+    pub fn of(location: &crate::startup::StartupLocation) -> Option<MachineStartup> {
+        use crate::startup::StartupLocation as L;
+        match location {
+            L::MachineRunKey => Some(MachineStartup::RunKey),
+            L::CommonStartupFolder => Some(MachineStartup::StartupFolder),
+            L::ScheduledTask => Some(MachineStartup::ScheduledTask),
+            L::SystemLaunchAgent => Some(MachineStartup::LaunchAgent),
+            L::UserRunKey | L::UserStartupFolder | L::UserLaunchAgent | L::LoginItem => None,
+        }
+    }
+}
+
+/// Whether `label` is a launch-agent label Dyno will touch: letters, digits, dots, dashes and underscores, not
+/// starting with a dot.
+pub fn is_agent_label(label: &str) -> bool {
+    !label.is_empty()
+        && !label.starts_with('.')
+        && label.len() <= 200
+        && label.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
 }
 
 /// A Linux power profile (power-profiles-daemon).
@@ -178,6 +205,11 @@ impl HelperAction {
             {
                 Err("That startup entry name is not valid.".into())
             }
+            HelperAction::SetMachineStartupEnabled {
+                location: MachineStartup::LaunchAgent,
+                name,
+                ..
+            } if !is_agent_label(name) => Err("That launch agent label is not valid.".into()),
             _ => Ok(()),
         }
     }
@@ -356,6 +388,27 @@ mod tests {
         assert!(s("a\\b").validate().is_err());
         assert!(s(" ").validate().is_err());
         assert!(HelperAction::SetLowPowerMode(true).validate().is_ok());
+    }
+
+    #[test]
+    fn machine_startup_locations_map_and_labels_are_checked() {
+        use crate::startup::StartupLocation as L;
+        for l in [L::MachineRunKey, L::CommonStartupFolder, L::ScheduledTask, L::SystemLaunchAgent] {
+            assert!(l.needs_admin() && MachineStartup::of(&l).is_some(), "{l:?}");
+        }
+        for l in [L::UserRunKey, L::UserStartupFolder, L::UserLaunchAgent, L::LoginItem] {
+            assert_eq!(MachineStartup::of(&l), None);
+        }
+        let agent = |name: &str| HelperAction::SetMachineStartupEnabled {
+            location: MachineStartup::LaunchAgent,
+            name: name.into(),
+            enabled: false,
+        };
+        assert!(agent("com.example.updater-1_x").validate().is_ok());
+        for bad in ["a b", "a;b", "a$(x)", "..", ".hidden", "é", ""] {
+            assert!(agent(bad).validate().is_err(), "{bad}");
+        }
+        assert!(!is_agent_label(&"a".repeat(201)));
     }
 
     #[test]

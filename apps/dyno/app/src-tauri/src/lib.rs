@@ -43,6 +43,7 @@ pub fn run() {
             commands::popover_close,
             commands::save_diagnostics,
             commands::save_report,
+            commands::save_issues,
         ])
         .on_window_event(|win, event| match event {
             tauri::WindowEvent::Destroyed => {

@@ -30,6 +30,7 @@ dyno-plugin-host = { path = "crates/dyno-plugin-host" }
 dyno-platform = { path = "crates/dyno-platform" }
 dyno-agent = { path = "crates/dyno-agent" }
 dyno-bench = { path = "crates/dyno-bench" }
+dyno-helper = { path = "crates/dyno-helper" }
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

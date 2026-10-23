@@ -1,4 +1,4 @@
-# 0016 Throttling, hardware life forecasts and learned baselines
+# 0018 Throttling, hardware life forecasts and learned baselines
 
 Status: accepted (2026-10-23). Related: 0001, 0002, 0006, 0008, 0013.
 

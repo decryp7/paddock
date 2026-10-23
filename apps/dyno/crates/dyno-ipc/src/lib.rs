@@ -31,6 +31,7 @@ mod token;
 pub mod wire;
 
 pub use child::{ChildLink, ChildProcess, ChildSpec};
+pub use endpoint::Access;
 pub use error::IpcError;
 pub use frame::FrameLimit;
 pub use host::{Client, Connection, Host};

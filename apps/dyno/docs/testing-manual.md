@@ -50,6 +50,29 @@ Record: date, OS and version, Dyno version, load average at the time, result per
 | 23 | `kill` the agent | It comes back within seconds (macOS, Linux); on Windows the app starts it |
 | 24 | Updater with a signed test release | Verified, installed, restarted; a tampered `.sig` is refused |
 
+## The privileged helper (WP-01)
+
+Nothing in the automated suite installs the helper; it is verified here, once per OS, on a spare machine or VM (not a machine
+you cannot afford to change). Use the release build, and keep the Settings > Helper page open to watch the state.
+
+| # | Steps | Expected |
+| --- | --- | --- |
+| H1 | Fresh install; open Settings > Helper | "Not installed"; no prompt appeared at any point before this |
+| H2 | Tuning > Review on "Turn off hibernation" (Windows) / a Low Power Mode or sleep item (macOS) / the charge limit (Linux with one) | The helper dialog explains first and names the prompt; **Not now** closes it and nothing changed |
+| H3 | Same, **Install the helper**, dismiss the OS prompt (Cancel / close) | Dialog shows that the prompt was closed and Dyno works; Settings still says Not installed; nothing under the helper's folder exists |
+| H4 | Same, approve the prompt | The dialog closes, the normal review opens; Settings says Ready with the version; macOS: `launchctl print system/net.decryptology.dyno.helper` is running; Linux: `systemctl status dyno-helper`; Windows: service `DynoHelper` runs as LocalSystem |
+| H5 | Apply, then check the setting with the OS's own tool (`pmset -g`, `powercfg /a`, sysfs) | It changed; Activity shows it with Undo; Settings > Helper lists it as Done with the earlier value in its log file |
+| H6 | Undo from Activity | The setting is back; the helper log has a second line |
+| H7 | Run the data folder check: macOS `ls -l "/Library/Application Support/Dyno/Helper"`, Linux `ls -l /var/lib/dyno-helper`, Windows `icacls "%ProgramData%\Dyno\Helper"` | Owned by root / SYSTEM; only `token` belongs to your account (or your SID has read); others cannot read the token |
+| H8 | As another local user (or another program as you), connect to the endpoint (for example `nc -U /var/run/net.decryptology.dyno.helper.sock`) and type anything | No answer and the connection closes; the helper log shows "A connection was refused" with the reason |
+| H9 | Kill the helper (`sudo kill -9`, `taskkill /f` for the service) | The OS restarts it within seconds; Settings is Ready again |
+| H10 | Windows: Network page with the helper installed | Per-program traffic appears; without the helper it says to install it |
+| H11 | Windows: startup item in "Registry (all users)" or the all-users Startup folder; macOS: an all-users launch agent | The switch asks for the helper first; turning it off works and Task Manager's Startup tab / `ls /Library/LaunchAgents` shows it disabled; Undo restores it |
+| H12 | Windows: a Defender exclusion item | The folder appears under Windows Security > Exclusions; Undo removes it; with Tamper Protection on the item reports Defender's refusal |
+| H13 | Update Dyno to a newer build | Settings > Helper says "Needs an update"; Update installs it with one more prompt |
+| H14 | Settings > Helper > Remove | Registration, program, data and socket/pipe are gone (`ls`, `sc query DynoHelper`); the settings it changed stay; Dyno still works |
+| H15 | Linux in a container or over SSH with no desktop | The dialog says why the helper cannot be installed (no polkit agent / no systemd) |
+
 ## Window, tray, native feel
 
 | # | Steps | Expected |

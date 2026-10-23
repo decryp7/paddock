@@ -46,8 +46,8 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **Tuning.** Suggestions grouped by topic (power, sleep and hibernation, battery, developer folders, appearance). Nothing
   changes when you open the page. **Review...** shows exactly what Dyno will change and exactly how it will undo it; only
   **Apply** changes anything, and the change appears in **Activity** with **Undo**. If something else changed the setting
-  afterwards, **Revert** asks before overwriting it (**Revert anyway**). Changes that need administrator rights are shown
-  but cannot be applied yet.
+  afterwards, **Revert** asks before overwriting it (**Revert anyway**). Changes that need administrator rights ask to
+  install the **helper** first (see below), then work like any other.
 - **CPU taming, Cleanup, Reports, Why slow** are placeholders for now. Their engine parts exist (see
 - **Cleanup.** Tick what to scan and press Scan: nothing is deleted. Review the list (every item, its size and why it is offered),
   untick what you want to keep, press Clean selected and confirm. Items wait 7 days in the quarantine (Undo, or Put back in the
@@ -72,6 +72,17 @@ one; to keep measuring after you log in, turn on **Settings > Launch at login** 
 - **Is this normal?** appears on the dashboard once Dyno has learned your usual week (7 days by default). It lists only what is out
   of the ordinary right now, in words ("CPU: higher than usual for Tuesday mornings, 71% against about 14%"). Change the learning
   period or switch alarms on in **Settings, Hardware and baselines**.
+## Issues and new programs
+
+Open **Issues** to see what your system itself recorded going wrong: crashes, apps that stopped responding, unexpected
+shutdowns, disk and memory errors, failing services. The big number is today's stability score out of 100; the bars are the days
+before. Click an app or kind to filter, click a row for the system's own words, and use **Export for Debrief...** to save the
+period as a file you can open in Debrief. If a log could not be read, the page says which one and why.
+
+**New and unusual** lists programs Dyno has not seen on this PC. For the first week (Settings, New programs) it only learns.
+Each program says why it is listed; a program that runs from a temporary folder or is not signed is "unusual because it...",
+which is a reason to look, not a verdict. **Protect** adds it to the list rules never touch, **Hide** removes it from the list,
+and **Forget** in the menu starts learning again. Dyno never ends or removes a program because of this list.
 
 ## Undo
 
@@ -116,6 +127,21 @@ dyno-agent run                         # run in the foreground (what the service
   command lines.
 - Deleting `dyno.db` is safe: history starts again.
 
+## The helper (administrator changes)
+
+Dyno never runs as administrator. A few changes need it anyway (hibernation, the sleep timer and Low Power Mode on a Mac, the
+battery charge limit, Microsoft Defender exclusions, startup items for every user, and programs' network traffic on Windows). For
+those Dyno uses a small separate **helper**:
+
+1. The first time you review such a change, Dyno explains the helper and shows what the system will ask (a Windows UAC prompt, the
+   macOS password dialog, the Linux polkit prompt). Nothing is installed until you press **Install the helper** and answer the
+   system's prompt. **Not now** (or closing the prompt) changes nothing and Dyno keeps working.
+2. The helper serves your account and Dyno's agent only. Every change shows what it will do and how to undo it, is checked again
+   by the helper, is read back, and is written to the helper's own log (Settings > Helper, "What the helper did lately") besides
+   the Activity list with its Undo.
+3. **Settings > Helper** shows whether it is installed and current, and has **Update** (after a Dyno update), **Repair** and
+   **Remove**. Changes it made stay in force when you remove it; undoing them from Activity then needs the helper again.
+
 ## Troubleshooting
 
 | Symptom | What to do |
@@ -123,7 +149,9 @@ dyno-agent run                         # run in the foreground (what the service
 | The window shows an error with **Retry** | The agent did not answer in 15 s. Retry; if it persists run `dyno-agent status`, then `dyno-agent run` in a terminal to see why |
 | No history after a reboot | The agent was not registered to start at login: turn on Launch at login |
 | A tile says "unavailable" | Read the reason; the OS or hardware does not provide it (no battery, no sensor, needs rights) |
-| An action says "needs the helper" | The process belongs to another user or the system; Dyno never elevates by itself (the helper is planned) |
+| A change says "needs Dyno's helper" | Install it under Settings > Helper (the system asks for your permission once). If it says the helper cannot be installed, read the reason: Linux needs polkit (`pkexec`) and systemd |
+| The helper "did not answer" | Settings > Helper > Repair (one more permission prompt). Updating Dyno can need it too: the helper must be the same version |
+| An action on another user's process says it needs the helper | Dyno never elevates processes by itself; the helper changes settings, not other users' processes |
 | An action says the process "has exited" | Its id was reused or it ended; Dyno refuses to act on a different process with the same id |
 | macOS: the agent does not start after an update | Dyno registers it again by itself; or `dyno-agent service ensure`; see macos.md |
 | Linux: no tray icon | Install a status-notifier host (GNOME: the AppIndicator extension) |

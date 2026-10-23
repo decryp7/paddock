@@ -20,6 +20,7 @@ const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown>
   }
 };
 const button = (root: ParentNode, label: string) => root.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+const helperButton = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('dy-helper-dialog button')].find((b) => b.textContent?.trim() === text)!;
 const dialogButton = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('dy-tuning-dialog button')].find((b) => b.textContent?.trim() === text)!;
 
 describe('dy-tuning-page', () => {
@@ -56,14 +57,45 @@ describe('dy-tuning-page', () => {
     expect(button(el, 'Revert Use the Balanced power plan while plugged in')).not.toBeNull();
   });
 
-  it('shows administrator items as not applicable with the reason, never as a failure', async () => {
-    const { f, el } = render();
+  it('an administrator item first offers the helper: declining changes nothing, accepting continues to the review', async () => {
+    const { f, el, mock } = render();
     await settle(f);
+    expect(el.textContent).toContain('Administrator');
+    button(el, 'Review Turn off hibernation to free disk space').click();
+    await settle(f);
+    const helper = () => document.querySelector('dy-helper-dialog') as HTMLElement | null;
+    expect(helper()?.textContent).toContain('Install the Dyno helper');
+    expect(helper()?.textContent).toContain('fixed list');
+    helperButton('Not now').click();
+    await settle(f);
+    expect(document.querySelector('dy-tuning-dialog')).toBeNull();
+    expect((await mock.helperStatus()).state).toBe('notInstalled');
+
+    button(el, 'Review Turn off hibernation to free disk space').click();
+    await settle(f);
+    helperButton('Install the helper').click();
+    await settle(f);
+    expect(helper()).toBeNull();
+    dialogButton('Apply').click();
+    await settle(f);
+    expect(TestBed.inject(TuningStore).items().find((t) => t.id === 'hibernate')!.applied).toBe(true);
+    // The helper is there now: the next administrator change goes straight to its review.
+    expect((await mock.helperStatus()).state).toBe('ready');
+  });
+
+  it('an administrator item where the helper cannot exist is listed with the reason', async () => {
+    const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000 });
+    const real = await mock.tuning();
+    const blocked = real.map((t) => (t.id === 'hibernate' ? { ...t, blocked: 'Needs administrator rights, and the helper cannot be installed here.' } : t));
+    vi.spyOn(mock, 'tuning').mockResolvedValue(blocked);
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, provideRouter([])] });
+    const f = TestBed.createComponent(TuningPage);
+    f.detectChanges();
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
     const b = button(el, 'Turn off hibernation to free disk space needs administrator rights');
     expect(b.disabled).toBe(true);
-    expect(b.textContent).toContain('Needs administrator rights');
-    expect(el.textContent).toContain('privileged helper is not installed yet');
-    expect(el.textContent).toContain('Administrator');
+    expect(el.textContent).toContain('the helper cannot be installed here');
   });
 
   it('asks again before overwriting a setting something else changed, and reverts when insisted', async () => {

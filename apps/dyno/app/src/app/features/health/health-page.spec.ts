@@ -66,6 +66,30 @@ describe('dy-health-page', () => {
     }
   });
 
+  it('an item that starts for every user asks for the helper first; saying no leaves it as it was', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    const store = TestBed.inject(HealthStore);
+    const all = store.startup().find((e) => e.needsAdmin && e.state === 'enabled')!;
+    el.querySelector<HTMLElement>(`[aria-label="Start ${all.name} at sign-in"]`)!.click();
+    await settle(f);
+    await new Promise((r) => setTimeout(r, 0));
+    const dialog = document.querySelector('dy-helper-dialog') as HTMLElement;
+    expect(dialog.textContent).toContain('Install the Dyno helper');
+    [...dialog.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Not now')!.click();
+    await settle(f);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store.startup().find((e) => e.id === all.id)!.state).toBe('enabled');
+    expect((await mock.helperStatus()).state).toBe('notInstalled');
+    // Once the helper is there the same switch just works.
+    await mock.installHelper();
+    el.querySelector<HTMLElement>(`[aria-label="Start ${all.name} at sign-in"]`)!.click();
+    await settle(f);
+    await new Promise((r) => setTimeout(r, 0));
+    await settle(f);
+    expect(store.startup().find((e) => e.id === all.id)!.state).toBe('disabled');
+  });
+
   it('a failed startup list shows its own error with Retry', async () => {
     const { f, el } = render(['startupEntries']);
     await settle(f);

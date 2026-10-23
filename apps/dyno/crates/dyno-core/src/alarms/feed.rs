@@ -186,6 +186,33 @@ pub fn from_threshold(name: &str, metric: Metric, severity: Severity, value: f64
     }
 }
 
+/// A serious problem the OS logged (an unexpected shutdown, a disk, memory or heat error, running out of memory) as a
+/// one-off event; one alarm per issue, so each one is acknowledged on its own. Ordinary crashes are not alarms by
+/// themselves: a crash *loop* is, through the crash-loop alert.
+pub fn from_issue(issue: &crate::issues::Issue) -> Observation {
+    Observation {
+        source: Source::Issue,
+        name: format!("{:?}", issue.kind).to_lowercase(),
+        subject: issue.id.clone(),
+        severity: issue.severity,
+        title: issue.title.clone(),
+        detail: issue.evidence.clone(),
+        value: None,
+        metric: None,
+        active: true,
+        one_off: true,
+    }
+}
+
+/// Whether an issue of this kind raises an alarm of its own.
+pub fn alarms_on(kind: crate::issues::IssueKind) -> bool {
+    use crate::issues::IssueKind as K;
+    matches!(
+        kind,
+        K::BadShutdown | K::DiskError | K::MemoryError | K::Overheating | K::MemoryExhaustion
+    )
+}
+
 /// A finished cleanup (or one that found something) as an informational event.
 pub fn from_cleanup(title: &str, detail: &str) -> Observation {
     Observation {
@@ -348,6 +375,26 @@ mod tests {
         let down = from_threshold("gpu-limit", Metric::GpuLoad, Severity::Warning, 50.0, 90.0, false);
         let c = e.apply(down.into_event(Timestamp(2)));
         assert_eq!(c[0].alarm.state, AlarmState::ClearedUnacknowledged);
+    }
+
+    #[test]
+    fn serious_issues_become_one_alarm_each() {
+        use crate::issues::{Issue, IssueKind, IssueSourceId};
+        let mk = |k, key: &str| Issue::new(IssueSourceId::MacLog, Timestamp(5), k, "", "Disk error", "I/O error on disk3", key);
+        let a = mk(IssueKind::DiskError, "1");
+        let b = mk(IssueKind::DiskError, "2");
+        let o = from_issue(&a);
+        assert_eq!(o.rule(), "issue:diskerror");
+        assert_ne!(o.key(), from_issue(&b).key());
+        assert_eq!(o.severity, Severity::Critical);
+        assert!(o.one_off && o.active);
+        assert_eq!(o.detail, "I/O error on disk3");
+        let mut e = AlarmEngine::default();
+        e.apply(o.into_event(Timestamp(5)));
+        assert_eq!(e.alarms().len(), 1);
+        assert!(alarms_on(IssueKind::BadShutdown));
+        assert!(!alarms_on(IssueKind::AppCrash));
+        assert!(!alarms_on(IssueKind::UpdateFailure));
     }
 
     #[test]

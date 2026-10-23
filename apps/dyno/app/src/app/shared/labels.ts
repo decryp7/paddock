@@ -7,6 +7,8 @@ import type {
   CleanupRisk,
   Forecast,
   Grade,
+  IssueKind,
+  IssueSourceId,
   ImpactRating,
   MemoryPressure,
   Priority,
@@ -232,3 +234,29 @@ export function readingValue<T>(r: Reading<T>): T | null {
 export function readingReason<T>(r: Reading<T>): string | null {
   return 'unavailable' in r ? r.unavailable : null;
 }
+
+/** The engine's names for what went wrong (`IssueKind::label`). */
+export const ISSUE_KIND_LABEL: Record<IssueKind, string> = {
+  appCrash: 'App crash',
+  appHang: 'App not responding',
+  badShutdown: 'Unexpected shutdown',
+  diskError: 'Disk error',
+  memoryError: 'Memory error',
+  overheating: 'Overheating',
+  serviceFailure: 'Service failure',
+  memoryExhaustion: 'Out of memory',
+  updateFailure: 'Update failure',
+  driverFailure: 'Driver failure',
+};
+
+/** Every issue kind, in the order the engine lists them. */
+export const ISSUE_KINDS = Object.keys(ISSUE_KIND_LABEL) as IssueKind[];
+
+/** Where an issue was read from (`IssueSourceId::label`). */
+export const ISSUE_SOURCE_LABEL: Record<IssueSourceId, string> = {
+  macReports: 'Crash reports',
+  macLog: 'System log',
+  windowsEvents: 'Windows Event Log',
+  journal: 'System journal',
+  coredumps: 'Core dumps',
+};

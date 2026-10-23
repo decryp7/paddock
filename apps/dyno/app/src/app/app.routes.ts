@@ -25,6 +25,7 @@ export const routes: Routes = [
       { path: 'throttling', title: 'Throttling · Dyno', loadComponent: () => import('./features/throttling/throttling-page').then((m) => m.ThrottlingPage) },
       { path: 'inventory', title: 'Inventory · Dyno', loadComponent: () => import('./features/inventory/inventory-page').then((m) => m.InventoryPage) },
       { path: 'benchmarks', title: 'Benchmarks · Dyno', loadComponent: () => import('./features/benchmarks/bench-page').then((m) => m.BenchPage) },
+      { path: 'issues', title: 'Issues · Dyno', loadComponent: () => import('./features/issues/issues-page').then((m) => m.IssuesPage) },
       { path: 'network', title: 'Network · Dyno', loadComponent: () => import('./features/network/network-page').then((m) => m.NetworkPage) },
       { path: 'cpu', title: 'CPU · Dyno', loadComponent: () => import('./features/cpu/cpu-detail').then((m) => m.CpuDetail) },
       { path: 'rules', title: 'CPU taming · Dyno', loadComponent: () => import('./features/rules/rules-page').then((m) => m.RulesPage) },

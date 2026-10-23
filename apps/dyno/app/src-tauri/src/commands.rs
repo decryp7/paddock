@@ -162,6 +162,36 @@ pub async fn save_report(
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
+/// "Export for Debrief" on the Issues page: the OS save dialog (so the path is one the person chose, never one the webview
+/// supplied), then the agent writes the issues of the last `days` days there as JSON lines. `null` when they cancel.
+#[tauri::command]
+pub async fn save_issues(app: AppHandle, link: State<'_, Arc<AgentLink>>, days: u32) -> Result<Value, CommandError> {
+    let link = link.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let Some(chosen) = app
+            .dialog()
+            .file()
+            .set_title("Save the issues for Debrief")
+            .set_file_name("dyno-issues.jsonl")
+            .add_filter("JSON lines", &["jsonl"])
+            .blocking_save_file()
+        else {
+            return Ok(Value::Null);
+        };
+        let path = chosen
+            .into_path()
+            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
+        let path = path.to_string_lossy().into_owned();
+        let reply = link.call(Request::SaveIssues { path, days })?;
+        reply
+            .into_json()
+            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
 /// The tray dropdown's "Open Dyno".
 #[tauri::command]
 pub async fn tray_open_main(app: AppHandle) -> Result<(), CommandError> {
@@ -217,6 +247,32 @@ mod tests {
         assert_eq!(parse_request(json!("throttling")).unwrap(), Request::Throttling);
         assert_eq!(parse_request(json!("lifespan")).unwrap(), Request::Lifespan);
         assert_eq!(parse_request(json!("baselines")).unwrap(), Request::Baselines);
+    }
+
+    #[test]
+    fn the_issue_and_unusual_requests_have_the_shape_the_ui_sends() {
+        assert!(matches!(
+            parse_request(json!({"issues": {"query": {"days": 14}}})).unwrap(),
+            Request::Issues { query } if query.days == 14
+        ));
+        assert!(matches!(
+            parse_request(json!({"rescanIssues": {"query": {"days": 7}}})).unwrap(),
+            Request::RescanIssues { .. }
+        ));
+        assert_eq!(
+            parse_request(json!({"unusual": {"includeIgnored": true}})).unwrap(),
+            Request::Unusual { include_ignored: true }
+        );
+        assert!(matches!(
+            parse_request(json!({"unusualAct": {"key": "/a/b", "action": "protect"}})).unwrap(),
+            Request::UnusualAct {
+                action: dyno_core::unusual::baseline::UnusualAction::Protect,
+                ..
+            }
+        ));
+        assert_eq!(parse_request(json!("forgetBaseline")).unwrap(), Request::ForgetBaseline);
+        // A forged action is refused at the edge.
+        assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "delete"}})).is_err());
     }
 
     #[test]

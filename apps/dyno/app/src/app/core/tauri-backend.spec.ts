@@ -51,6 +51,9 @@ describe('TauriBackend: request shapes', () => {
     ['applyTuning', (b) => b.applyTuning('t'), { applyTuning: { id: 't' } }],
     ['revertTuning', (b) => b.revertTuning('t'), { revertTuning: { id: 't', force: false } }],
     ['revertTuning forced', (b) => b.revertTuning('t', true), { revertTuning: { id: 't', force: true } }],
+    ['helperStatus', (b) => b.helperStatus(), 'helperStatus'],
+    ['installHelper', (b) => b.installHelper(), 'installHelper'],
+    ['uninstallHelper', (b) => b.uninstallHelper(), 'uninstallHelper'],
     ['startupEntries', (b) => b.startupEntries(), 'startupEntries'],
     ['setStartupState', (b) => b.setStartupState('s', { delayed: 30 }), { setStartupState: { id: 's', state: { delayed: 30 } } }],
     ['weeklyReport', (b) => b.weeklyReport(3), { weeklyReport: { weeksAgo: 3 } }],
@@ -58,6 +61,11 @@ describe('TauriBackend: request shapes', () => {
     ['settings', (b) => b.settings(), 'settings'],
     ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS } }],
     ['plugins', (b) => b.plugins(), 'plugins'],
+    ['issues', (b) => b.issues({ days: 14 }), { issues: { query: { days: 14 } } }],
+    ['rescanIssues', (b) => b.rescanIssues({ days: 7 }), { rescanIssues: { query: { days: 7 } } }],
+    ['unusual', (b) => b.unusual(true), { unusual: { includeIgnored: true } }],
+    ['unusualAct', (b) => b.unusualAct('/a', 'protect'), { unusualAct: { key: '/a', action: 'protect' } }],
+    ['forgetBaseline', (b) => b.forgetBaseline(), 'forgetBaseline'],
   ];
 
   it.each(cases)('%s sends the externally tagged request through the dyno command', async (_name, call, request) => {
@@ -71,6 +79,12 @@ describe('TauriBackend: request shapes', () => {
     const { backend, invoke } = fake();
     await backend.saveReport('markdown', 1);
     expect(invoke).toHaveBeenCalledWith('save_report', { format: 'markdown', weeksAgo: 1 });
+  });
+
+  it('saveIssues asks the shell for the dialog with the window', async () => {
+    const { backend, invoke } = fake();
+    await backend.saveIssues(30);
+    expect(invoke).toHaveBeenCalledWith('save_issues', { days: 30 });
   });
 
   it('popoverResize sends the measured height to popover_resize', async () => {

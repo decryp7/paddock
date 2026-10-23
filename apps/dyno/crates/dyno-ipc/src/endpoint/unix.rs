@@ -14,7 +14,13 @@ const MAX_SOCKET_PATH: usize = 100;
 pub(super) struct Listener {
     listener: UnixListener,
     name: String,
-    dir: PathBuf,
+    /// What to remove on drop: the private directory, or just the socket file of a fixed endpoint.
+    cleanup: Cleanup,
+}
+
+enum Cleanup {
+    Dir(PathBuf),
+    File(PathBuf),
 }
 
 impl Listener {
@@ -37,7 +43,7 @@ impl Listener {
                     return Ok(Listener {
                         listener,
                         name: sock.to_string_lossy().into_owned(),
-                        dir,
+                        cleanup: Cleanup::Dir(dir),
                     })
                 }
                 Err(e) => {
@@ -47,6 +53,38 @@ impl Listener {
             }
         }
         Err(last)
+    }
+
+    /// A socket at the fixed `path` with the file mode `access.mode` (the privileged helper's endpoint, ADR 0016). The
+    /// parent folder must exist. A stale socket file from a crashed run is replaced; anything else at the path is an error.
+    pub(super) fn bind_fixed(path: &str, access: &super::Access) -> io::Result<Listener> {
+        use std::os::unix::fs::FileTypeExt;
+        if path.len() > MAX_SOCKET_PATH {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "the socket path is too long"));
+        }
+        match std::fs::symlink_metadata(path) {
+            Ok(m) if m.file_type().is_socket() => std::fs::remove_file(path)?,
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{path} exists and is not a socket"),
+                ))
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        let listener = UnixListener::bind(path)?;
+        let ready =
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(access.mode)).and_then(|_| listener.set_nonblocking(true));
+        if let Err(e) = ready {
+            let _ = std::fs::remove_file(path);
+            return Err(e);
+        }
+        Ok(Listener {
+            listener,
+            name: path.to_string(),
+            cleanup: Cleanup::File(PathBuf::from(path)),
+        })
     }
 
     pub(super) fn name(&self) -> &str {
@@ -78,13 +116,25 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        match &self.cleanup {
+            Cleanup::Dir(d) => {
+                let _ = std::fs::remove_dir_all(d);
+            }
+            Cleanup::File(f) => {
+                let _ = std::fs::remove_file(f);
+            }
+        }
     }
 }
 
 pub(super) struct Stream(UnixStream);
 
 impl Stream {
+    /// The user id of the process on the other end, from the kernel.
+    pub(super) fn peer_uid(&self) -> Option<u32> {
+        peer_uid(&self.0)
+    }
+
     pub(super) fn connect(name: &str, _timeout: Duration) -> io::Result<Stream> {
         UnixStream::connect(name).map(Stream)
     }
@@ -162,5 +212,42 @@ fn peer_pid(s: &UnixStream) -> Option<u32> {
 /// Other Unixes: unknown (the token still authenticates the peer).
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn peer_pid(_: &UnixStream) -> Option<u32> {
+    None
+}
+
+/// The connected peer's user id, from the kernel.
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn peer_uid(s: &UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: `cred` and `len` are valid for writes of the sizes passed; the fd is open for the call.
+    let rc = unsafe {
+        libc::getsockopt(
+            s.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut cred as *mut libc::ucred).cast(),
+            &mut len,
+        )
+    };
+    (rc == 0).then_some(cred.uid)
+}
+
+/// The connected peer's user id, from the kernel (`getpeereid`).
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn peer_uid(s: &UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let (mut uid, mut gid): (libc::uid_t, libc::gid_t) = (0, 0);
+    // SAFETY: `uid` and `gid` are valid for writes; the fd is open for the call.
+    let rc = unsafe { libc::getpeereid(s.as_raw_fd(), &mut uid, &mut gid) };
+    (rc == 0).then_some(uid)
+}
+
+/// Other Unixes: unknown (a caller that needs the user refuses the connection).
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn peer_uid(_: &UnixStream) -> Option<u32> {
     None
 }
