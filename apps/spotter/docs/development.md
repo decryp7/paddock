@@ -66,3 +66,22 @@ for tags, the nightly schedule and manual runs; `release` publishes for tags. Se
 
 The workflow expects `app/.nvmrc`, `app/package-lock.json`, an `npm run lint` script, a Playwright config that honours
 `PW_PORT` and defines `chromium` and `webkit` projects, and the three script tests above.
+
+## CI image and compile cache
+
+Linux CI jobs run in the [garage](https://dev.decryptology.net/decryp7/garage) image (Rust, Tauri libraries, Node,
+Playwright browsers, sccache), so the jobs no longer install system packages. The Rust test and bundle jobs compile with
+`sccache`; its cache directory `/sccache` is saved and restored with `actions/cache`, keyed on `Cargo.lock`. The
+step `sccache statistics` in each job shows the hit rate.
+
+Optional upgrade (faster, needs a change to each runner's `config.yaml`): keep the cache on the runner host so no
+restore or save is needed, then drop the two `actions/cache` steps named after sccache:
+
+```yaml
+container:
+  options: "-v /var/cache/sccache:/sccache"
+  valid_volumes:
+    - /var/cache/sccache
+```
+
+See the [garage README](https://dev.decryptology.net/decryp7/garage) for the measurements.
