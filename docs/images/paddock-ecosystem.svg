@@ -1,0 +1,220 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="t d">
+<title id="t">The Paddock family</title>
+<desc id="d">Pitcrew, Debrief, Pitwall, Spotter and Dyno, five local-first desktop apps, connected by a few hand-offs and built on the shared Paddock foundation.</desc>
+<style>
+:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--found:#F1F3F7}
+@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--found:#12151A}}
+text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;fill:var(--ink)}
+.eyebrow{font-size:14px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
+.h1{font-size:46px;font-weight:600;letter-spacing:-.02em}
+.sub{font-size:18px;fill:var(--muted)}
+.card{fill:var(--card);stroke:var(--line);stroke-width:1}
+.name{font-size:22px;font-weight:600;letter-spacing:-.01em}
+.promise{font-size:15px;fill:var(--muted)}
+.link{fill:none;stroke:var(--link);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1 6}
+.arrow{fill:none;stroke:var(--link);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.pill{fill:var(--card);stroke:var(--line)}
+.lbl{font-size:13px;font-weight:500;fill:var(--ink)}
+.found{fill:var(--found);stroke:var(--line)}
+.chip{fill:var(--card);stroke:var(--line)}
+.ft{font-size:22px;font-weight:600}
+.fs{font-size:15px;fill:var(--muted)}
+.vt{font-size:15px;font-weight:600}
+.vs{font-size:14px;fill:var(--muted)}
+.rule{fill:var(--line)}
+.track{fill:none;stroke:var(--line);stroke-width:1.25;opacity:.7}
+</style>
+<!-- abstract track curve, very quiet -->
+<path class="track" d="M-40 300 C 300 120, 520 260, 800 150 S 1300 40, 1660 210"/>
+<path class="track" d="M-40 330 C 300 150, 520 290, 800 180 S 1300 70, 1660 240"/>
+
+<text class="eyebrow" x="800" y="88" text-anchor="middle">PADDOCK</text>
+<text class="h1" x="800" y="152" text-anchor="middle">Five local-first tools for people who keep systems running</text>
+<text class="sub" x="800" y="192" text-anchor="middle">Built on one foundation, each good alone, better together.</text>
+
+<path class="link" d="M218 370 L218 344 Q218 316 246 316 L466 316 Q494 316 494 344 L494 362"/><path class="arrow" d="M489 356 L494 364 L499 356" /><g><rect class="pill" x="262" y="300" width="188" height="32" rx="16"/><text class="lbl" x="356" y="321" text-anchor="middle">Open job log in Debrief</text></g>
+<path class="link" d="M790 370 L790 344 Q790 316 762 316 L542 316 Q514 316 514 344 L514 362"/><path class="arrow" d="M509 356 L514 364 L519 356" /><g><rect class="pill" x="554" y="300" width="196" height="32" rx="16"/><text class="lbl" x="652" y="321" text-anchor="middle">Local AI: Explain, research</text></g>
+<path class="link" d="M810 370 L810 344 Q810 316 838 316 L1058 316 Q1086 316 1086 344 L1086 362"/><path class="arrow" d="M1081 356 L1086 364 L1091 356" /><g><rect class="pill" x="850" y="300" width="196" height="32" rx="16"/><text class="lbl" x="948" y="321" text-anchor="middle">Local AI: &quot;What&#8217;s new&quot;</text></g>
+<path class="link" d="M1382 370 L1382 344 Q1382 316 1354 316 L1134 316 Q1106 316 1106 344 L1106 362"/><path class="arrow" d="M1101 356 L1106 364 L1111 356" /><g><rect class="pill" x="1170" y="300" width="148" height="32" rx="16"/><text class="lbl" x="1244" y="321" text-anchor="middle">Watch for updates</text></g>
+<path class="link" d="M1382 598 L1382 620 Q1382 648 1354 648 L542 648 Q514 648 514 620 L514 606"/><path class="arrow" d="M509 612 L514 604 L519 612" /><g><rect class="pill" x="882" y="632" width="132" height="32" rx="16"/><text class="lbl" x="948" y="653" text-anchor="middle">Open in Debrief</text></g>
+<path class="link" d="M1382 598 L1382 660 Q1382 688 1354 688 L246 688 Q218 688 218 660 L218 606"/><path class="arrow" d="M213 612 L218 604 L223 612" /><g><rect class="pill" x="702" y="672" width="196" height="32" rx="16"/><text class="lbl" x="800" y="693" text-anchor="middle">Machine health in Pitcrew</text></g>
+<g>
+  <rect class="card" x="76" y="372" width="264" height="224" rx="16"/>
+  <svg x="100" y="396" width="72" height="72" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="pbbg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF8A4C"/><stop offset="0.55" stop-color="#EF5F1C"/><stop offset="1" stop-color="#D4440D"/>
+    </linearGradient>
+    <radialGradient id="pbsheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="pbedge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="pbclip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="pbgs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#8A2A04" flood-opacity="0.32"/></filter>
+    <filter id="pbts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="pbm2" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M454 512a58 58 0 1 1 116 0a58 58 0 1 1 -116 0Z" fill="#000"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#pbbg)" filter="url(#pbts)"/>
+  <g clip-path="url(#pbclip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#pbsheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#pbedge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#pbgs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M687.31 317.3A262 262 0 1 1 336.69 317.3" fill="none" stroke="#FFFFFF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/><path d="M405.06 255.74L277.81 251.9L395.57 382.7Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="28" stroke-linejoin="round"/></g><path d="M647.1 590L512 668L376.9 590L376.9 434L512 356L647.1 434Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="52" stroke-linejoin="round" mask="url(#pbm2)"/></g>
+</svg>
+  <rect x="100" y="480" width="20" height="3" rx="1.5" fill="#D2420F"/>
+  <text class="name" x="100" y="508" >Pitcrew</text>
+  <text class="promise" x="100" y="532">Keeps your CI runners alive,</text><text class="promise" x="100" y="554">updated and clean.</text>
+</g>
+<g>
+  <rect class="card" x="372" y="372" width="264" height="224" rx="16"/>
+  <svg x="396" y="396" width="72" height="72" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="d0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5590FF"/><stop offset="0.55" stop-color="#2E6BF0"/><stop offset="1" stop-color="#1D4FD3"/>
+    </linearGradient>
+    <radialGradient id="d0sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="d0edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="d0clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="d0gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#10308A" flood-opacity="0.32"/></filter>
+    <filter id="d0ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#d0bg)" filter="url(#d0ts)"/>
+  <g clip-path="url(#d0clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#d0sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#d0edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#d0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M300 340H600" fill="none" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/><path d="M300 684H552" fill="none" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M300 512H426L480 424L568 604L620 512H724" fill="none" stroke="#FFFFFF" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/><path d="M668 340a46 46 0 1 1 92 0a46 46 0 1 1 -92 0Z" fill="#FFFFFF"/></g>
+</svg>
+  <rect x="396" y="480" width="20" height="3" rx="1.5" fill="#2F6FE0"/>
+  <text class="name" x="396" y="508" >Debrief</text>
+  <text class="promise" x="396" y="532">An IDE for analysing logs</text><text class="promise" x="396" y="554">and diagnostic files.</text>
+</g>
+<g>
+  <rect class="card" x="668" y="372" width="264" height="224" rx="16"/>
+  <svg x="692" y="396" width="72" height="72" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7B46DB"/><stop offset="0.55" stop-color="#5A24B0"/><stop offset="1" stop-color="#43198F"/>
+    </linearGradient>
+    <radialGradient id="p19sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="p19edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="p19clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="p19gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#24094F" flood-opacity="0.32"/></filter>
+    <filter id="p19ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="p19m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M392 448V528M452 404V572M512 364V612M572 404V572M632 448V528" fill="none" stroke="#000" stroke-width="34" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p19bg)" filter="url(#p19ts)"/>
+  <g clip-path="url(#p19clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#p19sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p19edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
+</svg>
+  <rect x="692" y="480" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
+  <text class="name" x="692" y="508" >Pitwall</text>
+  <text class="promise" x="692" y="532">The private, local LLM</text><text class="promise" x="692" y="554">server your apps talk to.</text>
+</g>
+<g>
+  <rect class="card" x="964" y="372" width="264" height="224" rx="16"/>
+  <svg x="988" y="396" width="72" height="72" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="svbg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD257"/><stop offset="0.55" stop-color="#F4B315"/><stop offset="1" stop-color="#E59600"/>
+    </linearGradient>
+    <radialGradient id="svsheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="svedge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="svclip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="svgs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#7A4E00" flood-opacity="0.18"/></filter>
+    <filter id="svts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="svm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M310 604a62 62 0 1 1 124 0a62 62 0 1 1 -124 0Z" fill="#000"/><path d="M590 604a62 62 0 1 1 124 0a62 62 0 1 1 -124 0Z" fill="#000"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#svbg)" filter="url(#svts)"/>
+  <g clip-path="url(#svclip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.16"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.17600000000000002"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#svsheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#svedge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#svgs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M248 604a124 124 0 1 1 248 0a124 124 0 1 1 -248 0ZM528 604a124 124 0 1 1 248 0a124 124 0 1 1 -248 0ZM336 372H408A36 36 0 0 1 444 408V568A36 36 0 0 1 408 604H336A36 36 0 0 1 300 568V408A36 36 0 0 1 336 372ZM616 372H688A36 36 0 0 1 724 408V568A36 36 0 0 1 688 604H616A36 36 0 0 1 580 568V408A36 36 0 0 1 616 372ZM466 432H558A30 30 0 0 1 588 462V498A30 30 0 0 1 558 528H466A30 30 0 0 1 436 498V462A30 30 0 0 1 466 432Z" fill="#3A2600" mask="url(#svm0)"/><g opacity="0.55"><path d="M336 300H408A20 20 0 0 1 428 320V336A20 20 0 0 1 408 356H336A20 20 0 0 1 316 336V320A20 20 0 0 1 336 300ZM616 300H688A20 20 0 0 1 708 320V336A20 20 0 0 1 688 356H616A20 20 0 0 1 596 336V320A20 20 0 0 1 616 300Z" fill="#3A2600"/></g><path d="M792 236C796.5 282 810 295.5 856 300C810 304.5 796.5 318 792 364C787.5 318 774 304.5 728 300C774 295.5 787.5 282 792 236Z" fill="#3A2600"/></g>
+</svg>
+  <rect x="988" y="480" width="20" height="3" rx="1.5" fill="#0E8577"/>
+  <text class="name" x="988" y="508" >Spotter</text>
+  <text class="promise" x="988" y="532">Watches for new releases</text><text class="promise" x="988" y="554">anywhere, the moment one</text><text class="promise" x="988" y="576">appears.</text>
+</g>
+<g>
+  <rect class="card" x="1260" y="372" width="264" height="224" rx="16"/>
+  <svg x="1284" y="396" width="72" height="72" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="d1qbg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DE559F"/><stop offset="0.55" stop-color="#BE3584"/><stop offset="1" stop-color="#A0226A"/>
+    </linearGradient>
+    <radialGradient id="d1qsheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="d1qedge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="d1qclip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="d1qgs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#5E0E3C" flood-opacity="0.32"/></filter>
+    <filter id="d1qts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="d1qm3" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M490 548a22 22 0 1 1 44 0a22 22 0 1 1 -44 0Z" fill="#000"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#d1qbg)" filter="url(#d1qts)"/>
+  <g clip-path="url(#d1qclip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#d1qsheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#d1qedge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#d1qgs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M297.23 672A248 248 0 1 1 726.77 672" fill="none" stroke="#FFFFFF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M297.23 672A248 248 0 0 1 696.3 382.06" fill="none" stroke="#FFFFFF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/><path d="M512 548L624.96 446.29" fill="none" stroke="#FFFFFF" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/><path d="M448 548a64 64 0 1 1 128 0a64 64 0 1 1 -128 0Z" fill="#FFFFFF" mask="url(#d1qm3)"/></g>
+</svg>
+  <rect x="1284" y="480" width="20" height="3" rx="1.5" fill="#C2287C"/>
+  <text class="name" x="1284" y="508" >Dyno</text>
+  <text class="promise" x="1284" y="532">Measures, explains</text><text class="promise" x="1284" y="554">and tunes your PC.</text>
+</g>
+
+<g>
+<rect class="found" x="76" y="732" width="1448" height="120" rx="20"/>
+<text class="ft" x="108" y="784">Paddock</text>
+<text class="fs" x="108" y="812">The shared foundation under every app.</text>
+<rect class="chip" x="880" y="776" width="88" height="32" rx="16"/><text class="lbl" x="924" y="797" text-anchor="middle">UI kit</text><rect class="chip" x="984" y="776" width="136" height="32" rx="16"/><text class="lbl" x="1052" y="797" text-anchor="middle">Design system</text><rect class="chip" x="1136" y="776" width="128" height="32" rx="16"/><text class="lbl" x="1200" y="797" text-anchor="middle">Diagram kit</text><rect class="chip" x="1280" y="776" width="212" height="32" rx="16"/><text class="lbl" x="1386" y="797" text-anchor="middle">CI and release practices</text>
+</g>
+
+<rect x="76" y="896" width="2" height="44" rx="1" class="rule"/><text class="vt" x="92" y="914">Local-only, private by design</text><text class="vs" x="92" y="936">No cloud. No telemetry.</text><rect x="558.6666666666667" y="896" width="2" height="44" rx="1" class="rule"/><text class="vt" x="574.6666666666667" y="914">Windows, macOS and Linux</text><text class="vs" x="574.6666666666667" y="936">One family, native on each.</text><rect x="1041.3333333333335" y="896" width="2" height="44" rx="1" class="rule"/><text class="vt" x="1057.3333333333335" y="914">Rust and Angular</text><text class="vs" x="1057.3333333333335" y="936">Fast engines, native feel.</text>
+</svg>
