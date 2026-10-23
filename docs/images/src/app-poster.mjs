@@ -120,7 +120,8 @@ function shotsFor(d) {
   if (d.planned) return {};
   const jobs = [];
   const add = (key, name, rect, outW, q) => ['light', 'dark'].forEach((th) => jobs.push({ key, th, src: shotFile(d, d.id, name, th), x: rect[0], y: rect[1], w: rect[2], h: rect[3], outW, q }));
-  add('hero', d.shots.hero, [0, 0, 2880, 1800], 1500, 0.8);
+  // heroH: the hero screenshot's height in CSS px when it is shorter than the 900 px window (a frame that ends between rows).
+  add('hero', d.shots.hero, [0, 0, 2880, (d.shots.heroH ?? 900) * 2], 1500, 0.8);
   add('back', d.shots.back, [0, 0, 2880, 1800], 1100, 0.72);
   (d.tour?.panels ?? []).forEach((p, i) => add(`t${i}`, p.shot, [p.crop[0] * 2, p.crop[1] * 2, p.crop[2] * 2, Math.round((p.crop[2] * 2) / 2.4)], 1100, 0.78));
   d.features.panels.forEach((p, i) => add(`p${i}`, p.shot, [p.crop[0] * 2, p.crop[1] * 2, p.crop[2] * 2, Math.round((p.crop[2] * 2) / 2.4)], 1100, 0.78));
