@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { CODEBASE_TOOL } from './family.mjs';
+import { CODEBASE_TOOL, STATUS } from './family.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, '..');
@@ -13,23 +13,23 @@ const W = 1600, H = 1500;
 
 // Layout: Pacenotes, Debrief and Sighter form a triangle on top; Pitcrew, Dyno and Spotter below; Pitwall is the band between.
 const row1 = [
-  { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#831826', tag: 'In design', lines: ['Everything code-related:', 'index, review, diagrams,', 'requirements, tests.'] },
+  { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#831826', lines: ['Everything code-related:', 'index, review, diagrams,', 'requirements, tests.'] },
   { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
-  { id: 'sighter', name: 'Sighter', accent: '#00B8D9', tag: 'In design', lines: ['Finds any UI element by', 'sight, for UI tests.'] },
+  { id: 'sighter', name: 'Sighter', accent: '#00B8D9', lines: ['Finds any UI element by', 'sight, for UI tests.'] },
 ];
 const row3 = [
-  { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', badge: 'Runs CI for all', lines: ['Keeps CI runners alive,', 'updated and clean.'] },
+  { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] },
   { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Measures, explains and', 'tunes your PC.'] },
   { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new releases', 'anywhere, the moment', 'one appears.'] },
 ];
-const CW = 340, GAP = 190, X0 = 100, CH = 170;
+const CW = 340, GAP = 215, X0 = 75, CH = 170;
 const R1 = 340, HUB = 650, HUBH = 160, R3 = HUB + HUBH + 140;
 const cardX = (i) => X0 + i * (CW + GAP);
 const cMid = (r) => r + CH / 2;
 const gapL = (i) => cardX(i) + CW, gapR = (i) => cardX(i + 1); // edges of the gap right of column i
 
 function icon(id, x, y, size) {
-  const raw = readFileSync(join(here, 'icons', `${id}.svg`), 'utf8');
+  const raw = readFileSync(join(here, 'icons', `${id === 'codebase' ? 'pacenotes' : id}.svg`), 'utf8');
   const inner = raw.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '').replace(/<title>[^<]*<\/title>/, '');
   return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="60 60 904 904" overflow="visible">${inner}</svg>`;
 }
@@ -37,8 +37,8 @@ function icon(id, x, y, size) {
 function pill(x, y, text) {
   const words = text.split(' '), lines = text.length > 13 && words.length > 1 ? [words.slice(0, Math.ceil(words.length / 2)).join(' '), words.slice(Math.ceil(words.length / 2)).join(' ')] : [text];
   const w = Math.round(Math.max(...lines.map((l) => l.length)) * 10.6 + 28), h = lines.length === 1 ? 34 : 58;
-  const t = lines.map((l, k) => `<text class="lbl" x="${x}" y="${y + 7 + (k - (lines.length - 1) / 2) * 24}" text-anchor="middle">${l}</text>`).join('');
-  return `<g><rect class="pill" x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="${h === 34 ? 17 : 20}"/>${t}</g>`;
+  const t = lines.map((l, k) => `<text class="lbl" x="${x}" y="${y + 8 + (k - (lines.length - 1) / 2) * 26}" text-anchor="middle">${l}</text>`).join('');
+  return `<g><rect class="pill" x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="${h === 36 ? 18 : 22}"/>${t}</g>`;
 }
 const head = (x, y, dir, cls) => {
   const p = { u: `${x},${y} ${x - 6},${y + 11} ${x + 6},${y + 11}`, d: `${x},${y} ${x - 6},${y - 11} ${x + 6},${y - 11}`,
@@ -75,8 +75,9 @@ function card(a, i, y) {
   const x = cardX(i);
   const ico = icon(a.id, x + 22, y + 24, 64);
   const bar = `<rect x="${x + 104}" y="${y + 28}" width="20" height="3" rx="1.5" fill="${a.accent ?? 'var(--link)'}"/>`;
-  const tag = a.tag ? `<rect class="tag" x="${x + CW - 20 - 80}" y="${y + 18}" width="80" height="26" rx="13"/><text class="tagt" x="${x + CW - 20 - 40}" y="${y + 36}" text-anchor="middle">${a.tag}</text>` : '';
-  const badge = a.badge ? `<rect class="badge" x="${x + CW - 20 - 128}" y="${y + 18}" width="128" height="26" rx="13"/><text class="badget" x="${x + CW - 20 - 64}" y="${y + 36}" text-anchor="middle">${a.badge}</text>` : '';
+  const st = STATUS[a.id], cw = Math.round(st.text.length * 7.8 + 30);
+  const tag = `<rect class="chip-${st.tone}" x="${x + CW - 20 - cw}" y="${y + 18}" width="${cw}" height="26" rx="13"/><text class="chipt-${st.tone}" x="${x + CW - 20 - cw / 2}" y="${y + 36}" text-anchor="middle">${st.text}</text>`;
+  const badge = a.ci ? `<circle cx="${x + 110}" cy="${y + 147}" r="4" fill="${a.accent}"/><text class="cinote" x="${x + 122}" y="${y + 153}">${a.ci}</text>` : '';
   const text = a.lines.map((l, k) => `<text class="promise" x="${x + 104}" y="${y + 96 + k * 23}">${l}</text>`).join('');
   return `<g><rect class="card" x="${x}" y="${y}" width="${CW}" height="${CH}" rx="16"/>${ico}${bar}${tag}${badge}` +
     `<text class="name" x="${x + 104}" y="${y + 64}">${a.name}</text>${text}</g>`;
@@ -95,11 +96,11 @@ links.push(hand([[cardX(2) - 2, m1], [gapL(1) + 2, m1]]) + pill((gapL(1) + cardX
 links.push(hand([[cardX(1) - 2, m3], [gapL(0) + 2, m3]]) + pill((gapL(0) + cardX(1)) / 2, m3, 'Machine health'));
 links.push(hand([[gapL(1) + 2, m3], [cardX(2) - 2, m3]]) + pill((gapL(1) + cardX(2)) / 2, m3, 'Installed software'));
 // Pacenotes -> Sighter (test plans) and back (results): nested arcs over the top row
-links.push(hand([[360, R1 - 2], [360, R1 - 40], [1240, R1 - 40], [1240, R1 - 2]]) + pill(800, R1 - 40, 'Test plans'));
-links.push(hand([[1340, R1 - 2], [1340, R1 - 100], [300, R1 - 100], [300, R1 - 2]]) + pill(800, R1 - 100, 'Results'));
+links.push(hand([[335, R1 - 2], [335, R1 - 40], [1265, R1 - 40], [1265, R1 - 2]]) + pill(800, R1 - 40, 'Test plans'));
+links.push(hand([[1385, R1 - 2], [1385, R1 - 100], [275, R1 - 100], [275, R1 - 2]]) + pill(800, R1 - 100, 'Results'));
 // Pitcrew -> Debrief, Dyno -> Debrief, Spotter -> Sighter (later): lines through the lane around the hub band
-const CH1 = 535, DX = 900, SX = 1420;
-links.push(hand([[400, R3 - 2], [400, R3 - 36], [CH1, R3 - 36], [CH1, laneTop], [660, laneTop], [660, B1 + 2]]) + pill(CH1, R3 - 70, 'Job logs'));
+const CH1 = Math.round((gapL(0) + cardX(1)) / 2), DX = 900, SX = 1450;
+links.push(hand([[380, R3 - 2], [380, R3 - 36], [CH1, R3 - 36], [CH1, laneTop], [660, laneTop], [660, B1 + 2]]) + pill(CH1, R3 - 70, 'Job logs'));
 links.push(hand([[DX, R3 - 2], [DX, B1 + 2]]) + pill(DX, B1 + 70, 'Issues'));
 links.push(hand([[SX, R3 - 2], [SX, B1 + 2]], { later: true }) + pill(SX, B1 + 70, 'Smoke tests'));
 
@@ -108,15 +109,15 @@ const T = B1 + 4, Bt = HUB - 4, H2 = HUB + HUBH + 4, T3 = R3 - 4;
 const stubs = [
   stub(cardX(0) + CW / 2, T, Bt, 'MCP, review, Q&amp;A', { both: true }),
   stub(720, T, Bt, 'Explain, research'),
-  stub(1240, T, Bt, 'Vision'),
+  stub(1265, T, Bt, 'Vision'),
   stub(720, T3, H2, 'Diagnosis'),
-  stub(1240, T3, H2, 'What’s new'),
+  stub(1265, T3, H2, 'What’s new'),
 ].join('\n');
 
 // ---- Pitwall hub band (avoids the x of the hand-off lines that pass through it) ----
 const HX = X0, HW = 3 * CW + 2 * GAP;
 const cols = [
-  [560, 'One local API', ['OpenAI, Anthropic and Ollama', 'compatible, plus /x/v1.']],
+  [580, 'One local API', ['OpenAI, Anthropic and Ollama', 'compatible, plus /x/v1.']],
   [930, 'Tools over MCP', ['MCP client and tool', 'router.']],
   [1172, 'Yours alone', ['Keys, priorities, caching.', 'No cloud, no telemetry.']],
 ];
@@ -159,16 +160,20 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" 
 <title id="t">The Paddock family</title>
 <desc id="d">Seven local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Pitcrew sends job logs, Dyno sends issues, installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later.</desc>
 <style>
-:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6}
-@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA}}
+:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E}
+@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0}}
 text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;fill:var(--ink)}
 .eyebrow{font-size:15px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
 .h1{font-size:44px;font-weight:600;letter-spacing:-.02em}
 .sub{font-size:19px;fill:var(--muted)}
-.tag{fill:none;stroke:var(--link);stroke-dasharray:3 3}
-.tagt{font-size:14px;font-weight:500;fill:var(--muted)}
-.badge{fill:var(--soft);stroke:var(--line)}
-.badget{font-size:14px;font-weight:600;fill:var(--ink)}
+.chip-design{fill:none;stroke:var(--link);stroke-dasharray:3 3}
+.chip-dev{fill:var(--soft);stroke:var(--line)}
+.chip-soon{fill:var(--hubf);stroke:var(--hubs)}
+.chip-ok{fill:var(--okf);stroke:var(--oks)}
+.chipt-design,.chipt-dev{font-size:14px;font-weight:500;fill:var(--muted)}
+.chipt-soon{font-size:14px;font-weight:600;fill:var(--hubs)}
+.chipt-ok{font-size:14px;font-weight:600;fill:var(--oks)}
+.cinote{font-size:15px;font-weight:500;fill:var(--muted)}
 .card{fill:var(--card);stroke:var(--line);stroke-width:1}
 .name{font-size:25px;font-weight:600;letter-spacing:-.01em}
 .hubname{font-size:30px}
@@ -179,7 +184,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .stub{fill:none;stroke:var(--hubs);stroke-width:2;stroke-linecap:round;stroke-dasharray:1 6}
 .ahp{fill:var(--hubs)}
 .pill{fill:var(--card);stroke:var(--line)}
-.lbl{font-size:20px;font-weight:500;fill:var(--ink)}
+.lbl{font-size:21.5px;font-weight:500;fill:var(--ink)}
 .hub{fill:var(--hubf);stroke:var(--hubs);stroke-width:1.5}
 .found{fill:var(--found);stroke:var(--line)}
 .chip{fill:var(--card);stroke:var(--line)}

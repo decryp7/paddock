@@ -13,13 +13,19 @@ Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 hero [light](images/paddock-ecosystem-light.png) and [dark](images/paddock-ecosystem-dark.png), integrations
 [light](images/paddock-integrations-light.png) and [dark](images/paddock-integrations-dark.png).
 
+Each app's marketing art (hero banner, feature showcase, how it works, 1280x640 social card) is generated from one data file per app
+in [`images/src/apps/`](images/src/apps/) by [`images/src/app-poster.mjs`](images/src/app-poster.mjs), into the app's own
+`docs/images/` (apps are expected as sibling checkouts, or set `PADDOCK_APPS`):
+`node docs/images/src/app-poster.mjs <app|all> --png`. Screenshots come from the app's `docs/screenshots`; planned apps use a
+concept mock. Debrief's data file is prepared but not generated until its release.
+
 ## Status
 
 | App | Status |
 |---|---|
-| Pitcrew | **v1.0.0 released** |
-| Debrief | Release in progress; the code is still named IMT while the rename to Debrief lands |
-| Pitwall | Feature-complete; release next |
+| Pitcrew | **v1.0 released** (v1.0.0) |
+| Debrief | Releasing; the code is still named IMT while the rename to Debrief lands |
+| Pitwall | Release next (feature-complete) |
 | Dyno | In development |
 | Spotter | In development |
 | Sighter | In design |
