@@ -20,6 +20,7 @@ so the numbering is fixed.
 | [0013](0013-alarms-lifecycle.md) | Alarms: an ISA-18.2 style lifecycle in a pure state machine |
 | [0014](0014-local-api-cli-and-integrations.md) | One versioned, local-only, authenticated protocol for the CLI, the API and integrations |
 | [0015](0015-benchmarks-network-and-ip-lookup.md) | Benchmarks on click out of process; sockets through a port; IP lookup is a browser hand-off |
+| [0016](0016-privileged-helper-install-and-ipc.md) | The privileged helper: a registered system daemon, installed on a click, one authorised user, closed action list |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.

@@ -269,6 +269,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Health => Ok(Reply::Health(Box::new(health(shared)?))),
         Request::StartupEntries => Ok(Reply::Startup(lock(&shared.ports.startup).list()?)),
         Request::SetStartupState { id, state } => set_startup(shared, &id, state).map(Reply::Activity),
+        Request::HelperStatus => Ok(Reply::Helper(Box::new(lock(&shared.ports.helper).status()))),
+        Request::InstallHelper => lock(&shared.ports.helper).install().map(|s| Reply::Helper(Box::new(s))),
+        Request::UninstallHelper => uninstall_helper(shared).map(|s| Reply::Helper(Box::new(s))),
         Request::Shutdown => {
             shared.request_stop();
             Ok(Reply::Ok)
@@ -285,6 +288,21 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
+}
+
+/// Removes the helper (on the user's click) and records that in the activity log.
+fn uninstall_helper(shared: &Shared) -> Result<dyno_core::helper_wire::HelperStatus, AgentError> {
+    let status = lock(&shared.ports.helper).uninstall()?;
+    let entry = lock(&shared.core).log(
+        now(),
+        ActivityKind::System,
+        "Removed the privileged helper".into(),
+        "Changes it made stay in force; undoing them needs the helper again.".into(),
+        UndoRecord::None,
+        None,
+    );
+    shared.broadcast(&Message::Activity(entry));
+    Ok(status)
 }
 
 fn known_alarm(shared: &Shared, id: u64) -> Result<(), AgentError> {

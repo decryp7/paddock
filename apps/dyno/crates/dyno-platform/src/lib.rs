@@ -10,6 +10,7 @@
 pub mod battery;
 pub mod control_state;
 pub mod dev_folders;
+pub mod elevate;
 pub mod fake;
 pub mod inventory;
 pub mod network;
@@ -18,6 +19,7 @@ pub mod process;
 pub mod processes;
 pub mod sensors;
 pub mod tuning;
+pub mod tuning_admin;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_control;

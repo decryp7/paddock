@@ -258,6 +258,19 @@ describe('HealthHero', () => {
     const dlg2 = document.querySelector('dy-fix-dialog') as HTMLElement;
     [...dlg2.querySelectorAll('button.primary')].find((b) => b.textContent?.includes('Fix a'))!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle(f);
+    // The fix needs administrator rights: the helper is offered first, and nothing is applied until it is there.
+    const helper = document.querySelector('dy-helper-dialog') as HTMLElement;
+    expect(helper.textContent).toContain('Install the Dyno helper');
+    expect(apply).not.toHaveBeenCalled();
+    byText(helper, 'Not now').click();
+    await settle(f);
+    expect(apply).not.toHaveBeenCalled();
+    byText(f.nativeElement, 'Fix a').click();
+    await settle(f);
+    (document.querySelector('dy-fix-dialog button.primary') as HTMLElement).click();
+    await settle(f);
+    byText(document.querySelector('dy-helper-dialog') as HTMLElement, 'Install the helper').click();
+    await settle(f);
     expect(apply).toHaveBeenCalledWith('power-plan');
   });
 
@@ -293,7 +306,7 @@ describe('HealthHero', () => {
 
   it('a confirmed restart fix only advises, it never restarts anything', async () => {
     const { mock, nav } = env();
-    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, 'restart')]));
+    vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 5, 'restart', { needsAdmin: false })]));
     const f = TestBed.createComponent(HealthHero);
     await settle(f);
     byText(f.nativeElement, 'Fix a').click();

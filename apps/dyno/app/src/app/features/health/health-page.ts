@@ -8,6 +8,7 @@ import { LOCATION_LABEL } from '../../shared/labels';
 import { Switch } from '../../shared/switch';
 import { HealthStore } from '../../state/health.store';
 import { HealthHero } from '../dashboard/health-hero';
+import { HelperGate } from '../helper/helper-gate';
 
 const IMPACT_LABEL: Record<ImpactRating, string> = { notMeasured: 'Not measured', low: 'Low', medium: 'Medium', high: 'High' };
 const IMPACT_TONE: Record<ImpactRating, 'ok' | 'warn' | 'bad' | null> = { notMeasured: null, low: 'ok', medium: 'warn', high: 'bad' };
@@ -83,6 +84,7 @@ export function startupChoice(s: StartupState): 'enabled' | 'delayed' | 'disable
 })
 export class HealthPage implements OnInit {
   protected readonly store = inject(HealthStore);
+  private readonly gate = inject(HelperGate);
   protected readonly bytes = formatBytes;
   protected readonly secs = formatSeconds;
   protected readonly choice = (e: StartupEntry) => startupChoice(e.state);
@@ -101,8 +103,11 @@ export class HealthPage implements OnInit {
     return this.store.busy().includes(id);
   }
 
-  protected set(e: StartupEntry, state: StartupState): void {
-    if (startupChoice(e.state) !== startupChoice(state)) void this.store.setStartup(e.id, state);
+  protected async set(e: StartupEntry, state: StartupState): Promise<void> {
+    if (startupChoice(e.state) === startupChoice(state)) return;
+    // An item that starts for every user is changed by the helper: make sure it is installed first.
+    if (e.needsAdmin && !(await this.gate.ensure())) return;
+    await this.store.setStartup(e.id, state);
   }
 
 }

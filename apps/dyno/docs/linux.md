@@ -71,6 +71,15 @@ removed AppImage path, `dyno-agent service ensure` rewrites it.
 `~/.local/share/dyno` (`dyno.db`, `settings.json`, `rules.json`, `agent.json`, `logs/app.log`), process-control state in
 `~/.local/state/dyno`, the agent's output in the user journal.
 
+## The helper (administrator changes)
+
+Settings > Helper installs `dyno-helper` as a systemd system service (`dyno-helper.service`, program in
+`/usr/local/libexec/dyno-helper`, data in `/var/lib/dyno-helper`, socket `/run/dyno-helper/helper.sock`) after a polkit
+(`pkexec`) prompt. It needs systemd and a polkit authentication agent in your session; without them the dialog says so. The
+only administrator change Linux has today is the battery charge limit (`charge_control_end_threshold`); more arrive as items are
+added to the tuning catalogue. If you cannot use the prompt, run as root: `sudo /path/to/dyno-helper install --user uid:$(id -u)
+--agent-exe /path/to/dyno-agent`. Remove with Settings > Helper or `sudo dyno-helper uninstall`.
+
 ## Removing Dyno
 
 Turn off Launch at login (or `dyno-agent service uninstall`), `sudo apt remove dyno`, delete the data folders above.

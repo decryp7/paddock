@@ -19,10 +19,25 @@ mod windows;
 #[cfg(windows)]
 use self::windows as sys;
 
+/// Who may open a fixed endpoint (ADR 0016): the file mode of a Unix socket, the access list (SDDL) of a Windows pipe.
+/// Each OS reads its own half; the privileged helper then still checks the peer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Access {
+    /// The socket file's mode (`0o666` lets any local user connect; the helper then refuses all but one by uid).
+    pub mode: u32,
+    /// The pipe's security descriptor in SDDL.
+    pub sddl: String,
+}
+
 /// A listening private endpoint for exactly one connection.
 pub struct Listener(sys::Listener);
 
 impl Listener {
+    /// Creates the endpoint `name` (a socket path or a pipe name) with a fixed name and the given access.
+    pub fn bind_fixed(name: &str, access: &Access) -> io::Result<Listener> {
+        sys::Listener::bind_fixed(name, access).map(Listener)
+    }
+
     /// Creates a fresh endpoint with a random name.
     pub fn bind() -> io::Result<Listener> {
         sys::Listener::bind().map(Listener)
@@ -47,6 +62,19 @@ impl Stream {
     /// Connects to the endpoint `name`, retrying for up to `timeout` while it is busy.
     pub fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
         sys::Stream::connect(name, timeout).map(Stream)
+    }
+
+    /// The user id of the process on the other end, where the OS tells (Unix); `None` on Windows (the pipe's access
+    /// list decides there).
+    pub fn peer_uid(&self) -> Option<u32> {
+        #[cfg(unix)]
+        {
+            self.0.peer_uid()
+        }
+        #[cfg(not(unix))]
+        {
+            None
+        }
     }
 
     /// Another handle to the same connection.

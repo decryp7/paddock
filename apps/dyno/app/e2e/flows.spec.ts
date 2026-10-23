@@ -28,10 +28,38 @@ test.describe('screens', () => {
   test('unbuilt features are listed in one dialog and have no route', async ({ page }) => {
     await page.goto(url());
     await page.getByRole('button', { name: /Coming/ }).click();
-    await expect(page.getByRole('dialog').getByText('Administrator tuning')).toBeVisible();
+    await expect(page.getByRole('dialog').getByText('Issues')).toBeVisible();
     await page.keyboard.press('Escape');
     await page.goto(url('/issues'));
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+  });
+
+  test('an administrator tuning item installs the helper only after the explanation, then reviews the change', async ({ page }) => {
+    await page.goto(url('/tuning'));
+    await page.getByRole('button', { name: 'Review Turn off hibernation to free disk space' }).click();
+    const helper = page.getByRole('dialog');
+    await expect(helper.getByText('Install the Dyno helper')).toBeVisible();
+    await expect(helper.getByText('Dyno itself never runs as administrator')).toBeVisible();
+    await helper.getByRole('button', { name: 'Not now' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Review Turn off hibernation to free disk space' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Install the helper' }).click();
+    const review = page.getByRole('dialog');
+    await expect(review.getByText('Turn hibernation off')).toBeVisible();
+    await review.getByRole('button', { name: 'Apply' }).click();
+    await expect(page.getByRole('button', { name: 'Revert Turn off hibernation to free disk space' })).toBeVisible();
+  });
+
+  test('Settings shows the helper and removes it again', async ({ page }) => {
+    await page.goto(url('/settings'));
+    const card = page.getByRole('region', { name: 'Helper' });
+    await expect(card.getByText('Not installed', { exact: true })).toBeVisible();
+    await card.getByRole('button', { name: /Install the helper/ }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Install the helper' }).click();
+    await expect(card.getByText('Ready', { exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Remove the helper' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Remove the helper' }).click();
+    await expect(card.getByText('Not installed', { exact: true })).toBeVisible();
   });
 
   test('the tray dropdown renders its compact dashboard', async ({ page }) => {

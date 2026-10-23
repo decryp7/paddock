@@ -12,7 +12,7 @@ pub const MAX_TRAFFIC_ROWS: usize = 50;
 pub const MAX_COUNTERS: usize = 8_192;
 
 /// What the OS reports for one process: bytes since it started.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrafficCounter {
     /// Process id.
     pub pid: u32,

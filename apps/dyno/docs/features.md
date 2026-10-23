@@ -52,8 +52,8 @@ process list can be taken and compared.
 
 
 **Network traffic per program** (Network page, process details): macOS from `nettop`, Linux from the kernel's per-socket TCP byte
-counters (no root; other users' programs are not attributed), Windows needs administrator rights for the OS counters and says so
-until the helper does it. Where it cannot be read the page shows the reason instead of zeros.
+counters (no root; other users' programs are not attributed), Windows needs administrator rights for the OS counters, so the helper (when installed) reads them and
+the page says to install it otherwise. Where it cannot be read the page shows the reason instead of zeros.
 
 ## Why is it slow?
 
@@ -92,7 +92,10 @@ Each previews its exact change and its exact inverse; applying records an undoab
 confirm it took effect; before a revert the setting is read again and a change made outside Dyno since is detected (Revert
 anyway overwrites it on purpose). The changes are a closed set of typed actions behind a port with a fake for tests; nothing
 runs text as a command. Changes that need administrator rights (Defender, hibernation, charge limit, macOS sleep and Low Power
-Mode) are listed with the reason and are not applicable until the privileged helper exists ([WP-01](roadmap.md#wp-01-privileged-helper)).
+Mode) go through the privileged helper ([WP-01](roadmap.md#wp-01-privileged-helper), [ADR 0016](adr/0016-privileged-helper-install-and-ipc.md)):
+the first click explains the helper and the OS asks once to install it; each change is then previewed, validated again in the
+helper, read back, logged by the helper and recorded with its undo. Where the helper cannot be installed (no polkit, no systemd)
+the item says why.
 Really applicable now: Windows power plan, sleep timer, visual effects, background apps and indexing; Linux power profile;
 macOS indexing exclusions (Spotlight markers). Windows commands are unit-tested through a fake runner, not yet run on Windows.
 
@@ -112,8 +115,7 @@ to run `docker image prune`), a disk-map screen, Linux Trash is never emptied by
 
 ## Tuning
 
-**Planned.** The core has the plan and `TuningSuggestion` types and the `HelperAction` set; the agent answers "Tuning is not
-built yet." Work packages [WP-01](roadmap.md#wp-01-privileged-helper), [WP-05](roadmap.md#wp-05-tuning-catalogue).
+**Built.** See the Tuning list above. Work packages [WP-01](roadmap.md#wp-01-privileged-helper), [WP-05](roadmap.md#wp-05-tuning-catalogue).
 
 ## Alerts and reports
 
@@ -141,8 +143,8 @@ Dyno's own Copy menu, no browser keys.
 
 **Built.** Observe-only by default; rules disabled; the protected list (critical OS processes, antivirus, audio engine, Dyno,
 your entries) cannot be overridden; actions name a `ProcessRef`; every action is logged and undoable; the agent never runs
-elevated; tests act only on processes and folders they create. The privileged helper for system changes is planned
-([ADR 0006](adr/0006-privileged-helper-and-observe-only.md)).
+elevated; tests act only on processes and folders they create. The privileged helper for system changes is installed only on a click and serves one user and one program
+([ADR 0006](adr/0006-privileged-helper-and-observe-only.md), [ADR 0016](adr/0016-privileged-helper-install-and-ipc.md)).
 
 ## Extensibility
 

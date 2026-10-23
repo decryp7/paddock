@@ -54,7 +54,7 @@ routes on one machine.
 
 - Your own processes: everything (command line, working directory, open files through `lsof`, signer through `codesign`).
 - Other users' and system processes: name and resource use; changing them needs administrator rights, which Dyno never takes by
-  itself (the helper is planned).
+  itself. The optional helper (Settings > Helper) makes the few changes that need it: it is installed with the macOS password dialog as a LaunchDaemon (`net.decryptology.dyno.helper`, program in `/Library/PrivilegedHelperTools`, data in `/Library/Application Support/Dyno/Helper`), serves your account and Dyno's agent only, and Remove deletes all of it. It does not use SMAppService yet: that needs a Developer ID signature.
 - Efficiency mode is the Darwin background policy (`setpriority` with `PRIO_DARWIN_BG`); CPU caps are a 100 ms SIGSTOP/SIGCONT
   duty cycle; there is no CPU affinity on macOS.
 - The protected list covers `kernel_task`, `launchd`, `WindowServer`, `loginwindow`, `coreaudiod`, `logd`, `securityd`,
