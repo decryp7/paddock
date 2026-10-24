@@ -3283,6 +3283,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-panels"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "objc2-app-kit",
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-env",
+ "paddock-window",
+ "paddock-workspace-hack",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-runtime",
+ "tempfile",
+ "ts-rs",
+ "windows",
+]
+
+[[package]]
 name = "paddock-pitwall"
 version = "0.1.0"
 dependencies = [

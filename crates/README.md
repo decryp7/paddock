@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-panels/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -111,6 +111,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
+| `paddock-panels` | pop-out panel windows, drag ghost, UI-state forwarding (X50 W3) | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
 
@@ -420,6 +421,26 @@ let startup = Startup::builder().safe_mode(restart_in_safe_mode).lifecycle(life)
 - Replaces: Debrief `app/src-tauri/src/lifecycle.rs` (marker, instances, `SessionStore`, `Lifecycle`) and
   `app/src/app/lifecycle/` (`lifecycle-banners.ts`, `lifecycle.service.ts` safe-mode and crash parts, `session.service.ts`
   checkpoint part). Debrief keeps the project-file format of its sessions: its `UiCheckpoint.capture()` returns the content.
+
+## `paddock-panels` (plan X50 W3)
+
+Pop-out panel windows: a panel of a window's dock moved into an OS window of its own. Taken from Debrief's
+`panel_windows.rs`, `drag_ghost/` and the transport half of `app/src/app/popout`. Pure core, `tauri` feature for the adapter.
+
+- `panel`: `Panel::parse` for `<view>` / `<view>#<key>` (view: namespaced id; key 1 to 1024 characters), `popout_url`.
+- `place`: `place(wanted, remembered, host, monitors)` puts a pop-out on any display, clamped to that display's work area
+  (requested place, else the view's remembered place, else beside the host); mixed scales and negative coordinates tested.
+- `registry`: `PopOuts` (labels `p-<host>-<n>`, at most 12 per host) and `Memory` (last place per view, a `paddock-env`
+  versioned file).
+- `sync`: `recipients` (only the windows of the sender's host; dialogs get `display` scope only), `check_message`
+  (JSON object, 512 KiB) and `Limiter` (200/s, burst 100).
+- `ghost`: the drag ghost's state machine, geometry, request parsing and static page (`ghost::page::{HTML, CSS, JS}`: the
+  app serves them as `drag-ghost.html|css|js`).
+- Adapter: `Panels::builder().route(..).bounds_file(..).build()` managed as state; `on_window_event` (a pop-out closing
+  docks its panel back, a host closing closes its pop-outs, a drag ends with its window); `invoke_handler()` behind
+  `Guard::new(&paddock_panels::COMMANDS)`. Events: `paddock://panels` (to the host: `returned`, `changed`, `moved`),
+  `paddock://ui-sync`. Generated TypeScript: `ui/projects/paddock-ui/workbench/panels/generated/` (`PADDOCK_WRITE_TS=1 cargo
+  test -p paddock-panels --lib generated`). OS glue (pointer, no-focus show, frameless, the tracker loop) is `tauri/native.rs`.
 
 ## `paddock-window` (plan S12)
 
