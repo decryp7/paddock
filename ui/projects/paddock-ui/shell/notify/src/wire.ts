@@ -19,7 +19,7 @@ import type {
 type Rec = Record<string, unknown>;
 
 const STATES: readonly ServiceState[] = ['ok', 'starting', 'degraded', 'down', 'quarantined', 'repairing'];
-const REPAIRS: readonly RepairAction[] = ['restart', 'reset', 'liftQuarantine', 'install', 'retry', 'openSettings', 'useFallback'];
+const REPAIRS: readonly RepairAction[] = ['restart', 'reset', 'liftQuarantine', 'install', 'retry', 'openSettings', 'useFallback', 'openLoginItems'];
 const SEVERITIES: readonly NoticeSeverity[] = ['info', 'success', 'warning', 'error', 'critical'];
 
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);

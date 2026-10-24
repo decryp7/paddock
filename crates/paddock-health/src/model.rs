@@ -64,6 +64,9 @@ pub enum RepairAction {
     OpenSettings,
     /// Use the fallback instead of the service that went away.
     UseFallback,
+    /// Open the OS page where the user allows or switches the background service on (macOS System Settings > General >
+    /// Login Items). The shell opens it; the switch stays the user's, the app never flips it (`paddock-service`).
+    OpenLoginItems,
 }
 
 /// Advice to raise a memory cap that stopped a process: the UI offers "Raise the cap…" (it opens the setting with this

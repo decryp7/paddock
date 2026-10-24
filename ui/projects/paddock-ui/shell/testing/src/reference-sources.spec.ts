@@ -45,7 +45,10 @@ describe('shell and shell-demo sources', () => {
     const files = [...sources(fs, SHELL), ...sources(fs, DEMO)].filter(isRegistrationFile);
     expect(files).toContain(`${DEMO}/app/demo.contributions.ts`);
     expect(files.length).toBeGreaterThanOrEqual(4);
-    expect(files.flatMap((f) => checkRegistrationSource(f, fs.readFileSync(f, 'utf8')))).toEqual([]);
+    // The service part's entry point and its generated wire module are named "service" but hold no service: the entry point
+    // exports the page's definition and constants (the page, store and backend are chunks or tree-shaken), the module only types.
+    const allow = ['@decryp7/paddock-ui/shell/service', '../generated/service'];
+    expect(files.flatMap((f) => checkRegistrationSource(f, fs.readFileSync(f, 'utf8'), allow))).toEqual([]);
   });
 
   it('every entry point keeps its lazily loaded components out of its public API (plan S16)', async () => {

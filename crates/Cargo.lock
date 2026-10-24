@@ -2656,6 +2656,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-security"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "709fe137109bd1e8b5a99390f77a7d8b2961dafc1a1c5db8f2e60329ad6d895a"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2",
+ "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-service-management"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b213642d6959cc6023ceb1217aa595eaaf09b8094ce95127c103cab611fe65e8"
+dependencies = [
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "objc2-security",
+]
+
+[[package]]
 name = "objc2-ui-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2875,6 +2898,7 @@ dependencies = [
 name = "paddock-pitwall"
 version = "0.1.0"
 dependencies = [
+ "paddock-commands",
  "paddock-env",
  "paddock-health",
  "paddock-proc",
@@ -2882,6 +2906,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "ts-rs",
 ]
 
 [[package]]
@@ -2900,6 +2925,30 @@ dependencies = [
  "keyring",
  "tempfile",
  "zeroize",
+]
+
+[[package]]
+name = "paddock-service"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "log",
+ "objc2",
+ "objc2-foundation",
+ "objc2-service-management",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-health",
+ "paddock-proc",
+ "paddock-settings",
+ "plist",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "ts-rs",
+ "windows",
+ "windows-service",
 ]
 
 [[package]]
@@ -2931,6 +2980,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-menu",
+ "paddock-service",
  "paddock-settings",
  "paddock-startup",
  "paddock-updater",
@@ -5483,6 +5533,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5632,6 +5688,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5"
 dependencies = [
  "windows-link",
+]
+
+[[package]]
+name = "windows-service"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "857224b3b211c6f3616921f081ee54721ee3ad2ace2fac6a6337e032f7b4dcf2"
+dependencies = [
+ "bitflags 2.13.2",
+ "widestring",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

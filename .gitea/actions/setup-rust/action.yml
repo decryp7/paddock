@@ -95,7 +95,11 @@ runs:
           # Cached builds are not incremental; an unreachable cache must slow a build down, never fail it.
           echo "CARGO_INCREMENTAL=0"
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+          # CI's own server: a host runner may run a developer's sccache on the default port 4226 with its own backend, which
+          # would silently ignore the settings below. sccache-stats stops this port's server, never the default one.
+          echo "SCCACHE_SERVER_PORT=4227"
         } >> "$GITHUB_ENV"
+        export SCCACHE_SERVER_PORT=4227
         if [ "$BACKEND" = redis ] && [ -z "$REDIS_ENDPOINT" ]; then
           echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
         fi
@@ -104,10 +108,15 @@ runs:
           echo "SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" >> "$GITHUB_ENV"
           echo "SCCACHE_REDIS_DB=${REDIS_DB:-5}" >> "$GITHUB_ENV"
           echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
+          # GITHUB_ENV reaches the next steps only; the server started below needs the settings now.
+          export SCCACHE_REDIS_ENDPOINT="$REDIS_ENDPOINT" SCCACHE_REDIS_DB="${REDIS_DB:-5}" SCCACHE_IGNORE_SERVER_IO_ERROR=1
         else
           echo "sccache: local disk"
         fi
         sccache --version
+        # A server left on this port by an earlier job would keep that job's backend: start it fresh with this job's settings.
+        sccache --stop-server >/dev/null 2>&1 || true
+        sccache --start-server || echo "::warning::the sccache server did not start; the build runs without the shared cache."
     - name: Linux dependencies for Tauri
       if: runner.os == 'Linux' && inputs.tauri-linux-deps == 'true'
       shell: bash

@@ -5,6 +5,46 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Shell demo: the sample agent is its own crate, bundled as `externalBin` on every OS (`agent/sidecar.mjs` in
+  `beforeBuildCommand`), ad-hoc sealed with the app; `shell-demo-agent --self-test` runs from the built bundle in the macOS
+  verification (which also checks every Mach-O's TeamIdentifier) and from the .deb / the bundled .exe in the release
+  workflow. `scripts/new-app.mjs` carries the agent into new apps, renamed.
+- `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
+  It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
+  actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
+  repair that does not depend on Pitwall, rule 19), Open AI settings, and `(step)` for what only the app can do (open or
+  install Pitwall, update, change permissions). `PitwallBackend` port (Tauri over the four `PITWALL_COMMANDS` and the
+  `paddock://pitwall` event, and an in-memory engine), `PitwallStore` (SignalStore, request status union, listens to the event),
+  `providePitwall`. The wire types and names are generated from Rust (`ts-rs`, stale files fail `cargo test -p paddock-pitwall`).
+  `Session::snapshot` builds the value. The shell demo has a Local AI page on a fake Pitwall (Vitest and a Chromium spec: axe,
+  320 px).
+- `paddock-pitwall` line coverage is above 99% (lcov): the socket error arms are classified by pure functions with tests, and the
+  pairing races (an approval after the request expired, a late answer for a replaced request) are tested deterministically.
+- `@decryp7/paddock-ui/shell/service` (plan X4): Settings > Background service. `ServiceBackend` (Tauri adapter and an in-memory
+  one that plays install, a repair's phases, failure, busy, switched-off and needs-approval), `ServiceStore` (status, the
+  `paddock://service` updates folded in, "Still working" while a repair runs and never timed out, an inline error with
+  Retry), `defineServiceSettingsPage` for the `pd.login` page and `SERVICE_SETTINGS_COMMANDS` for the Settings dialog's
+  contract, and `PdServicePage` in `shell/service/page` (a status word, the engine's message, Install, Repair and Open Login
+  Items… only where the engine says they apply, the "Start at login" switch beneath in the generic settings form). The shell
+  demo shows it (`?service=notInstalled|switchedOff|...`, `?service-outcome=fail|hang|...`).
+- `paddock-service` in the app (plan X4b): the Windows service host (`--service`: the program in the user's session,
+  restarted, moved with the session, stopped gracefully) behind a `Sessions` port; `ServiceControl` and the `tauri`
+  adapter (`service_status`, `service_repair`, `service_install`, `open_login_items`, the `paddock://service` event, the
+  health entry and its Repair, start-up checks); `paddock_shell::Builder::service` with the `pd.login` "Start at login"
+  section; `RepairAction::OpenLoginItems` in `paddock-health`; the shell demo's sample agent (`shell-demo-agent`, its
+  generated plist and NSIS hooks) and `scripts/shell-demo/smoke-service-update.sh` (C21, disposable Macs only).
+- `paddock-service` (plan X4, decision D4, rule 24, catalogue R03/R05): background services and login items. One
+  `ServiceSpec` rendered (pure, golden-tested) as the bundled launchd plist for `SMAppService` or a plist file, the systemd
+  user or system unit, the Windows `Run` value, the Windows service as `sc.exe` calls and the NSIS installer hooks (they
+  replace the hand-written `src-tauri/macos/*.plist` and `src-tauri/windows/installer-hooks.nsh`). Backends for
+  `SMAppService`, plist + `launchctl`, systemd, the `Run` value and the Service Control Manager (directly or through one UAC
+  prompt), all behind the `System`/`AppService`/`Elevator` ports with recording fakes (`testing`). `plan` + `repair::replace`:
+  unregister, `launchctl bootout`, wait until gone (bounded), register, check, retried; once per version change where the
+  OS pins the build, automatically for a refused job while the service is down, a missing or moved program re-pointed, a
+  newer copy's registration left alone, the user's switch never overridden, nothing installed unasked. `Manager` (status,
+  `on_start`, repair, install, uninstall, the registered version in `service-<label>.json`, a cross-copy lock,
+  `RepairTracker` progress), `ServiceStatus::health` for `paddock-health`, the `pd.login` launch-at-login section, the
+  exe-changed restart (`watch`), the login-shell `PATH` for a supervised program (`supervised`) and the shared verbs.
 - `paddock-pitwall` (ADR 0004, plan workbench section 15): the one Pitwall client, extracted from Debrief 1.1's engine and checked
   against Pitwall's router. Discovery (`discovery.json` from `paddock-env` folders, Local then Roaming on Windows, else port 11435),
   the key in `paddock-secrets`, pairing with the user's consent on a background thread, a typed `Client` (health, select, models,

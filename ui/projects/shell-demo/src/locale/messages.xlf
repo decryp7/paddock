@@ -44,6 +44,9 @@
       <trans-unit id="sd.greet" datatype="html">
         <source>Say hello</source>
       </trans-unit>
+      <trans-unit id="sd.health.agent" datatype="html">
+        <source>the demo agent</source>
+      </trans-unit>
       <trans-unit id="sd.health.engine" datatype="html">
         <source>the demo engine</source>
       </trans-unit>
@@ -88,6 +91,9 @@
       </trans-unit>
       <trans-unit id="sd.page.lab" datatype="html">
         <source>Lab</source>
+      </trans-unit>
+      <trans-unit id="sd.page.pitwall" datatype="html">
+        <source>Local AI</source>
       </trans-unit>
       <trans-unit id="sd.page.runners" datatype="html">
         <source>Runners</source>
