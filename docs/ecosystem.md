@@ -1,22 +1,24 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=1268df39" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=20c35da2" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
 the others. All run on Windows, macOS and Linux, are written in Rust with a Tauri 2 shell and an Angular UI, and are local
 only: no cloud, no account, no telemetry.
 
-The foundation has two layers (decided 2026-10-24, [ADR 0012](adr/0012-paddock-app-shell.md) and [ADR 0013](adr/0013-paddock-workbench.md)). The **App shell** is what every app gets: startup protection, notifications
-and service health, dialogs as real windows, jobs and progress, Settings, About and updates, and the theme; Pitcrew, Pitwall,
+The foundation has two layers (decided 2026-10-24, [ADR 0012](adr/0012-paddock-app-shell.md) and [ADR 0013](adr/0013-paddock-workbench.md)). The **App shell** is what every app gets: startup protection with crash recovery and
+safe mode, Report a problem, background services and login items, notifications and service health, dialogs as real windows,
+jobs and progress, Settings, About and updates, the Storage page, undo, and the theme (shell 0.3.0); Pitcrew, Pitwall,
 Spotter and Dyno are the shell with pages. The **Workbench** sits on top of it for the IDE-style apps, Debrief, Pacenotes and
 Sighter: docked panes with the layout planner, the activity bar, the Explorer, the command palette and the AI pane.
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=e68d3456) and [dark](images/paddock-ecosystem-dark.png?v=a1b06d58), integrations
-[light](images/paddock-integrations-light.png?v=bb3fc28b) and [dark](images/paddock-integrations-dark.png?v=68a820ad). PNGs are
+hero [light](images/paddock-ecosystem-light.png?v=3f9ae030) and [dark](images/paddock-ecosystem-dark.png?v=df7479ea), integrations
+[light](images/paddock-integrations-light.png?v=72242dc8) and [dark](images/paddock-integrations-dark.png?v=cfb0783c), hand-offs
+[light](images/paddock-handoffs-light.png?v=36352e2f) and [dark](images/paddock-handoffs-dark.png?v=90af075e). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
 `CHROME` to override).
 
@@ -126,7 +128,11 @@ Status: **in design** (after Pitwall). Repo: <https://dev.decryptology.net/decry
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=0f8eac57" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; Sighter's MCP server is driven by Debrief, Pacenotes or any MCP host; apps hand off files and deep links directly" width="100%">
+  <img src="images/paddock-integrations.svg?v=26ea5c70" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter and Dyno reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app; Pitwall runs llama.cpp as a child process, keeps keys in the OS credential store, and its tool router is an MCP client of the read-only MCP servers of Pacenotes, Debrief and Sighter, which other MCP clients can use too" width="100%">
+</picture>
+
+<picture>
+  <img src="images/paddock-handoffs.svg?v=6f8c5d40" alt="Hand-offs between apps: Sighter run bundles, Pitcrew job logs, Dyno issues and Pacenotes log checks go to Debrief; Debrief sends Pacenotes stack traces and drives Sighter over MCP to reproduce a bug from a video; Pacenotes sends Sighter test plans and gets results back; Dyno sends Spotter its watch list and Pitcrew machine health; Spotter tells Pacenotes about newer versions and, later, triggers Sighter smoke tests; Pitcrew supervises the Gitea runners" width="100%">
 </picture>
 
 The apps never depend on each other to do their own job. They meet in a few well-defined places:
@@ -144,7 +150,7 @@ The apps never depend on each other to do their own job. They meet in a few well
 | **Smoke tests** (later) | Spotter to Sighter | A new release found by Spotter triggers a Sighter smoke test. |
 | **CI** | Pitcrew to every repo | Pitcrew keeps the runners that build and test all of these apps alive, updated and clean. |
 | **Plugin platform** (planned) | Debrief, Pacenotes, later Dyno's tier-3 plugins | Debrief's plugin host, IPC and API (the ADR 0017 model) extracted into shared crates: out-of-process, Rust-only plugins. |
-| **`paddock-pitwall`** (planned) | shared crate in each app | One client for discovery, pairing, keychain keys, retries, priorities, cache headers and capability checks, so no app re-implements Pitwall access. |
+| **`paddock-pitwall`** | shared crate in each app | One client for discovery, pairing, keychain keys, retries, priorities, cache headers and capability checks, so no app re-implements Pitwall access. Built (extracted from Debrief 1.1's client); Debrief, Pacenotes and Sighter use it, Spotter and Dyno later. |
 
 What each app uses Pitwall for (the dotted lines in the hero): Debrief, its AI engine once paired (from 1.1; the built-in engine is the fallback); Pacenotes, answers, explanations and
 embeddings (a two-way link: it is an MCP server, Pitwall is the client); Sighter, vision; Spotter, "What's new" summaries; Dyno,
@@ -175,7 +181,8 @@ Pitwall is the AI hub, never a dependency. Every app's core works without it:
 - **Design guide and tokens**: five accents and a colour-vision-safe categorical palette ([design guide](design-guide.md)).
 - **Diagram kit**: draw.io shape library, templates and canonical export ([`diagrams/`](../diagrams/README.md)).
 - **Icon set**: one icon per app, per platform, and the Paddock mark itself: pit garages on a slab striped in the seven app hues ([`icons/`](../icons/README.md)).
-- **Shared Rust crates** (planned): the plugin platform, `paddock-pitwall` and `paddock-testplan` ([`crates/`](../crates/README.md)).
+- **Shared Rust crates** on the Gitea cargo registry: the app shell, jobs, logs, Report a problem, services, secrets, processes, folders, knowledge packs, IPC and `paddock-pitwall`, among others; the rest of the plugin platform, `paddock-mcp` and `paddock-testplan` are planned ([`crates/`](../crates/README.md)).
+- **Conformance checks**: `@decryp7/paddock-conformance`, the shared checks every app runs in CI ([`conformance/`](../conformance/)).
 - **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script. Apple notarization and Windows code signing are deferred until the releases settle (2026-10-23); every app's release notes carry a "First launch" note (macOS Open Anyway, Windows More info > Run anyway).
 - **Lessons**: what Debrief and Pitcrew taught about build, windows, services, native feel and tests ([lessons](lessons.md)).
 
