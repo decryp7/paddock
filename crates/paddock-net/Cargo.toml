@@ -1,0 +1,24 @@
+[package]
+name = "paddock-net"
+version = "0.1.0"
+description = "Outbound HTTP policy for the Paddock apps: https only (plain http to loopback), reach limits with a guard on every address and redirect, caps, redirect limit, host allow-list, offline switch, per-host gap and conditional requests, on paddock-download's TLS and proxy set-up with connection reuse."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+default = ["http"]
+# The real wire (`UreqWire`: ureq and rustls, certificates from the operating system, the proxy of `paddock-download`, the
+# address guard applied to the very addresses the socket connects to). Without it the app brings its own `Wire`.
+http = ["dep:ureq", "dep:rustls", "paddock-download/http"]
+
+[dependencies]
+paddock-jobs = { workspace = true }
+paddock-download = { workspace = true }
+url = "2"
+ureq = { version = "3.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
+
+[dev-dependencies]
+proptest = "1"

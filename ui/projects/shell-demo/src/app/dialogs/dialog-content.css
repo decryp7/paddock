@@ -10,5 +10,5 @@
 .facts dd { margin: 0; font-variant-numeric: tabular-nums; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--pd-space-2); margin-top: auto; }
 .btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); }
-.btn.primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: #fff; }
+.btn.primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
 .btn:disabled { opacity: 0.6; }

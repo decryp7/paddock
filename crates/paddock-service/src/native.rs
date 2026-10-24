@@ -175,10 +175,11 @@ mod mac {
                 Ok(()) => Ok(()),
                 Err(e) => match self.status() {
                     AppServiceStatus::RequiresApproval => Err(RegisterError::NeedsApproval),
-                    AppServiceStatus::NotFound => Err(RegisterError::Unavailable(
-                        "macOS cannot find the launch agent in the app: open the app from the Applications folder."
-                            .to_string(),
-                    )),
+                    // Still no record after a register that failed: it cannot be registered from where it is.
+                    AppServiceStatus::NotFound => Err(RegisterError::Unavailable(format!(
+                        "macOS cannot register the launch agent in the app ({}): open the app from the Applications folder.",
+                        e.localizedDescription()
+                    ))),
                     _ => Err(RegisterError::Other(e.localizedDescription().to_string())),
                 },
             }

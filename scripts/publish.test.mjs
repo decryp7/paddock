@@ -24,6 +24,7 @@ import {
   publishOrder,
   tagProblems,
   workspaceCrates,
+  WORKSPACE_HACK,
 } from './publish.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -81,6 +82,16 @@ describe('workspaceCrates', () => {
         ['paddock-a', [], true, '/w/paddock-a'],
         ['paddock-b', ['paddock-a'], false, '/w/paddock-b'],
       ],
+    );
+  });
+  test('the workspace-hack crate is neither a crate to publish nor a dependency', () => {
+    const list = workspaceCrates({
+      workspace_members: ['a', 'h'],
+      packages: [pkg('a', 'paddock-a', [{ name: WORKSPACE_HACK, kind: null }]), pkg('h', WORKSPACE_HACK, [])],
+    });
+    assert.deepEqual(
+      list.map((c) => [c.name, c.deps]),
+      [['paddock-a', []]],
     );
   });
 });
@@ -172,7 +183,7 @@ describe('tagProblems (rule 9)', () => {
 });
 
 describe('crateStepsMissing', () => {
-  const yaml = (name) => `      - name: ${name}\n        run: cargo clippy -p ${name} --all-targets --all-features -- -D warnings && cargo test -p ${name} --all-features\n`;
+  const yaml = (name) => `      - name: ${name}\n        run: cargo clippy -p ${name} --all-targets --all-features -- -D warnings && cargo nextest run -p ${name} --all-features --profile ci\n`;
   test('names crates without both steps', () => {
     const ci = yaml('paddock-a') + '        run: cargo clippy -p paddock-b --all-targets --all-features -- -D warnings\n';
     assert.deepEqual(crateStepsMissing(ci, ['paddock-a', 'paddock-b', 'paddock-c']), ['paddock-b', 'paddock-c']);
