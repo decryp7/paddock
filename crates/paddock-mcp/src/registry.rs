@@ -225,7 +225,7 @@ pub struct ToolInfoRaw {
     pub description: String,
     /// Read-only or action.
     pub access: Access,
-    /// Whether the current policy shows it to clients.
+    /// Whether clients see it now (MCP is on and the policy shows it).
     pub exposed: bool,
 }
 
