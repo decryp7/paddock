@@ -427,3 +427,17 @@ in the branch). "Owned" is in the Paddock repo.
 All apps wait for one shell release before they move, so **0.3.0 contains all 20 work packages (X1–X20)**, plus
 `paddock-pitwall`, the gaps found by the Pitcrew and Pitwall moves, and the Shell Demo fixes already on main. There is
 no 0.2.1 and no separate 0.4.0. Groups G1–G5 keep their order; G4/G5 start as soon as their dependencies land.
+
+## More shared parts for 0.3.0 (user, 2026-10-24 night)
+
+The user added these to 0.3.0 ("All"), and asked for a full survey to find and add every remaining candidate (§ below
+filled by the survey).
+
+| Id | Candidate | Home | Who has it today |
+|---|---|---|---|
+| X21 | UI building blocks: data table (sort, filter, virtual scroll, column choice), ECharts wrapper with the family palette, forms helpers | `@decryp7/paddock-ui` (`table`, `chart`, `forms`) | Debrief, Pitwall, Pitcrew, Dyno, Spotter (own tables and charts) |
+| X22 | MCP server: limits, logging, read-only tools, local only (ADR 0007) | new `paddock-mcp` | needed by Pacenotes, Sighter, Debrief; Pitwall is the client |
+| X23 | Folder watching with debounce (watched folders, sources, pack reload) | new `paddock-watch` | Debrief, Spotter, pack reloaders |
+| X24 | Safe archive unpacking (zip/tar, size and count limits, path traversal guard) | new `paddock-archive` | Debrief imports, Pitwall engines, Spotter assets |
+| X25 | CLI conventions: JSON output, exit codes, progress on stderr | new `paddock-cli` | Pitwall, Dyno, Sighter CLIs |
+| X26 | Benchmark harness with stored budgets (rule 16) | new `paddock-bench` + nightly workflow | each app's own benchmarks |
