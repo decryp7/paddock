@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ASSISTANT_COMMANDS } from '../generated/assistant-commands';
 import { ASSISTANT_EVENT, type AssistantInfo, type Envelope } from '../generated/assistant';
 import { FIXTURE_CONVERSATION, FIXTURE_EVENTS } from '../generated/assistant-fixtures';
-import { MemoryAssistantBackend, TauriAssistantBackend, type AssistantIpc } from './backend';
+import { DEMO_ANSWER, MemoryAssistantBackend, TauriAssistantBackend, type AssistantIpc } from './backend';
 
 const settle = async (n = 20): Promise<void> => {
   for (let i = 0; i < n; i++) await Promise.resolve();
@@ -80,6 +80,13 @@ describe('TauriAssistantBackend', () => {
 });
 
 describe('MemoryAssistantBackend', () => {
+  it('answers in markdown: a paragraph, a list, inline code and a code block', () => {
+    expect(DEMO_ANSWER).toMatch(/^[A-Z].*\.\n\n/);
+    expect(DEMO_ANSWER).toMatch(/\n- .+\n- /);
+    expect(DEMO_ANSWER).toMatch(/`handle_request`/);
+    expect(DEMO_ANSWER).toMatch(/```rust\n[\s\S]+\n```/);
+  });
+
   async function ask(b: MemoryAssistantBackend, text: string, allowWrite = false, conversationId?: string) {
     const events: Envelope[] = [];
     await b.listen((e) => events.push(e));
@@ -90,14 +97,15 @@ describe('MemoryAssistantBackend', () => {
   it('streams a canned answer word by word and keeps the conversation', async () => {
     const b = new MemoryAssistantBackend();
     const { events, ack } = await ask(b, 'hello there');
-    await settle();
-    expect(events.map((e) => e.type)).toEqual(['started', 'delta', 'delta', 'delta', 'delta', 'done']);
-    expect(events.at(-1)).toMatchObject({ type: 'done', text: 'You asked: hello there', end: 'answered' });
+    await settle(300);
+    expect(events[0]?.type).toBe('started');
+    expect(events.slice(1, -1).every((e) => e.type === 'delta')).toBe(true);
+    expect(events.at(-1)).toMatchObject({ type: 'done', text: DEMO_ANSWER, end: 'answered' });
     expect((await b.load(ack.conversationId)).messages.map((m) => m.role)).toEqual(['user', 'assistant']);
     expect((await b.conversations())[0]).toMatchObject({ id: ack.conversationId, messageCount: 2 });
     // A second question continues it.
     await b.send({ conversationId: ack.conversationId, text: 'again', context: [], allowWrite: false });
-    await settle();
+    await settle(300);
     expect((await b.load(ack.conversationId)).messages).toHaveLength(4);
     await b.delete(ack.conversationId);
     await expect(b.load(ack.conversationId)).rejects.toThrow('no longer exists');
@@ -146,17 +154,46 @@ describe('MemoryAssistantBackend', () => {
   it('plays /fail (words, then an error of kind failed) and /slow (words, then waits for Stop)', async () => {
     const b = new MemoryAssistantBackend();
     const failed = await ask(b, '/fail now');
-    await settle(10);
+    await settle(300);
     expect(failed.events.some((e) => e.type === 'delta')).toBe(true);
     expect(failed.events.at(-1)).toMatchObject({ type: 'error', kind: 'failed', message: 'The model stopped answering.' });
     expect(await b.stop(failed.ack.conversationId)).toBe(false);
 
     const slow = await ask(b, '/slow please');
-    await settle(10);
+    await settle(300);
     expect(slow.events.some((e) => e.type === 'delta')).toBe(true);
     expect(slow.events.some((e) => e.type === 'done')).toBe(false);
     expect(await b.stop(slow.ack.conversationId)).toBe(true);
     await settle(5);
     expect(slow.events.at(-1)).toMatchObject({ type: 'done', end: 'cancelled' });
+  });
+
+  it('plays /tool-slow (a tool card that stays running until Stop) and /tool-fail (a failed card with a reason)', async () => {
+    const b = new MemoryAssistantBackend();
+    const slow = await ask(b, '/tool-slow lookup');
+    await settle(30);
+    expect(slow.events.map((e) => e.type)).toEqual(['started', 'toolStarted']);
+    expect(slow.events[1]).toMatchObject({ summary: 'lookup', write: false });
+    expect(await b.stop(slow.ack.conversationId)).toBe(true);
+    await settle(30);
+    expect(slow.events.some((e) => e.type === 'toolFinished' || e.type === 'delta')).toBe(false);
+    expect(slow.events.at(-1)).toMatchObject({ type: 'done', end: 'cancelled' });
+
+    const fail = await ask(b, '/tool-fail');
+    await settle(300);
+    expect(fail.events.slice(0, 3).map((e) => e.type)).toEqual(['started', 'toolStarted', 'toolFinished']);
+    expect(fail.events[2]).toMatchObject({ ok: false, summary: 'The index is locked by another process.' });
+    expect(fail.events.at(-1)).toMatchObject({ type: 'done', end: 'answered' });
+  });
+
+  it('keeps /tool giving a citation and only the first word selects the behaviour', async () => {
+    const b = new MemoryAssistantBackend();
+    const tool = await ask(b, '/tool');
+    await settle(30);
+    expect(tool.events[2]).toMatchObject({ type: 'toolFinished', ok: true, data: { citations: [{ target: 'record:7' }] } });
+    expect(tool.events.at(-1)).toMatchObject({ type: 'done', text: 'Found item 7 for you.' });
+    const plain = await ask(b, 'what does /tool-fail do');
+    await settle(300);
+    expect(plain.events.some((e) => e.type === 'toolStarted')).toBe(false);
   });
 });

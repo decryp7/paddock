@@ -2369,6 +2369,9 @@
       <trans-unit id="pd.wb.assistant.approve.allow" datatype="html">
         <source>Allow</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.allow-tool" datatype="html">
+        <source>Allow <x id="tool"/></source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.arguments" datatype="html">
         <source>Arguments</source>
       </trans-unit>
@@ -2379,7 +2382,7 @@
         <source>Details</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.no-arguments" datatype="html">
-        <source>None</source>
+        <source>No arguments</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
         <source>Tool</source>
@@ -2498,6 +2501,9 @@
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.declined" datatype="html">
+        <source>Declined</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.done" datatype="html">
         <source>Done</source>
       </trans-unit>
@@ -2509,6 +2515,21 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
         <source>(unreadable call)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.cause" datatype="html">
+        <source>Likely cause: the local model stopped answering. Check that Pitwall is running, then try again.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.hide" datatype="html">
+        <source>Hide details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.show" datatype="html">
+        <source>Show details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.title" datatype="html">
+        <source>The answer did not finish.</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.undo" datatype="html">
         <source>Undo</source>
