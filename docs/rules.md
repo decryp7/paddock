@@ -88,3 +88,9 @@ changes here, every app's copy is updated in the same change.
     panes or apps), stop fixing instances: name the pattern, propose a redesign as an ADR that makes the class impossible
     or checked (a declared contract, one shared mechanism, a lint or test over every instance), and fix the instances
     through it. Until v1, check every batch of bug reports for such patterns.
+
+## Throughput (user, 2026-10-24)
+41. **Scale parallel work to the machine.** The coordinator watches load and free disk continuously and keeps the
+    machine busy but not overloaded: start more agents when load stays low, hold or stop starting them when it stays
+    high (Mac mini, 14 cores: aim for a 1-minute load of about 6–16, at most ~5 heavy jobs, `CARGO_BUILD_JOBS=2` each),
+    use the shared build cache (`sccache`) and copy-on-write target folders, and never let tests crowd out a release.
