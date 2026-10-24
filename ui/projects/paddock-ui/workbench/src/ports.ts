@@ -58,3 +58,30 @@ export const WORKBENCH_PORTS = new InjectionToken<WorkbenchPorts>('PADDOCK_WORKB
     openPalette: () => warn('open the palette'),
   }),
 });
+
+/** Where a pop-out window should appear: screen coordinates of its top-left corner (logical px), and its size. */
+export interface PopOutPlacement {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Pop-out windows as the dock sees them (plan W3): `workbench/panels` provides the real one over `paddock-panels`; the
+ * dock moves a panel out with `popOut` and takes it back when `returned` reports it (the window was closed or docked
+ * back). Without a provider panels cannot leave the window (the dock hides the action).
+ */
+export interface PanelWindowsPort {
+  /** Moves a panel to its own OS window; resolves false when it could not (the panel then stays docked). */
+  popOut(panel: string, placement?: PopOutPlacement): Promise<boolean>;
+  /** Brings a popped-out panel's window to the front. */
+  focus(panel: string): void;
+  /** Panels living in their own windows now. */
+  readonly poppedOut: Signal<readonly string[]>;
+  /** Called with a panel whose window closed or asked to dock back; returns the unsubscribe function. */
+  onReturned(listener: (panel: string) => void): () => void;
+}
+
+/** Provided by `workbench/panels`; optional (null: no pop-outs in this window, as in a pop-out window itself). */
+export const PANEL_WINDOWS = new InjectionToken<PanelWindowsPort | null>('PADDOCK_PANEL_WINDOWS', { providedIn: 'root', factory: () => null });

@@ -58,4 +58,4 @@ export {
   isOffered,
   type PanelRef,
 } from './src/registry';
-export { WORKBENCH_PORTS, type WorkbenchPorts, type ShowViewOptions } from './src/ports';
+export { WORKBENCH_PORTS, PANEL_WINDOWS, type WorkbenchPorts, type ShowViewOptions, type PanelWindowsPort, type PopOutPlacement } from './src/ports';
