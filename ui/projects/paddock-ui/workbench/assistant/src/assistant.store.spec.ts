@@ -1,11 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { msg } from '@decryp7/paddock-ui/shell';
 import { provideShellTesting, settle } from '@decryp7/paddock-ui/shell/testing';
 import { defineAssistantContext, provideWorkbenchContributions } from '@decryp7/paddock-ui/workbench';
 import { FIXTURE_CONVERSATION } from '../generated/assistant-fixtures';
 import { ASSISTANT_LIMITS } from '../generated/assistant';
-import { AssistantStore } from './assistant.store';
+import { AssistantStore, UNDO_MS } from './assistant.store';
 import { AssistantBackend, MemoryAssistantBackend, type MemoryAssistantOptions } from './backend';
 
 interface Ctx {
@@ -257,5 +257,66 @@ describe('AssistantStore', () => {
     expect(store.answer()).toBe('You asked: q');
     TestBed.resetTestingModule();
     backend.emit('x', { type: 'notice', message: 'late' });
+  });
+
+  describe('deleting with undo', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('hides the conversation at once, keeps it until the undo time passes, then deletes it', async () => {
+      const { store, backend } = setup({ conversations: [FIXTURE_CONVERSATION] });
+      await quiet();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.removeLater(FIXTURE_CONVERSATION.id);
+      store.removeLater(FIXTURE_CONVERSATION.id);
+      expect(store.visibleConversations()).toEqual([]);
+      expect(store.conversations()).toHaveLength(1);
+      expect(store.undoable()?.title).toBe(FIXTURE_CONVERSATION.title);
+      await vi.advanceTimersByTimeAsync(UNDO_MS - 1);
+      expect(store.conversations()).toHaveLength(1);
+      expect((await backend.conversations()).length).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      vi.useRealTimers();
+      await quiet();
+      expect(store.conversations()).toEqual([]);
+      expect(store.undoable()).toBeNull();
+    });
+
+    it('brings it back on undo and never deletes it', async () => {
+      const { store, backend } = setup({ conversations: [FIXTURE_CONVERSATION] });
+      await quiet();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.removeLater(FIXTURE_CONVERSATION.id);
+      store.undoRemove(FIXTURE_CONVERSATION.id);
+      store.undoRemove('nope');
+      store.removeLater('nope');
+      expect(store.visibleConversations()).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(UNDO_MS * 2);
+      expect((await backend.conversations()).length).toBe(1);
+    });
+
+    it('lets a pending delete go through when the pane closes', async () => {
+      const { store, backend } = setup({ conversations: [FIXTURE_CONVERSATION] });
+      await quiet();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.removeLater(FIXTURE_CONVERSATION.id);
+      store.dispose();
+      vi.useRealTimers();
+      await quiet();
+      expect(await backend.conversations()).toEqual([]);
+      const { store: other, backend: b2 } = setup({ conversations: [FIXTURE_CONVERSATION] });
+      await quiet();
+      b2.delete = () => Promise.reject(new Error('no'));
+      other.removeLater(FIXTURE_CONVERSATION.id);
+      other.dispose();
+      await quiet();
+    });
+  });
+
+  it('titles the pane with the conversation, or "New conversation"', async () => {
+    const { store } = setup({ conversations: [FIXTURE_CONVERSATION] });
+    await quiet();
+    expect(store.title()).toBe('New conversation');
+    await store.open(FIXTURE_CONVERSATION.id);
+    expect(store.title()).toBe(FIXTURE_CONVERSATION.title);
   });
 });
