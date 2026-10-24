@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import { CommandService, ContributionRegistry, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { PdJobsStatus } from '@decryp7/paddock-ui/shell/jobs';
+import { DemoNote } from './demo-note';
 import { DemoNotices } from './demo-notices';
 
 /** One part of the shell and the work package of docs/plans/workbench.md that brings it to this app. */
@@ -31,7 +33,7 @@ const PARTS: readonly ShellPart[] = [
 @Component({
   selector: 'sd-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState],
+  imports: [SuEmptyState, PdJobsStatus],
   template: `
     <main class="page">
       <h1>Paddock shell demo</h1>
@@ -66,6 +68,14 @@ const PARTS: readonly ShellPart[] = [
           </tbody>
         </table>
       </section>
+      <section class="startup" aria-labelledby="sd-startup">
+        <h2 id="sd-startup">Start-up contract</h2>
+        <p class="context">The window reports ready after its first paint and answers liveness pings; this note is kept if the shell reloads the window to recover it.</p>
+        <label class="note">
+          <span>Note</span>
+          <input #noteField type="text" data-testid="demo-note" [value]="note()" (input)="note.set(noteField.value)" />
+        </label>
+      </section>
       <table class="parts">
         <caption>Shell parts</caption>
         <thead>
@@ -78,9 +88,15 @@ const PARTS: readonly ShellPart[] = [
         </tbody>
       </table>
     </main>
+    <!-- The status bar the pages frame (plan S14) will own; the jobs status item opens the Jobs list (plan S9). -->
+    <footer class="status-bar" aria-label="Status bar">
+      <pd-jobs-status />
+    </footer>
   `,
   styles: `
-    .page { max-width: var(--pd-content-max); margin: 0 auto; padding: var(--pd-space-6) var(--pd-space-4); display: flex; flex-direction: column; gap: var(--pd-space-4); }
+    :host { display: flex; flex-direction: column; min-height: 100vh; }
+    .status-bar { position: sticky; bottom: 0; display: flex; justify-content: flex-end; min-width: 0; margin-top: auto; padding: var(--pd-space-1) var(--pd-space-4); background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); }
+    .page { width: 100%; max-width: var(--pd-content-max); margin: 0 auto; padding: var(--pd-space-6) var(--pd-space-4); display: flex; flex-direction: column; gap: var(--pd-space-4); }
     h1 { margin: 0; font-size: var(--pd-text-title); }
     .parts { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); }
     .parts caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }
@@ -100,6 +116,10 @@ const PARTS: readonly ShellPart[] = [
     .kinds caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }
     .kinds th, .kinds td { text-align: start; padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); }
     .kinds th { color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); }
+    .startup { display: flex; flex-direction: column; gap: var(--pd-space-2); }
+    .startup h2 { margin: 0; font-size: var(--pd-text-subtitle); }
+    .note { display: flex; flex-direction: column; gap: var(--pd-space-1); max-width: 40ch; }
+    .note input { min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; min-width: 0; }
   `,
 })
 export class ShellDemo {
@@ -108,6 +128,7 @@ export class ShellDemo {
   private readonly registry = inject(ContributionRegistry);
   private readonly host = inject(ShellContextHost);
   protected readonly notices = inject(DemoNotices).notices;
+  protected readonly note = inject(DemoNote).note;
   protected readonly available = this.commands.available;
   protected readonly contextLoaded = computed(() => this.host.context() !== null);
   protected readonly kinds = this.registry.kinds.map((k) => ({ name: k.name, count: this.registry.items(k.name).length }));

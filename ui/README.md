@@ -95,7 +95,8 @@ so a manager app never bundles the workbench:
 | Entry point | Content | Plan |
 |---|---|---|
 | `@decryp7/paddock-ui/shell` | contributions, `ShellContext`, frame parts, widgets | S2, S14 |
-| `/shell/startup`, `/shell/notify`, `/shell/dialogs`, `/shell/jobs`, `/shell/settings`, `/shell/about`, `/shell/menu`, `/shell/pages`, `/shell/i18n`, `/shell/store`, `/shell/testing` | one shell part each | S4-S16 |
+| `/shell/jobs` | jobs over the `paddock-jobs` adapter: `JobsBackend` (Tauri, memory), `JobsStore`, `pd-jobs-list`, `pd-jobs-status`, `JobFollow`, `provideShellJobs`, `JOBS_CONTRIBUTIONS` | S9 |
+| `/shell/startup`, `/shell/notify`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/menu`, `/shell/pages`, `/shell/i18n`, `/shell/store`, `/shell/testing` | one shell part each | S4-S16 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -104,6 +105,60 @@ A new entry point needs only those two files (the publish dry run fails if the b
 `projects/shell-demo` is the shell's reference app (mock backend): every shell change shows up there first, with its e2e in
 `e2e/shell-demo.spec.ts`. `@decryp7/paddock-e2e` (`projects/paddock-e2e`, plain Node, versioned with this package) gets the
 Playwright helpers in S16.
+
+### Start-up contract (`/shell/startup`, plan S7)
+
+Each window's config (main, other windows, pop-outs, dialogs):
+
+```ts
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { MockStartupBackend, provideStartupBackend, provideStartupContract, provideUiCheckpoint, TauriStartupBackend } from '@decryp7/paddock-ui/shell/startup';
+
+const ipc = { invoke, listen: (event: string, h: (p: unknown) => void) => listen(event, (e) => h(e.payload)) };
+providers: [
+  provideStartupBackend(() => (isTauri() ? new TauriStartupBackend(ipc) : new MockStartupBackend())),
+  provideStartupContract(),                                       // window_ready after the first render, then pings answered
+  provideUiCheckpoint(() => inject(QueryStore).checkpoint),       // main window only: what a recovery reload restores
+]
+```
+
+`main.ts` starts `startBootErrorForwarding(ipcBootErrorSender(ipc))` before anything else and passes bootstrap failures
+to `reportBootstrapFailure`; start-up reads the window depends on go through `retryUntilAnswered(call, STARTUP_RETRY)`.
+After a recovery reload the window shows a calm notice through the shell's notify port and restores its checkpoint.
+`index.html` keeps the `.pd-splash` (`role="status"`) inside the root element; `splashProblems(html, 'app-root')` checks it.
+In the browser build `MockStartupBackend` plays a recovery reload when `sessionStorage['paddock.mock.recover']` is set.
+
+### Jobs (`@decryp7/paddock-ui/shell/jobs`, plan S9)
+
+Per window (rule 34), with the app's IPC passed in (the package does not depend on `@tauri-apps/api`):
+
+```ts
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { JOBS_CONTRIBUTIONS, provideShellJobs, TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
+
+providers: [
+  provideContributions(JOBS_CONTRIBUTIONS), // status item `pd.jobs` (lazy), notification kinds pd.jobs.finished / failed
+  provideShellJobs({
+    backend: () => new TauriJobsBackend({ invoke, listen: (event, cb) => listen(event, (e) => cb(e.payload)) }),
+    stillWorkingAfterMs: 10_000, // the default
+  }),
+]
+```
+
+- `JobsStore` (SignalStore, `protectedState`): the newest snapshot per job (highest `seq`; listens before it reads the list,
+  so nothing is missed), `requestStatus` (`'idle' | 'loading' | 'loaded' | { error }`), `list` (active first), `activeCount`,
+  `lead`, `stalledIds` ("Still working" after `stillWorkingAfterMs` without an event, refreshed by a clock that ticks only
+  while a job runs), `load()` (also Retry), `cancel(id)`, `follow(id)`. A job that ends is a notice through
+  `SHELL_PORTS.notify` (done, failed, deadline; not a user cancel; not while someone follows it; never for the first list).
+- `<pd-jobs-list>` (the list with `pd-job` rows, Cancel, error with Retry, empty state) and `<pd-jobs-status>` (the status
+  item: "2 running: Reading", "Still working"; opens the list in an in-app popover, Escape and outside click close it).
+- `JobFollow.run(start, destroyRef)` / `follow(id, destroyRef)`: a dialog waits for its job; closing it stops waiting only.
+- `MemoryJobsBackend` plays the engine in the browser build and tests; `parseJobSnapshot` checks every payload at the edge.
+- Nothing times out a job (rule 12): `uiTimeoutProblems(path, source)` is the grep check the shell demo's e2e runs over every
+  shell and reference-app source (delayed `setTimeout`, `AbortSignal.timeout`, `Promise.race`, `...timeout...(` helpers).
+- `@ngrx/signals` (^22) is an optional peer dependency, needed by the shell entry points that hold stores.
 
 ## Tokens
 
