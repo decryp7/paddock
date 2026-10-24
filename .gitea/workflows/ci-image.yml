@@ -1,0 +1,74 @@
+# Builds the shared CI image (ci-image/Dockerfile, plan X53) and pushes it to the dev.decryptology.net container registry.
+# Manual dispatch only: the image changes when ci-image/ changes, not on every push. Run it from the branch that changes
+# ci-image/, then point ci.yml at the new ci-image/VERSION (scripts/ci-image.test.mjs checks they agree).
+#
+# Tags: `v<ci-image/VERSION>` (what ci.yml names), `ubuntu-24.04-YYYYMMDD-rN` (pinned to this run) and `latest`.
+# The registry build cache (`buildcache`) keeps a rebuild after a one-line change down to the layers that changed.
+#
+# Needs the Gitea secrets DOCKER_USERNAME and DOCKER_PASSWORD (a token with write:package), as the garage workflow does.
+# Images are pushed from here only, never from a workstation.
+
+name: ci-image
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-image
+  cancel-in-progress: false
+
+jobs:
+  push_to_registry:
+    name: Build and push paddock-ci
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Versions
+        id: v
+        run: |
+          set -euo pipefail
+          echo "image=$(tr -d '[:space:]' < ci-image/VERSION)" >> "$GITHUB_OUTPUT"
+          echo "node=$(tr -d '[:space:]v' < .nvmrc | cut -d. -f1)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to dev.decryptology.net
+        uses: docker/login-action@v4
+        with:
+          registry: dev.decryptology.net
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # The Dockerfile's last step runs ci-image/verify.sh: the build fails if any tool is missing or off its pin.
+      - name: Build and push the image
+        uses: docker/build-push-action@v7
+        env:
+          ACTIONS_RUNTIME_TOKEN: ''
+        with:
+          platforms: linux/amd64
+          context: ci-image
+          file: ci-image/Dockerfile
+          pull: true
+          push: true
+          build-args: |
+            NODE_MAJOR=${{ steps.v.outputs.node }}
+          cache-from: type=registry,ref=dev.decryptology.net/decryp7/paddock-ci:buildcache
+          cache-to: type=registry,ref=dev.decryptology.net/decryp7/paddock-ci:buildcache,mode=max
+          tags: |
+            dev.decryptology.net/decryp7/paddock-ci:v${{ steps.v.outputs.image }}
+            dev.decryptology.net/decryp7/paddock-ci:ubuntu-24.04-${{ steps.v.outputs.date }}-r${{ github.run_number }}
+            dev.decryptology.net/decryp7/paddock-ci:latest
+
+      - name: Summary
+        run: |
+          {
+            echo "### paddock-ci v${{ steps.v.outputs.image }}"
+            echo "Pushed \`paddock-ci:v${{ steps.v.outputs.image }}\` and \`paddock-ci:ubuntu-24.04-${{ steps.v.outputs.date }}-r${{ github.run_number }}\`."
+            echo "ci.yml names the image by \`ci-image/VERSION\`; the manifest is \`/etc/paddock-ci-release\` inside the image."
+          } >> "$GITHUB_STEP_SUMMARY"

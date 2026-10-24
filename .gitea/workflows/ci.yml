@@ -2,7 +2,7 @@
 # Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.
 #
-# Runner labels: ubuntu-latest (jobs in the garage image), windows-latest and macos-latest (host runners, tools used as
+# Runner labels: ubuntu-latest (jobs in the shared paddock-ci image, ci-image/), windows-latest and macos-latest (host runners, tools used as
 # installed), as in Debrief and Pitwall.
 
 name: ci
@@ -23,16 +23,12 @@ jobs:
     name: ui (tokens, contrast, components, entry points, publish dry run)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: ui
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Install
         run: npm ci
@@ -75,7 +71,7 @@ jobs:
     name: reference apps (shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     strategy:
       fail-fast: false
       matrix:
@@ -86,14 +82,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
+      # Playwright's browsers and Chrome for Testing are baked into the image (ci-image/): nothing is downloaded per job.
       - name: Install
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+        run: npm ci
 
       - name: Reference app checks
         # CI names its ports (@decryp7/paddock-e2e refuses a default there: another job could hold it), one pair per shard.
@@ -109,16 +100,12 @@ jobs:
     name: conformance (checks, release scripts)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: conformance
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Tests
         run: npm test
@@ -147,13 +134,9 @@ jobs:
     name: tools and shared scripts
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Tools
         run: node --test tools/test/*.test.mjs
@@ -166,16 +149,12 @@ jobs:
     name: eslint preset (rules 27 to 39)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: eslint
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - run: npm ci
 
@@ -185,7 +164,7 @@ jobs:
     name: crates (fmt, workspace hack, unused deps, coverage, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: crates
@@ -197,10 +176,7 @@ jobs:
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
       - run: cargo fmt --all --check
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-hakari,cargo-machete
-
+      # cargo-hakari and cargo-machete come with the image (ci-image/).
       # One feature set per dependency (docs/dev-setup.md): the workspace-hack crate is current and every member uses it.
       - name: Workspace hack up to date
         run: cargo hakari generate --diff && cargo hakari manage-deps --dry-run && cargo hakari verify
@@ -234,8 +210,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # Linux runs in the garage image (Tauri's libraries pre-installed); Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    # Linux runs in the paddock-ci image (Rust, Tauri's libraries, Node, Playwright, Chrome for Testing, cargo-nextest baked in); Windows and
+    # macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v1' || '' }}
     defaults:
       run:
         working-directory: crates
@@ -278,7 +255,7 @@ jobs:
           rustc --version && cargo --version
           cargo clippy --version || { echo "::error::clippy is missing on this runner (rustup component add clippy)"; exit 1; }
 
-      # The garage image has cargo-nextest; the host runners get the prebuilt binary.
+      # The paddock-ci image has cargo-nextest; the host runners get the prebuilt binary.
       - uses: taiki-e/install-action@v2
         if: runner.os != 'Linux'
         with:
@@ -357,6 +334,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-testkit --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-testkit --all-features --profile ci && cargo test -p paddock-testkit --all-features --doc
 
+      # The test-plan formats: properties (parse after write, no panics on any bytes) run with the tests; the fuzz target in
+      # paddock-testplan/fuzz is built by the nightly fuzz job.
+      - name: paddock-testplan
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-testplan --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-testplan --all-features --profile ci && cargo test -p paddock-testplan --all-features --doc
+
       - name: paddock-metrics
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-metrics --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-metrics --all-features --profile ci && cargo test -p paddock-metrics --all-features --doc
@@ -431,7 +414,7 @@ jobs:
     name: shell demo app (fmt, clippy, tests, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -441,10 +424,6 @@ jobs:
         with:
           sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
       - name: The UI the app embeds

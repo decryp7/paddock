@@ -96,7 +96,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
 | `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
-| `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
+| `paddock-testplan` | `.sighterplan` / `.sighterresult` as TOML (ADR 0005): typed ids and a closed `Step` enum, secrets by reference with redacting writers, canonical writer, traceability `Coverage`, plan `diff`, JUnit export, limits and a fuzz target (plan X52) | two (Pacenotes, Sighter); built |
 | `paddock-archive` | safe zip/tar/tar.gz/tar.xz unpacking: limits on entries, sizes and expansion ratio, traversal and link guards, layout and filter, all-or-nothing extract through a staging folder swapped in, progress and Cancel as a paddock-jobs job, fuzz target (plan X24) | yes (Debrief AI/video runtimes, Pitwall engines, Spotter renderer, Pitcrew runners); built |
 | `paddock-bench` | benchmark harness with stored budgets (rule 16): `Recorder` with an injected clock (startup, throughput, first event, query latency, memory), a results file per app, `budgets.toml` with tolerance and regression limit, `check`, and the `paddock-bench` command for the nightly workflow (plan X26) | yes (every app's benchmarks); built |
 
@@ -1397,3 +1397,35 @@ built yet (a real file is never overwritten); and it reruns on `TAURI_UPDATER_PU
 App extras (Debrief's commit id) stay in the app's build.rs before the call. `paddock_proc::self_test::handle(name, version, &checks)` is
 the first call in a sidecar's `main`: with `--self-test` it runs the checks, prints one line each and exits 0 or 1 (rule 23; C34 checks
 that every sidecar has it, and `paddock-sidecar self-test` starts them from the built bundle).
+
+## `paddock-testplan` (ADR 0005, plan X52)
+
+`.sighterplan` and `.sighterresult`: the formats Pacenotes drafts and Sighter runs. Pure (bytes in, strings out, no I/O); both files are TOML.
+
+```rust
+use paddock_testplan::{parse_plan, parse_result, Coverage, NoRedaction, SecretRedactor, diff, junit, lint};
+
+let plan = parse_plan(&bytes)?;                 // typed and validated; an error names line, key or id and the fix
+let text = plan.to_toml();                      // canonical: fixed key order, so a regenerated plan diffs cleanly
+let hash = plan.hash();                         // sha256 of the canonical text = a result's `plan_hash`
+let warnings = lint(&plan);                     // a literal typed into a password/token/card field: warn, never fail
+let redactor = SecretRedactor::for_plan(&plan, &keychain /* impl Resolver */);
+let result_text = result.to_toml(&redactor);    // resolved secrets become {{secret:NAME}}; same for junit::write
+let matrix = Coverage::from(&plan, &results);   // requirement x case x last status (and acceptance criteria), once for both tools
+let changes = diff(&old_plan, &new_plan);       // links kept by case id and step; only edited steps need a look
+```
+
+- Limits: file 4 MiB, 5,000 cases, 200 steps a case, strings 4 KiB, ids 64, a wait 1 h, results 50,000 case results. `format` and `version`
+  (major) come first; unknown keys at the same major are `UnknownKey { path, line }`; a newer major is `Version` ("needs Sighter/Pacenotes N
+  or newer"); the last two majors are read (today only 1 exists).
+- Ids are newtypes (`RequirementId`, `CaseId`, `ScreenName`, `PlanId`, `DataName`, `Tag`, `Column`, `SecretRef`); `#` is reserved for
+  `AcceptanceRef` (`REQ-142#AC-2` is the second entry of that requirement's `acceptance` list); `RelPath` refuses `..`, absolute and
+  backslash paths.
+- `Step` is a closed enum (click, type, press, select, wait_for, assert_screen, assert_text, wait); in the file a step is
+  `action = "..."` plus exactly the fields it needs, and a `target = { text, name, class, inside, near, nth }`. A value is plain text,
+  `{{data.COLUMN}}` (a column of the case's table) or `{{secret:NAME}}`; plain text may not contain `{{`.
+- Results carry evidence by relative path and sha256, never inline; `Status` is `pass | fail | blocked | needs_recording | skipped`.
+  `RunResult::is_for(&plan)` says whether a result belongs to this exact version of the plan.
+- The crate never resolves a secret: `Resolver` is the app's; `Redactor` is what writers take.
+- Tests: fixtures with invented data, every refusal, properties (`parse(write(p)) == p`, no input panics), `fuzz/` (`cargo +nightly fuzz run
+  formats`). JSON Schema export and thumbnails in results are not built (ADR open questions).
