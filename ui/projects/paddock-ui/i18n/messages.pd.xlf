@@ -56,6 +56,132 @@
       <trans-unit id="pd.category.help" datatype="html">
         <source>Help</source>
       </trans-unit>
+      <trans-unit id="pd.diag.attach" datatype="html">
+        <source>Attach this file to your bug report.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.cancel-refused" datatype="html">
+        <source>The save could not be cancelled.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.cancel-save" datatype="html">
+        <source>Stop saving</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.cancelled" datatype="html">
+        <source>Saving was stopped. Nothing was written.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.collecting" datatype="html">
+        <source>Putting the report together…</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.contains" datatype="html">
+        <source>What the report contains</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.describe" datatype="html">
+        <source>What went wrong? (optional)</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.dismissed" datatype="html">
+        <source>Nothing was saved. Choose Save report… when you are ready.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.file" datatype="html">
+        <source>File</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.hint" datatype="html">
+        <source>What you were doing, what you expected, what happened instead. It goes into the report as you write it.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.lede" datatype="html">
+        <source>Nothing is sent anywhere. This makes a file on your computer that you can look through, and attach to your report yourself.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.no-preview" datatype="html">
+        <source>The report could not be put together.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.no-preview-title" datatype="html">
+        <source>The report could not be put together.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-saved" datatype="html">
+        <source>The report was not saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.notes" datatype="html">
+        <source>Left out of the report</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.open" datatype="html">
+        <source>Report a problem…</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed" datatype="html">
+        <source>Removed from the files: <x id="list"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.email" datatype="html">
+        <source>1 e-mail address</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.emails" datatype="html">
+        <source><x id="n"/> e-mail addresses</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.field" datatype="html">
+        <source>1 hidden value</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.fields" datatype="html">
+        <source><x id="n"/> hidden values</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.home" datatype="html">
+        <source>1 home folder</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.homes" datatype="html">
+        <source><x id="n"/> home folders</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.ip" datatype="html">
+        <source>1 IP address</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.ips" datatype="html">
+        <source><x id="n"/> IP addresses</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.machine" datatype="html">
+        <source>1 computer name</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.machines" datatype="html">
+        <source><x id="n"/> computer names</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.secret" datatype="html">
+        <source>1 secret</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.secrets" datatype="html">
+        <source><x id="n"/> secrets</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.user" datatype="html">
+        <source>1 user name</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.removed.users" datatype="html">
+        <source><x id="n"/> user names</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.save" datatype="html">
+        <source>Save report…</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.save-refused" datatype="html">
+        <source>The report could not be saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.saved" datatype="html">
+        <source>The report is saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.saved-detail" datatype="html">
+        <source><x id="files"/> files, <x id="size"/></source>
+      </trans-unit>
+      <trans-unit id="pd.diag.saving" datatype="html">
+        <source>Saving the report…</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.title" datatype="html">
+        <source>Report a problem</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.total" datatype="html">
+        <source><x id="files"/> files, <x id="bytes"/> before compression</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.what" datatype="html">
+        <source>What it is</source>
+      </trans-unit>
       <trans-unit id="pd.dialogs.cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
@@ -472,6 +598,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.loading-page" datatype="html">
         <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.logging" datatype="html">
+        <source>Logging</source>
       </trans-unit>
       <trans-unit id="pd.settings.no-match" datatype="html">
         <source>No settings match “<x id="query"/>”.</source>

@@ -6,6 +6,10 @@
       "title": "pd.about.open"
     },
     {
+      "id": "pd.diagnostics.report",
+      "title": "pd.diag.open"
+    },
+    {
       "id": "pd.settings.open",
       "title": "pd.settings.open"
     },
@@ -160,6 +164,13 @@
       "accelerator": null
     },
     {
+      "menu": "help",
+      "command": "pd.diagnostics.report",
+      "group": "support",
+      "order": 400,
+      "accelerator": null
+    },
+    {
       "menu": "sd.appearance",
       "command": "sd.theme.system",
       "group": "theme",
@@ -250,11 +261,13 @@
   ],
   "settingsPages": [
     "pd.appearance",
+    "pd.logging",
     "sd.general",
     "sd.storage"
   ],
   "settingsForms": [
     "pd.appearance",
+    "pd.logging",
     "sd.general",
     "sd.storage"
   ],
@@ -271,6 +284,19 @@
       "commands": [
         "about_info",
         "about_legal"
+      ]
+    },
+    "pd.report-problem": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": [
+        "diagnostics_cancel",
+        "diagnostics_preview",
+        "diagnostics_save",
+        "log_from_webview"
       ]
     },
     "pd.settings": {
@@ -379,7 +405,10 @@
     "pd.about.title": "About",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
+    "pd.diag.open": "Report a problem…",
+    "pd.diag.title": "Report a problem",
     "pd.settings.appearance": "Appearance",
+    "pd.settings.logging": "Logging",
     "pd.settings.open": "Settings…",
     "pd.settings.title": "Settings",
     "pd.updates.notification.available": "Update available",

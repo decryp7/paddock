@@ -10,6 +10,7 @@ import {
   type SettingsBackend,
   type SetResult,
 } from '@decryp7/paddock-ui/shell/settings';
+import { LOGGING_SECTION_FIXTURE } from '@decryp7/paddock-ui/shell/diagnostics';
 import { DemoHealthEngine } from './demo-health';
 import { tauriIpc } from './demo-ipc';
 
@@ -51,7 +52,7 @@ class SharedMemorySettingsBackend extends MemorySettingsBackend {
   }
 
   private overviewNow(): { id: string; values: Record<string, unknown> }[] {
-    return ['pd.appearance', 'sd.general', 'sd.storage'].map((id) => ({ id, values: this.values(id) ?? {} }));
+    return ['pd.appearance', 'sd.general', 'sd.storage', 'pd.logging'].map((id) => ({ id, values: this.values(id) ?? {} }));
   }
 }
 
@@ -72,7 +73,11 @@ function read(): Record<string, SettingsChanges> {
 @Injectable({ providedIn: 'root' })
 export class DemoSettingsEngine {
   private readonly damaged = typeof location !== 'undefined' && new URLSearchParams(location.search).get('settings') === 'damaged';
-  readonly backend = new SharedMemorySettingsBackend(SETTINGS_OVERVIEW_FIXTURE, { problem: this.damaged ? SETTINGS_PROBLEM_FIXTURE : null });
+  readonly backend = new SharedMemorySettingsBackend(
+    // The shell's Logging section (`paddock-diag`, written by Rust into its fixture) beside the sections of the settings fixture.
+    { ...SETTINGS_OVERVIEW_FIXTURE, sections: [...SETTINGS_OVERVIEW_FIXTURE.sections, LOGGING_SECTION_FIXTURE] },
+    { problem: this.damaged ? SETTINGS_PROBLEM_FIXTURE : null },
+  );
 
   constructor() {
     if (!this.damaged) return;

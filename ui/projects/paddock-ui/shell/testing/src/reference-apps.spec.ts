@@ -14,7 +14,7 @@ import {
 } from '@decryp7/paddock-ui/shell';
 import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
-import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS } from '../../../../shell-demo/src/app/demo.contributions';
+import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS } from '../../../../shell-demo/src/app/demo.contributions';
 import { demoContext } from '../../../../shell-demo/src/app/demo-context';
 import { WARM_PAPER } from '../../../../shell-demo/src/app/demo-appearance';
 import { assertContributionsValid } from './contributions-lint';
@@ -93,13 +93,13 @@ describe('shell-demo manifest', () => {
   it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
     TestBed.configureTestingModule({
       providers: provideShellTesting({
-        contributions: [DEMO_CONTRIBUTIONS, SHELL_ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS],
+        contributions: [DEMO_CONTRIBUTIONS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS],
         context: () => Promise.resolve(demoContext),
         providers: [provideMenus({ appName: 'Shell demo' }), provideSubmenus(...DEMO_SUBMENUS)],
       }),
     });
     const manifest = buildManifest(TestBed.inject(ContributionRegistry));
-    expect(manifest.settingsForms).toEqual(['pd.appearance', 'sd.general', 'sd.storage']);
+    expect(manifest.settingsForms).toEqual(['pd.appearance', 'pd.logging', 'sd.general', 'sd.storage']);
     const fs = await nodeFs();
     if (env('PADDOCK_WRITE_MANIFEST') === '1') fs.writeFileSync(MANIFEST, serializeManifest(manifest));
     expect(manifestDrift(manifest, fs.readFileSync(MANIFEST, 'utf8'))).toEqual([]);

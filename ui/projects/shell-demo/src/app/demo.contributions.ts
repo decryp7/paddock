@@ -14,6 +14,7 @@ import {
 } from '@decryp7/paddock-ui/shell';
 import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
+import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
 
@@ -101,10 +102,16 @@ export const DEMO_SETTINGS_PAGES = [
 /** The shell's About, Updates and What's New (plan S11); their windows boot the demo's About providers. */
 export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import('./about.providers').then((m) => m.ABOUT_PROVIDERS) });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, ...SHELL_ABOUT_DIALOGS] as const;
+/** Report a problem (plan X2): a decision that shows every file with its size before saving; its window boots the demo's diagnostics providers. */
+export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
+
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);
+
+/** Report a problem's command, Help menu item and Logging settings page (its dialog is among `DEMO_DIALOGS`). */
+export const SHELL_DIAGNOSTICS_CONTRIBUTIONS = diagnosticsContributions([]);
 
 /** The titles of the theme choices (literal msg() calls: the catalog scanner reads them). */
 const THEME_TITLES = {
