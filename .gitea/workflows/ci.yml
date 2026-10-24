@@ -277,6 +277,18 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo test -p paddock-env --all-features
 
+      - name: paddock-testkit
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-testkit --all-targets --all-features -- -D warnings && cargo test -p paddock-testkit --all-features
+
+      - name: paddock-channels
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-channels --all-targets --all-features -- -D warnings && cargo test -p paddock-channels --all-features
+
+      - name: paddock-names
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-names --all-targets --all-features -- -D warnings && cargo test -p paddock-names --all-features
+
       - name: paddock-packs
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-packs --all-targets --all-features -- -D warnings && cargo test -p paddock-packs --all-features

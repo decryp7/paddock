@@ -1,12 +1,20 @@
 /**
  * The Chrome for Testing guard (rule 7: tests never use the installed Google Chrome). Playwright's own Chromium (a
  * Chrome for Testing build, `npx playwright install chromium`) is the browser; a pinned binary may be named explicitly
- * in `PADDOCK_E2E_CHROME`. An installed Chrome or Edge, by channel or by path, is refused: in the config
+ * in `CHROMIUM_TEST_PATH` (or `PADDOCK_E2E_CHROME`). An installed Chrome or Edge, by channel or by path, is refused: in the config
  * (`assertChromeForTesting`) and again when a worker starts (the kit's `test`).
  */
 
 /** The variable that may name a pinned browser binary (Chrome for Testing) for `launchOptions.executablePath`. */
 export const CHROME_ENV = 'PADDOCK_E2E_CHROME';
+
+/** The same, under the name the apps' CI and docs use; wins over {@link CHROME_ENV} when both are set. */
+export const CHROMIUM_TEST_ENV = 'CHROMIUM_TEST_PATH';
+
+/** The pinned browser binary the environment names (Chrome for Testing), or undefined for Playwright's own Chromium. */
+export function pinnedChrome(env: Readonly<Record<string, string | undefined>> = process.env): string | undefined {
+  return env[CHROMIUM_TEST_ENV] || env[CHROME_ENV] || undefined;
+}
 
 /** Playwright channels that launch a browser installed on the machine. */
 export const INSTALLED_CHANNELS: readonly string[] = [
@@ -47,13 +55,13 @@ export function browserProblems(use: BrowserUse | undefined, env: Readonly<Recor
   const problems: string[] = [];
   for (const channel of [use?.channel, use?.launchOptions?.channel]) {
     if (channel && INSTALLED_CHANNELS.includes(channel)) {
-      problems.push(`channel "${channel}" launches the installed browser; use Playwright's Chromium (Chrome for Testing) or name a pinned binary in ${CHROME_ENV}`);
+      problems.push(`channel "${channel}" launches the installed browser; use Playwright's Chromium (Chrome for Testing) or name a pinned binary in ${CHROMIUM_TEST_ENV}`);
     }
   }
   const path = use?.launchOptions?.executablePath;
   if (path) {
     if (isInstalledBrowser(path)) problems.push(`executablePath ${path} is the installed browser; tests never use it (rule 7)`);
-    else if (path !== env[CHROME_ENV]) problems.push(`executablePath ${path} is not the pinned browser named in ${CHROME_ENV}`);
+    else if (path !== pinnedChrome(env)) problems.push(`executablePath ${path} is not the pinned browser named in ${CHROMIUM_TEST_ENV} (or ${CHROME_ENV})`);
   }
   return problems;
 }

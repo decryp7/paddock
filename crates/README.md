@@ -97,10 +97,13 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
+| `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
+| `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
@@ -680,6 +683,64 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
 
+## `paddock-names` (plan X18)
+
+Rule 20 as a pure library: the user types "grafic bilder" and finds `CompanyA.Graphic.Builder.exe`, or "memory pages" and finds
+`\\Memory\\Pages/sec`. The app's engine builds a `Catalogue` and exposes `search` as a command (the palette and the assistant
+call the command; the matching is never written in TypeScript).
+
+```rust
+use paddock_names::{Candidate, Catalogue, Entry, Style, group, vocabulary_from};
+
+// Names with counts -> one group per entity (spellings joined) -> entries.
+let vocab = vocabulary_from(&candidates);                       // learns the words the data separates
+let entries = group(&candidates, &vocab).iter().map(|g| Entry::from(g).kind("process")).collect();
+let names = Catalogue::with_vocabulary(entries, Style::Path, vocab)?;
+let found = names.search("grafic bilder", 5);                  // found.matches[0].how == How::Typo, .why says so
+if let Some(q) = found.clarify { /* "By 'builder', do you mean A (process) or B (process)?" -> q.options are ids */ }
+
+// Counters, symbols, models: plain words, other fields rank below the name.
+let counters = Catalogue::text(vec![Entry::new(path, "Bytes Received/sec").fields(&["Network Interface", "lo0"])])?;
+```
+
+- `How`, best first: `UserAlias`, `Exact`, `Joined`, `Parts`, `Alias`, `Prefix`, `Words` (every word anywhere, any order),
+  `Typo` (only when nothing matches better). Order is score, then weight, then id, so results are deterministic.
+- `Style::Path` reads the last path component and drops extension, vendor prefix, version and architecture; `Style::Text`
+  drops nothing (`Pages/sec`, `lo0`).
+- Bounds: 250,000 entries (more is `NamesError::TooManyEntries`), 256 characters of a query or a name, 24 names, 8 fields and 16
+  aliases per entry, 50 matches. Nothing panics on any text.
+- Stays in the app: the entity catalogue, AI aliases (pass them as `Entry::aliases`), the user's corrections (`user_aliases`),
+  context ranking and co-occurrence merging (layer on the returned matches).
+## `paddock-channels` (plan X17)
+
+Where the apps send alerts, from Pitcrew's `notify-channels` and Spotter's `mail.rs`:
+
+```rust
+use paddock_channels::{Dispatcher, Message, Severity, Settings, UreqPoster, LettreSender};
+use paddock_download::ProxyMode;
+use paddock_jobs::{CancelToken, time::SystemClock};
+
+settings.validate()?;                                    // on Save: the message says what to fix; at most 8 channels
+let d = Dispatcher::new(settings, secrets, Arc::new(UreqPoster::new(ProxyMode::System)?), Arc::new(LettreSender), Arc::new(SystemClock));
+let msg = Message::new("diskLow", Severity::Error, "Disk low", "C: has 2 GB left", "runner-1");
+let deliveries = d.dispatch(&msg, &cancel);              // blocks: run it in a job; one Delivery per channel, in order
+let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // "Send test" before Save; d.test(id, ..) after
+```
+
+- Settings hold no secret: a webhook or ntfy channel with `auth` uses the token `Name("channel:<id>", "token")`, an e-mail
+  channel with a `username` uses `Name("channel:<id>", "password")` (`ChannelConfig::secret_name`); an old Pitcrew
+  entry moves with `paddock_secrets::rename_entry`. `forget_secret` removes it when the channel is deleted.
+- Bounded: title one line of at most 200 characters, body at most 64 KiB (cut on a character boundary with a marker), at most 8
+  channels, 10 recipients, 64 events a channel, 8 KiB a header; the answer's body is never read.
+- Retries: transient failures only (no connection, timeout, HTTP 408/425/429/5xx, a 4xx mail reply), at most 3 attempts by default
+  (`RetryPolicy`, 5 at most), waits from `paddock_jobs::time::Backoff` (2 s doubling to 30 s), a server's `Retry-After` honoured up
+  to that cap, every wait cancellable and on the injected `Clock` (tests use `FakeClock`). A bad configuration, a missing secret,
+  a refused login or certificate, or a 4xx rejection is reported at once. The test send makes one attempt.
+- Containment: every channel runs on its own thread under `catch_unwind`; a panic is `SendError::Panicked` and the others still
+  deliver. Redirects are never followed (a 3xx is a rejection). Errors name the host only (no path, query or login) and never a
+  secret. SMTP does not use the HTTP proxy.
+- Tests use `FakePoster` / `FakeMail` (scripted, recording) or an in-process loopback server; the real adapters are tested
+  against those servers only.
 ## `paddock-ipc` (plan X13, ADR 0001 step 1)
 
 The family's one IPC between an app and its own processes (workers, plugins, agents, services), from Debrief's
@@ -1016,3 +1077,33 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   four commands of `status::COMMANDS` (`pitwall_state`, `pitwall_connect`, `pitwall_cancel_pairing`, `pitwall_use_builtin`) over
   its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
   by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.
+
+## `paddock-testkit` (plan X40)
+
+A `[dev-dependencies]` crate; nothing in it ships. It replaces `std::env::temp_dir()` (clippy forbids it in tests, `lint/clippy.toml`), the per-app env mutexes and the hand-made fake runners:
+
+```rust
+use paddock_testkit::{assert_golden, env_lock, FakeRunner, Reply, Scratch};
+
+let scratch = Scratch::new();                       // work(), home(), tmp(); deleted on drop
+let mut env = env_lock();                           // one lock for every test that touches the environment
+env.hermetic(&scratch);                             // HOME, APPDATA, XDG_*, TMPDIR now point into the scratch folder
+let cfg = scratch.write("conf/app.toml", "x = 1")?; // relative paths only; `..` and absolute paths are refused
+run_the_code_under_test(&cfg);
+assert_golden(&golden_dir.join("report.txt"), &report);   // PADDOCK_UPDATE_GOLDEN=1 rewrites the file
+scratch.finish()?;                                  // or just drop it: anything left in tmp() fails the test
+```
+
+- `Scratch`: `work()` is for the code under test, `home()` stands in for the user's home, `tmp()` for the shared temp folder. Dropping a
+  scratch whose `tmp()` is not empty panics with the names (not while the test is already failing); `finish()` returns them as an
+  error to assert on. An unreadable `tmp()` counts as a leftover. `PADDOCK_TESTKIT_KEEP=1` keeps the folder of a failed test.
+- `env_lock()`: a process-wide lock (a lock poisoned by a failed test is recovered); `set`/`remove` restore the original values in
+  reverse order when the guard drops. `hermetic(&scratch)` is the in-process half of C14 (the wrapper `paddock-conformance run --`
+  is the other half).
+- Golden files: line endings normalised; the failure names the file, the first differing line and the update variable.
+- `FakeRunner`: `on("launchctl", &["print"]).reply(Reply::ok("..."))`, replies queue (`.then(...)`, the last repeats), the first
+  matching rule answers, an unscripted command is an error reply, `calls()`/`lines()`/`count()` record. An app implements its own
+  runner trait for it in its test module (Dyno's `Runner`).
+- `corpus(seed)` gives a bounded, deterministic set of hostile inputs; `never_panics(&corpus(seed), parse)` returns the inputs that
+  panicked (the proptest-free half of X41).
+- `FakeClock` (and `Clock`) are `paddock_jobs::time`'s, re-exported: assert on a fake clock, never on `Instant::now()` (C30).
