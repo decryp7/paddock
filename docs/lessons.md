@@ -315,3 +315,7 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   directly. The shell's notify entry (`PdServiceError`/`WaitingFor`) is the family's version; apps use it.
 - Lime-vs-amber (and similar hue pairs) can be far apart for normal vision yet collapse under deuteranopia: check every
   accent against warning/success/danger in CVD simulation, and never let colour alone carry warning (icon + word).
+- The CI image is x86-only, so on the Mac mini it runs under emulation: one container at `--cpus 6` is fine, but three
+  at once plus native test runs drove the load to 107. Run at most one emulated CI container at a time, check
+  `docker ps` before starting one, and keep it for the final local gate (rule 41). An arm64 build of the CI image would
+  remove the emulation cost (CI-speed backlog).
