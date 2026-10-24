@@ -3,8 +3,8 @@
 
 use crate::tauri::StorageEvent;
 use crate::{
-    CategoryClearResult, ClearChoice, ClearRequest, ItemView, Kind, Skipped, StorageCategory,
-    StorageClearResult, StorageUsage,
+    CategoryClearResult, ClearChoice, ClearRequest, ItemView, Kind, SizeNode, Skipped,
+    StorageCategory, StorageClearResult, StorageTree, StorageUsage,
 };
 use paddock_commands::testing::{self, WriteMode};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,8 @@ fn generated_files() -> Vec<(&'static str, String)> {
         ClearChoice::decl(),
         ClearRequest::decl(),
         StorageClearResult::decl(),
+        SizeNode::decl(),
+        StorageTree::decl(),
         StorageEvent::decl(),
     ];
     let types: Vec<String> = decls.into_iter().map(|d| format!("export {d}\n")).collect();
@@ -79,6 +81,7 @@ fn the_table_has_the_storage_commands_for_main_windows_and_dialogs() {
             "storage_last",
             "storage_scan",
             "storage_clear",
+            "storage_tree",
             "storage_cancel",
             "storage_reveal"
         ]

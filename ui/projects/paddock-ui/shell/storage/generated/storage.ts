@@ -150,6 +150,38 @@ categories: Array<CategoryClearResult>,
  */
 cancelled: boolean, };
 
+export type SizeNode = { 
+/**
+ * The file or folder name; empty for a folded node (the UI words it: "N other items").
+ */
+name: string, 
+/**
+ * Bytes in it and everything below it.
+ */
+bytes: number, 
+/**
+ * How many items this node stands for when it is a fold; 0 for a real item.
+ */
+folded: number, 
+/**
+ * The biggest items below it, biggest first (none below the tree's depth).
+ */
+children: Array<SizeNode>, };
+
+export type StorageTree = { 
+/**
+ * The category.
+ */
+id: string, 
+/**
+ * The category's folder as a node named after the category.
+ */
+root: SizeNode, 
+/**
+ * The walk stopped at its entry or time limit, or was cancelled: the sizes are lower bounds.
+ */
+capped: boolean, };
+
 export type StorageEvent = { "state": "usage", 
 /**
  * What the app keeps.
@@ -158,7 +190,11 @@ usage: StorageUsage, } | { "state": "cleared",
 /**
  * What it did.
  */
-result: StorageClearResult, } | { "state": "cancelled" } | { "state": "failed", 
+result: StorageClearResult, } | { "state": "tree", 
+/**
+ * The category's tree.
+ */
+tree: StorageTree, } | { "state": "cancelled" } | { "state": "failed", 
 /**
  * Words for the user.
  */

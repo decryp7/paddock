@@ -196,7 +196,7 @@ pub fn find_vscode(
         .map(|p| {
             // A relative PATH entry would depend on the working directory: never used.
             std::env::split_paths(&p)
-                .filter(|dir| dir.is_absolute())
+                .filter(|dir| dir.is_absolute() || (os != Os::Windows && dir.has_root()))
                 .map(|dir| dir.join(name))
                 .collect::<Vec<_>>()
         })
@@ -224,6 +224,14 @@ pub fn find_vscode(
     };
     on_path.into_iter().chain(installed).find(|p| is_file(p))
 }
+
+/// VS Code's launcher on this machine, if it is installed (the search of [`find_vscode`] with the real environment and file system).
+pub fn installed_vscode() -> Option<PathBuf> {
+    find_vscode(Os::CURRENT, &|v| std::env::var_os(v), &|p| p.is_file())
+}
+
+/// The largest line number accepted for "open at line".
+pub const MAX_LINE: u32 = 10_000_000;
 
 /// A web address the webview wants opened: at most [`MAX_URL_LEN`] bytes, no spaces or control characters, one of
 /// [`URL_SCHEMES`]; `http` and `https` need a host. Returns the address unchanged.

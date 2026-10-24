@@ -286,10 +286,13 @@ mod tests {
     #[test]
     fn an_install_goes_through_the_store_and_reports_what_failed() {
         let d = tempfile::tempdir().unwrap();
-        let vars = paddock_env::MapVars::new().with("DEMO_HOME", d.path().as_os_str());
+        let vars = paddock_env::MapVars::new()
+            .with("HOME", d.path().as_os_str())
+            .with("USERPROFILE", d.path().as_os_str())
+            .with("LOCALAPPDATA", d.path().as_os_str());
         let app = paddock_env::AppId::new("demo", "Demo").unwrap();
         let dirs =
-            paddock_env::AppDirs::resolve(&app, paddock_env::Os::current(), &vars, None, true)
+            paddock_env::AppDirs::resolve(&app, paddock_env::Os::current(), &vars, None, false)
                 .unwrap();
         let store = store(&dirs).unwrap();
         assert_eq!(store.root(), dirs.data().join("runtimes").join(NAME));

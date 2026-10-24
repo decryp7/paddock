@@ -379,6 +379,64 @@ fn a_browser_over_the_cap_while_it_starts_fails_to_launch_and_says_why() {
 }
 
 #[test]
+fn a_quick_browser_over_the_cap_is_caught_when_it_connects() {
+    // The fake may connect before the watcher's first look; the launch looks once more then, so the outcome is the same.
+    let f = Fixture::new(Mode::IgnoreClose, 1);
+    let mut o = opts(&f.base());
+    o.memory_cap = Some(1);
+    o.memory_sampler = Some(Arc::new(|_| u64::MAX));
+    let e = Chromium::launch_with(&f.exe(), &o, Sandbox::On)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(e.contains("more memory than allowed"), "{e}");
+}
+
+#[test]
+fn a_port_that_refuses_is_tried_again_until_the_start_limit() {
+    let d = tempfile::tempdir().unwrap();
+    // A port file that names a closed port (1), then the browser waits.
+    let refusing = script(
+        d.path(),
+        "refusing.sh",
+        "for a in \"$@\"; do case $a in --user-data-dir=*) p=${a#--user-data-dir=};; esac; done\nprintf '1\\n/devtools/browser/x\\n' > \"$p/DevToolsActivePort\"\nexec sleep 30",
+    );
+    let clock = FakeClock::new();
+    let mut o = opts(&d.path().join("p"));
+    (o.clock, o.max_lifetime, o.start_limit) = (
+        Arc::new(clock.clone()),
+        Duration::from_secs(3600),
+        Duration::from_secs(20),
+    );
+    std::thread::scope(|s| {
+        let h = s.spawn(|| Chromium::launch_with(&refusing, &o, Sandbox::On));
+        let written = || {
+            std::fs::read_dir(d.path().join("p"))
+                .map(|rd| {
+                    rd.flatten().any(|e| {
+                        std::fs::read_to_string(e.path().join("DevToolsActivePort"))
+                            .is_ok_and(|t| t.ends_with("/devtools/browser/x\n"))
+                    })
+                })
+                .unwrap_or(false)
+        };
+        wait_until("the whole port file", written);
+        // Polls after the file is there: each is refused and tried again while time is left.
+        for _ in 0..3 {
+            assert!(
+                clock.wait_for_waiters(2, Duration::from_secs(20)),
+                "the watchdog and the start-up wait"
+            );
+            clock.advance(POLL);
+        }
+        assert!(clock.wait_for_waiters(2, Duration::from_secs(20)));
+        clock.advance(Duration::from_secs(20));
+        let e = h.join().unwrap().err().unwrap();
+        assert!(matches!(e, Error::Connection(_)), "{e}");
+    });
+}
+
+#[test]
 fn a_launch_without_a_memory_cap_uses_a_plain_child() {
     let f = Fixture::new(Mode::Obey, 1);
     let mut o = opts(&f.base());
