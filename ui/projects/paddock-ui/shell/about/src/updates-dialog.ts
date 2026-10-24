@@ -16,46 +16,46 @@ import { formatBytes } from './format';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (store.status(); as s) {
-      <p class="muted" data-testid="updates-current">You have version {{ s.currentVersion }}.</p>
+      <p class="muted" data-testid="updates-current">{{ current(s.currentVersion) }}</p>
       <div aria-live="polite" data-testid="updates-phase">
         @switch (s.phase.kind) {
           @case ('unavailable') {
-            <p>Updates are not available in this build.</p>
+            <p>{{ t.unavailable }}</p>
           }
           @case ('idle') {
-            <p>Not checked yet.</p>
+            <p>{{ t.idle }}</p>
           }
           @case ('checking') {
-            <p role="status">Checking for updates…</p>
+            <p role="status">{{ t.checking }}</p>
           }
           @case ('upToDate') {
-            <p role="status">You have the latest version.</p>
+            <p role="status">{{ t.upToDate }}</p>
           }
           @case ('available') {
-            <p>Version {{ store.info()?.version }} is available{{ size() }}.</p>
+            <p>{{ available() }}</p>
           }
           @case ('downloading') {
-            <p role="status">Downloading version {{ store.info()?.version }}…</p>
+            <p role="status">{{ downloading() }}</p>
             @if (progress(); as p) {
               <p class="muted">{{ p.label }}</p>
               <progress [attr.value]="p.fraction" max="1" [attr.aria-label]="p.label"></progress>
             } @else {
-              <p class="muted">The progress is in Jobs.</p>
+              <p class="muted">{{ t.progressInJobs }}</p>
             }
           }
           @case ('ready') {
-            <p>Version {{ store.info()?.version }} is downloaded and its signature verified.</p>
+            <p>{{ ready() }}</p>
           }
           @case ('installing') {
-            <p role="status">Installing version {{ store.info()?.version }}…</p>
+            <p role="status">{{ installing() }}</p>
           }
           @case ('failed') {
-            <p>The last step did not finish.</p>
+            <p>{{ t.failed }}</p>
           }
         }
       </div>
       @if (store.info()?.notes; as notes) {
-        <pre class="text" tabindex="0" aria-label="Release notes">{{ notes }}</pre>
+        <pre class="text" tabindex="0" [attr.aria-label]="t.notes">{{ notes }}</pre>
       }
       @if (store.error(); as e) {
         <div class="problem" role="alert" data-testid="updates-error">
@@ -66,17 +66,17 @@ import { formatBytes } from './format';
           }
         </div>
       } @else if (s.phase.kind === 'unavailable') {
-        <p class="muted">This build was made without an update signing key, so it cannot verify updates. Download new versions from the releases page.</p>
+        <p class="muted">{{ t.noKey }}</p>
       }
       @if (s.phase.kind !== 'unavailable') {
         <div class="row">
           <label class="check">
             <input type="checkbox" [checked]="s.autoCheck" (change)="setAuto($any($event.target).checked)" />
-            Check for updates automatically
+            {{ t.autoCheck }}
           </label>
           @if (s.channels.length > 1) {
             <label class="check">
-              Channel
+              {{ t.channel }}
               <select [value]="s.channel" (change)="setChannel($any($event.target).value)">
                 @for (c of s.channels; track c.id) {
                   <option [value]="c.id" [selected]="c.id === s.channel">{{ c.label }}</option>
@@ -88,59 +88,95 @@ import { formatBytes } from './format';
         @if (s.phase.kind === 'ready') {
           <label class="check">
             <input type="checkbox" [checked]="installOnQuit()" (change)="store.installOnQuit($any($event.target).checked)" />
-            Install when the app quits
+            {{ t.installOnQuit }}
           </label>
         }
-        <p class="muted">{{ checkedText() }}@if (s.endpointHost) { · asks {{ s.endpointHost }}}</p>
+        <p class="muted">{{ checkedText() }}</p>
       }
       <div class="actions">
         @switch (s.phase.kind) {
           @case ('checking') {
-            <button type="button" class="btn" (click)="store.cancel()">Cancel</button>
+            <button type="button" class="btn" (click)="store.cancel()">{{ t.cancel }}</button>
           }
           @case ('downloading') {
-            <button type="button" class="btn" (click)="store.cancel()">Cancel</button>
+            <button type="button" class="btn" (click)="store.cancel()">{{ t.cancel }}</button>
           }
           @case ('ready') {
-            <button type="button" class="btn" (click)="store.cancel()">Discard</button>
-            <button type="button" class="btn primary" (click)="store.restart()">Restart to update</button>
+            <button type="button" class="btn" (click)="store.cancel()">{{ t.discard }}</button>
+            <button type="button" class="btn primary" (click)="store.restart()">{{ t.restart }}</button>
           }
           @case ('available') {
-            <button type="button" class="btn" (click)="store.check()">Check again</button>
-            <button type="button" class="btn primary" (click)="store.download()">Download</button>
+            <button type="button" class="btn" (click)="store.check()">{{ t.checkAgain }}</button>
+            <button type="button" class="btn primary" (click)="store.download()">{{ t.download }}</button>
           }
           @case ('failed') {
             @if (store.canDownload()) {
-              <button type="button" class="btn primary" (click)="store.download()">Try again</button>
+              <button type="button" class="btn primary" (click)="store.download()">{{ t.tryAgain }}</button>
             } @else {
-              <button type="button" class="btn primary" (click)="store.check()">Check again</button>
+              <button type="button" class="btn primary" (click)="store.check()">{{ t.checkAgain }}</button>
             }
           }
           @case ('idle') {
-            <button type="button" class="btn primary" (click)="store.check()">Check now</button>
+            <button type="button" class="btn primary" (click)="store.check()">{{ t.checkNow }}</button>
           }
           @case ('upToDate') {
-            <button type="button" class="btn primary" (click)="store.check()">Check now</button>
+            <button type="button" class="btn primary" (click)="store.check()">{{ t.checkNow }}</button>
           }
         }
       </div>
     } @else if (store.requestError(); as error) {
-      <p role="alert">{{ error }} <button type="button" class="btn" (click)="store.load()">Retry</button></p>
+      <p role="alert">{{ error }} <button type="button" class="btn" (click)="store.load()">{{ t.retry }}</button></p>
     } @else {
-      <p class="muted" role="status">Asking the updater…</p>
+      <p class="muted" role="status">{{ t.asking }}</p>
     }
   `,
   styles: ABOUT_STYLES,
 })
 export class PdUpdatesDialog {
+  /** The component's texts in the window's language (plan S15). The engine's errors and next steps arrive as they are. */
+  protected readonly t = {
+    unavailable: $localize`:@@pd.updates.unavailable:Updates are not available in this build.`,
+    noKey: $localize`:@@pd.updates.unavailable.why:This build was made without an update signing key, so it cannot verify updates. Download new versions from the releases page.`,
+    idle: $localize`:@@pd.updates.idle:Not checked yet.`,
+    checking: $localize`:@@pd.updates.checking:Checking for updates…`,
+    upToDate: $localize`:@@pd.updates.up-to-date:You have the latest version.`,
+    progressInJobs: $localize`:@@pd.updates.progress-in-jobs:The progress is in Jobs.`,
+    failed: $localize`:@@pd.updates.failed:The last step did not finish.`,
+    notes: $localize`:@@pd.updates.notes:Release notes`,
+    autoCheck: $localize`:@@pd.updates.auto-check:Check for updates automatically`,
+    channel: $localize`:@@pd.updates.channel:Channel`,
+    installOnQuit: $localize`:@@pd.updates.install-on-quit:Install when the app quits`,
+    cancel: $localize`:@@pd.updates.cancel:Cancel`,
+    discard: $localize`:@@pd.updates.discard:Discard`,
+    restart: $localize`:@@pd.updates.restart:Restart to update`,
+    checkAgain: $localize`:@@pd.updates.check-again:Check again`,
+    checkNow: $localize`:@@pd.updates.check-now:Check now`,
+    download: $localize`:@@pd.updates.download:Download`,
+    tryAgain: $localize`:@@pd.updates.try-again:Try again`,
+    retry: $localize`:@@pd.updates.retry:Retry`,
+    asking: $localize`:@@pd.updates.asking:Asking the updater…`,
+  };
   protected readonly store = inject(UpdatesStore);
   /** The window's jobs, when it has them: the download's phases. */
   private readonly jobs = inject(JobsStore, { optional: true });
 
-  protected readonly size = computed(() => {
+  private readonly version = computed(() => this.store.info()?.version ?? '');
+
+  protected current(version: string): string {
+    return $localize`:@@pd.updates.current:You have version ${version}:version:.`;
+  }
+
+  protected readonly available = computed(() => {
+    const version = this.version();
     const size = this.store.info()?.size;
-    return size ? ` (${formatBytes(size)})` : '';
+    return size
+      ? $localize`:@@pd.updates.available.sized:Version ${version}:version: is available (${formatBytes(size)}:size:).`
+      : $localize`:@@pd.updates.available:Version ${version}:version: is available.`;
   });
+
+  protected readonly downloading = computed(() => $localize`:@@pd.updates.downloading:Downloading version ${this.version()}:version:…`);
+  protected readonly ready = computed(() => $localize`:@@pd.updates.ready:Version ${this.version()}:version: is downloaded and its signature verified.`);
+  protected readonly installing = computed(() => $localize`:@@pd.updates.installing:Installing version ${this.version()}:version:…`);
 
   protected readonly installOnQuit = computed(() => {
     const p = this.store.phase();
@@ -148,8 +184,10 @@ export class PdUpdatesDialog {
   });
 
   protected readonly checkedText = computed(() => {
-    const t = this.store.status()?.lastChecked;
-    return t ? `Last checked ${new Date(t * 1000).toLocaleString()}` : 'Not checked in this installation yet';
+    const s = this.store.status();
+    const when = s?.lastChecked ? new Date(s.lastChecked * 1000).toLocaleString() : null;
+    const checked = when ? $localize`:@@pd.updates.last-checked:Last checked ${when}:when:` : $localize`:@@pd.updates.never-checked:Not checked in this installation yet`;
+    return s?.endpointHost ? $localize`:@@pd.updates.asks:${checked}:checked: · asks ${s.endpointHost}:host:` : checked;
   });
 
   /** The download job's phase, from the window's jobs (null without them or before the first event). */
@@ -160,7 +198,11 @@ export class PdUpdatesDialog {
     if (!phase) return null;
     const fraction = phase.total ? Math.min(1, phase.done / phase.total) : null;
     const amount = phase.unit === 'bytes' ? formatBytes(phase.done) : String(phase.done);
-    return { label: `${phase.label}: ${amount}${phase.total && phase.unit === 'bytes' ? ` of ${formatBytes(phase.total)}` : ''}`, fraction };
+    const label =
+      phase.total && phase.unit === 'bytes'
+        ? $localize`:@@pd.updates.progress.of:${phase.label}:phase:: ${amount}:done: of ${formatBytes(phase.total)}:total:`
+        : $localize`:@@pd.updates.progress:${phase.label}:phase:: ${amount}:done:`;
+    return { label, fraction };
   });
 
   protected setAuto(autoCheck: boolean): void {

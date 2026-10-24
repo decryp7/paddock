@@ -13,10 +13,10 @@ import { ABOUT_STYLES } from './styles';
     @switch (notes.status()) {
       @case ('resolved') {
         @if (notes.value(); as n) {
-          <h2 data-testid="whats-new-heading">What’s New in {{ n.version }}</h2>
+          <h2 data-testid="whats-new-heading">{{ heading(n.version) }}</h2>
           @if (n.release; as r) {
             @if (r.date) {
-              <p class="muted">Released {{ r.date }}</p>
+              <p class="muted">{{ released(r.date) }}</p>
             }
             @for (g of r.groups; track g.title) {
               <section [attr.aria-label]="g.title">
@@ -29,21 +29,39 @@ import { ABOUT_STYLES } from './styles';
               </section>
             }
           } @else {
-            <p data-testid="whats-new-none">There are no release notes for version {{ n.version }}.</p>
+            <p data-testid="whats-new-none">{{ none(n.version) }}</p>
           }
         }
       }
       @case ('error') {
-        <p role="alert">The release notes could not be loaded. <button type="button" class="btn" (click)="notes.reload()">Retry</button></p>
+        <p role="alert">{{ t.failed }} <button type="button" class="btn" (click)="notes.reload()">{{ t.retry }}</button></p>
       }
       @default {
-        <p class="muted" role="status">Loading…</p>
+        <p class="muted" role="status">{{ t.loading }}</p>
       }
     }
   `,
   styles: ABOUT_STYLES,
 })
 export class PdWhatsNewDialog {
+  /** The component's texts in the window's language (plan S15). Release notes are the app's text, shown as written. */
+  protected readonly t = {
+    failed: $localize`:@@pd.whats-new.failed:The release notes could not be loaded.`,
+    retry: $localize`:@@pd.whats-new.retry:Retry`,
+    loading: $localize`:@@pd.whats-new.loading:Loading…`,
+  };
   private readonly backend = inject(AboutBackend);
   protected readonly notes = resource({ loader: () => this.backend.whatsNew() });
+
+  protected heading(version: string): string {
+    return $localize`:@@pd.whats-new.heading:What’s New in ${version}:version:`;
+  }
+
+  protected released(date: string): string {
+    return $localize`:@@pd.whats-new.released:Released ${date}:date:`;
+  }
+
+  protected none(version: string): string {
+    return $localize`:@@pd.whats-new.none:There are no release notes for version ${version}:version:.`;
+  }
 }

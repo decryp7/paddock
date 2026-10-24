@@ -72,7 +72,8 @@ export const UpdatesStore = signalStore(
       const p = status.phase;
       if (config.announce && p.kind === 'available' && store.announced() !== p.info.version) {
         patchState(store, { announced: p.info.version });
-        ports.notify({ level: 'info', kind: UPDATE_AVAILABLE_KIND, message: `Version ${p.info.version} is available (you have ${p.info.currentVersion}).` });
+        const message = $localize`:@@pd.updates.notice.available:Version ${p.info.version}:version: is available (you have ${p.info.currentVersion}:current:).`;
+        ports.notify({ level: 'info', kind: UPDATE_AVAILABLE_KIND, message });
       }
     };
 
@@ -100,7 +101,7 @@ export const UpdatesStore = signalStore(
           if (store.heard() === heard) apply(status);
           patchState(store, setLoaded());
         } catch (e) {
-          patchState(store, setError(errorMessage(e, 'The updater did not answer.')));
+          patchState(store, setError(errorMessage(e, $localize`:@@pd.updates.no-answer:The updater did not answer.`)));
         }
       },
       check: () => step(() => backend.check()),

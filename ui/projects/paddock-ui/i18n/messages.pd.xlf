@@ -2,8 +2,59 @@
 <xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
   <file source-language="en-US" datatype="plaintext" original="ng2.template">
     <body>
+      <trans-unit id="pd.about.build" datatype="html">
+        <source>Build</source>
+      </trans-unit>
+      <trans-unit id="pd.about.built" datatype="html">
+        <source>Built</source>
+      </trans-unit>
+      <trans-unit id="pd.about.commit" datatype="html">
+        <source>Commit</source>
+      </trans-unit>
+      <trans-unit id="pd.about.failed" datatype="html">
+        <source>The app did not say what it is.</source>
+      </trans-unit>
+      <trans-unit id="pd.about.legal" datatype="html">
+        <source>Licences and notices</source>
+      </trans-unit>
+      <trans-unit id="pd.about.legal.failed" datatype="html">
+        <source>The text could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.about.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.about.open" datatype="html">
+        <source>About</source>
+      </trans-unit>
+      <trans-unit id="pd.about.releases" datatype="html">
+        <source>Releases</source>
+      </trans-unit>
+      <trans-unit id="pd.about.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.about.system" datatype="html">
+        <source>System</source>
+      </trans-unit>
+      <trans-unit id="pd.about.title" datatype="html">
+        <source>About</source>
+      </trans-unit>
+      <trans-unit id="pd.about.updates" datatype="html">
+        <source>Updates</source>
+      </trans-unit>
+      <trans-unit id="pd.about.updates.itself" datatype="html">
+        <source>Updates itself</source>
+      </trans-unit>
+      <trans-unit id="pd.about.updates.unavailable" datatype="html">
+        <source>Updates are not available in this build</source>
+      </trans-unit>
+      <trans-unit id="pd.about.version" datatype="html">
+        <source>Version <x id="version"/></source>
+      </trans-unit>
       <trans-unit id="pd.category.app" datatype="html">
         <source>Application</source>
+      </trans-unit>
+      <trans-unit id="pd.category.help" datatype="html">
+        <source>Help</source>
       </trans-unit>
       <trans-unit id="pd.dialogs.cancel" datatype="html">
         <source>Cancel</source>
@@ -607,6 +658,138 @@
       </trans-unit>
       <trans-unit id="pd.ui.sparkline" datatype="html">
         <source>Trend</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.asking" datatype="html">
+        <source>Asking the updater…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.asks" datatype="html">
+        <source><x id="checked"/> · asks <x id="host"/></source>
+      </trans-unit>
+      <trans-unit id="pd.updates.auto-check" datatype="html">
+        <source>Check for updates automatically</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.available" datatype="html">
+        <source>Version <x id="version"/> is available.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.available.sized" datatype="html">
+        <source>Version <x id="version"/> is available (<x id="size"/>).</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.channel" datatype="html">
+        <source>Channel</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.check-again" datatype="html">
+        <source>Check again</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.check-now" datatype="html">
+        <source>Check now</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.checking" datatype="html">
+        <source>Checking for updates…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.current" datatype="html">
+        <source>You have version <x id="version"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.discard" datatype="html">
+        <source>Discard</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.download" datatype="html">
+        <source>Download</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.downloading" datatype="html">
+        <source>Downloading version <x id="version"/>…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.failed" datatype="html">
+        <source>The last step did not finish.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.idle" datatype="html">
+        <source>Not checked yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.install-on-quit" datatype="html">
+        <source>Install when the app quits</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.installing" datatype="html">
+        <source>Installing version <x id="version"/>…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.last-checked" datatype="html">
+        <source>Last checked <x id="when"/></source>
+      </trans-unit>
+      <trans-unit id="pd.updates.never-checked" datatype="html">
+        <source>Not checked in this installation yet</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.no-answer" datatype="html">
+        <source>The updater did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.notes" datatype="html">
+        <source>Release notes</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.notice.available" datatype="html">
+        <source>Version <x id="version"/> is available (you have <x id="current"/>).</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.notification.available" datatype="html">
+        <source>Update available</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.open" datatype="html">
+        <source>Check for Updates…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.progress" datatype="html">
+        <source><x id="phase"/>: <x id="done"/></source>
+      </trans-unit>
+      <trans-unit id="pd.updates.progress-in-jobs" datatype="html">
+        <source>The progress is in Jobs.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.progress.of" datatype="html">
+        <source><x id="phase"/>: <x id="done"/> of <x id="total"/></source>
+      </trans-unit>
+      <trans-unit id="pd.updates.ready" datatype="html">
+        <source>Version <x id="version"/> is downloaded and its signature verified.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.restart" datatype="html">
+        <source>Restart to update</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.title" datatype="html">
+        <source>Updates</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.try-again" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.unavailable" datatype="html">
+        <source>Updates are not available in this build.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.unavailable.why" datatype="html">
+        <source>This build was made without an update signing key, so it cannot verify updates. Download new versions from the releases page.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.up-to-date" datatype="html">
+        <source>You have the latest version.</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.failed" datatype="html">
+        <source>The release notes could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.heading" datatype="html">
+        <source>What’s New in <x id="version"/></source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.none" datatype="html">
+        <source>There are no release notes for version <x id="version"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.open" datatype="html">
+        <source>What’s New</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.released" datatype="html">
+        <source>Released <x id="date"/></source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.title" datatype="html">
+        <source>What’s New</source>
       </trans-unit>
     </body>
   </file>
