@@ -99,13 +99,15 @@ export interface MemoryAssistantOptions {
 /**
  * The assistant held in memory, playing the engine (browser build, demos, tests): deterministic, no timers. A question
  * streams its answer word by word, one microtask apart; `/tool` runs a read-only tool call (`find`) before the answer and
- * `/write` asks for the user's approval of a writing tool (`erase`) and waits for it. `hold()` pauses the stream before the
+ * `/write` asks for the user's approval of a writing tool (`erase`) and waits for it. `/fail` streams a few words and then ends the
+ * turn with an error event of kind `failed`; `/slow` streams its first words and then waits until `stop()` (a running turn with Stop
+ * visible, no test hook needed). `hold()` pauses the stream before the
  * first word until `release()` (so a test can press Stop on a running turn).
  */
 export class MemoryAssistantBackend extends AssistantBackend {
   private readonly listeners = new Set<(e: Envelope) => void>();
   private readonly store = new Map<string, Conversation>();
-  private readonly running = new Map<string, { stopped: boolean; decision: ((approved: boolean) => void) | null; call: string | null }>();
+  private readonly running = new Map<string, { stopped: boolean; decision: ((approved: boolean) => void) | null; call: string | null; halt: (() => void) | null }>();
   private gate: Promise<void> | null = null;
   private open: (() => void) | null = null;
   private counter = 0;
@@ -179,7 +181,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
       this.store.set(id, { id, title: text.slice(0, 60), createdMs: now, updatedMs: now, messages: [user] });
     }
     const conversationId = id;
-    this.running.set(conversationId, { stopped: false, decision: null, call: null });
+    this.running.set(conversationId, { stopped: false, decision: null, call: null, halt: null });
     void Promise.resolve().then(() => this.run(conversationId, text, request.allowWrite));
     return Promise.resolve({ conversationId });
   }
@@ -189,6 +191,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
     if (!run) return Promise.resolve(false);
     run.stopped = true;
     run.decision?.(false);
+    run.halt?.();
     this.release();
     return Promise.resolve(true);
   }
@@ -234,11 +237,22 @@ export class MemoryAssistantBackend extends AssistantBackend {
       this.emit(id, { type: 'toolFinished', callId: 'call_2', name: 'erase', ok: approved, summary: approved ? 'Erased' : 'Declined by the user' });
     }
     const answer = this.options.reply ? this.options.reply(text) : text.startsWith('/tool') ? 'Found item 7 for you.' : `You asked: ${text}`;
-    for (const word of answer.split(/(?<= )/)) {
+    const words = answer.split(/(?<= )/);
+    for (const word of words) {
       if (run.stopped) break;
       said += word;
       this.emit(id, { type: 'delta', text: word });
       await Promise.resolve();
+    }
+    if (text.startsWith('/fail') && !run.stopped) {
+      this.running.delete(id);
+      this.emit(id, { type: 'error', kind: 'failed', message: 'The model stopped answering.' });
+      return;
+    }
+    if (text.startsWith('/slow') && !run.stopped) {
+      // Waits here, mid-answer, until the user presses Stop.
+      await new Promise<void>((resolve) => (run.halt = resolve));
+      run.halt = null;
     }
     const done = this.store.get(id);
     this.running.delete(id);

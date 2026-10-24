@@ -16,6 +16,8 @@ export interface ToolCard {
   readonly result: string | null;
   /** The structured result, for the app's renderer of this tool (never shown as HTML). */
   readonly data: unknown;
+  /** The arguments of the call, known once a write asks for approval (shown in the prompt's details). */
+  readonly input?: unknown;
 }
 
 /** A piece of an answer in order: text, or a tool call between two texts. */
@@ -73,7 +75,7 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
       return { ...t, parts: [...t.parts, { kind: 'tool', card }] };
     }
     case 'approvalNeeded':
-      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting' }));
+      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input }));
     case 'toolFinished': {
       const cites = citationsOf(e.data);
       const next = setCard(t, e.callId, (c) => ({ ...c, state: e.ok ? 'ok' : 'failed', result: e.summary, data: e.data }));

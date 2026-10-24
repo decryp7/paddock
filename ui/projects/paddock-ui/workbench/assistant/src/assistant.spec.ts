@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { msg } from '@decryp7/paddock-ui/shell';
 import { MemoryPitwallBackend, PitwallBackend, providePitwall } from '@decryp7/paddock-ui/shell/pitwall';
 import { provideShellTesting, render, settle } from '@decryp7/paddock-ui/shell/testing';
@@ -191,10 +191,18 @@ describe('PdAssistant', () => {
     expect(r.all('[data-testid=assistant-list]')).toHaveLength(0);
     r.one('[data-testid=assistant-list-toggle]').click();
     await settle(r.fixture);
+    expect(text(r, 'assistant-title')).toBe('Why did the build fail?');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     r.one('[data-testid=assistant-delete]').click();
+    await settle(r.fixture);
+    expect(r.one('[data-testid=assistant-list]').textContent).toContain('No conversations yet.');
+    expect(text(r, 'assistant-undo')).toContain('Deleted "Why did the build fail?"');
+    await vi.advanceTimersByTimeAsync(8000);
+    vi.useRealTimers();
     for (let i = 0; i < 4; i++) await settle(r.fixture);
     expect(text(r, 'assistant-turn')).toBe('');
-    expect(r.one('[data-testid=assistant-list]').textContent).toContain('No conversations yet.');
+    expect(r.all('[data-testid=assistant-undo]')).toHaveLength(0);
+    expect(text(r, 'assistant-title')).toBe('New conversation');
     r.one('[data-testid=assistant-new]').click();
     await settle(r.fixture);
     expect(r.all('[data-testid=assistant-turn]')).toHaveLength(0);
@@ -262,5 +270,164 @@ describe('PdAssistant', () => {
     await settle(r.fixture);
     expect(text(r, 'assistant-note')).toContain('A call could not be read.');
     expect(text(r, 'assistant-budget')).toBe('The assistant ran out of time.');
+  });
+
+  describe('review fixes', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('shows New conversation as the heading and a chat icon via history toggle with a tooltip', async () => {
+      const { r } = await open();
+      expect(text(r, 'assistant-title')).toBe('New conversation');
+      expect(r.one('[data-testid=assistant-list-toggle]').getAttribute('title')).toBe('Conversations');
+    });
+
+    it('undoes a delete from the toast', async () => {
+      const { r, backend } = await open({ conversations: [FIXTURE_CONVERSATION] });
+      r.one('[data-testid=assistant-list-toggle]').click();
+      await settle(r.fixture);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      r.one('[data-testid=assistant-delete]').click();
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-open]')).toHaveLength(0);
+      r.one('[data-testid=assistant-undo-button]').click();
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-open]')).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(20000);
+      expect((await backend.conversations()).length).toBe(1);
+    });
+
+    it('keeps the draft and disables the composer while Pitwall is not running, with one primary', async () => {
+      const pitwall = new MemoryPitwallBackend({ state: { kind: 'notRunning' }, app: 'Demo' });
+      const { r } = await open({ pitwall, info: { provider: 'p', tools: [], hasWrite: true } });
+      const box = r.one<HTMLTextAreaElement>('[data-testid=assistant-input]');
+      expect(box.disabled).toBe(true);
+      expect(box.placeholder).toBe('Start Pitwall to ask questions');
+      expect(r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').disabled).toBe(true);
+      expect(r.one<HTMLButtonElement>('[data-testid=assistant-chip]').disabled).toBe(true);
+      expect(r.one('[data-testid=assistant-send]').classList.contains('pd-btn--primary')).toBe(false);
+      expect(r.element.querySelectorAll('.pd-btn--primary')).toHaveLength(1);
+      // The draft written before is kept and comes back with the composer.
+      pitwall.setState({ kind: 'ready', model: 'q', vision: false, contextTokens: 8192 });
+      await settle(r.fixture);
+      await settle(r.fixture);
+      const live = r.one<HTMLTextAreaElement>('[data-testid=assistant-input]');
+      expect(live.disabled).toBe(false);
+      expect(live.placeholder).toContain('Enter sends');
+      await type(r, 'draft');
+      pitwall.setState({ kind: 'notRunning' });
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(r.one<HTMLTextAreaElement>('[data-testid=assistant-input]').value).toBe('draft');
+    });
+
+    it('words the composer hint after the state of Pitwall', async () => {
+      const words: Record<string, string> = {
+        notInstalled: 'Install Pitwall',
+        needsPairing: 'Connect Pitwall',
+        paused: 'Resume Pitwall',
+        noSuitableModel: 'Download a model',
+        incompatible: 'Update to ask',
+        unavailable: 'not available',
+      };
+      const states = {
+        notInstalled: { kind: 'notInstalled' },
+        needsPairing: { kind: 'needsPairing' },
+        paused: { kind: 'paused', stopped: false },
+        noSuitableModel: { kind: 'noSuitableModel', needs: { vision: false, contextTokens: 8192 } },
+        incompatible: { kind: 'incompatible', message: 'm', updateApp: true },
+        unavailable: { kind: 'unavailable', message: 'm' },
+      } as const;
+      for (const [kind, state] of Object.entries(states)) {
+        const { r } = await open({ pitwall: new MemoryPitwallBackend({ state: state as never, app: 'Demo' }) });
+        expect(r.one<HTMLTextAreaElement>('[data-testid=assistant-input]').placeholder).toContain(words[kind]);
+      }
+    });
+
+    it('follows the streaming text only while the user is at the bottom, else offers Jump to latest', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      const log = r.one('[data-testid=assistant-log]');
+      let top = 0;
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 });
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
+      Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => void (top = v) });
+      await press(r, await type(r, 'go'), { key: 'Enter' });
+      expect(top).toBe(1000);
+      expect(r.all('[data-testid=assistant-jump]')).toHaveLength(0);
+      // The user scrolls up to read: new text neither moves them nor is lost.
+      top = 500;
+      log.dispatchEvent(new Event('scroll'));
+      backend.emit('m1', { type: 'delta', text: 'more' });
+      await settle(r.fixture);
+      expect(top).toBe(500);
+      expect(r.all('[data-testid=assistant-jump]')).toHaveLength(1);
+      r.one('[data-testid=assistant-jump]').click();
+      await settle(r.fixture);
+      expect(top).toBe(1000);
+      expect(r.all('[data-testid=assistant-jump]')).toHaveLength(0);
+      // Within 24 px of the bottom counts as at the bottom, and scrolling back down hides the pill.
+      top = 500;
+      log.dispatchEvent(new Event('scroll'));
+      backend.emit('m1', { type: 'delta', text: 'again' });
+      await settle(r.fixture);
+      top = 780;
+      log.dispatchEvent(new Event('scroll'));
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-jump]')).toHaveLength(0);
+      backend.emit('m1', { type: 'delta', text: 'last' });
+      await settle(r.fixture);
+      expect(top).toBe(1000);
+    });
+
+    it('does not announce streaming text, and announces once when the answer is ready, stopped or failed', async () => {
+      const { r, backend } = await open();
+      expect(r.one('[data-testid=assistant-log]').getAttribute('aria-live')).toBe('off');
+      expect(r.one('[data-testid=assistant-announce]').getAttribute('aria-live')).toBe('polite');
+      backend.hold();
+      await press(r, await type(r, 'one'), { key: 'Enter' });
+      backend.emit('m1', { type: 'delta', text: 'partial' });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-announce')).toBe('');
+      backend.emit('m1', { type: 'done', text: 'partial', usage: { inputTokens: 0, outputTokens: 0 }, end: 'answered' });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-announce')).toBe('Answer ready');
+      await press(r, await type(r, 'two'), { key: 'Enter' });
+      expect(text(r, 'assistant-announce')).toBe('');
+      backend.emit('m1', { type: 'done', text: '', usage: { inputTokens: 0, outputTokens: 0 }, end: 'cancelled' });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-announce')).toBe('Stopped.');
+      await press(r, await type(r, 'three'), { key: 'Enter' });
+      backend.emit('m1', { type: 'error', kind: 'failed', message: 'The engine broke.' });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-announce')).toBe('The engine broke.');
+      await press(r, await type(r, 'four'), { key: 'Enter' });
+      backend.emit('m1', { type: 'error', kind: 'failed', message: 'x', needsAi: { kind: 'notRunning' } });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-announce')).toBe('The answer failed.');
+    });
+
+    it('shows the tool and its arguments in the approval prompt, with full-size buttons', async () => {
+      const { r, backend } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      expect(text(r, 'assistant-approval-tool')).toBe('erase');
+      expect(text(r, 'assistant-approval-args')).toBe('None');
+      expect(r.one('[data-testid=assistant-allow]').classList.contains('pd-btn--sm')).toBe(false);
+      expect(r.one('[data-testid=assistant-decline]').classList.contains('pd-btn--sm')).toBe(false);
+      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-approval-args')).toContain('"path": "/x"');
+      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-approval-args').endsWith('…')).toBe(true);
+      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: undefined });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-approval-args')).toBe('None');
+    });
+
+    it('draws a chip icon only when the glyph exists', async () => {
+      const { r } = await open();
+      expect(r.element.querySelectorAll('[data-testid=assistant-chip] pd-glyph')).toHaveLength(2);
+    });
   });
 });

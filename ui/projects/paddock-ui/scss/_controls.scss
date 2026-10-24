@@ -63,6 +63,15 @@
   &:active:not(:disabled, [aria-disabled='true']) {
     background: var(--pd-accent-fill-hover);
   }
+
+  // Disabled drops the fill (outline + subtle text), so it never looks like an enabled grey primary (review X50 P2-12).
+  &:disabled,
+  &[aria-disabled='true'] {
+    border-color: var(--pd-border-control);
+    background: transparent;
+    color: var(--pd-text-subtle);
+    opacity: 1;
+  }
 }
 
 // Danger: the text and icon in the danger colour; the fill is for the confirmation of a destructive action only.
