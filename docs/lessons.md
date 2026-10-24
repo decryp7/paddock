@@ -319,3 +319,8 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   at once plus native test runs drove the load to 107. Run at most one emulated CI container at a time, check
   `docker ps` before starting one, and keep it for the final local gate (rule 41). An arm64 build of the CI image would
   remove the emulation cost (CI-speed backlog).
+- A fake that is kinder than the real thing hides bugs: Debrief's research browser never auto-closed because Chrome
+  opens its own start tab and Debrief opened a second one, so "more than one tab" always meant "the user took part";
+  the fake browser reported a fixed tab count and ignored `createTarget`. Fakes must model the real system's observable
+  behaviour (start pages, created targets, recorded calls) and be checked against the real thing at least once; every
+  keep/close style decision logs its reason, so a silent wrong branch shows up in the user's log.
