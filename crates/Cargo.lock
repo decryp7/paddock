@@ -3157,6 +3157,7 @@ name = "paddock-jobs"
 version = "0.1.0"
 dependencies = [
  "paddock-commands",
+ "paddock-env",
  "proptest",
  "serde",
  "serde_json",

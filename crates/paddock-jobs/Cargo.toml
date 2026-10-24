@@ -19,6 +19,7 @@ tauri = ["dep:tauri", "dep:paddock-commands", "paddock-commands/tauri"]
 [dependencies]
 tauri = { workspace = true, optional = true }
 paddock-commands = { workspace = true, optional = true }
+paddock-env = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 
