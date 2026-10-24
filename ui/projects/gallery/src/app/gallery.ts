@@ -207,7 +207,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 
       <section class="gal-section" data-testid="controls" aria-labelledby="h-controls">
         <h2 id="h-controls">Controls</h2>
-        <div class="gal-row">
+        <div class="gal-row gal-row--center">
           <button type="button" class="pd-btn pd-btn--primary"><pd-glyph name="plus" /> Add runner</button>
           <button type="button" class="pd-btn"><pd-glyph name="refresh" /> Refresh</button>
           <button type="button" class="pd-btn pd-btn--ghost">Cancel</button>
@@ -218,13 +218,13 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         </div>
         <div class="gal-row">
           <div class="pd-field"><label for="g-name">Name</label><input id="g-name" class="pd-input" value="builder-01" /><span class="pd-field__hint">Shown in the sidebar.</span></div>
-          <div class="pd-field"><label for="g-bad">Port</label><input id="g-bad" class="pd-input" value="99999" aria-invalid="true" aria-describedby="g-bad-error" /><span id="g-bad-error" class="pd-field__error"><pd-glyph name="alert" [size]="12" /> Use a port from 1 to 65535.</span></div>
+          <div class="pd-field"><label for="g-bad">Port</label><input id="g-bad" class="pd-input" value="99999" aria-invalid="true" aria-describedby="g-bad-error" /><span id="g-bad-error" class="pd-field__error"><pd-glyph name="alert" [size]="14" /> Use a port from 1 to 65535.</span></div>
           <div class="pd-field"><label for="g-native">Native select</label><select id="g-native" class="pd-select"><option>Standard</option><option>Compact</option></select></div>
           <div class="pd-field"><label for="g-themed">Themed select</label><pd-select inputId="g-themed" [options]="selectOptions" [value]="selected()" (valueChange)="selected.set($event)" /></div>
-          <label class="pd-check"><input type="checkbox" checked /> Start with the system</label>
+          <div class="pd-field pd-field--check"><span class="pd-field__label" aria-hidden="true">&nbsp;</span><label class="pd-check"><input type="checkbox" checked /> Start with the system</label></div>
         </div>
-        <div class="gal-row">
-          <div class="pd-chips"><span class="pd-chip">linux <button type="button" aria-label="Remove linux"><pd-glyph name="close" [size]="12" /></button></span><span class="pd-chip">x64</span></div>
+        <div class="gal-row gal-row--center">
+          <div class="pd-chips"><span class="pd-chip">linux <button type="button" aria-label="Remove linux"><pd-glyph name="close" [size]="14" /></button></span><span class="pd-chip">x64</span></div>
           <div class="pd-segmented" role="group" aria-label="View"><button type="button" aria-pressed="true">List</button><button type="button" aria-pressed="false">Grid</button></div>
           <div class="pd-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">General</button><button type="button" role="tab" aria-selected="false">Network</button></div>
           <span>Press <kbd class="pd-kbd">Ctrl</kbd><kbd class="pd-kbd">K</kbd></span>
@@ -234,9 +234,9 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 
       <section class="gal-section" data-testid="states" aria-labelledby="h-states">
         <h2 id="h-states">Control states</h2>
-        <p>Each control at rest, hover, focus and disabled (forced by the review sheet), on the page and on a card (surface-2).</p>
-        @for (surface of ['page', 'card']; track surface) {
-          <div class="gal-states" [class.gal-states--card]="surface === 'card'" [attr.data-surface]="surface">
+        <p>Each control at rest, hover, focus and disabled (forced by the review sheet), on the page, on a card (surface-1 with a hairline) and on an inset (surface-2).</p>
+        @for (surface of ['page', 'card', 'inset']; track surface) {
+          <div class="gal-states" [class.gal-states--card]="surface === 'card'" [class.gal-states--inset]="surface === 'inset'" [attr.data-surface]="surface">
             <div class="gal-states-row" data-group="buttons">
               <button type="button" class="pd-btn pd-btn--primary" data-state="rest">Primary</button>
               <button type="button" class="pd-btn pd-btn--primary" data-state="hover">Hover</button>
@@ -275,7 +275,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
             </div>
             <div class="gal-states-row" data-group="small-icons">
               @for (n of ['alert', 'info', 'check', 'close', 'more', 'keyboard']; track n) {
-                <span class="gal-icon-pair"><pd-glyph [name]="n" [size]="12" /><pd-glyph [name]="n" [size]="16" /><pd-glyph [name]="n" [size]="24" /></span>
+                <span class="gal-icon-pair"><pd-glyph [name]="n" [size]="14" /><pd-glyph [name]="n" [size]="16" /><pd-glyph [name]="n" [size]="24" /></span>
               }
             </div>
             <div class="gal-states-row" data-group="choice">
@@ -293,6 +293,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         <div class="gal-row">
           <div class="gal-box gal-path"><pd-path-text value="/Users/lin/Library/Application Support/Builder/logs/builder.service.log" [copy]="true" /></div>
           <div class="gal-box gal-path gal-path--narrow"><pd-path-text value="C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log" /></div>
+          <div class="gal-path gal-path--plain240" data-testid="path-win-240"><pd-path-text value="C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log" /></div>
           <div class="gal-box gal-path gal-path--240" data-testid="path-240"><pd-path-text value="/Users/lin/Library/Application Support/Builder/logs/builder.service.log" /></div>
         </div>
       </section>
