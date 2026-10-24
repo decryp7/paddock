@@ -83,10 +83,14 @@ pub fn from_postcard<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ViewError> 
     if bytes.len() > MAX_ENCODED {
         return Err(ViewError::TooLarge { bytes: bytes.len() });
     }
-    let (value, rest) = postcard::take_from_bytes::<T>(bytes).map_err(|e| ViewError::Decode(e.to_string()))?;
+    let (value, rest) =
+        postcard::take_from_bytes::<T>(bytes).map_err(|e| ViewError::Decode(e.to_string()))?;
     if rest.is_empty() {
         Ok(value)
     } else {
-        Err(ViewError::Decode(format!("{} bytes after the value", rest.len())))
+        Err(ViewError::Decode(format!(
+            "{} bytes after the value",
+            rest.len()
+        )))
     }
 }

@@ -20,7 +20,11 @@ pub enum ViewError {
     /// A string is longer than [`crate::MAX_STRING`] bytes.
     StringTooLong { path: String, len: usize },
     /// A graph or diagram is larger than its limits.
-    GraphTooLarge { path: String, nodes: usize, edges: usize },
+    GraphTooLarge {
+        path: String,
+        nodes: usize,
+        edges: usize,
+    },
     /// A table has too many inline rows (use `Paged`).
     TooManyRows { path: String, rows: usize },
     /// An interactive node has no text label.
@@ -38,13 +42,30 @@ impl fmt::Display for ViewError {
         match self {
             ViewError::Decode(m) => write!(f, "the view does not decode: {m}"),
             ViewError::UnsupportedSchema { found, supported } => {
-                write!(f, "view schema {found} is not supported (this build renders schema {supported})")
+                write!(
+                    f,
+                    "view schema {found} is not supported (this build renders schema {supported})"
+                )
             }
-            ViewError::TooDeep { path } => write!(f, "{path}: nested deeper than {} levels", crate::MAX_DEPTH),
-            ViewError::TooManyNodes { path } => write!(f, "{path}: more than {} nodes in one view", crate::MAX_NODES),
-            ViewError::TooLarge { bytes } => write!(f, "the view is {bytes} bytes encoded; the limit is {}", crate::MAX_ENCODED),
+            ViewError::TooDeep { path } => {
+                write!(f, "{path}: nested deeper than {} levels", crate::MAX_DEPTH)
+            }
+            ViewError::TooManyNodes { path } => write!(
+                f,
+                "{path}: more than {} nodes in one view",
+                crate::MAX_NODES
+            ),
+            ViewError::TooLarge { bytes } => write!(
+                f,
+                "the view is {bytes} bytes encoded; the limit is {}",
+                crate::MAX_ENCODED
+            ),
             ViewError::StringTooLong { path, len } => {
-                write!(f, "{path}: a string of {len} bytes; the limit is {}", crate::MAX_STRING)
+                write!(
+                    f,
+                    "{path}: a string of {len} bytes; the limit is {}",
+                    crate::MAX_STRING
+                )
             }
             ViewError::GraphTooLarge { path, nodes, edges } => write!(
                 f,
@@ -53,11 +74,21 @@ impl fmt::Display for ViewError {
                 crate::MAX_GRAPH_EDGES
             ),
             ViewError::TooManyRows { path, rows } => {
-                write!(f, "{path}: {rows} inline rows; the limit is {} (use paged rows)", crate::MAX_INLINE_ROWS)
+                write!(
+                    f,
+                    "{path}: {rows} inline rows; the limit is {} (use paged rows)",
+                    crate::MAX_INLINE_ROWS
+                )
             }
-            ViewError::Unlabelled { path } => write!(f, "{path}: an interactive node needs a text label"),
-            ViewError::BadUrl { path } => write!(f, "{path}: only http and https links can be opened"),
-            ViewError::DuplicateId { path, id } => write!(f, "{path}: the id \"{id}\" is used twice"),
+            ViewError::Unlabelled { path } => {
+                write!(f, "{path}: an interactive node needs a text label")
+            }
+            ViewError::BadUrl { path } => {
+                write!(f, "{path}: only http and https links can be opened")
+            }
+            ViewError::DuplicateId { path, id } => {
+                write!(f, "{path}: the id \"{id}\" is used twice")
+            }
             ViewError::Invalid { path, reason } => write!(f, "{path}: {reason}"),
         }
     }
@@ -82,9 +113,14 @@ impl fmt::Display for PatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PatchError::Stale { have, patch_base } => {
-                write!(f, "the patch is for version {patch_base} of the view; this is version {have}")
+                write!(
+                    f,
+                    "the patch is for version {patch_base} of the view; this is version {have}"
+                )
             }
-            PatchError::SameEtag { etag } => write!(f, "the patch keeps etag {etag}; it must name a new one"),
+            PatchError::SameEtag { etag } => {
+                write!(f, "the patch keeps etag {etag}; it must name a new one")
+            }
             PatchError::UnknownNode { id } => write!(f, "no node has the id \"{id}\""),
             PatchError::Invalid(e) => write!(f, "the patched view is invalid: {e}"),
         }

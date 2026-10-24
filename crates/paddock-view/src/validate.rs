@@ -3,25 +3,26 @@
 
 use crate::model::*;
 use crate::{
-    MAX_ARGS, MAX_CHART_POINTS, MAX_DEPTH, MAX_ENCODED, MAX_GRAPH_EDGES, MAX_GRAPH_NODES, MAX_ID, MAX_INLINE_ROWS, MAX_NODES,
-    MAX_SAFE_INT, MAX_STRING, MAX_URL, ViewError,
+    MAX_ARGS, MAX_CHART_POINTS, MAX_DEPTH, MAX_ENCODED, MAX_GRAPH_EDGES, MAX_GRAPH_NODES, MAX_ID,
+    MAX_INLINE_ROWS, MAX_NODES, MAX_SAFE_INT, MAX_STRING, MAX_URL, ViewError,
 };
 use std::collections::HashSet;
 
 /// Checks a document against the limits and rules of ADR 0002.
 pub fn validate(doc: &ViewDoc) -> Result<(), ViewError> {
     if doc.schema != SCHEMA {
-        return Err(ViewError::UnsupportedSchema { found: doc.schema, supported: SCHEMA });
+        return Err(ViewError::UnsupportedSchema {
+            found: doc.schema,
+            supported: SCHEMA,
+        });
     }
     let mut c = Checker::default();
     c.safe_int("etag", doc.etag)?;
     c.label("title", &doc.title)?;
     c.node(&doc.root, "root", 1)?;
     // Last: the cheap checks above bound what is left to count.
-    let bytes = postcard::experimental::serialized_size(doc).map_err(|e| ViewError::Invalid {
-        path: "root".into(),
-        reason: e.to_string(),
-    })?;
+    // An encoding that fails is as unusable as one that is too large.
+    let bytes = postcard::experimental::serialized_size(doc).unwrap_or(usize::MAX);
     if bytes > MAX_ENCODED {
         return Err(ViewError::TooLarge { bytes });
     }
@@ -44,21 +45,29 @@ struct Checker {
 }
 
 fn invalid(path: &str, reason: impl Into<String>) -> ViewError {
-    ViewError::Invalid { path: path.to_string(), reason: reason.into() }
+    ViewError::Invalid {
+        path: path.to_string(),
+        reason: reason.into(),
+    }
 }
 
 impl Checker {
     fn count(&mut self, path: &str, n: usize) -> Result<(), ViewError> {
         self.nodes = self.nodes.saturating_add(n);
         if self.nodes > MAX_NODES {
-            return Err(ViewError::TooManyNodes { path: path.to_string() });
+            return Err(ViewError::TooManyNodes {
+                path: path.to_string(),
+            });
         }
         Ok(())
     }
 
     fn safe_int(&self, path: &str, v: u64) -> Result<(), ViewError> {
         if v > MAX_SAFE_INT {
-            return Err(invalid(path, "a number above 2^53 - 1 cannot cross JavaScript exactly"));
+            return Err(invalid(
+                path,
+                "a number above 2^53 - 1 cannot cross JavaScript exactly",
+            ));
         }
         Ok(())
     }
@@ -66,7 +75,10 @@ impl Checker {
     /// A string within the limit (may be empty).
     fn text(&self, path: &str, s: &str) -> Result<(), ViewError> {
         if s.len() > MAX_STRING {
-            return Err(ViewError::StringTooLong { path: path.to_string(), len: s.len() });
+            return Err(ViewError::StringTooLong {
+                path: path.to_string(),
+                len: s.len(),
+            });
         }
         Ok(())
     }
@@ -75,7 +87,9 @@ impl Checker {
     fn label(&self, path: &str, s: &str) -> Result<(), ViewError> {
         self.text(path, s)?;
         if s.trim().is_empty() {
-            return Err(ViewError::Unlabelled { path: path.to_string() });
+            return Err(ViewError::Unlabelled {
+                path: path.to_string(),
+            });
         }
         Ok(())
     }
@@ -91,28 +105,21 @@ impl Checker {
     /// A key unique in `seen`.
     fn unique(path: &str, seen: &mut HashSet<String>, id: &str) -> Result<(), ViewError> {
         if !seen.insert(id.to_string()) {
-            return Err(ViewError::DuplicateId { path: path.to_string(), id: id.to_string() });
+            return Err(ViewError::DuplicateId {
+                path: path.to_string(),
+                id: id.to_string(),
+            });
         }
         Ok(())
     }
 
     fn args(&self, path: &str, args: &paddock_ipc::Json) -> Result<(), ViewError> {
-        // Counting bytes through a writer, so large arguments are not copied.
-        struct Count(usize);
-        impl std::io::Write for Count {
-            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-                self.0 = self.0.saturating_add(b.len());
-                if self.0 > MAX_ARGS {
-                    return Err(std::io::Error::other("too large"));
-                }
-                Ok(b.len())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-        if serde_json::to_writer(Count(0), &args.0).is_err() {
-            return Err(invalid(path, format!("arguments larger than {MAX_ARGS} bytes")));
+        let bytes = serde_json::to_vec(&args.0).map_or(usize::MAX, |b| b.len());
+        if bytes > MAX_ARGS {
+            return Err(invalid(
+                path,
+                format!("arguments larger than {MAX_ARGS} bytes"),
+            ));
         }
         Ok(())
     }
@@ -146,13 +153,18 @@ impl Checker {
 
     fn node(&mut self, node: &Node, path: &str, depth: usize) -> Result<(), ViewError> {
         if depth > MAX_DEPTH {
-            return Err(ViewError::TooDeep { path: path.to_string() });
+            return Err(ViewError::TooDeep {
+                path: path.to_string(),
+            });
         }
         self.count(path, 1)?;
         if !node.id.is_empty() {
             self.id(&format!("{path}.id"), &node.id)?;
             if !self.ids.insert(node.id.clone()) {
-                return Err(ViewError::DuplicateId { path: path.to_string(), id: node.id.clone() });
+                return Err(ViewError::DuplicateId {
+                    path: path.to_string(),
+                    id: node.id.clone(),
+                });
             }
         }
         match &node.kind {
@@ -174,11 +186,19 @@ impl Checker {
             NodeKind::Badge { text, .. } => self.label(&format!("{path}.text"), text),
             NodeKind::Progress { value, label } => {
                 if !(0.0..=1.0).contains(value) {
-                    return Err(invalid(&format!("{path}.value"), "progress is a number from 0 to 1"));
+                    return Err(invalid(
+                        &format!("{path}.value"),
+                        "progress is a number from 0 to 1",
+                    ));
                 }
                 self.text(&format!("{path}.label"), label)
             }
-            NodeKind::Empty { title, hint, action, .. } => {
+            NodeKind::Empty {
+                title,
+                hint,
+                action,
+                ..
+            } => {
                 self.label(&format!("{path}.title"), title)?;
                 self.text(&format!("{path}.hint"), hint)?;
                 self.opt_action(&format!("{path}.action"), action)
@@ -199,7 +219,10 @@ impl Checker {
         self.count(path, rows.len())?;
         for (r, row) in rows.iter().enumerate() {
             if row.len() != columns {
-                return Err(invalid(&format!("{path}[{r}]"), format!("{} cells for {columns} columns", row.len())));
+                return Err(invalid(
+                    &format!("{path}[{r}]"),
+                    format!("{} cells for {columns} columns", row.len()),
+                ));
             }
             for (c, cell) in row.iter().enumerate() {
                 let p = format!("{path}[{r}][{c}]");
@@ -218,27 +241,44 @@ impl Checker {
             self.label(&format!("{p}.label"), &col.label)?;
             Self::unique(&p, &mut keys, &col.key)?;
         }
-        if let Some(s) = &t.sort {
-            if !keys.contains(&s.column) {
-                return Err(invalid(&format!("{path}.sort"), format!("no column \"{}\"", s.column)));
-            }
+        if let Some(s) = &t.sort
+            && !keys.contains(&s.column)
+        {
+            return Err(invalid(
+                &format!("{path}.sort"),
+                format!("no column \"{}\"", s.column),
+            ));
         }
         self.opt_action(&format!("{path}.rowAction"), &t.row_action)?;
         let p = format!("{path}.rows");
         match &t.rows {
             RowSource::Inline(rows) => {
                 if rows.len() > MAX_INLINE_ROWS {
-                    return Err(ViewError::TooManyRows { path: p, rows: rows.len() });
+                    return Err(ViewError::TooManyRows {
+                        path: p,
+                        rows: rows.len(),
+                    });
                 }
                 self.cells(&p, rows, t.columns.len())
             }
-            RowSource::Paged { total, page_size, page, rows } => {
+            RowSource::Paged {
+                total,
+                page_size,
+                page,
+                rows,
+            } => {
                 self.safe_int(&format!("{p}.total"), *total)?;
                 if *page_size == 0 || *page_size as usize > MAX_INLINE_ROWS {
-                    return Err(invalid(&p, format!("a page is 1 to {MAX_INLINE_ROWS} rows")));
+                    return Err(invalid(
+                        &p,
+                        format!("a page is 1 to {MAX_INLINE_ROWS} rows"),
+                    ));
                 }
                 if rows.len() > *page_size as usize {
-                    return Err(ViewError::TooManyRows { path: p, rows: rows.len() });
+                    return Err(ViewError::TooManyRows {
+                        path: p,
+                        rows: rows.len(),
+                    });
                 }
                 let first = u64::from(*page) * u64::from(*page_size);
                 if first > 0 && first >= *total {
@@ -263,7 +303,10 @@ impl Checker {
             self.label(&format!("{p}.label"), &n.label)?;
             let allowed = prev.map_or(0, |d| d.saturating_add(1));
             if n.depth > allowed {
-                return Err(invalid(&p, "a tree node is at most one level below the node before it"));
+                return Err(invalid(
+                    &p,
+                    "a tree node is at most one level below the node before it",
+                ));
             }
             if depth + usize::from(n.depth) + 1 > MAX_DEPTH {
                 return Err(ViewError::TooDeep { path: p });
@@ -280,16 +323,30 @@ impl Checker {
     /// Nodes and edges of a graph or diagram: counts, then the ids that edges name.
     fn graph_shape(path: &str, nodes: usize, edges: usize) -> Result<(), ViewError> {
         if nodes > MAX_GRAPH_NODES || edges > MAX_GRAPH_EDGES {
-            return Err(ViewError::GraphTooLarge { path: path.to_string(), nodes, edges });
+            return Err(ViewError::GraphTooLarge {
+                path: path.to_string(),
+                nodes,
+                edges,
+            });
         }
         Ok(())
     }
 
-    fn edge<'a>(path: &str, ids: &HashSet<&'a str>, from: &str, to: &str, label: &str, c: &Checker) -> Result<(), ViewError> {
+    fn edge(
+        path: &str,
+        ids: &HashSet<&str>,
+        from: &str,
+        to: &str,
+        label: &str,
+        c: &Checker,
+    ) -> Result<(), ViewError> {
         c.text(&format!("{path}.label"), label)?;
         for (end, id) in [("from", from), ("to", to)] {
             if !ids.contains(id) {
-                return Err(invalid(&format!("{path}.{end}"), format!("no node \"{id}\"")));
+                return Err(invalid(
+                    &format!("{path}.{end}"),
+                    format!("no node \"{id}\""),
+                ));
             }
         }
         Ok(())
@@ -308,7 +365,14 @@ impl Checker {
         }
         let ids: HashSet<&str> = g.nodes.iter().map(|n| n.id.as_str()).collect();
         for (i, e) in g.edges.iter().enumerate() {
-            Self::edge(&format!("{path}.edges[{i}]"), &ids, &e.from, &e.to, &e.label, self)?;
+            Self::edge(
+                &format!("{path}.edges[{i}]"),
+                &ids,
+                &e.from,
+                &e.to,
+                &e.label,
+                self,
+            )?;
         }
         Ok(())
     }
@@ -328,7 +392,14 @@ impl Checker {
         }
         let ids: HashSet<&str> = m.elements.iter().map(|e| e.id.as_str()).collect();
         for (i, r) in m.relations.iter().enumerate() {
-            Self::edge(&format!("{path}.relations[{i}]"), &ids, &r.from, &r.to, &r.label, self)?;
+            Self::edge(
+                &format!("{path}.relations[{i}]"),
+                &ids,
+                &r.from,
+                &r.to,
+                &r.label,
+                self,
+            )?;
         }
         Ok(())
     }
@@ -349,7 +420,9 @@ impl Checker {
 
     fn field_kind(&self, kind: &FieldKind, p: &str) -> Result<(), ViewError> {
         match kind {
-            FieldKind::Text { value, placeholder, .. } => {
+            FieldKind::Text {
+                value, placeholder, ..
+            } => {
                 self.text(&format!("{p}.value"), value)?;
                 self.text(&format!("{p}.placeholder"), placeholder)
             }
@@ -358,7 +431,10 @@ impl Checker {
                 if all.iter().flatten().any(|n| !n.is_finite()) {
                     return Err(invalid(p, "numbers are finite"));
                 }
-                if min.zip(*max).is_some_and(|(lo, hi)| lo > hi) || min.is_some_and(|lo| *value < lo) || max.is_some_and(|hi| *value > hi) {
+                if min.zip(*max).is_some_and(|(lo, hi)| lo > hi)
+                    || min.is_some_and(|lo| *value < lo)
+                    || max.is_some_and(|hi| *value > hi)
+                {
                     return Err(invalid(p, "the value is outside min and max"));
                 }
                 Ok(())
@@ -377,8 +453,12 @@ impl Checker {
                 Ok(())
             }
             FieldKind::Toggle { .. } => Ok(()),
-            FieldKind::Path { value, .. } => value.as_ref().map_or(Ok(()), |g| self.id(&format!("{p}.value"), &g.0)),
-            FieldKind::SecretRef { value } => value.as_ref().map_or(Ok(()), |s| self.id(&format!("{p}.value"), &s.0)),
+            FieldKind::Path { value, .. } => value
+                .as_ref()
+                .map_or(Ok(()), |g| self.id(&format!("{p}.value"), &g.0)),
+            FieldKind::SecretRef { value } => value
+                .as_ref()
+                .map_or(Ok(()), |s| self.id(&format!("{p}.value"), &s.0)),
         }
     }
 
@@ -403,7 +483,10 @@ impl Checker {
             self.text(&format!("{p}.detail"), &f.detail)?;
             self.text(&format!("{p}.location"), &f.location)?;
             if !states.contains(&f.state) {
-                return Err(invalid(&format!("{p}.state"), format!("no state \"{}\"", f.state)));
+                return Err(invalid(
+                    &format!("{p}.state"),
+                    format!("no state \"{}\"", f.state),
+                ));
             }
             self.opt_link(&format!("{p}.link"), &f.link)?;
         }
@@ -443,14 +526,24 @@ impl Checker {
         }
         let points = c.series.iter().map(|s| s.values.len()).sum::<usize>();
         if points > MAX_CHART_POINTS {
-            return Err(invalid(path, format!("{points} values; the limit is {MAX_CHART_POINTS}")));
+            return Err(invalid(
+                path,
+                format!("{points} values; the limit is {MAX_CHART_POINTS}"),
+            ));
         }
         self.count(path, c.series.len())?;
         for (i, s) in c.series.iter().enumerate() {
             let p = format!("{path}.series[{i}]");
             self.label(&format!("{p}.name"), &s.name)?;
             if s.values.len() != c.categories.len() {
-                return Err(invalid(&p, format!("{} values for {} categories", s.values.len(), c.categories.len())));
+                return Err(invalid(
+                    &p,
+                    format!(
+                        "{} values for {} categories",
+                        s.values.len(),
+                        c.categories.len()
+                    ),
+                ));
             }
             if s.values.iter().any(|v| !v.is_finite()) {
                 return Err(invalid(&p, "values are finite numbers"));
@@ -462,9 +555,14 @@ impl Checker {
 
 /// An `http` or `https` URL with a host, no user information, no spaces or control characters.
 fn web_url(path: &str, url: &str) -> Result<(), ViewError> {
-    let bad = || ViewError::BadUrl { path: path.to_string() };
+    let bad = || ViewError::BadUrl {
+        path: path.to_string(),
+    };
     if url.len() > MAX_URL {
-        return Err(ViewError::StringTooLong { path: path.to_string(), len: url.len() });
+        return Err(ViewError::StringTooLong {
+            path: path.to_string(),
+            len: url.len(),
+        });
     }
     let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
     let rest = if lower.starts_with("https://") {

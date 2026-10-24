@@ -42,7 +42,10 @@ pub struct Node {
 impl Node {
     /// A node without an id.
     pub fn new(kind: NodeKind) -> Self {
-        Node { id: String::new(), kind }
+        Node {
+            id: String::new(),
+            kind,
+        }
     }
 
     /// The same node with an id.
@@ -53,12 +56,19 @@ impl Node {
 
     /// A plain text node.
     pub fn text(text: impl Into<String>) -> Self {
-        Node::new(NodeKind::Text { text: text.into(), tone: Tone::Neutral, style: TextStyle::Body })
+        Node::new(NodeKind::Text {
+            text: text.into(),
+            tone: Tone::Neutral,
+            style: TextStyle::Body,
+        })
     }
 
     /// A vertical stack.
     pub fn column(children: Vec<Node>) -> Self {
-        Node::new(NodeKind::Stack { dir: Dir::Column, children })
+        Node::new(NodeKind::Stack {
+            dir: Dir::Column,
+            children,
+        })
     }
 }
 
@@ -68,12 +78,13 @@ impl Node {
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum NodeKind {
     /// Children in a row or a column.
-    Stack {
-        dir: Dir,
-        children: Vec<Node>,
-    },
+    Stack { dir: Dir, children: Vec<Node> },
     /// Plain text (bound as text, never as HTML).
-    Text { text: String, tone: Tone, style: TextStyle },
+    Text {
+        text: String,
+        tone: Tone,
+        style: TextStyle,
+    },
     /// A table.
     Table(Table),
     /// A tree (flat, in pre-order).
@@ -95,7 +106,12 @@ pub enum NodeKind {
     /// A progress bar; `value` is 0.0 to 1.0.
     Progress { value: f32, label: String },
     /// Nothing to show, with an optional way forward.
-    Empty { icon: Icon, title: String, hint: String, action: Option<ActionRef> },
+    Empty {
+        icon: Icon,
+        title: String,
+        hint: String,
+        action: Option<ActionRef>,
+    },
     /// The standard "needs local AI" state (ADR 0004).
     NeedsAi(NeedsAi),
     /// A link: an action or a page in the OS browser.
@@ -182,7 +198,13 @@ pub struct ActionRef {
 impl ActionRef {
     /// A read-only action without arguments or confirmation.
     pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
-        ActionRef { id: id.into(), label: label.into(), confirm: None, args: Json::default(), writes: false }
+        ActionRef {
+            id: id.into(),
+            label: label.into(),
+            confirm: None,
+            args: Json::default(),
+            writes: false,
+        }
     }
 }
 
@@ -193,7 +215,10 @@ impl ActionRef {
 pub enum Link {
     Action(ActionRef),
     /// An `http` or `https` URL.
-    OpenInBrowser { url: String, label: String },
+    OpenInBrowser {
+        url: String,
+        label: String,
+    },
 }
 
 /// A table.
@@ -245,7 +270,11 @@ pub struct Cell {
 impl Cell {
     /// A neutral cell without a link.
     pub fn text(text: impl Into<String>) -> Self {
-        Cell { text: text.into(), tone: Tone::Neutral, link: None }
+        Cell {
+            text: text.into(),
+            tone: Tone::Neutral,
+            link: None,
+        }
     }
 }
 
@@ -423,14 +452,32 @@ pub struct Field {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum FieldKind {
-    Text { value: String, placeholder: String, multiline: bool },
-    Number { value: f64, min: Option<f64>, max: Option<f64> },
-    Choice { value: String, options: Vec<ChoiceOption> },
-    Toggle { value: bool },
+    Text {
+        value: String,
+        placeholder: String,
+        multiline: bool,
+    },
+    Number {
+        value: f64,
+        min: Option<f64>,
+        max: Option<f64>,
+    },
+    Choice {
+        value: String,
+        options: Vec<ChoiceOption>,
+    },
+    Toggle {
+        value: bool,
+    },
     /// A file or folder chosen with the host's dialog; the plugin only ever sees the grant.
-    Path { value: Option<GrantRef>, folder: bool },
+    Path {
+        value: Option<GrantRef>,
+        folder: bool,
+    },
     /// A reference to a secret held by the host (never the secret itself).
-    SecretRef { value: Option<SecretRef> },
+    SecretRef {
+        value: Option<SecretRef>,
+    },
 }
 
 /// One option of a choice field.

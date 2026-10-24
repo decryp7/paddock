@@ -18,9 +18,17 @@ pub fn apply_patch(doc: &mut ViewDoc, patch: ViewPatch) -> Result<(), PatchError
             }
             new
         }
-        ViewPatch::Replace { base_etag, etag, id, node } => {
+        ViewPatch::Replace {
+            base_etag,
+            etag,
+            id,
+            node,
+        } => {
             if base_etag != doc.etag {
-                return Err(PatchError::Stale { have: doc.etag, patch_base: base_etag });
+                return Err(PatchError::Stale {
+                    have: doc.etag,
+                    patch_base: base_etag,
+                });
             }
             if etag == base_etag {
                 return Err(PatchError::SameEtag { etag });
@@ -46,7 +54,9 @@ fn find<'a>(node: &'a mut Node, id: &str, depth: usize) -> Option<&'a mut Node> 
         return Some(node);
     }
     match &mut node.kind {
-        NodeKind::Stack { children, .. } => children.iter_mut().find_map(|c| find(c, id, depth + 1)),
+        NodeKind::Stack { children, .. } => {
+            children.iter_mut().find_map(|c| find(c, id, depth + 1))
+        }
         _ => None,
     }
 }
