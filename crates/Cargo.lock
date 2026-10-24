@@ -3136,7 +3136,6 @@ dependencies = [
 name = "paddock-assistant"
 version = "0.1.0"
 dependencies = [
- "log",
  "paddock-commands",
  "paddock-env",
  "paddock-health",
@@ -3204,6 +3203,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-proc",
  "paddock-runtime",
+ "paddock-workspace-hack",
  "serde_json",
  "tempfile",
  "tungstenite",
@@ -3294,6 +3294,22 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "paddock-files"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-proc",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-dialog",
+ "tempfile",
+ "ts-rs",
 ]
 
 [[package]]
@@ -3524,6 +3540,7 @@ dependencies = [
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tar",
@@ -3595,6 +3612,7 @@ dependencies = [
  "paddock-dialogs",
  "paddock-download",
  "paddock-env",
+ "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-log",
@@ -3625,6 +3643,7 @@ dependencies = [
  "paddock-proc",
  "paddock-siblings",
  "paddock-window",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",

@@ -1,7 +1,7 @@
 import { MemoryChannelsBackend, TauriChannelsBackend, type ChannelConfig, type ChannelsBackend, type TestOutcome } from '@decryp7/paddock-ui/shell/channels';
 import { tauriIpc } from './demo-ipc';
 
-const OUTCOMES: readonly TestOutcome[] = ['succeed', 'rejected', 'unreachable', 'missingSecret', 'hang'];
+const OUTCOMES: readonly TestOutcome[] = ['succeed', 'retry', 'rejected', 'unreachable', 'missingSecret', 'hang'];
 
 const SLACK: ChannelConfig = {
   id: 'slack',
@@ -40,7 +40,7 @@ export function fakeChannels(search: string = globalThis.location?.search ?? '')
   return { channels: [SLACK, PHONE], getFailures: 0, secrets: ['slack'] };
 }
 
-/** How a test ends in the browser build (`?channels-test=succeed|rejected|unreachable|hang`); it is delivered by default. */
+/** How a test ends in the browser build (`?channels-test=succeed|retry|rejected|unreachable|hang`); it is delivered by default. */
 export function fakeTestOutcome(search: string = globalThis.location?.search ?? ''): TestOutcome {
   const wanted = new URLSearchParams(search).get('channels-test');
   return OUTCOMES.find((o) => o === wanted) ?? 'succeed';
@@ -61,7 +61,6 @@ export function demoChannelsBackend(): ChannelsBackend {
     secrets: start.secrets,
     getFailures: start.getFailures,
     outcome: fakeTestOutcome(),
-    retry: fakeTestOutcome() === 'succeed',
     schedule: (step) => void setTimeout(step, 400),
   });
   return memory;
