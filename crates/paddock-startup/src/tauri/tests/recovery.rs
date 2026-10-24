@@ -263,3 +263,24 @@ fn only_main_windows_may_ask_about_recovery() {
         );
     }
 }
+
+#[test]
+fn a_relaunch_writes_the_session_first_so_the_next_start_can_restore_it() {
+    let t = tempfile::tempdir().unwrap();
+    let seen = Shared::default();
+    let first = begin(t.path(), 100, &[100]);
+    first.checkpoint("main", json!({"query": "error"})).unwrap();
+    let app = app_after(first, &seen);
+    let w = window(&app, "main");
+    // The checkpoint is still on its way to the disk; the relaunch waits for it.
+    invoke(&w, "app_relaunch", json!({})).unwrap();
+    assert_eq!(lock(&seen).relaunch, ["main"]);
+    std::mem::forget(app);
+
+    let next = app_after(begin(t.path(), 200, &[200]), &Shared::default());
+    let w = window(&next, "main");
+    let status = invoke(&w, "recovery_status", json!({})).unwrap();
+    assert_eq!(status["unclean"]["session"]["windows"], 1);
+    let plan = invoke(&w, "recovery_restore", json!({})).unwrap();
+    assert_eq!(plan["ui"], json!({"query": "error"}));
+}

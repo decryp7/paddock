@@ -13,6 +13,74 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock-channels` now sends over `paddock-net` (`EgressPoster`, `channel_policy`; `UreqPoster` is gone), keeps one secret per
   channel (`channel:<id>:secret`), allows plain http only to this computer, and has the settings-page engine `ChannelsControl`
   with the `tauri` adapter (commands and the `paddock://channels` event).
+- `@decryp7/paddock-ui/shell/channels` (plan X17, UI half): Settings > Notification channels. `ChannelsBackend` (Tauri adapter and an
+  in-memory engine with the engine's validation, secrets in a map and test outcomes `succeed`, `rejected`, `unreachable`,
+  `missingSecret`, `hang`), `ChannelsStore` (the engine's refusal of a save shown as it is, a per-channel test state that is
+  never timed out, removal clears the secret), and `PdChannelsPage` in `shell/channels/page` (a table with Edit, Send test and
+  Remove on each row, one Add channel, an inline editor on Signal Forms, "Still working" and the engine's advice inline).
+  The token or password is typed in the modal `pd.channels.secret` dialog (`PdChannelSecretDialog` in `shell/channels/dialog`)
+  and goes from that window straight to the engine, never through a store, event, log or URL. The shell demo registers both.
+- `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
+  dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
+  volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.
+- i18n kit (plan X48). `paddock-i18n build [--config paddock-i18n.json] [--check] [--no-extract]` runs an app's whole translation
+  build from one declaration: the `localize-extract` run over its built output, every catalog (sources, manifests, extraction),
+  the pseudo-locale and each translated `messages.<tag>.xlf` into its runtime JSON together with the shell's translations
+  (Debrief's `build-locales` and this repo's `scripts/build-i18n.mjs` are replaced by it; `--check` writes nothing and fails on
+  drift, `--no-extract` reads the committed catalogs so no build is needed). `LanguageChoice` now also names a shipped
+  translation by its tag, `isLocaleTag` validates one, and `@decryp7/paddock-ui/shell/i18n/page` is the Settings > Language page
+  (`PdLanguagePage`, `defineLanguageSettingsPage`): System default, English, each translation by its own name, the pseudo-locale
+  where the app ships it, a restart offer. `paddock-conformance` C32 runs `build --check --no-extract` over the app's
+  `paddock-i18n.json`.
+- `app_relaunch` (`paddock-startup`, a window-class command: any window, a dialog lists it in its contract) and
+  `StartupBuilder::relaunch(|app| app.restart())`: the checkpoints are written to the session first, then the app's relaunch
+  runs, so the whole app restarts (a language change from the Settings window); without a hook it answers `relaunchUnavailable`,
+  a failing one `relaunchFailed` and the app keeps running. The shell demo wires it; the Language page calls it through
+  `LANGUAGE_CONFIG.reload`.
+- The app IPC kit (plan X28). `paddock_commands::CommandError` / `ErrorCode`: the one error envelope (code, message, retryable,
+  hint, field, cause, kind), with constructors, `From` for `io::Error`, strings and the guard's `Refusal`, and its TypeScript
+  generated into `@decryp7/paddock-ui/ipc`. `@decryp7/paddock-ui/ipc`: `toCommandError`, `CommandFailure`, `withCallTimeout` (a
+  Proxy with a default, per-method limits and `untimed` for job-starting commands, rule 12) and `callTimeoutProblems`,
+  `provideBackend` (Tauri or a lazily imported mock). `@decryp7/paddock-ui/ipc/testing`: `parseMockOptions` / `formatMockOptions`
+  (`?mock=&latency=&fail=&hold=`) and `withMockOptions` (latency, failures, held answers, recorded calls).
+- `paddock-bench` (plan X26, rule 16): the benchmark harness with stored budgets. `Recorder` (median of several runs on an
+  injected `Clock`; `ManualClock` for tests), `Kind` (startup, throughput, first event, query latency, memory: unit and
+  direction), `Results` (versioned results file per app, atomic, bounded), `Budgets` (`budgets.toml`: limit, tolerance, regression
+  against the previous run, `propose`), `check` (pass, tolerated, over budget, regressed, missing, wrong kind, unbudgeted;
+  text, Markdown, JSON) and the `paddock-bench check|propose` command (exit 5 on a miss). `.gitea/workflow-templates/bench-nightly.yml`
+  is the nightly workflow template.
+- `paddock-cli` (plan X25): the family's command-line conventions. `Exit` (0 ok, 1 failure, 2 usage, 3 not running, 4 refused,
+  5 findings, 130 interrupted), `CliError` with a next step, `finish` (one JSON object on stdout in `--json` mode, errors
+  included), `Table` (text, CSV, JSON; bounded cells), `Progress` (throttled, de-duplicated phase lines on stderr, injected time)
+  and `StopFlag`, `Help` and `version_line`, `CommonFlags`, `parse_time`, `parse_size`, `format_size`. `paddock_service::Verb`
+  describes itself for `--help`, rejects extra arguments with a hint and decides `status`'s exit code.
+- Paddock runs its own conformance checks in CI (C06, C14, C15, C16, C29, C30, C31; the app-only ones are skipped with reasons in
+  `ci.yml`); C24 runs non-blocking until the `docs/images` review lands. New check C31: ADR numbers are unique. The waiver of a
+  Rust test sleep (C30) must give a reason: `// conformance: hang-guard — <why>`.
+- Tests no longer sleep to wait for other threads: `paddock-jobs` `tests/parallel.rs` and `tests/pool.rs` (gates, a barrier and
+  event waits) and `paddock-window`'s exit-watchdog test (the process end is a channel event).
+- `paddock-names` search index and `names_search` (plan X18 follow-up): the catalogue keeps hash maps for the exact, joined and alias
+  rungs and an inverted index of words (prefix by range, inside-a-word by scan, typos by letter-bag and edit distance), so a
+  search over 250,000 names takes about 20 ms (was 500 ms; `cargo bench -p paddock-names` fails over 50 ms). `search_scan` ranks every
+  entry and a property test checks that both give the same answer. `NamesService` + `NamesSearchRequest`/`NamesSearchReply`
+  are the engine side of the palette's `names_search` command (arguments validated in Rust, catalogue swapped whole).
+- Conformance check C24 (rule 22): every image under `docs/screenshots` matches its `hashes.json` entry and has a `REVIEWED.md` row
+  (image, SHA-256, reviewer, date) with the current hash; `docs/images` needs the row. A regenerated image that changed fails until
+  it is reviewed again.
+- `@decryp7/paddock-e2e` `paddockConfig()` and `captureDocScreens()` (plan X39). The config preset: projects Chromium and WebKit
+  (plus `screenshots` only with `SCREENSHOTS=1`), the port from an environment variable (required on CI), Chrome for Testing
+  only through `CHROMIUM_TEST_PATH`, `retries: 0`, traces on failure, blob reports for shards. The runner takes the five apps'
+  screenshot tables: both themes at 1440 x 900 @2x, frozen clock, long pages framed, `docs/screenshots/<theme>/<name>.png` and a
+  `hashes.json` for the review gate (`clock: 'paused'` stops the fake clock at exactly the frozen time). Node tests for the pure parts and a Playwright self-test on `data:` pages.
+- `paddock-testkit` (plan X40): the Rust test kit. `Scratch` (work, home and tmp folders, a leftover check on drop), `env_lock()` and
+  `EnvLock::hermetic` (HOME, APPDATA, XDG_* and TMPDIR in the scratch folder, restored afterwards), golden files with
+  `PADDOCK_UPDATE_GOLDEN`, `FakeRunner` for OS-command seams, `corpus`/`never_panics`, and `FakeClock` re-exported from
+  `paddock_jobs::time`.
+- Conformance check C30 (warning level, rule 40): a `#[test]` fn that compares a duration measured with `elapsed()`,
+  `Instant::now() - x` or `duration_since` against a limit; a `thread::sleep` in a test that uses threads; and `Date.now()`/`performance.now()`
+  differences under `expect` in TypeScript specs. A hang guard of at least 10 s may carry `// conformance: hang-guard`.
+  First findings in Paddock: `paddock-diag` window.rs, `paddock-proc` login.rs and supervised.rs, `paddock-updater` tests,
+  `paddock-window` exit.rs and tauri/tests.rs.
 - `paddock-names` (plan X18): identifier search per rule 20, from Debrief's `names/` (segmentation with the embedded word list,
   normalisation, grouping of spellings, typo distance, the ranking ladder and the clarifying question) and Dyno's counter search
   (every word in any order, other fields ranked below the name). `Catalogue::new` / `text` / `with_vocabulary`, `Entry`,

@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -96,7 +96,12 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
+| `paddock-bench` | benchmark harness with stored budgets (rule 16): `Recorder` with an injected clock (startup, throughput, first event, query latency, memory), a results file per app, `budgets.toml` with tolerance and regression limit, `check`, and the `paddock-bench` command for the nightly workflow (plan X26) | yes (every app's benchmarks); built |
+
+| `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
+| `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
@@ -108,7 +113,6 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
-| `paddock-cli` | shared CLI conventions (`--json`, exit codes, timeouts) | yes |
 
 ## `paddock-jobs` Tauri adapter (plan S9)
 
@@ -683,6 +687,57 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
 
+## `paddock-bench` (plan X26)
+
+Rule 16's budgets, checked the same way in every app. The app's benchmark records numbers; the harness stores, compares and fails.
+
+```rust
+use paddock_bench::{Kind, Recorder, SystemClock};
+
+let clock = SystemClock::new();
+let mut rec = Recorder::new("debrief", env!("CARGO_PKG_VERSION"));
+rec.throughput(&clock, "import-clef", lines, 5, || import_all())?;       // items/s, median of 5 runs
+rec.time_ms(&clock, "page-unfiltered", Kind::QueryLatency, 7, || page())?; // ms, median of 7 runs
+rec.memory_bytes("rss-querying", peak_rss_bytes)?;                        // MB
+rec.finish().save(&root.join("bench/debrief.results.json"))?;             // versioned, atomic
+```
+
+`bench/budgets.toml` (TOML data, bounded, never executed):
+
+```toml
+[[budget]]
+name = "page-unfiltered"
+kind = "query-latency"   # optional guard
+limit = 500              # a maximum for times and memory, a minimum for throughput
+tolerance_pct = 10       # past the limit but inside this: passes with a warning
+regression_pct = 20      # worse than the previous run by more: fails even inside the limit
+```
+
+`paddock-bench check --budgets bench/budgets.toml --results bench/debrief.results.json [--previous old.json] [--json|--markdown]`
+exits 0, or 5 when a budget is missed, a measurement is missing or a regression is found (1 for an unreadable file, 2 for
+a wrong command line). `paddock-bench propose --results ... --margin 25` writes a first `budgets.toml`. The tests of an app's
+benchmark logic use `ManualClock`, so they do not depend on machine speed. The nightly workflow template is
+`.gitea/workflow-templates/bench-nightly.yml`.
+
+## `paddock-cli` (plan X25)
+
+One look and behaviour for every command line (Pitwall, Dyno, Debrief, the agent and service programs). Pure: writers and
+times are passed in.
+
+```rust
+use paddock_cli::{finish, CliError, CommonFlags, Exit, Format, Help, Progress, Report};
+
+let (flags, rest) = CommonFlags::extract(&std::env::args().skip(1).collect::<Vec<_>>()); // --json -q -h -V
+let result: Result<Report, CliError> = run(&rest);              // Err(CliError::not_running("Pitwall", "Start the app."))
+let exit = finish(flags.format, result, &mut stdout, &mut stderr); // text, or ONE JSON object (errors too)
+std::process::exit(exit.code());
+```
+
+Exit codes (a contract): 0 ok, 1 failure, 2 usage, 3 not running, 4 refused, 5 findings, 130 interrupted. Data goes to
+stdout, progress and notes to stderr. `Progress::update(now, line)` throttles to one line per 500 ms, drops repeats and lets a
+new phase through. `Table` renders text, CSV or JSON with bounded cells and a truncation note. `parse_time`, `parse_size`,
+`format_size` read command-line values once. `paddock_service::Verb` registers its words in `Help` and decides `status`'s exit.
+
 ## `paddock-names` (plan X18)
 
 Rule 20 as a pure library: the user types "grafic bilder" and finds `CompanyA.Graphic.Builder.exe`, or "memory pages" and finds
@@ -1116,3 +1171,70 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   four commands of `status::COMMANDS` (`pitwall_state`, `pitwall_connect`, `pitwall_cancel_pairing`, `pitwall_use_builtin`) over
   its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
   by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.
+
+## `paddock-metrics` (plan X30)
+
+Replaces `metrics.rs` in Pitcrew (generic `TieredStore`), Pitwall (four tiers) and the tier maths of Dyno's agent store, and the four
+free-space helpers (Debrief `disk.rs`, Pitcrew `probe.rs`, Pitwall `system.rs`, Dyno `sensors.rs`).
+
+```rust
+let retention = Retention::standard(30);                    // 5 s/1 h, 1 min/1 d, 10 min/1 w, 1 h/30 d; Retention::new(..) checks your own
+let file = StoreFile::<MachineSample>::new(dirs.state("metrics.json"), retention.clone());
+let (mut store, problem) = file.load();                     // damaged or newer file: empty store + a Problem to report once
+let mut sampler = Sampler::new(SystemProbe::new(), clock).watch_disk(&runners_dir).watch_process(std::process::id());
+store.push(sampler.sample());                               // every tier; a sample from the past is TooLate, never reordered
+let chart = store.query(clock.wall_ms() as u64, Duration::from_secs(86_400));   // the finest tier covering the range
+file.save(&store)?;
+```
+
+- A `Series` says how samples fold into a bucket (`begin`/`absorb`/`point`); the bucket may be any serializable value, so Pitwall's
+  histograms fit. Memory is `Retention::capacity()` points at most (`MAX_TIERS` 8, `MAX_KEEP`, `MAX_POINTS`); a file written with another
+  tier layout is dropped, a changed `keep` trims.
+- `MachineSample` aggregates CPU and memory as means (with the CPU peak), free disk as the minimum. Own memory is `paddock-proc`'s
+  `tree_memory`: PSS on Linux, threads skipped (rule 26).
+- `volume_free` picks the mount with the longest matching mount point (verbatim Windows paths match plain ones); `Sampler::disk_space` caches
+  the list of volumes (`mounts_every`, default 60 s, on the clock). `folder_size` stops at `max_entries`, `max_depth`, `max_time` (on the
+  clock) or a cancel and never follows links; `folder_size_with` takes any listing for tests.
+- Dyno keeps its SQLite history and uses `bucket_start`, `Retention::tier_for` and `Mean` for the tier maths.
+
+## `paddock-testkit` (plan X40)
+
+A `[dev-dependencies]` crate; nothing in it ships. It replaces `std::env::temp_dir()` (clippy forbids it in tests, `lint/clippy.toml`), the per-app env mutexes and the hand-made fake runners:
+
+```rust
+use paddock_testkit::{assert_golden, env_lock, FakeRunner, Reply, Scratch};
+
+let scratch = Scratch::new();                       // work(), home(), tmp(); deleted on drop
+let mut env = env_lock();                           // one lock for every test that touches the environment
+env.hermetic(&scratch);                             // HOME, APPDATA, XDG_*, TMPDIR now point into the scratch folder
+let cfg = scratch.write("conf/app.toml", "x = 1")?; // relative paths only; `..` and absolute paths are refused
+run_the_code_under_test(&cfg);
+assert_golden(&golden_dir.join("report.txt"), &report);   // PADDOCK_UPDATE_GOLDEN=1 rewrites the file
+scratch.finish()?;                                  // or just drop it: anything left in tmp() fails the test
+```
+
+- `Scratch`: `work()` is for the code under test, `home()` stands in for the user's home, `tmp()` for the shared temp folder. Dropping a
+  scratch whose `tmp()` is not empty panics with the names (not while the test is already failing); `finish()` returns them as an
+  error to assert on. An unreadable `tmp()` counts as a leftover. `PADDOCK_TESTKIT_KEEP=1` keeps the folder of a failed test.
+- `env_lock()`: a process-wide lock (a lock poisoned by a failed test is recovered); `set`/`remove` restore the original values in
+  reverse order when the guard drops. `hermetic(&scratch)` is the in-process half of C14 (the wrapper `paddock-conformance run --`
+  is the other half).
+- Golden files: line endings normalised; the failure names the file, the first differing line and the update variable.
+- `FakeRunner`: `on("launchctl", &["print"]).reply(Reply::ok("..."))`, replies queue (`.then(...)`, the last repeats), the first
+  matching rule answers, an unscripted command is an error reply, `calls()`/`lines()`/`count()` record. An app implements its own
+  runner trait for it in its test module (Dyno's `Runner`).
+- `corpus(seed)` gives a bounded, deterministic set of hostile inputs; `never_panics(&corpus(seed), parse)` returns the inputs that
+  panicked (the proptest-free half of X41).
+- `FakeClock` (and `Clock`) are `paddock_jobs::time`'s, re-exported: assert on a fake clock, never on `Instant::now()` (C30).
+
+### `CommandError` (plan X28)
+
+`paddock_commands::CommandError` is the one error a command rejects with: `{ code, message, retryable, hint?, field?, cause?, kind? }`
+in camelCase. `ErrorCode` is a short general list (`failed`, `invalid`, `notFound`, `notGranted`, `busy`, `cancelled`, `io`, `limit`,
+`unsupported`, `unavailable`, `denied`, `missing`, `timeout`, `internal`), so a code means the same in every app; an app's own
+distinctions (Pitcrew's `unknownRunner`, Debrief's `noModel`) go in `kind`. Constructors per code (`CommandError::invalid("...")`),
+builders (`.hint()`, `.field()`, `.cause("health:store")`, `.kind()`, `.retry(bool)`), and `From` for `io::Error` (not found, denied,
+io), `String`/`&str` (`failed`) and the guard's `Refusal` (`denied`, `limit`). `retryable` defaults by code (`busy`, `io`,
+`unavailable`, `timeout`). The TypeScript (`ui/projects/paddock-ui/ipc/generated/ipc.ts`, with the runtime `ERROR_CODES`) is generated
+by `PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated` and checked on every run. Domain errors stay in their libraries
+and convert once at the command edge.
