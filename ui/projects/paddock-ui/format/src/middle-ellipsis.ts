@@ -11,6 +11,14 @@ function lastSeparatorIndex(chars: readonly string[]): number {
   return -1;
 }
 
+const isBoundary = (c: string | undefined): boolean => c === '.' || c === '-' || c === '_' || c === ' ';
+
+/** The first word start at or after `from` (after a `.`, `-`, `_` or space), so the tail never begins mid-word; `from` when there is none. */
+function wordStart(chars: readonly string[], from: number): number {
+  for (let i = Math.max(1, from); i < chars.length; i++) if (isBoundary(chars[i - 1])) return i;
+  return from;
+}
+
 /** A text cut into the part that may be shortened and the part that always stays visible. */
 export interface SplitText {
   head: string;
@@ -19,7 +27,8 @@ export interface SplitText {
 
 /**
  * Splits `text` for a middle ellipsis done by layout (CSS): `tail` is the last separator and file name (or, with no
- * separator or a name longer than `keepTail`, the last `keepTail` characters, so a long extension or id stays visible)
+ * separator or a name longer than `keepTail`, the last `keepTail` characters from the next word start, so a long extension or id stays
+ * visible and the tail never begins mid-word)
  * and `head` is the rest, which the layout shortens with an ellipsis. Counts code points, never splitting a surrogate pair.
  */
 export function splitForEllipsis(text: string, keepTail = DEFAULT_KEEP_TAIL): SplitText {
@@ -29,6 +38,7 @@ export function splitForEllipsis(text: string, keepTail = DEFAULT_KEEP_TAIL): Sp
   const lastSeparator = lastSeparatorIndex(chars);
   // Keep the separator before the file name when the whole name fits: "…\Builder.Service.log".
   if (lastSeparator >= 0 && chars.length - lastSeparator <= keep) start = lastSeparator;
+  else if (start > 0) start = wordStart(chars, start);
   if (start <= 0) return { head: '', tail: text };
   return { head: chars.slice(0, start).join(''), tail: chars.slice(start).join('') };
 }
