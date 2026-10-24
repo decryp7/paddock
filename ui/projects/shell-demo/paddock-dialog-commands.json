@@ -1,0 +1,28 @@
+{
+  "//": "hostOnly: a dialog window provides no UI checkpoint, so the start-up contract never saves one there (ui_checkpoint is MAIN-only).",
+  "tsconfig": "tsconfig.app.json",
+  "registry": [
+    "src/app/demo.contributions.ts"
+  ],
+  "table": [
+    "src/app/generated/app-commands.ts",
+    "../paddock-ui/shell/generated/shell-commands.ts"
+  ],
+  "base": [
+    "window_pong",
+    "window_ready"
+  ],
+  "baseEntries": [
+    [
+      "src/app/dialog-base.ts",
+      "dialogBaseProviders"
+    ]
+  ],
+  "hostOnly": [
+    [
+      "../paddock-ui/shell/startup/src/backend.ts",
+      "TauriStartupBackend",
+      "checkpointUi"
+    ]
+  ]
+}

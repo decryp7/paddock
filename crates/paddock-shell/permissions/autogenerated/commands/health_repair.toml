@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-health-repair"
+description = "Enables the health_repair command without any pre-configured scope."
+commands.allow = ["health_repair"]
+
+[[permission]]
+identifier = "deny-health-repair"
+description = "Denies the health_repair command without any pre-configured scope."
+commands.deny = ["health_repair"]

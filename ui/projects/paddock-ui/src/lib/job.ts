@@ -5,7 +5,7 @@ import { jobView, type SuJobSnapshot } from './job-view';
  * One long operation (ADR 0008): title and subject, the current phase with its own count, a determinate bar or an indeterminate
  * bar with a growing count, ETA only when the engine has a trustworthy one, Cancel (disabled with the reason while a step cannot be
  * interrupted) and a polite live region that announces phase and state changes, not every tick. Presentational: the app feeds it the
- * latest `paddock-job` snapshot and handles `cancel`. Set `stalled` when no event arrived for a while; the job is never timed out.
+ * latest `paddock://jobs` snapshot and handles `cancel`. Set `stalled` when no event arrived for a while; the job is never timed out.
  */
 @Component({
   selector: 'pd-job',
@@ -35,18 +35,23 @@ import { jobView, type SuJobSnapshot } from './job-view';
         aria-valuemin="0"
         aria-valuemax="100"
         [attr.aria-valuenow]="view().percent === null ? null : round(view().percent)"
-        [attr.aria-valuetext]="view().percent === null ? view().count || 'In progress' : null"
+        [attr.aria-valuetext]="view().percent === null ? view().count || inProgress : null"
         [attr.aria-label]="view().title + ': ' + view().headline"
       >
         <span class="fill" [style.width.%]="view().percent === null ? null : view().percent"></span>
       </div>
     }
     @if (view().detail) {
-      <p class="detail">{{ view().detail }}</p>
+      <p class="detail">
+        @if (stalled() && job().state === 'running') {
+          <svg class="warn" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M8 2.5 14 13H2L8 2.5ZM8 6.5v3M8 11.25h.01" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        }
+        <span>{{ view().detail }}</span>
+      </p>
     }
     @if (view().canCancel) {
       <div class="actions">
-        <button type="button" class="cancel" [disabled]="view().cancelDisabled" (click)="cancel.emit(job().id)">Cancel</button>
+        <button type="button" class="cancel" [disabled]="view().cancelDisabled" (click)="cancel.emit(job().id)">{{ t.jobCancel }}</button>
         @if (view().cancelHint) {
           <span class="hint">{{ view().cancelHint }}</span>
         }
@@ -60,15 +65,19 @@ import { jobView, type SuJobSnapshot } from './job-view';
     .title { font-weight: var(--pd-weight-semibold); }
     .subject { color: var(--pd-text-muted); font-size: var(--pd-text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .line { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--pd-space-1) var(--pd-space-3); }
-    .headline { color: var(--pd-text); }
+    /* The phase is calm: muted while running (a stalled step says so in its detail line, with an icon and a word). */
+    .headline { color: var(--pd-text-muted); }
     .count, .eta { color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
     :host(.pd-job--success) .headline { color: var(--pd-success); }
     :host(.pd-job--danger) .headline { color: var(--pd-danger); }
-    :host(.pd-job--warning) .headline { color: var(--pd-warning); }
-    .bar { position: relative; height: 6px; overflow: hidden; background: var(--pd-surface-3); border-radius: var(--pd-radius-pill); }
-    .fill { display: block; height: 100%; background: var(--pd-accent-fill); border-radius: inherit; transition: width var(--pd-duration) var(--pd-ease-move); }
+    :host(.pd-job--warning) .detail { color: var(--pd-warning); }
+    /* Track surface-2, fill the accent text colour: at least 3:1 in both themes (WCAG 1.4.11). */
+    .bar { position: relative; height: 6px; overflow: hidden; background: var(--pd-surface-2); box-shadow: inset 0 0 0 1px var(--pd-hairline); border-radius: var(--pd-radius-pill); }
+    .fill { display: block; height: 100%; background: var(--pd-accent); border-radius: inherit; transition: width var(--pd-duration) var(--pd-ease-move); }
     .bar.indeterminate .fill { position: absolute; width: 35%; animation: pd-job-slide 1.4s var(--pd-ease-move) infinite; }
-    .detail { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .detail { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); line-height: var(--pd-lh-body); }
+    /* On the first line when the text wraps: centred in that line's box. */
+    .warn { flex: none; margin-top: calc((1lh - 14px) / 2); }
     :host(.pd-job--danger) .detail { color: var(--pd-danger); }
     .actions { display: flex; align-items: center; gap: var(--pd-space-2); }
     .cancel { min-height: var(--pd-button-height); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font-weight: var(--pd-weight-medium); }
@@ -78,20 +87,30 @@ import { jobView, type SuJobSnapshot } from './job-view';
     .pd-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     @keyframes pd-job-slide { from { left: -35%; } to { left: 100%; } }
     @media (prefers-reduced-motion: reduce) {
-      .bar.indeterminate .fill { animation: none; left: 0; width: 100%; opacity: 0.5; }
+      /* Unknown total without motion: a static striped track, never a full bar that reads as done. */
+      .bar.indeterminate { background: repeating-linear-gradient(135deg, var(--pd-accent) 0 4px, var(--pd-surface-2) 4px 10px); }
+      .bar.indeterminate .fill { display: none; }
       .fill { transition: none; }
     }
   `,
 })
 export class SuJob {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    jobCancel: $localize`:@@pd.ui.job.cancel:Cancel`,
+  };
   /** The latest snapshot of the job. */
   readonly job = input.required<SuJobSnapshot>();
   /** No event for a while: shows "Still working" (never an error, never a timeout). */
   readonly stalled = input(false);
+  /** The job's running time now (ms), when the caller tracks it between events: the count of an unknown step grows. */
+  readonly elapsedMs = input<number | null>(null);
   /** Emits the job id when Cancel is pressed. */
   readonly cancel = output<number>();
+  /** The progress bar's value text while the total is unknown. */
+  protected readonly inProgress = $localize`:@@pd.ui.job.in-progress:In progress`;
 
-  protected readonly view = computed(() => jobView(this.job(), this.stalled()));
+  protected readonly view = computed(() => jobView(this.job(), this.stalled(), this.elapsedMs() ?? this.job().elapsedMs));
 
   protected round(v: number | null): number | null {
     return v === null ? null : Math.round(v);

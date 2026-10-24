@@ -1,10 +1,10 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const THEMES = ['dark', 'light'] as const;
-const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter'] as const;
+const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter'] as const;
 const SECTIONS = [
   'card',
   'status-pill',

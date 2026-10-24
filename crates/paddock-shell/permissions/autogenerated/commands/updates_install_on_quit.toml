@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-updates-install-on-quit"
+description = "Enables the updates_install_on_quit command without any pre-configured scope."
+commands.allow = ["updates_install_on_quit"]
+
+[[permission]]
+identifier = "deny-updates-install-on-quit"
+description = "Denies the updates_install_on_quit command without any pre-configured scope."
+commands.deny = ["updates_install_on_quit"]

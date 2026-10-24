@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { SuJob } from './job';
-import { formatBytes, formatCount, formatEta, jobView, type SuJobSnapshot } from './job-view';
+import { formatBytes, formatCount, formatElapsed, formatEta, jobView, type SuJobSnapshot } from './job-view';
 
 const base = { id: 7, kind: 'import', title: 'Import logs', subject: '3 folders', seq: 1, elapsedMs: 0, cancellable: true };
 const running = (phase: unknown, extra: Partial<SuJobSnapshot> = {}): SuJobSnapshot =>
@@ -50,14 +50,16 @@ describe('jobView', () => {
   });
   it('running without a phase says Starting with an indeterminate bar', () => {
     const v = jobView({ ...base, state: 'running' } as SuJobSnapshot);
-    expect([v.headline, v.percent, v.showBar, v.count]).toEqual(['Starting', null, true, '']);
+    expect([v.headline, v.percent, v.showBar, v.count]).toEqual(['Starting', null, true, '0 s elapsed']);
   });
   it('unknown total is indeterminate with a growing count and no ETA', () => {
     const v = jobView({ ...discovering, etaMs: 5000 } as SuJobSnapshot);
     expect([v.percent, v.count, v.eta]).toEqual([null, '12,345 so far', '']);
   });
-  it('an empty indeterminate phase shows no count', () => {
-    expect(jobView(running({ id: 'a', label: 'A', unit: 'items', done: 0 })).count).toBe('');
+  it('an empty indeterminate phase counts its time instead (rule 11: never a static value)', () => {
+    expect(jobView(running({ id: 'a', label: 'A', unit: 'items', done: 0 })).count).toBe('0 s elapsed');
+    expect(jobView(running({ id: 'a', label: 'A', unit: 'items', done: 0 }), true, 72_000).count).toBe('1 min elapsed');
+    expect(jobView(running({ id: 'a', label: 'A', unit: 'items', total: 4, done: 0 }), false, 72_000).count).toBe('0 of 4');
     expect(jobView(running({ id: 'a', label: 'A', unit: 'items', total: 0, done: 0 })).percent).toBeNull();
   });
   it('known total is determinate with sizes and ETA', () => {
@@ -108,9 +110,26 @@ describe('SuJob', () => {
     expect(text(el)).toContain('12,345 so far');
     expect(text(el)).toContain('3 folders');
   });
-  it('indeterminate without any count still has a value text', () => {
+  it('indeterminate without any count says how long it has run', () => {
     const el = render(running({ id: 'a', label: 'A', unit: 'items', done: 0 })).nativeElement as HTMLElement;
-    expect(el.querySelector('[role=progressbar]')!.getAttribute('aria-valuetext')).toBe('In progress');
+    expect(el.querySelector('[role=progressbar]')!.getAttribute('aria-valuetext')).toBe('0 s elapsed');
+  });
+  it('a stalled step says so with an icon, and counts the time the caller tracks', () => {
+    const f = render(running({ id: 'a', label: 'Waiting', unit: 'items', done: 0 }), true);
+    f.componentRef.setInput('elapsedMs', 14_000);
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('.detail svg.warn')).not.toBeNull();
+    expect(text(el)).toContain('14 s elapsed');
+  });
+  it('formats elapsed time', () => {
+    expect([formatElapsed(8_400), formatElapsed(3 * 60_000), formatElapsed(65 * 60_000), formatElapsed(120 * 60_000), formatElapsed(Number.NaN)]).toEqual([
+      '8 s',
+      '3 min',
+      '1 h 5 min',
+      '2 h',
+      '0 s',
+    ]);
   });
   it('renders a determinate bar with aria-valuenow, count and ETA', () => {
     const el = render(download).nativeElement as HTMLElement;

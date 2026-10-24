@@ -1,0 +1,37 @@
+{
+  "name": "@decryp7/paddock-e2e",
+  "version": "0.2.0",
+  "description": "Playwright helpers and page objects for the Paddock app shell: test with the Chrome for Testing guard, e2e port, axe in both themes, page objects, layout scenarios, a fake Tauri IPC, settled screenshots and the retried-test reporter.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://dev.decryptology.net/decryp7/paddock.git",
+    "directory": "ui/projects/paddock-e2e"
+  },
+  "keywords": [
+    "playwright",
+    "e2e",
+    "paddock"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./retried-reporter": {
+      "types": "./retried-reporter.d.ts",
+      "default": "./retried-reporter.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@axe-core/playwright": "^4.14.0"
+  },
+  "publishConfig": {
+    "registry": "https://dev.decryptology.net/api/packages/decryp7/npm/",
+    "access": "public"
+  },
+  "//": "The published package.json gets \"type\": \"module\" from scripts/build-e2e.mjs (the build emits ES modules); the sources stay typeless so Playwright loads them like the specs that import them."
+}

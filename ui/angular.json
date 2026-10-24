@@ -7,7 +7,7 @@
     "paddock-ui": {
       "projectType": "library",
       "root": "projects/paddock-ui",
-      "sourceRoot": "projects/paddock-ui/src",
+      "sourceRoot": "projects/paddock-ui",
       "prefix": "su",
       "architect": {
         "build": {
@@ -40,6 +40,7 @@
           "builder": "@angular/build:application",
           "options": {
             "browser": "projects/gallery/src/main.ts",
+            "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/gallery/tsconfig.app.json",
             "styles": ["projects/paddock-ui/css/paddock.css", "projects/gallery/src/styles.css"]
           },
@@ -58,6 +59,40 @@
           "configurations": {
             "production": { "buildTarget": "gallery:build:production" },
             "development": { "buildTarget": "gallery:build:development" }
+          },
+          "defaultConfiguration": "development"
+        }
+      }
+    },
+    "shell-demo": {
+      "projectType": "application",
+      "root": "projects/shell-demo",
+      "sourceRoot": "projects/shell-demo/src",
+      "prefix": "sd",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "projects/shell-demo/src/main.ts",
+            "polyfills": ["@angular/localize/init"],
+            "tsConfig": "projects/shell-demo/tsconfig.app.json",
+            "styles": ["projects/paddock-ui/css/paddock.css", "projects/shell-demo/src/styles.css"]
+          },
+          "configurations": {
+            "production": {
+              "outputHashing": "all",
+              "optimization": { "scripts": true, "styles": { "minify": true, "inlineCritical": false }, "fonts": false },
+              "budgets": [{ "type": "initial", "maximumWarning": "500kB", "maximumError": "1MB" }]
+            },
+            "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": { "buildTarget": "shell-demo:build:production" },
+            "development": { "buildTarget": "shell-demo:build:development" }
           },
           "defaultConfiguration": "development"
         }

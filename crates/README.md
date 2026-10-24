@@ -1,22 +1,95 @@
 # Shared Rust crates
 
-A Cargo workspace for Rust code the five apps share. Members so far: `paddock-jobs` (ADR 0008). Crates are extracted from the apps one at a
-time (a crate moves here when a second app needs it, rule of three for new abstractions, two for copied code).
+A Cargo workspace for Rust code the apps share. Members: `paddock-jobs` (ADR 0008) and the app shell crates of ADR 0012
+(`paddock-commands`, `-dialogs`, `-download`, `-health`, `-menu`, `-settings`, `-startup`, `-updater`, `-window`, and
+`paddock-shell`, the Tauri plugin that wires them; plan [docs/plans/workbench.md](../docs/plans/workbench.md) S0-S17). Crates are extracted from the apps one
+at a time (a crate moves here when a second app needs it, rule of three for new abstractions, two for copied code).
 
 Rules for a crate here:
 
 - Pure logic and thin adapters, no dependency on any app crate. Edition and licence come from `[workspace.package]`.
 - Library errors are typed, no `unwrap`/`expect` on user data or I/O, `cargo clippy -- -D warnings` clean,
   >= 99% line coverage.
-- Apps consume a crate as a git dependency pinned to a repo tag, for example
-  `paddock-foo = { git = "https://dev.decryptology.net/decryp7/paddock", tag = "v0.2.0" }`.
-- One semver tag for the whole repo: a release tag versions the UI package and every crate together.
+- Native glue (code only a real desktop runs, that tests cannot reach by rule 7 or because Tauri does not let them build
+  the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
+  `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
+  `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`.
+- A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
+  `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
+  the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
+- A crate that uses another one writes `paddock-jobs = { workspace = true }` (the workspace dependency carries path,
+  version and registry, so the published crate points at the registry).
+- `publish = ["decryp7"]` in every crate. A new crate starts with `[package.metadata.paddock] scaffold = true`, which keeps
+  the publish job from uploading it; its work package removes the marker. A new member also needs its step in the `crate`
+  job of `.gitea/workflows/ci.yml` (`scripts/publish.test.mjs` fails without it).
+- Published to the Gitea cargo registry by the tag workflow only (`.gitea/workflows/publish.yml`, rule 9). One repo tag
+  `vX.Y.Z` releases everything; each crate bumps its own `version` only when it changes, and a version the registry
+  already has is skipped. `node scripts/publish.mjs` is the local dry run (lists every crate and npm package with what a
+  tag would publish).
 
-Planned crates, with their designs in [`docs/adr/`](../docs/adr/README.md) (ADRs 0001 to 0008; nothing is built yet):
+## Consuming the crates
+
+Apps consume the crates from the Gitea cargo registry (decision D3), never from a git tag. In the app's
+`.cargo/config.toml` (no token needed to read):
+
+```toml
+[registries.decryp7]
+index = "sparse+https://dev.decryptology.net/api/packages/decryp7/cargo/"
+```
+
+and in its `src-tauri/Cargo.toml` (pre-1.0: `0.N` accepts patches of that minor only), with `Cargo.lock` committed. An app
+on the shell needs only the plugin; it names a shell crate itself only for the types it uses in its own code:
+
+```toml
+[dependencies]
+paddock-shell = { version = "0.2", registry = "decryp7" }                       # the plugin (lockstep with @decryp7/paddock-ui)
+paddock-health = { version = "0.1", registry = "decryp7", features = ["tauri"] } # e.g. ServiceSpec, Cause for its supervisors
+paddock-jobs = { version = "0.1", registry = "decryp7", features = ["tauri"] }   # its own jobs
+```
+
+The app's `deny.toml` allows the registry: `allow-registry = ["https://github.com/rust-lang/crates.io-index",
+"sparse+https://dev.decryptology.net/api/packages/decryp7/cargo/"]`. Renovate opens one PR per Paddock release (crates
+and npm package together); it lands only through the app's own gates. `paddock-shell` and `@decryp7/paddock-ui` are
+bumped together (the UI checks `shell_version` at start-up); every other crate keeps its own version.
+
+**The shell in an app** (ADR 0012 §3): one plugin line, the app's own table next to it, and one capability set per
+window class.
+
+```rust
+// src-tauri/src/main.rs
+let shell = paddock_shell::Builder::new(paddock_shell::AppIdentity::new("pitwall", "Pitwall", env!("CARGO_PKG_VERSION")))
+    .app_commands(&COMMANDS)                                       // the app's own command_table! (checked against the shell's)
+    .dialog_contracts(include_str!("../dialog-contracts.json"))    // generated by the UI from its registry
+    .health(vec![ServiceSpec::new("llm", "the model server").repair(restart_llm)])
+    .section(paddock_settings::section(models_section(), apply_models))
+    .updater(|_| UpdatesBuilder::new("Pitwall").public_key(option_env!("TAURI_UPDATER_PUBKEY")).changelog(include_str!("../../CHANGELOG.md")))
+    .windows(|_| Windows::builder(WindowConfig::new("Pitwall")).build())
+    .build();
+tauri::Builder::default()
+    .plugin(shell)
+    .invoke_handler(paddock_commands::tauri::Guard::new(&COMMANDS).dialog_grants(paddock_dialogs::tauri::grant_of).wrap(handler!()))
+```
+
+```json
+// src-tauri/capabilities/shell.json (one capability per window class; the guard narrows dialogs to their contracts)
+[
+  { "identifier": "shell-main", "windows": ["main", "w-*"], "permissions": ["paddock-shell:main"] },
+  { "identifier": "shell-popout", "windows": ["p-*"], "permissions": ["paddock-shell:popout"] },
+  { "identifier": "shell-dialog", "windows": ["d-*"], "permissions": ["paddock-shell:dialog"] },
+  { "identifier": "shell-tray", "windows": ["tray", "tray-*"], "permissions": ["paddock-shell:tray"] }
+]
+```
+
+and in a test of the app: `assert_eq!(shell().problems(Some(include_str!("../paddock-manifest.json"))), Vec::<String>::new())`
+(see `paddock-shell` below). The UI side is in [ui/README.md](../ui/README.md) ("Adopting the shell").
+
+Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/README.md):
 
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -29,5 +102,438 @@ Planned crates, with their designs in [`docs/adr/`](../docs/adr/README.md) (ADRs
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
 | `paddock-cli` | shared CLI conventions (`--json`, exit codes, timeouts) | yes |
 
-To add a crate: create `crates/<name>`, add it to `members` in `Cargo.toml`, and add its job to
-`.gitea/workflows/ci.yml` (the Rust jobs are stubbed there).
+## `paddock-jobs` Tauri adapter (plan S9)
+
+With the `tauri` feature, `paddock_jobs::tauri` is the jobs part of the shell (ADR 0008 open question 2, ADR 0012 §3):
+
+```rust
+tauri::Builder::default()
+    .setup(|app| {
+        let jobs = paddock_jobs::tauri::manage(app.handle()); // Arc<JobRegistry>; snapshots go out on `paddock://jobs`
+        app.manage(AppState { jobs, pool: JobPool::new(Workers::auto()) });
+        Ok(())
+    })
+    .invoke_handler(paddock_jobs::tauri::route(
+        paddock_jobs::tauri::handler(),                    // or handler_with_grants(lookup): dialogs by their contracts
+        paddock_commands::tauri::Guard::new(&COMMANDS).wrap(handler!()),
+    ))
+```
+
+- `Emit` is the `EventSink` (event `EVENT` = `paddock://jobs`, every snapshot to every webview); `Jobs` is the managed state.
+- `COMMANDS` (a `command_table!`): `jobs_snapshot` (query: every known job, ordered by id) and `job_cancel { id }`
+  (mutation: false for an unknown or ended job). Both are async, return at once and never wait for a job; an app without
+  the state gets `{ code: 'notSetUp', message, retryable: false }`. Starting work stays with the app: its command registers
+  a job, submits it to its `JobPool` and returns the id.
+- `route(jobs, other)` sends the table's commands to the jobs handler and the rest to the app's, for an app without the
+  `paddock-shell` plugin (which serves these commands itself; `invoke_handler()` is the unguarded handler it composes).
+- Generated TypeScript in `ui/projects/paddock-ui/shell/jobs/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs
+  --features tauri --test tauri generated`): `jobs-commands.ts` (`JOBS_COMMANDS`, `JobsCommand`) and `jobs-fixtures.ts`
+  (one snapshot of every shape, written by the real reporter, decoded by the UI's specs).
+
+## `paddock-commands` (plan S1)
+
+The command table of an app or a shell plugin, and its guard (ADR 0012 §3, ported from Debrief ADR 0016 and 0054):
+
+```rust
+paddock_commands::command_table! {
+    pub(crate) static COMMANDS, macro handler;       // the validated `Table`, and `handler!()` = `::tauri::generate_handler![...]`
+    Query [WINDOW] => workspace::summary,           // Kind: Query | Mutation | Quiet (how it is logged)
+    Mutation [MAIN | DIALOG] limit 4 * MIB => workspace::open_paths,
+    Quiet [MAIN] => session::save_session,          // classes: MAIN (`main`, `w-<n>`), POPOUT (`p-<host>-<n>`), DIALOG (`d-<host>-<n>`), WINDOW (all)
+}
+tauri::Builder::default().invoke_handler(
+    paddock_commands::tauri::Guard::new(&COMMANDS)
+        .dialog_grants(|app, label| dialogs_of(app).grant_of(label))  // impl DialogGrant: the per-dialog contract (ADR 0009)
+        .wrap(handler!()),
+)
+```
+
+- The table is validated at compile time: a duplicate name, a command callable from no class, a name that is not
+  `lower_snake_case` (1-64) or a limit outside 1 KiB-64 MiB does not compile (default limit 256 KiB).
+- The guard refuses, before the arguments are parsed: a class the entry does not name, a webview outside the label
+  scheme, a dialog without a grant or whose grant does not cover the command, a request over the limit. The refusal is
+  the command's error (`{ code: 'denied' | 'limit', message, retryable: false, command, dialog? }`) and is logged with
+  target `paddock_commands` (keys `Command`, `Window`, `Dialog`, `ErrorCode`): an error naming the dialog and the
+  command for a contract breach, else a warning. Plugin commands (`plugin:...`) and unknown commands pass.
+- `Table::kind_of` classifies a command for the activity log; `Table::contract_problems(base, dialogs, host_only)`
+  checks dialog contracts against the table; `labels` is the shell's window label scheme (`Label`, `class_of`,
+  `resolve`).
+- Tray popovers (`tray`, `tray-<item>`) are their own class `TRAY` (plan S12): not part of `WINDOW`, so a popover calls
+  only the commands that name it (`[WINDOW | TRAY]`), it hosts no dialogs, and the start-up watchdog does not watch it.
+- In the owning crate's tests: `paddock_commands::testing::assert_async(&COMMANDS, &[src])` fails on any sync
+  `#[tauri::command]` and on table entries it cannot find; `testing::sync_generated(path, text, WriteMode::from_env())`
+  fails on a stale generated file (`PADDOCK_WRITE_TS=1` rewrites it).
+
+**Generated TypeScript command names** (`paddock_commands::ts::names_module(&TABLE, "APP_COMMANDS", "AppCommand", how)`),
+one file per table, written by a test of the crate that owns the table and checked on every run, so a stale file fails
+CI:
+
+```ts
+// Generated from the command table by paddock-commands. Do not edit: <how to regenerate>.
+
+/** Every command of the table: its kind, the window classes that may call it and its largest request in bytes. */
+export const APP_COMMANDS = {
+  open_paths: { kind: 'mutation', windows: ['main', 'dialog'], limit: 4194304 },
+  summary: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+} as const;
+
+/** A command name of the table. */
+export type AppCommand = keyof typeof APP_COMMANDS;
+```
+
+Entries are sorted by name; an empty table is `{} as const` (name type `never`).
+
+**Composed tables** (plan S17): `command_table! { pub static SHELL = [A, B, C]; }` folds other tables into one, validated
+the same way at compile time (a command two parts declare does not compile); `tauri::Routes` sends each call to the
+handler of the part that lists it, so one `Guard` covers them all. That is how `paddock-shell` serves every shell crate's
+commands: each crate keeps its table and an unguarded `invoke_handler()`, and no crate's Tauri command macros (exported
+at its crate root by `#[tauri::command]`) are spliced into another crate's `generate_handler!`.
+
+The shell's files live in `ui/projects/paddock-ui/shell/generated/` and in the entry point that uses each:
+
+| File | Content | Written by |
+|---|---|---|
+| `commands.ts` | the wire types (ts-rs): `CommandKind`, `WindowClass`, `CommandInfo`, `RefusalCode`, `CommandRefusal` | `paddock-commands` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated`) |
+| `shell-commands.ts` | `SHELL_COMMANDS` and `ShellCommand`, every command of the shell plugin | `paddock-shell` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-shell --lib generated`) |
+| `shell.ts` | `SHELL_PLUGIN`, `SHELL_VERSION` and the `shell_version` reply (`VersionReply`, `AppIdentity`) | `paddock-shell` (same test) |
+| `notify/generated/health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications, window notices and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
+| `notify/generated/health-commands.ts` | `HEALTH_COMMANDS` and `HealthCommand`, the health and notification commands | `paddock-health` (same test) |
+
+An app writes its own file the same way into its UI (for example `src/app/core/generated/app-commands.ts`); dialog
+contracts and the contributions core type command names as `AppCommand | ShellCommand`.
+
+## `paddock-dialogs` (plan S5)
+
+Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_contracts.rs`, `dialog_placement.rs` and
+`dialog_windows.rs` (Debrief ADRs 0050, 0054) without Debrief's dialog ids:
+
+- `Contracts::parse(json)` reads the app's generated contract file once (written by `dialogContractFile` in
+  `@decryp7/paddock-ui/shell/dialogs`; dialog ids are the shell's namespaced ids, `[a-z0-9.-]`) (version 1; `base` and per-dialog `kind`,
+  `modality`, `requiredChoice`, `instanced`, `minSize`, `commands` with `prefix*`) and refuses one that contradicts
+  itself (a modeless decision, a modal viewer or tool, a modeless required choice, bad ids or names, limits).
+  `Contracts::allows(dialog, command)` covers `BASE_COMMANDS` (`dialog_take_input`, `dialog_close`, `dialog_fit_height`, `notifications_post`, `notifications_list`),
+  the app's base set and the dialog's own list; `Contracts::problems(&TABLE, host_only)` checks them against the command
+  table (run it in a test). `Kind::policy()` is the size rule per kind (viewer floor 680x560 and grows only, tool
+  default 960x680, decision and form fitted to their content).
+- `placement`: pure geometry in physical px. `monitor_of` picks the parent's monitor (most overlap, else nearest; never
+  the primary display as such); `place` sizes and places on that monitor's work area (remembered offset from the parent
+  only when the whole dialog stays there, else centred on the parent and moved inside; shrunk to fit; mixed DPI and
+  negative coordinates); `screen_position` gives points on macOS and the exact physical place elsewhere;
+  `memory_for` is what each kind keeps of a remembered place.
+- `Dialogs` (managed state) records open dialogs by label `d-<host>-<n>` (at most 8 per host), answers the guard
+  (`grant_of(label)`, the `paddock_commands::DialogGrant`) and decides close requests (`close_request(label, now)`:
+  forwarded as the dialog's Close/Cancel, closed when it did not answer within 1.5 s, a required choice kept unless the
+  watchdog marked its page unresponsive).
+- `tauri` feature: `open` (window by kind, no title-bar buttons, owned or independent per OS, modal parent disabled
+  natively except on macOS, `WindowHooks` for the app's webview settings), the commands `dialog_open`,
+  `dialog_take_input`, `dialog_close`, `dialog_fit_height`, `on_window_event` (close request, move/resize, destroyed
+  dialog or host), `page_unresponsive`, `close_all_of`, `set_visible`, `grant_of` for `Guard::dialog_grants`. Events
+  `paddock://dialog-result`, `paddock://dialog-closed` (to the opener), `paddock://dialog-close-requested` (to the
+  dialog).
+
+```rust
+paddock_commands::command_table! {
+    static COMMANDS, macro handler;
+    Mutation [MAIN | DIALOG] limit 9 * MIB => paddock_dialogs::tauri::dialog_open,
+    Query [DIALOG] => paddock_dialogs::tauri::dialog_take_input,
+    Mutation [DIALOG] limit 2 * MIB => paddock_dialogs::tauri::dialog_close,
+    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit_height,
+    // ... the app's commands
+}
+tauri::Builder::default()
+    .manage(paddock_dialogs::Dialogs::from_json(include_str!("../dialog-contracts.json"))?)
+    .invoke_handler(Guard::new(&COMMANDS).dialog_grants(paddock_dialogs::tauri::grant_of).wrap(handler!()))
+    .on_window_event(|w, e| paddock_dialogs::tauri::on_window_event(w, e))
+```
+
+Wire types are generated into `ui/projects/paddock-ui/shell/generated/dialogs.ts` (`DialogKind`, `DialogContract`,
+`DialogContractFile`, `DialogRequest`, `DialogStart`, `DialogResult`, `DialogClosed`, `DialogError`, `DIALOG_EVENTS`,
+`DIALOG_BASE_COMMANDS`; `PADDOCK_WRITE_TS=1 cargo test -p paddock-dialogs --lib generated`).
+## `paddock-health` (plan S3)
+
+Service health and the cause-key notification centre (ADR 0010, ADR 0012 §3), ported from Debrief ADR 0055
+(`health/{model,registry}.rs`, the generic half of `health/hub.rs`, `notification_centre/`), without Debrief's
+services, sources or actions:
+
+```rust
+// The app registers its services; the repair is the shell's code and never goes through the broken service (rule 19).
+let health = paddock_health::tauri::init(app.handle(), paddock_health::tauri::Setup::new(vec![
+    ServiceSpec::new("llm", "the model server").repair(move || supervisor.restart().map_err(|e| Cause::new("...").detail(e))),
+]).notifications_file(data_dir.join("notifications.json")).os_notifications(|app, notice| show_os(app, notice)))?;
+// Supervisors report; the same report again announces nothing.
+health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.").code("llm.stopped"), Some(RepairAction::Restart));
+// Commands behind the shell's guard (S17 lists them in the shell plugin's table).
+.invoke_handler(Guard::new(&paddock_health::tauri::COMMANDS).wrap(paddock_health::tauri::invoke_handler()))
+```
+
+- One failure is one chip and one notification in every window: each real change is one `paddock://service-health`
+  event (a `ServiceHealthSnapshot`) and one message with the cause `health:<id>` (posted on the outage, updated in
+  place, resolved on the recovery), with a `paddock://notifications` event per window. New windows ask with
+  `health_snapshot` and `notifications_list`.
+- `notifications_post` (16 KiB): a window's own notice (`SHELL_PORTS.notify`) goes to the centre, so the engine stays the
+  source and every window lists it (rule 34). Untrusted input parsed once (`notify::window::WindowNotice`): the severity
+  is closed (no `critical`), the title one line of at most 160 characters, the body at most 1000, the kind an id of
+  `[a-z0-9.-]` (never `health`), unknown fields refused; the cause is the engine's (`ui:<kind or severity>:<title>`), so
+  a window never addresses another source's message and the same notice again counts up. App scope (default) reaches
+  every window, window scope the caller's window and its dialogs and pop-outs. Every dialog may call it (and
+  `notifications_list`): both are in `paddock_dialogs::BASE_COMMANDS`.
+- `health_repair` returns at once with the service `repairing`, runs the repair on a background thread (a panic is
+  contained) and ends `ok`, or `down` with the repair's cause; `openSettings` repairs are opened by the UI instead.
+- Notifications: sources and action types are the app's strings (`NoticeSource`, `NoticeAction { type, ...args }`);
+  the shell's own are `health`, `repairService` and `openSettings`. App messages are saved debounced and atomically in a
+  versioned file (missing, damaged or newer: empty, logged); a window's project messages are saved by the app with its
+  project (`notifications_record` / `notifications_restore`). A dialog or pop-out sees its host window's list.
+
+## `paddock-startup` (plan S7 and §11)
+
+The start-up contract and the window watchdog (ADR 0012 §3, ported from Debrief ADR 0058), plus the liveness heartbeat
+after start-up. Every window reports `window_ready` once it painted its frame; a window that does not within 10 s is
+reloaded once, then the user is asked natively (Reload / Restart in Safe Mode / Keep Waiting). Once ready, each visible
+window answers a ping every 2 s (`paddock://ping` → `window_pong`); after 5 missed in a row it is marked unresponsive,
+logged, the unresponsive hook lets its dialog be closed by the OS close, and the user is asked (Reload / Keep Waiting); an
+answer clears the mark. A gap of more than 3 s between ticks means the app process itself was paused: the clocks restart.
+A terminated web content process (macOS) is reloaded at most three times a minute; the reloaded page hears why with its
+last UI checkpoint.
+
+```rust
+let startup = paddock_startup::tauri::Startup::builder()
+    .safe_mode(|app, _label| restart_in_safe_mode(app).map_err(|e| e.to_string()))
+    .on_unresponsive(paddock_dialogs::tauri::page_unresponsive)    // a dialog whose page cannot answer may be closed
+    .native_dialogs()                                               // feature `dialog`; the app registers tauri-plugin-dialog
+    .build()?;                                                      // `Config` timings are checked
+paddock_startup::tauri::install(tauri::Builder::default(), startup) // manage + on_page_load + content-process terminate
+    .invoke_handler(Guard::new(&paddock_startup::COMMANDS).wrap(paddock_startup::tauri::handler()))
+```
+
+- The pure core (`Watchdog`, `Checkpoints`, `ready_reply`, `clean_error`, `Prompt`, `Config`) takes the time from the
+  caller and is tested with a fake clock; the ticker thread (started by the first watched page load; never the main
+  thread) only applies the `Action`s, reloading and asking through `run_on_main_thread`.
+- `COMMANDS`: `window_ready`, `window_boot_error` (16 KiB, one bounded line, at most 10 per page load) and `window_pong`
+  for every window class; `ui_checkpoint` (16 MiB, an object) for main windows only. An app with its own table lists
+  `paddock_startup::tauri::window_ready` and the others there instead; `DIALOG_BASE` names the three every dialog
+  contract includes.
+- Generated TypeScript: `ui/projects/paddock-ui/shell/startup/generated/startup.ts` (wire types) and
+  `startup-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-startup --lib generated`).
+
+## `paddock-window` (plan S12)
+
+Top-level windows, single instance and deep links, the bounded quit, native feel and the tray (ADR 0012 §3), ported
+from Debrief's `window_manager.rs`, `windows.rs`, `instance.rs`, `lifecycle.rs` (exit watchdog), `native_feel.rs` and
+`tray.rs`, Pitwall's `window.rs`/`tray.rs` and Dyno's `popover.rs`, with no app's names, settings or menu items:
+
+```rust
+let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &["pitwall"]);
+if paddock_window::launch::wants_single_instance(&launch, safe_mode_env) {   // first plugin
+    builder = builder.plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance));
+}
+builder.setup(move |app| {
+        app.manage(Windows::builder(WindowConfig::new("Pitwall").schemes(&["pitwall"]))   // .multi_window(32) for Debrief
+            .prefs(settings.clone())                          // impl Prefs: close setting, open-files setting, "remember"
+            .bounds_file(data_dir.join("window-state.json"))
+            .teardown("server client", |app| disconnect(app)) // bounded exit steps, in order
+            .build());
+        app.manage(Windows::dialog_hooks(app.handle()));      // dialogs get the same feel and builder hook
+        app.manage(Popovers::new().popover(None, PopoverSpec::new("index.html#/tray", "Pitwall")));
+        create_tray(app.handle(), Tray::new(NativeTray::new(icons).menu_on_left_click(false), model).popover(true));
+        start(app.handle(), &launch)?;                        // main window, unless `--hidden` and a tray exists
+        Ok(())
+    })
+    .on_window_event(|w, e| { paddock_dialogs::tauri::on_window_event(w, e); paddock_window::tauri::on_window_event(w, e) })
+    .invoke_handler(Guard::new(&paddock_window::COMMANDS).wrap(paddock_window::tauri::handler()))
+    .build(context)?
+    .run(|app, event| paddock_window::tauri::on_run_event(app, &event));
+```
+
+- Pure core: `close` (last window: quit / keep running in the tray / ask; no tray means quit; only an explicit exit
+  ends a tray app; `--hidden` builds no window when a tray can bring it back), `launch` (flags `--new-instance`,
+  `--new-window`, `--safe-mode`, `--hidden`, `--`; paths capped at 256; deep links of the app's schemes parsed once,
+  bounded, no credentials; the open plan: an empty window is reused, links go to the window in front and never ask,
+  the `openFilesIn` setting decides the rest), `bounds` (versioned file, `main` and `window` keys; restored on the
+  monitor the rectangle overlaps most or the nearest, scaled, shrunk and moved inside the work area; new windows
+  cascade on the parent's monitor; built on `paddock_dialogs::placement`), `exit` (`teardown_step` bounded per step,
+  `end_stalled_exit`, once-only `ExitState`), `feel`, `tray` (menu model with validation and the shell's ids `pd.show`,
+  `pd.new-window`, `pd.window:<label>`, `pd.quit`), `popover` (anchoring at the tray icon, fitted height, material per
+  OS, the boot script with `data-popover-open` and Escape).
+- `tauri` feature: `Windows` state and builder, `create_main` (from `tauri.conf.json` with `"create": false`, else
+  `WindowConfig`), `open_new`, `reveal` (rebuilds a destroyed `main`), `list`, `target`, `quit`, `close_requested`,
+  `on_window_event` (close setting, focus of pop-outs and dialogs for their host, bounds, destroyed windows, the
+  popover's blur), `second_instance`, `opened` and `reopen` (macOS), `exit_requested`, `exit` (bounded teardown, once),
+  `arm_exit_watchdog` (8 s, then teardown and process exit), `on_run_event`; `Tray` over a `TrayBackend` (redrawn only
+  when the model changed), `Popovers` with `toggle_popover`, `fit_popover`, `close_popover`. `tray` feature:
+  `NativeTray` (Tauri's tray icon; template images on macOS; no icon in a session without a taskbar). `wry` feature:
+  WebView2's browser keys off in release builds.
+- `COMMANDS`: `window_new` [MAIN | TRAY], `window_close`, `window_set_title` (4 KiB), `window_resolve_close`,
+  `window_take_pending`, `window_resolve_open` [MAIN], `windows_list`, `window_focus`, `app_quit` [WINDOW | TRAY],
+  `tray_fit_height`, `tray_close` [TRAY]. Events: `paddock://windows`, `paddock://window-close-requested`,
+  `paddock://window-open-ask`, `paddock://window-open`.
+- Generated TypeScript: `ui/projects/paddock-ui/shell/generated/window.ts` (wire types, `WINDOW_EVENTS`) and
+  `window-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-window --lib generated`).
+- Tests run on Tauri's mock runtime with a fake tray backend and hooks for Quit and the process exit: no window, tray
+  icon or single-instance lock reaches the desktop (rule 7). The untestable glue (the tray icon's create/update, window
+  effects, the run and close events Tauri does not let tests build) is `src/tauri/native.rs`, outside coverage. `tests/native_menu.rs` has no harness, so the native menu
+  is built on the main thread (macOS builds menus there only); the builder is made, never built.
+## `paddock-menu` (plan S13)
+
+One menu model for the native menu bar and the in-app menus (ADR 0012 §3, ported from Debrief's `menu.rs`, ADR 0008).
+The UI builds the model from its contributions and draws it itself on Windows and Linux; on macOS it sends it with
+`menu_set` once the app reported ready (later changes coalesced), and this crate shows it natively:
+
+```rust
+paddock_commands::command_table! {
+    static COMMANDS, macro handler;
+    Quiet [MAIN | POPOUT] limit 1 * MIB => paddock_menu::tauri::menu_set,
+    // ... the app's commands
+}
+tauri::Builder::default()
+    .setup(|app| Ok(paddock_menu::tauri::install(app.handle())))  // manages NativeMenu (product name), routes clicks
+    .invoke_handler(Guard::new(&COMMANDS).wrap(handler!()))
+    .on_window_event(|w, e| paddock_menu::tauri::on_window_event(w, e)) // the menu bar follows the focused window
+```
+
+- `parse` refuses a model over the limits (16 menus, 1000 entries, depth 4, ids of 128 `[A-Za-z0-9._:/-]`, labels of
+  120 characters without control characters, no duplicate item id; unknown fields) and turns bindings into accelerators
+  (`accelerator("Mod+Shift+O")` is `CmdOrCtrl+Shift+O`; a binding a menu cannot show keeps working in the page).
+- `native_spec(model, app_name)` adds the standard macOS items; `outline` is its snapshot form (the crate's snapshot test
+  pins it). `diff` answers `Unchanged`, `States` (check marks and enabled states updated in place) or `Rebuild`;
+  `NativeMenu::builds` counts the builds (a start builds twice: the standard menus at `install`, then the UI's).
+- A click goes as `paddock://menu` (the item id) to the focused top-level window only (a dialog or pop-out stands for its
+  host); a model from a window that is not the target is answered `notFocused` and sent again on focus.
+- `manifest::check(json)` over the app's `paddock-manifest.json`: every menu item routes to a command, every key converts
+  to an accelerator, a command sits in one menu-bar menu. Run it in a test of the app.
+- The native menu bar is a port (`NativeBar`: `TauriBar`, a fake in tests); on macOS native menus are created on the main
+  thread only, so the Tauri menus are built in tests on Windows and Linux.
+- Generated TypeScript: `ui/projects/paddock-ui/shell/menu/generated/menu.ts`
+  (`PADDOCK_WRITE_TS=1 cargo test -p paddock-menu --lib generated`).
+
+## `paddock-download` (plan S8)
+
+Downloads with one in-order SHA-256 while writing (rule 15, ADR 0008 §5, ADR 0012 §3), ported from Debrief's model
+downloader (`debrief-ai::models::{download, segmented}`) with the hash moved into the write path:
+
+```rust
+let downloader = Arc::new(Downloader::http(HttpConfig::default())?);  // one per app: the host caps hold across downloads
+let req = Request::new(url, models_dir.join("model.gguf"), Integrity::Sha256(Sha256Digest::from_hex(&pinned)?))?;
+let ctx = jobs.register("download", "Downloading the model", Some("model.gguf"));
+let d = downloader.clone();
+pool.spawn_job(ctx, move |ctx| Ok(d.download(ctx, &req)?))?;      // the command returns the job id at once
+```
+
+- Phases (`phases`): `connect` (items, 1), `resume` (bytes of the kept prefix, only when resuming), `download` (bytes;
+  a growing count when the host gives no size), `verify` (items, 1: the digest computed while writing is compared, then
+  one rename; never a second read). Each phase starts at 0 and never goes backwards; Cancel is noticed within 250 ms in
+  every phase, because the job's worker only supervises the transfer threads.
+- A `bytes=0-0` probe decides: a 206 host is downloaded in ranges (`Config::connections`, default 4, when the file is at
+  least `segment_threshold`), positioned writes, an idle connection takes over the far half of the lowest slow range, and
+  ranges ahead of the hash wait in memory (at most `max_buffer`, default 64 MiB); a host without ranges is one stream,
+  and a dropped connection restarts it and skips the bytes already written.
+- `HostCaps` (default 4 connections per host across all downloads; `with_cap(host, n)`); 429/503 lower the download's
+  connections and hold every request to that host for `Retry-After` (seconds or an HTTP date, clamped to
+  `backoff..=max_wait`); failures retry with exponential back-off; no bytes for `stall_timeout` ends as `Stalled`.
+- Resume: `<name>.part.json` (versioned) keeps the written and hashed prefix; the same request resumes when the size,
+  the pinned checksum and the host's strong ETag (else Last-Modified) still match; ranges carry `If-Range`.
+- Bounds: `Config::max_bytes` / `Request::max_bytes` before writing and while streaming; a pinned `Request::size` must
+  match. Typed `DownloadError` (`keeps_partial()` says whether a rerun resumes); `From<DownloadError> for JobError`.
+- The network is a port (`Transport`); `HttpTransport` (feature `http`, default) is ureq with rustls and the OS
+  certificate store, a proxy only when configured, `Accept-Encoding: identity`. Feature `tauri`: `tauri::manage` puts one
+  shared `Downloader` in the app state, `tauri::downloader(app)` returns it.
+- Tests run against an in-process HTTP server and a scripted transport (no network); `cargo bench -p paddock-download`
+  compares one stream with 2, 4 and 8 connections on a server that limits each connection.
+
+## `paddock-settings` (plan S10)
+
+Settings (rule 21: tunables are settings; ADR 0012 §3), ported from Debrief's `debrief_plugin_api::settings`,
+`config_store.rs` and the generic half of `settings.rs`, without Debrief's sections, plugins or groups:
+
+```rust
+let settings = paddock_settings::tauri::manage(app.handle(), Settings::open(config_dir.join(paddock_settings::FILE_NAME)));
+settings.register(Arc::new(paddock_settings::shell::appearance()))?;                 // the shell's section `pd.appearance`
+settings.register(paddock_settings::section(models_section(), |v| apply_models(v)))?;  // `Configurable`: schema + apply
+let models: ModelsSettings = settings.decode("pw.models")?;                           // the app's own typed struct
+.invoke_handler(paddock_settings::tauri::route(paddock_settings::tauri::handler_with_grants(paddock_dialogs::tauri::grant_of), app_handler))
+```
+
+- Schema: `SettingsSection` (id = the settings page's id, owner `shell` or `app`) of `SettingField`s with a `FieldKind`
+  (bool, int with step and unit, float, text with an anchored `regex` pattern of bounded size, enum, path, duration in ms,
+  size in bytes, string list) and a default; `check` refuses a defective schema at `register` (ids, lengths, limits,
+  patterns, defaults that fail their own validation, duplicates).
+- Values: `validate` (refuses a set as a whole, one `FieldError` per field, messages for the user) and `sanitize` (stored
+  values: each bad one becomes its default and is logged); unknown keys are dropped; `ValidValues` with typed getters and
+  `decode::<T>()`.
+- File: `settings.json` `{ version: 1, sections: { id: { key: value } } }`, at most 1 MiB, read once. Missing: defaults.
+  Damaged (not JSON, wrong shape, too large): defaults, kept as `settings.json.corrupt` (five slots), one `LoadProblem`.
+  Newer format: defaults, kept as `settings.json.v<N>`. Unreadable: defaults, left alone. Sections nobody registers are
+  kept and written back. Writes are atomic (temp file, `sync_all`, rename, folder sync on Unix) and serialised.
+- `Settings::set(id, changes)` lays changes over the current values (`null` = default), validates, applies (a failing or
+  panicking `apply` refuses the change and nothing is saved), saves, and announces one `SettingsChanged` to the
+  `ChangeSink`; the same values again announce nothing; restart-only fields set `restart_pending`. `reset(id, key?)`.
+  Locks recover from poisoning. Errors are typed (`SettingsError`, on the wire `{ code, message, retryable }`).
+- `tauri` feature: `manage` (the `paddock://settings` sink to every window; a start-up problem is posted once to
+  `paddock-health`'s centre as `settings:file` with an Open Settings action), `COMMANDS` (`settings_overview` for every
+  window; `settings_set` (1 MiB) and `settings_reset` for main windows and dialogs whose contract names them; the writes
+  run on the blocking pool), `handler`, `handler_with_grants`, `route`.
+- Generated TypeScript in `ui/projects/paddock-ui/shell/settings/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p
+  paddock-settings --all-features --lib generated`): `settings.ts`, `settings-commands.ts`, `settings-fixtures.ts`.
+- Coverage: 99%+ lines; not covered are the `#[tauri::command]` wrapper lines and the blocking pool's join error (a panic
+  outside `apply`, which is contained already).
+
+## `paddock-shell` (plan S17)
+
+The shell as one Tauri plugin (ADR 0012 §3, decision D2): `paddock_shell::Builder` (see "Consuming the crates" above).
+
+- `COMMANDS` folds every shell crate's table into one (`command_table!` composition) plus the plugin's own
+  `shell_version`; one `Guard` with the dialog grants (`paddock_dialogs::tauri::grant_of`) wraps `Routes` over each crate's
+  `invoke_handler()`. Commands are `plugin:paddock-shell|<command>`; the guard and dialog contracts see the plain names.
+- Set-up (in order): the app identity, the jobs registry, the downloader (when given), service health and the
+  notification centre (always; the app's services, `notifications.json` in the data folder unless `in_memory`), settings
+  (`settings.json` in the config folder by default) with the shell's `pd.appearance` section, the dialog contracts (an
+  empty file when none is given), the start-up watchdog (defaults unless `startup` is given), windows (when given; dialog
+  windows then get their feel), the native menu (`native_menu(false)` in tests: macOS builds menus on the main thread
+  only), updates with the `pd.updates` section, the app's sections, then the app's own `setup` closures. A part that fails
+  fails the start with a message naming it.
+- Hooks: page load (the start-up watchdog), every window's events (dialogs, windows, menu, health focus and forget), run
+  events (the window layer's bounded exit; at exit the pending update and the messages are written). macOS's web content
+  process termination is an app-builder hook: `.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated)`.
+- Update preferences live on the `pd.updates` settings section (`paddock_settings::shell::updates`): the settings are their
+  one writer and source; `updates_set_preferences` stores through `SettingsPreferences` and the section's apply puts
+  stored and changed values into effect (`Updater::apply_preferences`). `updates.json` keeps only the updater's own record.
+- Permissions: Tauri's build step makes `allow-<command>` for every command (`src/command_names.rs`, generated from the
+  table); `permissions/window-classes.toml` (generated) groups them into `main` (also `default`), `popout`, `dialog` and
+  `tray`, each exactly the commands the table opens to that class. The tests resolve them through Tauri's own ACL.
+- `Builder::problems(manifest)`: the app's table against the shell's (no shared names), the dialog contracts against both
+  tables, and with the app's `paddock-manifest.json` (`manifest::check`): menus and keys (`paddock_menu::manifest`), every
+  command a dialog declares served and open to dialogs, contracts and manifest dialogs the same set, UI health services
+  equal to the Rust services, every app settings section with a page and every generic-form page with a section.
+- `shell_version` answers `{ shell, app }`; the crate's version is `@decryp7/paddock-ui`'s (a test reads `package.json`,
+  `scripts/publish.mjs` refuses a difference), and the UI logs a plain error when the plugin differs
+  (`checkShellVersion`).
+- Tests on Tauri's mock runtime: every command reaches its handler from a window of a class it is open to, each permission
+  set opens exactly the table's classes, a dialog reaches only its contract, window notices reach every window, the update
+  preferences flow through the settings, and `tests/demo.rs` is the shell demo's Rust side (its table writes the demo's
+  `app-commands.ts`; its contracts and manifest are checked).
+
+To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
+`Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.
+
+## `paddock-updater` (plan S11)
+
+Updates, About and What's New. With the `tauri` feature (and `install` for the installer over `tauri-plugin-updater`):
+
+```rust
+.setup(|app| {
+    let key = option_env!("TAURI_UPDATER_PUBKEY"); // CI secret; else `plugins.updater.pubkey`
+    let updates = paddock_updater::tauri::UpdatesBuilder::new("Pitwall")
+        .public_key(key)                                   // no valid key: "Updates are not available in this build"
+        .releases_page("https://dev.decryptology.net/decryp7/pitwall/releases")
+        .changelog(include_str!("../../CHANGELOG.md"))     // What's New: the running version's notes only
+        .legal("notices", "Third-party notices", include_str!("../resources/THIRD_PARTY_NOTICES.md"))
+        .service_hooks(Arc::new(PitwallService))           // rule 24: before_install, on_version_change
+        .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(app.handle().clone(), key.unwrap_or_default())));
+    paddock_updater::tauri::install(app.handle(), updates)?;
+    Ok(())
+})
+.run(|app, e| if let tauri::RunEvent::Exit = e { paddock_updater::tauri::on_exit(app); })
+```
+
+The release address is `plugins.updater.endpoints[0]` (the `stable` channel) unless the builder names channels. Checks
+and downloads are jobs on the app's `paddock-jobs` registry and use the app's `paddock-download` downloader; the UI is
+`@decryp7/paddock-ui/shell/about`.

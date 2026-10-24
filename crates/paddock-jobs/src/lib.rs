@@ -1,6 +1,6 @@
 //! Long operations for the Paddock apps (ADR 0008).
 //!
-//! The crate is pure Rust with no UI or Tauri dependency. An app wires one [`EventSink`] (for Tauri: `app.emit("paddock-job", &snapshot)`)
+//! The crate is pure Rust with no UI or Tauri dependency. An app wires one [`EventSink`] (for Tauri: the `tauri` feature's `tauri::Emit`, on [`EVENT_NAME`])
 //! and everything else is shared:
 //!
 //! * [`JobSnapshot`] is the wire model (camelCase JSON): id, kind, title, subject, a [`JobState`] state machine and a [`PhaseProgress`]
@@ -21,6 +21,8 @@ mod model;
 mod pipeline;
 mod pool;
 mod reporter;
+#[cfg(feature = "tauri")]
+pub mod tauri;
 mod walk;
 mod workers;
 
@@ -50,5 +52,5 @@ pub const CANCEL_CHECK_ITEMS: usize = 256;
 /// The documented cancel latency target for helpers in this crate; longer, non-interruptible steps declare themselves
 /// with [`JobContext::uncancellable`].
 pub const CANCEL_LATENCY_TARGET_MS: u64 = 250;
-/// The Tauri event name apps emit [`JobSnapshot`]s on.
-pub const EVENT_NAME: &str = "paddock-job";
+/// The Tauri event name apps emit [`JobSnapshot`]s on (ADR 0012 naming: `paddock://<area>`).
+pub const EVENT_NAME: &str = "paddock://jobs";

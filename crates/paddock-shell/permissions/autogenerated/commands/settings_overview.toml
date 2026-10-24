@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-settings-overview"
+description = "Enables the settings_overview command without any pre-configured scope."
+commands.allow = ["settings_overview"]
+
+[[permission]]
+identifier = "deny-settings-overview"
+description = "Denies the settings_overview command without any pre-configured scope."
+commands.deny = ["settings_overview"]

@@ -1,0 +1,796 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" datatype="plaintext" original="ng2.template">
+    <body>
+      <trans-unit id="pd.about.build" datatype="html">
+        <source>Build</source>
+      </trans-unit>
+      <trans-unit id="pd.about.built" datatype="html">
+        <source>Built</source>
+      </trans-unit>
+      <trans-unit id="pd.about.commit" datatype="html">
+        <source>Commit</source>
+      </trans-unit>
+      <trans-unit id="pd.about.failed" datatype="html">
+        <source>The app did not say what it is.</source>
+      </trans-unit>
+      <trans-unit id="pd.about.legal" datatype="html">
+        <source>Licences and notices</source>
+      </trans-unit>
+      <trans-unit id="pd.about.legal.failed" datatype="html">
+        <source>The text could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.about.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.about.open" datatype="html">
+        <source>About</source>
+      </trans-unit>
+      <trans-unit id="pd.about.releases" datatype="html">
+        <source>Releases</source>
+      </trans-unit>
+      <trans-unit id="pd.about.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.about.system" datatype="html">
+        <source>System</source>
+      </trans-unit>
+      <trans-unit id="pd.about.title" datatype="html">
+        <source>About</source>
+      </trans-unit>
+      <trans-unit id="pd.about.updates" datatype="html">
+        <source>Updates</source>
+      </trans-unit>
+      <trans-unit id="pd.about.updates.itself" datatype="html">
+        <source>Updates itself</source>
+      </trans-unit>
+      <trans-unit id="pd.about.updates.unavailable" datatype="html">
+        <source>Updates are not available in this build</source>
+      </trans-unit>
+      <trans-unit id="pd.about.version" datatype="html">
+        <source>Version <x id="version"/></source>
+      </trans-unit>
+      <trans-unit id="pd.category.app" datatype="html">
+        <source>Application</source>
+      </trans-unit>
+      <trans-unit id="pd.category.help" datatype="html">
+        <source>Help</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.open-failed" datatype="html">
+        <source>This window couldn't open</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.unknown" datatype="html">
+        <source>This dialog is not known to this version of the app: <x id="dialog"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.compact.many" datatype="html">
+        <source><x id="count"/> services</source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.compact.one" datatype="html">
+        <source><x id="service"/> <x id="state"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.compact.unknown" datatype="html">
+        <source>Unknown</source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.many" datatype="html">
+        <source><x id="count"/> services need attention</source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.one" datatype="html">
+        <source><x id="service"/>: <x id="state"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.unknown" datatype="html">
+        <source>Services: unknown</source>
+      </trans-unit>
+      <trans-unit id="pd.health.no-answer" datatype="html">
+        <source>The service-health service did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.no-such-service" datatype="html">
+        <source>No service is called <x id="service"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.not-working" datatype="html">
+        <source><x id="service"/> is not working.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.nothing-to-repair" datatype="html">
+        <source>There is nothing to repair for <x id="service"/> now.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.popover" datatype="html">
+        <source>Services</source>
+      </trans-unit>
+      <trans-unit id="pd.health.raise-cap" datatype="html">
+        <source>Raise the cap…</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair" datatype="html">
+        <source>Repair</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.install" datatype="html">
+        <source>Install</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.install-named" datatype="html">
+        <source>Install <x id="service"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.lift-quarantine" datatype="html">
+        <source>Allow again</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.open-settings" datatype="html">
+        <source>Open Settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.reset-named" datatype="html">
+        <source>Reset <x id="service"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.restart" datatype="html">
+        <source>Restart</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.restart-named" datatype="html">
+        <source>Restart <x id="service"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.use-fallback" datatype="html">
+        <source>Use the fallback</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repairing" datatype="html">
+        <source>Repairing…</source>
+      </trans-unit>
+      <trans-unit id="pd.health.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.health.see-what-happened" datatype="html">
+        <source>See what happened</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.degraded" datatype="html">
+        <source>limited</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.quarantined" datatype="html">
+        <source>switched off</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.repairing" datatype="html">
+        <source>repairing</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.stopped" datatype="html">
+        <source>stopped</source>
+      </trans-unit>
+      <trans-unit id="pd.health.status" datatype="html">
+        <source>Services</source>
+      </trans-unit>
+      <trans-unit id="pd.health.technical-details" datatype="html">
+        <source>Technical details</source>
+      </trans-unit>
+      <trans-unit id="pd.health.try-again" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.health.unknown" datatype="html">
+        <source>The state of the services is not known yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.waiting-for" datatype="html">
+        <source>Waiting for <x id="service"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.cancel-failed" datatype="html">
+        <source>The job could not be cancelled: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.empty.description" datatype="html">
+        <source>Long operations show their progress here.</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.empty.heading" datatype="html">
+        <source>No jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.list" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.no-answer" datatype="html">
+        <source>The jobs service did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notice.deadline" datatype="html">
+        <source><x id="title"/> stopped: the time limit was reached</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notice.done" datatype="html">
+        <source><x id="title"/>: done</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notice.failed" datatype="html">
+        <source><x id="title"/> failed: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notification.failed" datatype="html">
+        <source>Job failed</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notification.finished" datatype="html">
+        <source>Job finished</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.popover" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.read-failed" datatype="html">
+        <source>The jobs could not be read</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.starting" datatype="html">
+        <source>Starting</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.detail" datatype="html">
+        <source><x id="lead"/>: <x id="phase"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.doing" datatype="html">
+        <source><x id="count"/>: <x id="lead"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.idle" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.running" datatype="html">
+        <source><x id="count"/> running</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.still-working" datatype="html">
+        <source>still working, this step is taking longer than usual</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.bar" datatype="html">
+        <source>Application menu</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.conflict" datatype="html">
+        <source><x id="first"/> (<x id="firstCommand"/>) and <x id="second"/> (<x id="secondCommand"/>) both press <x id="pressed"/> in scope <x id="scope"/></source>
+      </trans-unit>
+      <trans-unit id="pd.menu.conflict.mac" datatype="html">
+        <source><x id="conflict"/> on macOS</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.conflict.other" datatype="html">
+        <source><x id="conflict"/> on Windows and Linux</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.context" datatype="html">
+        <source>Context menu</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.edit" datatype="html">
+        <source>Edit</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.file" datatype="html">
+        <source>File</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.help" datatype="html">
+        <source>Help</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.window" datatype="html">
+        <source>Window</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.action-failed" datatype="html">
+        <source>The action failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.action-unknown" datatype="html">
+        <source>This window cannot do “<x id="action"/>”.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.centre" datatype="html">
+        <source>Notifications centre</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.details" datatype="html">
+        <source>Details</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.dismiss" datatype="html">
+        <source>Dismiss <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.dismiss-toast" datatype="html">
+        <source>Dismiss notification</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.empty.description" datatype="html">
+        <source>Finished work, alerts and problems show up here.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.empty.heading" datatype="html">
+        <source>Nothing needs your attention</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.filter" datatype="html">
+        <source>Show</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.filter.all" datatype="html">
+        <source>All</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.filter.unread" datatype="html">
+        <source>Unread</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.mark-all-read" datatype="html">
+        <source>Mark all read</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.mark-read" datatype="html">
+        <source>Mark read: <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.no-answer" datatype="html">
+        <source>The notification centre did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.show" datatype="html">
+        <source>Show in Notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.source.app" datatype="html">
+        <source>App</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.source.health" datatype="html">
+        <source>Services</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.source.jobs" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.status" datatype="html">
+        <source>Notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.status.none" datatype="html">
+        <source>Notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.status.unread" datatype="html">
+        <source><x id="count"/> unread</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.toasts" datatype="html">
+        <source>Notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.unread-mark" datatype="html">
+        <source>, unread</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.link-with-badge" datatype="html">
+        <source><x id="page"/>, <x id="badge"/></source>
+      </trans-unit>
+      <trans-unit id="pd.pages.missing" datatype="html">
+        <source>This page does not exist.</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.missing.cause" datatype="html">
+        <source>Choose a page in the sidebar.</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.missing.home" datatype="html">
+        <source>Go to the first page</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.nav" datatype="html">
+        <source>Pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.sidebar.collapse" datatype="html">
+        <source>Collapse sidebar</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.sidebar.expand" datatype="html">
+        <source>Expand sidebar</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.sidebar.hide" datatype="html">
+        <source>Hide pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.sidebar.show" datatype="html">
+        <source>Show pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.skip" datatype="html">
+        <source>Skip to page</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.status-bar" datatype="html">
+        <source>Status bar</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.appearance" datatype="html">
+        <source>Appearance</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.check.max-items" datatype="html">
+        <source>At most <x id="count"/> items.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.check.max-len" datatype="html">
+        <source>At most <x id="count"/> characters.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.check.number" datatype="html">
+        <source>Enter a number.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.check.whole" datatype="html">
+        <source>Enter a whole number.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.advanced" datatype="html">
+        <source>Advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.default" datatype="html">
+        <source>Default: <x id="value"/></source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.file" datatype="html">
+        <source>File (empty: the default)</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.folder" datatype="html">
+        <source>Folder (empty: the default)</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.reset" datatype="html">
+        <source>Reset to default</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.reset-named" datatype="html">
+        <source>Reset to default: <x id="setting"/></source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.restart" datatype="html">
+        <source>Needs restart</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.restart-title" datatype="html">
+        <source>Takes effect after a restart</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.group.advanced" datatype="html">
+        <source>Advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.group.application" datatype="html">
+        <source>Application</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.group.features" datatype="html">
+        <source>Features</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.hint.file" datatype="html">
+        <source>file</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.hint.folder" datatype="html">
+        <source>folder</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.hint.list" datatype="html">
+        <source>up to <x id="count"/> items, one per line</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.hint.text" datatype="html">
+        <source>up to <x id="count"/> characters</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.load-failed" datatype="html">
+        <source>The settings could not be loaded: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.settings.loading" datatype="html">
+        <source>Loading settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.loading-page" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.no-match" datatype="html">
+        <source>No settings match “<x id="query"/>”.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.open" datatype="html">
+        <source>Settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.page-failed" datatype="html">
+        <source>This page could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.pages" datatype="html">
+        <source>Settings pages</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.restart-now" datatype="html">
+        <source>Restart now</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.restart.one" datatype="html">
+        <source>1 change takes effect after the app restarts (<x id="setting"/>).</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.restart.other" datatype="html">
+        <source><x id="count"/> changes take effect after the app restarts.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.restart.some" datatype="html">
+        <source>Some changes take effect after the app restarts.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.results" datatype="html">
+        <source>Search results</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.search" datatype="html">
+        <source>Search settings</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.empty" datatype="html">
+        <source>This section has no settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.hidden.one" datatype="html">
+        <source>1 advanced setting is hidden.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.hidden.other" datatype="html">
+        <source><x id="count"/> advanced settings are hidden.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.reset" datatype="html">
+        <source>Reset section</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.unavailable" datatype="html">
+        <source>These settings are not available in this app.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.show-advanced" datatype="html">
+        <source>Show advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.load-failed" datatype="html">
+        <source>The settings could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.reset-done" datatype="html">
+        <source><x id="section"/> reset to defaults.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.reset-failed" datatype="html">
+        <source>The settings could not be reset.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.saved" datatype="html">
+        <source><x id="what"/> saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.set-failed" datatype="html">
+        <source>The settings could not be changed.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.title" datatype="html">
+        <source>Settings</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.unsaved" datatype="html">
+        <source>Unsaved changes</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.unsaved.ask" datatype="html">
+        <source>Some changes are not saved: <x id="pages"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.unsaved.discard" datatype="html">
+        <source>Discard changes</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.unsaved.keep" datatype="html">
+        <source>Keep editing</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.context-failed" datatype="html">
+        <source>The app context failed to load: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.failed" datatype="html">
+        <source><x id="part"/> did not load: <x id="reason"/></source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.loading" datatype="html">
+        <source>Loading <x id="part"/></source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.open-failed" datatype="html">
+        <source><x id="part"/> could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.retry" datatype="html">
+        <source><x id="part"/> did not load. Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.try-again" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.region.next" datatype="html">
+        <source>Focus next region</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.region.previous" datatype="html">
+        <source>Focus previous region</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.status.fewer" datatype="html">
+        <source>Show fewer status items</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.status.more" datatype="html">
+        <source>More status (<x id="count"/>)</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovered-hung" datatype="html">
+        <source>The window stopped responding and was reloaded. Your open files and view are kept.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovered-terminated" datatype="html">
+        <source>The window's content stopped unexpectedly and was reloaded. Your open files and view are kept.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovered-unresponsive" datatype="html">
+        <source>The window did not finish starting and was reloaded. Your open files and view are kept.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.restore-failed" datatype="html">
+        <source>The window's view could not be restored: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.elapsed.hours" datatype="html">
+        <source><x id="hours"/> h</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.elapsed.hours-minutes" datatype="html">
+        <source><x id="hours"/> h <x id="minutes"/> min</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.elapsed.minutes" datatype="html">
+        <source><x id="minutes"/> min</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.elapsed.seconds" datatype="html">
+        <source><x id="seconds"/> s</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.eta.hours" datatype="html">
+        <source>about <x id="hours"/> h left</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.eta.hours-minutes" datatype="html">
+        <source>about <x id="hours"/> h <x id="minutes"/> min left</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.eta.minutes" datatype="html">
+        <source>about <x id="minutes"/> min left</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.eta.seconds" datatype="html">
+        <source><x id="seconds"/> s left</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.cancelled" datatype="html">
+        <source><x id="title"/>: cancelled</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.done" datatype="html">
+        <source><x id="title"/>: done</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.failed" datatype="html">
+        <source><x id="title"/>: failed</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.running" datatype="html">
+        <source><x id="title"/>: <x id="phase"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.waiting" datatype="html">
+        <source><x id="title"/>: waiting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.cancelled" datatype="html">
+        <source>Cancelled</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.deadline" datatype="html">
+        <source>Stopped: the time limit was reached.</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.elapsed" datatype="html">
+        <source><x id="elapsed"/> elapsed</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.failed" datatype="html">
+        <source>Failed</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.in-progress" datatype="html">
+        <source>In progress</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.not-cancellable" datatype="html">
+        <source>This step cannot be stopped</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.of" datatype="html">
+        <source><x id="done"/> of <x id="total"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.so-far" datatype="html">
+        <source><x id="done"/> so far</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.stalled" datatype="html">
+        <source>Still working. This step is taking longer than usual.</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.starting" datatype="html">
+        <source>Starting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.user-cancelled" datatype="html">
+        <source>Stopped at your request.</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.waiting" datatype="html">
+        <source>Waiting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.metric.down" datatype="html">
+        <source>Down</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.metric.same" datatype="html">
+        <source>No change</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.metric.up" datatype="html">
+        <source>Up</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sparkline" datatype="html">
+        <source>Trend</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.asking" datatype="html">
+        <source>Asking the updater…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.asks" datatype="html">
+        <source><x id="checked"/> · asks <x id="host"/></source>
+      </trans-unit>
+      <trans-unit id="pd.updates.auto-check" datatype="html">
+        <source>Check for updates automatically</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.available" datatype="html">
+        <source>Version <x id="version"/> is available.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.available.sized" datatype="html">
+        <source>Version <x id="version"/> is available (<x id="size"/>).</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.channel" datatype="html">
+        <source>Channel</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.check-again" datatype="html">
+        <source>Check again</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.check-now" datatype="html">
+        <source>Check now</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.checking" datatype="html">
+        <source>Checking for updates…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.current" datatype="html">
+        <source>You have version <x id="version"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.discard" datatype="html">
+        <source>Discard</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.download" datatype="html">
+        <source>Download</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.downloading" datatype="html">
+        <source>Downloading version <x id="version"/>…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.failed" datatype="html">
+        <source>The last step did not finish.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.idle" datatype="html">
+        <source>Not checked yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.install-on-quit" datatype="html">
+        <source>Install when the app quits</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.installing" datatype="html">
+        <source>Installing version <x id="version"/>…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.last-checked" datatype="html">
+        <source>Last checked <x id="when"/></source>
+      </trans-unit>
+      <trans-unit id="pd.updates.never-checked" datatype="html">
+        <source>Not checked in this installation yet</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.no-answer" datatype="html">
+        <source>The updater did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.notes" datatype="html">
+        <source>Release notes</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.notice.available" datatype="html">
+        <source>Version <x id="version"/> is available (you have <x id="current"/>).</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.notification.available" datatype="html">
+        <source>Update available</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.open" datatype="html">
+        <source>Check for Updates…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.progress" datatype="html">
+        <source><x id="phase"/>: <x id="done"/></source>
+      </trans-unit>
+      <trans-unit id="pd.updates.progress-in-jobs" datatype="html">
+        <source>The progress is in Jobs.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.progress.of" datatype="html">
+        <source><x id="phase"/>: <x id="done"/> of <x id="total"/></source>
+      </trans-unit>
+      <trans-unit id="pd.updates.ready" datatype="html">
+        <source>Version <x id="version"/> is downloaded and its signature verified.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.restart" datatype="html">
+        <source>Restart to update</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.title" datatype="html">
+        <source>Updates</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.try-again" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.unavailable" datatype="html">
+        <source>Updates are not available in this build.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.unavailable.why" datatype="html">
+        <source>This build was made without an update signing key, so it cannot verify updates. Download new versions from the releases page.</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.up-to-date" datatype="html">
+        <source>You have the latest version.</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.failed" datatype="html">
+        <source>The release notes could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.heading" datatype="html">
+        <source>What’s New in <x id="version"/></source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.none" datatype="html">
+        <source>There are no release notes for version <x id="version"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.open" datatype="html">
+        <source>What’s New</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.released" datatype="html">
+        <source>Released <x id="date"/></source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.whats-new.title" datatype="html">
+        <source>What’s New</source>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

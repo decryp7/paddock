@@ -35,6 +35,11 @@ product-reference points come from established knowledge (marked "[k]" in Source
   Gap between cards 16 (12 compact). Page gutter 24, max content width 1440 for dashboards, 880 for forms/settings.
 - Dashboard grid: 12 columns, tiles span 3/4/6/12; row heights snap to 8 px. Align baselines of hero numbers across a row.
 - Sidebar 216 px (collapsed 56), toolbar 44 px (Debrief 40), status bar 24 px, dialog widths 400/560/720.
+- Title bar 40 px, its own height (not a toolbar): app name and, on Windows, Linux and in the browser, the in-app menu
+  bar; on macOS the menus are in the native menu bar only and the title bar keeps 78 px clear for the window buttons.
+- A sidebar shown over the page (narrow windows) is modal: it and its scrim cover everything below the title bar,
+  including the status bar, which is inert meanwhile; Escape, the scrim or choosing a page closes it.
+- Selected navigation item: 14 % accent tint, accent icon, 600 label and a 2 px accent bar, the same in every sidebar mode.
 - **Radii** (shared, matches Fluent 4/8 and macOS inset controls): control 6, input 6, chip/badge 999 (pill) or 4 for
   tags, card 10, popover/menu 10, dialog 14, window content (macOS) 0 (OS draws). Nested radius = outer minus padding.
   Windows 11 native windows round themselves; do not fake a window radius.

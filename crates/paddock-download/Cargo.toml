@@ -1,0 +1,39 @@
+[package]
+name = "paddock-download"
+version = "0.1.0"
+description = "Downloads for the Paddock apps: segmented Range downloads with per-host caps, 429 and Retry-After back-off, resume, and one in-order SHA-256 while writing, reported as job phases."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+default = ["http"]
+# The HTTPS transport (`paddock_download::HttpTransport`: ureq and rustls, certificates checked against the operating system's
+# store). Without it the app brings its own `Transport`.
+http = ["dep:ureq", "dep:rustls"]
+# The Tauri adapter (`paddock_download::tauri`: one shared `Downloader` in the app state); the core never depends on Tauri.
+tauri = ["dep:tauri"]
+
+[dependencies]
+paddock-jobs = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+httpdate = "1"
+# The free space of the destination's disk (one platform call, checked before a download writes).
+fs4 = { version = "0.13", default-features = false, features = ["sync"] }
+tauri = { workspace = true, optional = true }
+# No gzip: a download asks for `identity`, so byte ranges stay byte ranges.
+ureq = { version = "3.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
+
+[dev-dependencies]
+sha2 = "0.10"
+tempfile = "3"
+# The adapter is tested on Tauri's mock runtime.
+tauri = { workspace = true, features = ["test"] }
+
+[[bench]]
+name = "segmented"
+harness = false
+required-features = ["http"]

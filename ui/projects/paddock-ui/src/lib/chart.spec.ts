@@ -1,4 +1,4 @@
-import { SU_ACCENTS, SU_DENSITIES, SU_THEMES, applyPaddockAppearance } from './appearance';
+import { SU_ACCENTS, SU_CONTRASTS, SU_DENSITIES, SU_MOTIONS, SU_THEMES, applyPaddockAppearance } from './appearance';
 import {
   EVENT_SHAPES,
   PADDOCK_THEME_DARK,
@@ -194,9 +194,32 @@ describe('applyPaddockAppearance', () => {
     expect(el.hasAttribute('data-theme')).toBe(false);
     expect(el.hasAttribute('data-density')).toBe(false);
   });
-  it('lists the five apps, three themes and three densities', () => {
-    expect(SU_ACCENTS).toHaveLength(5);
+  it('lists the seven apps, three themes and three densities', () => {
+    expect(SU_ACCENTS).toEqual(['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter']);
     expect(SU_THEMES).toEqual(['system', 'dark', 'light']);
     expect(SU_DENSITIES).toEqual(['comfortable', 'standard', 'compact']);
+    expect(SU_CONTRASTS).toEqual(['system', 'standard', 'more']);
+    expect(SU_MOTIONS).toEqual(['system', 'reduce', 'full']);
+  });
+  it('high contrast: more sets data-contrast, standard turns the OS preference off, system removes it', () => {
+    const el = document.createElement('html');
+    applyPaddockAppearance(el, { contrast: 'more' });
+    expect(el.getAttribute('data-contrast')).toBe('more');
+    applyPaddockAppearance(el, { contrast: 'standard' });
+    expect(el.getAttribute('data-contrast')).toBe('off');
+    applyPaddockAppearance(el, { contrast: 'system' });
+    expect(el.hasAttribute('data-contrast')).toBe(false);
+  });
+  it('motion: reduce and full set data-motion, system removes it, unknown values are ignored', () => {
+    const el = document.createElement('html');
+    applyPaddockAppearance(el, { motion: 'reduce' });
+    expect(el.getAttribute('data-motion')).toBe('reduce');
+    applyPaddockAppearance(el, { motion: 'fast' as never, contrast: 'max' as never });
+    expect(el.getAttribute('data-motion')).toBe('reduce');
+    expect(el.hasAttribute('data-contrast')).toBe(false);
+    applyPaddockAppearance(el, { motion: 'full' });
+    expect(el.getAttribute('data-motion')).toBe('full');
+    applyPaddockAppearance(el, { motion: 'system' });
+    expect(el.hasAttribute('data-motion')).toBe(false);
   });
 });
