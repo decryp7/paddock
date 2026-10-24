@@ -1,6 +1,7 @@
 import { defineCommand, defineDialog, defineHealthService, defineKeybinding, defineMenuItem, defineNotificationKind, definePage, defineSettingsPage, defineStatusItem } from './define';
 import { isMessage, msg } from './message';
-import { type } from './types';
+import { type, type IpcCommandName } from './types';
+import type { ShellCommand } from '../generated/shell-commands';
 
 const load = () => Promise.resolve(class {});
 
@@ -25,6 +26,12 @@ describe('define*', () => {
     expect(defineDialog({ ...base, id: 'sd.form', kind: 'form', modality: 'modeless' }).modality).toBe('modeless');
     expect(defineDialog({ ...base, id: 'sd.form2', kind: 'form' }).modality).toBeUndefined();
     expect(defineDialog({ ...base, id: 'sd.bad', kind: 'nope' as 'form' }).modality).toBeUndefined();
+  });
+
+  it("types dialog commands as the app's names plus the shell plugin's", () => {
+    // Without a ShellTypes.appCommand augmentation the app's part is string; the shell's table is empty for now (S17).
+    expectTypeOf<IpcCommandName>().toEqualTypeOf<string>();
+    expectTypeOf<ShellCommand>().toEqualTypeOf<never>();
   });
 
   it('checks messages', () => {

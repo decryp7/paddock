@@ -16,8 +16,8 @@ Conventional Commits; one semver tag for the whole repo.
   so message ids survive to run time), `provideContributions<T>`, `ContributionRegistry` with kinds the workbench extends
   (`defineContributionKind`, `provideContributionKinds`), `ShellContext<T>` with the app part loaded on first use or when
   idle (`provideShellContext`), `CommandService` (defensive `when`/`enabled`, failures become notices), `loadPart`
-  (component plus its own providers), key binding parsing and accelerators, `ShellTypes.ipcCommand` for the generated
-  IPC command union (plan S1), and the `paddock-manifest.json` writer, parser and drift check.
+  (component plus its own providers), key binding parsing and accelerators, `IpcCommandName` (the app's generated `AppCommand`
+  via `ShellTypes.appCommand`, plus the re-exported `ShellCommand` of plan S1) typing dialog contracts, and the `paddock-manifest.json` writer, parser and drift check.
 - `@decryp7/paddock-ui/shell/testing`: `assertContributionsValid` (duplicate ids, key conflicts per scope, menu items and
   keys naming missing commands, missing icons and message ids, dialogs without a kind or with a forbidden modality,
   `min > pref`, unknown kinds) and `checkRegistrationSource` / `assertRegistrationsLazy` (a `*.contributions.ts` file
