@@ -773,17 +773,21 @@ fn the_record_survives_restarts_and_falls_back_to_defaults() {
     let store = RecordStore::new(Some(dir.path()));
     assert_eq!(store.load(), Record::default());
     let ((), saved) = store.update(|r| {
-        r.auto_check = true;
+        r.whats_new_seen = Some("1.0.0".into());
         r.last_checked = Some(7);
     });
     assert!(saved.is_ok());
     let again = RecordStore::new(Some(dir.path())).load();
     assert_eq!(
-        (again.auto_check, again.last_checked, again.version),
-        (true, Some(7), record::VERSION)
+        (
+            again.whats_new_seen.as_deref(),
+            again.last_checked,
+            again.version
+        ),
+        (Some("1.0.0"), Some(7), record::VERSION)
     );
     let path = dir.path().join(record::FILE);
-    for bad in ["{", "[]", r#"{"version": 99, "autoCheck": true}"#] {
+    for bad in ["{", "[]", r#"{"version": 99, "lastChecked": 1}"#] {
         std::fs::write(&path, bad).unwrap();
         assert_eq!(store.load(), Record::default(), "{bad}");
     }
@@ -810,8 +814,8 @@ fn the_record_survives_restarts_and_falls_back_to_defaults() {
     );
     // Without a folder nothing persists and nothing fails.
     let memory = RecordStore::new(None);
-    assert!(memory.update(|r| r.auto_check = true).1.is_ok());
-    assert!(!memory.load().auto_check);
+    assert!(memory.update(|r| r.last_checked = Some(1)).1.is_ok());
+    assert!(memory.load().last_checked.is_none());
 }
 
 #[test]

@@ -606,8 +606,8 @@ fn generated_dir() -> PathBuf {
 
 const REGENERATE: &str = "PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated";
 
-/// The generated files of this crate: the wire types (ts-rs) and the shell's command names (the shell plugin's table:
-/// empty until `paddock-shell`, plan S17, takes this file over with its own table and test).
+/// The generated file of this crate: the wire types (ts-rs). The shell's command names (`shell-commands.ts`) are the
+/// shell plugin's table and written by `paddock-shell`.
 fn generated_files() -> Vec<(&'static str, String)> {
     use ts_rs::TS;
     let header = format!(
@@ -625,13 +625,7 @@ fn generated_files() -> Vec<(&'static str, String)> {
         .map(|d| format!("export {d}\n"))
         .collect::<Vec<_>>()
         .join("\n");
-    vec![
-        ("commands.ts", format!("{header}{types}")),
-        (
-            "shell-commands.ts",
-            ts::names_module(&Table::EMPTY, "SHELL_COMMANDS", "ShellCommand", REGENERATE).unwrap(),
-        ),
-    ]
+    vec![("commands.ts", format!("{header}{types}"))]
 }
 
 #[test]
@@ -853,4 +847,50 @@ fn a_tray_popover_calls_only_the_commands_that_name_its_class() {
         TRAY_COMMANDS.spec("window_focus").map(|s| s.info().windows),
         Some(WindowClass::ALL.to_vec())
     );
+}
+
+crate::command_table! {
+    static PART_A;
+    Query [WINDOW] => a::first,
+    Mutation [MAIN] limit 2 * crate::MIB => a::second,
+}
+
+crate::command_table! {
+    static PART_B;
+    Quiet [TRAY] => b::third,
+}
+
+crate::command_table! {
+    /// Both parts.
+    static COMPOSED = [PART_A, PART_B,];
+}
+
+crate::command_table! {
+    static NOTHING = [];
+}
+
+#[test]
+fn a_composed_table_lists_every_part_in_order_with_its_specs() {
+    let names: Vec<&str> = COMPOSED.specs().iter().map(|s| s.name()).collect();
+    assert_eq!(names, ["first", "second", "third"]);
+    assert_eq!(
+        COMPOSED.spec("second").map(|s| s.limit()),
+        Some(2 * crate::MIB)
+    );
+    assert_eq!(COMPOSED.kind_of("third"), Kind::Quiet);
+    assert_eq!(
+        COMPOSED.spec("third").map(|s| s.windows()),
+        Some(Windows::TRAY)
+    );
+    assert!(NOTHING.specs().is_empty());
+    assert_eq!(crate::table::total(&[&PART_A, &PART_B]), 3);
+    // The same at run time.
+    let specs = crate::table::concat::<3>(&[&PART_A, &PART_B]);
+    assert_eq!(specs.map(|s| s.name()), ["first", "second", "third"]);
+}
+
+#[test]
+#[should_panic(expected = "composed length")]
+fn a_composed_table_of_the_wrong_length_is_refused() {
+    let _ = crate::table::concat::<2>(&[&PART_A, &PART_B]);
 }

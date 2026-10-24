@@ -12,7 +12,7 @@ export { assertChromeForTesting, browserProblems, isInstalledBrowser, CHROME_ENV
 export { axeViolations, WCAG_TAGS, THEMES, type Theme, type AxeOptions } from './axe.ts';
 export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize } from './layout.ts';
 export { waitForStableFrame, captureStable, type StableFrameOptions } from './screenshot.ts';
-export { installTauriFake, TauriFake, START_REPLIES, type IpcCall, type TauriFakeOptions } from './ipc.ts';
+export { installTauriFake, TauriFake, START_REPLIES, SHELL_PLUGIN_PREFIX, type IpcCall, type TauriFakeOptions } from './ipc.ts';
 export {
   ShellApp,
   ShellFrame,

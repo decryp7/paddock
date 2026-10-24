@@ -553,3 +553,112 @@ fn a_failed_send_is_logged_and_nothing_else_happens() {
     ));
     assert!(!crate::tests::logged(log::Level::Warn, "never logged"));
 }
+
+#[test]
+fn a_window_notice_reaches_the_centre_and_every_window_once_per_cause() {
+    let (app, _health) = app_with(Setup::new(vec![]));
+    let (main, second, dialog) = (
+        window(&app, "main"),
+        window(&app, "w-2"),
+        window(&app, "d-main-1"),
+    );
+    let lists: Vec<Heard> = [&main, &second]
+        .iter()
+        .map(|w| hear(w, NOTIFICATIONS_EVENT))
+        .collect();
+    let notice =
+        json!({ "notice": { "severity": "error", "title": "The app context failed to load." } });
+    let posted = invoke(&second, "notifications_post", notice.clone()).unwrap();
+    assert_eq!(posted["cause"], "ui:error:The app context failed to load.");
+    assert_eq!(
+        (
+            posted["scope"].as_str(),
+            posted["source"].as_str(),
+            posted["count"].as_u64()
+        ),
+        (Some("app"), Some("app"), Some(1))
+    );
+    // The same notice again is the same message, counted.
+    let again = invoke(&main, "notifications_post", notice).unwrap();
+    assert_eq!(
+        (again["id"].clone(), again["count"].as_u64()),
+        (posted["id"].clone(), Some(2))
+    );
+    for list in &lists {
+        let heard = take(list);
+        assert_eq!(heard.len(), 2, "every window hears both posts: {heard:?}");
+        assert_eq!(
+            heard[1]["posted"]["count"], 2,
+            "with the message for its toast"
+        );
+    }
+    // Every window lists it, a dialog through its host.
+    for w in [&main, &second, &dialog] {
+        let list = invoke(w, "notifications_list", json!({})).unwrap();
+        assert_eq!(
+            list["notices"][0]["cause"],
+            "ui:error:The app context failed to load.",
+            "{}",
+            w.label()
+        );
+    }
+}
+
+#[test]
+fn a_window_scoped_notice_stays_with_its_window_and_a_bad_one_is_refused() {
+    let (app, _health) = app_with(Setup::new(vec![]));
+    let (main, second) = (window(&app, "main"), window(&app, "w-2"));
+    let heard = hear(&second, NOTIFICATIONS_EVENT);
+    let posted = invoke(
+        &main,
+        "notifications_post",
+        json!({ "notice": { "severity": "info", "title": "Saved", "kind": "sd.save", "scope": "window" } }),
+    )
+    .unwrap();
+    assert_eq!(
+        (posted["scope"].as_str(), posted["source"].as_str()),
+        (Some("project"), Some("sd.save"))
+    );
+    assert!(take(&heard).is_empty(), "the other window hears nothing");
+    let other = invoke(&second, "notifications_list", json!({})).unwrap();
+    assert_eq!(other["notices"].as_array().map(Vec::len), Some(0));
+    for bad in [
+        json!({ "notice": { "severity": "critical", "title": "x" } }),
+        json!({ "notice": { "severity": "info", "title": "x", "kind": "health" } }),
+        json!({ "notice": { "severity": "info", "title": "" } }),
+    ] {
+        let e = invoke(&main, "notifications_post", bad.clone()).unwrap_err();
+        assert_eq!(e["code"], "invalid", "{bad}: {e}");
+    }
+    let unknown = invoke(
+        &main,
+        "notifications_post",
+        json!({ "notice": { "severity": "info", "title": "x", "cause": "health:a" } }),
+    );
+    assert!(
+        unknown.is_err(),
+        "a cause of its own is not part of the contract"
+    );
+    let huge =
+        json!({ "notice": { "severity": "info", "title": "x", "body": "y".repeat(20 * 1024) } });
+    assert_eq!(
+        invoke(&main, "notifications_post", huge).unwrap_err()["code"],
+        "limit"
+    );
+}
+
+#[test]
+fn a_window_notice_without_the_centre_is_unavailable() {
+    let app = bare_app();
+    let main = window(&app, "main");
+    let e = invoke(
+        &main,
+        "notifications_post",
+        json!({ "notice": { "severity": "info", "title": "x" } }),
+    )
+    .unwrap_err();
+    assert_eq!(
+        (e["code"].as_str(), e["retryable"].as_bool()),
+        (Some("unavailable"), Some(true))
+    );
+}

@@ -18,8 +18,9 @@ import { isMessage, type Message } from './message';
 /*
  * `paddock-manifest.json`: the static parts of a window's contributions that Rust needs, generated from the registry by
  * a test in write mode and compared on every run (like Debrief's `dialog-contracts.json`). Rust checks it at build/test
- * time: every menu item routes to a command, every contracted IPC command exists and is open to dialogs, every health
- * service has a supervisor and vice versa, every settings page has a section. Arrays and records are sorted so the
+ * time (`paddock_shell::manifest::check`): every menu item routes to a command, every contracted IPC command exists and
+ * is open to dialogs, every health service has a supervisor and vice versa, every app settings section has a page and
+ * every page the generic form shows has a section. Arrays and records are sorted so the
  * checked-in copy has a stable diff. Change the shape only together with its Rust reader.
  */
 
@@ -74,6 +75,8 @@ export interface PaddockManifest {
   readonly pages: readonly string[];
   readonly statusItems: readonly string[];
   readonly settingsPages: readonly string[];
+  /** The settings pages without a component of their own: the shell's generic form shows the Rust section of their id. */
+  readonly settingsForms: readonly string[];
   readonly dialogs: Readonly<Record<string, ManifestDialog>>;
   readonly healthServices: readonly string[];
   readonly notificationKinds: Readonly<Record<string, ManifestNotificationKind>>;
@@ -137,6 +140,7 @@ export function buildManifest(source: ManifestSource): PaddockManifest {
     pages: sortedIds(source.pages()),
     statusItems: sortedIds(source.statusItems()),
     settingsPages: sortedIds(source.settingsPages()),
+    settingsForms: sortedIds(source.settingsPages().filter((p) => p.load === undefined)),
     dialogs: sortedRecord(
       source
         .dialogs()
@@ -178,7 +182,7 @@ export function parseManifest(text: string): ManifestParse {
   const at = (path: string, why: string) => errors.push(`${path}: ${why}`);
   if (!isRecord(raw)) return { ok: false, errors: ['the manifest is not an object'] };
   if (raw['version'] !== MANIFEST_VERSION) at('version', `expected ${MANIFEST_VERSION}, found ${JSON.stringify(raw['version'])}`);
-  const known = ['version', 'commands', 'keybindings', 'menus', 'pages', 'statusItems', 'settingsPages', 'dialogs', 'healthServices', 'notificationKinds', 'messages'];
+  const known = ['version', 'commands', 'keybindings', 'menus', 'pages', 'statusItems', 'settingsPages', 'settingsForms', 'dialogs', 'healthServices', 'notificationKinds', 'messages'];
   for (const k of Object.keys(raw)) if (!known.includes(k)) at(k, 'unknown field');
 
   const list = (key: string, item: (v: unknown, path: string) => void): void => {
@@ -204,7 +208,7 @@ export function parseManifest(text: string): ManifestParse {
   list('commands', (v, p) => fields(v, p, { id: str, title: str }));
   list('keybindings', (v, p) => fields(v, p, { command: str, key: str, accelerator: str, scope: str }));
   list('menus', (v, p) => fields(v, p, { menu: str, command: str, group: str, order: num, accelerator: (x) => x === null || str(x) }));
-  for (const key of ['pages', 'statusItems', 'settingsPages', 'healthServices']) list(key, (v, p) => void (!str(v) && at(p, 'expected a string')));
+  for (const key of ['pages', 'statusItems', 'settingsPages', 'settingsForms', 'healthServices']) list(key, (v, p) => void (!str(v) && at(p, 'expected a string')));
   record('dialogs', (v, p) =>
     fields(v, p, {
       kind: (x) => (DIALOG_KINDS as readonly unknown[]).includes(x),

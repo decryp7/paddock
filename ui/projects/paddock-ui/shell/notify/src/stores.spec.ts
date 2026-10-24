@@ -3,7 +3,7 @@ import { MemoryNotificationCentre, NotificationsBackend, ServiceHealthBackend, t
 import { NotificationsStore, localCause } from './notifications.store';
 import { ServiceHealthStore } from './service-health.store';
 import { cause, notifyBed, settle } from './spec-helpers';
-import type { NoticesEvent, NoticesSnapshot, ServiceHealthSnapshot } from './wire.types';
+import type { Notice, NoticesEvent, NoticesSnapshot, ServiceHealthSnapshot } from './wire.types';
 
 class SlowHealth extends ServiceHealthBackend {
   resolveSnapshot: (s: ServiceHealthSnapshot) => void = () => undefined;
@@ -127,6 +127,9 @@ class FailingCentre extends NotificationsBackend {
   dismiss(): Promise<boolean> {
     return Promise.reject(new Error('no'));
   }
+  postNotice(): Promise<Notice> {
+    return Promise.reject(new Error('the centre is gone'));
+  }
   listen(_h: (e: NoticesEvent) => void): Promise<Unlisten> {
     return Promise.reject(new Error('no events'));
   }
@@ -160,15 +163,41 @@ describe('NotificationsStore', () => {
     expect(store.toasts()).toEqual([]);
   });
 
-  it('merges the UI’s own notices by kind and text, with a count, and lists them', async () => {
+  it('posts the UI’s own notices to the engine, which keys them and tells every window', async () => {
+    const { centre } = notifyBed();
+    const store = TestBed.inject(NotificationsStore);
+    await settle();
+    await store.post({ level: 'error', message: 'Could not save', kind: 'sd.save' });
+    await store.post({ level: 'error', message: 'Could not save', kind: 'sd.save' });
+    await store.post({ level: 'info', message: 'Saved' });
+    expect(store.toasts().map((t) => [t.cause, t.count, t.id > 0])).toEqual([
+      ['ui:sd.save:Could not save', 2, true],
+      ['ui:info:Saved', 1, true],
+    ]);
+    expect((await centre.list()).notices.map((n) => n.source).sort()).toEqual(['app', 'sd.save']);
+    expect(store.local()).toEqual([]);
+  });
+
+  it('keeps a notice itself when the engine cannot take it', async () => {
+    const failing = new FailingCentre();
+    failing.fail = false;
+    notifyBed({ centre: failing });
+    const store = TestBed.inject(NotificationsStore);
+    await settle();
+    await store.post({ level: 'warning', message: 'Offline' });
+    expect(store.local().map((n) => [n.cause, n.id < 0])).toEqual([['ui:warning:Offline', true]]);
+    await expect(new MemoryNotificationCentre().postNotice({ severity: 'info', title: '  ' })).rejects.toThrow('title');
+  });
+
+  it('merges the notices it keeps by kind and text, with a count, and lists them', async () => {
     const { clock } = notifyBed();
     const store = TestBed.inject(NotificationsStore);
     await settle();
-    const first = store.post({ level: 'error', message: 'Could not save', kind: 'sd.save' });
+    const first = store.postLocal({ level: 'error', message: 'Could not save', kind: 'sd.save' });
     clock.time += 5;
-    store.post({ level: 'error', message: 'Could not save', kind: 'sd.save' });
+    store.postLocal({ level: 'error', message: 'Could not save', kind: 'sd.save' });
     clock.time += 5;
-    store.post({ level: 'info', message: 'Saved' });
+    store.postLocal({ level: 'info', message: 'Saved' });
     expect(first.id).toBeLessThan(0);
     expect(localCause({ level: 'info', message: 'Saved' })).toBe('ui:info:Saved');
     expect(store.toasts().map((t) => [t.cause, t.count])).toEqual([

@@ -80,6 +80,59 @@ impl<R: Runtime> Guard<R> {
     }
 }
 
+/// One invoke handler over several tables: a call goes to the handler of the first table that lists its command; a
+/// command no table lists is not handled (Tauri answers that it does not exist). The shell plugin composes the shell
+/// crates' handlers with it behind one [`Guard`] over the composed table.
+pub struct Routes<R: Runtime> {
+    routes: Vec<(&'static Table, Box<Handler<R>>)>,
+}
+
+/// An invoke handler, boxed.
+type Handler<R> = dyn Fn(Invoke<R>) -> bool + Send + Sync;
+
+impl<R: Runtime> Default for Routes<R> {
+    fn default() -> Self {
+        Routes { routes: Vec::new() }
+    }
+}
+
+impl<R: Runtime> Routes<R> {
+    /// No routes yet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The commands of `table` go to `handler`.
+    pub fn route(
+        mut self,
+        table: &'static Table,
+        handler: impl Fn(Invoke<R>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.routes.push((table, Box::new(handler)));
+        self
+    }
+
+    /// The table that serves `command`, if any.
+    pub fn table_of(&self, command: &str) -> Option<&'static Table> {
+        self.routes
+            .iter()
+            .find(|(t, _)| t.spec(command).is_some())
+            .map(|(t, _)| *t)
+    }
+
+    /// The one invoke handler.
+    pub fn handler(self) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
+        let Routes { routes } = self;
+        move |invoke: Invoke<R>| {
+            let command = invoke.message.command();
+            match routes.iter().find(|(t, _)| t.spec(command).is_some()) {
+                Some((_, handler)) => handler(invoke),
+                None => false,
+            }
+        }
+    }
+}
+
 /// The size of a request body, counting up to about `cap` (a JSON body is measured as serialised, so a huge request
 /// costs little to refuse).
 pub fn body_size(body: &InvokeBody, cap: usize) -> usize {

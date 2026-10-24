@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-window-boot-error"
+description = "Enables the window_boot_error command without any pre-configured scope."
+commands.allow = ["window_boot_error"]
+
+[[permission]]
+identifier = "deny-window-boot-error"
+description = "Denies the window_boot_error command without any pre-configured scope."
+commands.deny = ["window_boot_error"]

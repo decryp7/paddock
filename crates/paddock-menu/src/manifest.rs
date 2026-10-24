@@ -17,6 +17,10 @@ use crate::model::{MAX_ENTRIES, valid_id};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The menu-bar menus (`SHELL_MENUS` in `@decryp7/paddock-ui/shell`): a command sits in one of them at most. Other
+/// menus are context menus (or submenus, which the manifest does not place), and may repeat a menu-bar command.
+pub const MENU_BAR: [&str; 6] = ["app", "file", "edit", "view", "window", "help"];
+
 /// The manifest version this crate reads (`MANIFEST_VERSION` in `@decryp7/paddock-ui/shell`).
 pub const MANIFEST_VERSION: u32 = 1;
 
@@ -116,7 +120,11 @@ pub fn check(manifest_json: &str) -> Vec<String> {
         if !valid_id(&m.command) {
             out.push(format!("{at}: the command id is not a native menu item id"));
         }
-        if let Some(first) = placed.insert(m.command.as_str(), m.menu.as_str()) {
+        let in_bar = MENU_BAR.contains(&m.menu.as_str());
+        if let Some(first) = in_bar
+            .then(|| placed.insert(m.command.as_str(), m.menu.as_str()))
+            .flatten()
+        {
             out.push(format!(
                 "command {} is in two menus ({first} and {}); the native menu bar shows a command once",
                 m.command, m.menu
@@ -156,6 +164,18 @@ mod tests {
                 { "menu": "help", "command": "sd.reset", "group": "demo", "order": 200, "accelerator": null }
             ]),
             json!([{ "command": "sd.greet", "key": "Mod+Shift+H", "accelerator": "CmdOrCtrl+Shift+H", "scope": "window" }]),
+        );
+        assert_eq!(check(&m), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_context_menu_may_repeat_a_menu_bar_command() {
+        let m = manifest(
+            json!([
+                { "menu": "help", "command": "sd.greet", "group": "demo", "order": 100, "accelerator": null },
+                { "menu": "sd.greetings", "command": "sd.greet", "group": "demo", "order": 100, "accelerator": null }
+            ]),
+            json!([]),
         );
         assert_eq!(check(&m), Vec::<String>::new());
     }

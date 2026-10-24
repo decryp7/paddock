@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-updates-restart"
+description = "Enables the updates_restart command without any pre-configured scope."
+commands.allow = ["updates_restart"]
+
+[[permission]]
+identifier = "deny-updates-restart"
+description = "Denies the updates_restart command without any pre-configured scope."
+commands.deny = ["updates_restart"]

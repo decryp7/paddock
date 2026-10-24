@@ -6,8 +6,7 @@
   ],
   "table": [
     "src/app/generated/app-commands.ts",
-    "../paddock-ui/shell/startup/generated/startup-commands.ts",
-    "../paddock-ui/shell/settings/generated/settings-commands.ts"
+    "../paddock-ui/shell/generated/shell-commands.ts"
   ],
   "base": [
     "window_pong",

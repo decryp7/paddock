@@ -94,7 +94,7 @@ fn app_with(startup: Startup<MockRuntime>) -> App {
     let _ = log::set_logger(&Capture);
     log::set_max_level(log::LevelFilter::Trace);
     install(mock_builder(), startup)
-        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(handler()))
+        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(invoke_handler()))
         .build(mock_context(noop_assets()))
         .unwrap()
 }
@@ -494,7 +494,7 @@ fn only_the_apps_own_pages_are_watched() {
 fn commands_fail_plainly_when_the_contract_is_not_installed() {
     let _ = log::set_logger(&Capture);
     let app = mock_builder()
-        .invoke_handler(handler())
+        .invoke_handler(invoke_handler())
         .build(mock_context(noop_assets()))
         .unwrap();
     let w = window(&app, "main");

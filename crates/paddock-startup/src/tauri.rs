@@ -9,7 +9,7 @@
 //!     .native_dialogs()                                            // feature `dialog`; the app registers tauri-plugin-dialog
 //!     .build()?;
 //! let builder = paddock_startup::tauri::install(tauri::Builder::default(), startup)
-//!     .invoke_handler(paddock_commands::tauri::Guard::new(&paddock_startup::COMMANDS).wrap(paddock_startup::tauri::handler()));
+//!     .invoke_handler(paddock_commands::tauri::Guard::new(&paddock_startup::COMMANDS).wrap(paddock_startup::tauri::invoke_handler()));
 //! ```
 //!
 //! The ticker starts with the first watched page load (or [`start`]) and never runs on the main thread; it reloads pages
@@ -483,7 +483,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Option<JoinHandle<()>> {
 }
 
 /// The invoke handler of [`COMMANDS`](crate::COMMANDS) (put it behind `paddock_commands::tauri::Guard`).
-pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
+pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     ::tauri::generate_handler![window_ready, window_boot_error, ui_checkpoint, window_pong]
 }
 

@@ -8,11 +8,13 @@ import {
   ContributionRegistry,
   parseManifest,
   provideAppearance,
+  manifestDrift,
   serializeManifest,
   themeProblems,
 } from '@decryp7/paddock-ui/shell';
 import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
-import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS } from '../../../../shell-demo/src/app/demo.contributions';
+import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
+import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS } from '../../../../shell-demo/src/app/demo.contributions';
 import { demoContext } from '../../../../shell-demo/src/app/demo-context';
 import { WARM_PAPER } from '../../../../shell-demo/src/app/demo-appearance';
 import { assertContributionsValid } from './contributions-lint';
@@ -73,5 +75,33 @@ describe('shell-demo contributions', () => {
     const manifest = buildManifest(TestBed.inject(ContributionRegistry));
     expect(manifest.menus.find((m) => m.command === 'sd.greet')?.accelerator).toBe('CmdOrCtrl+Shift+H');
     expect(parseManifest(serializeManifest(manifest))).toEqual({ ok: true, manifest });
+  });
+});
+
+/** Node's `fs`, loaded at run time (the spec programme has no Node types). */
+interface NodeFs {
+  readFileSync(path: string, encoding: 'utf8'): string;
+  writeFileSync(path: string, data: string): void;
+}
+const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
+const env = (name: string): string | undefined => (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env[name];
+/** Rust's copy of the main window's contributions (`paddock_shell::manifest::check` reads it in `crates/paddock-shell/tests/demo.rs`). */
+const MANIFEST = 'projects/shell-demo/paddock-manifest.json';
+
+describe('shell-demo manifest', () => {
+  // Regenerate with PADDOCK_WRITE_MANIFEST=1 npx ng test paddock-ui --watch=false --include=**/reference-apps.spec.ts
+  it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
+    TestBed.configureTestingModule({
+      providers: provideShellTesting({
+        contributions: [DEMO_CONTRIBUTIONS, SHELL_ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS],
+        context: () => Promise.resolve(demoContext),
+        providers: [provideMenus({ appName: 'Shell demo' }), provideSubmenus(...DEMO_SUBMENUS)],
+      }),
+    });
+    const manifest = buildManifest(TestBed.inject(ContributionRegistry));
+    expect(manifest.settingsForms).toEqual(['pd.appearance', 'sd.general', 'sd.storage']);
+    const fs = await nodeFs();
+    if (env('PADDOCK_WRITE_MANIFEST') === '1') fs.writeFileSync(MANIFEST, serializeManifest(manifest));
+    expect(manifestDrift(manifest, fs.readFileSync(MANIFEST, 'utf8'))).toEqual([]);
   });
 });

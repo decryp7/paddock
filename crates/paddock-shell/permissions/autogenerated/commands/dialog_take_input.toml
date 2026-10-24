@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-dialog-take-input"
+description = "Enables the dialog_take_input command without any pre-configured scope."
+commands.allow = ["dialog_take_input"]
+
+[[permission]]
+identifier = "deny-dialog-take-input"
+description = "Denies the dialog_take_input command without any pre-configured scope."
+commands.deny = ["dialog_take_input"]

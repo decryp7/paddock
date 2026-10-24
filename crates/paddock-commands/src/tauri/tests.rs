@@ -256,3 +256,56 @@ fn request_sizes_are_measured_as_serialised_and_stop_past_the_cap() {
     assert_eq!(body_size(&InvokeBody::Raw(vec![0; 7]), 10), 7);
     assert_eq!(body_size(&InvokeBody::Json(serde_json::Value::Null), 10), 5);
 }
+
+mod other {
+    #[::tauri::command]
+    pub async fn status() -> String {
+        "fine".into()
+    }
+}
+
+crate::command_table! {
+    static OTHER, macro other_handler;
+    Query [MAIN] => other::status,
+}
+
+crate::command_table! {
+    static BOTH = [TABLE, OTHER];
+}
+
+#[test]
+fn routes_send_each_command_to_the_handler_of_its_table_behind_one_guard() {
+    let _serial = serial();
+    let routes = Routes::new()
+        .route(&TABLE, handler!())
+        .route(&OTHER, other_handler!());
+    assert_eq!(routes.table_of("status").map(|t| t.specs().len()), Some(1));
+    assert_eq!(routes.table_of("ping").map(|t| t.specs().len()), Some(4));
+    assert!(routes.table_of("nope").is_none());
+    let _ = log::set_logger(&Capture);
+    let app = mock_builder()
+        .invoke_handler(Guard::new(&BOTH).wrap(routes.handler()))
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let main = window(&app, "main");
+    assert_eq!(call(&main, "ping"), Ok("pong".into()));
+    assert_eq!(call(&main, "status"), Ok("fine".into()));
+    // The composed table's guard applies the part's classes: `status` is for main windows only.
+    let popout = window(&app, "p-main-1");
+    assert_eq!(call(&popout, "status").unwrap_err()["code"], "denied");
+    // A command no table lists is not handled: Tauri says it does not exist.
+    let e = call(&main, "nope").unwrap_err();
+    assert!(e.to_string().contains("nope"), "{e}");
+    let _ = logged();
+}
+
+#[test]
+fn routes_without_any_table_handle_nothing() {
+    let _serial = serial();
+    let app = mock_builder()
+        .invoke_handler(Routes::<MockRuntime>::default().handler())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let main = window(&app, "main");
+    assert!(call(&main, "ping").is_err());
+}

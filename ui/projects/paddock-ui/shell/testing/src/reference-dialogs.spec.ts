@@ -1,11 +1,9 @@
 import { dialogContractFile, serializeDialogContracts } from '@decryp7/paddock-ui/shell/dialogs';
-import { SETTINGS_COMMANDS } from '@decryp7/paddock-ui/shell/settings';
-import { STARTUP_COMMANDS } from '@decryp7/paddock-ui/shell/startup';
 import { DEMO_DIALOGS } from '../../../../shell-demo/src/app/demo.contributions';
 import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from '../../../../shell-demo/src/app/dialog-base';
 import { APP_COMMANDS } from '../../../../shell-demo/src/app/generated/app-commands';
 import { assertDialogBoots, dialogTableProblems } from './dialog-harness';
-import type { DialogDef } from '@decryp7/paddock-ui/shell';
+import { SHELL_COMMANDS, type DialogDef } from '@decryp7/paddock-ui/shell';
 
 // The shell demo's dialogs (one per kind) through the boot-every-dialog harness, its contract file and its command table:
 // what every app runs over its own registry (ADR 0009 §4).
@@ -45,7 +43,8 @@ describe('shell-demo dialogs', () => {
   }
 
   it('declares only commands of its table that dialogs may call', () => {
-    expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...STARTUP_COMMANDS, ...SETTINGS_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
+    // The app's own table and the shell plugin's (every shell crate's commands, plan S17).
+    expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...SHELL_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
   });
 
   // Regenerate with PADDOCK_WRITE_CONTRACTS=1 npx ng test paddock-ui --watch=false --include=**/reference-dialogs.spec.ts

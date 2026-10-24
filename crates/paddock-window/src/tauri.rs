@@ -21,7 +21,7 @@
 //!         Ok(())
 //!     })
 //!     .on_window_event(|w, e| { paddock_dialogs::tauri::on_window_event(w, e); paddock_window::tauri::on_window_event(w, e) })
-//!     .invoke_handler(Guard::new(&paddock_window::COMMANDS).wrap(paddock_window::tauri::handler()))
+//!     .invoke_handler(Guard::new(&paddock_window::COMMANDS).wrap(paddock_window::tauri::invoke_handler()))
 //!     .build(context)?
 //!     .run(|app, event| paddock_window::tauri::on_run_event(app, &event));
 //! ```
@@ -41,7 +41,7 @@ mod popover;
 mod tray;
 
 pub use commands::{
-    app_quit, handler, tray_close, tray_fit_height, window_close, window_focus, window_new,
+    app_quit, invoke_handler, tray_close, tray_fit_height, window_close, window_focus, window_new,
     window_resolve_close, window_resolve_open, window_set_title, window_take_pending, windows_list,
 };
 pub use instance::{open_from_outside, opened, queue_open, reopen, second_instance};

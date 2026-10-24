@@ -54,5 +54,19 @@ pub use window::{
 #[cfg(feature = "tauri")]
 pub mod tauri;
 
+paddock_commands::command_table! {
+    /// The dialog layer's commands (`paddock_dialogs::tauri::invoke_handler` serves them; the shell plugin folds them
+    /// into its table). [`BASE_COMMANDS`] are the ones every dialog contract includes.
+    pub static COMMANDS;
+    /// Opens a dialog window for the calling window (a dialog may open a dialog of its own).
+    Mutation [MAIN | DIALOG] limit 9 * paddock_commands::MIB => tauri::dialog_open,
+    /// The calling dialog's start data.
+    Query [DIALOG] => tauri::dialog_take_input,
+    /// Closes the calling dialog with its result.
+    Mutation [DIALOG] limit 2 * paddock_commands::MIB => tauri::dialog_close,
+    /// Sizes the calling dialog to its content.
+    Quiet [DIALOG] => tauri::dialog_fit_height,
+}
+
 #[cfg(test)]
 mod generated;

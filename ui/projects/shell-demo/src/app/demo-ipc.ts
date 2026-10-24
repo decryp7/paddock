@@ -1,4 +1,6 @@
 
+import { shellInvoke } from '@decryp7/paddock-ui/shell';
+
 /** The part of Tauri's page globals the demo uses (what `@tauri-apps/api` wraps). */
 interface TauriInternals {
   invoke(cmd: string, args?: unknown): Promise<unknown>;
@@ -19,7 +21,8 @@ export function tauriIpc(): DemoIpc | null {
   const internals = (globalThis as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
   if (!internals) return null;
   return {
-    invoke: <T>(command: string, args?: Record<string, unknown>) => internals.invoke(command, args ?? {}) as Promise<T>,
+    // The shell's commands go to the `paddock-shell` plugin (`plugin:paddock-shell|<command>`), the demo's own as they are.
+    invoke: shellInvoke(<T>(command: string, args?: Record<string, unknown>) => internals.invoke(command, args ?? {}) as Promise<T>),
     listen: async <T>(event: string, handler: (payload: T) => void) => {
       const callback = internals.transformCallback((e) => handler(e.payload as T));
       const eventId = await internals.invoke('plugin:event|listen', { event, target: { kind: 'Any' }, handler: callback });

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { auditDialog, main, parseTable, readConfig, run } from './paddock-check-dialog-commands.mjs';
+import { auditDialog, main, parseTable, readConfig, run, SHELL_BASE_COMMANDS } from './paddock-check-dialog-commands.mjs';
 import { createAnalysis, readRegistry } from './dialog-commands-analysis.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -136,4 +136,10 @@ test("the shell demo's dialogs declare exactly what they reach", () => {
   // The Settings window (plan S10) reaches the settings commands through its store and the Tauri backend.
   assert.deepEqual([...r.derived['pd.settings']].sort(), ['settings_overview', 'settings_reset', 'settings_set']);
   assert.equal(r.dialogs, 6);
+});
+
+test('the base set is the generated DIALOG_BASE_COMMANDS of paddock-dialogs', () => {
+  const generated = readFileSync(join(here, '../shell/generated/dialogs.ts'), 'utf8');
+  const list = /export const DIALOG_BASE_COMMANDS = \[([^\]]*)\] as const;/.exec(generated)?.[1] ?? '';
+  assert.deepEqual(SHELL_BASE_COMMANDS, [...list.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
 });

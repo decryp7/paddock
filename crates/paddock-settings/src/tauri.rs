@@ -165,6 +165,12 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] => settings_reset,
 }
 
+/// The invoke handler of [`COMMANDS`] without a guard: for a guard of the app's or the shell plugin's own (which folds
+/// [`COMMANDS`] into its table).
+pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
+    generated_handler!()
+}
+
 /// The guarded invoke handler of [`COMMANDS`]. Dialog windows may call nothing of it; use [`handler_with_grants`] so the
 /// dialogs whose contracts name a settings command (the Settings window) may call it.
 pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {

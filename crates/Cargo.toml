@@ -11,6 +11,7 @@ members = [
     "paddock-jobs",
     "paddock-menu",
     "paddock-settings",
+    "paddock-shell",
     "paddock-startup",
     "paddock-updater",
     "paddock-window",
@@ -34,6 +35,7 @@ paddock-health = { path = "paddock-health", version = "0.1.0", registry = "decry
 paddock-jobs = { path = "paddock-jobs", version = "0.1.0", registry = "decryp7" }
 paddock-menu = { path = "paddock-menu", version = "0.1.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "decryp7" }
+paddock-shell = { path = "paddock-shell", version = "0.2.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.1.0", registry = "decryp7" }

@@ -3,9 +3,10 @@
 use crate::notify::{self, persist};
 use std::path::{Path, PathBuf};
 
-/// Where the shell's generated TypeScript goes: the `shell` entry point of `@decryp7/paddock-ui`.
+/// Where the generated TypeScript goes: the `shell/notify` entry point of `@decryp7/paddock-ui`, which uses it.
 pub(crate) fn generated_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/projects/paddock-ui/shell/generated")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/projects/paddock-ui/shell/notify/generated")
 }
 
 const REGENERATE: &str =
@@ -31,6 +32,8 @@ fn health_ts() -> String {
         notify::NoticesEvent::decl(),
         notify::RestoredNotices::decl(),
         persist::NoticesRecord::decl(),
+        notify::window::WindowNoticeScope::decl(),
+        notify::window::WindowNotice::decl(),
         crate::HealthErrorCode::decl(),
         crate::HealthError::decl(),
     ];

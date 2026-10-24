@@ -1,0 +1,136 @@
+# Generated from the command table of paddock-shell. Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-shell --lib generated.
+
+[default]
+description = "The main window's set: every shell command a top-level window may call."
+permissions = ["main"]
+
+[[set]]
+identifier = "main"
+description = "Every shell command a top-level window (`main`, `w-<n>`) may call."
+permissions = [
+  "allow-about-info",
+  "allow-about-legal",
+  "allow-about-whats-new",
+  "allow-about-whats-new-start",
+  "allow-app-quit",
+  "allow-dialog-open",
+  "allow-health-repair",
+  "allow-health-snapshot",
+  "allow-job-cancel",
+  "allow-jobs-snapshot",
+  "allow-menu-set",
+  "allow-notifications-dismiss",
+  "allow-notifications-list",
+  "allow-notifications-mark-all-read",
+  "allow-notifications-mark-read",
+  "allow-notifications-post",
+  "allow-notifications-record",
+  "allow-notifications-restore",
+  "allow-settings-overview",
+  "allow-settings-reset",
+  "allow-settings-set",
+  "allow-shell-version",
+  "allow-ui-checkpoint",
+  "allow-updates-cancel",
+  "allow-updates-check",
+  "allow-updates-download",
+  "allow-updates-install-on-quit",
+  "allow-updates-restart",
+  "allow-updates-set-preferences",
+  "allow-updates-status",
+  "allow-window-boot-error",
+  "allow-window-close",
+  "allow-window-focus",
+  "allow-window-new",
+  "allow-window-pong",
+  "allow-window-ready",
+  "allow-window-resolve-close",
+  "allow-window-resolve-open",
+  "allow-window-set-title",
+  "allow-window-take-pending",
+  "allow-windows-list",
+]
+
+[[set]]
+identifier = "popout"
+description = "Every shell command a panel popped out of a window (`p-<host>-<n>`) may call."
+permissions = [
+  "allow-about-info",
+  "allow-about-legal",
+  "allow-about-whats-new",
+  "allow-app-quit",
+  "allow-health-repair",
+  "allow-health-snapshot",
+  "allow-job-cancel",
+  "allow-jobs-snapshot",
+  "allow-menu-set",
+  "allow-notifications-dismiss",
+  "allow-notifications-list",
+  "allow-notifications-mark-all-read",
+  "allow-notifications-mark-read",
+  "allow-notifications-post",
+  "allow-notifications-record",
+  "allow-notifications-restore",
+  "allow-settings-overview",
+  "allow-shell-version",
+  "allow-updates-status",
+  "allow-window-boot-error",
+  "allow-window-focus",
+  "allow-window-pong",
+  "allow-window-ready",
+  "allow-windows-list",
+]
+
+[[set]]
+identifier = "dialog"
+description = "Every shell command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract."
+permissions = [
+  "allow-about-info",
+  "allow-about-legal",
+  "allow-about-whats-new",
+  "allow-app-quit",
+  "allow-dialog-close",
+  "allow-dialog-fit-height",
+  "allow-dialog-open",
+  "allow-dialog-take-input",
+  "allow-health-repair",
+  "allow-health-snapshot",
+  "allow-job-cancel",
+  "allow-jobs-snapshot",
+  "allow-notifications-dismiss",
+  "allow-notifications-list",
+  "allow-notifications-mark-all-read",
+  "allow-notifications-mark-read",
+  "allow-notifications-post",
+  "allow-notifications-record",
+  "allow-notifications-restore",
+  "allow-settings-overview",
+  "allow-settings-reset",
+  "allow-settings-set",
+  "allow-shell-version",
+  "allow-updates-cancel",
+  "allow-updates-check",
+  "allow-updates-download",
+  "allow-updates-install-on-quit",
+  "allow-updates-restart",
+  "allow-updates-set-preferences",
+  "allow-updates-status",
+  "allow-window-boot-error",
+  "allow-window-focus",
+  "allow-window-pong",
+  "allow-window-ready",
+  "allow-windows-list",
+]
+
+[[set]]
+identifier = "tray"
+description = "Every shell command a tray popover (`tray`, `tray-<item>`) may call."
+permissions = [
+  "allow-app-quit",
+  "allow-shell-version",
+  "allow-tray-close",
+  "allow-tray-fit-height",
+  "allow-window-focus",
+  "allow-window-new",
+  "allow-windows-list",
+]

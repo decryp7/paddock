@@ -11,9 +11,16 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-/// The commands every dialog window may call whatever it shows (taking its input, answering, sizing itself): the kind
-/// adds them, a contract never lists them. An app adds its own base set in the contract file (`base`).
-pub const BASE_COMMANDS: [&str; 3] = ["dialog_take_input", "dialog_close", "dialog_fit_height"];
+/// The commands every dialog window may call whatever it shows (taking its input, answering, sizing itself, and, as every
+/// window, posting a notice to the engine's centre and reading its host's list: ADR 0010, rule 34): the kind adds them,
+/// a contract never lists them. An app adds its own base set in the contract file (`base`).
+pub const BASE_COMMANDS: [&str; 5] = [
+    "dialog_take_input",
+    "dialog_close",
+    "dialog_fit_height",
+    "notifications_post",
+    "notifications_list",
+];
 /// The longest dialog id and command name.
 pub const MAX_NAME_LEN: usize = 64;
 /// The largest contract file accepted.
@@ -606,6 +613,10 @@ mod tests {
         assert_eq!(
             c.ids().collect::<Vec<_>>(),
             [
+                "pd.about",
+                "pd.settings",
+                "pd.updates",
+                "pd.whats-new",
                 "sd.about",
                 "sd.choose-style",
                 "sd.confirm-reset",

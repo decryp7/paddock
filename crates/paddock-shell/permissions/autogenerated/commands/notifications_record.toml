@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-notifications-record"
+description = "Enables the notifications_record command without any pre-configured scope."
+commands.allow = ["notifications_record"]
+
+[[permission]]
+identifier = "deny-notifications-record"
+description = "Denies the notifications_record command without any pre-configured scope."
+commands.deny = ["notifications_record"]

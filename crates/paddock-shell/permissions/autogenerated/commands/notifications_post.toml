@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-notifications-post"
+description = "Enables the notifications_post command without any pre-configured scope."
+commands.allow = ["notifications_post"]
+
+[[permission]]
+identifier = "deny-notifications-post"
+description = "Denies the notifications_post command without any pre-configured scope."
+commands.deny = ["notifications_post"]

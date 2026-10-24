@@ -99,4 +99,4 @@ export const DIALOG_EVENTS = {
 } as const;
 
 /** The commands every dialog window may call whatever its contract says. */
-export const DIALOG_BASE_COMMANDS = ['dialog_take_input', 'dialog_close', 'dialog_fit_height'] as const;
+export const DIALOG_BASE_COMMANDS = ['dialog_take_input', 'dialog_close', 'dialog_fit_height', 'notifications_post', 'notifications_list'] as const;

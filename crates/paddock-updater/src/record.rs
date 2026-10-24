@@ -1,4 +1,4 @@
-//! `updates.json` in the app's config folder: the update preferences, when the app last checked (so the daily automatic
+//! `updates.json` in the app's config folder: when the app last checked (so the daily automatic
 //! check survives restarts), an install that failed while quitting (shown at the next start), the last version whose
 //! release notes were shown, and the last version whose services were registered (rule 24). Versioned; a missing,
 //! oversized, newer or corrupt file means "nothing recorded" (defaults), never an error.
@@ -22,10 +22,6 @@ pub struct Record {
     pub version: u32,
     /// Seconds since 1970 of the last finished check.
     pub last_checked: Option<u64>,
-    /// "Check for updates automatically" (off by default).
-    pub auto_check: bool,
-    /// The release channel's id (the app's first channel when unknown).
-    pub channel: Option<String>,
     pub failed_install: Option<FailedInstall>,
     /// The last version whose release notes the user was shown (or which started for the first time).
     pub whats_new_seen: Option<String>,
@@ -38,8 +34,6 @@ impl Default for Record {
         Record {
             version: VERSION,
             last_checked: None,
-            auto_check: false,
-            channel: None,
             failed_install: None,
             whats_new_seen: None,
             services_version: None,

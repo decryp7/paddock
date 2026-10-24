@@ -171,6 +171,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-settings --all-targets --all-features -- -D warnings && cargo test -p paddock-settings --all-features
 
+      # The plugin: every shell command registered on the mock runtime, the permission sets through Tauri's ACL, the
+      # demo's contracts and manifest, the version lockstep with @decryp7/paddock-ui. Also without the optional features.
+      - name: paddock-shell
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-shell --all-targets --all-features -- -D warnings && cargo test -p paddock-shell --all-features && cargo test -p paddock-shell
+
       - name: paddock-startup
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-startup --all-targets --all-features -- -D warnings && cargo test -p paddock-startup --all-features

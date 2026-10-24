@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
-import { provideContributions, provideShellContext } from '@decryp7/paddock-ui/shell';
+import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
@@ -42,6 +42,8 @@ export function bootMainWindow(): Promise<unknown> {
         },
       },
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
+      // The desktop build asks the shell plugin for its version once (ADR 0012 §3): a different one is a plain error.
+      ...(ipc ? [provideShellVersionCheck(ipc.invoke)] : []),
       // About, Updates and What's New (plan S11): the Help menu's items; the main window announces a found update and
       // opens What's New once after an update.
       provideContributions(SHELL_ABOUT_CONTRIBUTIONS),
