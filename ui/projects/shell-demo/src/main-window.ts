@@ -9,6 +9,8 @@ import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
 import { TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
 import { OS_NOTIFICATIONS_CONTRIBUTIONS, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
+import { provideShellSetup, SETUP_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/setup';
+import { demoSetupBackend } from './app/demo-setup';
 import { ACTIVITY_CONTRIBUTIONS, provideShellActivity, provideShellUndo, UNDO_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/undo';
 import { DemoActivity } from './app/demo-activity';
 import { provideWebviewLog } from '@decryp7/paddock-ui/shell/diagnostics';
@@ -65,6 +67,9 @@ export function bootMainWindow(): Promise<unknown> {
       // Report a problem (plan X2): Help > Report a problem…, the Logging settings page, and the page's own errors in the
       // engine's log (desktop build only: the browser build has no log to send them to).
       provideContributions(SHELL_DIAGNOSTICS_CONTRIBUTIONS),
+      // The first-run set-up checklist (plan X19): Help > Set-up…, and the Set-up window opened once on a first run.
+      provideContributions(SETUP_CONTRIBUTIONS),
+      provideShellSetup({ backend: demoSetupBackend, main: true, ready: windowReady }),
       provideContributions(OS_NOTIFICATIONS_CONTRIBUTIONS),
       ...(ipc ? [provideWebviewLog({ ipc: () => ({ invoke: (command, args) => ipc.invoke(command, args) }) })] : []),
       // Settings (plan S10): Settings… (Mod+,) and the shell's Appearance page, Open Settings for notices and repairs, and

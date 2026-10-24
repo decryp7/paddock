@@ -27,6 +27,25 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- First-run set-up checklist (plan X19). `paddock_shell::setup` (`Builder::first_run`): the steps in order with their own checks
+  (`SetupItem`), the user's answers (skipped, shown) in `setup.json` through `paddock-env`, actions run on a worker with the
+  outcome on `paddock://setup`, and the commands `setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish`. The shell
+  brings four steps over small ports: the background service (`paddock-service`; Install, Repair, or Open Login Items where the
+  user's switch is off), Start at login (the `pd.login` setting), notification permission (`Toaster::permission` through
+  `ToasterAccess`, Repair opens the system settings) and Pitwall pairing (`paddock-pitwall`'s `Link` through `LinkPort`, with the
+  shared needs-AI view and the pairing code to compare); an app adds its own (Debrief's tour). Every step is skippable and a step
+  with a problem always has a Repair. `@decryp7/paddock-ui/shell/setup`: `SetupBackend` (Tauri and in-memory), `SetupStore`,
+  `defineSetup` (a modeless `tool` window `pd.setup` and the Settings > Set-up page), `SETUP_CONTRIBUTIONS` (Help > Set-up…) and
+  `provideShellSetup` (the main window opens the window once on a first run); the components are in `shell/setup/page`.
+- `paddock-siblings` (plan X45): hand-off between the apps, from Pitcrew's `debrief_link.rs` and `handoff.rs`. `AppSpec` / `FAMILY` hold
+  what each app accepts (the hand-off rows of `docs/ecosystem.md`); `Handoff` is `Open`, `Import { files }` (absolute existing files,
+  at most 32, the app's extensions) or `Show { item }` (plain words); `Siblings::open` refuses an unknown app, itself and anything
+  the app does not accept before looking for it, finds the program (`PATH`, then the install places per OS, the pre-rename name as
+  "needs update"), and starts it detached with the paths or one deep link of its scheme (`pitcrew://show/machine/mac-mini`);
+  "not installed" is a plain `Outcome`. The receiving side parses with `Handoff::from_paths` / `from_link`. `testing` has a file
+  system and a spawner that start nothing.
+- Paddock Workbench Demo (plan X50 W8): `apps/workbench-demo`, the workbench demo as an installable app on the `paddock-shell` and `paddock-workbench` plugins (layouts in the config folder, pop-out panels with the drag ghost, the assistant on Pitwall with one read-only sample tool and a calm "Pitwall not running" state), its own icon, ad-hoc macOS sealing, a release workflow from `workbench-demo-v*` tags (`scripts/workbench-demo-release.mjs`, `scripts/workbench-demo/`), a CI job, and the starter section in its README. `ui/projects/workbench-demo` picks the Tauri backends when `inTauri()` and boots main, pop-out and dialog windows; `workbenchInvoke` (`@decryp7/paddock-ui/workbench`) sends the plugin's commands to it.
+- `paddock-workbench` plugin (plan X50 W7): `paddock_workbench::Builder` (`layouts`, `panels`, `window_hooks`, `assistant`, each optional) builds the Tauri plugin `paddock-workbench`: the layout, panel and assistant commands in one composed table behind one guard, generated permission sets `default`/`popout`/`dialog` per window class, and generated `WORKBENCH_COMMANDS`/`WORKBENCH_PLUGIN` in `workbench/generated`.
 - Every Paddock crate that parses untrusted input has a never-panics test (`paddock_testkit::assert_never_panics`, new: the one-line
   form of `corpus` + `never_panics`), so C36 reports nothing and is strict in Paddock's own CI (`paddock-conformance --strict C36`: the
   warnings of the named checks fail the run). C36 now assigns a file to the nearest crate above it.

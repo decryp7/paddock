@@ -1,0 +1,39 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Paddock Workbench Demo",
+  "identifier": "net.decryptology.paddock-workbench-demo",
+  "build": {
+    "frontendDist": "../../../ui/dist/workbench-demo/browser",
+    "devUrl": "http://localhost:4302",
+    "beforeDevCommand": "npm --prefix ../../ui run workbench-demo",
+    "beforeBuildCommand": "npm --prefix ../../ui run workbench-demo:build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "Paddock Workbench Demo",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "zoomHotkeysEnabled": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app", "nsis", "deb", "appimage"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "category": "DeveloperTool",
+    "copyright": "MIT OR Apache-2.0",
+    "shortDescription": "The Paddock workbench as an app, to check the shared UI",
+    "longDescription": "Paddock Workbench Demo shows the shared workbench of the Paddock apps for real: the dock with perspectives and saved layouts, the Explorer, the command palette, panels that pop out into windows of their own with the drag ghost, and the assistant pane on Pitwall. It is also the starter for new IDE-style Paddock apps."
+  }
+}
