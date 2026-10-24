@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 /// `value` as pretty JSON with a trailing newline.
 pub fn pretty<T: Serialize>(value: &T) -> String {
-    let mut text = serde_json::to_string_pretty(value).unwrap_or_else(|e| format!("cannot serialise: {e}"));
+    let mut text =
+        serde_json::to_string_pretty(value).unwrap_or_else(|e| format!("cannot serialise: {e}"));
     text.push('\n');
     text
 }

@@ -36,17 +36,29 @@ pub struct HostConfig {
     pub tasks: Arc<dyn TaskObserver>,
     /// Runs elevated operations, when the app can.
     pub elevated: Option<Arc<dyn ElevatedRunner>>,
+    /// Environment variables added to every plugin process on top of the few it keeps (plugins start with a clean
+    /// environment). The tests of this workspace use it to keep the plugins' coverage data out of the way.
+    pub child_env: Vec<(String, String)>,
 }
 
 impl HostConfig {
     /// Defaults: restart with 1 s doubling to 60 s (reset after five healthy minutes), 30 s calls, a 5 s hang grace, 15 s to
     /// start, 2 s to stop, 16 MiB frames.
-    pub fn new(info: HostInfo, clock: Arc<dyn Clock>, quarantine: Arc<Quarantine>, outputs_dir: impl Into<PathBuf>) -> HostConfig {
+    pub fn new(
+        info: HostInfo,
+        clock: Arc<dyn Clock>,
+        quarantine: Arc<Quarantine>,
+        outputs_dir: impl Into<PathBuf>,
+    ) -> HostConfig {
         HostConfig {
             clock,
             info,
             quarantine,
-            backoff: BackoffPolicy::retry_forever(Duration::from_secs(1), Duration::from_secs(60), Duration::from_secs(300)),
+            backoff: BackoffPolicy::retry_forever(
+                Duration::from_secs(1),
+                Duration::from_secs(60),
+                Duration::from_secs(300),
+            ),
             call_timeout: Duration::from_secs(30),
             hang_grace: Duration::from_secs(5),
             start_timeout: Duration::from_secs(15),
@@ -55,6 +67,7 @@ impl HostConfig {
             outputs_dir: outputs_dir.into(),
             tasks: Arc::new(NoTasks),
             elevated: None,
+            child_env: Vec::new(),
         }
     }
 }

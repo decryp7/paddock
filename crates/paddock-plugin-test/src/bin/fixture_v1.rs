@@ -6,7 +6,12 @@ use paddock_ipc::{NoCalls, ProtocolVersion};
 use std::sync::Arc;
 
 fn main() {
-    let result = paddock_ipc::child::serve("the app", ProtocolVersion::new(1, 1), |_| Arc::new(NoCalls), |_, _| {});
+    let result = paddock_ipc::child::serve(
+        "the app",
+        ProtocolVersion::new(1, 1),
+        |_| Arc::new(NoCalls),
+        |_, _| {},
+    );
     if let Err(e) = result {
         eprintln!("fixture v1: {e}");
         std::process::exit(2);

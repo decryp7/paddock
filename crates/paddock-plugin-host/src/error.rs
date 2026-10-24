@@ -1,7 +1,7 @@
 //! Errors of calling a plugin.
 
-use paddock_plugin_api::protocol::Fail;
 use paddock_ipc::RemoteError;
+use paddock_plugin_api::protocol::Fail;
 use std::fmt;
 
 /// What a fault is: the plugin misbehaved, the process is (or was) in trouble. Each one is counted towards quarantine.
@@ -51,3 +51,29 @@ impl fmt::Display for HostError {
 }
 
 impl std::error::Error for HostError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_error_says_what_happened() {
+        let cases = [
+            (HostError::Unavailable("a".into()), "a"),
+            (HostError::Invalid("b".into()), "b"),
+            (
+                HostError::Fault {
+                    kind: FaultKind::Hang,
+                    message: "c".into(),
+                },
+                "c",
+            ),
+            (HostError::Failed(Fail::new("d")), "d"),
+            (HostError::Remote(RemoteError::new("x", "e")), "e"),
+            (HostError::Cancelled, "cancelled"),
+        ];
+        for (e, text) in cases {
+            assert_eq!(e.to_string(), text);
+        }
+    }
+}

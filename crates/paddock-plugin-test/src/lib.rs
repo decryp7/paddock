@@ -23,5 +23,6 @@ pub mod conformance;
 pub mod fake;
 pub mod fixture;
 pub mod golden;
+pub mod process;
 
 pub use fake::{CallFailure, FakeHost};

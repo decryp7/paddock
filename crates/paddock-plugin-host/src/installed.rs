@@ -20,7 +20,10 @@ use paddock_plugin_api::compat::{HostInfo, protocol_of};
 use paddock_plugin_package::archive::verify_installed;
 use paddock_plugin_package::keys::{from_hex, to_hex};
 use paddock_plugin_package::manifest::host_target;
-use paddock_plugin_package::{Manifest, Package, PackageError, Permission, PermissionRequest, SignatureStatus, Trust, TrustPolicy};
+use paddock_plugin_package::{
+    Manifest, Package, PackageError, Permission, PermissionRequest, SignatureStatus, Trust,
+    TrustPolicy,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -116,11 +119,24 @@ impl Inspection {
 
 fn plain(rel: &str) -> bool {
     let p = Path::new(rel);
-    !rel.is_empty() && p.components().count() == 1 && matches!(p.components().next(), Some(Component::Normal(_)))
+    !rel.is_empty()
+        && p.components().count() == 1
+        && matches!(p.components().next(), Some(Component::Normal(_)))
 }
 
 fn io(e: std::io::Error) -> PackageError {
     PackageError::Io(e.to_string())
+}
+
+/// The signature status as the record keeps it: its code and the publisher's name (or the key's id).
+fn signer_of(status: &SignatureStatus) -> (&'static str, Option<String>) {
+    match status {
+        SignatureStatus::Builtin(name) | SignatureStatus::Trusted(name) => {
+            (status.code(), Some(name.clone()))
+        }
+        SignatureStatus::UnknownKey(key) => (status.code(), Some(key.clone())),
+        SignatureStatus::Unsigned => (status.code(), None),
+    }
 }
 
 /// The folder of installed plugins.
@@ -133,7 +149,10 @@ pub struct PluginsDir {
 impl PluginsDir {
     /// Plugins under `root`, time stamps from `clock`.
     pub fn new(root: impl Into<PathBuf>, clock: Arc<dyn Clock>) -> PluginsDir {
-        PluginsDir { root: root.into(), clock }
+        PluginsDir {
+            root: root.into(),
+            clock,
+        }
     }
 
     /// `<data folder of the app>/plugins`.
@@ -148,7 +167,9 @@ impl PluginsDir {
 
     fn plugin_dir(&self, id: &str) -> Result<PathBuf, PackageError> {
         if paddock_plugin_package::PluginId::new(id).is_err() {
-            return Err(PackageError::InvalidManifest(format!("\"{id}\" is not a plugin id")));
+            return Err(PackageError::InvalidManifest(format!(
+                "\"{id}\" is not a plugin id"
+            )));
         }
         Ok(self.root.join(id))
     }
@@ -161,11 +182,15 @@ impl PluginsDir {
     pub fn record(&self, id: &str) -> Result<Option<InstallRecord>, PackageError> {
         let loaded = self.file(id)?.load();
         if let Some(problem) = loaded.problem {
-            return Err(PackageError::Io(format!("the record of {id} is not usable ({problem}); reinstall it")));
+            return Err(PackageError::Io(format!(
+                "the record of {id} is not usable ({problem}); reinstall it"
+            )));
         }
         match loaded.value.record {
             Some(r) if r.id == id => Ok(Some(r)),
-            Some(_) => Err(PackageError::Tampered(format!("the record in the folder of {id} belongs to another plugin"))),
+            Some(_) => Err(PackageError::Tampered(format!(
+                "the record in the folder of {id} belongs to another plugin"
+            ))),
             None => Ok(None),
         }
     }
@@ -173,38 +198,62 @@ impl PluginsDir {
     fn save(&self, record: &InstallRecord) -> Result<(), PackageError> {
         let dir = self.plugin_dir(&record.id)?;
         std::fs::create_dir_all(&dir).map_err(io)?;
-        self.file(&record.id)?.save(&RecordFile { record: Some(record.clone()) })?;
+        self.file(&record.id)?.save(&RecordFile {
+            record: Some(record.clone()),
+        })?;
         Ok(())
     }
 
     /// Reads `id` back: the record, the manifest in its version folder (it must still ask for what the user saw), the program
     /// path.
     pub fn load(&self, id: &str) -> Result<Option<Installed>, PackageError> {
-        let Some(record) = self.record(id)? else { return Ok(None) };
+        let Some(record) = self.record(id)? else {
+            return Ok(None);
+        };
         if !plain(&record.folder) || !plain(&record.program) {
-            return Err(PackageError::Tampered(format!("the record of {id} names paths outside its folder")));
+            return Err(PackageError::Tampered(format!(
+                "the record of {id} names paths outside its folder"
+            )));
         }
-        let dir = self.plugin_dir(id)?;
-        let version_dir = dir.join(&record.folder);
+        let version_dir = self.plugin_dir(id)?.join(&record.folder);
         let text = std::fs::read_to_string(version_dir.join("manifest.toml"))
             .map_err(|e| PackageError::MissingFile(format!("manifest.toml of {id} ({e})")))?;
         let manifest = Manifest::parse(&text)?;
-        if manifest.id.as_str() != id || manifest.version.to_string() != record.version || manifest.permissions != record.requested {
-            return Err(PackageError::Tampered(format!("the manifest of {id} is not the one that was installed")));
+        if manifest.id.as_str() != id
+            || manifest.version.to_string() != record.version
+            || manifest.permissions != record.requested
+        {
+            return Err(PackageError::Tampered(format!(
+                "the manifest of {id} is not the one that was installed"
+            )));
         }
-        let sha256 = from_hex::<32>(&record.sha256).ok_or_else(|| PackageError::Tampered(format!("the record of {id} has no valid hash")))?;
-        Ok(Some(Installed {
-            program: version_dir.join("bin").join(&record.program),
+        self.installed_of(record, manifest).map(Some)
+    }
+
+    /// A record and its manifest as an installed plugin (the record's hash must be one).
+    fn installed_of(
+        &self,
+        record: InstallRecord,
+        manifest: Manifest,
+    ) -> Result<Installed, PackageError> {
+        let sha256 = from_hex::<32>(&record.sha256).ok_or_else(|| {
+            PackageError::Tampered(format!("the record of {} has no valid hash", record.id))
+        })?;
+        let dir = self.plugin_dir(&record.id)?;
+        Ok(Installed {
+            program: dir.join(&record.folder).join("bin").join(&record.program),
             data_dir: dir.join("data"),
             sha256,
             manifest,
             record,
-        }))
+        })
     }
 
     /// Every installed plugin, by id; one that cannot be read is listed with the reason, never skipped.
     pub fn list(&self) -> Vec<Result<Installed, (String, PackageError)>> {
-        let Ok(entries) = std::fs::read_dir(&self.root) else { return Vec::new() };
+        let Ok(entries) = std::fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
         let mut ids: Vec<String> = entries
             .flatten()
             .filter(|e| e.path().join(RECORD_FILE).is_file())
@@ -213,10 +262,10 @@ impl PluginsDir {
             .collect();
         ids.sort();
         ids.into_iter()
-            .filter_map(|id| match self.load(&id) {
-                Ok(Some(i)) => Some(Ok(i)),
-                Ok(None) => None,
-                Err(e) => Some(Err((id, e))),
+            .filter_map(|id| {
+                self.load(&id)
+                    .transpose()
+                    .map(|r| r.map_err(|e| (id.clone(), e)))
             })
             .collect()
     }
@@ -228,34 +277,54 @@ impl PluginsDir {
     }
 
     /// Reads and verifies the package at `path` and says what installing it would do.
-    pub fn inspect(&self, path: &Path, trust: &TrustPolicy, host: &HostInfo) -> Result<Inspection, PackageError> {
-        let pkg = Package::open(path)?;
+    pub fn inspect(
+        &self,
+        path: &Path,
+        trust: &TrustPolicy,
+        host: &HostInfo,
+    ) -> Result<Inspection, PackageError> {
+        Ok(self.inspection_of(Package::open(path)?, trust, host))
+    }
+
+    fn inspection_of(&self, pkg: Package, trust: &TrustPolicy, host: &HostInfo) -> Inspection {
         let m = &pkg.manifest;
         let installed = self.record(m.id.as_str()).ok().flatten();
         let asked: Vec<Permission> = m.permissions.iter().map(|p| p.permission.clone()).collect();
-        let before: Vec<Permission> = installed.as_ref().map(|r| r.requested.iter().map(|p| p.permission.clone()).collect()).unwrap_or_default();
+        let before: Vec<Permission> = installed
+            .iter()
+            .flat_map(|r| r.requested.iter().map(|p| p.permission.clone()))
+            .collect();
         let label = m.id.to_string();
-        let runnable = host
+        let compatible = host
             .check_protocol(&label, protocol_of(m.protocol))
-            .and_then(|()| m.namespaces().try_for_each(|n| host.check_extension(&label, n.ns(), n.minor)))
-            .map_err(|r| PackageError::Incompatible(r.to_string()))
-            .and_then(|()| match pkg.program(host_target()) {
-                Some(_) => Ok(()),
-                None => Err(PackageError::WrongTarget {
-                    target: host_target().into(),
-                    supported: m.targets.join(", "),
-                }),
-            });
-        Ok(Inspection {
+            .and_then(|()| {
+                m.namespaces()
+                    .try_for_each(|n| host.check_extension(&label, n.ns(), n.minor))
+            })
+            .map_err(|r| PackageError::Incompatible(r.to_string()));
+        let has_program = pkg.program(host_target()).is_some();
+        let wrong_target = PackageError::WrongTarget {
+            target: host_target().into(),
+            supported: m.targets.join(", "),
+        };
+        Inspection {
             digest: pkg.digest(),
             signature: trust.status(&pkg.signature),
             trust: trust.decide(&pkg.signature),
-            runnable,
-            added_permissions: asked.iter().filter(|p| !before.contains(p)).cloned().collect(),
-            removed_permissions: before.iter().filter(|p| installed.is_some() && !asked.contains(p)).cloned().collect(),
+            runnable: compatible.and(has_program.then_some(()).ok_or(wrong_target)),
+            added_permissions: asked
+                .iter()
+                .filter(|p| !before.contains(p))
+                .cloned()
+                .collect(),
+            removed_permissions: before
+                .iter()
+                .filter(|p| !asked.contains(p))
+                .cloned()
+                .collect(),
             installed,
             manifest: pkg.manifest,
-        })
+        }
     }
 
     /// Installs (or updates to) the package at `path`, which the user reviewed as `digest`, with `grants` (only what the
@@ -269,83 +338,95 @@ impl PluginsDir {
         digest: &str,
         grants: Grants,
     ) -> Result<Installed, PackageError> {
-        let inspection = self.inspect(path, trust, host)?;
-        let changed = || PackageError::Tampered("the package changed after you reviewed it; review it again".into());
-        if inspection.digest != digest {
-            return Err(changed());
-        }
-        let trust_level = inspection.trust.clone().and_then(|t| inspection.runnable.clone().map(|()| t))?;
         let pkg = Package::open(path)?;
-        if pkg.digest() != digest {
-            return Err(changed());
+        let inspection = self.inspection_of(pkg.clone(), trust, host);
+        if inspection.digest != digest {
+            return Err(PackageError::Tampered(
+                "the package changed after you reviewed it; review it again".into(),
+            ));
         }
+        let trust_level = inspection
+            .trust
+            .clone()
+            .and_then(|t| inspection.runnable.clone().map(|()| t))?;
         let m = &pkg.manifest;
         let dir = self.plugin_dir(m.id.as_str())?;
         let folder = format!("v-{}-{}", m.version, &digest[..8.min(digest.len())]);
-        let version_dir = dir.join(&folder);
         let staging = dir.join(format!(".staging-{}", self.clock.wall_ms()));
         let _ = std::fs::remove_dir_all(&staging);
         std::fs::create_dir_all(staging.join("bin")).map_err(io)?;
         std::fs::create_dir_all(dir.join("data")).map_err(io)?;
-        let built = (|| -> Result<InstallRecord, PackageError> {
-            let program = m.binary_file(host_target());
-            let sha = pkg.extract(path, host_target(), &staging.join("bin").join(&program))?;
-            std::fs::write(staging.join("manifest.toml"), m.to_toml()).map_err(io)?;
-            if version_dir.exists() {
-                std::fs::remove_dir_all(&version_dir).map_err(io)?;
-            }
-            std::fs::rename(&staging, &version_dir).map_err(io)?;
-            let (signature, signer) = match &inspection.signature {
-                SignatureStatus::Builtin(n) | SignatureStatus::Trusted(n) => (inspection.signature.code(), Some(n.clone())),
-                SignatureStatus::UnknownKey(id) => (inspection.signature.code(), Some(id.clone())),
-                SignatureStatus::Unsigned => (inspection.signature.code(), None),
-            };
-            let granted = Grants {
-                permissions: grants.permissions.iter().filter(|p| m.permissions.iter().any(|r| &r.permission == *p)).cloned().collect(),
+        let program = m.binary_file(host_target());
+        let moved = pkg
+            .extract(path, host_target(), &staging.join("bin").join(&program))
+            .and_then(|sha| {
+                self.move_into_place(m, &staging, &dir.join(&folder))
+                    .map(|()| sha)
+            });
+        let sha = moved.inspect_err(|_| {
+            let _ = std::fs::remove_dir_all(&staging);
+        })?;
+        let (signature, signer) = signer_of(&inspection.signature);
+        let record = InstallRecord {
+            id: m.id.to_string(),
+            version: m.version.to_string(),
+            signature: signature.into(),
+            trust: trust_level.code().into(),
+            signer,
+            warning: match &trust_level {
+                Trust::Unsigned { warning } => Some(warning.clone()),
+                _ => None,
+            },
+            digest: digest.into(),
+            folder,
+            program,
+            sha256: to_hex(&sha),
+            requested: m.permissions.clone(),
+            grants: Grants {
+                permissions: grants
+                    .permissions
+                    .iter()
+                    .filter(|p| m.permissions.iter().any(|r| &r.permission == *p))
+                    .cloned()
+                    .collect(),
                 folders: grants.folders.clone(),
-            };
-            Ok(InstallRecord {
-                id: m.id.to_string(),
-                version: m.version.to_string(),
-                signature: signature.into(),
-                trust: trust_level.code().into(),
-                signer,
-                warning: match &trust_level {
-                    Trust::Unsigned { warning } => Some(warning.clone()),
-                    _ => None,
-                },
-                digest: digest.into(),
-                folder: folder.clone(),
-                program,
-                sha256: to_hex(&sha),
-                requested: m.permissions.clone(),
-                grants: granted,
-                enabled: inspection.installed.as_ref().is_none_or(|p| p.enabled),
-                installed_at_ms: self.clock.wall_ms(),
-            })
-        })();
-        let record = match built {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = std::fs::remove_dir_all(&staging);
-                return Err(e);
-            }
+            },
+            enabled: inspection.installed.as_ref().is_none_or(|p| p.enabled),
+            installed_at_ms: self.clock.wall_ms(),
         };
         self.save(&record)?;
         self.cleanup(m.id.as_str());
-        self.load(m.id.as_str())?.ok_or_else(|| PackageError::Io("the plugin was installed but cannot be read back".into()))
+        self.installed_of(record, pkg.manifest)
+    }
+
+    /// Writes the manifest next to the extracted program and moves the staging folder to its version folder.
+    fn move_into_place(
+        &self,
+        m: &Manifest,
+        staging: &Path,
+        version_dir: &Path,
+    ) -> Result<(), PackageError> {
+        std::fs::write(staging.join("manifest.toml"), m.to_toml()).map_err(io)?;
+        if version_dir.exists() {
+            std::fs::remove_dir_all(version_dir).map_err(io)?;
+        }
+        std::fs::rename(staging, version_dir).map_err(io)
     }
 
     /// Switches a plugin on or off.
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<(), PackageError> {
-        let mut record = self.record(id)?.ok_or_else(|| PackageError::MissingFile(format!("plugin {id} is not installed")))?;
+        let mut record = self
+            .record(id)?
+            .ok_or_else(|| PackageError::MissingFile(format!("plugin {id} is not installed")))?;
         record.enabled = enabled;
         self.save(&record)
     }
 
     /// Replaces what the user granted (only what the manifest asks for stays in force when it is used).
     pub fn set_grants(&self, id: &str, grants: Grants) -> Result<(), PackageError> {
-        let mut record = self.record(id)?.ok_or_else(|| PackageError::MissingFile(format!("plugin {id} is not installed")))?;
+        let mut record = self
+            .record(id)?
+            .ok_or_else(|| PackageError::MissingFile(format!("plugin {id} is not installed")))?;
         record.grants = grants;
         self.save(&record)
     }
@@ -362,7 +443,12 @@ impl PluginsDir {
         for entry in std::fs::read_dir(&dir).map_err(io)?.flatten() {
             if entry.file_name() != "data" {
                 let p = entry.path();
-                if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) }.map_err(io)?;
+                if p.is_dir() {
+                    std::fs::remove_dir_all(&p)
+                } else {
+                    std::fs::remove_file(&p)
+                }
+                .map_err(io)?;
             }
         }
         Ok(())
@@ -370,11 +456,13 @@ impl PluginsDir {
 
     /// Removes version folders and staging leftovers nothing refers to.
     pub fn cleanup(&self, id: &str) {
-        let (Ok(dir), Ok(Some(record))) = (self.plugin_dir(id), self.record(id)) else { return };
-        let Ok(entries) = std::fs::read_dir(&dir) else { return };
-        for entry in entries.flatten() {
+        let (Ok(dir), Ok(Some(record))) = (self.plugin_dir(id), self.record(id)) else {
+            return;
+        };
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let stale = (name.starts_with("v-") && name != record.folder) || name.starts_with(".staging-");
+            let stale =
+                (name.starts_with("v-") && name != record.folder) || name.starts_with(".staging-");
             if stale {
                 let _ = std::fs::remove_dir_all(entry.path());
             }

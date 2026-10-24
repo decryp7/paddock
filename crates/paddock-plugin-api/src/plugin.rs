@@ -2,7 +2,9 @@
 //! section, views, MCP tools, and handlers for the app contracts it speaks).
 
 use crate::extension::{Contract, ExtensionHandler, Registered};
-use crate::protocol::{Described, ExtensionInfo, McpBudget, McpToolInfo, PLATFORM_PROTOCOL, ViewInfo};
+use crate::protocol::{
+    Described, ExtensionInfo, McpBudget, McpToolInfo, PLATFORM_PROTOCOL, ViewInfo,
+};
 use crate::tools::{Tool, ToolCtx, ToolError, ToolInfo, check_id};
 use paddock_settings::Configurable;
 use paddock_view::{ViewAction, ViewDoc, ViewPatch};
@@ -150,7 +152,9 @@ impl Contributions {
             }
         }
         if let Some(s) = &self.settings {
-            s.section().check().map_err(|e| RegisterError(format!("settings: {e}")))?;
+            s.section()
+                .check()
+                .map_err(|e| RegisterError(format!("settings: {e}")))?;
         }
         Ok(())
     }
@@ -167,7 +171,14 @@ impl Contributions {
             settings: self.settings.as_ref().map(|s| s.section()),
             views: self.views.iter().map(|(i, _)| i.clone()).collect(),
             mcp_tools: self.mcp.iter().map(|(i, _)| i.clone()).collect(),
-            extensions: self.extensions.iter().map(|e| ExtensionInfo { ns: e.ns.into(), minor: e.minor }).collect(),
+            extensions: self
+                .extensions
+                .iter()
+                .map(|e| ExtensionInfo {
+                    ns: e.ns.into(),
+                    minor: e.minor,
+                })
+                .collect(),
         }
     }
 }
@@ -194,7 +205,11 @@ mod tests {
     struct V(&'static str);
     impl View for V {
         fn info(&self) -> ViewInfo {
-            ViewInfo { id: self.0.into(), title: "V".into(), writes: false }
+            ViewInfo {
+                id: self.0.into(),
+                title: "V".into(),
+                writes: false,
+            }
         }
         fn render(&self, _: &ViewCtx) -> Result<ViewDoc, ToolError> {
             Err(ToolError::Cancelled)
@@ -206,7 +221,11 @@ mod tests {
     struct M(&'static str);
     impl McpTool for M {
         fn info(&self) -> McpToolInfo {
-            McpToolInfo { name: self.0.into(), description: String::new(), args: crate::tools::Schema::object() }
+            McpToolInfo {
+                name: self.0.into(),
+                description: String::new(),
+                args: crate::tools::Schema::object(),
+            }
         }
         fn call(&self, _: Value, _: McpBudget, _: &ToolCtx) -> Result<Value, ToolError> {
             Ok(Value::Null)
@@ -217,7 +236,10 @@ mod tests {
         fn section(&self) -> SettingsSection {
             self.0.clone()
         }
-        fn apply(&self, _: &paddock_settings::ValidValues) -> Result<(), paddock_settings::service::ApplyError> {
+        fn apply(
+            &self,
+            _: &paddock_settings::ValidValues,
+        ) -> Result<(), paddock_settings::service::ApplyError> {
             Ok(())
         }
     }
@@ -243,36 +265,132 @@ mod tests {
         c.add_tool(T("a")).add_view(V("v")).add_mcp_tool(M("m"));
         c.check().unwrap();
         let d = c.describe(&P);
-        assert_eq!((d.id.as_str(), d.tools.len(), d.views.len(), d.mcp_tools.len(), d.memory_limit), ("net.example.p", 1, 1, 1, None));
+        assert_eq!(
+            (
+                d.id.as_str(),
+                d.tools.len(),
+                d.views.len(),
+                d.mcp_tools.len(),
+                d.memory_limit
+            ),
+            ("net.example.p", 1, 1, 1, None)
+        );
         assert!(d.settings.is_none() && d.extensions.is_empty());
         let twice = |f: &dyn Fn(&mut Contributions), what: &str| {
             let mut c = Contributions::default();
             f(&mut c);
             assert!(c.check().unwrap_err().0.contains(what), "{what}");
         };
-        twice(&|c| { c.add_tool(T("a")).add_tool(T("a")); }, "tool \"a\" is registered twice");
-        twice(&|c| { c.add_view(V("v")).add_view(V("v")); }, "view \"v\" is registered twice");
-        twice(&|c| { c.add_mcp_tool(M("m")).add_mcp_tool(M("m")); }, "MCP tool \"m\" is registered twice");
-        twice(&|c| { c.add_view(V("bad id")); }, "view id");
-        twice(&|c| { c.add_mcp_tool(M("bad id")); }, "MCP tool name");
-        twice(&|c| { c.add_tool(T("bad id")); }, "tool id");
         twice(
             &|c| {
-                c.add_extension::<crate::extension::tests_support::Calc>(|_: &crate::extension::ExtCtx, a: u32| Ok(a))
-                    .add_extension::<crate::extension::tests_support::Calc>(|_: &crate::extension::ExtCtx, a: u32| Ok(a));
+                c.add_tool(T("a")).add_tool(T("a"));
+            },
+            "tool \"a\" is registered twice",
+        );
+        twice(
+            &|c| {
+                c.add_view(V("v")).add_view(V("v"));
+            },
+            "view \"v\" is registered twice",
+        );
+        twice(
+            &|c| {
+                c.add_mcp_tool(M("m")).add_mcp_tool(M("m"));
+            },
+            "MCP tool \"m\" is registered twice",
+        );
+        twice(
+            &|c| {
+                c.add_view(V("bad id"));
+            },
+            "view id",
+        );
+        twice(
+            &|c| {
+                c.add_mcp_tool(M("bad id"));
+            },
+            "MCP tool name",
+        );
+        twice(
+            &|c| {
+                c.add_tool(T("bad id"));
+            },
+            "tool id",
+        );
+        twice(
+            &|c| {
+                c.add_extension::<crate::extension::tests_support::Calc>(
+                    crate::extension::tests_support::echo,
+                )
+                .add_extension::<crate::extension::tests_support::Calc>(
+                    crate::extension::tests_support::echo,
+                );
             },
             "contract \"test.calc.v1\" is registered twice",
         );
         let broken = SettingsSection::new("s", "S", SectionOwner::App).field(SettingField::new(
             "k",
             "K",
-            FieldKind::Int { min: 5, max: 1, step: 1, unit: None },
+            FieldKind::Int {
+                min: 5,
+                max: 1,
+                step: 1,
+                unit: None,
+            },
             3,
         ));
-        twice(&|c| { c.set_settings(Arc::new(Bad(broken.clone()))); }, "settings:");
+        twice(
+            &|c| {
+                c.set_settings(Arc::new(Bad(broken.clone())));
+            },
+            "settings:",
+        );
         let mut with_extension = Contributions::default();
-        with_extension.add_extension::<crate::extension::tests_support::Calc>(|_: &crate::extension::ExtCtx, a: u32| Ok(a));
-        assert_eq!(with_extension.describe(&P).extensions, [ExtensionInfo { ns: "test.calc.v1".into(), minor: 1 }]);
+        with_extension.add_extension::<crate::extension::tests_support::Calc>(
+            crate::extension::tests_support::echo,
+        );
+        assert_eq!(
+            with_extension.describe(&P).extensions,
+            [ExtensionInfo {
+                ns: "test.calc.v1".into(),
+                minor: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn the_stubs_behave_as_the_checks_above_assume() {
+        let ctx = ToolCtx::new("t", None, Arc::new(crate::tools::NoHost));
+        assert_eq!(T("a").invoke("o", Value::Null, &ctx), Ok(Value::Null));
+        assert_eq!(T("a").id(), "a");
+        let vctx = ViewCtx {
+            args: Value::Null,
+            tool: ctx.clone(),
+        };
+        assert!(V("v").render(&vctx).is_err());
+        let action = ViewAction {
+            view: "v".into(),
+            action: "a".into(),
+            args: paddock_ipc::Json(Value::Null),
+        };
+        assert!(V("v").action(&vctx, &action).is_err());
+        assert_eq!(
+            M("m").call(
+                Value::Null,
+                McpBudget {
+                    max_bytes: 1,
+                    max_ms: 1
+                },
+                &ctx
+            ),
+            Ok(Value::Null)
+        );
+        let section = SettingsSection::new("s", "S", SectionOwner::App);
+        let bad = Bad(section);
+        assert!(bad.apply(&paddock_settings::ValidValues::default()).is_ok());
+        let mut c = Contributions::default();
+        assert!(P.register(&mut c).is_ok());
+        assert!(P.memory_limit().is_none());
     }
 
     #[test]

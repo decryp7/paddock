@@ -5,8 +5,8 @@
 //! is in force. Folders are named grants (`GrantRef`): the user maps each name to a folder through the app's dialog, and a
 //! plugin never sees a raw path it was not given.
 
-use paddock_plugin_package::{GrantRef, HostPattern, Manifest, Permission, ProgramRef};
 use paddock_plugin_api::tools::{PathAccess, PathKind};
+use paddock_plugin_package::{GrantRef, HostPattern, Manifest, Permission, ProgramRef};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,8 +41,15 @@ impl Grants {
     }
 
     /// The permissions in force: asked by the manifest **and** granted.
-    pub fn effective<'a>(&'a self, manifest: &'a Manifest) -> impl Iterator<Item = &'a Permission> + 'a {
-        manifest.permissions.iter().map(|r| &r.permission).filter(|p| self.permissions.contains(p))
+    pub fn effective<'a>(
+        &'a self,
+        manifest: &'a Manifest,
+    ) -> impl Iterator<Item = &'a Permission> + 'a {
+        manifest
+            .permissions
+            .iter()
+            .map(|r| &r.permission)
+            .filter(|p| self.permissions.contains(p))
     }
 
     fn folders_of<'a>(&'a self, names: &'a [GrantRef]) -> impl Iterator<Item = &'a PathBuf> + 'a {
@@ -77,24 +84,42 @@ impl Grants {
 
     /// Whether the elevated operation `op` is allowed.
     pub fn may_elevate(&self, manifest: &Manifest, op: &str) -> bool {
-        self.effective(manifest).any(|p| matches!(p, Permission::Elevated(ops) if ops.iter().any(|o| o == op)))
+        self.effective(manifest)
+            .any(|p| matches!(p, Permission::Elevated(ops) if ops.iter().any(|o| o == op)))
     }
 
     /// The path rule for tool arguments: an existing path, resolved (links followed, so a link cannot lead out of a grant),
     /// inside a granted folder (a folder for [`PathKind::Dir`] may be the granted folder itself). Writing needs a write grant;
     /// a file to be created is judged by its folder.
-    pub fn path_policy<'a>(&'a self, manifest: &'a Manifest) -> impl Fn(&str, PathKind, PathAccess) -> Result<PathBuf, String> + 'a {
+    pub fn path_policy<'a>(
+        &'a self,
+        manifest: &'a Manifest,
+    ) -> impl Fn(&str, PathKind, PathAccess) -> Result<PathBuf, String> + 'a {
         move |path, kind, access| {
-            let resolved = resolve(Path::new(path), access == PathAccess::Write && kind == PathKind::File)
-                .map_err(|e| format!("\"{path}\" cannot be used ({e})"))?;
-            let roots = if access == PathAccess::Write { self.writable(manifest) } else { self.readable(manifest) };
-            let inside = roots.iter().filter_map(|r| std::fs::canonicalize(r).ok()).any(|r| resolved.starts_with(&r));
+            let resolved = resolve(
+                Path::new(path),
+                access == PathAccess::Write && kind == PathKind::File,
+            )
+            .map_err(|e| format!("\"{path}\" cannot be used ({e})"))?;
+            let roots = if access == PathAccess::Write {
+                self.writable(manifest)
+            } else {
+                self.readable(manifest)
+            };
+            let inside = roots
+                .iter()
+                .filter_map(|r| std::fs::canonicalize(r).ok())
+                .any(|r| resolved.starts_with(&r));
             if inside {
                 Ok(resolved)
             } else {
                 Err(format!(
                     "\"{path}\" is not inside a folder you allowed this plugin to {}; grant a folder first",
-                    if access == PathAccess::Write { "write into" } else { "read" }
+                    if access == PathAccess::Write {
+                        "write into"
+                    } else {
+                        "read"
+                    }
                 ))
             }
         }
@@ -176,13 +201,23 @@ pub fn sandbox_for(manifest: &Manifest, grants: &Grants) -> SandboxSpec {
             Permission::RunPrograms(programs) => {
                 s.children = true;
                 s.low_integrity = false;
-                s.programs.extend(programs.iter().map(ProgramRef::to_string));
+                s.programs
+                    .extend(programs.iter().map(ProgramRef::to_string));
             }
-            Permission::Network(hosts) => s.network.extend(hosts.iter().map(HostPattern::to_string)),
+            Permission::Network(hosts) => {
+                s.network.extend(hosts.iter().map(HostPattern::to_string))
+            }
             Permission::Elevated(ops) => s.elevated_ops.extend(ops.iter().cloned()),
-            Permission::Memory { mib } => s.memory_limit = (u64::from(*mib) << 20).clamp(MIN_MEMORY, MAX_MEMORY),
-            Permission::Cpu { percent } => s.cpu_percent = Some((*percent).clamp(1, 100)).filter(|p| *p < 100),
-            Permission::OpenedFilePaths | Permission::McpExpose | Permission::ReadFolders(_) | Permission::WriteFolders(_) => {}
+            Permission::Memory { mib } => {
+                s.memory_limit = (u64::from(*mib) << 20).clamp(MIN_MEMORY, MAX_MEMORY)
+            }
+            Permission::Cpu { percent } => {
+                s.cpu_percent = Some((*percent).clamp(1, 100)).filter(|p| *p < 100)
+            }
+            Permission::OpenedFilePaths
+            | Permission::McpExpose
+            | Permission::ReadFolders(_)
+            | Permission::WriteFolders(_) => {}
         }
     }
     s.read = grants.readable(manifest);
@@ -195,4 +230,235 @@ pub fn sandbox_for(manifest: &Manifest, grants: &Grants) -> SandboxSpec {
     s.programs.sort();
     s.programs.dedup();
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(permissions: &str) -> Manifest {
+        Manifest::parse(&format!(
+            "format = 1\n[plugin]\nid = \"net.example.p\"\nname = \"P\"\nversion = \"1.0.0\"\npublisher = \"E\"\nprotocol = \"2.0\"\nbinary = \"p\"\ntargets = [\"x86_64-unknown-linux-gnu\"]\n{permissions}"
+        ))
+        .unwrap()
+    }
+
+    const ALL: &str = r#"
+[[permissions]]
+permission = "readFolders"
+grants = ["docs"]
+reason = "r"
+[[permissions]]
+permission = "writeFolders"
+grants = ["out", "unmapped"]
+reason = "r"
+[[permissions]]
+permission = "runPrograms"
+programs = ["relog"]
+reason = "r"
+[[permissions]]
+permission = "network"
+hosts = ["b.example.com", "a.example.com"]
+reason = "r"
+[[permissions]]
+permission = "elevated"
+ops = ["collect"]
+reason = "r"
+[[permissions]]
+permission = "memory"
+mib = 65536
+reason = "r"
+[[permissions]]
+permission = "cpu"
+percent = 40
+reason = "r"
+[[permissions]]
+permission = "openedFilePaths"
+reason = "r"
+"#;
+
+    fn granted_all(m: &Manifest) -> Grants {
+        let mut g = Grants::none().folder("docs", "/docs").folder("out", "/out");
+        for r in &m.permissions {
+            g = g.allow(r.permission.clone());
+        }
+        g
+    }
+
+    #[test]
+    fn nothing_granted_is_the_locked_sandbox() {
+        let m = manifest(ALL);
+        let s = sandbox_for(&m, &Grants::none());
+        assert_eq!(s, SandboxSpec::locked());
+        assert!(
+            s.low_integrity
+                && !s.children
+                && s.read.is_empty()
+                && s.write.is_empty()
+                && s.network.is_empty()
+        );
+        assert_eq!(s.memory_limit, DEFAULT_MEMORY);
+    }
+
+    #[test]
+    fn what_is_asked_and_granted_widens_the_sandbox_and_only_that() {
+        let m = manifest(ALL);
+        let s = sandbox_for(&m, &granted_all(&m));
+        assert_eq!(s.read, [PathBuf::from("/docs"), PathBuf::from("/out")]);
+        assert_eq!(s.write, [PathBuf::from("/out")]);
+        assert_eq!(
+            (s.programs.clone(), s.network.clone()),
+            (
+                vec!["relog".to_string()],
+                vec!["a.example.com".to_string(), "b.example.com".to_string()]
+            )
+        );
+        assert_eq!(s.elevated_ops, ["collect"]);
+        assert!(s.children && !s.low_integrity);
+        // 65536 MiB is clamped to the most a plugin can have.
+        assert_eq!(s.memory_limit, MAX_MEMORY);
+        assert_eq!(s.cpu_percent, Some(40));
+        // Granted but not asked for: nothing changes.
+        let none = manifest("");
+        assert_eq!(sandbox_for(&none, &granted_all(&m)), SandboxSpec::locked());
+        // Asked but not granted: still locked, per permission.
+        let only_net = Grants::none().allow(m.permissions[3].permission.clone());
+        let n = sandbox_for(&m, &only_net);
+        assert_eq!(n.network.len(), 2);
+        assert!(n.programs.is_empty() && n.read.is_empty() && n.low_integrity);
+    }
+
+    #[test]
+    fn limits_are_clamped_and_a_full_cpu_share_is_no_cap() {
+        let m = manifest(
+            "[[permissions]]\npermission = \"memory\"\nmib = 16\nreason = \"r\"\n[[permissions]]\npermission = \"cpu\"\npercent = 100\nreason = \"r\"\n",
+        );
+        let s = sandbox_for(&m, &granted_all(&m));
+        assert_eq!((s.memory_limit, s.cpu_percent), (MIN_MEMORY, None));
+        let low = manifest("[[permissions]]\npermission = \"cpu\"\npercent = 1\nreason = \"r\"\n");
+        assert_eq!(sandbox_for(&low, &granted_all(&low)).cpu_percent, Some(1));
+    }
+
+    #[test]
+    fn an_unmapped_grant_name_adds_no_folder_and_write_clears_low_integrity() {
+        let m = manifest(
+            "[[permissions]]\npermission = \"writeFolders\"\ngrants = [\"out\", \"unmapped\"]\nreason = \"r\"\n",
+        );
+        let g = Grants::none()
+            .allow(m.permissions[0].permission.clone())
+            .folder("out", "/out");
+        let s = sandbox_for(&m, &g);
+        assert_eq!(s.write, [PathBuf::from("/out")]);
+        assert!(!s.low_integrity && !s.children);
+        let unmapped = Grants::none().allow(m.permissions[0].permission.clone());
+        assert!(
+            sandbox_for(&m, &unmapped).write.is_empty() && sandbox_for(&m, &unmapped).low_integrity
+        );
+    }
+
+    #[test]
+    fn grants_report_elevation_by_name_and_do_not_duplicate() {
+        let m = manifest(ALL);
+        let g = granted_all(&m);
+        assert!(g.may_elevate(&m, "collect") && !g.may_elevate(&m, "other"));
+        assert!(!Grants::none().may_elevate(&m, "collect"));
+        let twice = Grants::none()
+            .allow(Permission::McpExpose)
+            .allow(Permission::McpExpose);
+        assert_eq!(twice.permissions.len(), 1);
+        let back: Grants = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
+        assert_eq!(back, g);
+    }
+
+    #[test]
+    fn tool_paths_must_be_inside_a_granted_folder_after_links_are_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (docs, out, secret) = (
+            dir.path().join("docs"),
+            dir.path().join("out"),
+            dir.path().join("secret"),
+        );
+        for d in [&docs, &out, &secret] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(docs.join("a.txt"), "a").unwrap();
+        std::fs::write(secret.join("s.txt"), "s").unwrap();
+        let m = manifest(ALL);
+        let g = Grants::none()
+            .folder("docs", &docs)
+            .folder("out", &out)
+            .allow(m.permissions[0].permission.clone())
+            .allow(m.permissions[1].permission.clone());
+        let policy = g.path_policy(&m);
+        let ok = policy(
+            docs.join("a.txt").to_str().unwrap(),
+            PathKind::File,
+            PathAccess::Read,
+        )
+        .unwrap();
+        assert_eq!(ok, std::fs::canonicalize(docs.join("a.txt")).unwrap());
+        // A folder itself is inside its grant; a file in a folder that is only readable is not writable.
+        policy(docs.to_str().unwrap(), PathKind::Dir, PathAccess::Read).unwrap();
+        let no_write = policy(
+            docs.join("a.txt").to_str().unwrap(),
+            PathKind::File,
+            PathAccess::Write,
+        )
+        .unwrap_err();
+        assert!(no_write.contains("allowed this plugin to write into"));
+        // A file to create is judged by its folder.
+        let created = policy(
+            out.join("new.txt").to_str().unwrap(),
+            PathKind::File,
+            PathAccess::Write,
+        )
+        .unwrap();
+        assert!(created.ends_with("new.txt"));
+        // Outside the grants, missing, and a missing folder.
+        let outside = policy(
+            secret.join("s.txt").to_str().unwrap(),
+            PathKind::File,
+            PathAccess::Read,
+        )
+        .unwrap_err();
+        assert!(outside.contains("not inside a folder you allowed this plugin to read"));
+        assert!(
+            policy(
+                docs.join("missing.txt").to_str().unwrap(),
+                PathKind::File,
+                PathAccess::Read
+            )
+            .unwrap_err()
+            .contains("cannot be used")
+        );
+        assert!(
+            policy(
+                out.join("nodir/new.txt").to_str().unwrap(),
+                PathKind::File,
+                PathAccess::Write
+            )
+            .unwrap_err()
+            .contains("cannot be used")
+        );
+        assert!(policy("/", PathKind::File, PathAccess::Write).is_err());
+        // `..` does not get out.
+        let dotdot = format!("{}/../secret/s.txt", docs.display());
+        assert!(policy(&dotdot, PathKind::File, PathAccess::Read).is_err());
+        // A link inside a grant that leads out of it is followed, so it leads out.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&secret, docs.join("link")).unwrap();
+            let via_link = docs.join("link").join("s.txt");
+            assert!(policy(via_link.to_str().unwrap(), PathKind::File, PathAccess::Read).is_err());
+        }
+    }
+
+    #[test]
+    fn resolve_handles_missing_files_by_their_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(resolve(&dir.path().join("x"), false).is_err());
+        assert!(resolve(&dir.path().join("x"), true).unwrap().ends_with("x"));
+        assert!(resolve(Path::new("/"), true).is_ok());
+        assert!(resolve(Path::new(""), true).is_err());
+    }
 }

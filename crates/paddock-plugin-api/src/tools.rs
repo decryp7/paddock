@@ -216,7 +216,12 @@ impl Schema {
     }
 
     fn check(&self, value: &Value, at: &str) -> std::result::Result<(), SchemaError> {
-        let fail = |message: String| Err(SchemaError { at: at.into(), message });
+        let fail = |message: String| {
+            Err(SchemaError {
+                at: at.into(),
+                message,
+            })
+        };
         match (self, value) {
             (Schema::Any, _) | (Schema::Bool, Value::Bool(_)) => Ok(()),
             (Schema::Int { min, max }, Value::Number(n)) => match n.as_i64() {
@@ -225,12 +230,16 @@ impl Schema {
                 None => fail(format!("must be a whole number between {min} and {max}")),
             },
             (Schema::Text { max_len }, Value::String(s)) => match s.chars().count() {
-                n if n > *max_len => fail(format!("must be at most {max_len} characters (got {n})")),
+                n if n > *max_len => {
+                    fail(format!("must be at most {max_len} characters (got {n})"))
+                }
                 _ => Ok(()),
             },
             (Schema::Path { .. }, Value::String(s)) => {
                 if s.chars().count() > MAX_PATH_LEN || s.contains('\0') {
-                    fail(format!("must be a path of at most {MAX_PATH_LEN} characters"))
+                    fail(format!(
+                        "must be a path of at most {MAX_PATH_LEN} characters"
+                    ))
                 } else if !Path::new(s).is_absolute() {
                     fail("must be an absolute path".into())
                 } else {
@@ -238,12 +247,19 @@ impl Schema {
                 }
             }
             (Schema::Enum { values }, Value::String(s)) if values.contains(s) => Ok(()),
-            (Schema::Enum { values }, Value::String(s)) => fail(format!("\"{s}\" is not one of: {}", values.join(", "))),
+            (Schema::Enum { values }, Value::String(s)) => {
+                fail(format!("\"{s}\" is not one of: {}", values.join(", ")))
+            }
             (Schema::List { items, max_items }, Value::Array(a)) => {
                 if a.len() > *max_items {
-                    return fail(format!("must have at most {max_items} items (got {})", a.len()));
+                    return fail(format!(
+                        "must have at most {max_items} items (got {})",
+                        a.len()
+                    ));
                 }
-                a.iter().enumerate().try_for_each(|(i, v)| items.check(v, &format!("{at}[{i}]")))
+                a.iter()
+                    .enumerate()
+                    .try_for_each(|(i, v)| items.check(v, &format!("{at}[{i}]")))
             }
             (Schema::Object { fields, additional }, Value::Object(map)) => {
                 for f in fields {
@@ -252,13 +268,16 @@ impl Schema {
                             return Err(SchemaError {
                                 at: format!("{at}.{}", f.name),
                                 message: "is required".into(),
-                            })
+                            });
                         }
                         None | Some(Value::Null) => {}
                         Some(v) => f.schema.check(v, &format!("{at}.{}", f.name))?,
                     }
                 }
-                match map.keys().find(|k| !*additional && !fields.iter().any(|f| &f.name == *k)) {
+                match map
+                    .keys()
+                    .find(|k| !*additional && !fields.iter().any(|f| &f.name == *k))
+                {
                     Some(k) => Err(SchemaError {
                         at: format!("{at}.{k}"),
                         message: "is not a known argument".into(),
@@ -288,7 +307,10 @@ impl Schema {
     ) -> std::result::Result<(), SchemaError> {
         match (self, value) {
             (Schema::Path { kind, access }, Value::String(s)) => {
-                let p = check(s, *kind, *access).map_err(|message| SchemaError { at: at.into(), message })?;
+                let p = check(s, *kind, *access).map_err(|message| SchemaError {
+                    at: at.into(),
+                    message,
+                })?;
                 *s = p.to_string_lossy().into_owned();
                 Ok(())
             }
@@ -500,7 +522,10 @@ impl ToolInfo {
         for (i, op) in self.ops.iter().enumerate() {
             check_id(&format!("tool \"{}\": operation name", self.id), &op.name)?;
             if self.ops[..i].iter().any(|o| o.name == op.name) {
-                return Err(format!("tool \"{}\": operation \"{}\" is declared twice", self.id, op.name));
+                return Err(format!(
+                    "tool \"{}\": operation \"{}\" is declared twice",
+                    self.id, op.name
+                ));
             }
         }
         Ok(())
@@ -523,8 +548,11 @@ impl ToolInfo {
 
 /// Checks an id: 1–[`MAX_ID_LEN`] characters of a-z, 0-9, '.', '-', '_' or ':'.
 pub fn check_id(what: &str, id: &str) -> Result<(), String> {
-    let ok =
-        !id.is_empty() && id.len() <= MAX_ID_LEN && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'));
+    let ok = !id.is_empty()
+        && id.len() <= MAX_ID_LEN
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'));
     if ok {
         Ok(())
     } else {
@@ -627,9 +655,22 @@ pub trait Host: Send + Sync {
     /// Announces that a task ended.
     fn task_finished(&self, task: &str);
     /// One piece of the output file `name` (see [`crate::output`]); `last` ends it and returns where it was saved.
-    fn output(&self, name: &str, bytes: &[u8], last: bool) -> Result<Option<crate::protocol::SavedOutput>, ToolError>;
+    fn output(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        last: bool,
+    ) -> Result<Option<crate::protocol::SavedOutput>, ToolError>;
+    /// Lines of the plugin's own log, which the app writes to its log (never file contents by default).
+    fn log(&self, lines: &[String]);
     /// Runs the named elevated operation of `tool` through the app.
-    fn elevated(&self, tool: &str, op: &str, args: Value, timeout: Duration) -> Result<Value, ToolError>;
+    fn elevated(
+        &self,
+        tool: &str,
+        op: &str,
+        args: Value,
+        timeout: Duration,
+    ) -> Result<Value, ToolError>;
 }
 
 /// A [`Host`] that offers nothing: reads fail, reports are dropped.
@@ -642,11 +683,19 @@ impl Host for NoHost {
     fn report(&self, _: &str, _: Option<f32>, _: &str) {}
     fn task_started(&self, _: &str, _: &ToolTask) {}
     fn task_finished(&self, _: &str) {}
-    fn output(&self, _: &str, _: &[u8], _: bool) -> Result<Option<crate::protocol::SavedOutput>, ToolError> {
+    fn output(
+        &self,
+        _: &str,
+        _: &[u8],
+        _: bool,
+    ) -> Result<Option<crate::protocol::SavedOutput>, ToolError> {
         Err(ToolError::Missing("this call cannot save output".into()))
     }
+    fn log(&self, _: &[String]) {}
     fn elevated(&self, _: &str, _: &str, _: Value, _: Duration) -> Result<Value, ToolError> {
-        Err(ToolError::Missing("this call cannot run elevated operations".into()))
+        Err(ToolError::Missing(
+            "this call cannot run elevated operations".into(),
+        ))
     }
 }
 
@@ -711,6 +760,11 @@ impl ToolCtx {
         self.host.task_finished(task);
     }
 
+    /// Sends a line to the app's log for this plugin.
+    pub fn log(&self, line: &str) {
+        self.host.log(&[line.to_string()]);
+    }
+
     /// Runs one of this tool's elevated operations through the app.
     pub fn elevated(&self, op: &str, args: Value, timeout: Duration) -> Result<Value, ToolError> {
         self.host.elevated(&self.tool, op, args, timeout)
@@ -728,7 +782,10 @@ pub trait Tool: Send + Sync {
     /// Stops the background task `task` this tool started (the default: there is none).
     fn stop(&self, task: &str, ctx: &ToolCtx) -> Result<(), ToolError> {
         let _ = ctx;
-        Err(ToolError::Missing(format!("tool \"{}\" has no background task \"{task}\" to stop", self.id())))
+        Err(ToolError::Missing(format!(
+            "tool \"{}\" has no background task \"{task}\" to stop",
+            self.id()
+        )))
     }
 }
 
@@ -738,21 +795,36 @@ mod tests {
     use serde_json::json;
     use std::sync::Mutex;
 
-    fn abs() -> &'static str {
-        if cfg!(windows) { "C:\\out\\set.xml" } else { "/out/set.xml" }
+    fn abs() -> String {
+        std::env::temp_dir()
+            .join("set.xml")
+            .to_string_lossy()
+            .into_owned()
     }
 
     #[test]
     fn path_arguments_are_validated_and_checked_by_the_host() {
         let s = Schema::object()
             .field("xmlPath", Schema::path(PathKind::File, PathAccess::Write))
-            .optional("inputs", Schema::list(Schema::path(PathKind::File, PathAccess::Read), 4));
+            .optional(
+                "inputs",
+                Schema::list(Schema::path(PathKind::File, PathAccess::Read), 4),
+            );
         assert!(s.has_paths() && !Schema::object().field("x", Schema::Bool).has_paths());
         let mut args = json!({"xmlPath": abs(), "inputs": [abs()], "ignored": null});
-        s.validate(&json!({"xmlPath": abs(), "inputs": [abs()]})).unwrap();
+        s.validate(&json!({"xmlPath": abs(), "inputs": [abs()]}))
+            .unwrap();
         // Relative paths and NULs are refused by the schema itself.
-        assert_eq!(s.validate(&json!({"xmlPath": "rel/x"})).unwrap_err().message, "must be an absolute path");
-        assert!(s.validate(&json!({"xmlPath": format!("{}\0", abs())})).is_err());
+        assert_eq!(
+            s.validate(&json!({"xmlPath": "rel/x"}))
+                .unwrap_err()
+                .message,
+            "must be an absolute path"
+        );
+        assert!(
+            s.validate(&json!({"xmlPath": format!("{}\0", abs())}))
+                .is_err()
+        );
         // The host's policy decides, and its canonical answer replaces the argument.
         let seen = Mutex::new(Vec::new());
         s.check_paths(&mut args, &|p, k, a| {
@@ -763,12 +835,39 @@ mod tests {
         assert_eq!(args["xmlPath"], format!("{}.canonical", abs()));
         assert_eq!(args["inputs"][0], format!("{}.canonical", abs()));
         assert_eq!(seen.lock().unwrap()[0].2, PathAccess::Write);
-        let err = s.check_paths(&mut json!({"xmlPath": abs()}), &|p, _, _| Err(format!("\"{p}\" was not chosen"))).unwrap_err();
+        let err = s
+            .check_paths(&mut json!({"xmlPath": abs()}), &|p, _, _| {
+                Err(format!("\"{p}\" was not chosen"))
+            })
+            .unwrap_err();
         assert_eq!(err.at, "args.xmlPath");
         assert!(err.message.contains("not chosen") && err.to_string().starts_with("args.xmlPath "));
         // A path where the schema has none is left alone, as is a null optional.
         let mut other = json!({"inputs": null});
-        s.check_paths(&mut other, &|_, _, _| Err("never".into())).unwrap();
+        s.check_paths(&mut other, &|_, _, _| Err("never".into()))
+            .unwrap();
+    }
+
+    #[test]
+    fn paths_are_found_in_lists_and_left_alone_elsewhere() {
+        let list = Schema::list(Schema::path(PathKind::File, PathAccess::Read), 3);
+        assert!(list.has_paths() && !Schema::list(Schema::Bool, 3).has_paths());
+        let mixed = Schema::object()
+            .field("n", Schema::int(0, 5))
+            .field("p", Schema::path(PathKind::Dir, PathAccess::Read));
+        let mut args = json!({"n": 3, "p": abs()});
+        mixed
+            .check_paths(&mut args, &|p, _, _| Ok(PathBuf::from(format!("{p}!"))))
+            .unwrap();
+        assert_eq!(
+            (args["n"].clone(), args["p"].clone()),
+            (json!(3), json!(format!("{}!", abs())))
+        );
+        let mut items = json!([abs(), abs()]);
+        list.check_paths(&mut items, &|p, _, _| Ok(PathBuf::from(p.to_uppercase())))
+            .unwrap();
+        assert_eq!(items[1], json!(abs().to_uppercase()));
+        assert_eq!(Schema::Any.kind(), "any value");
     }
 
     #[test]
@@ -783,15 +882,32 @@ mod tests {
         let ok = json!({"n": 3, "t": "abc", "e": "a", "b": true, "l": [1, 2], "any": {"x": 1}});
         s.validate(&ok).unwrap();
         let bad = |v: Value| s.validate(&v).unwrap_err().to_string();
-        assert!(bad(json!({"n": 9, "t": "a", "e": "a", "b": true})).contains("between 1 and 5 (got 9)"));
+        assert!(
+            bad(json!({"n": 9, "t": "a", "e": "a", "b": true})).contains("between 1 and 5 (got 9)")
+        );
         assert!(bad(json!({"n": 1.5, "t": "a", "e": "a", "b": true})).contains("whole number"));
-        assert!(bad(json!({"n": 1, "t": "abcd", "e": "a", "b": true})).contains("at most 3 characters"));
-        assert!(bad(json!({"n": 1, "t": "a", "e": "z", "b": true})).contains("is not one of: a, b"));
-        assert!(bad(json!({"n": 1, "t": "a", "e": "a", "b": "yes"})).contains("must be true or false, not text"));
-        assert!(bad(json!({"n": 1, "t": "a", "e": "a", "b": true, "l": [1, 2, 3]})).contains("at most 2 items"));
-        assert!(bad(json!({"n": 1, "t": "a", "e": "a", "b": true, "l": [1, 10]})).contains("args.l[1]"));
+        assert!(
+            bad(json!({"n": 1, "t": "abcd", "e": "a", "b": true})).contains("at most 3 characters")
+        );
+        assert!(
+            bad(json!({"n": 1, "t": "a", "e": "z", "b": true})).contains("is not one of: a, b")
+        );
+        assert!(
+            bad(json!({"n": 1, "t": "a", "e": "a", "b": "yes"}))
+                .contains("must be true or false, not text")
+        );
+        assert!(
+            bad(json!({"n": 1, "t": "a", "e": "a", "b": true, "l": [1, 2, 3]}))
+                .contains("at most 2 items")
+        );
+        assert!(
+            bad(json!({"n": 1, "t": "a", "e": "a", "b": true, "l": [1, 10]})).contains("args.l[1]")
+        );
         assert!(bad(json!({"t": "a", "e": "a", "b": true})).contains("args.n is required"));
-        assert!(bad(json!({"n": 1, "t": "a", "e": "a", "b": true, "zzz": 1})).contains("is not a known argument"));
+        assert!(
+            bad(json!({"n": 1, "t": "a", "e": "a", "b": true, "zzz": 1}))
+                .contains("is not a known argument")
+        );
         assert!(bad(json!(["x"])).contains("must be an object, not a list"));
         assert!(bad(json!({"n": null, "t": "a", "e": "a", "b": true})).contains("is required"));
         // Open objects take more; every kind has a name in the message.
@@ -799,11 +915,19 @@ mod tests {
         for (schema, value, kind) in [
             (Schema::Any, json!(null), ""),
             (Schema::text(1), json!(1), "text, not a number"),
-            (Schema::path(PathKind::Dir, PathAccess::Read), json!(true), "a path, not true/false"),
-            (Schema::list(Schema::Any, 1), json!({}), "a list, not an object"),
+            (
+                Schema::path(PathKind::Dir, PathAccess::Read),
+                json!(true),
+                "a path, not true/false",
+            ),
+            (
+                Schema::list(Schema::Any, 1),
+                json!({}),
+                "a list, not an object",
+            ),
             (Schema::int(0, 1), json!(null), "a whole number, not null"),
             (Schema::object(), json!([]), "an object, not a list"),
-            (Schema::one_of(["a"]), json!("a".repeat(1)), ""),
+            (Schema::one_of(["a"]), json!("a"), ""),
         ] {
             let r = schema.validate(&value);
             if kind.is_empty() {
@@ -812,7 +936,11 @@ mod tests {
                 assert!(r.unwrap_err().message.contains(kind), "{kind}");
             }
         }
-        assert!(Schema::path(PathKind::File, PathAccess::Read).validate(&json!("x".repeat(MAX_PATH_LEN + 1))).is_err());
+        assert!(
+            Schema::path(PathKind::File, PathAccess::Read)
+                .validate(&json!("x".repeat(MAX_PATH_LEN + 1)))
+                .is_err()
+        );
         assert!(Schema::int(0, 1).validate(&json!(u64::MAX)).is_err());
     }
 
@@ -822,66 +950,96 @@ mod tests {
             .describe("d")
             .only_on(&[Platform::Windows])
             .needs_elevation()
-            .op(OpSpec::new("generate", "Generate").args(Schema::object().field("n", Schema::int(1, 5)).open()).budget(None).elevated())
-            .op(OpSpec::new("poll", "Poll").polling().budget(Some(Duration::from_millis(1500))));
+            .op(OpSpec::new("generate", "Generate")
+                .args(Schema::object().field("n", Schema::int(1, 5)).open())
+                .budget(None)
+                .elevated())
+            .op(OpSpec::new("poll", "Poll")
+                .polling()
+                .budget(Some(Duration::from_millis(1500))));
         info.check().unwrap();
         let back: ToolInfo = serde_json::from_value(serde_json::to_value(&info).unwrap()).unwrap();
         assert_eq!(back, info);
         assert!(back.ops[0].elevated && back.ops[0].budget.is_none() && back.ops[1].poll);
         assert_eq!(back.ops[1].budget, Some(Duration::from_millis(1500)));
-        assert!(info.unsupported_on(Platform::Linux).unwrap().contains("only available on Windows"));
-        assert!(info.unsupported_on(Platform::Macos).unwrap().contains("(this is macOS)"));
+        assert!(
+            info.unsupported_on(Platform::Linux)
+                .unwrap()
+                .contains("only available on Windows")
+        );
+        assert!(
+            info.unsupported_on(Platform::Macos)
+                .unwrap()
+                .contains("(this is macOS)")
+        );
         assert_eq!(info.unsupported_on(Platform::Windows), None);
-        assert_eq!(ToolInfo::new("x", "X").unsupported_on(Platform::Linux), None);
+        assert_eq!(
+            ToolInfo::new("x", "X").unsupported_on(Platform::Linux),
+            None
+        );
         assert!(ToolInfo::new("x", "X").check().is_err());
-        let twice = ToolInfo::new("x", "X").op(OpSpec::new("a", "A")).op(OpSpec::new("a", "A again"));
+        let twice = ToolInfo::new("x", "X")
+            .op(OpSpec::new("a", "A"))
+            .op(OpSpec::new("a", "A again"));
         assert!(twice.check().unwrap_err().contains("declared twice"));
-        assert!(ToolInfo::new("x", "X").op(OpSpec::new("bad op", "B")).check().is_err());
-        assert!(check_id("id", "bad id").is_err() && check_id("id", "").is_err() && check_id("id", &"a".repeat(MAX_ID_LEN + 1)).is_err());
+        assert!(
+            ToolInfo::new("x", "X")
+                .op(OpSpec::new("bad op", "B"))
+                .check()
+                .is_err()
+        );
+        assert!(
+            check_id("id", "bad id").is_err()
+                && check_id("id", "").is_err()
+                && check_id("id", &"a".repeat(MAX_ID_LEN + 1)).is_err()
+        );
         assert!(check_id("id", "a.b-c_d:e").is_ok());
         assert_eq!(OpSpec::new("a", "A").budget, Some(DEFAULT_OP_BUDGET));
         assert!(!Platform::current().label().is_empty());
         assert_eq!(Platform::Linux.label(), "Linux");
     }
 
-    #[derive(Default)]
-    struct Rec(Mutex<Vec<String>>);
-
-    impl Host for Rec {
-        fn read_file(&self, id: u64, offset: u64, len: u32) -> Result<Vec<u8>, ToolError> {
-            self.0.lock().unwrap().push(format!("read {id} {offset} {len}"));
-            Ok(Vec::new())
-        }
-        fn report(&self, task: &str, progress: Option<f32>, note: &str) {
-            self.0.lock().unwrap().push(format!("report {task} {progress:?} {note}"));
-        }
-        fn task_started(&self, tool: &str, task: &ToolTask) {
-            self.0.lock().unwrap().push(format!("started {tool} {}", task.id));
-        }
-        fn task_finished(&self, task: &str) {
-            self.0.lock().unwrap().push(format!("finished {task}"));
-        }
-        fn output(&self, _: &str, _: &[u8], _: bool) -> Result<Option<crate::protocol::SavedOutput>, ToolError> {
-            Ok(None)
-        }
-        fn elevated(&self, tool: &str, op: &str, args: Value, _: Duration) -> Result<Value, ToolError> {
-            self.0.lock().unwrap().push(format!("elevated {tool} {op}"));
-            Ok(args)
-        }
-    }
-
     #[test]
     fn contexts_scope_tasks_to_their_tool() {
-        let rec = Arc::new(Rec::default());
+        let rec = Arc::new(crate::testing::Memory::default());
         let ctx = ToolCtx::new("t", Some(PathBuf::from("data")), rec.clone());
         assert_eq!((ctx.tool(), ctx.data_dir()), ("t", Some(Path::new("data"))));
-        ctx.task_started(ToolTask { id: "a".into(), label: "A".into(), kind: "k".into(), stoppable: true });
+        ctx.task_started(ToolTask {
+            id: "a".into(),
+            label: "A".into(),
+            kind: "k".into(),
+            stoppable: true,
+        });
         ctx.report("a", Some(0.5), "half");
         ctx.task_finished("a");
-        assert_eq!(ctx.elevated("op", json!({"x": 1}), Duration::from_secs(1)).unwrap(), json!({"x": 1}));
+        assert_eq!(
+            ctx.elevated("op", json!({"x": 1}), Duration::from_secs(1))
+                .unwrap(),
+            json!({"x": 1})
+        );
         assert_eq!(ctx.host().read_file(1, 2, 3).unwrap(), Vec::<u8>::new());
-        assert_eq!(*rec.0.lock().unwrap(), ["started t a", "report a Some(0.5) half", "finished a", "elevated t op", "read 1 2 3"]);
-        assert!(ToolCtx::new("t", None, rec.clone()).data_dir().is_none());
+        assert_eq!(
+            ctx.host()
+                .output("o.bin", b"abc", true)
+                .unwrap()
+                .unwrap()
+                .name,
+            "o.bin"
+        );
+        ctx.log("hi");
+        assert_eq!(
+            rec.log(),
+            [
+                "started t a",
+                "report a Some(0.5) half",
+                "finished a",
+                "elevated t op",
+                "read 1 2 3",
+                "output o.bin 3 true",
+                "log hi"
+            ]
+        );
+        assert!(ToolCtx::new("t", None, rec).data_dir().is_none());
         assert!(!ctx.is_cancelled());
         assert!(ctx.clone().with_cancel(Arc::new(|| true)).is_cancelled());
     }
@@ -890,10 +1048,22 @@ mod tests {
     fn no_host_offers_nothing() {
         let h = NoHost;
         assert!(h.read_file(1, 0, 1).is_err() && h.output("a", b"", true).is_err());
-        assert!(h.elevated("t", "o", json!(null), Duration::from_secs(1)).is_err());
+        assert!(
+            h.elevated("t", "o", json!(null), Duration::from_secs(1))
+                .is_err()
+        );
         h.report("a", None, "");
-        h.task_started("t", &ToolTask { id: "a".into(), label: "A".into(), kind: "k".into(), stoppable: false });
+        h.task_started(
+            "t",
+            &ToolTask {
+                id: "a".into(),
+                label: "A".into(),
+                kind: "k".into(),
+                stoppable: false,
+            },
+        );
         h.task_finished("a");
+        h.log(&["line".to_string()]);
     }
 
     struct Plain;
@@ -915,14 +1085,33 @@ mod tests {
         let e = Plain.stop("t1", &ctx).unwrap_err();
         assert_eq!(e.reason(), Some(FailureReason::Missing));
         assert!(e.to_string().contains("no background task \"t1\""));
-        assert_eq!(ToolError::Denied("d".into()).reason(), Some(FailureReason::Denied));
+        assert_eq!(
+            ToolError::Denied("d".into()).reason(),
+            Some(FailureReason::Denied)
+        );
         assert_eq!(ToolError::failed("f").reason(), None);
-        assert_eq!((ToolError::Cancelled.reason(), ToolError::Cancelled.to_string()), (None, "cancelled".to_string()));
-        assert!(matches!(ToolError::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied)), ToolError::Denied(_)));
-        assert!(matches!(ToolError::from(std::io::Error::from(std::io::ErrorKind::NotFound)), ToolError::Missing(_)));
-        assert!(matches!(ToolError::from(std::io::Error::other("x")), ToolError::Failed(_)));
+        assert_eq!(
+            (
+                ToolError::Cancelled.reason(),
+                ToolError::Cancelled.to_string()
+            ),
+            (None, "cancelled".to_string())
+        );
+        assert!(matches!(
+            ToolError::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            ToolError::Denied(_)
+        ));
+        assert!(matches!(
+            ToolError::from(std::io::Error::from(std::io::ErrorKind::NotFound)),
+            ToolError::Missing(_)
+        ));
+        assert!(matches!(
+            ToolError::from(std::io::Error::other("x")),
+            ToolError::Failed(_)
+        ));
         let json_err = serde_json::from_str::<Value>("{").unwrap_err();
         assert!(matches!(ToolError::from(json_err), ToolError::Failed(_)));
         assert_eq!(Plain.invoke("x", Value::Null, &ctx).unwrap(), Value::Null);
+        assert_eq!((Plain.id(), Plain.describe().ops.len()), ("plain", 1));
     }
 }

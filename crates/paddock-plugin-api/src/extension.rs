@@ -109,7 +109,10 @@ pub(crate) fn route(
     ctx: &ExtCtx,
 ) -> Result<Vec<u8>, RemoteError> {
     let Some(entry) = registered.iter().find(|r| r.ns == ns) else {
-        return Err(RemoteError::new(codes::UNIMPLEMENTED, format!("plugin {plugin} does not speak \"{ns}\"")));
+        return Err(RemoteError::new(
+            codes::UNIMPLEMENTED,
+            format!("plugin {plugin} does not speak \"{ns}\""),
+        ));
     };
     if minor > entry.minor {
         return Err(RemoteError::new(
@@ -134,6 +137,14 @@ pub(crate) mod tests_support {
         const MINOR: u16 = 1;
         type Request = u32;
         type Reply = u32;
+    }
+
+    /// Answers the number it was given.
+    pub(crate) fn echo(
+        _: &crate::extension::ExtCtx,
+        n: u32,
+    ) -> Result<u32, paddock_ipc::RemoteError> {
+        Ok(n)
     }
 }
 
@@ -160,12 +171,14 @@ mod tests {
     }
 
     fn entries() -> Vec<Registered> {
-        vec![Registered::new::<Calc>(|ctx: &ExtCtx, Ask::Add(a, b): Ask| {
-            if ctx.is_cancelled() {
-                return Err(RemoteError::new(codes::CANCELLED, "stop"));
-            }
-            Ok(Answer::Sum(a + b))
-        })]
+        vec![Registered::new::<Calc>(
+            |ctx: &ExtCtx, Ask::Add(a, b): Ask| {
+                if ctx.is_cancelled() {
+                    return Err(RemoteError::new(codes::CANCELLED, "stop"));
+                }
+                Ok(Answer::Sum(a + b))
+            },
+        )]
     }
 
     fn ctx(cancelled: &dyn Fn() -> bool) -> ExtCtx<'_> {
@@ -180,12 +193,29 @@ mod tests {
         let body = paddock_ipc::wire::encode(&Ask::Add(2, 3)).unwrap();
         let no = || false;
         let reply = route(&entries(), "p", "test.calc.v1", 1, &body, &ctx(&no)).unwrap();
-        assert_eq!(paddock_ipc::wire::decode::<Answer>(&reply).unwrap(), Answer::Sum(5));
+        assert_eq!(
+            paddock_ipc::wire::decode::<Answer>(&reply).unwrap(),
+            Answer::Sum(5)
+        );
         // An older minor is served; the handler sees the same enum.
         assert!(route(&entries(), "p", "test.calc.v1", 0, &body, &ctx(&no)).is_ok());
         let yes = || true;
-        assert_eq!(route(&entries(), "p", "test.calc.v1", 1, &body, &ctx(&yes)).unwrap_err().code, codes::CANCELLED);
+        assert_eq!(
+            route(&entries(), "p", "test.calc.v1", 1, &body, &ctx(&yes))
+                .unwrap_err()
+                .code,
+            codes::CANCELLED
+        );
         assert!(ctx(&yes).is_cancelled() && ctx(&yes).host().read_file(0, 0, 1).is_err());
+    }
+
+    #[test]
+    fn a_handler_is_any_function_of_the_context_and_the_request() {
+        let entries = vec![Registered::new::<tests_support::Calc>(tests_support::echo)];
+        let no = || false;
+        let body = paddock_ipc::wire::encode(&41u32).unwrap();
+        let reply = route(&entries, "p", "test.calc.v1", 1, &body, &ctx(&no)).unwrap();
+        assert_eq!(paddock_ipc::wire::decode::<u32>(&reply).unwrap(), 41);
     }
 
     #[test]
@@ -194,14 +224,18 @@ mod tests {
         let no = || false;
         let c = ctx(&no);
         let unknown = route(&entries(), "p", "other.v1", 0, &body, &c).unwrap_err();
-        assert_eq!((unknown.code.as_str(), unknown.message.as_str()), (codes::UNIMPLEMENTED, "plugin p does not speak \"other.v1\""));
+        assert_eq!(
+            (unknown.code.as_str(), unknown.message.as_str()),
+            (codes::UNIMPLEMENTED, "plugin p does not speak \"other.v1\"")
+        );
         let newer = route(&entries(), "p", "test.calc.v1", 2, &body, &c).unwrap_err();
         assert_eq!(newer.code, codes::VERSION);
         assert_eq!(
             newer.message,
             "plugin p was built for an older contract (\"test.calc.v1\" version 1, asked for 2); update it"
         );
-        let garbled = route(&entries(), "p", "test.calc.v1", 1, &[0xff, 0xff, 0xff], &c).unwrap_err();
+        let garbled =
+            route(&entries(), "p", "test.calc.v1", 1, &[0xff, 0xff, 0xff], &c).unwrap_err();
         assert_eq!(garbled.code, codes::INVALID);
     }
 }

@@ -247,6 +247,39 @@
           "poll": false
         },
         {
+          "name": "quit_soon",
+          "title": "End the process soon",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "log",
+          "title": "Log a line",
+          "args": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "line",
+                "schema": {
+                  "type": "text",
+                  "maxLen": 5000
+                },
+                "required": true
+              }
+            ],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
           "name": "root",
           "title": "Elevated only",
           "args": {

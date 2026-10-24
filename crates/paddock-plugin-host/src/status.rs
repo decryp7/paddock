@@ -46,8 +46,42 @@ impl Status {
     /// The text the UI shows next to the status, when there is one.
     pub fn reason(&self) -> Option<&str> {
         match self {
-            Status::Restarting { why, .. } | Status::Quarantined { why } | Status::Refused(why) => Some(why),
+            Status::Restarting { why, .. } | Status::Quarantined { why } | Status::Refused(why) => {
+                Some(why)
+            }
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_status_has_a_code_and_the_ones_with_a_reason_give_it() {
+        let all = [
+            (Status::Stopped, "stopped", None),
+            (Status::Starting, "starting", None),
+            (Status::Running, "running", None),
+            (
+                Status::Restarting {
+                    why: "w".into(),
+                    delay: Duration::from_secs(1),
+                },
+                "restarting",
+                Some("w"),
+            ),
+            (
+                Status::Quarantined { why: "q".into() },
+                "quarantined",
+                Some("q"),
+            ),
+            (Status::Refused("r".into()), "refused", Some("r")),
+            (Status::Disabled, "disabled", None),
+        ];
+        for (status, code, reason) in all {
+            assert_eq!((status.code(), status.reason()), (code, reason));
         }
     }
 }

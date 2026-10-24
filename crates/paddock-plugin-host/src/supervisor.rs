@@ -23,7 +23,9 @@ use paddock_ipc::{Child, ChildSpec, IpcError, Json, codes};
 use paddock_jobs::time::{Backoff, Retry};
 use paddock_plugin_api::compat::{check_described, protocol_of};
 use paddock_plugin_api::extension::Contract;
-use paddock_plugin_api::protocol::{Described, Fail, McpBudget, PLATFORM_PROTOCOL, PlatformRequest};
+use paddock_plugin_api::protocol::{
+    Described, Fail, McpBudget, PLATFORM_PROTOCOL, PlatformRequest,
+};
 use paddock_plugin_api::tools::{PathAccess, PathKind, Schema};
 use paddock_plugin_package::manifest::Contribution;
 use paddock_plugin_package::{Manifest, PackageError, Permission};
@@ -91,7 +93,7 @@ impl Supervisor {
             cfg.tasks.clone(),
             cfg.elevated.clone(),
         ));
-        let status = initial_status(&cfg, &installed);
+        let status = status_for(&cfg, &installed.manifest, installed.record.enabled);
         let state = State {
             status,
             child: None,
@@ -160,19 +162,15 @@ impl Supervisor {
         *lock(&self.inner.grants) = grants;
     }
 
-    /// Switches the plugin on or off; off stops the process.
+    /// Switches the plugin on or off; off stops the process. A plugin that cannot be served or is quarantined stays so.
     pub fn set_enabled(&self, enabled: bool) {
-        if enabled {
-            let mut st = lock(&self.inner.state);
-            st.enabled = true;
-            if st.status == Status::Disabled {
-                st.status = initial_status_of(&self.inner);
-            }
-        } else {
+        if !enabled {
             self.end_process();
-            let mut st = lock(&self.inner.state);
-            st.enabled = false;
-            st.status = Status::Disabled;
+        }
+        let mut st = lock(&self.inner.state);
+        st.enabled = enabled;
+        if !enabled || st.status == Status::Disabled {
+            st.status = status_for(&self.inner.cfg, &self.inner.manifest, enabled);
         }
     }
 
@@ -182,8 +180,11 @@ impl Supervisor {
         let mut st = lock(&self.inner.state);
         st.backoff.reset();
         st.restart_at = None;
-        if matches!(st.status, Status::Quarantined { .. } | Status::Restarting { .. }) {
-            st.status = if st.enabled { Status::Stopped } else { Status::Disabled };
+        if matches!(
+            st.status,
+            Status::Quarantined { .. } | Status::Restarting { .. }
+        ) {
+            st.status = status_for(&self.inner.cfg, &self.inner.manifest, st.enabled);
         }
     }
 
@@ -191,6 +192,13 @@ impl Supervisor {
     pub fn status(&self) -> Status {
         self.reap();
         lock(&self.inner.state).status.clone()
+    }
+
+    /// Blocks until the process has ended or `guard` of real time has passed (a hang guard, not a timing): true when it ended.
+    /// A process that is not running has ended.
+    pub fn wait_until_ended(&self, guard: Duration) -> bool {
+        let child = lock(&self.inner.state).child.clone();
+        child.is_none_or(|c| c.peer().wait_closed(Some(guard)))
     }
 
     /// Stops the process politely (closes its lifeline, then ends its tree). Not a fault.
@@ -221,18 +229,16 @@ impl Supervisor {
     fn reap(&self) {
         let dead = {
             let st = lock(&self.inner.state);
-            st.child.as_ref().is_some_and(|c| c.exited() || c.peer().is_closed())
+            st.child
+                .as_ref()
+                .is_some_and(|c| c.exited() || c.peer().is_closed())
         };
         if dead {
-            let why = lock(&self.inner.state)
+            let over = lock(&self.inner.state)
                 .child
                 .as_ref()
-                .and_then(|c| c.stopped_over_memory())
-                .map_or_else(
-                    || "its process ended unexpectedly".to_string(),
-                    |limit| format!("it used more than {} MiB of memory and was stopped", limit >> 20),
-                );
-            self.fault(FaultKind::Crash, &why, true);
+                .and_then(|c| c.stopped_over_memory());
+            self.fault(FaultKind::Crash, &ended_text(over), true);
         }
     }
 
@@ -243,7 +249,15 @@ impl Supervisor {
             FaultKind::Hang => Failure::Hang,
             FaultKind::Garbled => Failure::Garbled,
         };
-        self.inner.cfg.quarantine.record(&self.inner.id, failure, message);
+        self.inner
+            .cfg
+            .quarantine
+            .record(&self.inner.id, failure, message);
+        if kind == FaultKind::Hang {
+            // The call that overran has returned (it timed out on the connection), so the plugin is not "hung" any more:
+            // the guard marks it so only for a call it abandons itself.
+            self.inner.cfg.quarantine.hang_ended(&self.inner.id);
+        }
         self.after_fault(message, end);
     }
 
@@ -256,12 +270,17 @@ impl Supervisor {
         let now = self.inner.cfg.clock.monotonic();
         let mut st = lock(&self.inner.state);
         if quarantined {
-            st.status = Status::Quarantined { why: message.to_string() };
+            st.status = Status::Quarantined {
+                why: message.to_string(),
+            };
         } else if end {
             match st.backoff.failed(now) {
                 Retry::After(delay) => {
                     st.restart_at = Some(now + delay);
-                    st.status = Status::Restarting { why: message.to_string(), delay };
+                    st.status = Status::Restarting {
+                        why: message.to_string(),
+                        delay,
+                    };
                 }
                 Retry::GiveUp => {
                     drop(st);
@@ -281,13 +300,17 @@ impl Supervisor {
             q.record(&self.inner.id, Failure::Panic, why);
         }
         self.end_process();
-        lock(&self.inner.state).status = Status::Quarantined { why: why.to_string() };
+        lock(&self.inner.state).status = Status::Quarantined {
+            why: why.to_string(),
+        };
     }
 
     fn unavailable(&self, st: &State) -> Option<HostError> {
         let id = &self.inner.id;
         match &st.status {
-            Status::Disabled => Some(HostError::Unavailable(format!("plugin {id} is switched off; turn it on in the plugin list"))),
+            Status::Disabled => Some(HostError::Unavailable(format!(
+                "plugin {id} is switched off; turn it on in the plugin list"
+            ))),
             Status::Refused(why) => Some(HostError::Unavailable(why.clone())),
             Status::Quarantined { why } => Some(HostError::Unavailable(format!(
                 "plugin {id} is disabled after repeated failures (last: {why}); re-enable it in the plugin list"
@@ -299,37 +322,39 @@ impl Supervisor {
     /// The running process, started (and verified, and described) when it is not up yet.
     fn ensure_running(&self) -> Result<Arc<Child>, HostError> {
         self.reap();
-        {
-            let st = lock(&self.inner.state);
-            if let Some(e) = self.unavailable(&st) {
-                return Err(e);
-            }
-            if let Some(child) = &st.child {
-                return Ok(child.clone());
-            }
-        }
-        let _one_start = lock(&self.inner.start);
-        {
-            // Another caller may have started it while this one waited.
-            let st = lock(&self.inner.state);
-            if let Some(e) = self.unavailable(&st) {
-                return Err(e);
-            }
-            if let Some(child) = &st.child {
-                return Ok(child.clone());
-            }
-            if let (Some(at), Status::Restarting { why, .. }) = (st.restart_at, &st.status) {
-                let now = self.inner.cfg.clock.monotonic();
-                if now < at {
-                    return Err(HostError::Unavailable(format!(
-                        "plugin {} ended ({why}) and restarts in {} s",
-                        self.inner.id,
-                        (at - now).as_secs() + 1
-                    )));
-                }
+        match self.ready() {
+            Some(ready) => ready,
+            None => {
+                let _one_start = lock(&self.inner.start);
+                // Another caller may have started it while this one waited.
+                self.ready().unwrap_or_else(|| self.start())
             }
         }
-        self.start()
+    }
+
+    /// What can be said without starting anything: the running process, or why the plugin cannot be called now (switched
+    /// off, refused, quarantined, or waiting for the back-off after a crash). `None`: it has to be started.
+    fn ready(&self) -> Option<Result<Arc<Child>, HostError>> {
+        let st = lock(&self.inner.state);
+        if let Some(e) = self.unavailable(&st) {
+            return Some(Err(e));
+        }
+        if let Some(child) = &st.child {
+            return Some(Ok(child.clone()));
+        }
+        let now = self.inner.cfg.clock.monotonic();
+        let (Some(at), Status::Restarting { why, .. }) = (st.restart_at, &st.status) else {
+            return None;
+        };
+        if now >= at {
+            return None;
+        }
+        let left = at - now;
+        let seconds = left.as_secs() + u64::from(left.subsec_nanos() > 0);
+        let id = &self.inner.id;
+        Some(Err(HostError::Unavailable(format!(
+            "plugin {id} ended ({why}) and restarts in {seconds} s"
+        ))))
     }
 
     fn refuse(&self, why: String) -> HostError {
@@ -341,15 +366,22 @@ impl Supervisor {
     fn start(&self) -> Result<Arc<Child>, HostError> {
         let id = self.inner.id.clone();
         lock(&self.inner.state).status = Status::Starting;
-        match paddock_plugin_package::archive::verify_installed(&self.inner.program, &self.inner.sha256) {
+        match paddock_plugin_package::archive::verify_installed(
+            &self.inner.program,
+            &self.inner.sha256,
+        ) {
             Ok(()) => {}
             Err(e @ PackageError::Tampered(_)) => {
                 // Quarantine-grade: the program is not the one the user installed.
                 let why = e.to_string();
                 self.quarantine_now(&why);
-                return Err(HostError::Unavailable(format!("plugin {id} was not started: {why}")));
+                return Err(HostError::Unavailable(format!(
+                    "plugin {id} was not started: {why}"
+                )));
             }
-            Err(e) => return Err(self.refuse(format!("plugin {id} cannot start: {e}; reinstall it"))),
+            Err(e) => {
+                return Err(self.refuse(format!("plugin {id} cannot start: {e}; reinstall it")));
+            }
         }
         if let Err(e) = std::fs::create_dir_all(&self.inner.data_dir) {
             return Err(self.refuse(format!("plugin {id} has no data folder ({e})")));
@@ -365,6 +397,11 @@ impl Supervisor {
         spec.start_timeout = cfg.start_timeout;
         spec.extra = serde_json::to_value(&sandbox).ok().map(Json);
         spec.peer.clock = cfg.clock.clone();
+        spec.envs = cfg
+            .child_env
+            .iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect();
         let child = match paddock_ipc::launch(&spec, self.inner.services.clone()) {
             Ok(c) => Arc::new(c),
             // The plugin speaks another protocol: nobody crashed, somebody must update (the text says who).
@@ -372,7 +409,10 @@ impl Supervisor {
             Err(e) => {
                 let why = format!("plugin {id} could not start ({e})");
                 self.fault(FaultKind::Crash, &why, true);
-                return Err(HostError::Fault { kind: FaultKind::Crash, message: why });
+                return Err(HostError::Fault {
+                    kind: FaultKind::Crash,
+                    message: why,
+                });
             }
         };
         let described = match self.describe_child(&child) {
@@ -406,56 +446,92 @@ impl Supervisor {
         Ok(child)
     }
 
+    /// Counts a fault and gives it back as the error of the call.
+    fn faulted(&self, kind: FaultKind, message: String, end: bool) -> HostError {
+        self.fault(kind, &message, end);
+        HostError::Fault { kind, message }
+    }
+
     fn describe_child(&self, child: &Child) -> Result<Described, HostError> {
         let id = &self.inner.id;
-        let asked: Result<Json, IpcError> = child.peer().request(&PlatformRequest::Describe, Some(self.inner.cfg.start_timeout));
+        let timeout = Some(self.inner.cfg.start_timeout);
+        let asked: Result<Json, IpcError> =
+            child.peer().request(&PlatformRequest::Describe, timeout);
         let json = match asked {
-            Ok(j) => j,
+            Ok(json) => json,
+            Err(IpcError::Timeout) => {
+                return Err(self.faulted(
+                    FaultKind::Hang,
+                    format!("plugin {id} did not describe itself in time"),
+                    true,
+                ));
+            }
             Err(e) => {
-                let why = format!("plugin {id} did not describe itself ({e})");
-                let kind = if matches!(e, IpcError::Timeout) { FaultKind::Hang } else { FaultKind::Crash };
-                self.fault(kind, &why, true);
-                return Err(HostError::Fault { kind, message: why });
+                return Err(self.faulted(
+                    FaultKind::Crash,
+                    format!("plugin {id} did not describe itself ({e})"),
+                    true,
+                ));
             }
         };
         serde_json::from_value::<Described>(json.into_inner()).map_err(|e| {
-            let why = format!("plugin {id} described itself in a way this app cannot read ({e})");
-            self.fault(FaultKind::Garbled, &why, true);
-            HostError::Fault { kind: FaultKind::Garbled, message: why }
+            self.faulted(
+                FaultKind::Garbled,
+                format!("plugin {id} described itself in a way this app cannot read ({e})"),
+                true,
+            )
         })
     }
 
     /// Sends one request through the guard and returns the reply bytes. The process is started first when needed.
-    fn call(&self, kind: &str, request: &PlatformRequest, timeout: Duration) -> Result<Vec<u8>, HostError> {
+    fn call(
+        &self,
+        kind: &str,
+        request: &PlatformRequest,
+        timeout: Duration,
+    ) -> Result<Vec<u8>, HostError> {
         let body = paddock_ipc::wire::encode(request).map_err(HostError::Invalid)?;
         let child = self.ensure_running()?;
         let peer = child.peer().clone();
-        let cancel_grace = peer_cancel_grace();
-        let budget = timeout.saturating_add(cancel_grace).saturating_add(self.inner.cfg.hang_grace);
-        let outcome = self.inner.guard.call(&self.inner.id, kind, Some(budget), move || peer.call(body, Some(timeout)));
+        let budget = timeout
+            .saturating_add(peer_cancel_grace())
+            .saturating_add(self.inner.cfg.hang_grace);
+        let id = &self.inner.id;
+        let outcome = self.inner.guard.call(id, kind, Some(budget), move || {
+            peer.call(body, Some(timeout))
+        });
         match outcome {
             Ok(bytes) => Ok(bytes),
-            Err(CallError::Refused(r)) => {
-                self.sync_quarantine(&r.to_string());
-                Err(HostError::Unavailable(r.to_string()))
-            }
-            Err(CallError::Crashed(c)) => {
-                self.after_fault(&c.to_string(), false);
-                Err(HostError::Fault { kind: FaultKind::Crash, message: c.to_string() })
-            }
-            Err(CallError::Hung { what, budget }) => {
-                let message = format!("{what} did not finish within {budget:?}");
-                self.after_fault(&message, true);
-                Err(HostError::Fault { kind: FaultKind::Hang, message })
-            }
-            Err(CallError::Unavailable(m)) => Err(HostError::Unavailable(m)),
             Err(CallError::Failed(e)) => Err(self.classify(e)),
+            // The plugin is quarantined or not responding (or no thread could be started): the call was not made.
+            Err(e @ (CallError::Refused(_) | CallError::Unavailable(_))) => {
+                self.sync_quarantine(&e.to_string());
+                Err(HostError::Unavailable(e.to_string()))
+            }
+            // The guard counted a panic or an abandoned call itself; the supervisor only ends the process of a hung call.
+            Err(e) => {
+                let hung = matches!(e, CallError::Hung { .. });
+                let kind = if hung {
+                    FaultKind::Hang
+                } else {
+                    FaultKind::Crash
+                };
+                Err(self.counted(kind, e.to_string(), hung))
+            }
         }
+    }
+
+    /// A fault the guard already counted, as the error of the call.
+    fn counted(&self, kind: FaultKind, message: String, end: bool) -> HostError {
+        self.after_fault(&message, end);
+        HostError::Fault { kind, message }
     }
 
     fn sync_quarantine(&self, why: &str) {
         if self.inner.cfg.quarantine.is_quarantined(&self.inner.id) {
-            lock(&self.inner.state).status = Status::Quarantined { why: why.to_string() };
+            lock(&self.inner.state).status = Status::Quarantined {
+                why: why.to_string(),
+            };
         }
     }
 
@@ -464,47 +540,56 @@ impl Supervisor {
         let id = &self.inner.id;
         match e {
             IpcError::Remote(r) if r.code == codes::CANCELLED => HostError::Cancelled,
-            IpcError::Remote(r) if r.code == codes::PANIC => {
-                let message = format!("plugin {id} panicked: {}", r.message);
-                self.fault(FaultKind::Crash, &message, false);
-                HostError::Fault { kind: FaultKind::Crash, message }
-            }
-            IpcError::Remote(r) if r.code == codes::TOO_LARGE => {
-                let message = format!("plugin {id} sent a message over the size limit: {}", r.message);
-                self.fault(FaultKind::Garbled, &message, false);
-                HostError::Fault { kind: FaultKind::Garbled, message }
-            }
+            IpcError::Remote(r) if r.code == codes::PANIC => self.faulted(
+                FaultKind::Crash,
+                format!("plugin {id} panicked: {}", r.message),
+                false,
+            ),
+            IpcError::Remote(r) if r.code == codes::TOO_LARGE => self.faulted(
+                FaultKind::Garbled,
+                format!(
+                    "plugin {id} sent a message over the size limit: {}",
+                    r.message
+                ),
+                false,
+            ),
             IpcError::Remote(r) => HostError::Remote(r),
-            IpcError::TooLarge { len, max } => {
-                let message = format!("plugin {id} sent a message of {len} bytes; the limit is {max}");
-                self.fault(FaultKind::Garbled, &message, false);
-                HostError::Fault { kind: FaultKind::Garbled, message }
+            // Our own request did not fit a frame: the plugin did nothing wrong.
+            IpcError::TooLarge { len, max } => HostError::Invalid(format!(
+                "the request is {len} bytes; a message to plugin {id} can have {max}"
+            )),
+            IpcError::Timeout => self.faulted(
+                FaultKind::Hang,
+                format!("plugin {id} stopped responding"),
+                true,
+            ),
+            IpcError::Protocol(m) => self.faulted(
+                FaultKind::Garbled,
+                format!("plugin {id} sent an invalid message ({m})"),
+                true,
+            ),
+            IpcError::Version(m) | IpcError::Denied(m) | IpcError::Auth(m) => {
+                HostError::Unavailable(m)
             }
-            IpcError::Timeout => {
-                let message = format!("plugin {id} stopped responding");
-                self.fault(FaultKind::Hang, &message, true);
-                HostError::Fault { kind: FaultKind::Hang, message }
-            }
-            IpcError::Protocol(m) => {
-                let message = format!("plugin {id} sent an invalid message ({m})");
-                self.fault(FaultKind::Garbled, &message, true);
-                HostError::Fault { kind: FaultKind::Garbled, message }
-            }
-            IpcError::Version(m) | IpcError::Denied(m) | IpcError::Auth(m) => HostError::Unavailable(m),
-            other => {
-                let message = format!("plugin {id} ended ({other})");
-                self.fault(FaultKind::Crash, &message, true);
-                HostError::Fault { kind: FaultKind::Crash, message }
-            }
+            other => self.faulted(
+                FaultKind::Crash,
+                format!("plugin {id} ended: {other}"),
+                true,
+            ),
         }
     }
 
     /// A reply of type `T`; one that does not decode is a counted fault.
     fn decode<T: DeserializeOwned>(&self, bytes: &[u8]) -> Result<T, HostError> {
         paddock_ipc::wire::decode::<T>(bytes).map_err(|m| {
-            let message = format!("plugin {} sent a reply this app cannot read ({m})", self.inner.id);
-            self.fault(FaultKind::Garbled, &message, false);
-            HostError::Fault { kind: FaultKind::Garbled, message }
+            self.faulted(
+                FaultKind::Garbled,
+                format!(
+                    "plugin {} sent a reply this app cannot read ({m})",
+                    self.inner.id
+                ),
+                false,
+            )
         })
     }
 
@@ -516,23 +601,27 @@ impl Supervisor {
         }
     }
 
+    /// What the plugin described, starting it when it is not running.
     fn described_or_start(&self) -> Result<Described, HostError> {
         self.ensure_running()?;
-        lock(&self.inner.state).described.clone().ok_or_else(|| HostError::Unavailable(format!("plugin {} has not described itself", self.inner.id)))
+        let described = lock(&self.inner.state).described.clone();
+        Ok(described.unwrap_or_default())
     }
 
     /// Gives the plugin its settings after validating them against the section it described; they are kept and given again
     /// after a restart.
     pub fn apply_settings(&self, values: Value) -> Result<(), HostError> {
-        let described = self.described_or_start()?;
-        let Some(section) = described.settings else {
-            return Err(HostError::Invalid(format!("plugin {} has no settings", self.inner.id)));
+        let id = &self.inner.id;
+        let Some(section) = self.described_or_start()?.settings else {
+            return Err(HostError::Invalid(format!("plugin {id} has no settings")));
         };
-        let valid = paddock_settings::validate(&section, &values).map_err(|errors| {
-            HostError::Invalid(errors.iter().map(|e| format!("{}: {}", e.key, e.message)).collect::<Vec<_>>().join("; "))
-        })?;
-        let request = PlatformRequest::ApplySettings { json: Json(valid.to_json()) };
-        let bytes = self.call("settings", &request, self.inner.cfg.call_timeout)?;
+        let valid = paddock_settings::validate(&section, &values)
+            .map_err(|errors| HostError::Invalid(field_errors(&errors)))?;
+        let request = PlatformRequest::ApplySettings {
+            json: Json(valid.to_json()),
+        };
+        let timeout = self.inner.cfg.call_timeout;
+        let bytes = self.call("settings", &request, timeout)?;
         self.decode::<()>(&bytes)?;
         lock(&self.inner.state).settings = Some(valid.to_json());
         Ok(())
@@ -542,81 +631,116 @@ impl Supervisor {
     /// must lie inside the folders the plugin was granted (they arrive canonicalised). The answer is the operation's result;
     /// a failure it reports on purpose is [`HostError::Failed`].
     pub fn invoke(&self, tool: &str, op: &str, mut args: Value) -> Result<Value, HostError> {
+        let id = &self.inner.id;
         let described = self.described_or_start()?;
-        let info = described.tools.iter().find(|t| t.id == tool).ok_or_else(|| HostError::Invalid(format!("plugin {} has no tool \"{tool}\"", self.inner.id)))?;
-        let spec = info.ops.iter().find(|o| o.name == op).ok_or_else(|| HostError::Invalid(format!("tool \"{tool}\" has no operation \"{op}\"")))?;
+        let Some(info) = described.tools.iter().find(|t| t.id == tool) else {
+            return Err(HostError::Invalid(format!(
+                "plugin {id} has no tool \"{tool}\""
+            )));
+        };
+        let Some(spec) = info.ops.iter().find(|o| o.name == op) else {
+            return Err(HostError::Invalid(format!(
+                "tool \"{tool}\" has no operation \"{op}\""
+            )));
+        };
         if spec.elevated {
-            return Err(HostError::Invalid(format!("\"{tool} {op}\" runs with administrator rights; the app starts that process")));
+            return Err(HostError::Invalid(format!(
+                "\"{tool} {op}\" runs with administrator rights; the app starts that process"
+            )));
         }
-        spec.args.validate(&args).map_err(|e| HostError::Invalid(e.to_string()))?;
+        spec.args
+            .validate(&args)
+            .map_err(|e| HostError::Invalid(e.to_string()))?;
         self.check_paths(&spec.args, &mut args)?;
-        let request = PlatformRequest::Invoke { tool: tool.into(), op: op.into(), args: Json(args) };
-        let bytes = self.call(&format!("tool {tool} {op}"), &request, spec.budget.unwrap_or(NO_BUDGET))?;
+        let request = PlatformRequest::Invoke {
+            tool: tool.into(),
+            op: op.into(),
+            args: Json(args),
+        };
+        let timeout = spec.budget.unwrap_or(NO_BUDGET);
+        let label = format!("tool {tool} {op}");
+        let bytes = self.call(&label, &request, timeout)?;
         self.json_reply(&bytes)
     }
 
     fn check_paths(&self, schema: &Schema, args: &mut Value) -> Result<(), HostError> {
-        if !schema.has_paths() {
-            return Ok(());
-        }
         let grants = lock(&self.inner.grants).clone();
         let policy = grants.path_policy(&self.inner.manifest);
         let check = |p: &str, k: PathKind, a: PathAccess| policy(p, k, a);
-        schema.check_paths(args, &check).map_err(|e| HostError::Invalid(e.to_string()))
+        schema
+            .check_paths(args, &check)
+            .map_err(|e| HostError::Invalid(e.to_string()))
     }
 
     /// Stops the background task `task`.
     pub fn stop_task(&self, task: &str) -> Result<(), HostError> {
-        let bytes = self.call("stop", &PlatformRequest::Stop { task: task.into() }, self.inner.cfg.call_timeout)?;
-        match self.decode::<Result<(), Fail>>(&bytes)? {
-            Ok(()) => Ok(()),
-            Err(f) => Err(HostError::Failed(f)),
-        }
+        let request = PlatformRequest::Stop { task: task.into() };
+        let timeout = self.inner.cfg.call_timeout;
+        let bytes = self.call("stop", &request, timeout)?;
+        let reply: Result<(), Fail> = self.decode(&bytes)?;
+        reply.map_err(HostError::Failed)
     }
 
     /// The document of view `view`, validated; one that breaks the limits is a counted fault of the plugin.
     pub fn render_view(&self, view: &str, ctx: Value) -> Result<ViewDoc, HostError> {
         let described = self.described_or_start()?;
         if !described.views.iter().any(|v| v.id == view) {
-            return Err(HostError::Invalid(format!("plugin {} has no view \"{view}\"", self.inner.id)));
+            return Err(HostError::Invalid(format!(
+                "plugin {} has no view \"{view}\"",
+                self.inner.id
+            )));
         }
-        let request = PlatformRequest::RenderView { view: view.into(), ctx: Json(ctx) };
-        let bytes = self.call(&format!("view {view}"), &request, self.inner.cfg.call_timeout)?;
+        let request = PlatformRequest::RenderView {
+            view: view.into(),
+            ctx: Json(ctx),
+        };
+        let timeout = self.inner.cfg.call_timeout;
+        let label = format!("view {view}");
+        let bytes = self.call(&label, &request, timeout)?;
         let value = self.json_reply(&bytes)?;
-        let doc: ViewDoc = self.view_value(value, |d: &ViewDoc| paddock_view::validate(d))?;
-        Ok(doc)
+        self.view_value(value, |d: &ViewDoc| paddock_view::validate(d))
     }
 
     /// Delivers the user's action on a view and returns the patch, validated. The action must be one the manifest lists
     /// for the view.
     pub fn view_action(&self, action: &ViewAction) -> Result<ViewPatch, HostError> {
         paddock_view::validate_action(action).map_err(|e| HostError::Invalid(e.to_string()))?;
-        let declared = self.inner.manifest.contributions.iter().any(
-            |c| matches!(c, Contribution::View { id, actions } if *id == action.view && actions.iter().any(|a| a.id == action.action)),
-        );
-        if !declared {
+        if !declares_action(&self.inner.manifest, action) {
+            let id = &self.inner.id;
             return Err(HostError::Invalid(format!(
-                "plugin {} does not declare the action \"{}\" on view \"{}\"",
-                self.inner.id, action.action, action.view
+                "plugin {id} does not declare the action \"{}\" on view \"{}\"",
+                action.action, action.view
             )));
         }
-        let request = PlatformRequest::ViewAction { view: action.view.clone(), action: action.action.clone(), args: action.args.clone() };
-        let bytes = self.call(&format!("view {} {}", action.view, action.action), &request, self.inner.cfg.call_timeout)?;
+        let request = PlatformRequest::ViewAction {
+            view: action.view.clone(),
+            action: action.action.clone(),
+            args: action.args.clone(),
+        };
+        let timeout = self.inner.cfg.call_timeout;
+        let label = format!("view {} {}", action.view, action.action);
+        let bytes = self.call(&label, &request, timeout)?;
         let value = self.json_reply(&bytes)?;
-        self.view_value(value, |p: &ViewPatch| match p {
-            ViewPatch::Doc(d) => paddock_view::validate(d),
-            ViewPatch::Replace { node, .. } => paddock_view::validate(&ViewDoc { schema: paddock_view::SCHEMA, title: String::new(), root: node.clone(), etag: 0 }),
-        })
+        self.view_value(value, check_patch)
     }
 
-    fn view_value<T: DeserializeOwned>(&self, value: Value, validate: impl Fn(&T) -> Result<(), paddock_view::ViewError>) -> Result<T, HostError> {
+    fn view_value<T: DeserializeOwned>(
+        &self,
+        value: Value,
+        validate: impl Fn(&T) -> Result<(), paddock_view::ViewError>,
+    ) -> Result<T, HostError> {
         let garbled = |m: String| {
-            let message = format!("plugin {} returned a view the app refuses ({m})", self.inner.id);
-            self.fault(FaultKind::Garbled, &message, false);
-            HostError::Fault { kind: FaultKind::Garbled, message }
+            self.faulted(
+                FaultKind::Garbled,
+                format!(
+                    "plugin {} returned a view the app refuses ({m})",
+                    self.inner.id
+                ),
+                false,
+            )
         };
-        let text = value.to_string();
-        let parsed: T = paddock_view::from_json(&text).map_err(|e| garbled(e.to_string()))?;
+        let parsed: T =
+            paddock_view::from_json(&value.to_string()).map_err(|e| garbled(e.to_string()))?;
         validate(&parsed).map_err(|e| garbled(e.to_string()))?;
         Ok(parsed)
     }
@@ -624,21 +748,47 @@ impl Supervisor {
     /// Calls an MCP tool the plugin contributed. Needs the `mcpExpose` permission asked **and** granted; the answer is cut
     /// to the budget (an answer over it is a typed failure of the call).
     pub fn mcp_tool(&self, tool: &str, args: Value, budget: McpBudget) -> Result<Value, HostError> {
-        let allowed = self.inner.manifest.permissions.iter().any(|p| p.permission == Permission::McpExpose)
-            && lock(&self.inner.grants).permissions.contains(&Permission::McpExpose);
-        if !allowed {
-            return Err(HostError::Invalid(format!("plugin {} may not offer tools over MCP; allow it first", self.inner.id)));
+        let id = &self.inner.id;
+        let asked = self
+            .inner
+            .manifest
+            .permissions
+            .iter()
+            .any(|p| p.permission == Permission::McpExpose);
+        if !(asked
+            && lock(&self.inner.grants)
+                .permissions
+                .contains(&Permission::McpExpose))
+        {
+            return Err(HostError::Invalid(format!(
+                "plugin {id} may not offer tools over MCP; allow it first"
+            )));
         }
         let described = self.described_or_start()?;
-        let info = described.mcp_tools.iter().find(|t| t.name == tool).ok_or_else(|| HostError::Invalid(format!("plugin {} has no MCP tool \"{tool}\"", self.inner.id)))?;
-        info.args.validate(&args).map_err(|e| HostError::Invalid(e.to_string()))?;
+        let Some(info) = described.mcp_tools.iter().find(|t| t.name == tool) else {
+            return Err(HostError::Invalid(format!(
+                "plugin {id} has no MCP tool \"{tool}\""
+            )));
+        };
+        info.args
+            .validate(&args)
+            .map_err(|e| HostError::Invalid(e.to_string()))?;
         let timeout = Duration::from_millis(budget.max_ms).min(NO_BUDGET);
-        let request = PlatformRequest::McpTool { tool: tool.into(), args: Json(args), budget };
-        let bytes = self.call(&format!("mcp {tool}"), &request, timeout)?;
+        let request = PlatformRequest::McpTool {
+            tool: tool.into(),
+            args: Json(args),
+            budget,
+        };
+        let label = format!("mcp {tool}");
+        let bytes = self.call(&label, &request, timeout)?;
         let value = self.json_reply(&bytes)?;
         let size = value.to_string().len() as u64;
         if size > budget.max_bytes {
-            return Err(HostError::Failed(Fail::new(format!("the answer is {size} bytes; the budget is {}", budget.max_bytes))));
+            let message = format!(
+                "the answer is {size} bytes; the budget is {}",
+                budget.max_bytes
+            );
+            return Err(HostError::Failed(Fail::new(message)));
         }
         Ok(value)
     }
@@ -652,17 +802,29 @@ impl Supervisor {
             .manifest
             .namespaces()
             .find(|n| n.ns() == C::NS)
-            .ok_or_else(|| HostError::Invalid(format!("plugin {id} does not speak \"{}\"", C::NS)))?;
+            .ok_or_else(|| {
+                HostError::Invalid(format!("plugin {id} does not speak \"{}\"", C::NS))
+            })?;
         if declared.minor > C::MINOR {
             let refusal = paddock_plugin_api::compat::Refusal::AppTooOld {
                 plugin: id.clone(),
                 app: self.inner.cfg.info.app.clone(),
                 needs: None,
-                what: format!("\"{}\" version {}, this {} serves up to {}", C::NS, declared.minor, self.inner.cfg.info.app, C::MINOR),
+                what: format!(
+                    "\"{}\" version {}, this {} serves up to {}",
+                    C::NS,
+                    declared.minor,
+                    self.inner.cfg.info.app,
+                    C::MINOR
+                ),
             };
             return Err(HostError::Unavailable(refusal.to_string()));
         }
-        Ok(Remote { sup: self.clone(), minor: declared.minor, _contract: PhantomData })
+        Ok(Remote {
+            sup: self.clone(),
+            minor: declared.minor,
+            _contract: PhantomData,
+        })
     }
 
     /// The program the supervisor starts.
@@ -671,45 +833,76 @@ impl Supervisor {
     }
 }
 
+/// The refused fields of a settings change as one text.
+fn field_errors(errors: &[paddock_settings::FieldError]) -> String {
+    errors
+        .iter()
+        .map(|e| format!("{}: {}", e.key, e.message))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Whether the manifest lists `action` on its view.
+fn declares_action(manifest: &Manifest, action: &ViewAction) -> bool {
+    manifest.contributions.iter().any(|c| match c {
+        Contribution::View { id, actions } => {
+            *id == action.view && actions.iter().any(|a| a.id == action.action)
+        }
+        _ => false,
+    })
+}
+
+/// A patch the app would apply: a whole document must validate; a replacement node is validated inside an empty document.
+fn check_patch(patch: &ViewPatch) -> Result<(), paddock_view::ViewError> {
+    match patch {
+        ViewPatch::Doc(doc) => paddock_view::validate(doc),
+        ViewPatch::Replace { node, .. } => paddock_view::validate(&ViewDoc {
+            schema: paddock_view::SCHEMA,
+            title: "patch".into(),
+            root: node.clone(),
+            etag: 0,
+        }),
+    }
+}
+
+/// Why a process ended by itself: over its memory cap (the limit in bytes) or for no reason the app knows.
+fn ended_text(over_memory: Option<u64>) -> String {
+    match over_memory {
+        Some(limit) => format!(
+            "it used more than {} MiB of memory and was stopped",
+            limit >> 20
+        ),
+        None => "its process ended unexpectedly".to_string(),
+    }
+}
+
 /// How long the peer gives a callee to end a cancelled call (the IPC default; the guard budget adds it).
 fn peer_cancel_grace() -> Duration {
     paddock_ipc::peer::CANCEL_GRACE
 }
 
-fn initial_status(cfg: &HostConfig, installed: &Installed) -> Status {
-    let m = &installed.manifest;
-    if !installed.record.enabled {
-        return Status::Disabled;
-    }
-    let label = m.id.to_string();
+/// The status a plugin has when nothing has happened yet: switched off, refused (this app cannot serve its protocol or
+/// contracts), quarantined (the quarantine file says so), else stopped.
+fn status_for(cfg: &HostConfig, manifest: &Manifest, enabled: bool) -> Status {
+    let label = manifest.id.to_string();
     let compat = cfg
         .info
-        .check_protocol(&label, protocol_of(m.protocol))
-        .and_then(|()| m.namespaces().try_for_each(|n| cfg.info.check_extension(&label, n.ns(), n.minor)));
-    if let Err(r) = compat {
-        return Status::Refused(r.to_string());
-    }
-    if cfg.quarantine.is_quarantined(&label) {
-        let why = cfg.quarantine.status(&label).last_error.unwrap_or_else(|| "repeated failures".into());
-        return Status::Quarantined { why };
-    }
-    Status::Stopped
-}
-
-fn initial_status_of(inner: &Inner) -> Status {
-    let m = &inner.manifest;
-    let label = inner.id.clone();
-    let compat = inner
-        .cfg
-        .info
-        .check_protocol(&label, protocol_of(m.protocol))
-        .and_then(|()| m.namespaces().try_for_each(|n| inner.cfg.info.check_extension(&label, n.ns(), n.minor)));
-    match compat {
-        Err(r) => Status::Refused(r.to_string()),
-        Ok(()) if inner.cfg.quarantine.is_quarantined(&label) => {
-            Status::Quarantined { why: inner.cfg.quarantine.status(&label).last_error.unwrap_or_default() }
+        .check_protocol(&label, protocol_of(manifest.protocol))
+        .and_then(|()| {
+            manifest
+                .namespaces()
+                .try_for_each(|n| cfg.info.check_extension(&label, n.ns(), n.minor))
+        });
+    if !enabled {
+        Status::Disabled
+    } else if let Err(r) = compat {
+        Status::Refused(r.to_string())
+    } else if cfg.quarantine.is_quarantined(&label) {
+        Status::Quarantined {
+            why: cfg.quarantine.status(&label).last_error.unwrap_or_default(),
         }
-        Ok(()) => Status::Stopped,
+    } else {
+        Status::Stopped
     }
 }
 
@@ -724,7 +917,11 @@ pub struct Remote<C: Contract> {
 
 impl<C: Contract> Clone for Remote<C> {
     fn clone(&self) -> Self {
-        Remote { sup: self.sup.clone(), minor: self.minor, _contract: PhantomData }
+        Remote {
+            sup: self.sup.clone(),
+            minor: self.minor,
+            _contract: PhantomData,
+        }
     }
 }
 
@@ -740,11 +937,204 @@ impl<C: Contract> Remote<C> {
     }
 
     /// Asks `request`, waiting at most `timeout` (on the app's clock).
-    pub fn call_within(&self, request: &C::Request, timeout: Duration) -> Result<C::Reply, HostError> {
+    pub fn call_within(
+        &self,
+        request: &C::Request,
+        timeout: Duration,
+    ) -> Result<C::Reply, HostError> {
         let body = paddock_ipc::wire::encode(request).map_err(HostError::Invalid)?;
-        let req = PlatformRequest::Extension { ns: C::NS.into(), minor: self.minor, body };
+        let req = PlatformRequest::Extension {
+            ns: C::NS.into(),
+            minor: self.minor,
+            body,
+        };
         let bytes = self.sup.call(C::NS, &req, timeout)?;
         // The reply of an extension is the contract's own postcard bytes.
         self.sup.decode::<C::Reply>(&bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::installed::InstallRecord;
+    use paddock_guard::{Quarantine, QuarantinePolicy};
+    use paddock_ipc::RemoteError;
+    use paddock_jobs::time::{Clock, FakeClock};
+    use paddock_plugin_api::compat::HostInfo;
+    use paddock_view::{Node, SCHEMA};
+
+    fn supervisor() -> (Supervisor, Arc<Quarantine>) {
+        let manifest = Manifest::parse(
+            "format = 1\n[plugin]\nid = \"net.example.p\"\nname = \"P\"\nversion = \"1.0.0\"\npublisher = \"E\"\nprotocol = \"2.0\"\nbinary = \"p\"\ntargets = [\"x86_64-unknown-linux-gnu\"]\n",
+        )
+        .unwrap();
+        let clock: Arc<dyn Clock> = Arc::new(FakeClock::new());
+        let quarantine = Arc::new(Quarantine::new(QuarantinePolicy::default(), clock.clone()));
+        let dir = std::env::temp_dir();
+        let cfg = Arc::new(HostConfig::new(
+            HostInfo::new("TestApp"),
+            clock,
+            quarantine.clone(),
+            dir.join("paddock-plugin-host-unit-out"),
+        ));
+        let record = InstallRecord {
+            id: "net.example.p".into(),
+            version: "1.0.0".into(),
+            signature: "unsigned".into(),
+            trust: "unsigned".into(),
+            signer: None,
+            warning: None,
+            digest: String::new(),
+            folder: "v".into(),
+            program: "p".into(),
+            sha256: String::new(),
+            requested: Vec::new(),
+            grants: Grants::none(),
+            enabled: true,
+            installed_at_ms: 0,
+        };
+        let installed = Installed {
+            record,
+            manifest,
+            program: "/does/not/exist".into(),
+            data_dir: "/does/not/exist-data".into(),
+            sha256: [0; 32],
+        };
+        (Supervisor::new(cfg, installed), quarantine)
+    }
+
+    #[test]
+    fn a_view_the_app_refuses_is_a_counted_fault_of_the_plugin() {
+        let (s, q) = supervisor();
+        let doc = |title: &str| ViewDoc {
+            schema: SCHEMA,
+            title: title.into(),
+            root: Node::text("x"),
+            etag: 1,
+        };
+        // Valid: passes through.
+        let ok = s
+            .view_value::<ViewDoc>(serde_json::to_value(doc("T")).unwrap(), |d| {
+                paddock_view::validate(d)
+            })
+            .unwrap();
+        assert_eq!(ok.title, "T");
+        assert_eq!(q.status("net.example.p").total, 0);
+        // Not a document at all.
+        let e = s
+            .view_value::<ViewDoc>(serde_json::json!({"bogus": 1}), paddock_view::validate)
+            .unwrap_err();
+        assert!(
+            matches!(&e, HostError::Fault { kind: FaultKind::Garbled, message } if message.contains("returned a view the app refuses")),
+            "{e}"
+        );
+        // A document over the limits.
+        let mut bad = doc("T");
+        bad.schema = 99;
+        let e = s
+            .view_value::<ViewDoc>(serde_json::to_value(bad).unwrap(), |d| {
+                paddock_view::validate(d)
+            })
+            .unwrap_err();
+        assert!(matches!(
+            e,
+            HostError::Fault {
+                kind: FaultKind::Garbled,
+                ..
+            }
+        ));
+        assert_eq!(q.status("net.example.p").total, 2);
+        // A reply that does not decode.
+        let e = s.decode::<Vec<String>>(&[0xff, 0xff, 0xff]).unwrap_err();
+        assert!(matches!(
+            e,
+            HostError::Fault {
+                kind: FaultKind::Garbled,
+                ..
+            }
+        ));
+        assert_eq!(q.status("net.example.p").total, 3);
+        assert!(q.is_quarantined("net.example.p"));
+        assert!(matches!(s.status(), Status::Quarantined { .. }));
+    }
+
+    #[test]
+    fn a_process_that_ended_by_itself_is_noticed_as_a_crash_when_nothing_is_calling() {
+        let (s, q) = supervisor();
+        // No process: nothing to notice.
+        assert_eq!(s.status(), Status::Stopped);
+        s.reap();
+        assert_eq!(q.status("net.example.p").total, 0);
+        // The back-off that gives up quarantines at once.
+        s.quarantine_now("it keeps failing");
+        assert!(q.is_quarantined("net.example.p"));
+        assert_eq!(
+            s.status(),
+            Status::Quarantined {
+                why: "it keeps failing".into()
+            }
+        );
+        s.quarantine_now("again");
+        assert_eq!(q.status("net.example.p").total, 3);
+    }
+
+    #[test]
+    fn every_ipc_failure_is_a_typed_failure_a_refusal_or_a_counted_fault() {
+        let (s, q) = supervisor();
+        let cancelled = s.classify(IpcError::Remote(RemoteError::new(codes::CANCELLED, "stop")));
+        assert_eq!(cancelled, HostError::Cancelled);
+        let refused = s.classify(IpcError::Remote(RemoteError::new("x.failed", "no")));
+        assert!(matches!(refused, HostError::Remote(r) if r.code == "x.failed"));
+        let big = s.classify(IpcError::TooLarge { len: 10, max: 5 });
+        assert!(
+            matches!(&big, HostError::Invalid(m) if m.contains("the request is 10 bytes")),
+            "{big}"
+        );
+        for e in [
+            IpcError::Version("v".into()),
+            IpcError::Denied("d".into()),
+            IpcError::Auth("a".into()),
+        ] {
+            assert!(matches!(s.classify(e), HostError::Unavailable(_)));
+        }
+        assert_eq!(q.status("net.example.p").total, 0);
+        let garbled = s.classify(IpcError::Protocol("junk".into()));
+        assert!(
+            matches!(&garbled, HostError::Fault { kind: FaultKind::Garbled, message } if message.contains("(junk)")),
+            "{garbled}"
+        );
+        let too_large = s.classify(IpcError::Remote(RemoteError::new(codes::TOO_LARGE, "big")));
+        assert!(matches!(
+            too_large,
+            HostError::Fault {
+                kind: FaultKind::Garbled,
+                ..
+            }
+        ));
+        assert_eq!(q.status("net.example.p").total, 2);
+    }
+
+    #[test]
+    fn a_process_over_its_memory_cap_says_so() {
+        assert_eq!(ended_text(None), "its process ended unexpectedly");
+        assert_eq!(
+            ended_text(Some(256 << 20)),
+            "it used more than 256 MiB of memory and was stopped"
+        );
+    }
+
+    #[test]
+    fn a_disabled_plugin_that_was_installed_off_starts_off() {
+        let (s, _q) = supervisor();
+        s.set_enabled(false);
+        assert_eq!(s.status(), Status::Disabled);
+        s.set_enabled(false);
+        assert_eq!(s.status(), Status::Disabled);
+        assert!(
+            matches!(s.ensure_running(), Err(HostError::Unavailable(m)) if m.contains("switched off"))
+        );
+        assert_eq!(s.sandbox(), SandboxSpec::locked());
+        assert!(s.tasks().is_empty() && s.described().is_none());
     }
 }

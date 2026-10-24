@@ -97,6 +97,9 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
 | `paddock-plugin-package` | the `.paddockplugin` archive, the plugin manifest model (permissions, contributions, namespaces), Ed25519 signing, keys, trust levels and store, installed-binary verification (ADR 0001, plan X51) | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-view` | the declarative view model plugins return (ADR 0002, plan X51): `ViewDoc`, nodes, actions, patches, JSON + postcard, the limits validator, generated TypeScript | yes (Debrief, Pacenotes, Dyno tier 3); built |
+| `paddock-plugin-api` | what an out-of-process plugin links (ADR 0001, plan X51): platform protocol 2.0 (`PlatformRequest`, `HostCall`), `Plugin` and `Contributions` (tools with checked schemas, settings, views, MCP tools), the `Extension` mechanism for an app's own contract, version rules with refusal texts that say who must update, host files, output files, `serve` | yes (Debrief, Pacenotes, Dyno tier 3); built |
+| `paddock-plugin-host` | what an app links to run plugins (ADR 0001, plan X51): installed `.paddockplugin` packages (verified before every start), grants (default deny) and the pure `sandbox_for` mapping, a `Supervisor` per plugin (restart with back-off, quarantine through `paddock-guard`), guarded `Remote<C>` proxies, grant-checked host files, outputs and elevated operations, status for the UI | yes (Debrief, Pacenotes, Dyno tier 3); built |
+| `paddock-plugin-test` | testing plugins (ADR 0001, plan X51): `FakeHost` (a plugin in this process over a real IPC pair), the conformance checks every plugin runs, golden helpers, and `paddock-plugin-fixture`, the sample plugin the host's tests start as a process | yes (every plugin, the host's tests); built |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
@@ -1661,3 +1664,58 @@ let changes = diff(&old_plan, &new_plan);       // links kept by case id and ste
 - The crate never resolves a secret: `Resolver` is the app's; `Redactor` is what writers take.
 - Tests: fixtures with invented data, every refusal, properties (`parse(write(p)) == p`, no input panics), `fuzz/` (`cargo +nightly fuzz run
   formats`). JSON Schema export and thumbnails in results are not built (ADR open questions).
+
+## The plugin platform: `paddock-plugin-api`, `-host` and `-test` (plan X51, ADR 0001 and 0003)
+
+Rust only, out of process only, one IPC (`paddock-ipc`), no web code from plugins. The platform knows how to host, isolate,
+call, sign and describe a plugin; each app owns what its plugins may contribute, as an **app contract** carried in
+`Extension { ns, minor, body }` (the platform routes by `ns` and never decodes `body`).
+
+```rust
+// A plugin (depends on paddock-plugin-api alone); its main is one line.
+struct Hello;
+impl Plugin for Hello {
+    fn id(&self) -> &str { "net.example.hello" }
+    fn name(&self) -> &str { "Hello" }
+    fn version(&self) -> &str { env!("CARGO_PKG_VERSION") }
+    fn register(&self, c: &mut Contributions) -> Result<(), RegisterError> {
+        c.add_tool(MyTool).add_view(MyView).add_extension::<DebriefImport>(handle_import);
+        Ok(())
+    }
+}
+fn main() -> Result<(), IpcError> { paddock_plugin_api::serve(Arc::new(Hello)) }
+
+// The app: discovery, grants, supervision, a typed proxy per contract.
+let cfg = Arc::new(HostConfig::new(HostInfo::new("Debrief").serving(NamespaceSupport::new("debrief.import.v1", 2)), clock, quarantine, outputs));
+let host = PluginHost::load(PluginsDir::of(&dirs, clock), cfg);
+let plugin = host.get("net.example.hello").unwrap();
+let reply = plugin.remote::<DebriefImport>()?.call(&ImportRequest::Sniff { .. })?;   // guarded: faults are counted
+let answer = plugin.invoke("collector", "start", json!({ "folder": path }))?;          // schema- and grant-checked
+```
+
+- **Wire** (`paddock-plugin-api::protocol`, `PLATFORM_PROTOCOL` 2.0): `PlatformRequest { Describe, ApplySettings, Invoke,
+  RenderView, ViewAction, McpTool, Stop, Extension }` and, plugin to app while it works, `HostCall { ReadFile (at most
+  1 MiB), Report, TaskStarted, TaskFinished, Output, Elevated (a named operation), Log }`. Values that are JSON by nature
+  cross as `Json`; no wire type uses `untagged`, `flatten`, internal tags or `skip_serializing_if` (round-trip tested).
+  Protocol 1 (Debrief's own) is refused by `HostInfo::check_protocol` with `Refusal::Legacy`; the shim that would serve it
+  (ADR 0003 phase 3) is the app's.
+- **Compatibility** (`compat`): same major and a minor the host knows, for the platform and for every contract namespace
+  (the namespace carries its major in its name). Refusals say who must update: "plugin X needs Debrief 1.4 or newer" /
+  "plugin X was built for an older contract; update it". `check_described` compares what a plugin says on `Describe` with the
+  verified manifest; a plugin that contributes more or less than it declared is refused.
+- **Faults and failures** (`paddock-plugin-host::supervisor`): a *fault* (process ended, panic in a contribution, a call past
+  its timeout and the cancel grace, an oversized or garbled frame, a reply or view document that does not decode or validate)
+  is counted by `paddock_guard::Quarantine` (3 in 10 minutes) and attributed to the plugin; a *typed failure* (`Fail`, a
+  contract's own error) is not. A crash is restarted on the next call after `paddock_jobs::time::Backoff` on the injected
+  clock; a changed program (`verify_installed`) is quarantined at once and never started.
+- **Grants** (`grants`): default deny; `sandbox_for(&Manifest, &Grants) -> SandboxSpec` is a pure table-tested mapping kept as
+  data. **OS-level enforcement (AppContainer, landlock/seccomp, `sandbox-exec`) stays in the app for now**; the spec is in the
+  child's bootstrap (`Bootstrap::extra`). The host enforces the memory cap, the grant-checked reads of host files, tool path
+  arguments (links followed), outputs only into the app's folder, and elevated operations only by an allowed name.
+- **Tests** (`paddock-plugin-test`): `conformance::assert_conforms(plugin)` is one line in a plugin's tests; `FakeHost` is a
+  real IPC pair inside the test process; `golden` compares what a plugin describes and renders; `fixture` is the sample plugin
+  and `paddock-plugin-fixture` / `-v1` (the frozen protocol-1 program) / `-misbehaving` (garbled, silent, dying, greedy and bare plugins) are the processes the host's tests start; the parts that end or block a process (`process.rs`) and the programs' `main`s are the only files outside the coverage gate. Time is a
+  `FakeClock`; nothing sleeps.
+- **Not here:** Debrief's profile/document importers, dumps, the old `PluginRequest` enum (it becomes the `debrief.*`
+  contract bodies, ADR 0003 phase 2), the elevated *process* (the app starts it and runs `Invoke` with the `elevated` role),
+  the OS sandbox, and the `cargo paddock-plugin` tool.

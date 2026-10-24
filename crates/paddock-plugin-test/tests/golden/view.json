@@ -2,7 +2,7 @@
   "schema": 1,
   "title": "Fixture",
   "root": {
-    "id": "",
+    "id": "root",
     "kind": {
       "stack": {
         "dir": "column",

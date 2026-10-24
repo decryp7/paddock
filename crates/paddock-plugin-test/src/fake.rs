@@ -2,14 +2,19 @@
 //! (same frames, same handshake, same limits as in the app), answers the calls the plugin makes back from memory, and
 //! records them.
 
-use paddock_ipc::{CallCtx, Client, FrameLimit, Handler, Host, IpcError, Json, Peer, PeerOptions, RemoteError, codes, decode_request, encode_reply};
-use paddock_testkit::Clock;
+use paddock_ipc::{
+    CallCtx, Client, FrameLimit, Handler, Host, IpcError, Json, Peer, PeerOptions, RemoteError,
+    codes, decode_request, encode_reply,
+};
+use paddock_plugin_api::Plugin;
 use paddock_plugin_api::extension::Contract;
 use paddock_plugin_api::host_file::HostFileRef;
-use paddock_plugin_api::protocol::{DENIED, Described, Fail, HostCall, McpBudget, PLATFORM_PROTOCOL, PlatformRequest, SavedOutput};
+use paddock_plugin_api::protocol::{
+    DENIED, Described, Fail, HostCall, McpBudget, PLATFORM_PROTOCOL, PlatformRequest, SavedOutput,
+};
 use paddock_plugin_api::serve::PluginHandler;
 use paddock_plugin_api::tools::ToolTask;
-use paddock_plugin_api::Plugin;
+use paddock_testkit::Clock;
 use paddock_view::{ViewAction, ViewDoc, ViewPatch};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -76,14 +81,29 @@ struct Services {
 impl Handler for Services {
     fn call(&self, _ctx: &CallCtx, body: &[u8]) -> Result<Vec<u8>, RemoteError> {
         match decode_request::<HostCall>(body)? {
+            // The ids a test uses to make the app answer in the other ways it can.
+            HostCall::ReadFile { id: 0, .. } => {
+                Err(RemoteError::new(codes::CANCELLED, "the call was cancelled"))
+            }
+            HostCall::ReadFile { id: DISK_FAILS, .. } => {
+                Err(RemoteError::new(codes::INTERNAL, "the disk failed"))
+            }
             HostCall::ReadFile { id, offset, len } => {
                 let rec = lock(&self.rec);
-                let file = rec.files.get(&id).ok_or_else(|| RemoteError::new(DENIED, format!("file {id} was not opened for this plugin")))?;
-                let start = usize::try_from(offset).unwrap_or(usize::MAX).min(file.len());
+                let file = rec.files.get(&id).ok_or_else(|| {
+                    RemoteError::new(DENIED, format!("file {id} was not opened for this plugin"))
+                })?;
+                let start = usize::try_from(offset)
+                    .unwrap_or(usize::MAX)
+                    .min(file.len());
                 let end = start.saturating_add(len as usize).min(file.len());
                 encode_reply(&file[start..end].to_vec())
             }
-            HostCall::Report { task, progress, note } => {
+            HostCall::Report {
+                task,
+                progress,
+                note,
+            } => {
                 lock(&self.rec).reports.push((task, progress, note));
                 encode_reply(&())
             }
@@ -97,15 +117,23 @@ impl Handler for Services {
             }
             HostCall::Output { name, bytes, last } => {
                 let mut rec = lock(&self.rec);
-                rec.outputs.entry(name.clone()).or_default().extend_from_slice(&bytes);
-                let saved = last.then(|| SavedOutput { name: name.clone(), bytes: rec.outputs[&name].len() as u64 });
+                rec.outputs
+                    .entry(name.clone())
+                    .or_default()
+                    .extend_from_slice(&bytes);
+                let saved = last.then(|| SavedOutput {
+                    name: name.clone(),
+                    bytes: rec.outputs[&name].len() as u64,
+                });
                 if let Some(s) = &saved {
                     rec.saved.insert(name, s.clone());
                 }
                 encode_reply(&saved)
             }
             HostCall::Elevated { tool, op, args, .. } => {
-                lock(&self.rec).elevated_calls.push((tool.clone(), op.clone()));
+                lock(&self.rec)
+                    .elevated_calls
+                    .push((tool.clone(), op.clone()));
                 let reply: Result<Json, Fail> = match &*lock(&self.elevated) {
                     Some(f) => f(&tool, &op, args.into_inner()).map(Json),
                     None => Err(Fail::new("the fake host runs no elevated operations")),
@@ -137,18 +165,30 @@ impl FakeHost {
 
     /// [`FakeHost::start`] with a frame limit (a small one makes an oversized frame cheap to cause) and, when given, the
     /// clock the app side's call timeouts run on.
-    pub fn start_with(plugin: Arc<dyn Plugin>, limit: FrameLimit, clock: Option<Arc<dyn Clock>>) -> Result<FakeHost, IpcError> {
+    pub fn start_with(
+        plugin: Arc<dyn Plugin>,
+        limit: FrameLimit,
+        clock: Option<Arc<dyn Clock>>,
+    ) -> Result<FakeHost, IpcError> {
         FakeHost::start_handler(Arc::new(PluginHandler::new(plugin, false)), limit, clock)
     }
 
     /// [`FakeHost::start_with`] for any handler on the plugin side: how the conformance checks themselves are tested against
     /// a plugin that misbehaves.
-    pub fn start_handler(handler: Arc<dyn Handler>, limit: FrameLimit, clock: Option<Arc<dyn Clock>>) -> Result<FakeHost, IpcError> {
+    pub fn start_handler(
+        handler: Arc<dyn Handler>,
+        limit: FrameLimit,
+        clock: Option<Arc<dyn Clock>>,
+    ) -> Result<FakeHost, IpcError> {
         let mut host = Host::listen(limit, PLATFORM_PROTOCOL).map_err(IpcError::from)?;
         let (endpoint, token) = (host.endpoint().to_string(), host.token().clone());
-        let connect = std::thread::spawn(move || Client::connect(&endpoint, &token, limit, PLATFORM_PROTOCOL));
+        let connect = std::thread::spawn(move || {
+            Client::connect(&endpoint, &token, limit, PLATFORM_PROTOCOL)
+        });
         let host_conn = host.accept(Duration::from_secs(10))?;
-        let plugin_conn = connect.join().map_err(|_| IpcError::Closed("the plugin side panicked".into()))??;
+        let plugin_conn = connect
+            .join()
+            .map_err(|_| IpcError::Closed("the plugin side panicked".into()))??;
         let services = Arc::new(Services::default());
         let mut opts = PeerOptions::new("plugin under test");
         if let Some(c) = clock {
@@ -156,7 +196,12 @@ impl FakeHost {
         }
         let host_side = Peer::start(host_conn, services.clone(), opts)?;
         let plugin_side = Peer::start(plugin_conn, handler, PeerOptions::new("the app"))?;
-        Ok(FakeHost { host_side, _plugin_side: plugin_side, _host: host, services })
+        Ok(FakeHost {
+            host_side,
+            _plugin_side: plugin_side,
+            _host: host,
+            services,
+        })
     }
 
     /// The app side of the connection.
@@ -174,13 +219,19 @@ impl FakeHost {
         let content = content.into();
         let mut next = lock(&self.services.next);
         *next += 1;
-        let r = HostFileRef { id: *next, len: content.len() as u64 };
+        let r = HostFileRef {
+            id: *next,
+            len: content.len() as u64,
+        };
         lock(&self.services.rec).files.insert(r.id, content);
         r
     }
 
     /// Makes the plugin's elevated calls run `f`.
-    pub fn on_elevated(&self, f: impl Fn(&str, &str, Value) -> Result<Value, Fail> + Send + Sync + 'static) {
+    pub fn on_elevated(
+        &self,
+        f: impl Fn(&str, &str, Value) -> Result<Value, Fail> + Send + Sync + 'static,
+    ) {
         *lock(&self.services.elevated) = Some(Box::new(f));
     }
 
@@ -205,7 +256,8 @@ impl FakeHost {
     /// What the plugin says about itself.
     pub fn describe(&self) -> Result<Described, CallFailure> {
         let json: Json = self.ask(&PlatformRequest::Describe)?;
-        serde_json::from_value(json.into_inner()).map_err(|e| CallFailure::Ipc(IpcError::Protocol(e.to_string())))
+        serde_json::from_value(json.into_inner())
+            .map_err(|e| CallFailure::Ipc(IpcError::Protocol(e.to_string())))
     }
 
     /// Gives the plugin its settings (already validated by the app in real life; the plugin validates again).
@@ -215,24 +267,44 @@ impl FakeHost {
 
     /// Runs a tool operation.
     pub fn invoke(&self, tool: &str, op: &str, args: Value) -> Result<Value, CallFailure> {
-        self.json(&PlatformRequest::Invoke { tool: tool.into(), op: op.into(), args: Json(args) })
+        self.json(&PlatformRequest::Invoke {
+            tool: tool.into(),
+            op: op.into(),
+            args: Json(args),
+        })
     }
 
     /// Renders a view.
     pub fn render_view(&self, view: &str, ctx: Value) -> Result<ViewDoc, CallFailure> {
-        let v = self.json(&PlatformRequest::RenderView { view: view.into(), ctx: Json(ctx) })?;
+        let v = self.json(&PlatformRequest::RenderView {
+            view: view.into(),
+            ctx: Json(ctx),
+        })?;
         serde_json::from_value(v).map_err(|e| CallFailure::Ipc(IpcError::Protocol(e.to_string())))
     }
 
     /// Delivers a view action.
     pub fn view_action(&self, action: &ViewAction) -> Result<ViewPatch, CallFailure> {
-        let v = self.json(&PlatformRequest::ViewAction { view: action.view.clone(), action: action.action.clone(), args: action.args.clone() })?;
+        let v = self.json(&PlatformRequest::ViewAction {
+            view: action.view.clone(),
+            action: action.action.clone(),
+            args: action.args.clone(),
+        })?;
         serde_json::from_value(v).map_err(|e| CallFailure::Ipc(IpcError::Protocol(e.to_string())))
     }
 
     /// Calls an MCP tool.
-    pub fn mcp_tool(&self, tool: &str, args: Value, budget: McpBudget) -> Result<Value, CallFailure> {
-        self.json(&PlatformRequest::McpTool { tool: tool.into(), args: Json(args), budget })
+    pub fn mcp_tool(
+        &self,
+        tool: &str,
+        args: Value,
+        budget: McpBudget,
+    ) -> Result<Value, CallFailure> {
+        self.json(&PlatformRequest::McpTool {
+            tool: tool.into(),
+            args: Json(args),
+            budget,
+        })
     }
 
     /// Stops a background task.
@@ -244,9 +316,18 @@ impl FakeHost {
     }
 
     /// Calls the contract `C` at `minor`.
-    pub fn extension<C: Contract>(&self, minor: u16, request: &C::Request) -> Result<C::Reply, CallFailure> {
-        let body = paddock_ipc::wire::encode(request).map_err(|m| CallFailure::Ipc(IpcError::Protocol(m)))?;
-        let bytes = self.raw(&PlatformRequest::Extension { ns: C::NS.into(), minor, body })?;
+    pub fn extension<C: Contract>(
+        &self,
+        minor: u16,
+        request: &C::Request,
+    ) -> Result<C::Reply, CallFailure> {
+        let body = paddock_ipc::wire::encode(request)
+            .map_err(|m| CallFailure::Ipc(IpcError::Protocol(m)))?;
+        let bytes = self.raw(&PlatformRequest::Extension {
+            ns: C::NS.into(),
+            minor,
+            body,
+        })?;
         paddock_ipc::wire::decode(&bytes).map_err(|m| CallFailure::Ipc(IpcError::Protocol(m)))
     }
 
@@ -285,6 +366,9 @@ impl FakeHost {
         lock(&self.services.rec).elevated_calls.clone()
     }
 }
+
+/// A file id the fake host answers with a disk failure (the largest id a tool argument can name).
+pub const DISK_FAILS: u64 = i64::MAX as u64;
 
 /// The refusal code a request the plugin does not know comes back with.
 pub const INVALID: &str = codes::INVALID;
