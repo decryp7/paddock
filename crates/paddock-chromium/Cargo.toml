@@ -1,0 +1,30 @@
+[package]
+name = "paddock-chromium"
+version = "0.1.0"
+description = "The one Chromium driver of the Paddock apps: discovery (never the user's browser in tests), one command-line builder, a supervised launch with time and memory caps, a small synchronous DevTools client, pages, readiness and challenge rules, and the pinned Chrome for Testing runtime."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+# A fake DevTools browser (Unix) for tests of this crate and of the apps that drive it.
+test-support = []
+
+[dependencies]
+paddock-download = { workspace = true }
+paddock-env = { workspace = true }
+paddock-jobs = { workspace = true }
+paddock-proc = { workspace = true }
+paddock-runtime = { workspace = true }
+serde_json = "1"
+log = "0.4"
+# A small synchronous WebSocket client for the DevTools endpoint on 127.0.0.1 (MIT OR Apache-2.0).
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }

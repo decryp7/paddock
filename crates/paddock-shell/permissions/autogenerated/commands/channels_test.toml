@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-channels-test"
+description = "Enables the channels_test command without any pre-configured scope."
+commands.allow = ["channels_test"]
+
+[[permission]]
+identifier = "deny-channels-test"
+description = "Denies the channels_test command without any pre-configured scope."
+commands.deny = ["channels_test"]
