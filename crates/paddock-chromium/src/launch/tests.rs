@@ -502,6 +502,26 @@ fn a_page_is_read_snapshot_by_snapshot() {
 }
 
 #[test]
+fn a_helper_that_left_the_process_group_is_ended_with_the_browser() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join("chromium-helper-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    // A "helper" outside the browser's tree whose command line names the profile (one process, no children).
+    let log = dir.join("helper.log");
+    std::fs::write(&log, b"").unwrap();
+    let mut cmd = paddock_proc::command("tail");
+    cmd.arg("-f").arg(&log);
+    #[allow(clippy::zombie_processes)]
+    let mut helper = cmd.spawn().unwrap();
+    wait_until("the helper to show up", || {
+        !paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty()
+    });
+    assert_eq!(end_leftovers(&dir), 1);
+    helper.wait().unwrap();
+    assert_eq!(end_leftovers(&dir), 0, "nothing is left");
+}
+
+#[test]
 fn a_profile_that_cannot_be_removed_is_given_up_without_failing() {
     let d = tempfile::tempdir().unwrap();
     assert!(!cleanup_with(d.path(), &|_| Err(std::io::Error::other(
