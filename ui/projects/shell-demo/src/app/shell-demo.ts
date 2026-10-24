@@ -4,6 +4,7 @@ import { CommandService, ContributionRegistry, ShellContextHost } from '@decryp7
 import { PdJobsStatus } from '@decryp7/paddock-ui/shell/jobs';
 import { PdNotificationsStatus, PdServiceStatus } from '@decryp7/paddock-ui/shell/notify';
 import { EnginePanel } from './engine-panel';
+import { DemoNote } from './demo-note';
 
 /** One part of the shell and the work package of docs/plans/workbench.md that brings it to this app. */
 interface ShellPart {
@@ -64,6 +65,14 @@ const PARTS: readonly ShellPart[] = [
         </table>
       </section>
       <sd-engine-panel />
+      <section class="startup" aria-labelledby="sd-startup">
+        <h2 id="sd-startup">Start-up contract</h2>
+        <p class="context">The window reports ready after its first paint and answers liveness pings; this note is kept if the shell reloads the window to recover it.</p>
+        <label class="note">
+          <span>Note</span>
+          <input #noteField type="text" data-testid="demo-note" [value]="note()" (input)="note.set(noteField.value)" />
+        </label>
+      </section>
       <table class="parts">
         <caption>Shell parts</caption>
         <thead>
@@ -103,6 +112,10 @@ const PARTS: readonly ShellPart[] = [
     .kinds caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }
     .kinds th, .kinds td { text-align: start; padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); }
     .kinds th { color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); }
+    .startup { display: flex; flex-direction: column; gap: var(--pd-space-2); }
+    .startup h2 { margin: 0; font-size: var(--pd-text-subtitle); }
+    .note { display: flex; flex-direction: column; gap: var(--pd-space-1); max-width: 40ch; }
+    .note input { min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; min-width: 0; }
   `,
 })
 export class ShellDemo {
@@ -110,6 +123,7 @@ export class ShellDemo {
   protected readonly commands = inject(CommandService);
   private readonly registry = inject(ContributionRegistry);
   private readonly host = inject(ShellContextHost);
+  protected readonly note = inject(DemoNote).note;
   protected readonly available = this.commands.available;
   protected readonly contextLoaded = computed(() => this.host.context() !== null);
   protected readonly kinds = this.registry.kinds.map((k) => ({ name: k.name, count: this.registry.items(k.name).length }));

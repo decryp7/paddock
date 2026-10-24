@@ -108,6 +108,29 @@ A new entry point needs only those two files (the publish dry run fails if the b
 `e2e/shell-demo.spec.ts`. `@decryp7/paddock-e2e` (`projects/paddock-e2e`, plain Node, versioned with this package) gets the
 Playwright helpers in S16.
 
+### Start-up contract (`/shell/startup`, plan S7)
+
+Each window's config (main, other windows, pop-outs, dialogs):
+
+```ts
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { MockStartupBackend, provideStartupBackend, provideStartupContract, provideUiCheckpoint, TauriStartupBackend } from '@decryp7/paddock-ui/shell/startup';
+
+const ipc = { invoke, listen: (event: string, h: (p: unknown) => void) => listen(event, (e) => h(e.payload)) };
+providers: [
+  provideStartupBackend(() => (isTauri() ? new TauriStartupBackend(ipc) : new MockStartupBackend())),
+  provideStartupContract(),                                       // window_ready after the first render, then pings answered
+  provideUiCheckpoint(() => inject(QueryStore).checkpoint),       // main window only: what a recovery reload restores
+]
+```
+
+`main.ts` starts `startBootErrorForwarding(ipcBootErrorSender(ipc))` before anything else and passes bootstrap failures
+to `reportBootstrapFailure`; start-up reads the window depends on go through `retryUntilAnswered(call, STARTUP_RETRY)`.
+After a recovery reload the window shows a calm notice through the shell's notify port and restores its checkpoint.
+`index.html` keeps the `.pd-splash` (`role="status"`) inside the root element; `splashProblems(html, 'app-root')` checks it.
+In the browser build `MockStartupBackend` plays a recovery reload when `sessionStorage['paddock.mock.recover']` is set.
+
 ### Jobs (`@decryp7/paddock-ui/shell/jobs`, plan S9)
 
 Per window (rule 34), with the app's IPC passed in (the package does not depend on `@tauri-apps/api`):

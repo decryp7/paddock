@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3) and `paddock-dialogs` (S5) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3) and `paddock-dialogs` (S5) and `paddock-startup` (S7) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -220,6 +220,37 @@ health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.
   the shell's own are `health`, `repairService` and `openSettings`. App messages are saved debounced and atomically in a
   versioned file (missing, damaged or newer: empty, logged); a window's project messages are saved by the app with its
   project (`notifications_record` / `notifications_restore`). A dialog or pop-out sees its host window's list.
+
+## `paddock-startup` (plan S7 and §11)
+
+The start-up contract and the window watchdog (ADR 0012 §3, ported from Debrief ADR 0058), plus the liveness heartbeat
+after start-up. Every window reports `window_ready` once it painted its frame; a window that does not within 10 s is
+reloaded once, then the user is asked natively (Reload / Restart in Safe Mode / Keep Waiting). Once ready, each visible
+window answers a ping every 2 s (`paddock://ping` → `window_pong`); after 5 missed in a row it is marked unresponsive,
+logged, the unresponsive hook lets its dialog be closed by the OS close, and the user is asked (Reload / Keep Waiting); an
+answer clears the mark. A gap of more than 3 s between ticks means the app process itself was paused: the clocks restart.
+A terminated web content process (macOS) is reloaded at most three times a minute; the reloaded page hears why with its
+last UI checkpoint.
+
+```rust
+let startup = paddock_startup::tauri::Startup::builder()
+    .safe_mode(|app, _label| restart_in_safe_mode(app).map_err(|e| e.to_string()))
+    .on_unresponsive(paddock_dialogs::tauri::page_unresponsive)    // a dialog whose page cannot answer may be closed
+    .native_dialogs()                                               // feature `dialog`; the app registers tauri-plugin-dialog
+    .build()?;                                                      // `Config` timings are checked
+paddock_startup::tauri::install(tauri::Builder::default(), startup) // manage + on_page_load + content-process terminate
+    .invoke_handler(Guard::new(&paddock_startup::COMMANDS).wrap(paddock_startup::tauri::handler()))
+```
+
+- The pure core (`Watchdog`, `Checkpoints`, `ready_reply`, `clean_error`, `Prompt`, `Config`) takes the time from the
+  caller and is tested with a fake clock; the ticker thread (started by the first watched page load; never the main
+  thread) only applies the `Action`s, reloading and asking through `run_on_main_thread`.
+- `COMMANDS`: `window_ready`, `window_boot_error` (16 KiB, one bounded line, at most 10 per page load) and `window_pong`
+  for every window class; `ui_checkpoint` (16 MiB, an object) for main windows only. An app with its own table lists
+  `paddock_startup::tauri::window_ready` and the others there instead; `DIALOG_BASE` names the three every dialog
+  contract includes.
+- Generated TypeScript: `ui/projects/paddock-ui/shell/startup/generated/startup.ts` (wire types) and
+  `startup-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-startup --lib generated`).
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.
