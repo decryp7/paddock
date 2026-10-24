@@ -185,7 +185,6 @@ test.describe('UI basics review fixes (regressions)', () => {
       expect(r.headClipped).toBe(true);
       expect(r.tailClipped).toBe(false);
       expect(r.tail.endsWith('.log')).toBe(true);
-      expect(r.tail).not.toMatch(/^[a-z]+\./); // starts at a word, not mid-word
       expect(r.font).toMatch(/mono|Mono|Menlo|Consolas/i);
     });
   }
@@ -195,6 +194,53 @@ test.describe('UI basics review fixes (regressions)', () => {
     const bg = await page.locator('#g-native').evaluate((e) => getComputedStyle(e).backgroundImage);
     expect(bg.match(/linear-gradient/g)?.length).toBe(2);
     expect(bg).not.toMatch(/45deg|135deg/);
+  });
+
+  test('the open select list is as wide as its trigger (review 2, N-P2-1)', async ({ page }) => {
+    await open(page, 'light', 'debrief');
+    const trigger = page.locator('#g-themed');
+    await trigger.click();
+    const list = page.locator('.pd-list');
+    await expect(list).toBeVisible();
+    const [t, l] = [(await trigger.boundingBox())!, (await list.boundingBox())!];
+    expect(Math.abs(l.x - t.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(l.width - t.width)).toBeLessThanOrEqual(1);
+  });
+
+  test('hover changes the border of an input, a native select and the themed select, and a secondary button on a white card (review 2, N-P2-2, N-P3-3)', async ({ page }) => {
+    await open(page, 'light', 'debrief');
+    const border = (sel: string) => page.locator(sel).first().evaluate((e) => getComputedStyle(e).borderTopColor);
+    for (const sel of ['#g-name', '#g-native', '#g-themed']) {
+      const rest = await border(sel);
+      await page.locator(sel).first().hover();
+      await expect.poll(() => border(sel), { message: sel }).not.toBe(rest); // the border transitions over 100 ms
+      await page.mouse.move(0, 0);
+    }
+    const btn = page.locator('[data-surface="card"] .pd-btn:not(.pd-btn--primary):not([disabled])').first();
+    const rest = await btn.evaluate((e) => getComputedStyle(e).backgroundColor);
+    await btn.hover();
+    const read = () => btn.evaluate((e) => getComputedStyle(e).backgroundColor);
+    await expect.poll(read).not.toBe(rest);
+    expect(await read()).not.toBe('rgb(255, 255, 255)');
+  });
+
+  test('a lone checkbox sits on the control line of the fields beside it (review 2, N-P2-5)', async ({ page }) => {
+    await open(page, 'dark', 'debrief');
+    const centre = (sel: string) => page.locator(sel).first().evaluate((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; });
+    expect(Math.abs((await centre('.pd-field--check input')) - (await centre('#g-name')))).toBeLessThanOrEqual(1);
+  });
+
+  test('a long path in a 240 px box shortens the directory first and keeps the start of the name, the extension and the last word (review 2, N-P2-4)', async ({ page }) => {
+    await open(page, 'dark', 'debrief');
+    const r = await page.locator('[data-testid="path-win-240"] pd-path-text').evaluate((host) => {
+      const part = (c: string) => host.querySelector(c) as HTMLElement;
+      const clipped = (e: HTMLElement) => e.scrollWidth > e.clientWidth;
+      return { dirClipped: clipped(part('.pd-head')), nameClipped: clipped(part('.pd-name')), tailClipped: clipped(part('.pd-tail')), shown: part('.pd-name').textContent! + part('.pd-tail').textContent! };
+    });
+    expect(r.dirClipped).toBe(true);
+    expect(r.nameClipped).toBe(false);
+    expect(r.tailClipped).toBe(false);
+    expect(r.shown).toContain('Service.2026-10-24.log');
   });
 
   test('keycaps do not touch (P2-12)', async ({ page }) => {

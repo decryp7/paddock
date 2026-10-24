@@ -38,7 +38,7 @@ test.describe('contact sheet', () => {
         await page.goto(`${GALLERY}/?theme=${theme}&accent=${accent}`);
         await page.locator('[data-testid="card"] pd-card').first().waitFor();
         const ids = accent === 'debrief'
-          ? ([['icons', 'Icons (pd:): glyph and mat-icon literal rows, 16 and 24 px'], ['controls', 'Controls'], ['states', 'Control states (rest, hover, focus, disabled; page and card)'], ['path-text', 'Path text'], ['empty-state', 'Empty state with an icon']] as const)
+          ? ([['icons', 'Icons (pd:): glyph and mat-icon literal rows, 16 and 24 px'], ['controls', 'Controls'], ['states', 'Control states (rest, hover, focus, disabled; page, card, inset)'], ['path-text', 'Path text'], ['empty-state', 'Empty state with an icon']] as const)
           : ([['states', 'Control states, Pitwall accent (purple)']] as const);
         await forceStates(page);
         for (const [id, title] of ids) {
@@ -49,18 +49,18 @@ test.describe('contact sheet', () => {
         if (accent !== 'debrief') return;
         // The themed select, open, with the keyboard-active option: the trigger and the whole list in one crop.
         const trigger = page.getByRole('combobox', { name: 'Themed select', exact: true });
-        await trigger.scrollIntoViewIfNeeded();
+        await page.locator('section[data-testid="controls"]').evaluate((e) => e.scrollIntoView({ block: 'start' }));
         await trigger.click();
         await expect(page.getByRole('option', { name: 'Comfortable' })).toBeVisible();
         await page.keyboard.press('ArrowDown');
-        const a = (await trigger.boundingBox())!;
-        const b = (await page.locator('.pd-list').boundingBox())!;
-        const x = Math.max(0, Math.min(a.x, b.x) - 24);
-        const y = Math.max(0, Math.min(a.y, b.y) - 24);
-        const clip = { x, y, width: Math.max(a.x + a.width, b.x + b.width) + 24 - x, height: Math.max(a.y + a.height, b.y + b.height) + 24 - y };
+        // The whole controls card with the open list in one crop at the sheet's scale (nothing cut mid-element).
+        const card = (await page.locator('section[data-testid="controls"]').boundingBox())!;
+        const list = (await page.locator('.pd-list').boundingBox())!;
+        const bottom = Math.max(card.y + card.height, list.y + list.height) + 16;
+        const clip = { x: Math.max(0, card.x), y: Math.max(0, card.y), width: card.width, height: Math.min(bottom - card.y, 900 - Math.max(0, card.y)) };
         const file = join(OUT, 'parts', `${theme}-select-open.png`);
         await page.screenshot({ path: file, clip });
-        shots.push({ theme, title: 'Themed select (open, one option keyboard-active)', file });
+        shots.push({ theme, title: 'Controls with the themed select open (one option keyboard-active)', file });
       });
     }
 
