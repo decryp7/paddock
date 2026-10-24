@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1) and `paddock-dialogs` (S5) built, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3) and `paddock-dialogs` (S5) built, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -113,6 +113,8 @@ Entries are sorted by name; an empty table is `{} as const` (name type `never`).
 |---|---|---|
 | `commands.ts` | the wire types (ts-rs): `CommandKind`, `WindowClass`, `CommandInfo`, `RefusalCode`, `CommandRefusal` | `paddock-commands` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated`) |
 | `shell-commands.ts` | `SHELL_COMMANDS` and `ShellCommand`, the shell plugin's command names | `paddock-commands` with an empty table until `paddock-shell` (S17) takes it over with its own table and test |
+| `health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
+| `health-commands.ts` | `HEALTH_COMMANDS` and `HealthCommand`, the health and notification commands | `paddock-health` (same test) |
 
 An app writes its own file the same way into its UI (for example `src/app/core/generated/app-commands.ts`); dialog
 contracts and the contributions core type command names as `AppCommand | ShellCommand`.
@@ -163,6 +165,33 @@ tauri::Builder::default()
 Wire types are generated into `ui/projects/paddock-ui/shell/generated/dialogs.ts` (`DialogKind`, `DialogContract`,
 `DialogContractFile`, `DialogRequest`, `DialogStart`, `DialogResult`, `DialogClosed`, `DialogError`, `DIALOG_EVENTS`,
 `DIALOG_BASE_COMMANDS`; `PADDOCK_WRITE_TS=1 cargo test -p paddock-dialogs --lib generated`).
+## `paddock-health` (plan S3)
+
+Service health and the cause-key notification centre (ADR 0010, ADR 0012 §3), ported from Debrief ADR 0055
+(`health/{model,registry}.rs`, the generic half of `health/hub.rs`, `notification_centre/`), without Debrief's
+services, sources or actions:
+
+```rust
+// The app registers its services; the repair is the shell's code and never goes through the broken service (rule 19).
+let health = paddock_health::tauri::init(app.handle(), paddock_health::tauri::Setup::new(vec![
+    ServiceSpec::new("llm", "the model server").repair(move || supervisor.restart().map_err(|e| Cause::new("...").detail(e))),
+]).notifications_file(data_dir.join("notifications.json")).os_notifications(|app, notice| show_os(app, notice)))?;
+// Supervisors report; the same report again announces nothing.
+health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.").code("llm.stopped"), Some(RepairAction::Restart));
+// Commands behind the shell's guard (S17 lists them in the shell plugin's table).
+.invoke_handler(Guard::new(&paddock_health::tauri::COMMANDS).wrap(paddock_health::tauri::invoke_handler()))
+```
+
+- One failure is one chip and one notification in every window: each real change is one `paddock://service-health`
+  event (a `ServiceHealthSnapshot`) and one message with the cause `health:<id>` (posted on the outage, updated in
+  place, resolved on the recovery), with a `paddock://notifications` event per window. New windows ask with
+  `health_snapshot` and `notifications_list`.
+- `health_repair` returns at once with the service `repairing`, runs the repair on a background thread (a panic is
+  contained) and ends `ok`, or `down` with the repair's cause; `openSettings` repairs are opened by the UI instead.
+- Notifications: sources and action types are the app's strings (`NoticeSource`, `NoticeAction { type, ...args }`);
+  the shell's own are `health`, `repairService` and `openSettings`. App messages are saved debounced and atomically in a
+  versioned file (missing, damaged or newer: empty, logged); a window's project messages are saved by the app with its
+  project (`notifications_record` / `notifications_restore`). A dialog or pop-out sees its host window's list.
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.

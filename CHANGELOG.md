@@ -11,6 +11,13 @@ Conventional Commits; one semver tag for the whole repo.
   `Dialogs` bookkeeping with close-request and required-choice rules, and the Tauri adapter (window creation by kind
   with title-bar buttons disabled, modality, close requests forwarded, `page_unresponsive`, fit-height grow rules, the
   four `dialog_*` commands); generated `shell/generated/dialogs.ts`.
+- Crate `paddock-health` 0.1.0 (plan S3, ADR 0010 and 0012): the service-health model (closed `ServiceState`, `Cause`
+  with hint, detail, code and memory-cap advice, `RepairAction`, `Snapshot`), `Health` (app-registered `ServiceSpec`s,
+  one announcement per real change, repairs as shell closures on a background thread), the cause-key notification
+  centre (merge with counts, caps, read state, resolve, app file with debounced atomic writes, project records,
+  OS-notification click-through) and the Tauri adapter (`paddock://service-health`, `paddock://notifications`,
+  `health_snapshot`, `health_repair`, `notifications_*` with their `COMMANDS` table); generated TypeScript
+  `shell/generated/health.ts` and `shell/generated/health-commands.ts`. Ported from Debrief ADR 0055.
 - Crate `paddock-commands` 0.1.0 (plan S1, ADR 0012): `command_table!` (kind, window classes, request limit, validated at
   compile time, optional invoke-handler macro), the shell's window label scheme, the pure `check` with the
   `DialogGrant` hook for per-dialog contracts, the Tauri `Guard` (refuses and logs before arguments are parsed),
