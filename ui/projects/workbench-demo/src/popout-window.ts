@@ -5,7 +5,7 @@ import { provideAppearance, provideShellContext } from '@decryp7/paddock-ui/shel
 import { provideShellCore } from '@decryp7/paddock-ui/shell';
 import { MockStartupBackend, provideStartupBackend, provideStartupContract, reportBootstrapFailure, TauriStartupBackend } from '@decryp7/paddock-ui/shell/startup';
 import { provideWorkbenchContributions } from '@decryp7/paddock-ui/workbench';
-import { browserWindowChrome, parsePopoutRoute, PdPopoutShell, providePopoutWindow, tauriPanelsIo, tauriWindowChrome } from '@decryp7/paddock-ui/workbench/panels';
+import { browserWindowChrome, mountPopoutWindowHost, parsePopoutRoute, PdPopoutShell, providePopoutWindow, tauriPanelsIo, tauriWindowChrome } from '@decryp7/paddock-ui/workbench/panels';
 import type { WorkbenchDemoContext } from './app/context';
 import { desktopIpc, onMac, panelsBridge, windowBridge } from './app/desktop';
 import { DEMO_CONTRIBUTIONS } from './app/demo.contributions';
@@ -18,6 +18,8 @@ import { InPageDesktop } from '@decryp7/paddock-ui/workbench/panels';
  */
 export function bootPopoutWindow(): Promise<unknown> {
   const route = parsePopoutRoute(location.hash);
+  // index.html carries the main window's root; a pop-out window boots the pop-out shell in its place.
+  mountPopoutWindowHost();
   const desktop = inTauri();
   const ipc = desktop ? desktopIpc() : null;
   const bridge = desktop ? panelsBridge() : null;

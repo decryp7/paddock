@@ -49,7 +49,7 @@ export class ProblemsView {
   protected readonly rows = [...inject(DemoRepo).problems].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level] || a.path.localeCompare(b.path) || a.line - b.line);
   protected readonly key = (p: Problem) => `${p.path}:${p.line}`;
   protected readonly columns: PdColumn<Problem>[] = [
-    { key: 'level', header: 'Severity', value: (p) => SEVERITY[p.level], text: (p) => p.level, width: '32px', required: true },
+    { key: 'level', header: 'Severity', value: (p) => SEVERITY[p.level], text: (p) => p.level, width: '44px', required: true, headerHidden: true },
     { key: 'message', header: 'Problem', value: (p) => p.message, required: true, width: 'minmax(0, 3fr)' },
     { key: 'path', header: 'File', value: (p) => p.path, truncate: 'middle', width: 'minmax(0, 2fr)', hideBelow: 360 },
     { key: 'line', header: 'Line', value: (p) => p.line, align: 'end', width: '56px', hideBelow: 440 },

@@ -247,3 +247,11 @@ test.describe('review 1 (X50)', () => {
     await expect(wb.notifications.toasts.getByText('Layout adjusted to fit this window')).toBeVisible();
   });
 });
+
+test('a pop-out window boots its shell and its one view (regression: the page kept the main root)', async ({ page, pageErrors }) => {
+  await page.goto('/#/popout?panel=wd.code%23src%2Fmain.rs&host=main&label=p-main-1');
+  // Without a host in the browser it waits for the host's snapshot first (bounded), then shows the view.
+  await expect(page.getByTestId('code-lines')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('pd-popout-shell')).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
