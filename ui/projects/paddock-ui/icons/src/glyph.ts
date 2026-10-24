@@ -30,9 +30,11 @@ export class PdGlyph {
   readonly stroke = input<number | null>(null);
   protected readonly strokeWidth = computed(() => this.stroke() ?? ICON_STROKE);
   protected readonly dots = computed(() => {
-    if (this.paths()) return this.dotList();
     const n = this.name().replace(/^pd:/, '') as PdIconName;
-    return PD_ICON_DOTS[n] ?? [];
+    const list = this.paths() ? this.dotList() : (PD_ICON_DOTS[n] ?? []);
+    // Dots are as heavy as the strokes: never thinner than the stroke's width on the screen, whatever the size.
+    const min = ((this.strokeWidth() / 2) * 24) / this.size();
+    return list.map(([cx, cy, r]) => [cx, cy, Math.max(r, min)] as const);
   });
   protected readonly path = computed(() => {
     const p = this.paths();
