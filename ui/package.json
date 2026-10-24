@@ -17,6 +17,8 @@
     "shell-demo": "npm run build:css && ng serve shell-demo --port 4301",
     "shell-demo:build": "npm run build:css && ng build shell-demo",
     "test:scripts": "node --test ../scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs",
+    "i18n": "node scripts/build-i18n.mjs",
+    "i18n:check": "node scripts/build-i18n.mjs --check",
     "check:dialogs": "node projects/paddock-ui/bin/paddock-check-dialog-commands.mjs --config projects/shell-demo/paddock-dialog-commands.json",
     "release": "node ../scripts/publish.mjs"
   },
@@ -25,6 +27,8 @@
     "@angular/common": "^22.2.0",
     "@angular/compiler": "^22.2.0",
     "@angular/core": "^22.2.0",
+    "@angular/localize": "^22.2.3",
+    "@angular/forms": "^22.2.0",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.3",
     "@ngrx/signals": "^22.0.1",

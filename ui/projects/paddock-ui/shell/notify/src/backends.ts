@@ -283,7 +283,13 @@ export class MemoryServiceHealth extends ServiceHealthBackend {
   repair(service: string): Promise<ServiceHealthSnapshot> {
     const h = this.get(service);
     if (!h || h.state === 'ok' || h.state === 'repairing' || !h.repair) {
-      return Promise.reject(new Error(h ? `There is nothing to repair for ${h.label} now.` : `No service is called ${service}.`));
+      return Promise.reject(
+        new Error(
+          h
+            ? $localize`:@@pd.health.nothing-to-repair:There is nothing to repair for ${h.label}:service: now.`
+            : $localize`:@@pd.health.no-such-service:No service is called ${service}:service:.`,
+        ),
+      );
     }
     this.repairs.push(service);
     this.pending.set(service, this.options.repairOutcome?.(service) ?? 'ok');

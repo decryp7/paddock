@@ -66,11 +66,11 @@ const BODY_PADDING_PX = 16;
     <main #body class="body" tabindex="-1" [attr.aria-label]="title()" [attr.aria-busy]="loading()">
       @if (error(); as e) {
         <div class="failed" role="alert" data-testid="dialog-error">
-          <h1 class="failed-title">This window couldn't open</h1>
+          <h1 class="failed-title">{{ t.openFailed }}</h1>
           <p class="failed-reason" data-testid="dialog-error-reason">{{ e }}</p>
         </div>
       } @else if (loading()) {
-        <p class="loading" data-testid="dialog-loading">Loading…</p>
+        <p class="loading" data-testid="dialog-loading">{{ t.loading }}</p>
       }
       @if (denied(); as d) {
         <p class="denied" role="alert" data-testid="dialog-denied">{{ d.message }}</p>
@@ -79,7 +79,7 @@ const BODY_PADDING_PX = 16;
       @if (shellClose()) {
         <div class="foot" data-testid="dialog-shell-foot">
           <button type="button" class="pd-dialog-button" (click)="dismiss()" data-testid="dialog-shell-close" data-dialog-close>
-            {{ modality() === 'modal' && !error() ? 'Cancel' : 'Close' }}
+            {{ modality() === 'modal' && !error() ? t.cancel : t.close }}
           </button>
         </div>
       }
@@ -99,6 +99,13 @@ const BODY_PADDING_PX = 16;
   `,
 })
 export class DialogShell {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    openFailed: $localize`:@@pd.dialogs.open-failed:This window couldn't open`,
+    loading: $localize`:@@pd.dialogs.loading:Loading…`,
+    cancel: $localize`:@@pd.dialogs.cancel:Cancel`,
+    close: $localize`:@@pd.dialogs.close:Close`,
+  };
   private readonly route = inject(DIALOG_ROUTE);
   private readonly io = inject(DIALOG_IO);
   private readonly environment = inject(EnvironmentInjector);
@@ -147,7 +154,7 @@ export class DialogShell {
   private async start(): Promise<void> {
     try {
       const def = this.def;
-      if (!def) throw new Error(`This dialog is not known to this version of the app: ${this.id || '(none)'}`);
+      if (!def) throw new Error($localize`:@@pd.dialogs.unknown:This dialog is not known to this version of the app: ${this.id || '(none)'}:dialog:`);
       const [start, part] = await Promise.all([this.io.take(), loadPart(def, this.environment, `dialog ${def.id}`)]);
       if (part.injector !== this.environment) this.destroyRef.onDestroy(() => part.injector.destroy());
       this.title.set(start.title);

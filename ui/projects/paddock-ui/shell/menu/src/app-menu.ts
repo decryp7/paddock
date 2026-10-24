@@ -13,7 +13,7 @@ import {
 } from '@decryp7/paddock-ui/shell';
 import { currentPlatform } from './keys';
 import { Keymap } from './keymap';
-import { buildMenu, buildMenus, type MenuNode, type MenuSource, type TopMenu } from './menu-model';
+import { buildMenu, buildMenus, foldAppMenu, type MenuNode, type MenuSource, type TopMenu } from './menu-model';
 import { SUBMENUS, type SubmenuDef } from './submenus';
 
 /** Where the menus are shown: the shell's in-app menu bar, or the macOS native menu bar (the in-app bar is then hidden). */
@@ -87,12 +87,14 @@ export class AppMenu {
   });
 
   /** The top-level menus: the app menu (titled with the app's name), File, Edit, View, Window, Help; empty ones left out. */
-  readonly menus: Signal<readonly TopMenu[]> = computed(() =>
-    buildMenus(
+  readonly menus: Signal<readonly TopMenu[]> = computed(() => {
+    const menus = buildMenus(
       SHELL_MENUS.map((id) => ({ id, label: id === 'app' ? this.config.appName : SHELL_MENU_TITLES[id].text })),
       this.source(),
-    ),
-  );
+    );
+    // In the window (not the macOS menu bar) the app menu's entries go to File: the title bar shows the app's name.
+    return this.mode === 'in-app' ? foldAppMenu(menus, SHELL_MENU_TITLES.file.text) : menus;
+  });
 
   /** The entries of a context menu (or any menu id), current; reactive when read in a template or `computed`. */
   items(menu: string): readonly MenuNode[] {

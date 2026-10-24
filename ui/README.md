@@ -1,6 +1,6 @@
 # @decryp7/paddock-ui
 
-The shared design system of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter): design tokens, base styles,
+The shared design system of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter, Pacenotes, Sighter): design tokens, base styles,
 Angular components and an ECharts theme. Part of [paddock](../README.md); versioned with the repo.
 
 ![Gallery, dark](docs/screenshots/gallery-dark-debrief.png)
@@ -37,12 +37,15 @@ Select the look on `<html>`; nothing else is app-specific:
 
 ```ts
 import { applyPaddockAppearance } from '@decryp7/paddock-ui';
-applyPaddockAppearance(document.documentElement, { theme: 'system', accent: 'pitcrew', density: 'standard' });
-// <html data-theme="dark|light" data-accent="debrief|pitcrew|pitwall|dyno|spotter" data-density="comfortable|standard|compact">
+applyPaddockAppearance(document.documentElement, { theme: 'system', accent: 'pitcrew', density: 'standard', contrast: 'system', motion: 'system' });
+// <html data-theme="dark|light" data-accent="debrief|pitcrew|pitwall|dyno|spotter|pacenotes|sighter"
+//       data-density="comfortable|standard|compact" data-contrast="more|off" data-motion="reduce|full">
 ```
 
-No `data-theme` follows the OS (`prefers-color-scheme`); `data-contrast="more"` (or the OS setting) maps hairlines to strong
-borders and removes translucency. Components are standalone with `pd-` selectors:
+No `data-theme` follows the OS (`prefers-color-scheme`); `data-contrast="more"` (or the OS setting, unless `off`) maps
+hairlines to strong borders and removes translucency (opaque scrim, outlined popovers); `data-motion="reduce"` (or the OS
+setting, unless `full`) shortens every duration to 100 ms, sets `--pd-motion-scale: 0` and stops animations. Apps on the
+shell use `provideAppearance` instead (below), which also follows the user's choice across windows. Components are standalone with `pd-` selectors:
 
 ```ts
 import { SuCard, SuMetric, SuSparkline, SuStatusPill } from '@decryp7/paddock-ui';
@@ -99,8 +102,11 @@ so a manager app never bundles the workbench:
 | `/shell/notify` | notifications and service health over the `paddock-health` adapter: backends (Tauri, memory), `ServiceHealthStore`, `NotificationsStore`, `pd-notification-host`, `pd-service-status`, `pd-notifications-status`, `pd-waiting-for`, `provideShellNotify` | S4 |
 | `/shell/store` | shared SignalStore features: `withRequestStatus` (rule 30) | S4 |
 | `/shell/menu` | menus and keys: `defineSubmenu`, the menu model, `AppMenu`, `pd-menu-bar`, `pd-context-menu`, `Keymap` with user overrides, `NativeMenuBridge` over `paddock-menu` | S13 |
+| `@decryp7/paddock-ui/shell` (theme) | theme packs (`defineTheme`, `provideThemes`, `themeProblems`), the window's appearance (`provideAppearance`, `AppearanceStore`, `applyStoredAppearance`, browser and IPC backends), colour maths | S15 |
+| `/shell/i18n` | `initI18n`, `LanguageStore`, locale, plural and number helpers; the shell's XLIFF catalog and pseudo-locale in `i18n/`; the `paddock-i18n` bin | S15 |
 | `/shell/pages` | the pages frame of the manager apps: `provideShellPages`, `pd-shell-frame`, the sidebar of contributed pages (expanded, rail or over the page by `planLayout`), routed lazy pages with their own providers, `ShellPages` | S14 |
-| `/shell/startup`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/i18n`, `/shell/testing` | one shell part each | S5-S16 |
+| `/shell/settings` | settings over the `paddock-settings` adapter: `SettingsBackend` (Tauri, memory), `SettingsStore`, `SettingsDrafts` (Signal Forms), `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `settingsWindowProviders`, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
+| `/shell/startup`, `/shell/dialogs`, `/shell/about`, `/shell/testing` | one shell part each | S5-S16 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -282,6 +288,50 @@ providers: [
   service is back.
 - The wire types mirror `shell/generated/health.ts` (ng-packagr cannot import across entry points); a type-level spec
   fails `npm test` when they drift.
+### Settings (`/shell/settings`, plan S10)
+
+Settings are the engine's (rule 21): `paddock-settings` holds the sections the shell and the app register, validates every
+value in Rust, applies, saves and announces it on `paddock://settings`; the UI renders the schema and sends values. The
+Settings window is a modeless `tool` dialog the app declares itself, so its contract is in the app's registry:
+
+```ts
+// app.contributions.ts: static data and loaders only
+export const SETTINGS_DIALOG = defineDialog({
+  id: 'pd.settings', kind: 'tool', title: msg('pd.settings.title', 'Settings'), width: 880, height: 620,
+  commands: ['settings_overview', 'settings_reset', 'settings_set'],                  // SETTINGS_DIALOG_COMMANDS
+  providers: () => import('./settings-window.providers').then((m) => m.SETTINGS_WINDOW),
+  load: () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsWindow),
+});
+export const APP_SETTINGS_PAGES = [
+  defineSettingsPage({ id: 'pw.models', group: 'features', title: msg('pw.settings.models', 'Models'), order: 100,
+    load: () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsSectionPage) }),   // or a page of its own
+];
+// settings-window.providers.ts: what the Settings window boots with (rule 34)
+export const SETTINGS_WINDOW = settingsWindowProviders({ backend: () => new TauriSettingsBackend(ipc), pages: APP_SETTINGS_PAGES });
+// main window
+provideContributions(SETTINGS_CONTRIBUTIONS),          // Settings… (Mod+,) in the app menu, the shell's Appearance page
+provideContributions({ settingsPages: APP_SETTINGS_PAGES, dialogs: [SETTINGS_DIALOG] }),
+provideShellSettings({ backend: () => new TauriSettingsBackend(ipc) }),   // OPEN_SETTINGS for notices; follows Appearance
+```
+
+- A page's id is the id of its Rust section; `PdSettingsSectionPage` (or `<pd-settings-section section="...">` inside a
+  page of the app's own) renders it from the schema: one native control per field kind (switch, select, text, path,
+  number with its unit and limits, duration and size in their unit, list), help, "Needs restart", Reset to default,
+  Reset section, advanced fields behind "Show advanced". Sections without a page are listed under Advanced, so nothing
+  is unreachable. Every page is listed (a Settings window has no app context, so `when` is not evaluated there).
+- Edits are Signal Forms (`SettingsDrafts`, rule 37): a switch or a choice applies at once, typed values on Enter or on
+  leaving the control. The pre-check (types, ranges) only gives early feedback; the engine's refusal shows at the field
+  while the refused value is there. An edit that is not applied stays unsaved, is marked in the navigation, survives
+  moving between pages, and closing the window (Close, Escape, a close request) asks Discard changes / Keep editing.
+- Search covers every field's label, help, key, unit, choices and section title, and pages without a section by title,
+  however written (parts, joins, separators, case, one typo; rule 20). Escape clears a filled search.
+- The restart bar counts restart-only changes (Restart now when the app provides `restart`); a settings file that could
+  not be used at start-up is one notification (posted by Rust) and a note in the window.
+- Generated in `shell/settings/generated/`: `settings.ts` (wire types, `SETTINGS_EVENT`, `APPEARANCE_SECTION`, limits),
+  `settings-commands.ts` (`SETTINGS_COMMANDS`) and `settings-fixtures.ts` (an overview with every field kind, a refusal, a
+  change and a start-up problem, written by Rust; the shell demo's in-memory engine serves them).
+- Needs `@angular/forms` (^22, an optional peer dependency).
+
 ### Dialogs (`/shell/dialogs`, plan S6)
 
 Dialogs are real OS windows (ADR 0009, rule 17). Declare each with `defineDialog` in a registration file; the kind decides
@@ -311,20 +361,72 @@ export const RENAME_DIALOG = defineDialog({
   (what a click could send, in both directions; see the header of `bin/paddock-check-dialog-commands.mjs`). The shell
   demo runs all three (`npm run check:dialogs`).
 
+### Theme and language (`@decryp7/paddock-ui/shell`, `/shell/i18n`, plan S15)
+
+The look is the user's choice, the same in every window of the app: scheme (system, dark, light), contrast (system,
+standard, more), motion (system, reduce, full), density and an optional theme pack; the accent is the app's.
+
+```ts
+// main.ts: the stored look before the first paint, then the language, then the window (each window its own bootstrap)
+applyStoredAppearance(document.documentElement, 'pitwall');
+initI18n({ loaders: { 'en-XA': () => import('./locale/messages.en-XA.json').then((m) => m.default.translations) } })
+  .then(() => import('./main-window').then((m) => m.bootMainWindow()));
+
+// every window's providers (dialog windows too, so an open dialog follows a change)
+provideAppearance({ accent: 'pitwall', backend: () => new IpcAppearanceBackend({ emit, listen }) }), // browser: default backend
+provideThemes(CONSOLE_THEME),                                                                          // optional packs
+```
+
+- With Settings (`/shell/settings`), `provideShellSettings` makes the engine's Appearance settings the source of the look
+  (`APPEARANCE_SOURCE`): every window's store follows their changes and writes there; dialog windows add
+  `provideSettingsAppearance({ settings, read: 'events' })` to their base providers. The store is the only writer of the
+  look on `<html>` (checked by `e2e/shell-demo-theme.spec.ts`).
+- `AppearanceStore`: `theme()`, `contrast()`, `motion()`, `density()`, `pack()`, `resolved()` (`scheme`, `highContrast`,
+  `reducedMotion` against the OS) and `setTheme`/`setContrast`/`setMotion`/`setDensity`/`setPack`. A change is saved and
+  announced (`paddock://appearance` in the desktop build, a `BroadcastChannel` in the browser); the other windows apply it
+  at once. Stored under `paddock.appearance` (versioned; a corrupt value is the default).
+- Theme packs: `defineTheme({ id, name: msg(...), tokens: { common, dark, light } })` overrides `--pd-*` tokens only
+  (inline on `<html>`, `data-pack`), never in high contrast; `themeProblems(def)` (also the `themes` kind's lint) refuses
+  non-`--pd-*` names, unsafe values and pairs below the token targets.
+- i18n (ADR 0012 §6): `$localize` with runtime-loaded translations, one build for every language. Install
+  `@angular/localize/init` in the app's `polyfills` and `"types": ["@angular/localize"]`. The shell's messages use `@@pd.`
+  ids; contributions' `msg(id, text)` read their text through the loaded translations, so they need nothing else.
+  `LanguageStore` keeps the choice (`paddock.language`: system, en, pseudo) and says when a restart is needed.
+- Translation files: the package ships `i18n/messages.pd.xlf` (the shell's catalog) and `i18n/messages.pd.en-XA.json`
+  (its pseudo-locale). An app builds its own catalog (its `msg()` and `$localize` messages with `@@id`s, scanned from the
+  sources) and loader files with the bin:
+
+  ```sh
+  npx paddock-i18n catalog --out src/locale/messages.xlf --src src --prefix pw. [--json extracted.json] [--manifest paddock.manifest.json]
+  npx paddock-i18n merge --locale en-XA --out src/locale/messages.en-XA.json \
+    node_modules/@decryp7/paddock-ui/i18n/messages.pd.en-XA.json src/locale/messages.xlf
+  ```
+
+  `--check` writes nothing and fails on drift (CI). Here `npm run i18n` (after `npm run build`) regenerates the package's
+  files and the shell demo's; CI runs `npm run i18n:check`. The shell demo's View > Appearance switches theme, a sample
+  pack, high contrast, reduced motion and the pseudo-locale; `e2e/shell-demo-locale.spec.ts` finds no unmarked English
+  in any shell part in the pseudo-locale, `e2e/shell-demo-theme.spec.ts` checks switching across windows.
+
+Screenshots for review: [dark](docs/screenshots/shell-demo/theme-dark.png), [light](docs/screenshots/shell-demo/theme-light.png),
+[high contrast dark](docs/screenshots/shell-demo/theme-high-contrast-dark.png),
+[high contrast light](docs/screenshots/shell-demo/theme-high-contrast-light.png),
+[pseudo-locale](docs/screenshots/shell-demo/theme-pseudo-locale-dark.png) (`SCREENSHOTS=1 npx playwright test shell-demo-theme`).
+
 ## Tokens
 
 All values live in `projects/paddock-ui/scss/_tokens.scss` and compile to `css/tokens.css`: neutral roles (bg, surface-1..3,
 hairline, border-strong, border-control, text, muted, subtle), status (success, warning, danger, info, neutral, each with a
-tint), the five accents (`--pd-accent` for text/links/focus, `--pd-accent-fill` for buttons with white text), the 8-colour
+tint), the seven accents (`--pd-accent` for text/links/focus, `--pd-accent-fill` for buttons with white text), the 8-colour
 chart palette `--pd-chart-1..8`, the diverging scale, the sequential ramp `--pd-seq-1..6`, spacing (2 to 48), radii
-(6/10/14), type scale with tabular numerals, elevation, motion (100/180/260 ms), layout and the three densities.
+(6/10/14), type scale with tabular numerals, elevation, motion (100/180/260 ms; `--pd-motion-scale`), layout, the three
+densities, high contrast (`data-contrast`) and reduced motion (`data-motion`).
 
 ## Tests and gates
 
 ```sh
 cd ui
 npm ci
-npm run test:tokens      # WCAG contrast of every pair + colour-vision separation of the palette (131 tests)
+npm run test:tokens      # WCAG contrast of every pair (standard and high contrast) + colour-vision separation (289 tests)
 npm test                 # component and helper specs (Vitest via ng test), 100% lines
 npx playwright test      # gallery: axe (both themes), keyboard, native feel, CSP; SCREENSHOTS=1 rewrites docs/screenshots
 npm run build            # ng-packagr build to dist/paddock-ui (every entry point)
@@ -338,8 +440,11 @@ npm run release          # dry run: builds and lists every crate, npm package an
 
 - Text (AAA 7:1) on bg, surface-1, surface-2 and surface-3 in both themes; muted text AA (and 6.5:1 on surface-1/2); subtle text AA.
 - Status text AA on every surface and on its own tint; neutral too.
-- Accent text AA on every surface for all five accents in both themes; white on every accent fill AA; the accent as focus
-  ring 3:1 (WCAG 2.4.11); the accent fill 3:1 against surface-1.
+- Every pair above again in high contrast; there hairlines are 3:1 boundaries, translucency is gone and subtle text is
+  muted text; the OS preference applies it unless the app turned it off.
+- Accent text AA on every surface for all seven accents in both themes and both contrast modes; white on every accent fill
+  AA; the accent as focus ring 3:1 (WCAG 2.4.11); the accent fill 3:1 against surface-1; the seven fills dE >= 15 apart.
+- Reduced motion: every duration at most 100 ms and `--pd-motion-scale: 0`, by the OS setting unless the app chose full motion.
 - Input and control boundaries (`--pd-border-control`) 3:1 (WCAG 1.4.11); chart marks 3:1 on surface-1 and surface-2.
 - Chart palette under protanopia, deuteranopia and tritanopia (Machado 2009, severity 1.0, CIE76 Lab distance): adjacent
   series dE >= 20; the first five (recommended) series pairwise >= 14; normal-vision pairs >= 20; the diverging ends

@@ -144,7 +144,7 @@ export class PdStatusBar {
     return new Set(planStatusBar(slots, this.available(), GAP, MORE).hidden);
   });
 
-  protected readonly moreLabel = computed(() => (this.showAll() ? 'Show fewer status items' : `More status (${this.hidden().size})`));
+  protected readonly moreLabel = computed(() => (this.showAll() ? $localize`:@@pd.shell.status.fewer:Show fewer status items` : $localize`:@@pd.shell.status.more:More status (${this.hidden().size}:count:)`));
 
   constructor() {
     afterNextRender(() => this.observer?.observe(this.el));

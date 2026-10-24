@@ -5,6 +5,18 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Changed
+- Appearance has one writer and one source (rule 40, rule 34): `paddock_settings::shell::appearance` holds the whole
+  look (theme, contrast, motion, density and the theme pack; `PACK_ID`); `provideShellSettings` provides it as the
+  window's `APPEARANCE_SOURCE`, so `provideAppearance` follows the engine's Appearance settings in every window and
+  writes every change there (`SettingsAppearanceBackend`: `overview` in a main window and the Settings window,
+  `events` in a dialog window whose contract has no settings command, `provideSettingsAppearance`). The old
+  `appearanceFollower` / `followAppearance` / `appearanceOf` are gone (`appearanceFromSettings`, `appearanceToSettings`
+  replace the value mapping); the Settings window never writes the look itself. An e2e check allows only the appearance
+  store (and the pre-paint copy) to put the look on `<html>`, and a View-menu change and a Settings change in another
+  window never revert each other. The shell demo's in-memory settings engine is shared by the origin's windows and kept
+  in localStorage, as the Rust engine is.
+- The in-app menu bar (Windows, Linux, the browser) has no app menu: the title bar already names the app, so its entries
+  (Settings…, About, Quit) are at the end of File (`foldAppMenu`); the macOS menu bar keeps the app menu.
 - Pages frame, review round 3: status items sit at equal distances (4 px gap, 4 px item padding; the service chip
   keeps 5 px of margin for its visible edge) and the chip looks pressed while its details are open. `shell-demo`: the
   status item says the table's exceptions ("1 offline · 1 updating", the full count in its name and tooltip), and the
@@ -59,6 +71,46 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock-download`: a free-disk pre-check (plan §13): a pinned size is checked before connecting and an announced
   size before writing, against `Config::disk_reserve` (64 MiB by default); `DownloadError::NotEnoughSpace` says "needs
   N, M is free". `Downloader::with_free_space` and `Downloader::transport`, `human_bytes`.
+- Theme and i18n in the app shell (plan S15, ADR 0012 §5-6, decision D6). Tokens: accents for Pacenotes (route green,
+  `#7fc85a` / `#3b7114`, fill `#3d7515`) and Sighter (orchid, `#cc8cf2` / `#a224cc`, fill `#a224cc`), a complete high
+  contrast mode (opaque hairlines and scrim, outlined popovers, subtle text as muted; `data-contrast="more|off"`) and
+  reduced motion (`data-motion="reduce|full"`, durations at most 100 ms, `--pd-motion-scale`); `applyPaddockAppearance`
+  takes `contrast` and `motion`. Token tests for seven accents in both schemes and both contrast modes, high contrast
+  and reduced motion (289 tests); the colour maths moved to the shell and is shared with `themeProblems`.
+  `@decryp7/paddock-ui/shell`: theme packs as the `themes` contribution kind (`defineTheme`, `provideThemes`,
+  `themeProblems`), the window's appearance (`provideAppearance`, `AppearanceStore` with the choice resolved against
+  the OS, `applyStoredAppearance` before the first paint) synced across windows by `BrowserAppearanceBackend`
+  (BroadcastChannel) or `IpcAppearanceBackend` (`paddock://appearance`), and `msg()` texts read through the loaded
+  translations (`localizedText`). `@decryp7/paddock-ui/shell/i18n`: `initI18n` (runtime-loaded translation chunks, a
+  broken file falls back to English), `LanguageStore`, locale, plural and number helpers. Every user-visible string of
+  the root components, the frame parts and of `shell/jobs`, `shell/notify`, `shell/dialogs`, `shell/startup`, `shell/menu`, `shell/pages` and the Settings window's own words is a
+  `$localize` message with a `@@pd.` id (201 in `i18n/messages.pd.xlf`, shipped with its pseudo-locale); the service
+  chip names a service by its contributed `defineHealthService` label. Bin `paddock-i18n` (`catalog`: `$localize`
+  extraction plus `msg()` and `$localize` with `@@id`s scanned from the sources, or a manifest, into a sorted XLIFF
+  catalog; `merge`: the shell's and the app's translations into the app's loader file, the pseudo-locale generated;
+  `--check` for CI) and `npm run i18n` /
+  `i18n:check` (CI). `shell-demo`: View > Appearance (theme, a sample pack, high contrast, reduced motion,
+  pseudo-locale), Chromium e2e for switching across windows and a pseudo-locale run that finds no unmarked English in
+  any shell part, and review screenshots in `ui/docs/screenshots/shell-demo/`. With Settings (plan S10) the look has
+  one owner: `SettingsAppearanceBackend` / `settingsAppearanceBackend({ local, gate })` in `/shell/settings` keeps theme
+  and density in the engine's Appearance section (contrast, motion and the pack in the window), and the demo passes
+  `appearance: false` to `provideShellSettings`.
+- Settings (plan S10, rule 21, ADR 0012; ported from Debrief's settings schema, `config_store.rs` and `settings.rs`):
+  crate `paddock-settings` 0.1.0 with the section schema (nine field kinds, schema check at registration), validation
+  in Rust (`validate`, `sanitize`, `ValidValues::decode`), the versioned `settings.json` (missing, damaged, newer or
+  unreadable: defaults and one `LoadProblem`; damaged and newer files kept aside; atomic writes; sections nobody
+  registers kept), the `Settings` service (`register`, `set` laying changes over the values, `reset` of a section or a
+  field, contained `apply`, `restart_pending`, one change event per real change), the shell's Appearance section, and
+  the Tauri adapter (`manage`, `paddock://settings` to every window, one notification for a start-up problem,
+  `settings_overview` / `settings_set` / `settings_reset` on the blocking pool, `route`, dialog grants) with generated
+  wire types, command names and Rust-written fixtures. `@decryp7/paddock-ui/shell/settings`: `SettingsBackend` (Tauri,
+  memory), `SettingsStore`, `SettingsDrafts` (Signal Forms), `pd-setting-field` (a `FormValueControl` per field kind),
+  `pd-settings-section` and `PdSettingsSectionPage`, the Settings window `pd-settings-window` (modeless tool dialog:
+  pages by group with lazy page components and their own providers, search across every setting, restart bar,
+  start-up problem, unsaved edits marked and asked about before closing, keyboard navigation), `followAppearance`,
+  `settingsWindowProviders`, `provideShellSettings` (`OPEN_SETTINGS`) and `SETTINGS_CONTRIBUTIONS` (Settings…, Mod+,).
+  `@angular/forms` (^22) is an optional peer dependency. `shell-demo` has the Settings window over the fixtures, with
+  Chromium e2e (every field kind, refusal and unsaved edits, search and keys, a damaged file, axe in both themes, 320 px).
 - Crate `paddock-window` 0.1.0 (plan S12, ADR 0012): top-level windows in the shell's label scheme (`main`, `w-<n>`;
   open, list, reveal, titles, the close setting with quit / keep running in the tray / ask, hide or destroy), remembered
   bounds restored on the right monitor (versioned file; scaled, shrunk and moved inside the work area; cascade from the
@@ -149,6 +201,8 @@ Conventional Commits; one semver tag for the whole repo.
   booted from `#/dialog`, and a Chromium e2e over the contract file.
 
 ### Changed
+- `@angular/localize` (^22) is a peer dependency of `@decryp7/paddock-ui`: apps add `@angular/localize/init` to their
+  polyfills (the root components' texts are `$localize` messages now). The gallery and the shell demo do.
 - `paddock-dialogs`: dialog ids may contain `.`, so the shell's namespaced contribution ids (`sd.about`) are valid
   contract keys; a test parses the shell demo's generated contract file.
 - Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,

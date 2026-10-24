@@ -11,8 +11,8 @@ import { ServiceHealthStore } from './service-health.store';
   template: `
     <div class="waiting" role="status" [attr.data-testid]="'waiting-for-' + service()">
       <span class="spinner" aria-hidden="true"></span>
-      <strong>Waiting for {{ label() }}</strong>
-      <button type="button" class="link" data-testid="waiting-for-details" (click)="health.showDetails()">See what happened</button>
+      <strong>{{ waitingFor() }}</strong>
+      <button type="button" class="link" data-testid="waiting-for-details" (click)="health.showDetails()">{{ t.seeWhatHappened }}</button>
     </div>
   `,
   styles: `
@@ -27,10 +27,15 @@ import { ServiceHealthStore } from './service-health.store';
   `,
 })
 export class PdWaitingFor {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    seeWhatHappened: $localize`:@@pd.health.see-what-happened:See what happened`,
+  };
   protected readonly health = inject(ServiceHealthStore);
   /** The service id. */
   readonly service = input.required<string>();
   protected readonly label = computed(() => this.health.health(this.service())?.label ?? this.service());
+  protected readonly waitingFor = computed(() => $localize`:@@pd.health.waiting-for:Waiting for ${this.label()}:service:`);
 }
 
 /**
@@ -49,11 +54,11 @@ export class PdWaitingFor {
       <div class="error" role="alert">
         <strong class="summary">{{ summary() }}</strong>
         @if (retryable()) {
-          <button class="btn" type="button" (click)="retry.emit()">Retry</button>
+          <button class="btn" type="button" (click)="retry.emit()">{{ t.retry }}</button>
         }
         @if (detail(); as d) {
           <details class="tech">
-            <summary>Technical details</summary>
+            <summary>{{ t.technicalDetails }}</summary>
             <code>{{ d }}</code>
           </details>
         }
@@ -72,6 +77,11 @@ export class PdWaitingFor {
   `,
 })
 export class PdServiceError {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    retry: $localize`:@@pd.health.retry:Retry`,
+    technicalDetails: $localize`:@@pd.health.technical-details:Technical details`,
+  };
   private readonly health = inject(ServiceHealthStore);
   /** What did not happen, as a sentence. */
   readonly summary = input.required<string>();

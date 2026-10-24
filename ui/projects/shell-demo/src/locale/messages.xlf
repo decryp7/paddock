@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" datatype="plaintext" original="ng2.template">
+    <body>
+      <trans-unit id="sd.category.appearance" datatype="html">
+        <source>Appearance</source>
+      </trans-unit>
+      <trans-unit id="sd.category.demo" datatype="html">
+        <source>Demo</source>
+      </trans-unit>
+      <trans-unit id="sd.category.jobs" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="sd.category.notify" datatype="html">
+        <source>Notifications</source>
+      </trans-unit>
+      <trans-unit id="sd.compact" datatype="html">
+        <source>Compact layout</source>
+      </trans-unit>
+      <trans-unit id="sd.contrast" datatype="html">
+        <source>High contrast</source>
+      </trans-unit>
+      <trans-unit id="sd.dialog.about" datatype="html">
+        <source>About the shell demo</source>
+      </trans-unit>
+      <trans-unit id="sd.dialog.choose-style" datatype="html">
+        <source>Choose a greeting style</source>
+      </trans-unit>
+      <trans-unit id="sd.dialog.confirm-reset" datatype="html">
+        <source>Reset greetings?</source>
+      </trans-unit>
+      <trans-unit id="sd.dialog.inspector" datatype="html">
+        <source>Engine inspector</source>
+      </trans-unit>
+      <trans-unit id="sd.dialog.rename" datatype="html">
+        <source>Rename</source>
+      </trans-unit>
+      <trans-unit id="sd.engine.break" datatype="html">
+        <source>Break the demo engine</source>
+      </trans-unit>
+      <trans-unit id="sd.fail" datatype="html">
+        <source>Fail on purpose</source>
+      </trans-unit>
+      <trans-unit id="sd.greet" datatype="html">
+        <source>Say hello</source>
+      </trans-unit>
+      <trans-unit id="sd.health.engine" datatype="html">
+        <source>the demo engine</source>
+      </trans-unit>
+      <trans-unit id="sd.health.index" datatype="html">
+        <source>the search index</source>
+      </trans-unit>
+      <trans-unit id="sd.index.break" datatype="html">
+        <source>Break the search index</source>
+      </trans-unit>
+      <trans-unit id="sd.job.quiet" datatype="html">
+        <source>Start quiet job</source>
+      </trans-unit>
+      <trans-unit id="sd.job.start" datatype="html">
+        <source>Start sample job</source>
+      </trans-unit>
+      <trans-unit id="sd.menu.appearance" datatype="html">
+        <source>Appearance</source>
+      </trans-unit>
+      <trans-unit id="sd.menu.more" datatype="html">
+        <source>More demos</source>
+      </trans-unit>
+      <trans-unit id="sd.motion" datatype="html">
+        <source>Reduce motion</source>
+      </trans-unit>
+      <trans-unit id="sd.notification.greeting" datatype="html">
+        <source>Greeting</source>
+      </trans-unit>
+      <trans-unit id="sd.notify.three" datatype="html">
+        <source>Notify three times</source>
+      </trans-unit>
+      <trans-unit id="sd.page.about" datatype="html">
+        <source>About</source>
+      </trans-unit>
+      <trans-unit id="sd.page.dialogs" datatype="html">
+        <source>Dialogs</source>
+      </trans-unit>
+      <trans-unit id="sd.page.home" datatype="html">
+        <source>Overview</source>
+      </trans-unit>
+      <trans-unit id="sd.page.keys" datatype="html">
+        <source>Keyboard</source>
+      </trans-unit>
+      <trans-unit id="sd.page.lab" datatype="html">
+        <source>Lab</source>
+      </trans-unit>
+      <trans-unit id="sd.page.runners" datatype="html">
+        <source>Runners</source>
+      </trans-unit>
+      <trans-unit id="sd.pseudo-locale" datatype="html">
+        <source>Pseudo-locale</source>
+      </trans-unit>
+      <trans-unit id="sd.reset" datatype="html">
+        <source>Reset greetings</source>
+      </trans-unit>
+      <trans-unit id="sd.runners.offline.one" datatype="html">
+        <source>1 runner offline</source>
+      </trans-unit>
+      <trans-unit id="sd.runners.offline.other" datatype="html">
+        <source><x id="count"/> runners offline</source>
+      </trans-unit>
+      <trans-unit id="sd.settings.general" datatype="html">
+        <source>General</source>
+      </trans-unit>
+      <trans-unit id="sd.settings.storage" datatype="html">
+        <source>Storage</source>
+      </trans-unit>
+      <trans-unit id="sd.status.runners" datatype="html">
+        <source>Runners online</source>
+      </trans-unit>
+      <trans-unit id="sd.theme.dark" datatype="html">
+        <source>Theme: dark</source>
+      </trans-unit>
+      <trans-unit id="sd.theme.light" datatype="html">
+        <source>Theme: light</source>
+      </trans-unit>
+      <trans-unit id="sd.theme.system" datatype="html">
+        <source>Theme: system</source>
+      </trans-unit>
+      <trans-unit id="sd.theme.warm-paper" datatype="html">
+        <source>Warm paper</source>
+      </trans-unit>
+      <trans-unit id="sd.warm-paper" datatype="html">
+        <source>Warm paper</source>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

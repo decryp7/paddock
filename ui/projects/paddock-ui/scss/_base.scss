@@ -201,7 +201,7 @@ html.pd-tray body {
   overflow: hidden;
 }
 
-@media (prefers-reduced-motion: reduce) {
+@mixin reduced-motion-everywhere {
   *,
   *::before,
   *::after {
@@ -210,4 +210,15 @@ html.pd-tray body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+// The OS setting, unless the app's Appearance says "full motion"; or the app's own "reduce motion" (data-motion).
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) {
+    @include reduced-motion-everywhere;
+  }
+}
+
+:root[data-motion='reduce'] {
+  @include reduced-motion-everywhere;
 }

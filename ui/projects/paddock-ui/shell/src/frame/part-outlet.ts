@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ComponentRef,
+  computed,
   DestroyRef,
   effect,
   EnvironmentInjector,
@@ -35,7 +36,7 @@ export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded
     @switch (status().kind) {
       @case ('loading') {
         @if (variant() === 'page') {
-          <div class="loading" role="status" [attr.aria-label]="'Loading ' + label()" data-testid="part-loading">
+          <div class="loading" role="status" [attr.aria-label]="loadingLabel()" data-testid="part-loading">
             <pd-skeleton [height]="26" width="40%" />
             <pd-skeleton [height]="14" width="70%" />
             <pd-skeleton shape="block" [height]="160" />
@@ -44,9 +45,9 @@ export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded
       }
       @case ('error') {
         @if (variant() === 'page') {
-          <pd-error-state [heading]="label() + ' could not be opened.'" [cause]="reason()" retryLabel="Try again" (retry)="load()" data-testid="part-error" />
+          <pd-error-state [heading]="openFailed()" [cause]="reason()" [retryLabel]="t.tryAgain" (retry)="load()" data-testid="part-error" />
         } @else {
-          <button type="button" class="retry" [attr.aria-label]="label() + ' did not load. Try again'" [title]="label() + ' did not load: ' + reason()" data-testid="part-error" (click)="load()">
+          <button type="button" class="retry" [attr.aria-label]="retryLabel()" [title]="failedTitle()" data-testid="part-error" (click)="load()">
             <span aria-hidden="true">!</span>
           </button>
         }
@@ -66,6 +67,11 @@ export class PdPartOutlet {
   readonly part = input.required<LazyPart>();
   /** What the part is called, for the loading and error states ("Models"). */
   readonly label = input.required<string>();
+  protected readonly t = { tryAgain: $localize`:@@pd.shell.part.try-again:Try again` };
+  protected readonly loadingLabel = computed(() => $localize`:@@pd.shell.part.loading:Loading ${this.label()}:part:`);
+  protected readonly openFailed = computed(() => $localize`:@@pd.shell.part.open-failed:${this.label()}:part: could not be opened.`);
+  protected readonly retryLabel = computed(() => $localize`:@@pd.shell.part.retry:${this.label()}:part: did not load. Try again`);
+  protected readonly failedTitle = computed(() => $localize`:@@pd.shell.part.failed:${this.label()}:part: did not load: ${this.reason()}:reason:`);
   readonly variant = input<'page' | 'inline'>('inline');
 
   private readonly parent = inject(EnvironmentInjector);

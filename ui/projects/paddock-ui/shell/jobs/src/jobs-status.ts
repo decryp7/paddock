@@ -8,16 +8,16 @@ let nextId = 0;
 
 /** What the status item says: "Jobs", or how many run and which one leads ("1 running: Update runner"). */
 export function jobsStatusText(active: number, lead: string | null): string {
-  if (active === 0) return 'Jobs';
-  const count = `${formatCount(active)} running`;
-  return lead ? `${count}: ${lead}` : count;
+  if (active === 0) return $localize`:@@pd.jobs.status.idle:Jobs`;
+  const count = $localize`:@@pd.jobs.status.running:${formatCount(active)}:count: running`;
+  return lead ? $localize`:@@pd.jobs.status.doing:${count}:count:: ${lead}:lead:` : count;
 }
 
 /** The status item's tooltip: the lead job and what it does now ("Still working" when it went quiet); the card owns more. */
 export function jobsStatusDetail(lead: string | null, phase: string | null, stalled: boolean): string {
   if (!lead) return '';
-  const doing = stalled ? 'still working, this step is taking longer than usual' : phase;
-  return doing ? `${lead}: ${doing}` : lead;
+  const doing = stalled ? $localize`:@@pd.jobs.still-working:still working, this step is taking longer than usual` : phase;
+  return doing ? $localize`:@@pd.jobs.status.detail:${lead}:lead:: ${doing}:phase:` : lead;
 }
 
 /**
@@ -41,7 +41,7 @@ export function jobsStatusDetail(lead: string | null, phase: string | null, stal
       <span class="text">{{ compact() ? compactText() : text() }}</span>
     </button>
     @if (open()) {
-      <div class="popover" role="region" aria-label="Jobs" [id]="panelId">
+      <div class="popover" role="region" [attr.aria-label]="t.popover" [id]="panelId">
         <pd-jobs-list />
       </div>
     }
@@ -63,6 +63,10 @@ export function jobsStatusDetail(lead: string | null, phase: string | null, stal
   `,
 })
 export class PdJobsStatus {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    popover: $localize`:@@pd.jobs.popover:Jobs`,
+  };
   protected readonly store = inject(JobsStore);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** Where the popover opens: above (a status bar at the bottom, the default) or below. */
@@ -72,7 +76,7 @@ export class PdJobsStatus {
 
   /** The status bar is narrow: the item shows the running count only. */
   protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);
-  protected readonly compactText = computed(() => (this.store.activeCount() ? formatCount(this.store.activeCount()) : 'Jobs'));
+  protected readonly compactText = computed(() => (this.store.activeCount() ? formatCount(this.store.activeCount()) : $localize`:@@pd.jobs.status.idle:Jobs`));
 
   /** The lead job went quiet ("Still working"). */
   protected readonly stalled = computed(() => {
@@ -82,7 +86,7 @@ export class PdJobsStatus {
   protected readonly text = computed(() => jobsStatusText(this.store.activeCount(), this.store.lead()?.title ?? null));
   protected readonly detail = computed(() => {
     const lead = this.store.lead();
-    const phase = lead?.state === 'running' ? (lead.phase?.label ?? 'Starting') : null;
+    const phase = lead?.state === 'running' ? (lead.phase?.label ?? $localize`:@@pd.jobs.starting:Starting`) : null;
     return jobsStatusDetail(lead?.title ?? null, phase, this.stalled());
   });
 

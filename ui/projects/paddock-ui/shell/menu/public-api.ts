@@ -62,6 +62,7 @@ export { defineSubmenu, provideSubmenus, SUBMENUS, MAX_SUBMENU_DEPTH, type Subme
 export {
   buildMenu,
   buildMenus,
+  foldAppMenu,
   itemsAt,
   type MenuNode,
   type MenuItemNode,

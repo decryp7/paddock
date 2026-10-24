@@ -29,7 +29,7 @@ const CONTRIBUTIONS = {
   ],
 };
 
-function setup(withContext = true) {
+function setup(withContext = true, mode: 'in-app' | 'native' = 'in-app') {
   ran.length = 0;
   wrap.set(false);
   let idle: () => void = () => undefined;
@@ -42,6 +42,7 @@ function setup(withContext = true) {
       ...(withContext ? [provideShellContext<Ctx>(() => Promise.resolve(() => ({ wrap })))] : []),
       { provide: SHELL_IDLE, useValue: (w: () => void) => (idle = w) },
       { provide: KEY_PLATFORM, useValue: 'other' },
+      { provide: MENU_MODE, useValue: mode },
       { provide: KEYBINDING_STORAGE, useValue: null },
       { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: () => Promise.resolve(undefined), notify: () => undefined } },
     ],
@@ -63,11 +64,13 @@ describe('AppMenu', () => {
   it('builds the menus from the contributions with live states and effective keys', async () => {
     const { app, idle } = setup();
     // Before the app's context is loaded every command is offered with its defaults.
-    expect(app.menus().map((m) => m.label)).toEqual(['Demo', 'View', 'Help']);
+    // In the window the app menu's entries are under File: the title bar already shows the app's name (regression:
+    // "Demo" was shown twice, as the title and as the first menu).
+    expect(app.menus().map((m) => m.label)).toEqual(['File', 'View', 'Help']);
     idle();
     await flush();
     expect(app.menus()).toEqual([
-      { id: 'app', label: 'Demo', items: [{ kind: 'item', id: 'sd.about', label: 'About Demo', enabled: true }] },
+      { id: 'file', label: 'File', items: [{ kind: 'item', id: 'sd.about', label: 'About Demo', enabled: true }] },
       { id: 'view', label: 'View', items: [{ kind: 'item', id: 'sd.wrap', label: 'Word wrap', enabled: true, checked: false }] },
       { id: 'help', label: 'Help', items: [{ kind: 'item', id: 'sd.greet', label: 'Say hello', enabled: true, keybinding: 'Mod+Shift+H' }] },
     ]);
@@ -78,6 +81,15 @@ describe('AppMenu', () => {
     expect(app.menus()[2]!.items[0]).toMatchObject({ keybinding: 'Mod+G' });
     expect(app.items('sd.ctx')).toEqual([{ kind: 'item', id: 'sd.greet', label: 'Say hello', enabled: false, keybinding: 'Mod+G' }]);
     expect(app.items('sd.none')).toEqual([]);
+  });
+
+  it('the macOS menu bar keeps the app menu, titled with the app name', () => {
+    const { app } = setup(true, 'native');
+    expect(app.menus().map((m) => [m.id, m.label])).toEqual([
+      ['app', 'Demo'],
+      ['view', 'View'],
+      ['help', 'Help'],
+    ]);
   });
 
   it('runs items through the commands; disabled and unknown ones do nothing', async () => {

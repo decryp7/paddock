@@ -6,7 +6,7 @@ let nextId = 0;
 
 /** What the status item says: the unread count when there is one. */
 export function notificationsStatusText(unread: number): string {
-  return unread > 0 ? `${unread} unread` : 'Notifications';
+  return unread > 0 ? $localize`:@@pd.notifications.status.unread:${unread}:count: unread` : $localize`:@@pd.notifications.status.none:Notifications`;
 }
 
 /**
@@ -32,7 +32,7 @@ export function notificationsStatusText(unread: number): string {
       }
     </button>
     @if (open()) {
-      <div class="popover" role="region" aria-label="Notifications centre" [id]="panelId">
+      <div class="popover" role="region" [attr.aria-label]="t.centre" [id]="panelId">
         <pd-notifications-panel />
       </div>
     }
@@ -50,6 +50,10 @@ export function notificationsStatusText(unread: number): string {
   `,
 })
 export class PdNotificationsStatus {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    centre: $localize`:@@pd.notifications.centre:Notifications centre`,
+  };
   protected readonly store = inject(NotificationsStore);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** Where the centre opens: above (a status bar at the bottom, the default) or below. */

@@ -78,7 +78,7 @@ export class SuErrorState {
   readonly heading = input.required<string>();
   /** Likely cause and what to do. */
   readonly cause = input<string>('');
-  readonly retryLabel = input<string>('Retry');
+  readonly retryLabel = input<string>($localize`:@@pd.ui.retry:Retry`);
   readonly secondaryLabel = input<string>('');
   /** A retry is in flight: the button is disabled. */
   readonly busy = input<boolean>(false);

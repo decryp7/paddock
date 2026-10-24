@@ -5,7 +5,7 @@ interface TauriInternals {
   transformCallback(cb: (event: { payload: unknown }) => void, once?: boolean): number;
 }
 
-/** The demo's IPC: any command name (each shell part narrows it to its own table: `StartupIpc`, `AboutIpc`, ...). */
+/** The demo's IPC: any command name, so it serves every shell backend's port (`StartupIpc`, `SettingsIpc`, `AboutIpc`, ...). */
 export interface DemoIpc {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
   listen<T>(event: string, handler: (payload: T) => void): Promise<() => void>;
@@ -27,3 +27,4 @@ export function tauriIpc(): DemoIpc | null {
     },
   };
 }
+

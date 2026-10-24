@@ -71,7 +71,7 @@ export class PdPagesSidebar {
   /** A link's name with its badge: "Runners, 1 runner offline" (what it counts, else the count). */
   protected label(title: string, id: string): string {
     const badge = this.pages.badgeLabels()[id] ?? this.pages.badges()[id];
-    return badge ? `${title}, ${badge}` : title;
+    return badge ? $localize`:@@pd.pages.link-with-badge:${title}:page:, ${badge}:badge:` : title;
   }
 
   protected onKey(e: KeyboardEvent): void {

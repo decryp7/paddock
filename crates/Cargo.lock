@@ -2303,7 +2303,15 @@ dependencies = [
 name = "paddock-settings"
 version = "0.1.0"
 dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-health",
+ "regex",
+ "serde",
+ "serde_json",
  "tauri",
+ "tempfile",
+ "ts-rs",
 ]
 
 [[package]]

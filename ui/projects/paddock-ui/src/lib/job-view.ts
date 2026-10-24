@@ -80,29 +80,32 @@ export function formatBytes(n: number): string {
 export function formatEta(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return '';
   const s = Math.ceil(ms / 1000);
-  if (s < 60) return `${s} s left`;
+  if (s < 60) return $localize`:@@pd.ui.eta.seconds:${s}:seconds: s left`;
   const m = Math.round(s / 60);
-  if (m < 60) return `about ${m} min left`;
+  if (m < 60) return $localize`:@@pd.ui.eta.minutes:about ${m}:minutes: min left`;
   const h = Math.floor(m / 60);
   const rest = m % 60;
-  return rest === 0 ? `about ${h} h left` : `about ${h} h ${rest} min left`;
+  return rest === 0
+    ? $localize`:@@pd.ui.eta.hours:about ${h}:hours: h left`
+    : $localize`:@@pd.ui.eta.hours-minutes:about ${h}:hours: h ${rest}:minutes: min left`;
 }
 
 /** Time spent, short: "8 s", "3 min", "1 h 5 min". */
 export function formatElapsed(ms: number): string {
   const s = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
-  if (s < 60) return `${s} s`;
+  if (s < 60) return $localize`:@@pd.ui.elapsed.seconds:${s}:seconds: s`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} min`;
+  if (m < 60) return $localize`:@@pd.ui.elapsed.minutes:${m}:minutes: min`;
   const rest = m % 60;
-  return rest === 0 ? `${Math.floor(m / 60)} h` : `${Math.floor(m / 60)} h ${rest} min`;
+  const h = Math.floor(m / 60);
+  return rest === 0 ? $localize`:@@pd.ui.elapsed.hours:${h}:hours: h` : $localize`:@@pd.ui.elapsed.hours-minutes:${h}:hours: h ${rest}:minutes: min`;
 }
 
 function countText(p: SuJobPhase): string {
   const fmt = p.unit === 'bytes' ? formatBytes : formatCount;
   const total = p.total ?? null;
-  if (total === null || total <= 0) return p.done > 0 ? `${fmt(p.done)} so far` : '';
-  return `${fmt(Math.min(p.done, total))} of ${fmt(total)}`;
+  if (total === null || total <= 0) return p.done > 0 ? $localize`:@@pd.ui.job.so-far:${fmt(p.done)}:done: so far` : '';
+  return $localize`:@@pd.ui.job.of:${fmt(Math.min(p.done, total))}:done: of ${fmt(total)}:total:`;
 }
 
 /**
@@ -125,39 +128,61 @@ export function jobView(job: SuJobSnapshot, stalled = false, elapsedMs: number =
   };
   switch (job.state) {
     case 'queued':
-      return { ...base, headline: 'Waiting', tone: 'neutral', canCancel: true, announcement: `${job.title}: waiting` };
+      return {
+        ...base,
+        headline: $localize`:@@pd.ui.job.waiting:Waiting`,
+        tone: 'neutral',
+        canCancel: true,
+        announcement: $localize`:@@pd.ui.job.announce.waiting:${job.title}:title:: waiting`,
+      };
     case 'running': {
       const p = job.phase ?? null;
       const total = p?.total ?? null;
       const determinate = p !== null && total !== null && total > 0;
-      const headline = p ? p.label : 'Starting';
+      const headline = p ? p.label : $localize`:@@pd.ui.job.starting:Starting`;
       return {
         ...base,
         headline,
-        count: (p ? countText(p) : '') || (determinate ? '' : `${formatElapsed(elapsedMs)} elapsed`),
+        count: (p ? countText(p) : '') || (determinate ? '' : $localize`:@@pd.ui.job.elapsed:${formatElapsed(elapsedMs)}:elapsed: elapsed`),
         percent: determinate ? Math.min(100, Math.max(0, (p.done / total) * 100)) : null,
         showBar: true,
         eta: determinate ? formatEta(job.etaMs) : '',
         tone: stalled ? 'warning' : 'info',
         canCancel: true,
         cancelDisabled: !job.cancellable,
-        cancelHint: job.cancellable ? '' : (job.notCancellableReason ?? 'This step cannot be stopped'),
-        detail: stalled ? 'Still working. This step is taking longer than usual.' : '',
-        announcement: `${job.title}: ${headline}`,
+        cancelHint: job.cancellable ? '' : (job.notCancellableReason ?? $localize`:@@pd.ui.job.not-cancellable:This step cannot be stopped`),
+        detail: stalled ? $localize`:@@pd.ui.job.stalled:Still working. This step is taking longer than usual.` : '',
+        announcement: $localize`:@@pd.ui.job.announce.running:${job.title}:title:: ${headline}:phase:`,
       };
     }
     case 'done':
-      return { ...base, headline: 'Done', tone: 'success', terminal: true, announcement: `${job.title}: done` };
+      return {
+        ...base,
+        headline: $localize`:@@pd.ui.job.done:Done`,
+        tone: 'success',
+        terminal: true,
+        announcement: $localize`:@@pd.ui.job.announce.done:${job.title}:title:: done`,
+      };
     case 'failed':
-      return { ...base, headline: 'Failed', tone: 'danger', terminal: true, detail: job.message, announcement: `${job.title}: failed` };
+      return {
+        ...base,
+        headline: $localize`:@@pd.ui.job.failed:Failed`,
+        tone: 'danger',
+        terminal: true,
+        detail: job.message,
+        announcement: $localize`:@@pd.ui.job.announce.failed:${job.title}:title:: failed`,
+      };
     case 'cancelled':
       return {
         ...base,
-        headline: 'Cancelled',
+        headline: $localize`:@@pd.ui.job.cancelled:Cancelled`,
         tone: 'neutral',
         terminal: true,
-        detail: job.reason === 'deadline' ? 'Stopped: the time limit was reached.' : 'Stopped at your request.',
-        announcement: `${job.title}: cancelled`,
+        detail:
+          job.reason === 'deadline'
+            ? $localize`:@@pd.ui.job.deadline:Stopped: the time limit was reached.`
+            : $localize`:@@pd.ui.job.user-cancelled:Stopped at your request.`,
+        announcement: $localize`:@@pd.ui.job.announce.cancelled:${job.title}:title:: cancelled`,
       };
   }
 }

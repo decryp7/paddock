@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "outDir": "../../out-tsc/shell-demo", "types": [], "resolveJsonModule": true },
+  "compilerOptions": { "outDir": "../../out-tsc/shell-demo", "types": ["@angular/localize"], "resolveJsonModule": true },
   "include": ["src/**/*.ts"],
   "exclude": ["**/*.spec.ts"]
 }

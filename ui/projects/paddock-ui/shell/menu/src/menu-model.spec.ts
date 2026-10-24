@@ -1,5 +1,5 @@
 import { defineMenuItem, msg, type MenuItemDef } from '@decryp7/paddock-ui/shell';
-import { buildMenu, buildMenus, itemsAt, type MenuCommandState, type MenuSource } from './menu-model';
+import { buildMenu, buildMenus, foldAppMenu, itemsAt, type MenuCommandState, type MenuSource } from './menu-model';
 import { defineSubmenu, type SubmenuDef } from './submenus';
 
 function source(items: MenuItemDef[], submenus: SubmenuDef[] = [], commands: Record<string, MenuCommandState | null> = {}, hidden: string[] = []): MenuSource {
@@ -65,5 +65,26 @@ describe('menu model', () => {
     expect(itemsAt(menus, ['view', 'sd.more'])).toEqual([{ kind: 'item', id: 'sd.x', label: 'X', enabled: true }]);
     expect(itemsAt(menus, ['view', 'sd.gone'])).toEqual([]);
     expect(itemsAt(menus, ['help'])).toEqual([]);
+  });
+});
+
+describe('foldAppMenu', () => {
+  const item = (id: string) => ({ kind: 'item', id, label: id, enabled: true }) as const;
+  it('appends the app menu to File after a separator and drops it', () => {
+    const menus = [
+      { id: 'app', label: 'Demo', items: [item('pd.settings.open')] },
+      { id: 'file', label: 'File', items: [item('sd.open')] },
+      { id: 'help', label: 'Help', items: [item('sd.about')] },
+    ];
+    expect(foldAppMenu(menus, 'File')).toEqual([
+      { id: 'file', label: 'File', items: [item('sd.open'), { kind: 'separator' }, item('pd.settings.open')] },
+      { id: 'help', label: 'Help', items: [item('sd.about')] },
+    ]);
+  });
+
+  it('makes a File menu when there is none, and leaves menus without an app menu as they are', () => {
+    expect(foldAppMenu([{ id: 'app', label: 'Demo', items: [item('a')] }], 'Fichier')).toEqual([{ id: 'file', label: 'Fichier', items: [item('a')] }]);
+    const plain = [{ id: 'view', label: 'View', items: [item('v')] }];
+    expect(foldAppMenu(plain, 'File')).toEqual(plain);
   });
 });

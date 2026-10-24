@@ -1,5 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
+import { ContributionRegistry } from '@decryp7/paddock-ui/shell';
 import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { ServiceHealthBackend, type Unlisten } from './backends';
 import { EMPTY_HEALTH, isServing, type ServiceHealth, type ServiceHealthSnapshot } from './wire.types';
@@ -12,7 +13,7 @@ interface HealthState {
   repairErrors: Readonly<Record<string, string>>;
 }
 
-const FALLBACK = 'The service-health service did not answer.';
+const FALLBACK = (): string => $localize`:@@pd.health.no-answer:The service-health service did not answer.`;
 
 /**
  * The latest service-health snapshot of this window and nothing else (ADR 0010, Debrief ADR 0055): the engine decides, an
@@ -24,10 +25,21 @@ export const ServiceHealthStore = signalStore(
   { protectedState: true },
   withState<HealthState>({ snapshot: EMPTY_HEALTH, detailsRequested: 0, repairErrors: {} }),
   withRequestStatus(),
+  withComputed((store, registry = inject(ContributionRegistry, { optional: true })) => ({
+    /**
+     * Every service as the engine reports it, named by the app's `defineHealthService` label when it registered one: that
+     * label is a message in the window's language, the engine's is English (plan S15).
+     */
+    services: computed(() =>
+      store.snapshot().services.map((s) => {
+        const label = registry?.healthServices().find((d) => d.id === s.service)?.label.text;
+        return label && label !== s.label ? { ...s, label } : s;
+      }),
+    ),
+  })),
   withComputed((store) => ({
-    services: computed(() => store.snapshot().services),
     /** The services that are not working (any state but ok and starting), in the registry's order. */
-    problems: computed(() => store.snapshot().services.filter((s) => !isServing(s.state))),
+    problems: computed(() => store.services().filter((s) => !isServing(s.state))),
     /** The first snapshot arrived (by event or by the list). */
     isReady: computed(() => store.snapshot().revision > 0 || store.requestStatus() === 'loaded'),
   })),
@@ -57,7 +69,7 @@ export const ServiceHealthStore = signalStore(
           apply(next);
           patchState(store, setLoaded());
         } catch (e) {
-          patchState(store, setError(errorMessage(e, FALLBACK)));
+          patchState(store, setError(errorMessage(e, FALLBACK())));
         }
       },
       /** The Repair button: the shell repairs the service (never through the service); its state follows by event. */
@@ -66,7 +78,7 @@ export const ServiceHealthStore = signalStore(
         try {
           apply(await backend.repair(service));
         } catch (e) {
-          patchState(store, (s) => ({ repairErrors: { ...s.repairErrors, [service]: errorMessage(e, FALLBACK) } }));
+          patchState(store, (s) => ({ repairErrors: { ...s.repairErrors, [service]: errorMessage(e, FALLBACK()) } }));
         }
       },
       /** Opens the status chip's details (the "See what happened" link of `pd-waiting-for`). */
@@ -84,7 +96,7 @@ export const ServiceHealthStore = signalStore(
         void backend
           .listen((s) => store.apply(s))
           .then((u) => (destroyed ? u() : (off = u)))
-          .catch((e: unknown) => console.warn(`[paddock-notify] cannot listen for service health: ${errorMessage(e, FALLBACK)}`));
+          .catch((e: unknown) => console.warn(`[paddock-notify] cannot listen for service health: ${errorMessage(e, FALLBACK())}`));
         void store.load();
       },
       onDestroy() {

@@ -17,21 +17,21 @@ export function shortName(label: string): string {
 export function stateWord(state: ServiceState): string {
   switch (state) {
     case 'quarantined':
-      return 'switched off';
+      return $localize`:@@pd.health.state.quarantined:switched off`;
     case 'repairing':
-      return 'repairing';
+      return $localize`:@@pd.health.state.repairing:repairing`;
     case 'degraded':
-      return 'limited';
+      return $localize`:@@pd.health.state.degraded:limited`;
     default:
-      return 'stopped';
+      return $localize`:@@pd.health.state.stopped:stopped`;
   }
 }
 
 /** What the chip says: one service by name and state, or how many need attention. */
 export function chipText(problems: readonly Pick<ServiceHealth, 'label' | 'state'>[]): string {
   const p = problems[0];
-  if (problems.length === 1 && p) return `${shortName(p.label)}: ${stateWord(p.state)}`;
-  return `${problems.length} services need attention`;
+  if (problems.length === 1 && p) return $localize`:@@pd.health.chip.one:${shortName(p.label)}:service:: ${stateWord(p.state)}:state:`;
+  return $localize`:@@pd.health.chip.many:${problems.length}:count: services need attention`;
 }
 
 /** The chip's compact form (a narrow status bar): a short subject and the state, or the count; the full text is its name and tooltip. */
@@ -41,9 +41,9 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
     // The subject's last word keeps it said what stopped: "Index stopped", "Engine limited".
     const subject = shortName(p.label).split(/\s+/).at(-1) ?? '';
     const head = subject.charAt(0).toUpperCase() + subject.slice(1);
-    return `${head} ${stateWord(p.state)}`;
+    return $localize`:@@pd.health.chip.compact.one:${head}:service: ${stateWord(p.state)}:state:`;
   }
-  return problems.length ? `${problems.length} services` : 'Unknown';
+  return problems.length ? $localize`:@@pd.health.chip.compact.many:${problems.length}:count: services` : $localize`:@@pd.health.chip.compact.unknown:Unknown`;
 }
 
 /**
@@ -69,23 +69,23 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
         <span class="text">{{ compact() ? compactText() : text() }}</span>
       </button>
       @if (open()) {
-        <div class="popover" role="region" aria-label="Services" [id]="panelId" data-testid="service-health-details">
+        <div class="popover" role="region" [attr.aria-label]="t.popover" [id]="panelId" data-testid="service-health-details">
           @if (unknown(); as why) {
             <section class="svc">
-              <strong>The state of the services is not known yet.</strong>
+              <strong>{{ t.unknown }}</strong>
               <span class="hint">{{ why }}</span>
-              <button type="button" class="btn primary" data-testid="service-health-reload" (click)="store.load()">Try again</button>
+              <button type="button" class="btn primary" data-testid="service-health-reload" (click)="store.load()">{{ t.tryAgain }}</button>
             </section>
           }
           @for (s of problems(); track s.service) {
             <section class="svc" [attr.data-testid]="'service-health-' + s.service" [attr.aria-label]="shortName(s.label)">
-              <strong>{{ s.cause?.message ?? shortName(s.label) + ' is not working.' }}</strong>
+              <strong>{{ s.cause?.message ?? notWorking(s.label) }}</strong>
               @if (s.cause?.hint; as hint) {
                 <span class="hint">{{ hint }}</span>
               }
               <div class="actions">
                 @if (s.state === 'repairing') {
-                  <span class="hint" role="status">Repairing…</span>
+                  <span class="hint" role="status">{{ t.repairing }}</span>
                 } @else if (s.repair; as action) {
                   @if (canRepair(s)) {
                     <button type="button" class="btn primary" [attr.data-testid]="'service-health-repair-' + s.service" (click)="repair(s)">{{ label(action, s.label) }}</button>
@@ -93,7 +93,7 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
                 }
                 @if (s.cause?.raiseCap; as cap) {
                   @if (canRaise) {
-                    <button type="button" class="btn" [attr.data-testid]="'service-health-raise-cap-' + s.service" (click)="raise(cap)">Raise the cap…</button>
+                    <button type="button" class="btn" [attr.data-testid]="'service-health-raise-cap-' + s.service" (click)="raise(cap)">{{ t.raiseCap }}</button>
                   }
                 }
               </div>
@@ -101,7 +101,7 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
                 <span class="err" role="alert">{{ why }}</span>
               }
               @if (s.cause?.detail; as detail) {
-                <details><summary>Technical details</summary><code>{{ detail }}</code></details>
+                <details><summary>{{ t.technicalDetails }}</summary><code>{{ detail }}</code></details>
               }
             </section>
           }
@@ -140,6 +140,15 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
   `,
 })
 export class PdServiceStatus {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    popover: $localize`:@@pd.health.popover:Services`,
+    unknown: $localize`:@@pd.health.unknown:The state of the services is not known yet.`,
+    tryAgain: $localize`:@@pd.health.try-again:Try again`,
+    repairing: $localize`:@@pd.health.repairing:Repairing…`,
+    raiseCap: $localize`:@@pd.health.raise-cap:Raise the cap…`,
+    technicalDetails: $localize`:@@pd.health.technical-details:Technical details`,
+  };
   protected readonly store = inject(ServiceHealthStore);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly raiseCap = inject(RAISE_CAP, { optional: true });
@@ -162,7 +171,10 @@ export class PdServiceStatus {
     },
   });
   protected readonly allRepairing = computed(() => this.problems().length > 0 && this.problems().every((p) => p.state === 'repairing'));
-  protected readonly text = computed(() => (this.problems().length ? chipText(this.problems()) : 'Services: unknown'));
+  protected readonly text = computed(() => (this.problems().length ? chipText(this.problems()) : $localize`:@@pd.health.chip.unknown:Services: unknown`));
+  protected notWorking(label: string): string {
+    return $localize`:@@pd.health.not-working:${shortName(label)}:service: is not working.`;
+  }
   /** The status bar is narrow: the chip shows its compact form. */
   protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);
   protected readonly compactText = computed(() => chipCompactText(this.problems()));
