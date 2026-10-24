@@ -1107,3 +1107,15 @@ scratch.finish()?;                                  // or just drop it: anything
 - `corpus(seed)` gives a bounded, deterministic set of hostile inputs; `never_panics(&corpus(seed), parse)` returns the inputs that
   panicked (the proptest-free half of X41).
 - `FakeClock` (and `Clock`) are `paddock_jobs::time`'s, re-exported: assert on a fake clock, never on `Instant::now()` (C30).
+
+### `CommandError` (plan X28)
+
+`paddock_commands::CommandError` is the one error a command rejects with: `{ code, message, retryable, hint?, field?, cause?, kind? }`
+in camelCase. `ErrorCode` is a short general list (`failed`, `invalid`, `notFound`, `notGranted`, `busy`, `cancelled`, `io`, `limit`,
+`unsupported`, `unavailable`, `denied`, `missing`, `timeout`, `internal`), so a code means the same in every app; an app's own
+distinctions (Pitcrew's `unknownRunner`, Debrief's `noModel`) go in `kind`. Constructors per code (`CommandError::invalid("...")`),
+builders (`.hint()`, `.field()`, `.cause("health:store")`, `.kind()`, `.retry(bool)`), and `From` for `io::Error` (not found, denied,
+io), `String`/`&str` (`failed`) and the guard's `Refusal` (`denied`, `limit`). `retryable` defaults by code (`busy`, `io`,
+`unavailable`, `timeout`). The TypeScript (`ui/projects/paddock-ui/ipc/generated/ipc.ts`, with the runtime `ERROR_CODES`) is generated
+by `PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated` and checked on every run. Domain errors stay in their libraries
+and convert once at the command edge.
