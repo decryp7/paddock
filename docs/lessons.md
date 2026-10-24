@@ -368,6 +368,27 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
 - One oversized message must not take the connection down: read past it without allocating it (the length is in the
   prefix), and fail only the call its first bytes name. A length beyond the hard limit is garbage and ends the link.
 
+## SMAppService on a fresh Mac (Paddock C21 VM smoke, 2026-10-25)
+- `SMAppService.status` is `.notFound` for an agent the app has never registered: Background Task Management has no
+  record of the app until the first `register()` (`backgroundtaskmanagementd`: "effectiveItemDisposition: record not
+  found"; after `unregister()` it reads `.notRegistered`). paddock-service treated NotFound as "cannot be registered from
+  here" and refused Install without ever calling `register()`, so the first install failed on every fresh Mac, not only in
+  the VM (a drag-install to /Applications hits it too). NotFound is "not installed"; only a failing `register()` means
+  "cannot register from here". The tart `exec` session, the helper (not the main executable) calling `register()`, ad-hoc
+  signing and /Applications vs ~/Applications were all fine: a helper in `Contents/MacOS` registered at once from `tart
+  exec`, which runs in the user's Aqua session (`launchctl managername` = Aqua).
+- Read launchd's report by structure, not by `grep`: macOS 26's `launchctl print` adds `resource coalition` and
+  `jetsam coalition` blocks with their own `state = active` after the job's `state = running`, so a line scan saw a
+  stopped job and, with `has LWCR`, called a healthy agent "refused" (Repair offered for nothing). Only the job's own
+  level counts. Pitwall's and Pitcrew's `service_repair.rs` have the same line scan; fix them when they are next touched.
+- Before blaming the harness, look at what the OS was actually asked: the log had one `status` and no `register` call. A
+  ten-line Swift probe in the bundle (`status`, `register`, `status`) answered in a minute what five harness changes had not.
+- The simulation is only as good as its fidelity: the launchd simulation said "never registered = NotRegistered", so every
+  scenario passed while the real first install failed. Fakes copy the real OS's answers, captured from a VM, including
+  the odd ones.
+- An update smoke needs both versions everywhere: the N+1 build bumped only the app's Cargo.toml, so the agent still said
+  0.1.0 and could never report the new version. Check the built binaries' versions before booting a VM.
+
 ## Test and build speed (2026-10-24)
 
 - Linking dominated the Rust test cycle: Debrief had 239 test binaries (181 integration). One `tests/it/main.rs` binary
