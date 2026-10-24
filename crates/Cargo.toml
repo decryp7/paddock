@@ -32,7 +32,15 @@ members = [
     "paddock-testkit",
     "paddock-updater",
     "paddock-window",
+    "paddock-workspace-hack",
 ]
+
+# cargo-machete (CI: `cargo machete`) reports dependencies no code uses. A false report (a dependency used only through a
+# macro or for its features) goes into `ignored`, here for every crate or in the crate's own
+# `[package.metadata.cargo-machete]`, with a comment saying why.
+[workspace.metadata.cargo-machete]
+# cargo-hakari's crate: depended on for its features, never named in code.
+ignored = ["paddock-workspace-hack"]
 
 [workspace.package]
 edition = "2024"
@@ -71,3 +79,14 @@ paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "dec
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.1.0", registry = "decryp7" }
+
+# Debug info for development and test builds (docs/dev-setup.md, "Build profiles"): line tables are enough for backtraces
+# with file and line, and dependencies get none, which makes the objects smaller and linking faster. A debugger session
+# that needs variables sets `CARGO_PROFILE_DEV_DEBUG=full` for that build. split-debuginfo stays at each platform's
+# default (macOS already keeps it out of the binaries; Windows supports only `packed`).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+

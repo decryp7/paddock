@@ -7,6 +7,9 @@
 #       if: needs.plan.outputs.run == 'true'
 #       uses: decryp7/paddock/.gitea/workflows/app-e2e.yml@v0.3.0
 #       with: { paddock-ref: v0.3.0, app-id: pitcrew, env-prefix: PITCREW, browser-pin: app/chromium-pin.json }
+#
+# The full run (both browsers, on the combined result) can be split into parallel jobs: `shards: "[1, 2]"` runs
+# `--shard=1/2` and `--shard=2/2` at the same time, each with its own port (port + shard - 1).
 
 name: app-e2e
 
@@ -46,11 +49,19 @@ on:
       image:
         type: string
         default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      shards:
+        description: The shard numbers as a JSON list ("[1, 2]" splits the run in two parallel jobs); "[1]" is one job.
+        type: string
+        default: "[1]"
 
 jobs:
   e2e:
-    name: e2e (pinned Chrome for Testing)
+    name: e2e (pinned Chrome for Testing, shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.shards) }}
     container:
       image: ${{ inputs.image }}
     steps:
@@ -80,6 +91,12 @@ jobs:
       - name: End-to-end tests
         working-directory: ${{ inputs.app-dir }}
         env:
-          PW_PORT: ${{ inputs.port }}
           CI: "true"
-        run: node ../.paddock/conformance/bin/paddock-conformance.mjs run -- ${{ inputs.command }}
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          total=$(node -e 'console.log(JSON.parse(process.env.SHARDS).length)')
+          export PW_PORT=$(( ${{ inputs.port }} + SHARD - 1 ))
+          split=""
+          if [ "$total" -gt 1 ]; then split="--shard=$SHARD/$total"; fi
+          node ../.paddock/conformance/bin/paddock-conformance.mjs run -- ${{ inputs.command }} $split
