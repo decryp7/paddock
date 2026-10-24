@@ -102,7 +102,8 @@ export class ActivityItems {
   /** The key shown for the item: its own, else its command's bound key. */
   keybinding(item: Pick<ActivityItemDef, 'keybinding' | 'run'> | ActivityMenuEntry): string | null {
     const own = item.keybinding;
-    const command = 'command' in item.run ? item.run.command : null;
+    const run = (item as { run?: unknown }).run;
+    const command = typeof run === 'object' && run !== null && 'command' in run ? (run as { command: string }).command : null;
     const key = own ?? (command ? this.keymap.keyFor(command) : undefined);
     return key ?? null;
   }
