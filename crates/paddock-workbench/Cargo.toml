@@ -1,0 +1,55 @@
+[package]
+name = "paddock-workbench"
+version = "0.1.0"
+description = "The Paddock workbench's Rust side: the dock's layout store (versioned, bounded) and the workbench Tauri plugin that serves it with the pop-out panels and the assistant behind one command guard."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+# Tauri plugins name themselves through `links` (the app's build reads the plugin's permissions through it).
+links = "paddock-workbench"
+
+[features]
+# The Tauri adapter and the plugin: the managed layout store and its commands, the composed command table and the
+# `Builder` that folds the pop-out panels and the assistant behind one guard.
+tauri = [
+  "dep:tauri",
+  "dep:paddock-panels",
+  "dep:paddock-assistant",
+  "dep:paddock-dialogs",
+  "paddock-commands/tauri",
+  "paddock-panels/tauri",
+  "paddock-assistant/tauri",
+  "paddock-dialogs/tauri",
+]
+
+[dependencies]
+paddock-commands = { workspace = true }
+paddock-env = { workspace = true }
+paddock-panels = { workspace = true, optional = true }
+paddock-assistant = { workspace = true, optional = true }
+paddock-dialogs = { workspace = true, optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = { version = "0.4", features = ["kv"] }
+tauri = { workspace = true, optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[build-dependencies]
+tauri-plugin = { version = "2.7", features = ["build"] }
+
+[dev-dependencies]
+tempfile = "3"
+tauri = { workspace = true, features = ["test"] }
+# The permission sets are resolved through Tauri's own ACL in the tests.
+tauri-utils = "2.10"
+toml = "0.9"
+paddock-panels = { workspace = true, features = ["mock-runtime"] }
+paddock-dialogs = { workspace = true, features = ["tauri", "mock-runtime"] }
+# The plugin test builds an assistant over a canned provider and a fake clock.
+paddock-assistant = { workspace = true, features = ["tauri"] }
+paddock-health = { workspace = true }
+
+[[test]]
+name = "it"
+required-features = ["tauri"]

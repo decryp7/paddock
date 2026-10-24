@@ -207,7 +207,9 @@ export interface DialogContractEntry {
 
 /** The dialogs of an app's contract file (`dialog-contracts.json`, generated from its registry), by id. */
 export function dialogContracts(path: string): Readonly<Record<string, DialogContractEntry>> {
-  return (JSON.parse(readFileSync(path, 'utf8')) as { dialogs: Record<string, DialogContractEntry> }).dialogs;
+  const dialogs = (JSON.parse(readFileSync(path, 'utf8')) as { dialogs?: Record<string, DialogContractEntry> }).dialogs;
+  if (typeof dialogs !== 'object' || dialogs === null) throw new Error(`${path} has no "dialogs": regenerate the dialog contracts`);
+  return dialogs;
 }
 
 /** Where the browser build of a dialog window leaves its answer (`localStorage`). */
@@ -215,6 +217,12 @@ export const DIALOG_RESULT_KEY = 'paddock.dialog.browserResult';
 
 /** A Close, Cancel or the like: the ways out of a dialog. */
 export const CLOSE_NAMES = /^(close|cancel|not now|dismiss|done|later|got it)\b/i;
+
+/** The URL Rust loads dialog `id`'s window with (`query` goes before the hash: `?settings=damaged`). */
+export function dialogWindowUrl(id: string, input: unknown = {}, options: { readonly title?: string; readonly query?: string } = {}): string {
+  const title = encodeURIComponent(options.title ?? id);
+  return `/${options.query ?? ''}#/dialog?id=${id}&host=main&label=d-main-1&title=${title}&dialogInput=${encodeURIComponent(JSON.stringify(input))}`;
+}
 
 /** Dialog windows (by URL, as Rust loads them) and dialogs in the page. */
 export class ShellDialogs {
@@ -224,8 +232,7 @@ export class ShellDialogs {
   }
   /** The URL of dialog `id`'s window with `input` (`query` goes before the hash: `?settings=damaged`). */
   url(id: string, input: unknown = {}, options: { readonly title?: string; readonly query?: string } = {}): string {
-    const title = encodeURIComponent(options.title ?? id);
-    return `/${options.query ?? ''}#/dialog?id=${id}&host=main&label=d-main-1&title=${title}&dialogInput=${encodeURIComponent(JSON.stringify(input))}`;
+    return dialogWindowUrl(id, input, options);
   }
   /** Opens dialog `id`'s window in the page. */
   async openWindow(id: string, input: unknown = {}, options: { readonly title?: string; readonly query?: string } = {}): Promise<void> {
@@ -245,6 +252,8 @@ export class ShellDialogs {
   }
   /** Resolves once the window has left Loading without an error. */
   async loaded(): Promise<void> {
+    // The shell itself first: before it mounts there is no "loading" marker either, and a window still on the start-up splash would pass.
+    await expect(this.shell).toBeVisible();
     await expect(this.shell.getByTestId('dialog-loading')).toHaveCount(0);
     await expect(this.shell.getByTestId('dialog-error')).toHaveCount(0);
   }

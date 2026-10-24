@@ -3,6 +3,10 @@
 //! the notification centre (window notices need it), settings with the shell's Appearance section, dialogs (an empty
 //! contract file), the start-up watchdog with its defaults, and the menu.
 
+use crate::setup::{
+    LoginItem, NotificationAccess, NotificationsItem, PitwallItem, PitwallPort, ServiceItem,
+    SetupItem,
+};
 use crate::{COMMANDS, OWN_COMMANDS, PLUGIN_NAME, commands, prefs};
 use paddock_commands::Table;
 use paddock_commands::tauri::{Guard, Routes};
@@ -46,6 +50,17 @@ type BoxError = Box<dyn Error + Send + Sync>;
 type Part<R, T> = Box<dyn FnOnce(&AppHandle<R>) -> T + Send>;
 type DiagSetup<R> =
     Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send>;
+type FilesSetup<R> =
+    Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_files::Files, BoxError> + Send>;
+type PacksSetup<R> =
+    Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_packs::tauri::Setup, BoxError> + Send>;
+type ChannelsSetup<R> = Box<
+    dyn FnOnce(
+            &AppHandle<R>,
+            paddock_channels::Emit,
+        ) -> Result<Arc<paddock_channels::ChannelsControl>, BoxError>
+        + Send,
+>;
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
@@ -60,6 +75,10 @@ pub struct Builder<R: Runtime> {
     settings: Option<Part<R, Settings>>,
     diagnostics: Option<DiagSetup<R>>,
     service: Option<ServiceSetup<R>>,
+    first_run: Option<Part<R, FirstRun>>,
+    files: Option<FilesSetup<R>>,
+    packs: Option<PacksSetup<R>>,
+    channels: Option<ChannelsSetup<R>>,
     sections: Vec<Arc<dyn Configurable>>,
     startup: Option<Startup<R>>,
     updater: Option<Part<R, UpdatesBuilder>>,
@@ -82,6 +101,10 @@ impl<R: Runtime> Builder<R> {
             settings: None,
             diagnostics: None,
             service: None,
+            first_run: None,
+            files: None,
+            packs: None,
+            channels: None,
             sections: Vec::new(),
             startup: None,
             updater: None,
@@ -150,6 +173,57 @@ impl<R: Runtime> Builder<R> {
         f: impl FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send + 'static,
     ) -> Self {
         self.service = Some(Box::new(f));
+        self
+    }
+
+    /// The first-run set-up checklist (plan X19): the background service and Start at login when the app has them
+    /// ([`Builder::service`]), then the steps `f` names (notification permission, Pitwall pairing, the app's own). The
+    /// shell serves `setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish` and the `paddock://setup`
+    /// event; the answers are kept in `setup.json` in the app's config folder. A step that cannot be built is a failed
+    /// start naming it.
+    pub fn first_run(mut self, f: impl FnOnce(&AppHandle<R>) -> FirstRun + Send + 'static) -> Self {
+        self.first_run = Some(Box::new(f));
+        self
+    }
+
+    /// The app's user files (plan X31): path grants, the pickers, recent lists, reveal and open. The shell manages the service
+    /// (`paddock_files::Files::for_app(&dirs, &[recent::FILES, recent::PROJECTS])`), serves the `files_*` commands, grants files
+    /// dropped on a window to it (`paddock://files-dropped`) and, with `native-dialogs`, shows the native dialogs when the
+    /// service has no picker of its own. The app's own commands take `paddock_files::tauri::WindowGrants`.
+    pub fn files(
+        mut self,
+        f: impl FnOnce(&AppHandle<R>) -> Result<paddock_files::Files, BoxError> + Send + 'static,
+    ) -> Self {
+        self.files = Some(Box::new(f));
+        self
+    }
+
+    /// The app's knowledge packs (plan X15): its pack kinds and, if it has one, the health entry that follows them. The
+    /// shell manages them (`packs_status`, `packs_reload` and the `paddock://packs` event) and keeps the health entry
+    /// current with its Repair (reload). Do the first load (`Reloader::reload_now`) before the closure returns, so the
+    /// first look is real.
+    pub fn packs(
+        mut self,
+        f: impl FnOnce(&AppHandle<R>) -> Result<paddock_packs::tauri::Setup, BoxError> + Send + 'static,
+    ) -> Self {
+        self.packs = Some(Box::new(f));
+        self
+    }
+
+    /// The app's notification channels (plan X17): the closure builds the `ChannelsControl` (settings store, secrets, the
+    /// `paddock-net` egress, clock) around the event sender it is given. The shell manages it (`channels_get`, `channels_save`,
+    /// `channels_set_secret`, `channels_clear_secret`, `channels_test` and the `paddock://channels` event); only the secret
+    /// dialog's window may store a secret.
+    pub fn channels(
+        mut self,
+        f: impl FnOnce(
+            &AppHandle<R>,
+            paddock_channels::Emit,
+        ) -> Result<Arc<paddock_channels::ChannelsControl>, BoxError>
+        + Send
+        + 'static,
+    ) -> Self {
+        self.channels = Some(Box::new(f));
         self
     }
 
@@ -279,8 +353,24 @@ impl<R: Runtime> Builder<R> {
                 paddock_diag::tauri::invoke_handler(),
             )
             .route(
+                &paddock_files::COMMANDS,
+                paddock_files::tauri::invoke_handler(),
+            )
+            .route(
                 &paddock_service::COMMANDS,
                 paddock_service::tauri::invoke_handler(),
+            )
+            .route(
+                &crate::setup::COMMANDS,
+                crate::setup::tauri::invoke_handler(),
+            )
+            .route(
+                &paddock_packs::COMMANDS,
+                paddock_packs::tauri::invoke_handler(),
+            )
+            .route(
+                &paddock_channels::COMMANDS,
+                paddock_channels::tauri::invoke_handler(),
             )
             .route(
                 &paddock_jobs::tauri::COMMANDS,
@@ -363,6 +453,19 @@ impl<R: Runtime> Builder<R> {
             }
         }
 
+        if let Some(f) = self.files {
+            let files = f(app).map_err(|e| named("user files", e))?;
+            let files = if files.can_pick() {
+                files
+            } else {
+                match native_files_picker(app) {
+                    Some(picker) => files.picker(picker),
+                    None => files,
+                }
+            };
+            paddock_files::tauri::install(app, files);
+        }
+
         if let Some(f) = self.service {
             let part = f(app).map_err(|e| named("the background service", e))?;
             let service = paddock_service::tauri::install(app, part.setup);
@@ -387,6 +490,16 @@ impl<R: Runtime> Builder<R> {
                     Ok(())
                 }))
                 .map_err(|e| named("the Start at login settings", e))?;
+        }
+
+        if let Some(f) = self.packs {
+            let setup = f(app).map_err(|e| named("the knowledge packs", e))?;
+            paddock_packs::tauri::install(app, setup);
+        }
+
+        if let Some(f) = self.channels {
+            paddock_channels::tauri::install(app, |emit| f(app, emit))
+                .map_err(|e| named("the notification channels", e))?;
         }
 
         let dialogs = Dialogs::from_json(self.contracts.as_deref().unwrap_or(NO_CONTRACTS))
@@ -428,10 +541,77 @@ impl<R: Runtime> Builder<R> {
                 .register(section)
                 .map_err(|e| named(&format!("the settings section {id}"), e))?;
         }
+        if let Some(f) = self.first_run {
+            let part = f(app);
+            let mut items: Vec<Arc<dyn SetupItem>> = Vec::new();
+            if let Some(service) = app.try_state::<Arc<paddock_service::tauri::Service>>() {
+                items.push(Arc::new(ServiceItem::new(
+                    &self.identity.name,
+                    service.control().clone(),
+                )));
+                items.push(Arc::new(LoginItem::new(
+                    &self.identity.name,
+                    settings.clone(),
+                )));
+            }
+            if let Some(access) = part.notifications {
+                items.push(Arc::new(NotificationsItem::new(
+                    &self.identity.name,
+                    access,
+                )));
+            }
+            if let Some((port, needs)) = part.pitwall {
+                items.push(Arc::new(PitwallItem::new(&self.identity.name, needs, port)));
+            }
+            items.extend(part.extra);
+            let dir = if self.in_memory {
+                None
+            } else {
+                app.path().app_config_dir().ok()
+            };
+            crate::setup::tauri::install(app, items, dir)
+                .map_err(|e| named("the set-up checklist", e))?;
+        }
         for f in self.setup {
             f(app)?;
         }
         Ok(())
+    }
+}
+
+/// What [`Builder::first_run`] adds to the shell's own steps.
+#[derive(Default)]
+pub struct FirstRun {
+    notifications: Option<Arc<dyn NotificationAccess>>,
+    pitwall: Option<(Arc<dyn PitwallPort>, paddock_pitwall::Caps)>,
+    extra: Vec<Arc<dyn SetupItem>>,
+}
+
+impl FirstRun {
+    /// No steps beyond the service and Start at login.
+    pub fn new() -> FirstRun {
+        FirstRun::default()
+    }
+
+    /// The notification-permission step over the OS (`paddock_health::tauri::native` has the real one).
+    #[must_use]
+    pub fn notifications(mut self, access: Arc<dyn NotificationAccess>) -> FirstRun {
+        self.notifications = Some(access);
+        self
+    }
+
+    /// The Pitwall step; `needs` is what the app asks of models.
+    #[must_use]
+    pub fn pitwall(mut self, port: Arc<dyn PitwallPort>, needs: paddock_pitwall::Caps) -> FirstRun {
+        self.pitwall = Some((port, needs));
+        self
+    }
+
+    /// One of the app's own steps (Debrief's tour), after the shell's.
+    #[must_use]
+    pub fn item(mut self, item: Arc<dyn SetupItem>) -> FirstRun {
+        self.extra.push(item);
+        self
     }
 }
 
@@ -458,6 +638,19 @@ impl ServicePart {
         self.autostart = autostart;
         self
     }
+}
+
+/// The native open and save dialogs for user files (`native-dialogs`); without the feature the app's files name a picker.
+#[cfg(feature = "native-dialogs")]
+fn native_files_picker<R: Runtime>(app: &AppHandle<R>) -> Option<Arc<dyn paddock_files::Picker>> {
+    Some(Arc::new(paddock_files::tauri::NativePicker::new(
+        app.clone(),
+    )))
+}
+
+#[cfg(not(feature = "native-dialogs"))]
+fn native_files_picker<R: Runtime>(_: &AppHandle<R>) -> Option<Arc<dyn paddock_files::Picker>> {
+    None
 }
 
 /// The native save dialog for reports (`native-dialogs`); without the feature the app's setup must name a picker.
@@ -487,6 +680,7 @@ fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
         paddock_window::tauri::on_window_event(window, event);
     }
     paddock_menu::tauri::on_window_event(window, event);
+    paddock_files::tauri::on_window_event(window, event);
     let app = window.app_handle();
     match event {
         WindowEvent::Focused(true) => paddock_health::tauri::on_focus(app, window.label()),

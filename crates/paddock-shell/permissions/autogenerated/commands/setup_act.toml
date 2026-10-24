@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-setup-act"
+description = "Enables the setup_act command without any pre-configured scope."
+commands.allow = ["setup_act"]
+
+[[permission]]
+identifier = "deny-setup-act"
+description = "Denies the setup_act command without any pre-configured scope."
+commands.deny = ["setup_act"]

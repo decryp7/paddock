@@ -23,6 +23,8 @@ paddock-health = { workspace = true, optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
+# The never-panics test of the parsers (conformance check C36).
+paddock-testkit = { workspace = true }
 tempfile = "3"
 # The Tauri adapter is tested on Tauri's mock runtime.
 tauri = { workspace = true, features = ["test"] }

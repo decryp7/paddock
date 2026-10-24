@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input, signal } from '@angular/core
 import { TestBed } from '@angular/core/testing';
 import { CommandService, ContributionRegistry, defineCommand, msg, ShellContextHost, SHELL_IDLE, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { WindowReady } from '@decryp7/paddock-ui/shell/startup';
-import { ManualClock, ManualIdle, provideShellTesting, RecordingShellPorts, render, settle, shellIdle, shellPorts } from './shell-testing';
+import { FakeClock, ManualIdle, provideShellTesting, RecordingShellPorts, render, settle, shellIdle, shellPorts } from './shell-testing';
 
 interface Demo {
   readonly count: ReturnType<typeof signal<number>>;
@@ -62,19 +62,38 @@ describe('provideShellTesting', () => {
   });
 });
 
-describe('ManualClock', () => {
+describe('FakeClock', () => {
   it('moves by hand and fires each tick as often as it fell due, until stopped', () => {
-    const clock = new ManualClock(0);
+    const clock = new FakeClock(0);
     const ticks: number[] = [];
     const stop = clock.every(100, () => ticks.push(clock.now()));
     clock.advance(250);
     expect(ticks).toEqual([100, 200]);
     expect(clock.now()).toBe(250);
+    expect(clock.monotonic()).toBe(250);
     expect(clock.ticking).toBe(1);
+    expect(clock.periods()).toEqual([100]);
     stop();
     clock.advance(1000);
     expect(ticks).toHaveLength(2);
-    expect(new ManualClock().now()).toBe(1_000_000);
+    expect(new FakeClock().now()).toBe(1_000_000);
+  });
+
+  it('fires a one-shot once, in time order with the ticks, and a wall change fires nothing', () => {
+    const clock = new FakeClock(5_000);
+    const seen: string[] = [];
+    clock.every(40, () => seen.push(`tick@${clock.monotonic()}`));
+    clock.after(50, () => seen.push(`once@${clock.monotonic()}`));
+    const cancelled = clock.after(10, () => seen.push('never'));
+    cancelled();
+    clock.advance(100);
+    expect(seen).toEqual(['tick@40', 'once@50', 'tick@80']);
+    clock.setWall(0);
+    expect(clock.now()).toBe(0);
+    expect(clock.monotonic()).toBe(100);
+    expect(seen).toHaveLength(3);
+    clock.advance(-5);
+    expect(clock.monotonic()).toBe(100);
   });
 });
 

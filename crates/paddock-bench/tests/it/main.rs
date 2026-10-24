@@ -2,3 +2,4 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`.
 
 mod cli;
+mod never_panics;

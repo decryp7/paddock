@@ -1,0 +1,22 @@
+// Generated from `paddock_workbench::COMMANDS` by its tests. Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-workbench --all-features --lib generated.
+pub const COMMAND_NAMES: &[&str] = &[
+    "assistant_approve_tool",
+    "assistant_conversations",
+    "assistant_delete",
+    "assistant_info",
+    "assistant_load",
+    "assistant_send",
+    "assistant_stop",
+    "drag_ghost_end",
+    "drag_ghost_show",
+    "drag_ghost_start",
+    "layout_get",
+    "layout_set",
+    "panel_dock_back",
+    "panel_focus",
+    "panel_keep_on_top",
+    "panel_pop_out",
+    "panels_list",
+    "pointer_button_down",
+    "ui_sync_publish",
+];
