@@ -196,7 +196,7 @@ pub fn find_vscode(
         .map(|p| {
             // A relative PATH entry would depend on the working directory: never used.
             std::env::split_paths(&p)
-                .filter(|dir| dir.is_absolute())
+                .filter(|dir| dir.is_absolute() || (os != Os::Windows && dir.has_root()))
                 .map(|dir| dir.join(name))
                 .collect::<Vec<_>>()
         })

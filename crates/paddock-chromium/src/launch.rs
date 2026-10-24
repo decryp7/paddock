@@ -441,7 +441,27 @@ impl Chromium {
             stop.clone(),
             timed_out.clone(),
         );
-        match connect(&dir, &mut process, opts.start_limit) {
+        let started = connect(&dir, &mut process, opts.start_limit).and_then(|conn| {
+            // The memory watcher looks every 200 ms, so a browser that is quick to start can be connected before its first
+            // look: one look now, with the same cap and sampler, so "over the cap while it starts" does not depend on timing.
+            match (opts.memory_cap, process.id()) {
+                (Some(limit), Some(pid)) => {
+                    let used = opts
+                        .memory_sampler
+                        .as_ref()
+                        .map_or_else(|| paddock_proc::tree_memory(pid), |sample| sample(pid));
+                    if used > limit {
+                        Err(Error::Launch(
+                            "the browser used more memory than allowed while it started".into(),
+                        ))
+                    } else {
+                        Ok(conn)
+                    }
+                }
+                _ => Ok(conn),
+            }
+        });
+        match started {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
                 process,
