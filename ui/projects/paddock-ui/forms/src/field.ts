@@ -35,12 +35,14 @@ let nextId = 0;
   `,
   styles: `
     :host { display: grid; gap: var(--pd-space-1); min-width: 0; align-content: start; }
-    :host(.pd-field--short) { max-width: 8rem; }
+    /* A short field narrows the control only: the error and the hint keep the whole column (an error of 20 characters must not wrap). */
+    :host(.pd-field--short) ::ng-deep :is(input, select, textarea) { max-width: 8rem; }
     .pd-field__label { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
+    .pd-field__error pd-glyph { margin-top: 1px; }
     .pd-required { color: var(--pd-danger-text, var(--pd-danger)); }
     .pd-field__hint { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-messages:empty { display: none; }
-    .pd-field__error { display: flex; align-items: center; gap: var(--pd-space-1); margin: 0; font-size: var(--pd-text-label); color: var(--pd-danger-text, var(--pd-danger)); }
+    .pd-field__error { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; font-size: var(--pd-text-label); color: var(--pd-danger-text, var(--pd-danger)); }
   `,
 })
 export class PdField {

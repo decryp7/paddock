@@ -338,6 +338,8 @@ describe('pd-table', () => {
     sorts[0]!.click();
     await settle(f);
     expect(el(f).querySelector('.pd-sorted .pd-sort-icon')?.querySelector('svg path')?.getAttribute('d')).toBe('M6 15l6-6 6 6');
+    // An unsorted header shows the two-way glyph, which a descending sort never uses.
+    expect(el(f).querySelectorAll('.pd-sort:not(.pd-sorted) .pd-sort-icon svg path')[0]?.getAttribute('d')).toBe('M8 9l4-4 4 4M8 15l4 4 4-4');
     sorts[0]!.click();
     await settle(f);
     expect(el(f).querySelector('.pd-sorted .pd-sort-icon')?.querySelector('svg path')?.getAttribute('d')).toBe('M6 9l6 6 6-6');
@@ -360,6 +362,10 @@ describe('pd-table', () => {
     f.componentInstance.state.set('loading');
     await settle(f);
     expect(el(f).querySelector('[data-testid=table-loading]')).not.toBeNull();
+    // Nothing is counted while loading, and the action track stays (the columns do not move when the rows arrive).
+    expect(el(f).querySelector('[data-testid=table-count]')).toBeNull();
+    const cols = el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols');
+    expect(cols).toMatch(/84px$/);
     expect(el(f).querySelector('[role=grid]')?.getAttribute('aria-busy')).toBe('true');
     expect(el(f).querySelectorAll('.pd-skel').length).toBeGreaterThan(0);
     f.componentInstance.state.set('error');
@@ -370,6 +376,18 @@ describe('pd-table', () => {
     f.componentInstance.state.set('ready');
     await settle(f);
     expect(rowEls(f)).toHaveLength(3);
+    expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols')).toBe(cols);
+    expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe('3 rows');
+  });
+
+  it('counts with the locale’s thousands separators and says nothing when there are no rows', async () => {
+    const f = await setup();
+    f.componentInstance.rows.set(Array.from({ length: 1250 }, (_, i): Plugin => ({ id: `r${i}`, name: `R${i}`, size: i, kind: 'k', path: `/p/${i}` })));
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe(`${new Intl.NumberFormat().format(1250)} rows`);
+    f.componentInstance.rows.set([]);
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-count]')).toBeNull();
   });
 
   it('shows the next step the app projects when there are no rows at all, and the filter message when a filter hides them', async () => {
