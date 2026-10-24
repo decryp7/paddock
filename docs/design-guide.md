@@ -98,8 +98,17 @@ red-orange (hue 18) and not amber, and why it is never used as a status.
 
 Sighter (proposed 2026-10-24, hue 80): 41 deg from warning amber, 70 from success green, far from Spotter teal (172) and
 Debrief blue (217). Measured: dark text 10.8:1 on surface-1, light text 5.6:1 on white and 5.0:1 on surface-2, white on
-the fill 5.6:1. It is a lime, so it must never stand in for success (status always has its word and icon); re-tint the
-app icon to the same hue and add the token set to `paddock-ui` with its token tests before freezing.
+the fill 5.6:1. It is a lime, so it must never stand in for success (status always has its word and icon). Under
+colour-vision deficiency (Machado 2009, CIELAB) lime and warning amber merge: ΔE 47 normal but 3 (dark tokens) to 6
+(light tokens) for deuteranopes. Rule for Sighter: warning is never colour alone (always the warning icon, its word in
+the text colour), and accent-coloured text is never placed directly beside a warning. Sighter's app checks this pair in
+its token test. Add the token set to `paddock-ui` with its token tests before freezing.
+
+The app icon stays on its cyan tile for now. App icon tiles are their own palette (Spotter: amber tile, teal accent), and
+a lime tile breaks the family's colour-vision separation: with the Sighter tile at #8CC63F the smallest OKLab distance
+(`icons/tools/cvd.mjs`) falls from 11.6 to 1.4 for protanopia (against Spotter's amber tile) and from 13.6 to 6.4 for
+deuteranopia; olive tiles (#4D7300 to #6E9A20) still drop protanopia to 3 to 7.6 against Pitcrew. The cyan tile is clear
+of every other tile, including Spotter's amber. Decide the icon with the design lead before changing it.
 
 Accent rules: primary button, selected nav item (tinted bg 14% + 2 px left or full tint, accent icon), focus ring (2 px
 accent, 2 px offset), links, the single highlighted chart series, progress of the app's own primary metric. Not
