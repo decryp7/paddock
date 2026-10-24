@@ -1268,6 +1268,363 @@
       <trans-unit id="pd.updates.up-to-date" datatype="html">
         <source>You have the latest version.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.activity.empty" datatype="html">
+        <source>Nothing here</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.label-badge" datatype="html">
+        <source><x id="label"/>, <x id="badge"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.more" datatype="html">
+        <source>More</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.tooltip-keys" datatype="html">
+        <source><x id="label"/> (<x id="keys"/>)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.tooltip-reason" datatype="html">
+        <source><x id="label"/> — <x id="reason"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.category.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.cmd.jobs" datatype="html">
+        <source>Show jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.cmd.toggle-sidebar" datatype="html">
+        <source>Toggle side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.autoHide.toBottom" datatype="html">
+        <source>Auto-hide to the bottom</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.autoHide.toLeft" datatype="html">
+        <source>Auto-hide to the left</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.autoHide.toRight" datatype="html">
+        <source>Auto-hide to the right</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.category" datatype="html">
+        <source>Window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.auto-hide" datatype="html">
+        <source>Auto hide or pin tool window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.auto-hide-all" datatype="html">
+        <source>Auto hide all tool windows</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.close-all-documents" datatype="html">
+        <source>Close all documents</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.float" datatype="html">
+        <source>Float panel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.full-screen" datatype="html">
+        <source>Full screen</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-apply" datatype="html">
+        <source>Apply saved layout</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-delete" datatype="html">
+        <source>Delete saved layout</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-reset" datatype="html">
+        <source>Reset perspective</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-save" datatype="html">
+        <source>Save current as perspective</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.panel-menu" datatype="html">
+        <source>Panel menu</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.pin-all" datatype="html">
+        <source>Pin all tool windows</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.pop-out" datatype="html">
+        <source>Pop out to window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.switcher" datatype="html">
+        <source>Switch panel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.floatCue.cancel" datatype="html">
+        <source>Release to cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.floatCue.window" datatype="html">
+        <source>Release to open in a new window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.autoHide" datatype="html">
+        <source>Auto-hide <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.autoHideTitle" datatype="html">
+        <source>Auto-hide <x id="title"/>. Right-click to choose the left, right or bottom edge.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.autoHideTitleKeys" datatype="html">
+        <source>Auto-hide <x id="title"/> (<x id="keys"/>). Right-click to choose the left, right or bottom edge.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.maximize" datatype="html">
+        <source>Maximize panel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.panelMenu" datatype="html">
+        <source>Panel menu</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.restore" datatype="html">
+        <source>Restore panel size</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.toolbar" datatype="html">
+        <source>Panel actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.barBottom" datatype="html">
+        <source>Auto-hidden tool windows (bottom)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.barLeft" datatype="html">
+        <source>Auto-hidden tool windows (left)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.barRight" datatype="html">
+        <source>Auto-hidden tool windows (right)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.hideLabel" datatype="html">
+        <source>Hide <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.pinLabel" datatype="html">
+        <source>Pin <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.pinTitle" datatype="html">
+        <source>Pin (dock it again)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.default-name" datatype="html">
+        <source>Layout</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.fit" datatype="html">
+        <source>Layout adjusted to fit this window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.fit.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.overflow.many" datatype="html">
+        <source><x id="count"/> more tabs</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.overflow.one" datatype="html">
+        <source>1 more tab</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.copied" datatype="html">
+        <source>Copied</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.copyDetails" datatype="html">
+        <source>Copy details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.copyFailed" datatype="html">
+        <source>Copy failed</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.failed" datatype="html">
+        <source>This panel failed: <x id="message"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.loading" datatype="html">
+        <source>Loading <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.missingView" datatype="html">
+        <source>The view &quot;<x id="id"/>&quot; is not available. Close this tab or reset the layout.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.stopped" datatype="html">
+        <source>The <x id="label"/> panel stopped, the rest of the app is unaffected.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.autoHide" datatype="html">
+        <source>Auto hide</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.closeAllDocuments" datatype="html">
+        <source>Close all documents</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.closeOthers" datatype="html">
+        <source>Close all but this</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.closeRight" datatype="html">
+        <source>Close all to the right</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.dock" datatype="html">
+        <source>Dock</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.dockAsDocument" datatype="html">
+        <source>Dock as tabbed document</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.float" datatype="html">
+        <source>Float</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.moveToNextGroup" datatype="html">
+        <source>Move to next tab group</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.newHorizontalGroup" datatype="html">
+        <source>New horizontal tab group</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.newVerticalGroup" datatype="html">
+        <source>New vertical tab group</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.pinTab" datatype="html">
+        <source>Pin tab</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.popOut" datatype="html">
+        <source>Pop out to window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.unpinTab" datatype="html">
+        <source>Unpin tab</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelTab.close" datatype="html">
+        <source>Close (Delete)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelTab.menu" datatype="html">
+        <source>Panel menu (Shift+F10)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-1" datatype="html">
+        <source>Switch to perspective 1</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-2" datatype="html">
+        <source>Switch to perspective 2</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-3" datatype="html">
+        <source>Switch to perspective 3</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-4" datatype="html">
+        <source>Switch to perspective 4</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-5" datatype="html">
+        <source>Switch to perspective 5</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-6" datatype="html">
+        <source>Switch to perspective 6</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-7" datatype="html">
+        <source>Switch to perspective 7</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-8" datatype="html">
+        <source>Switch to perspective 8</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-9" datatype="html">
+        <source>Switch to perspective 9</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.popout.failed" datatype="html">
+        <source>The panel could not be moved to its own window.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.popout.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.switcher.documents" datatype="html">
+        <source>Active documents</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.switcher.tools" datatype="html">
+        <source>Active tool windows</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.windowLayouts.applyFailed" datatype="html">
+        <source>Layout &quot;<x id="name"/>&quot; could not be applied; the default layout is shown</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.action-failed" datatype="html">
+        <source>That action failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.empty" datatype="html">
+        <source>Nothing here yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.failed" datatype="html">
+        <source>This list could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.more" datatype="html">
+        <source>Show more</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.more-of" datatype="html">
+        <source>Show more (<x id="count"/> left)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.no-actions" datatype="html">
+        <source>No actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.no-children" datatype="html">
+        <source>This item has no children to show.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.none" datatype="html">
+        <source>Nothing to explore.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.open-failed" datatype="html">
+        <source><x id="item"/> could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.refresh" datatype="html">
+        <source>Refresh <x id="section"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.activity" datatype="html">
+        <source>Activity bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.resize" datatype="html">
+        <source>Resize the side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.sidebar" datatype="html">
+        <source>Side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.skip" datatype="html">
+        <source>Skip to the work area</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.status" datatype="html">
+        <source>Status bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.accept-failed" datatype="html">
+        <source>That result could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.category.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.cmd.commands" datatype="html">
+        <source>Show all commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.cmd.quick-open" datatype="html">
+        <source>Go to…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.dialog" datatype="html">
+        <source>Command palette</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.did-you-mean" datatype="html">
+        <source>Nothing matches “<x id="query"/>”. Did you mean:</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.empty" datatype="html">
+        <source>Nothing matches</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.failed" datatype="html">
+        <source>The search failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.input" datatype="html">
+        <source>Type a command, or a prefix to search</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.names-building" datatype="html">
+        <source>Still indexing names…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.open-view" datatype="html">
+        <source>Open <x id="view"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.placeholder" datatype="html">
+        <source>Type a command or search…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.prefix.commands" datatype="html">
+        <source>Commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.results" datatype="html">
+        <source>Results</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.searching" datatype="html">
+        <source>Searching…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.unavailable" datatype="html">
+        <source>Not available now</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.view.jobs" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
       <trans-unit id="pd.whats-new.failed" datatype="html">
         <source>The release notes could not be loaded.</source>
       </trans-unit>

@@ -1,5 +1,5 @@
 import type { Injector } from '@angular/core';
-import { defineCommand, defineKeybinding, defineMenuItem, msg } from '@decryp7/paddock-ui/shell';
+import { defineCommand, defineKeybinding, defineMenuItem, msg, type Message } from '@decryp7/paddock-ui/shell';
 import { provideLiveContributions, type WorkbenchBatch } from '@decryp7/paddock-ui/workbench';
 import { Perspectives, PERSPECTIVE_KEYS } from './perspectives';
 import { WorkbenchDock } from './dock.service';
@@ -34,6 +34,19 @@ const nameOf = (args: unknown): string | null => (typeof args === 'object' && ar
  * The dock's commands, keys and Window-menu entries (ids `pd.wb.dock.*`) for a window whose injector has a
  * `WorkbenchDock`. Every function resolves the services only when it runs (the registry is being built when this is).
  */
+/** The titles of "Switch to perspective n" (literals, so the message catalog extracts each). */
+const PERSPECTIVE_TITLES: readonly Message[] = [
+  msg('pd.wb.dock.perspective-1', 'Switch to perspective 1'),
+  msg('pd.wb.dock.perspective-2', 'Switch to perspective 2'),
+  msg('pd.wb.dock.perspective-3', 'Switch to perspective 3'),
+  msg('pd.wb.dock.perspective-4', 'Switch to perspective 4'),
+  msg('pd.wb.dock.perspective-5', 'Switch to perspective 5'),
+  msg('pd.wb.dock.perspective-6', 'Switch to perspective 6'),
+  msg('pd.wb.dock.perspective-7', 'Switch to perspective 7'),
+  msg('pd.wb.dock.perspective-8', 'Switch to perspective 8'),
+  msg('pd.wb.dock.perspective-9', 'Switch to perspective 9'),
+];
+
 export function dockContributions(injector: Injector): WorkbenchBatch {
   const dock = () => injector.get(WorkbenchDock);
   const perspectives = () => injector.get(Perspectives);
@@ -41,7 +54,7 @@ export function dockContributions(injector: Injector): WorkbenchBatch {
   const perspectiveAt = (n: number) =>
     defineCommand({
       id: DOCK_COMMANDS.perspective(n),
-      title: msg(`pd.wb.dock.perspective-${n}`, `Switch to perspective ${n}`),
+      title: PERSPECTIVE_TITLES[n - 1] as Message,
       category: CATEGORY,
       when: () => !!perspectives().at(n),
       run: () => {
