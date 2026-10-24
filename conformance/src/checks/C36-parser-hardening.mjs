@@ -7,7 +7,7 @@
 import { warn } from '../finding.mjs';
 
 const PARSE_FN = /\bpub\s+(?:async\s+)?fn\s+((?:parse|decode|read|deserialize|from_str|from_bytes)\w*)\s*(?:<[^>]*>)?\s*\(\s*(?:&?(?:mut\s+)?self\s*,\s*)?(?:mut\s+)?\w+\s*:\s*(&\s*str|&\s*\[\s*u8\s*\]|String|Vec<u8>|impl\s+(?:\w+::)*(?:Buf)?Read\b|&\s*mut\s+(?:dyn\s+|impl\s+)?(?:\w+::)*(?:Buf)?Read\b|&\s*Path|&\s*\[u8\])/g;
-const HARDENING = /\bfuzz_target!|\bnever_panics\s*\(|\bcorpus\s*\(|\bproptest!\s*\{|\bproptest!\s*\(/;
+const HARDENING = /\bfuzz_target!|never_panics\s*\(|\bcorpus\s*\(|\bproptest!\s*\{|\bproptest!\s*\(/;
 
 /** The parsing functions in a Rust source: [{ line, name }]. */
 export function parseFunctions(source) {
@@ -35,7 +35,9 @@ export default {
     const out = [];
     for (const c of crates) {
       if (skip.has(c.name)) continue;
-      const inCrate = (f) => (c.dir === '' ? !f.startsWith('fuzz/') : f.startsWith(`${c.dir}/`));
+      // A file belongs to the nearest crate above it: the demo agent inside the demo app is the agent's, not the app's.
+      const owner = (f) => crates.filter((x) => x.dir === '' || f.startsWith(`${x.dir}/`)).sort((a, b) => b.dir.length - a.dir.length)[0];
+      const inCrate = (f) => owner(f) === c;
       const sources = rs.filter((f) => inCrate(f) && /(^|\/)src\//.test(f) && !/(^|\/)(?:tests?|benches)(\.rs|\/)/.test(f));
       const found = sources.flatMap((f) => parseFunctions(ctx.read(f) ?? '').map((p) => ({ ...p, file: f })));
       if (!found.length && !named.has(c.name)) continue;

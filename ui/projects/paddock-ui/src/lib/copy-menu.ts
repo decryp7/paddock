@@ -51,7 +51,8 @@ export class PdCopyMenu {
   styles: `
     .pd-menu { position: fixed; z-index: var(--pd-z-toast); min-width: 112px; padding: var(--pd-space-1); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); box-shadow: var(--pd-shadow-2); }
     .pd-item { display: block; width: 100%; padding: var(--pd-space-1) var(--pd-space-3); border: 0; border-radius: var(--pd-radius-tag); background: transparent; color: var(--pd-text); font: inherit; text-align: start; cursor: pointer; }
-    .pd-item:hover, .pd-item:focus-visible { background: var(--pd-hover); outline: none; }
+    .pd-item:hover { background: var(--pd-hover); }
+    .pd-item:focus-visible { background: var(--pd-hover); outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
   `,
 })
 export class PdCopyMenuHost {

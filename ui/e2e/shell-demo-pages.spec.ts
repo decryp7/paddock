@@ -27,7 +27,7 @@ test.describe('pages frame (plan S14)', () => {
     await expect(app.frame.heading).toHaveText('Overview');
     await expect(page).toHaveTitle('Overview – Paddock Shell Demo');
     await expect(app.sidebar.link('Overview')).toHaveAttribute('aria-current', 'page');
-    await expect(app.sidebar.links).toHaveText([/^Overview$/, /^Runners/, /^Local AI$/, /^Dialogs$/, /^Schedules$/, /^Keyboard$/, /^About$/]);
+    await expect(app.sidebar.links).toHaveText([/^Overview$/, /^Runners/, /^Local AI$/, /^Dialogs$/, /^Schedules$/, /^Files$/, /^Keyboard$/, /^Activity$/, /^About$/]);
 
     await app.sidebar.link('Keyboard').click();
     await expect(app.frame.heading).toHaveText('Keyboard');

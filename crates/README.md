@@ -95,9 +95,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-assistant` | the assistant (plan W6): `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for writes, the bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, Tauri commands and the `paddock://assistant` event | yes (Pacenotes, Sighter; Debrief's chat moves onto it); built |
 | `paddock-guard` | crash containment (ADR 0001, plan X51): `catch`, `Quarantine` (3 failures in 10 minutes, shared `Clock`, persisted through paddock-env), `Guard::call` (time budget, hang abandoned, typed refusal) | yes (Debrief, Pacenotes, Dyno plugin hosts); built |
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
-| `paddock-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-plugin-package` | the `.paddockplugin` archive, the plugin manifest model (permissions, contributions, namespaces), Ed25519 signing, keys, trust levels and store, installed-binary verification (ADR 0001, plan X51) | yes (Debrief, Pacenotes, Dyno tier 3); built |
-| `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
+| `paddock-view` | the declarative view model plugins return (ADR 0002, plan X51): `ViewDoc`, nodes, actions, patches, JSON + postcard, the limits validator, generated TypeScript | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
@@ -107,6 +106,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-files` | user files: path grants (open only paths the user chose, canonicalised), validated open/save pickers behind a port, recent lists (recorded only after a granted open, re-granted on use), reveal, open with the default program (never what runs on open) and web addresses (plan X31; from Debrief `paths.rs`, `recent.rs`, `opener.rs`) | yes (all apps; Pacenotes and Sighter from their first commit); built |
 | `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
@@ -922,6 +922,29 @@ guard.quarantine().release("my-plugin"); // the user re-enabled it
   failure) and refuses calls until the abandoned call returns. In-process guarding cannot stop a running call or survive an
   abort; that is the process boundary's job.
 - Tests drive a `FakeClock`; nothing sleeps or measures time. Locks poisoned by a panicking thread are recovered.
+## `paddock-view` (plan X51, ADR 0002)
+
+The declarative view model a plugin returns instead of web code: pure data, validated in Rust, rendered by the host's generic
+components. Depends on `paddock-ipc` (for `Json`, the arguments of an action) and serde only.
+
+- `ViewDoc { schema, title, root, etag }`; `Node { id, kind: NodeKind }` with `Stack`, `Text`, `Table`, `Tree` (flat, pre-order
+  `depth`), `Graph`, `Diagram`, `Form`, `ReviewList`, `Matrix`, `Chart`, `Badge`, `Progress`, `Empty`, `NeedsAi` and `Link`.
+  `ActionRef { id, label, confirm, args, writes }` carries the text label that makes every interactive node accessible;
+  `Link` is an action or `OpenInBrowser { url, label }`. Icons, tones and text styles are closed enums.
+- Wire: JSON (camelCase, externally tagged enums) and postcard, no `untagged`/`flatten`/internal or adjacent tags (postcard
+  cannot decode those) and no `skip_serializing_if`; variants only appended. `to_json`/`from_json`/`to_postcard`/`from_postcard`
+  refuse more than 1 MiB and stop nesting at 64 nodes while decoding (postcard has no recursion limit of its own).
+- `validate(&ViewDoc) -> Result<(), ViewError>`: depth 16, 20,000 nodes (nodes, tree nodes, graph nodes, diagram elements,
+  table rows, findings, matrix cells, fields), 1 MiB encoded, strings 8 KiB, ids 128 bytes and unique, graphs and diagrams
+  5,000 nodes / 20,000 edges with edges naming existing nodes, inline rows 2,000 (more: `RowSource::Paged`), charts 20,000
+  values, `u64`s below 2^53, links `http`/`https` without user information. `validate_action` bounds a `ViewAction`.
+- `apply_patch(&mut ViewDoc, ViewPatch)`: `Replace { base_etag, etag, id, node }` (a stale base or an unchanged etag is refused) or
+  `Doc` (a new etag); all or nothing, and the result is validated.
+- Host-added action arguments: `row` (table row), `page`, `node` (tree/graph node, `expand`), `finding` (and `reason`), `values`
+  (form), `column`/`descending` (`sort`).
+- Generated TypeScript: `ui/projects/paddock-ui/view/generated/view.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-view --lib
+  generated`; a test fails on a stale file). The Angular `<pd-view>` renderer is not built yet.
+- Fuzz: `crates/paddock-view/fuzz` (`cargo +nightly fuzz run decode` from `crates/paddock-view`).
 
 ## `paddock-ipc` (plan X13, ADR 0001 step 1)
 
@@ -1012,6 +1035,46 @@ archive::verify_installed(&installed, &sha)?;                                   
 - `fuzz/` holds the manifest and archive fuzz targets (`cargo +nightly fuzz run manifest`, `... package`); `tests/properties.rs` runs
   never-panic and never-accept-other-content properties with the tests.
 
+## `paddock-files` (plan X31)
+
+The rule "open only paths the user chose" in one place, plus what an app does with the user's files. Built from Debrief's
+`paths.rs`, `recent.rs` and `opener.rs`; Pitcrew's `open_url`/`reveal_logs` and Spotter's and Dyno's direct calls to the dialog and
+opener plugins become `Files`.
+
+```rust
+use paddock_files::{Access, Files, GrantSource, PickRequest, recent};
+
+// shell: Builder::new(identity).files(|_| Ok(Files::for_app(&dirs, &[recent::FILES, recent::PROJECTS])))
+// an app command takes the calling window's grants (a dialog or pop-out resolves to its host):
+#[tauri::command]
+async fn open_log(grants: paddock_files::tauri::WindowGrants, app: tauri::AppHandle, path: String) -> Result<(), CommandError> {
+    let granted = grants.read_file(&path, &["log", "txt"])?;        // notGranted unless the user chose it
+    // ... open it ...
+    paddock_files::tauri::opened(&app, "files", &granted, None);     // recorded only after a granted open
+    Ok(())
+}
+```
+
+- **Grants** (`PathGrants`, `GrantedPath`): filled only on the Rust side by the native dialogs (`Files::pick`), drag and drop
+  (the shell's window hook grants a drop to the window and sends `paddock://files-dropped`), the command line
+  (`tauri::grant_command_line`), a window's project file and files the app produced (`GrantSource`). Per window, at most
+  `MAX_GRANTS`, expiring after `GRANT_TTL` (a project does not), compared canonically so `..` and links cannot reach another
+  file; a read grant on a folder covers what is inside it. The message of a refusal says what to do (choose it again).
+- **Validators** (`path`): `parse` (absolute, bounded, no NUL), `canonical`, `output_file`, `child`, `confined` (a removal stays in
+  a root).
+- **Pickers**: `PickRequest` is validated (bounded title, letters-and-digits extensions, a plain default name) and shown by a
+  `Picker`; `tauri::NativePicker` (feature `dialog`, native glue) is the `tauri-plugin-dialog` adapter. It runs on the blocking
+  pool.
+- **Recent lists** (`Recents`, `ListSpec`): any number of named lists with caps (`recent::FILES`, `recent::PROJECTS`), in a
+  versioned `recent.json` of the config folder (damaged or newer reads as empty), announced on `paddock://files-recent`.
+  `Files::regrant` grants an entry again on use.
+- **Open** (`open`): reveal, open with the default program and the browser as command lines that are pure functions of the OS
+  (`Os`), started by a `Launcher` (a detached child with a reaper and a timeout). Files that would run (`runs_on_open`: scripts,
+  programs, installers) are refused; web addresses must be http, https or mailto.
+- **Commands** (`COMMANDS`, folded into the shell plugin): `files_pick`, `files_recent_list|remove|clear|grant`, `files_reveal`,
+  `files_open`, `files_open_app_folder` (data, config, cache, logs by name: the webview never supplies the path) and
+  `files_open_url`. The wire types and names are generated into `ui/projects/paddock-ui/shell/files/generated/`
+  (`PADDOCK_WRITE_TS=1 cargo test -p paddock-files --all-features --lib generated`).
 ## `paddock-net` (plan X16)
 
 Every outbound request goes through one `Egress`:

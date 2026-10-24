@@ -3142,12 +3142,12 @@ dependencies = [
 name = "paddock-assistant"
 version = "0.1.0"
 dependencies = [
- "log",
  "paddock-commands",
  "paddock-env",
  "paddock-health",
  "paddock-pitwall",
  "paddock-secrets",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3163,6 +3163,7 @@ dependencies = [
  "jsonschema",
  "paddock-cli",
  "paddock-env",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3222,6 +3223,7 @@ name = "paddock-cli"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde_json",
 ]
@@ -3250,6 +3252,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-settings",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "regex",
  "serde",
@@ -3267,6 +3270,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3282,6 +3286,7 @@ dependencies = [
  "fs4",
  "httpdate",
  "paddock-jobs",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "rustls",
  "serde",
@@ -3301,6 +3306,24 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "paddock-files"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-dialog",
+ "tempfile",
+ "ts-rs",
 ]
 
 [[package]]
@@ -3359,6 +3382,7 @@ dependencies = [
  "croner",
  "jiff",
  "paddock-commands",
+ "paddock-env",
  "paddock-workspace-hack",
  "proptest",
  "serde",
@@ -3389,6 +3413,7 @@ dependencies = [
  "log",
  "paddock-env",
  "paddock-jobs",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3406,6 +3431,7 @@ dependencies = [
  "log",
  "paddock-jobs",
  "paddock-log",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3473,6 +3499,7 @@ dependencies = [
  "paddock-env",
  "paddock-health",
  "paddock-jobs",
+ "paddock-testkit",
  "paddock-watch",
  "paddock-workspace-hack",
  "regex",
@@ -3515,11 +3542,46 @@ dependencies = [
  "paddock-health",
  "paddock-proc",
  "paddock-secrets",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",
  "ts-rs",
+]
+
+[[package]]
+name = "paddock-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "paddock-ipc",
+ "paddock-plugin-package",
+ "paddock-settings",
+ "paddock-view",
+ "paddock-workspace-hack",
+ "postcard",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "paddock-plugin-host"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-env",
+ "paddock-guard",
+ "paddock-ipc",
+ "paddock-jobs",
+ "paddock-plugin-api",
+ "paddock-plugin-package",
+ "paddock-plugin-test",
+ "paddock-settings",
+ "paddock-view",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -3543,10 +3605,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-plugin-test"
+version = "0.1.0"
+dependencies = [
+ "paddock-ipc",
+ "paddock-plugin-api",
+ "paddock-plugin-package",
+ "paddock-settings",
+ "paddock-testkit",
+ "paddock-view",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "sysinfo",
  "tempfile",
@@ -3563,6 +3642,7 @@ dependencies = [
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3616,6 +3696,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-health",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "regex",
  "serde",
@@ -3635,6 +3716,7 @@ dependencies = [
  "paddock-dialogs",
  "paddock-download",
  "paddock-env",
+ "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-log",
@@ -3657,6 +3739,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-siblings"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-siblings",
+ "paddock-window",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-startup"
 version = "0.1.0"
 dependencies = [
@@ -3664,6 +3761,7 @@ dependencies = [
  "paddock-commands",
  "paddock-env",
  "paddock-log",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3716,6 +3814,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-view"
+version = "0.1.0"
+dependencies = [
+ "paddock-commands",
+ "paddock-ipc",
+ "paddock-workspace-hack",
+ "postcard",
+ "proptest",
+ "serde",
+ "serde_json",
+ "ts-rs",
+]
+
+[[package]]
 name = "paddock-watch"
 version = "0.1.0"
 dependencies = [
@@ -3733,6 +3845,7 @@ dependencies = [
  "paddock-commands",
  "paddock-dialogs",
  "paddock-jobs",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
