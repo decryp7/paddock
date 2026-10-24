@@ -29,8 +29,8 @@ const MANY: Plugin[] = Array.from({ length: 5000 }, (_, i) => ({
   name: `Record ${String(i + 1).padStart(4, '0')}`,
   kind: KINDS[i % KINDS.length] as string,
   version: `2.${i % 9}.0`,
-  size: (i * 37) % 4096,
-  path: `/data/records/${i}/entry.bin`,
+  size: ((i + 1) * 37) % 4096,
+  path: `/data/records/${i + 1}/entry.bin`,
   state: 'ready',
 }));
 
@@ -95,12 +95,12 @@ const COLUMNS: PdColumn<Plugin>[] = [
       <h2 id="h-pdchart">Chart</h2>
       <p>The wrapper draws a spec in the family theme; each chart has a name and a text twin for screen readers.</p>
       <div class="gal-charts">
-        <div class="gal-box"><pd-chart label="Requests per hour" [spec]="line" [height]="200" /></div>
-        <div class="gal-box"><pd-chart label="Outcome per day" [spec]="stacked" [height]="200" /></div>
-        <div class="gal-box"><pd-chart label="Latency p95" [spec]="area" [height]="200" /></div>
+        <div class="gal-box"><pd-chart label="Request rate" [spec]="line" [height]="200" /></div>
+        <div class="gal-box"><pd-chart label="Outcome per day, last 7 days" [spec]="stacked" [height]="200" /></div>
+        <div class="gal-box"><pd-chart label="Latency p95, last 24 h" [spec]="area" [height]="200" /></div>
         <div class="gal-box"><pd-chart label="Disk use by kind" [spec]="donut" [height]="200" /></div>
-        <div class="gal-box" data-testid="chart-loading-box"><pd-chart label="Latency p95" [spec]="area" [height]="200" state="loading" /></div>
-        <div class="gal-box" data-testid="chart-error-box"><pd-chart label="Latency p95" [spec]="area" [height]="200" state="error" errorText="The latency data could not be loaded." /></div>
+        <div class="gal-box" data-testid="chart-loading-box"><pd-chart label="Latency p95, last 24 h" [spec]="area" [height]="200" state="loading" /></div>
+        <div class="gal-box" data-testid="chart-error-box"><pd-chart label="Latency p95, last 24 h" [spec]="area" [height]="200" state="error" errorText="The latency data could not be loaded." /></div>
       </div>
     </section>
 
@@ -154,7 +154,7 @@ export class GalData {
   }
 
   protected readonly hours = Array.from({ length: 12 }, (_, i) => `${String(i * 2).padStart(2, '0')}:00`);
-  protected readonly line: PdChartSpec = { kind: 'line', x: this.hours, unit: 'req', series: [{ name: 'Requests', values: [12, 18, 9, 22, 41, 38, 52, null, 47, null, 21, 15], color: 'accent' }] };
+  protected readonly line: PdChartSpec = { kind: 'line', x: this.hours, unit: 'req/h', series: [{ name: 'Requests', values: [12, 18, 9, 22, 41, 38, 52, null, 47, null, 21, 15], color: 'accent' }] };
   protected readonly stacked: PdChartSpec = {
     kind: 'stackedBar',
     x: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],

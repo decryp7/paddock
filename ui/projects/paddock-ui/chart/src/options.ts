@@ -176,6 +176,8 @@ export function chartOption(spec: PdChartSpec, t: PaddockChartTokens, drawing: P
     const narrow = drawing.narrow === true;
     const height = drawing.height ?? 200;
     const radius = narrow ? RING_RADIUS_NARROW : Math.max(40, Math.min(Math.floor(height / 2) - 10, 90));
+    // The total reads as one value on one line, smaller when it is long, so it stays inside the hole of the ring.
+    const totalText = withUnit(format(total), spec.unit);
     const cx = narrow ? Math.floor((drawing.width ?? 320) / 2) : radius + 16;
     const cy = narrow ? radius + 12 : Math.floor(height / 2);
     return {
@@ -198,7 +200,7 @@ export function chartOption(spec: PdChartSpec, t: PaddockChartTokens, drawing: P
           type: 'text',
           x: cx,
           y: cy,
-          style: { text: `${format(total)}${spec.unit ? `\n${spec.unit}` : ''}`, textAlign: 'center', textVerticalAlign: 'middle', fill: t.text, font: `600 18px ${t.fontFamily}`, lineHeight: 22 },
+          style: { text: totalText, textAlign: 'center', textVerticalAlign: 'middle', fill: t.text, font: `600 ${totalText.length > 7 ? 13 : 16}px ${t.fontFamily}` },
         },
       ],
       tooltip: {
@@ -225,7 +227,9 @@ export function chartOption(spec: PdChartSpec, t: PaddockChartTokens, drawing: P
   });
   const series = spec.series.map((s, i) => {
     const color = seriesColor(t, s.color, i, only);
-    const common = { name: s.name, color, itemStyle: { color } };
+    // Four or more series are not told apart by colour alone: hovering one isolates it, and the tooltip names it.
+    const isolate = spec.series.length >= 4 ? { emphasis: { focus: 'series' } } : {};
+    const common = { name: s.name, color, itemStyle: { color }, ...isolate };
     switch (spec.kind) {
       case 'line':
       case 'area': {

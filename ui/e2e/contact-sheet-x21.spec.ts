@@ -26,6 +26,8 @@ test.describe('contact sheet: data parts', () => {
   async function shoot(page: Page, theme: string, title: string, name: string, target: ReturnType<Page['locator']>): Promise<void> {
     mkdirSync(OUT, { recursive: true });
     const file = join(OUT, `${theme}-${name}.png`);
+    // No stray hover or focus in a frame: the pointer rests in a corner unless the frame is about it.
+    if (!/hover|menu/.test(name)) await page.mouse.move(0, 0);
     await target.screenshot({ path: file });
     shots.push({ theme, title, file });
   }
@@ -58,7 +60,7 @@ test.describe('contact sheet: data parts', () => {
       // Keyboard focus: the row ring and a focused sortable header.
       await small.locator('[role=row][data-index]').first().focus();
       await page.keyboard.press('ArrowDown');
-      await shoot(page, theme, 'Focused row (2 px ring) and a hovered header showing the sort chevron', 'table-focus-row', small.locator('.pd-grid'));
+      await shoot(page, theme, 'Focused row (2 px ring)', 'table-focus-row', small.locator('.pd-grid'));
       await small.locator('.pd-sort').nth(1).focus();
       await page.keyboard.press('Tab');
       await page.keyboard.press('Shift+Tab');

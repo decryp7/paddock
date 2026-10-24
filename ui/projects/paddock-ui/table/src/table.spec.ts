@@ -362,6 +362,8 @@ describe('pd-table', () => {
     f.componentInstance.state.set('loading');
     await settle(f);
     expect(el(f).querySelector('[data-testid=table-loading]')).not.toBeNull();
+    // The filter stays in the toolbar (the bar keeps its shape) but is disabled until there is something to filter.
+    expect(el(f).querySelector<HTMLInputElement>('input[type=search]')?.disabled).toBe(true);
     // Nothing is counted while loading, and the action track stays (the columns do not move when the rows arrive).
     expect(el(f).querySelector('[data-testid=table-count]')).toBeNull();
     const cols = el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols');
@@ -377,6 +379,7 @@ describe('pd-table', () => {
     await settle(f);
     expect(rowEls(f)).toHaveLength(3);
     expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols')).toBe(cols);
+    expect(el(f).querySelector<HTMLInputElement>('input[type=search]')?.disabled).toBe(false);
     expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe('3 rows');
   });
 

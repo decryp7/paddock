@@ -102,7 +102,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
       @if (filterable()) {
         <label class="pd-filter">
           <pd-glyph name="search" [size]="14" />
-          <input class="pd-filter-input" type="search" autocomplete="off" [attr.aria-label]="t.filter" [placeholder]="t.filter" [value]="query()" (input)="query.set($any($event.target).value)" />
+          <input class="pd-filter-input" type="search" autocomplete="off" [attr.aria-label]="t.filter" [placeholder]="t.filter" [value]="query()" [disabled]="state() !== 'ready' || !rows().length" (input)="query.set($any($event.target).value)" />
         </label>
       }
       @if (countText(); as count) {
@@ -329,6 +329,9 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
     .pd-row:hover .pd-inline, .pd-row:focus-within .pd-inline { opacity: 1; }
     .pd-row:hover .pd-more, .pd-row:focus-within .pd-more, .pd-more[aria-expanded='true'] { color: var(--pd-text); }
+    /* On the selected row's tint the rest colour (mixed against the plain surface) is not 3:1: use the full subtle text there. */
+    .pd-row.pd-selected .pd-more { color: var(--pd-text-subtle); }
+    .pd-row.pd-selected:hover .pd-more, .pd-row.pd-selected:focus-within .pd-more, .pd-row.pd-selected .pd-more[aria-expanded='true'] { color: var(--pd-text); }
     @media (hover: none) { .pd-inline { opacity: 0.6; } }
     .pd-empty { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); margin: 0; padding: var(--pd-space-6, 32px) var(--pd-space-3); color: var(--pd-text-muted); text-align: center; font-size: var(--pd-text-body); }
     .pd-msg-row { display: block; }

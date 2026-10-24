@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Changed
+- X21 review 3: the resting "..." button shows the full subtle text on a selected row (the rest mix was 2.71:1 on the tint; the
+  token test now covers the selected tint and surface-2); paths are cut at segment boundaries and keep their trailing segments
+  (`…/Debrief/plugins/viewer/plugin-1.bin`); the donut total is one line; chart loading shows muted bars and a label (never an empty
+  chart); chart error groups message and Retry; the filter stays (disabled) while loading; from 4 series on `pd-chart` isolates a series on
+  hover and the guide asks for a non-colour key; dark disabled fields get more lift.
+
 - X21 review 2 (`ui/docs/review/x21-data/REVIEW.md`): `pd-middle-text` measures the room it is given (`flex: 1 1 0`), so paths are cut
   only as far as needed and grow back when the table widens; the donut lays out by the card's own width (list under the ring below
   400 px, the card grows to hold it), the total in its middle is drawn at the ring's centre (a tree-shaken loader needs
