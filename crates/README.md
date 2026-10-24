@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` built (S1), the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1) and `paddock-dialogs` (S5) built, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -116,6 +116,53 @@ Entries are sorted by name; an empty table is `{} as const` (name type `never`).
 
 An app writes its own file the same way into its UI (for example `src/app/core/generated/app-commands.ts`); dialog
 contracts and the contributions core type command names as `AppCommand | ShellCommand`.
+
+## `paddock-dialogs` (plan S5)
+
+Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_contracts.rs`, `dialog_placement.rs` and
+`dialog_windows.rs` (Debrief ADRs 0050, 0054) without Debrief's dialog ids:
+
+- `Contracts::parse(json)` reads the app's generated contract file once (version 1; `base` and per-dialog `kind`,
+  `modality`, `requiredChoice`, `instanced`, `minSize`, `commands` with `prefix*`) and refuses one that contradicts
+  itself (a modeless decision, a modal viewer or tool, a modeless required choice, bad ids or names, limits).
+  `Contracts::allows(dialog, command)` covers `BASE_COMMANDS` (`dialog_take_input`, `dialog_close`, `dialog_fit_height`),
+  the app's base set and the dialog's own list; `Contracts::problems(&TABLE, host_only)` checks them against the command
+  table (run it in a test). `Kind::policy()` is the size rule per kind (viewer floor 680x560 and grows only, tool
+  default 960x680, decision and form fitted to their content).
+- `placement`: pure geometry in physical px. `monitor_of` picks the parent's monitor (most overlap, else nearest; never
+  the primary display as such); `place` sizes and places on that monitor's work area (remembered offset from the parent
+  only when the whole dialog stays there, else centred on the parent and moved inside; shrunk to fit; mixed DPI and
+  negative coordinates); `screen_position` gives points on macOS and the exact physical place elsewhere;
+  `memory_for` is what each kind keeps of a remembered place.
+- `Dialogs` (managed state) records open dialogs by label `d-<host>-<n>` (at most 8 per host), answers the guard
+  (`grant_of(label)`, the `paddock_commands::DialogGrant`) and decides close requests (`close_request(label, now)`:
+  forwarded as the dialog's Close/Cancel, closed when it did not answer within 1.5 s, a required choice kept unless the
+  watchdog marked its page unresponsive).
+- `tauri` feature: `open` (window by kind, no title-bar buttons, owned or independent per OS, modal parent disabled
+  natively except on macOS, `WindowHooks` for the app's webview settings), the commands `dialog_open`,
+  `dialog_take_input`, `dialog_close`, `dialog_fit_height`, `on_window_event` (close request, move/resize, destroyed
+  dialog or host), `page_unresponsive`, `close_all_of`, `set_visible`, `grant_of` for `Guard::dialog_grants`. Events
+  `paddock://dialog-result`, `paddock://dialog-closed` (to the opener), `paddock://dialog-close-requested` (to the
+  dialog).
+
+```rust
+paddock_commands::command_table! {
+    static COMMANDS, macro handler;
+    Mutation [MAIN | DIALOG] limit 9 * MIB => paddock_dialogs::tauri::dialog_open,
+    Query [DIALOG] => paddock_dialogs::tauri::dialog_take_input,
+    Mutation [DIALOG] limit 2 * MIB => paddock_dialogs::tauri::dialog_close,
+    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit_height,
+    // ... the app's commands
+}
+tauri::Builder::default()
+    .manage(paddock_dialogs::Dialogs::from_json(include_str!("../dialog-contracts.json"))?)
+    .invoke_handler(Guard::new(&COMMANDS).dialog_grants(paddock_dialogs::tauri::grant_of).wrap(handler!()))
+    .on_window_event(|w, e| paddock_dialogs::tauri::on_window_event(w, e))
+```
+
+Wire types are generated into `ui/projects/paddock-ui/shell/generated/dialogs.ts` (`DialogKind`, `DialogContract`,
+`DialogContractFile`, `DialogRequest`, `DialogStart`, `DialogResult`, `DialogClosed`, `DialogError`, `DIALOG_EVENTS`,
+`DIALOG_BASE_COMMANDS`; `PADDOCK_WRITE_TS=1 cargo test -p paddock-dialogs --lib generated`).
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.

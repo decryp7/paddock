@@ -1797,7 +1797,13 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.1.0"
 dependencies = [
+ "log",
+ "paddock-commands",
+ "serde",
+ "serde_json",
  "tauri",
+ "tauri-runtime",
+ "ts-rs",
 ]
 
 [[package]]
