@@ -40,6 +40,13 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-mcp` follow-ups (plan X22): `notifications/cancelled` stops the running call (its token is cancelled, it gets no answer);
+  the tool calls of one connection run concurrently up to `Limits::max_concurrent_calls` (default 4) and are answered in any order,
+  while everything else stays in order; `McpControl` and the Tauri adapter (feature `tauri`: `mcp_get`, `mcp_save`, `mcp_issue_key`
+  for the key dialog's window only, `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear`, the `paddock://mcp` event) with the settings
+  in a versioned file, the client keys persisted through `paddock-secrets`, the audit log announced to every window;
+  `paddock_shell::Builder::mcp`. The UI side is `@decryp7/paddock-ui/shell/mcp` (Settings > AI access (MCP), the key and revoke dialogs,
+  the audit viewer).
 - Set-up checklist, no app wiring (plan X19 follow-up). `paddock_health::notify::os::Toaster` gains `request_permission` and
   `open_system_settings`; `PluginToaster` implements them (the plugin's `request_permission`; macOS `open
   x-apple.systempreferences:com.apple.Notifications-Settings.extension`, Windows `ms-settings:notifications`, GNOME
@@ -481,6 +488,14 @@ Conventional Commits; one semver tag for the whole repo.
   wears an app's colour; held to the same token tests as Pacenotes and Sighter.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
+
+- `@decryp7/paddock-ui/shell/mcp` (plan X22, ADR 0007): Settings > AI access (MCP). `McpBackend` (Tauri over `mcp_get`, `mcp_save`, `mcp_issue_key`,
+  `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear` and the `paddock://mcp` event; in-memory with the engine's refusals), the per-window `McpStore`,
+  `defineMcpSettingsPage`/`defineMcpKeyDialog`/`defineMcpRevokeDialog`, `provideShellMcp`/`provideMcpBackend`. The page `PdMcpPage` (`/shell/mcp/page`): the
+  master switch (off by default), a switch per read-only tool, a separate off-by-default "Allow" with a warning per action tool, the clients' keys with
+  Revoke, and the shared audit viewer `PdMcpAudit` (the family's `pd-table`: time, client, tool, result, size, duration, redacted arguments; Clear). The key
+  is issued in the key dialog's window (`/shell/mcp/dialog`, a modal credential form, `mcp_issue_key` for that window only) and shown once with Copy; it is in
+  no store, event, log or URL. Shell demo: the page and both dialogs (`?mcp=calls|error`), Vitest specs and a Chromium spec with axe at 320 px.
 
 ### Fixed
 - The About, Updates and What's New contents were unstyled: their stylesheet still used the old class names (`.btn`, `.muted`, ...)

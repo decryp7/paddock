@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-mcp-revoke-key"
+description = "Enables the mcp_revoke_key command without any pre-configured scope."
+commands.allow = ["mcp_revoke_key"]
+
+[[permission]]
+identifier = "deny-mcp-revoke-key"
+description = "Denies the mcp_revoke_key command without any pre-configured scope."
+commands.deny = ["mcp_revoke_key"]
