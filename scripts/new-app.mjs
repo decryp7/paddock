@@ -77,12 +77,31 @@ export function registryDependencies(cargoToml, versions) {
 /** The rewrites of the Rust side, file by file (path relative to src-tauri). Each `[from, to]` must match. */
 export function rustRewrites({ id, name, identifier }, versions) {
   const { crate, lib } = crateNames(id);
+  // The sample background agent (plan X4): its own crate, its executable, launchd label, service name and variable.
+  const agent = `${id}-agent`;
+  const agentLib = `${id.replaceAll('-', '_')}_agent`;
+  const serviceName = name.replace(/[^A-Za-z0-9]/g, '') || id;
+  const agentVar = `${id.toUpperCase().replaceAll('-', '_')}_AGENT`;
+  const agentSpec = [
+    ['"net.decryptology.paddock-shell-demo.agent"', JSON.stringify(`${identifier}.agent`)],
+    ['"net.decryptology.paddock-shell-demo"', JSON.stringify(identifier)],
+    ['"shell-demo-agent"', JSON.stringify(agent)],
+    ['"paddock-shell-demo-agent"', JSON.stringify(agent)],
+    ['"PaddockShellDemo"', JSON.stringify(serviceName)],
+    ['"SHELL_DEMO_AGENT"', JSON.stringify(agentVar)],
+    ['"Paddock Shell Demo agent"', JSON.stringify(`${name} agent`)],
+    [/"The Paddock Shell Demo's sample background agent[^"]*"/, JSON.stringify(`${name}'s sample background agent (writes a heartbeat, nothing else).`)],
+    ['"https://dev.decryptology.net/decryp7/paddock"', JSON.stringify(`https://dev.decryptology.net/decryp7/${id}`)],
+    ['pub const APP_ID: &str = "shell-demo";', `pub const APP_ID: &str = "${id}";`],
+    ['pub const APP_NAME: &str = "Paddock Shell Demo";', `pub const APP_NAME: &str = "${name}";`],
+  ];
   return {
     'Cargo.toml': [
       [/^# Paddock Shell Demo:.*\n(#.*\n)*/m, `# ${name}: a Paddock app on the \`paddock-shell\` plugin, started from Paddock Shell Demo.\n`],
       ['name = "paddock-shell-demo"', `name = "${crate}"`],
       ['default-run = "paddock-shell-demo"', `default-run = "${crate}"`],
       ['name = "paddock_shell_demo"', `name = "${lib}"`],
+      ['shell-demo-agent = { path = "agent" }', `${agent} = { path = "agent" }`],
       [/description = "Paddock Shell Demo:[^"]*"/, `description = "${name}"`],
       [/repository = "[^"]*"\n/, ''],
       ['# `shell-demo-v<version>` and CHANGELOG.md has its notes (What\'s New).', `# \`${id}-v<version>\` and CHANGELOG.md has its notes (What's New).`],
@@ -90,9 +109,30 @@ export function rustRewrites({ id, name, identifier }, versions) {
       { all: (text) => registryDependencies(text, versions) },
     ],
     'src/main.rs': [['paddock_shell_demo::run();', `${lib}::run();`]],
+    'build.rs': [['shell-demo-agent-', `${agent}-`]],
+    'agent/Cargo.toml': [
+      [/^# The Paddock Shell Demo's sample background agent/m, `# ${name}'s sample background agent (from Paddock Shell Demo's)`],
+      ['name = "shell-demo-agent"', `name = "${agent}"`],
+      ['name = "shell_demo_agent"', `name = "${agentLib}"`],
+      [/description = "Paddock Shell Demo's sample background agent"/, `description = ${JSON.stringify(`${name}'s sample background agent`)}`],
+      [/repository = "[^"]*"\n/, ''],
+      { all: (text) => registryDependencies(text.replaceAll('path = "../../../../crates/', 'path = "../../../crates/'), versions) },
+    ],
+    'agent/src/lib.rs': agentSpec,
+    'agent/src/main.rs': [['shell_demo_agent::', `${agentLib}::`]],
+    'agent/sidecar.mjs': [['shell-demo-agent', agent]],
+    'macos/agent.plist': [
+      ['net.decryptology.paddock-shell-demo.agent', `${identifier}.agent`],
+      ['net.decryptology.paddock-shell-demo', identifier],
+      ['shell-demo-agent', agent],
+      ['SHELL_DEMO_AGENT', agentVar],
+    ],
+    'windows/installer-hooks.nsh': [['shell-demo-agent', agent], ['PaddockShellDemo', serviceName]],
+    'tauri.macos.conf.json': [['net.decryptology.paddock-shell-demo.agent', `${identifier}.agent`]],
     'src/lib.rs': [
       [/^\/\/! Paddock Shell Demo:[^\n]*\n/m, `//! ${name}: the Paddock app shell with the sample engine of Paddock Shell Demo, to replace part by part:\n`],
       [/^\/\/! It is also the starter of new apps:[^\n]*\n/m, '//! It was started from Paddock Shell Demo (`node scripts/new-app.mjs` in the Paddock repository).\n'],
+      ['pub use shell_demo_agent as agent;', `pub use ${agentLib} as agent;`],
       ['pub const APP_ID: &str = "shell-demo";', `pub const APP_ID: &str = "${id}";`],
       ['pub const APP_NAME: &str = "Paddock Shell Demo";', `pub const APP_NAME: &str = "${name}";`],
       ['"https://dev.decryptology.net/decryp7/paddock/releases"', `"https://dev.decryptology.net/decryp7/${id}/releases"`],
@@ -106,6 +146,7 @@ export function rustRewrites({ id, name, identifier }, versions) {
     ],
     'src/tray.rs': [[/shell-demo-tray-/g, `${id}-tray-`]],
     'tests/app.rs': [
+      ['"binaries/shell-demo-agent"', `"binaries/${agent}"`],
       ['use paddock_shell_demo::', `use ${lib}::`],
       ['paddock_shell_demo::tray::', `${lib}::tray::`],
       ['app_dir().join("../../../ui/projects/shell-demo")', 'app_dir().join("..")'],
@@ -117,8 +158,9 @@ export function rustRewrites({ id, name, identifier }, versions) {
       ['"identifier": "net.decryptology.paddock-shell-demo"', `"identifier": ${JSON.stringify(identifier)}`],
       ['"frontendDist": "../../../ui/dist/shell-demo/browser"', '"frontendDist": "../dist/app/browser"'],
       ['"devUrl": "http://localhost:4301"', '"devUrl": "http://localhost:4200"'],
-      ['"beforeDevCommand": "npm --prefix ../../ui run shell-demo"', '"beforeDevCommand": "npm run start"'],
-      ['"beforeBuildCommand": "npm --prefix ../../ui run shell-demo:build"', '"beforeBuildCommand": "npm run build"'],
+      ['"beforeDevCommand": "node src-tauri/agent/sidecar.mjs --dev && npm --prefix ../../ui run shell-demo"', '"beforeDevCommand": "node src-tauri/agent/sidecar.mjs --dev && npm run start"'],
+      ['"beforeBuildCommand": "node src-tauri/agent/sidecar.mjs && npm --prefix ../../ui run shell-demo:build"', '"beforeBuildCommand": "node src-tauri/agent/sidecar.mjs && npm run build"'],
+      ['"binaries/shell-demo-agent"', `"binaries/${agent}"`],
       ['"title": "Paddock Shell Demo"', `"title": ${JSON.stringify(name)}`],
       [/"shortDescription": "[^"]*"/, `"shortDescription": ${JSON.stringify(name)}`],
       [/"longDescription": "[^"]*"/, `"longDescription": ${JSON.stringify(`${name}, a Paddock app.`)}`],

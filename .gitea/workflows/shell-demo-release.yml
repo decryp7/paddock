@@ -129,10 +129,26 @@ jobs:
           bash scripts/shell-demo/bundle.sh "${{ matrix.bundles }}"
 
       # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and on the app inside
-      # the DMG; the app is never started here.
+      # the DMG, every Mach-O with the app's TeamIdentifier, the agent started with --self-test; the app is never started.
       - name: Verify the .app and the DMG (macOS)
         if: runner.os == 'macOS'
         run: bash scripts/shell-demo/verify-macos.sh
+
+      # Rule 23 on Linux and Windows: the sample agent (externalBin, plan X4) starts with --self-test; on Linux from the
+      # .deb's own files (unpacked, never installed), on Windows from the copy the installer bundles.
+      - name: The bundled agent starts (Linux, Windows)
+        if: runner.os != 'macOS'
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            unpacked=$(mktemp -d)
+            dpkg-deb -x "$(ls apps/shell-demo/dist/*.deb | head -1)" "$unpacked"
+            agent="$unpacked/usr/bin/shell-demo-agent"
+          else
+            agent=$(ls apps/shell-demo/src-tauri/binaries/shell-demo-agent-*.exe | head -1)
+          fi
+          out=$("$agent" --self-test)
+          echo "$out"
+          echo "$out" | grep -q 'self-test: ok' || { echo "::error::the agent's self-test failed"; exit 1; }
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         with:

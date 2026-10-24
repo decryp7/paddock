@@ -1,0 +1,28 @@
+# The Paddock Shell Demo's sample background agent (plan X4): a heartbeat-only per-user agent, bundled next to the app as
+# Tauri's `externalBin` (agent/sidecar.mjs builds it and copies it to src-tauri/binaries/). Its own crate,
+# so it links neither Tauri nor the webview. Its version must equal the app's (a test of the app checks it).
+[package]
+name = "shell-demo-agent"
+version = "0.1.0"
+description = "Paddock Shell Demo's sample background agent"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://dev.decryptology.net/decryp7/paddock"
+publish = false
+
+[lib]
+name = "shell_demo_agent"
+
+[[bin]]
+name = "shell-demo-agent"
+path = "src/main.rs"
+
+[dependencies]
+paddock-env = { path = "../../../../crates/paddock-env" }
+paddock-service = { path = "../../../../crates/paddock-service" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = { version = "0.4", features = ["kv"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -5,6 +5,10 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Shell demo: the sample agent is its own crate, bundled as `externalBin` on every OS (`agent/sidecar.mjs` in
+  `beforeBuildCommand`), ad-hoc sealed with the app; `shell-demo-agent --self-test` runs from the built bundle in the macOS
+  verification (which also checks every Mach-O's TeamIdentifier) and from the .deb / the bundled .exe in the release
+  workflow. `scripts/new-app.mjs` carries the agent into new apps, renamed.
 - `@decryp7/paddock-ui/shell/service` (plan X4): Settings > Background service. `ServiceBackend` (Tauri adapter and an in-memory
   one that plays install, a repair's phases, failure, busy, switched-off and needs-approval), `ServiceStore` (status, the
   `paddock://service` updates folded in, "Still working" while a repair runs and never timed out, an inline error with
