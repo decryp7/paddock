@@ -467,3 +467,44 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+  # Paddock Workbench Demo (apps/workbench-demo, plan X50 W8): the shell and workbench plugins in a real app, in its own workspace, with the UI it
+  # embeds. Inside this repo it is the first consumer: a change to a shell or workbench crate or to the UI that breaks an app fails
+  # here before a tag. Its installers are built by workbench-demo-release.yml (a `workbench-demo-v*` tag or a manual run).
+  workbench-demo-app:
+    name: workbench demo app (fmt, clippy, tests, deny)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
+          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
+      - name: The UI the app embeds
+        working-directory: ui
+        run: |
+          npm ci
+          npm run workbench-demo:build
+
+      - name: App (fmt, clippy, tests on the mock runtime, deny)
+        working-directory: apps/workbench-demo/src-tauri
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo nextest run --workspace --config-file ../../../crates/.config/nextest.toml --profile ci
+          cargo test --workspace --doc
+          cargo deny check
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()

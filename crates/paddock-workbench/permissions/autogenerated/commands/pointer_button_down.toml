@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-pointer-button-down"
+description = "Enables the pointer_button_down command without any pre-configured scope."
+commands.allow = ["pointer_button_down"]
+
+[[permission]]
+identifier = "deny-pointer-button-down"
+description = "Denies the pointer_button_down command without any pre-configured scope."
+commands.deny = ["pointer_button_down"]

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-drag-ghost-show"
+description = "Enables the drag_ghost_show command without any pre-configured scope."
+commands.allow = ["drag_ghost_show"]
+
+[[permission]]
+identifier = "deny-drag-ghost-show"
+description = "Denies the drag_ghost_show command without any pre-configured scope."
+commands.deny = ["drag_ghost_show"]
