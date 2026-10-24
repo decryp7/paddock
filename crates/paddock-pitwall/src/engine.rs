@@ -9,7 +9,7 @@
 //! The app keeps its own engine trait; this module only decides.
 
 use crate::service::Link;
-use crate::status::{AiState, NeedsAiView};
+use crate::status::{AiSnapshot, AiState, NeedsAiView};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -149,6 +149,20 @@ impl Session {
     /// The engine requests go to now.
     pub fn engine(&self, link: &Link) -> Option<EngineKind> {
         select(self.input(link))
+    }
+
+    /// Everything the shared needs-AI component draws. `built_in_available`: the app has an engine of its own.
+    pub fn snapshot(&self, link: &Link, built_in_available: bool) -> AiSnapshot {
+        let state = self.state(link);
+        AiSnapshot {
+            message: state.message(link.app_name()),
+            actions: state.actions(),
+            state,
+            app: link.app_name().to_string(),
+            pairing: link.view().pairing,
+            built_in_available,
+            built_in_for_session: self.built_in_for_session(),
+        }
     }
 
     /// What the app can do with Pitwall now, for a status line or [`NeedsAiView`].

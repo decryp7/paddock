@@ -44,12 +44,14 @@ pub enum FoundKind {
 }
 
 /// A pairing that waits for the user's approval in Pitwall.
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingView {
     /// The six-digit code the user compares in Pitwall.
     pub code: String,
     /// When the request expires (Unix ms).
+    #[cfg_attr(test, ts(type = "number"))]
     pub expires_at_ms: u64,
 }
 
@@ -222,7 +224,8 @@ impl Link {
         self.inner.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    fn app_name(&self) -> &str {
+    /// The app's display name.
+    pub fn app_name(&self) -> &str {
         self.cfg.app.display_name()
     }
 
@@ -658,6 +661,57 @@ impl Drop for Link {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::testing::{FakePitwall, FakeState, PairMode};
+    use paddock_secrets::MemorySecrets;
+
+    #[test]
+    fn a_late_answer_for_a_replaced_pairing_changes_nothing() {
+        // Pairing 1 is cancelled, pairing 2 waits; the first one's thread finishes late with an approval.
+        let fake = FakePitwall::start(FakeState {
+            pair: PairMode::Pending,
+            pending_polls: 0,
+            ..FakeState::default()
+        });
+        let dir = tempfile::tempdir().unwrap();
+        fake.write_discovery(dir.path(), 42, 1);
+        let secrets = Arc::new(MemorySecrets::new("Debrief"));
+        let mut cfg = LinkConfig::new(
+            AppIdentity::new("debrief", "Debrief").unwrap(),
+            Locator::in_dir(dir.path(), None, Arc::new(|p| p == 42)),
+            secrets,
+        );
+        // The poll thread never wakes: the test plays its late answer itself.
+        struct Never;
+        impl Sleeper for Never {
+            fn sleep(&self, _: Duration, cancel: &CancelToken) {
+                while !cancel.is_cancelled() {
+                    std::thread::yield_now();
+                }
+            }
+        }
+        cfg.sleeper = Arc::new(Never);
+        let link = Link::new(cfg);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let e = events.clone();
+        link.set_listener(Arc::new(move |ev| e.lock().unwrap().push(ev)));
+        let first = link.connect(true).unwrap().pairing.unwrap();
+        assert!(link.cancel_pairing());
+        let second = link.connect(true).unwrap().pairing.unwrap();
+        assert_eq!(fake.state().pairs, 2, "two requests, two ids");
+        events.lock().unwrap().clear();
+        // The first request's late approval: its id is no longer the waiting one.
+        link.finish_pairing("pr1-abc", Ok(()), true);
+        assert_eq!(link.view().pairing, Some(second));
+        assert_ne!(first.code, "");
+        assert!(events.lock().unwrap().is_empty(), "no Paired, no Changed");
+        // The right id ends it.
+        link.finish_pairing("pr2-abc", Err(PitwallError::PairingDenied), false);
+        assert!(link.view().pairing.is_none());
+        assert!(link.view().problem.unwrap().contains("denied"));
+        assert_eq!(*events.lock().unwrap(), [LinkEvent::Changed]);
+    }
+
     use super::sentence;
 
     #[test]

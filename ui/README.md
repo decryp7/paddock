@@ -139,6 +139,7 @@ so a manager app never bundles the workbench:
 | `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/shell/startup`, `/shell/dialogs`, `/shell/about` | one shell part each | S5-S11 |
 | `/shell/diagnostics` | report a problem over the `paddock-diag` adapter: `DiagnosticsBackend` (Tauri, memory), `DiagnosticsStore`, the Report a Problem decision dialog (description, every file with its size, Save through the engine's native dialog), `diagnosticsContributions` (Help item, the Logging settings page), `provideShellDiagnostics`, `provideWebviewLog` (the page's errors in the engine's log) | X2 |
+| `/shell/pitwall` | the family's one "needs local AI" state over `paddock-pitwall`: `<pd-needs-ai>` (the engine's sentence and actions: Connect with the code to compare, Use the built-in engine for this session, Open AI settings, `(step)` for what only the app can do), `PitwallBackend` (Tauri over `PITWALL_COMMANDS`, memory), `PitwallStore`, `providePitwall`; wire types generated from Rust | ADR 0004 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
