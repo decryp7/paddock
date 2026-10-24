@@ -15,7 +15,7 @@ import {
 import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
-import { defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
+import { defineChannelsRemoveDialog, defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
 import { defineLanguageSettingsPage } from '@decryp7/paddock-ui/shell/i18n/settings';
 import { definePacksSettingsPage } from '@decryp7/paddock-ui/shell/packs';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
@@ -140,6 +140,11 @@ export const CHANNELS_SECRET_DIALOG = defineChannelsSecretDialog({
   load: () => import('@decryp7/paddock-ui/shell/channels/dialog').then((m) => m.PdChannelSecretDialog),
 });
 
+/** The remove confirmation of a channel (a modal decision, one window per channel): it calls nothing. */
+export const CHANNELS_REMOVE_DIALOG = defineChannelsRemoveDialog({
+  load: () => import('@decryp7/paddock-ui/shell/channels/dialog').then((m) => m.PdChannelRemoveDialog),
+});
+
 /** Settings > Language: System default, English and the pseudo-locale (the demo ships no real translation). */
 export const LANGUAGE_PAGE = defineLanguageSettingsPage({
   load: () => import('@decryp7/paddock-ui/shell/i18n/page').then((m) => m.PdLanguagePage),
@@ -161,7 +166,7 @@ export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import(
 /** Report a problem (plan X2): a decision that shows every file with its size before saving; its window boots the demo's diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);
@@ -336,6 +341,14 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       order: 200,
       when: (ctx) => ctx.developer(),
       load: () => import('./pages/dialogs-page').then((m) => m.DialogsPage),
+    }),
+    definePage<DemoContext>({
+      id: 'sd.schedule',
+      title: msg('sd.page.schedule', 'Schedules'),
+      icon: 'pd:clock',
+      order: 250,
+      when: (ctx) => ctx.developer(),
+      load: () => import('./pages/schedule-page').then((m) => m.SchedulePage),
     }),
     definePage<DemoContext>({
       id: 'sd.keys',

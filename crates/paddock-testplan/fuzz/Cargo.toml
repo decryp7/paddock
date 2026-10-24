@@ -1,0 +1,24 @@
+# Fuzz targets for paddock-testplan's parsers (ADR 0005: "a fuzz target and property test are mandatory before release").
+# Its own workspace, outside the crates' one; run with `cargo +nightly fuzz run formats` from `crates/paddock-testplan`.
+[package]
+name = "paddock-testplan-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+paddock-testplan = { path = ".." }
+
+[[bin]]
+name = "formats"
+path = "fuzz_targets/formats.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

@@ -19,6 +19,13 @@
         "about_legal"
       ]
     },
+    "pd.channels.remove": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": true,
+      "commands": []
+    },
     "pd.channels.secret": {
       "kind": "form",
       "modality": "modal",

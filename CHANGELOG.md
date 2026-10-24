@@ -7,6 +7,52 @@ Conventional Commits; one semver tag for the whole repo.
 ### Added
 - Paddock Workbench Demo (plan X50 W8): `apps/workbench-demo`, the workbench demo as an installable app on the `paddock-shell` and `paddock-workbench` plugins (layouts in the config folder, pop-out panels with the drag ghost, the assistant on Pitwall with one read-only sample tool and a calm "Pitwall not running" state), its own icon, ad-hoc macOS sealing, a release workflow from `workbench-demo-v*` tags (`scripts/workbench-demo-release.mjs`, `scripts/workbench-demo/`), a CI job, and the starter section in its README. `ui/projects/workbench-demo` picks the Tauri backends when `inTauri()` and boots main, pop-out and dialog windows; `workbenchInvoke` (`@decryp7/paddock-ui/workbench`) sends the plugin's commands to it.
 - `paddock-workbench` plugin (plan X50 W7): `paddock_workbench::Builder` (`layouts`, `panels`, `window_hooks`, `assistant`, each optional) builds the Tauri plugin `paddock-workbench`: the layout, panel and assistant commands in one composed table behind one guard, generated permission sets `default`/`popout`/`dialog` per window class, and generated `WORKBENCH_COMMANDS`/`WORKBENCH_PLUGIN` in `workbench/generated`.
+- Undo and an activity journal (plan X44). `paddock_jobs::journal`: a bounded (at most 5,000 entries, cut texts), persisted (paddock-env
+  versioned file, user-only permissions, a damaged file kept, a newer one never overwritten) log of what the app did on the user's
+  behalf, each entry `NotUndoable`, `Available`, `Undone` or `Expired`; `record`, `mark`, `expire_before`, `entries`, listeners for
+  pushing changes, a save failure kept for the app to show. Undoing stays the app's work. UI: `@decryp7/paddock-ui/shell/undo` with
+  `UndoStore` (the history of the user's edits: labels, merge keys, groups, limit 100; port of Debrief's `UndoStack`), Edit > Undo and
+  Redo (`UNDO_CONTRIBUTIONS`, Mod+Z / Mod+Shift+Z), the `pd-undo-toast` "Done, Undo" toast, `ActivityStore`, the Activity page
+  (`ACTIVITY_CONTRIBUTIONS`) and `TauriActivityBackend` / `MemoryActivityBackend`. The shell demo shows all of it (Say hello is
+  undoable). `paddock-jobs` now depends on `paddock-env`.
+- `paddock-chromium` and `paddock-runtime` (plan X14). `paddock-chromium` is the one Chromium driver, merged from Debrief's
+  `chromium-driver` and Spotter's `spotter-render`: one command-line builder with the start page always last, `Sandbox::decide`
+  (root plus an explicit opt-in only), launch as a `paddock-proc` supervised tree with a time limit on an injected clock and a
+  memory cap, the DevTools client that knows when the user closed a window, pages (snapshot, wait until readable, capture),
+  both apps' readiness and challenge rules, discovery that gives tests only `CHROMIUM_TEST_PATH`, the pinned Chrome for Testing
+  runtime and a fake browser for tests. `paddock-runtime` installs pinned runtimes (Chromium now, FFmpeg and llama.cpp later)
+  from a checked catalogue as one job (download hashed while written, unpack through `paddock-archive`, self-test, install), keeps the previous release
+  for rollback and quarantines a release that fails.
+- `@decryp7/paddock-ui/live`: `streamCall` and `tauriChannelFactory` for commands that stream to their caller over a per-call
+  channel (ordered delivery, nothing after the call settled, failure, handler error, last-message marker, abort). `paddock-metrics`:
+  `folder_size` does not cross volumes (`other_volumes`) and reads a folder entry by entry, so a cancel or the time limit is seen
+  between reads. CI: a step for `paddock-net`; `paddock-archive` and `paddock-net` take the workspace hack.
+- `paddock-mcp` (plan X22, ADR 0007): the local-only MCP server. `Server` with `ToolDef`/`ResourceDef` registration, `Policy` (off by
+  default, read-only tools, actions only by name), schema validation, result caps, cursors, time limits with cancel, panic
+  containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers
+  only, bounded lines, connection cap), `client` request builders and the shared MCP types for Pitwall; a contract test of the
+  2025-06-18 message shapes.
+- `paddock-proc` (plan X54): every `Supervised` child on Windows runs in a job object of its own with kill-on-close (and
+  die-on-unhandled-exception), so the child and every helper it started end when the value is dropped or the app exits or
+  crashes, also helpers that left its process tree; `Supervised::in_job`. `paddock-ipc`'s launcher gets it through
+  `Supervised` (`Child::in_job`). Windows refusing a job degrades to the tree kill.
+- `paddock_jobs::schedule` and the shared schedule editors (plan X33). `Schedule` (every N seconds, days at times of day, cron with five or
+  six fields) in the computer's or a chosen IANA zone with daylight saving (a time inside the spring gap runs once, shifted; a repeated
+  time runs once), `next_check` (jitter, back-off after failures, a per-source minimum interval), `preview` (the words, the next runs and
+  warnings for the editor), `due` with a `CatchUp` policy (`Skip`, `Once`, `All { max }`) for runs missed while the machine slept, and
+  `PauseWindows` (pause windows and quiet hours: spans of local time on chosen days that may cross midnight; `holds`, `resume_at`,
+  `next_open`). Time is always passed in (`UnixMs::from_clock`), so every case is a `FakeClock` test. Spotter's `schedule.rs` and
+  `calendar.rs` are the base; Debrief's agent timers and Pitcrew's `pause.rs` become adopters. UI: `@decryp7/paddock-ui/schedule` with
+  `pd-schedule-editor` (Every / At times / Cron over the engine's preview, warnings and problems) and `pd-pause-editor`, and a
+  Schedules page in the shell demo. New dependencies of `paddock-jobs`: `jiff` (bundled tz database) and `croner`.
+- The shared CI image (plan X53, `ci-image/`): `paddock-ci` on top of garage with cargo-hakari, cargo-machete, libduckdb, a pinned Chrome for
+  Testing and sccache 0.18.0, every download checksum-verified, a verifying last build step and manifest, a manual `ci-image` workflow that
+  pushes it from CI. `ci.yml` runs its Linux jobs in it and no longer installs Node, browsers or hakari/machete per job; `setup-rust` skips the
+  toolchain install inside it.
+- `paddock-testplan` (ADR 0005, plan X52): `.sighterplan` / `.sighterresult` as TOML. `parse_plan` / `parse_result` (4 MiB, 5,000 cases, 200 steps, 4 KiB
+  strings, unknown keys named by line, newer majors refused), typed ids and the closed `Step` enum, `Plan::to_toml` (canonical) and `Plan::hash`,
+  secrets by reference (`SecretRef`, `Resolver`, `Redactor`, `SecretRedactor`, `lint`), `RunResult::to_toml` with redaction, `Coverage::from`,
+  `diff`, `junit::write`; property tests and a fuzz target.
 - `@decryp7/paddock-ui/workbench/dock` (plan X50 W2a, W2b): the workbench dock over dockview (optional peer, loaded on first use): `<pd-dock />`,
   `WorkbenchDock` from `provideWorkbenchDock` (`showView`, `closeView`, `openPanels`, `activePanel`, perspectives, named layouts, `verdict`/`onWindowPlan`
   for the Explorer column, checkpoint), `planLayout` adapter with grow-back and a "layout adjusted" notice with Undo, auto-hide edges, floating groups,

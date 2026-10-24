@@ -9,6 +9,8 @@ import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
 import { TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
 import { OS_NOTIFICATIONS_CONTRIBUTIONS, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
+import { ACTIVITY_CONTRIBUTIONS, provideShellActivity, provideShellUndo, UNDO_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/undo';
+import { DemoActivity } from './app/demo-activity';
 import { provideWebviewLog } from '@decryp7/paddock-ui/shell/diagnostics';
 import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS } from './app/demo.contributions';
 import { demoAboutBackend, demoUpdatesBackend } from './app/demo-about';
@@ -49,6 +51,11 @@ export function bootMainWindow(): Promise<unknown> {
         },
       },
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
+      // Undo and the activity log (plan X44): Edit > Undo and Redo, the "Done, Undo" toast, the Activity page.
+      provideShellUndo(),
+      provideShellActivity({ backend: () => inject(DemoActivity).backend }),
+      provideContributions<DemoContext>(UNDO_CONTRIBUTIONS),
+      provideContributions(ACTIVITY_CONTRIBUTIONS),
       // The desktop build asks the shell plugin for its version once (ADR 0012 §3): a different one is a plain error.
       ...(ipc ? [provideShellVersionCheck(ipc.invoke)] : []),
       // About, Updates and What's New (plan S11): the Help menu's items; the main window announces a found update and

@@ -138,6 +138,8 @@ so a manager app never bundles the workbench:
 | `/table`, `/chart`, `/forms` | `pd-table` (sort, filter, columns, groups, virtual scroll, row keyboard and menus, hover actions); `pd-chart` over lazy ECharts with the family theme and the generic chart kinds; `pd-field` and the validation display for Signal Forms | X21 |
 | `/icons`, `/format`, `/prefs`, `/select`, `/testing`, `/shell/feel` | the `pd:` icon set and `outlineIcon`; one formatting API and the middle ellipsis; guarded localStorage; the themed `pd-select`; the DOM test kit (`installTestKit`, helpers, fake ECharts); the native-feel guard | X36, X35, X12, X38 |
 | `/ipc`, `/ipc/testing` | the app IPC kit: `CommandError` (generated from `paddock_commands::CommandError`) with `toCommandError`, `CommandFailure`; `withCallTimeout` for request/reply commands (never jobs, rule 12) and `callTimeoutProblems`; `provideBackend` (Tauri or a lazily imported mock); the mock kit `parseMockOptions` (`?mock=&latency=&fail=&hold=`), `formatMockOptions`, `withMockOptions` | X28 |
+| `/live` | the window side of the live feed: `withLiveFeed` (SignalStore feature over `paddock-live`: `live`, `liveSeq`, `liveLink`, `connectLive`, `resyncLive`), the pure `foldFrame` / `parseFrame`, `LIVE_TRANSPORT` with `tauriLiveTransport` and `MemoryLiveTransport`, the bounded lists `appendBounded`, `appendThrottled`, `upsertBy`, `prependUnique`, and `Debouncer`, `streamCall` / `tauriChannelFactory` (per-call streams) | X29 |
+| `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/live` | the window side of the live feed: `withLiveFeed` (SignalStore feature over `paddock-live`: `live`, `liveSeq`, `liveLink`, `connectLive`, `resyncLive`), the pure `foldFrame` / `parseFrame`, `LIVE_TRANSPORT` with `tauriLiveTransport` and `MemoryLiveTransport`, the bounded lists `appendBounded`, `appendThrottled`, `upsertBy`, `prependUnique`, and `Debouncer` | X29 |
 | `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `FakeClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/shell/startup`, `/shell/dialogs`, `/shell/about` | one shell part each | S5-S11 |
@@ -145,7 +147,14 @@ so a manager app never bundles the workbench:
 | `/shell/pitwall` | the family's one "needs local AI" state over `paddock-pitwall`: `<pd-needs-ai>` (the engine's sentence and actions: Connect with the code to compare, Use the built-in engine for this session, Open AI settings, `(step)` for what only the app can do), `PitwallBackend` (Tauri over `PITWALL_COMMANDS`, memory), `PitwallStore`, `providePitwall`; wire types generated from Rust | ADR 0004 |
 | `/shell/service` | the background service over the `paddock-service` adapter (`service_status`, `service_repair`, `service_install`, `open_login_items`, live phases and outcomes on `paddock://service`): `ServiceBackend` (Tauri, memory with install, repair phases, failure, busy, switched-off, needs-approval), `ServiceStore` (status, event folding, "Still working", inline error with Retry), `defineServiceSettingsPage`/`serviceContributions` (the `pd.login` page and `SERVICE_SETTINGS_COMMANDS` for the Settings dialog's contract), `provideShellService`; the page `PdServicePage` (status word, message, Install/Repair/Open Login Items… only where `can*` says, "Start at login" beneath) is in `/shell/service/page`, a chunk of its own | X4 |
 | `/shell/channels` | notification channels over the `paddock-channels` adapter (`channels_get`, `channels_save`, `channels_set_secret`, `channels_clear_secret`, `channels_test`, a test's outcome on `paddock://channels`): `ChannelsBackend` (Tauri; memory with the engine's validation, secrets in a map, `succeed`/`rejected`/`unreachable`/`missingSecret`/`hang` tests), `ChannelsStore` (view, save and remove with the engine's message kept as it is, per-channel test state, a test is never timed out), the draft helpers, `defineChannelsSettingsPage`/`defineChannelsSecretDialog`/`channelsContributions` (the `pd.channels` page, the modal `pd.channels.secret` form, `CHANNELS_SETTINGS_COMMANDS` for the Settings dialog's contract), `provideShellChannels`/`provideChannelsBackend`; the page `PdChannelsPage` (a table with Edit, Send test and Remove per row, one Add channel, an inline editor on Signal Forms) is in `/shell/channels/page` and the secret dialog `PdChannelSecretDialog` (a masked field; the secret goes from its window straight to the engine) in `/shell/channels/dialog`, each a chunk of its own | X17 |
-| `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
+| `@decryp7/paddock-ui/workbench` | the workbench core: `defineView` (layout required), `defineActivityItem`, `defineExplorerProvider`, `definePaletteProvider`, `definePerspective`, `defineSharedState`, `defineAssistantContext`, `provideWorkbenchContributions`, `provideLiveContributions`, `WorkbenchRegistry`, `panelId`/`parsePanelId`/`panelTitle`, `VIEW_PANEL`, and the ports `WORKBENCH_PORTS`, `DOCK_PORT`, `EXPLORER_PLAN`, `PANEL_WINDOWS` | X50 W1 |
+| `/workbench/frame` | `<pd-workbench>` and `provideShellWorkbench`: title and menu bar, activity bar, Explorer side bar (sized by the user, closed and reopened by the layout plan), stage slot for the dock, status bar, palette, notifications, dialogs, F6 regions, the Jobs view | X50 W4 |
+| `/workbench/dock` | `<pd-dock>` and `provideWorkbenchDock` over dockview (optional peer, loaded on first use): the `planLayout` adapter, perspectives, named layouts, auto-hide, floating groups, switcher, `DockLayoutStore` (memory, localStorage, IPC) | X50 W2 |
+| `/workbench/explorer` | `<pd-explorer>` and `ExplorerStore`: lazy, paged, cancellable trees from Explorer providers | X50 W4 |
+| `/workbench/palette` | `<pd-command-palette>`, `PaletteStore`, `providePalette`, `namesPaletteProvider` (an engine's `names_search`) | X50 W5 |
+| `/workbench/panels` | pop-out windows over `paddock-panels`: `providePanelWindows`, `providePopoutWindow` + `<pd-popout-shell>`, shared state (`UiSync`), the drag ghost, `InPageDesktop` for the browser | X50 W3 |
+| `/workbench/assistant` | `<pd-assistant>` over `paddock-assistant`: `ASSISTANT_CONTRIBUTIONS`, `provideAssistant`, `AssistantStore`, Tauri and memory backends, tool-result renderers, safe markdown | X50 W6 |
+| `/workbench/testing` | `provideWorkbenchTesting`, `RecordingWorkbenchPorts` | X50 W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
 `projects/paddock-ui/<entry>/` with an `ng-package.json` and a `public-api.ts`; specs next to the code run with `npm test`.
@@ -155,6 +164,36 @@ A new entry point needs only those two files (the publish dry run fails if the b
 package; see its README): `test` with the Chrome for Testing guard, page objects, axe, layout scenarios, the fake Tauri
 IPC, settled screenshots and the retried-test reporter. Lazy chunks stay lazy: a module a contribution loads with
 `import()` is never re-exported as a value by its entry point (`lazyExportProblems`, run over every entry point).
+
+### Workbench (`/workbench/*`, ADR 0013, plan X50)
+
+An IDE-style app (Debrief, Pacenotes, Sighter) puts the dock in the workbench frame and registers its contributions; the
+reference is `projects/workbench-demo` (mock backends, e2e in `e2e/workbench-demo.spec.ts` with `WorkbenchApp` from
+`@decryp7/paddock-e2e`).
+
+```ts
+// main.ts of the main window
+bootstrapApplication(Root /* <pd-workbench><pd-dock slot="stage" /></pd-workbench> */, { providers: [
+  provideWorkbenchContributions<AppContext>(APP_CONTRIBUTIONS),          // views, activity items, Explorer, palette, perspectives...
+  provideShellContext<AppContext>(() => import('./app-context').then((m) => m.appContext)),
+  provideShellWorkbench({ appName: 'Pacenotes', notify: { health, notifications }, jobs: { backend }, startup: { backend } }),
+  provideWorkbenchDock({ store: new IpcDockLayoutStore(invoke) }),      // plugin:paddock-workbench|layout_get/_set
+  providePanelWindows(tauriPanelsIo(bridge)),                            // pop-outs; a pop-out window boots providePopoutWindow
+  provideWorkbenchContributions(ASSISTANT_CONTRIBUTIONS), provideAssistant({ backend: () => new TauriAssistantBackend(ipc) }),
+  providePitwall({ backend: () => new TauriPitwallBackend(ipc) }),
+] });
+```
+
+- Every view declares its `layout` (area, min, pref, priority; ADR 0011): the dock never squeezes a group below its views'
+  minimum, it tabs or auto-hides the lowest priority instead, and grows them back with a margin. A view with `instances`
+  opens as `<view>#<key>` panels (`VIEW_PANEL` tells the component which), named in their tab by the key's last part.
+- The parts never import each other's stores: the activity bar, palette and Explorer reach the dock through
+  `WORKBENCH_PORTS` (composed by the frame from `DOCK_PORT` and its own side bar and palette); the dock reaches pop-outs
+  through `PANEL_WINDOWS`; dockview stays in the dock's chunk.
+- Contributions whose `run` needs the window's services are built with `provideLiveContributions(injector => batch)`.
+- Matching engine data is the engine's (rule 20): a palette provider calls a command (`namesPaletteProvider` for
+  `names_search`), an Explorer provider fetches pages of display data; `changes` reloads a section when what it depends on
+  changes. The palette's own commands and views are ranked in the UI (they are UI contributions).
 
 ### Pages frame (`/shell/pages`, plan S14)
 
@@ -621,3 +660,8 @@ export const OverviewStore = signalStore(
 - Lists a fold keeps are bounded: `appendThrottled` (Pitwall's chart tail: one point per step, at most N), `appendBounded`
   (Dyno's sparklines), `prependUnique` (events by id), `upsertBy` (downloads by id). `Debouncer` turns a burst of pushes into one
   reload (Spotter's dashboard).
+- **Per-call streams** (Debrief's search results and live tail, a query's progress): `streamCall(tauriChannelFactory(Channel), (channel) =>
+  invoke('run_query_stream', { request, onProgress: channel }), { onMessage, isLast?, signal? })`. Messages arrive in order and none after
+  the call settled; a command failure rejects at once; a throwing handler stops delivery and rejects with its error; with `isLast` the
+  call resolves only when the answer and the last message are both in (the answer can overtake the final messages); `signal` aborts
+  with an `AbortError` (cancelling the work itself stays a job). Backends take a `ChannelFactory` so specs pass a fake.

@@ -15,15 +15,17 @@ import { channelNeedsSecret } from './draft';
 
 /** How the fake engine ends a test send. */
 export type TestOutcome =
-  /** Delivered (after a second attempt when `retry` is set on the options). */
+  /** Delivered at the first attempt. */
   | 'succeed'
+  /** The receiver answers 503 once: a wait, then delivered at the second attempt. */
+  | 'retry'
   /** The receiver refuses it (an HTTP 401 style advice). */
   | 'rejected'
   /** The receiver cannot be reached. */
   | 'unreachable'
   /** The channel needs a secret and none is stored. */
   | 'missingSecret'
-  /** It never ends (to show "Still working"). */
+  /** It never ends: attempt 1 is sending, for ever (to show "Still working"). */
   | 'hang';
 
 export interface MemoryChannelsOptions {
@@ -33,8 +35,6 @@ export interface MemoryChannelsOptions {
   readonly secrets?: readonly string[];
   /** How a test ends (default `succeed`); a function decides per channel. A channel that needs a secret and has none always ends `missingSecret`. */
   readonly outcome?: TestOutcome | ((channel: ChannelConfig) => TestOutcome);
-  /** A delivered test needed a second attempt. */
-  readonly retry?: boolean;
   /** `get` rejects this many times before it answers (to show the inline error and Retry). */
   readonly getFailures?: number;
   /** `save` rejects with this error (to show the engine's message). */
@@ -111,7 +111,7 @@ export class MemoryChannelsBackend extends ChannelsBackend {
   private readonly listeners = new Set<(e: ChannelsEvent) => void>();
   private readonly schedule: (step: () => void) => void;
   private readonly secrets = new Map<string, string>();
-  private stored: readonly ChannelConfig[];
+  private stored: ChannelConfig[];
   private failures: number;
   private nextTest = 1;
   /** The secret of each channel as the fake engine holds it (for tests; the UI never reads secrets). */
@@ -122,7 +122,7 @@ export class MemoryChannelsBackend extends ChannelsBackend {
   constructor(private readonly options: MemoryChannelsOptions = {}) {
     super();
     this.schedule = options.schedule ?? ((step) => queueMicrotask(step));
-    this.stored = options.channels ?? [];
+    this.stored = [...(options.channels ?? [])];
     this.failures = options.getFailures ?? 0;
     for (const id of options.secrets ?? []) this.secrets.set(id, '(stored)');
   }
@@ -139,7 +139,7 @@ export class MemoryChannelsBackend extends ChannelsBackend {
     if (this.options.saveError) return Promise.reject(this.options.saveError);
     const problem = settingsProblem(settings);
     if (problem) return Promise.reject({ code: 'invalid', message: problem, retryable: false } satisfies ChannelsError);
-    this.stored = settings.channels;
+    this.stored = [...settings.channels];
     // A channel that needs no secret keeps none; a removed channel loses its own.
     for (const id of [...this.secrets.keys()]) {
       const c = this.stored.find((x) => x.id === id);
@@ -166,19 +166,30 @@ export class MemoryChannelsBackend extends ChannelsBackend {
     const wanted = typeof this.options.outcome === 'function' ? this.options.outcome(channel) : (this.options.outcome ?? 'succeed');
     const outcome = channelNeedsSecret(channel) && !this.secrets.has(channel.id) && wanted !== 'hang' ? 'missingSecret' : wanted;
     const done = (ok: boolean, attempts: number, message: string | null): void => this.emit({ kind: 'test', testId, channelId: channel.id, ok, attempts, message });
-    if (outcome !== 'hang') {
-      this.schedule(() => {
-        switch (outcome) {
-          case 'succeed':
-            return done(true, this.options.retry ? 2 : 1, null);
-          case 'rejected':
-            return done(false, 1, 'The receiver refused the message (HTTP 401). Check the token, then send the test again.');
-          case 'unreachable':
-            return done(false, 2, 'The receiver could not be reached after 2 attempts. Check the address and your connection.');
-          case 'missingSecret':
-            return done(false, 0, 'This channel needs a token and none is stored yet. Set the token first.');
-        }
-      });
+    const progress = (attempt: number, phase: 'sending' | 'waiting', waitSecs: number | null): void =>
+      this.emit({ kind: 'testProgress', testId, channelId: channel.id, attempt, of: 3, phase, waitSecs });
+    switch (outcome) {
+      case 'hang':
+        this.schedule(() => progress(1, 'sending', null));
+        break;
+      case 'retry':
+        this.schedule(() => progress(1, 'sending', null));
+        this.schedule(() => progress(1, 'waiting', 4));
+        this.schedule(() => progress(2, 'sending', null));
+        this.schedule(() => done(true, 2, null));
+        break;
+      case 'succeed':
+        this.schedule(() => done(true, 1, null));
+        break;
+      case 'rejected':
+        this.schedule(() => done(false, 1, 'The receiver refused the message (HTTP 401). Check the token, then send the test again.'));
+        break;
+      case 'unreachable':
+        this.schedule(() => done(false, 3, 'The receiver could not be reached after 3 attempts. Check the address and your connection.'));
+        break;
+      case 'missingSecret':
+        this.schedule(() => done(false, 0, 'This channel needs a token and none is stored yet. Set the token first.'));
+        break;
     }
     return Promise.resolve(testId);
   }
@@ -201,6 +212,6 @@ export class MemoryChannelsBackend extends ChannelsBackend {
   private view(): ChannelsView {
     const secretSet: Record<string, boolean> = {};
     for (const c of this.stored) if (channelNeedsSecret(c) && this.secrets.has(c.id)) secretSet[c.id] = true;
-    return { settings: { channels: this.stored }, secretSet };
+    return { settings: { channels: [...this.stored] }, secretSet };
   }
 }

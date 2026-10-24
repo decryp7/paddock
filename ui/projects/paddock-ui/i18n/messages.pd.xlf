@@ -50,6 +50,63 @@
       <trans-unit id="pd.about.version" datatype="html">
         <source>Version <x id="version"/></source>
       </trans-unit>
+      <trans-unit id="pd.activity.badAnswer" datatype="html">
+        <source>The app did not answer with the entry.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.cannot" datatype="html">
+        <source>That action cannot be undone any more.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.what" datatype="html">
+        <source>What happened</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.when" datatype="html">
+        <source>When</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.emptyDescription" datatype="html">
+        <source>Actions the app takes for you will be listed here.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.emptyHeading" datatype="html">
+        <source>Nothing yet</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.expired" datatype="html">
+        <source>No longer possible</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.gone" datatype="html">
+        <source>That entry is no longer in the log.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.noAnswer" datatype="html">
+        <source>The activity log did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.page" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.readFailed" datatype="html">
+        <source>The activity log could not be read</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.subtitle" datatype="html">
+        <source>What the app did for you, and what you can take back.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.title" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undoFailed" datatype="html">
+        <source>The action could not be undone.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undoNamed" datatype="html">
+        <source>Undo: <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undone" datatype="html">
+        <source>Undone</source>
+      </trans-unit>
       <trans-unit id="pd.category.app" datatype="html">
         <source>Application</source>
       </trans-unit>
@@ -185,9 +242,6 @@
       <trans-unit id="pd.channels.hint.url" datatype="html">
         <source>Enter the web address to post to, starting with https://.</source>
       </trans-unit>
-      <trans-unit id="pd.channels.keep" datatype="html">
-        <source>Keep</source>
-      </trans-unit>
       <trans-unit id="pd.channels.lede" datatype="html">
         <source>Where the app tells you about things that need attention, even when its window is closed: a web address it posts to, an ntfy topic, or an email.</source>
       </trans-unit>
@@ -218,14 +272,38 @@
       <trans-unit id="pd.channels.paused" datatype="html">
         <source>Off</source>
       </trans-unit>
-      <trans-unit id="pd.channels.remove" datatype="html">
-        <source>Remove</source>
+      <trans-unit id="pd.channels.progress-sending" datatype="html">
+        <source>Attempt <x id="attempt"/> of <x id="of"/> · sending…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.progress-waiting" datatype="html">
+        <source>Attempt <x id="attempt"/> of <x id="of"/> · waiting <x id="secs"/> s before the next try</source>
       </trans-unit>
       <trans-unit id="pd.channels.remove-aria" datatype="html">
         <source>Remove <x id="name"/></source>
       </trans-unit>
+      <trans-unit id="pd.channels.remove-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-invalid" datatype="html">
+        <source>This window was opened without a channel to remove. Close it and choose Remove on a channel in the list.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-question" datatype="html">
+        <source>Remove &quot;<x id="name"/>&quot;?</source>
+      </trans-unit>
       <trans-unit id="pd.channels.remove-secret" datatype="html">
         <source>Remove secret</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-secret-goes" datatype="html">
+        <source>Its stored secret is deleted too.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-yes" datatype="html">
+        <source>Remove</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove.title" datatype="html">
+        <source>Remove channel</source>
       </trans-unit>
       <trans-unit id="pd.channels.save" datatype="html">
         <source>Save</source>
@@ -245,6 +323,9 @@
       <trans-unit id="pd.channels.secret.cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
+      <trans-unit id="pd.channels.secret.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
       <trans-unit id="pd.channels.secret.failed" datatype="html">
         <source>The engine could not store the secret.</source>
       </trans-unit>
@@ -253,6 +334,9 @@
       </trans-unit>
       <trans-unit id="pd.channels.secret.hide-short" datatype="html">
         <source>Hide</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.invalid" datatype="html">
+        <source>This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel's editor.</source>
       </trans-unit>
       <trans-unit id="pd.channels.secret.lede-password" datatype="html">
         <source>The password for <x id="channel"/> is kept by the app's engine, not in the settings file. It is never shown again.</source>
@@ -1046,6 +1130,132 @@
       <trans-unit id="pd.pitwall.use-builtin" datatype="html">
         <source>Use the built-in engine</source>
       </trans-unit>
+      <trans-unit id="pd.schedule.addTime" datatype="html">
+        <source>Add a time</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.cron" datatype="html">
+        <source>Cron expression</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.cronHint" datatype="html">
+        <source>Five fields: minute hour day-of-month month day-of-week, for example 0 9 * * 1-5. A leading seconds field is allowed.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.fri" datatype="html">
+        <source>Fri</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.mon" datatype="html">
+        <source>Mon</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.sat" datatype="html">
+        <source>Sat</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.sun" datatype="html">
+        <source>Sun</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.thu" datatype="html">
+        <source>Thu</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.tue" datatype="html">
+        <source>Tue</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.wed" datatype="html">
+        <source>Wed</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.daysLabel" datatype="html">
+        <source>Days of the week</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.every" datatype="html">
+        <source>Every</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.cron" datatype="html">
+        <source>Cron</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.every" datatype="html">
+        <source>Every…</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.times" datatype="html">
+        <source>At times</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.modeLabel" datatype="html">
+        <source>Schedule type</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.nextRuns" datatype="html">
+        <source>Next runs</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.add" datatype="html">
+        <source>Add a window</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.daysN" datatype="html">
+        <source>Days of window <x id="n"/> (none selected means every day)</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.empty" datatype="html">
+        <source>No windows: nothing is paused.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.from" datatype="html">
+        <source>From</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.overnight" datatype="html">
+        <source>Ends the next day.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.remove" datatype="html">
+        <source>Remove this window</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.removeN" datatype="html">
+        <source>Remove window <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.to" datatype="html">
+        <source>Until</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.zone" datatype="html">
+        <source>Time zone</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.zonePlaceholder" datatype="html">
+        <source>This computer's time zone (or an IANA name such as Europe/Berlin)</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.daily" datatype="html">
+        <source>Daily</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.hours" datatype="html">
+        <source><x id="hours"/> h</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.minutes" datatype="html">
+        <source><x id="minutes"/> min</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.presetsLabel" datatype="html">
+        <source>Common intervals</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.previewLabel" datatype="html">
+        <source>Schedule preview</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.removeTime" datatype="html">
+        <source>Remove this time</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.removeTimeN" datatype="html">
+        <source>Remove time of day <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.timeN" datatype="html">
+        <source>Time of day <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.days" datatype="html">
+        <source>Days</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.hours" datatype="html">
+        <source>Hours</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.minutes" datatype="html">
+        <source>Minutes</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unitLabel" datatype="html">
+        <source>Interval unit</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zone" datatype="html">
+        <source>Time zone</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zoneIn" datatype="html">
+        <source>Times are in <x id="zone"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zonePlaceholder" datatype="html">
+        <source>This computer's time zone (or an IANA name such as Europe/Berlin)</source>
+      </trans-unit>
       <trans-unit id="pd.service.actions" datatype="html">
         <source>Service actions</source>
       </trans-unit>
@@ -1516,6 +1726,51 @@
       </trans-unit>
       <trans-unit id="pd.ui.sparkline" datatype="html">
         <source>Trend</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.actionFailed" datatype="html">
+        <source><x id="label"/> failed: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.category" datatype="html">
+        <source>Edit</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.redo" datatype="html">
+        <source>Redo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.nothingToRedo" datatype="html">
+        <source>Nothing to redo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.nothingToUndo" datatype="html">
+        <source>Nothing to undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.notification.failed" datatype="html">
+        <source>Could not undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.redoFailed" datatype="html">
+        <source>Could not redo <x id="label"/>: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.redone" datatype="html">
+        <source>Redone: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.close" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.done" datatype="html">
+        <source>Done: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.undoFailed" datatype="html">
+        <source>Could not undo <x id="label"/>: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.undone" datatype="html">
+        <source>Undone: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.unknown" datatype="html">
+        <source>something went wrong</source>
       </trans-unit>
       <trans-unit id="pd.updates.asking" datatype="html">
         <source>Asking the updater…</source>

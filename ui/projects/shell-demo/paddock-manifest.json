@@ -10,6 +10,14 @@
       "title": "pd.diag.open"
     },
     {
+      "id": "pd.edit.redo",
+      "title": "pd.undo.cmd.redo"
+    },
+    {
+      "id": "pd.edit.undo",
+      "title": "pd.undo.cmd.undo"
+    },
+    {
       "id": "pd.settings.open",
       "title": "pd.settings.open"
     },
@@ -104,6 +112,18 @@
       "key": "Mod+Shift+H",
       "accelerator": "CmdOrCtrl+Shift+H",
       "scope": "window"
+    },
+    {
+      "command": "pd.edit.redo",
+      "key": "Mod+Shift+Z",
+      "accelerator": "CmdOrCtrl+Shift+Z",
+      "scope": "window"
+    },
+    {
+      "command": "pd.edit.undo",
+      "key": "Mod+Z",
+      "accelerator": "CmdOrCtrl+Z",
+      "scope": "window"
     }
   ],
   "menus": [
@@ -113,6 +133,20 @@
       "group": "settings",
       "order": 100,
       "accelerator": "CmdOrCtrl+,"
+    },
+    {
+      "menu": "edit",
+      "command": "pd.edit.undo",
+      "group": "history",
+      "order": 100,
+      "accelerator": "CmdOrCtrl+Z"
+    },
+    {
+      "menu": "edit",
+      "command": "pd.edit.redo",
+      "group": "history",
+      "order": 200,
+      "accelerator": "CmdOrCtrl+Shift+Z"
     },
     {
       "menu": "file",
@@ -249,13 +283,15 @@
     }
   ],
   "pages": [
+    "pd.activity",
     "sd.about",
     "sd.dialogs",
     "sd.home",
     "sd.keys",
     "sd.lab",
     "sd.pitwall",
-    "sd.runners"
+    "sd.runners",
+    "sd.schedule"
   ],
   "statusItems": [
     "sd.runners"
@@ -292,6 +328,14 @@
         "about_info",
         "about_legal"
       ]
+    },
+    "pd.channels.remove": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": []
     },
     "pd.channels.secret": {
       "kind": "form",
@@ -421,6 +465,9 @@
     "sd.index"
   ],
   "notificationKinds": {
+    "pd.undo.failed": {
+      "actions": []
+    },
     "pd.updates.available": {
       "actions": []
     },
@@ -433,8 +480,10 @@
   "messages": {
     "pd.about.open": "About",
     "pd.about.title": "About",
+    "pd.activity.page": "Activity",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
+    "pd.channels.remove.title": "Remove channel",
     "pd.channels.secret.title": "Channel secret",
     "pd.diag.open": "Report a problem…",
     "pd.diag.title": "Report a problem",
@@ -447,6 +496,10 @@
     "pd.settings.packs": "Knowledge packs",
     "pd.settings.service": "Background service",
     "pd.settings.title": "Settings",
+    "pd.undo.cmd.category": "Edit",
+    "pd.undo.cmd.redo": "Redo",
+    "pd.undo.cmd.undo": "Undo",
+    "pd.undo.notification.failed": "Could not undo",
     "pd.updates.notification.available": "Update available",
     "pd.updates.open": "Check for updates…",
     "pd.updates.title": "Updates",
@@ -482,6 +535,7 @@
     "sd.page.lab": "Lab",
     "sd.page.pitwall": "Local AI",
     "sd.page.runners": "Runners",
+    "sd.page.schedule": "Schedules",
     "sd.pseudo-locale": "Pseudo-locale",
     "sd.reset": "Reset greetings",
     "sd.settings.general": "General",

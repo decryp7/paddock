@@ -46,6 +46,7 @@ fn a_child_connects_authenticates_answers_and_is_gone_after_drop() {
     );
     assert_eq!(child.peer().call(b"still".to_vec(), T).unwrap(), b"still");
     assert!(!child.exited());
+    assert_eq!(child.in_job(), cfg!(windows));
     assert_eq!(child.memory_peak(), 0);
     assert_eq!(child.stopped_over_memory(), None);
     let pid = child.pid();
