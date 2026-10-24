@@ -46,6 +46,8 @@ type BoxError = Box<dyn Error + Send + Sync>;
 type Part<R, T> = Box<dyn FnOnce(&AppHandle<R>) -> T + Send>;
 type DiagSetup<R> =
     Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send>;
+type FilesSetup<R> =
+    Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_files::Files, BoxError> + Send>;
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
@@ -60,6 +62,7 @@ pub struct Builder<R: Runtime> {
     settings: Option<Part<R, Settings>>,
     diagnostics: Option<DiagSetup<R>>,
     service: Option<ServiceSetup<R>>,
+    files: Option<FilesSetup<R>>,
     sections: Vec<Arc<dyn Configurable>>,
     startup: Option<Startup<R>>,
     updater: Option<Part<R, UpdatesBuilder>>,
@@ -82,6 +85,7 @@ impl<R: Runtime> Builder<R> {
             settings: None,
             diagnostics: None,
             service: None,
+            files: None,
             sections: Vec::new(),
             startup: None,
             updater: None,
@@ -150,6 +154,18 @@ impl<R: Runtime> Builder<R> {
         f: impl FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send + 'static,
     ) -> Self {
         self.service = Some(Box::new(f));
+        self
+    }
+
+    /// The app's user files (plan X31): path grants, the pickers, recent lists, reveal and open. The shell manages the service
+    /// (`paddock_files::Files::for_app(&dirs, &[recent::FILES, recent::PROJECTS])`), serves the `files_*` commands, grants files
+    /// dropped on a window to it (`paddock://files-dropped`) and, with `native-dialogs`, shows the native dialogs when the
+    /// service has no picker of its own. The app's own commands take `paddock_files::tauri::WindowGrants`.
+    pub fn files(
+        mut self,
+        f: impl FnOnce(&AppHandle<R>) -> Result<paddock_files::Files, BoxError> + Send + 'static,
+    ) -> Self {
+        self.files = Some(Box::new(f));
         self
     }
 
@@ -279,6 +295,10 @@ impl<R: Runtime> Builder<R> {
                 paddock_diag::tauri::invoke_handler(),
             )
             .route(
+                &paddock_files::COMMANDS,
+                paddock_files::tauri::invoke_handler(),
+            )
+            .route(
                 &paddock_service::COMMANDS,
                 paddock_service::tauri::invoke_handler(),
             )
@@ -361,6 +381,19 @@ impl<R: Runtime> Builder<R> {
                     .register(paddock_diag::logging::logging_section(handle))
                     .map_err(|e| named("the Logging settings", e))?;
             }
+        }
+
+        if let Some(f) = self.files {
+            let files = f(app).map_err(|e| named("user files", e))?;
+            let files = if files.can_pick() {
+                files
+            } else {
+                match native_files_picker(app) {
+                    Some(picker) => files.picker(picker),
+                    None => files,
+                }
+            };
+            paddock_files::tauri::install(app, files);
         }
 
         if let Some(f) = self.service {
@@ -460,6 +493,19 @@ impl ServicePart {
     }
 }
 
+/// The native open and save dialogs for user files (`native-dialogs`); without the feature the app's files name a picker.
+#[cfg(feature = "native-dialogs")]
+fn native_files_picker<R: Runtime>(app: &AppHandle<R>) -> Option<Arc<dyn paddock_files::Picker>> {
+    Some(Arc::new(paddock_files::tauri::NativePicker::new(
+        app.clone(),
+    )))
+}
+
+#[cfg(not(feature = "native-dialogs"))]
+fn native_files_picker<R: Runtime>(_: &AppHandle<R>) -> Option<Arc<dyn paddock_files::Picker>> {
+    None
+}
+
 /// The native save dialog for reports (`native-dialogs`); without the feature the app's setup must name a picker.
 #[cfg(feature = "native-dialogs")]
 fn native_picker<R: Runtime>(
@@ -487,6 +533,7 @@ fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
         paddock_window::tauri::on_window_event(window, event);
     }
     paddock_menu::tauri::on_window_event(window, event);
+    paddock_files::tauri::on_window_event(window, event);
     let app = window.app_handle();
     match event {
         WindowEvent::Focused(true) => paddock_health::tauri::on_focus(app, window.label()),

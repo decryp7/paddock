@@ -217,6 +217,18 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
             Some(_) => setup.checks(Duration::ZERO, Duration::ZERO, 0),
         }))
     });
+    let files_dir = test_dir.clone();
+    // User files (plan X31): path grants, the native pickers, the recent lists in the config folder, reveal and open.
+    builder = builder.files(move |_| {
+        let dirs = dirs(files_dir.as_deref())?;
+        Ok(paddock_files::Files::for_app(
+            &dirs,
+            &[
+                paddock_files::recent::FILES,
+                paddock_files::recent::PROJECTS,
+            ],
+        ))
+    });
     let report_dir = test_dir.clone();
     // Report a problem (plan X2) and the Logging section: the app's folders and log, the shell's built-in sections.
     builder = builder.diagnostics(move |_| {

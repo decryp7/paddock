@@ -89,6 +89,7 @@ fn every_command_is_async() {
         "paddock-health",
         "paddock-dialogs",
         "paddock-diag",
+        "paddock-files",
         "paddock-service",
         "paddock-jobs",
         "paddock-settings",

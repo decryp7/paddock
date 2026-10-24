@@ -3119,6 +3119,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-files"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-proc",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-dialog",
+ "tempfile",
+ "ts-rs",
+]
+
+[[package]]
 name = "paddock-health"
 version = "0.1.0"
 dependencies = [
@@ -3299,6 +3315,7 @@ dependencies = [
  "paddock-dialogs",
  "paddock-download",
  "paddock-env",
+ "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-log",

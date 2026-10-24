@@ -5,6 +5,13 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-files` and `@decryp7/paddock-ui/shell/files` (plan X31): the user's files. `PathGrants` (open only paths the user chose,
+  by dialog, drop or command line; per window, bounded, expiring, canonical), the validators (`parse`, `canonical`, `output_file`,
+  `child`, `confined`), validated pickers behind `Picker` (`NativePicker` over `tauri-plugin-dialog`), `Recents` (named lists in a
+  versioned file, recorded only after a granted open, granted again on use), reveal, open and web addresses with command lines per
+  OS (never a file that runs on open; http, https and mailto only), `Files` and the `files_*` commands in the shell plugin
+  (`Builder::files`, drops granted by the window hook, `WindowGrants` for the app's own commands). UI: `FilesBackend`
+  (Tauri, memory), `FilesStore`, `pd-recent-files`; the shell demo has a Files page.
 - The app IPC kit (plan X28). `paddock_commands::CommandError` / `ErrorCode`: the one error envelope (code, message, retryable,
   hint, field, cause, kind), with constructors, `From` for `io::Error`, strings and the guard's `Refusal`, and its TypeScript
   generated into `@decryp7/paddock-ui/ipc`. `@decryp7/paddock-ui/ipc`: `toCommandError`, `CommandFailure`, `withCallTimeout` (a

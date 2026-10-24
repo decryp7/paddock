@@ -251,6 +251,7 @@
   "pages": [
     "sd.about",
     "sd.dialogs",
+    "sd.files",
     "sd.home",
     "sd.keys",
     "sd.lab",
@@ -452,6 +453,7 @@
     "sd.notify.three": "Notify three times",
     "sd.page.about": "About",
     "sd.page.dialogs": "Dialogs",
+    "sd.page.files": "Files",
     "sd.page.home": "Overview",
     "sd.page.keys": "Keyboard",
     "sd.page.lab": "Lab",

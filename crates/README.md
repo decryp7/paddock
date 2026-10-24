@@ -100,6 +100,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-files` | user files: path grants (open only paths the user chose, canonicalised), validated open/save pickers behind a port, recent lists (recorded only after a granted open, re-granted on use), reveal, open with the default program (never what runs on open) and web addresses (plan X31; from Debrief `paths.rs`, `recent.rs`, `opener.rs`) | yes (all apps; Pacenotes and Sighter from their first commit); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
@@ -836,6 +837,47 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 - Tests start real processes through the `paddock-ipc-test-child` binary and leave none behind; nothing sleeps or measures
   time (gates, channels, a `FakeClock` for the back-off). `fuzz/` holds the frame-codec fuzz target
   (`cargo +nightly fuzz run frame`).
+
+## `paddock-files` (plan X31)
+
+The rule "open only paths the user chose" in one place, plus what an app does with the user's files. Built from Debrief's
+`paths.rs`, `recent.rs` and `opener.rs`; Pitcrew's `open_url`/`reveal_logs` and Spotter's and Dyno's direct calls to the dialog and
+opener plugins become `Files`.
+
+```rust
+use paddock_files::{Access, Files, GrantSource, PickRequest, recent};
+
+// shell: Builder::new(identity).files(|_| Ok(Files::for_app(&dirs, &[recent::FILES, recent::PROJECTS])))
+// an app command takes the calling window's grants (a dialog or pop-out resolves to its host):
+#[tauri::command]
+async fn open_log(grants: paddock_files::tauri::WindowGrants, app: tauri::AppHandle, path: String) -> Result<(), CommandError> {
+    let granted = grants.read_file(&path, &["log", "txt"])?;        // notGranted unless the user chose it
+    // ... open it ...
+    paddock_files::tauri::opened(&app, "files", &granted, None);     // recorded only after a granted open
+    Ok(())
+}
+```
+
+- **Grants** (`PathGrants`, `GrantedPath`): filled only on the Rust side by the native dialogs (`Files::pick`), drag and drop
+  (the shell's window hook grants a drop to the window and sends `paddock://files-dropped`), the command line
+  (`tauri::grant_command_line`), a window's project file and files the app produced (`GrantSource`). Per window, at most
+  `MAX_GRANTS`, expiring after `GRANT_TTL` (a project does not), compared canonically so `..` and links cannot reach another
+  file; a read grant on a folder covers what is inside it. The message of a refusal says what to do (choose it again).
+- **Validators** (`path`): `parse` (absolute, bounded, no NUL), `canonical`, `output_file`, `child`, `confined` (a removal stays in
+  a root).
+- **Pickers**: `PickRequest` is validated (bounded title, letters-and-digits extensions, a plain default name) and shown by a
+  `Picker`; `tauri::NativePicker` (feature `dialog`, native glue) is the `tauri-plugin-dialog` adapter. It runs on the blocking
+  pool.
+- **Recent lists** (`Recents`, `ListSpec`): any number of named lists with caps (`recent::FILES`, `recent::PROJECTS`), in a
+  versioned `recent.json` of the config folder (damaged or newer reads as empty), announced on `paddock://files-recent`.
+  `Files::regrant` grants an entry again on use.
+- **Open** (`open`): reveal, open with the default program and the browser as command lines that are pure functions of the OS
+  (`Os`), started by a `Launcher` (a detached child with a reaper and a timeout). Files that would run (`runs_on_open`: scripts,
+  programs, installers) are refused; web addresses must be http, https or mailto.
+- **Commands** (`COMMANDS`, folded into the shell plugin): `files_pick`, `files_recent_list|remove|clear|grant`, `files_reveal`,
+  `files_open`, `files_open_app_folder` (data, config, cache, logs by name: the webview never supplies the path) and
+  `files_open_url`. The wire types and names are generated into `ui/projects/paddock-ui/shell/files/generated/`
+  (`PADDOCK_WRITE_TS=1 cargo test -p paddock-files --all-features --lib generated`).
 
 ## `paddock-env` (plan X7)
 

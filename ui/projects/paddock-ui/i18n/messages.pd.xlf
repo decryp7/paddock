@@ -200,6 +200,24 @@
       <trans-unit id="pd.dialogs.unknown" datatype="html">
         <source>This dialog is not known to this version of the app: <x id="dialog"/></source>
       </trans-unit>
+      <trans-unit id="pd.files.clear" datatype="html">
+        <source>Clear the list</source>
+      </trans-unit>
+      <trans-unit id="pd.files.no-recent" datatype="html">
+        <source>The recent files could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.files.recent-empty" datatype="html">
+        <source>Nothing opened yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.files.recent-label" datatype="html">
+        <source>Recent files</source>
+      </trans-unit>
+      <trans-unit id="pd.files.remove" datatype="html">
+        <source>Remove from the list</source>
+      </trans-unit>
+      <trans-unit id="pd.files.reveal" datatype="html">
+        <source>Show in the file manager</source>
+      </trans-unit>
       <trans-unit id="pd.format.bytes.one" datatype="html">
         <source><x id="count"/> byte</source>
       </trans-unit>
