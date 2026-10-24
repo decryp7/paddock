@@ -137,19 +137,19 @@ jobs:
 
       # Rule 23 on Linux and Windows: the sample agent (externalBin, plan X4) starts with --self-test; on Linux from the
       # .deb's own files (unpacked, never installed), on Windows from the copy the installer bundles.
-      - name: The bundled agent starts (Linux, Windows)
-        if: runner.os != 'macOS'
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            unpacked=$(mktemp -d)
-            dpkg-deb -x "$(ls apps/shell-demo/dist/*.deb | head -1)" "$unpacked"
-            agent="$unpacked/usr/bin/shell-demo-agent"
-          else
-            agent=$(ls apps/shell-demo/src-tauri/binaries/shell-demo-agent-*.exe | head -1)
-          fi
-          out=$("$agent" --self-test)
-          echo "$out"
-          echo "$out" | grep -q 'self-test: ok' || { echo "::error::the agent's self-test failed"; exit 1; }
+      - name: The bundled agent starts (Linux)
+        if: runner.os == 'Linux'
+        uses: ./.gitea/actions/sidecar-self-test
+        with:
+          deb: apps/shell-demo/dist/*.deb
+          sidecars: shell-demo-agent
+
+      - name: The bundled agent starts (Windows)
+        if: runner.os == 'Windows'
+        uses: ./.gitea/actions/sidecar-self-test
+        with:
+          dir: apps/shell-demo/src-tauri/binaries
+          sidecars: shell-demo-agent
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         with:

@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Every Paddock crate that parses untrusted input has a never-panics test (`paddock_testkit::assert_never_panics`, new: the one-line
+  form of `corpus` + `never_panics`), so C36 reports nothing and is strict in Paddock's own CI (`paddock-conformance --strict C36`: the
+  warnings of the named checks fail the run). C36 now assigns a file to the nearest crate above it.
+- The `sidecar-self-test` composite action (rule 23 on Linux and Windows bundles) and its use in the shell demo's release workflow. The
+  demo agent's `--self-test` is `paddock_proc::self_test` now (a failing check exits 1; before it always exited 0). `paddock-proc` was
+  already in the agent through `paddock-service`, so no dependency was added.
 - `paddock-build` (plan X34): the Tauri build step in one call (the Windows manifest in every binary, sidecar placeholders, rerun
   triggers; the manifest is shared, the shell demo gains it); `paddock_proc::self_test` (the `--self-test` of a sidecar);
   `paddock-sidecar` in `@decryp7/paddock-conformance` (`build` and `self-test` for every app's sidecars; the shell demo's

@@ -4,6 +4,7 @@
 mod common;
 mod loader;
 mod native;
+mod never_panics;
 mod parse;
 mod regex;
 mod reload;
