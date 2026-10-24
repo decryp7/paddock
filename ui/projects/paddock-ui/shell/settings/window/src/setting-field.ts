@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
 import type { FormValueControl, ValidationError } from '@angular/forms/signals';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import { type SettingField, type SettingValue, displayValue, editUnit, parseList, parseNumber, rangeHint, sameValue } from '@decryp7/paddock-ui/shell/settings';
 
@@ -14,7 +15,7 @@ let nextId = 0;
 @Component({
   selector: 'pd-setting-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdSelect],
+  imports: [PdSelect, PdGlyph],
   host: { class: 'pd-setting', '[class.pd-invalid]': '!!message()', '[class.pd-edited]': 'dirty()', '[attr.data-key]': 'setting().key' },
   template: `
     @let f = setting();
@@ -66,7 +67,7 @@ let nextId = 0;
       <p class="pd-help" [id]="id + '-help'">{{ f.description }}</p>
     }
     @if (message(); as m) {
-      <p class="pd-error" [id]="id + '-error'" role="alert">{{ m }}</p>
+      <p class="pd-error" [id]="id + '-error'" role="alert"><pd-glyph name="alert" [size]="12" /><span>{{ m }}</span></p>
     }
   `,
   styles: `
@@ -78,18 +79,17 @@ let nextId = 0;
     .pd-reset { min-height: 24px; padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
     .pd-reset:hover { border-color: var(--pd-border-control); color: var(--pd-text); }
     .pd-control { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; min-width: 0; }
-    .pd-input { min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; min-width: 0; max-width: 100%; box-sizing: border-box; }
-    pd-select { min-width: 10rem; max-width: 100%; }
+    .pd-input { min-height: var(--pd-control-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; min-width: 0; max-width: 100%; box-sizing: border-box; }
+    pd-select { width: 15rem; max-width: 100%; }
     .pd-input.pd-num { width: 9rem; }
     .pd-input.pd-wide { width: min(32rem, 100%); }
     textarea.pd-input { padding: var(--pd-space-1) var(--pd-space-2); font-family: var(--pd-font-mono, ui-monospace, monospace); }
     .pd-mono { font-family: var(--pd-font-mono, ui-monospace, monospace); }
-    .pd-switch { width: 18px; height: 18px; margin: 0; accent-color: var(--pd-accent); }
-    .pd-input:focus-visible, .pd-switch:focus-visible, .pd-reset:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
+    .pd-input:focus-visible, .pd-reset:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-unit { color: var(--pd-text-muted); }
     .pd-hint { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
     .pd-help { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); line-height: 1.45; }
-    .pd-error { margin: 0; color: var(--pd-danger-text, var(--pd-text)); font-size: var(--pd-text-caption); }
+    .pd-error { display: flex; align-items: center; gap: var(--pd-space-1); margin: 0; color: var(--pd-danger-text, var(--pd-text)); font-size: var(--pd-text-caption); }
     :host(.pd-invalid) .pd-input { border-color: var(--pd-danger-text, var(--pd-border-control)); }
   `,
 })
