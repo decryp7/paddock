@@ -1,0 +1,9 @@
+# The clippy preset every Paddock app extends (plan X11, check C13). clippy.toml has no `extends`: an app copies these
+# entries into its own clippy.toml, may add its own, and may reword the `reason` to name its process helper, but may not
+# drop a path. Tests and build scripts may `#[allow(clippy::disallowed_methods)]` with a reason.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "use the app's process helper (paddock-proc): no console window on Windows, always bounded and killed with its parent" },
+    { path = "tokio::process::Command::new", allow-invalid = true, reason = "use the app's process helper (paddock-proc): no console window on Windows, always bounded" },
+    { path = "std::env::temp_dir", reason = "tests use a scratch folder from the test kit and production code uses paddock-env: nothing is left in the shared temp folder" },
+    { path = "reqwest::Client::new", allow-invalid = true, reason = "build the client with paddock-net's policy (https only, caps, redirects, timeouts)" },
+]

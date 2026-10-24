@@ -23,6 +23,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C06 | every step exporting a Tauri key strips whitespace first | |
 | C07 | version agreement; release job needs the gates; with `--preflight vX.Y.Z` the tag preflight | `--api --repo` for the CI-green part |
 | C08 | the shared release scripts are used; with `--artifacts` the release files | `--artifacts` |
+| C13 | Rust lint preset (`lint/`): `[workspace.lints]` at least as strict, every member crate `[lints] workspace = true`, `clippy.toml` keeps every `disallowed-methods` path | `--paddock` |
 | C14 | tests run hermetically (`run --`); workflows that run tests without it are warned | |
 | C15 | no test or script uses the installed Chrome; CI requires the test browser | |
 | C16 | no spec or mock hard-codes the current app version | |
