@@ -100,6 +100,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-plugin-api` | what an out-of-process plugin links (ADR 0001, plan X51): platform protocol 2.0 (`PlatformRequest`, `HostCall`), `Plugin` and `Contributions` (tools with checked schemas, settings, views, MCP tools), the `Extension` mechanism for an app's own contract, version rules with refusal texts that say who must update, host files, output files, `serve` | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-host` | what an app links to run plugins (ADR 0001, plan X51): installed `.paddockplugin` packages (verified before every start), grants (default deny) and the pure `sandbox_for` mapping, a `Supervisor` per plugin (restart with back-off, quarantine through `paddock-guard`), guarded `Remote<C>` proxies, grant-checked host files, outputs and elevated operations, status for the UI | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-test` | testing plugins (ADR 0001, plan X51): `FakeHost` (a plugin in this process over a real IPC pair), the conformance checks every plugin runs, golden helpers, and `paddock-plugin-fixture`, the sample plugin the host's tests start as a process | yes (every plugin, the host's tests); built |
+| `cargo-paddock-plugin` | the plugin author's tool (ADR 0001, plan X51): `cargo paddock-plugin new / build / pack / keygen / sign / verify / run / test` on `paddock-cli` conventions; a project that depends on `paddock-plugin-api` alone, a deterministic optionally Ed25519-signed `.paddockplugin`, verification against trusted keys, and the built program started against `FakeHost` for the conformance checks (from Debrief `cargo-debrief-plugin`) | yes (every plugin author, plugin CI); built |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
@@ -855,6 +856,39 @@ Exit codes (a contract): 0 ok, 1 failure, 2 usage, 3 not running, 4 refused, 5 f
 stdout, progress and notes to stderr. `Progress::update(now, line)` throttles to one line per 500 ms, drops repeats and lets a
 new phase through. `Table` renders text, CSV or JSON with bounded cells and a truncation note. `parse_time`, `parse_size`,
 `format_size` read command-line values once. `paddock_service::Verb` registers its words in `Help` and decides `status`'s exit.
+
+## `cargo-paddock-plugin` (plan X51, ADR 0001)
+
+`cargo install cargo-paddock-plugin --registry decryp7`, then `cargo paddock-plugin <command>`. Output follows `paddock-cli`:
+`--json` writes exactly one object (errors too), `-q` silences notes, exit codes 0 ok, 1 failed, 2 wrong command line, 4 refused
+(a package that is unsigned, signed by a stranger or changed), 5 findings.
+
+```text
+cargo paddock-plugin new my-plugin [--dir D] [--id com.you.my-plugin] [--publisher "You"] [--api-path <checkout>/crates]
+cd my-plugin
+cargo paddock-plugin test                       # build, start the program against FakeHost, run the conformance checks
+cargo paddock-plugin run                        # start it and print what it describes
+cargo paddock-plugin keygen --out ~/.paddock/me.key        # owner-only file, never overwritten; prints the public key
+cargo paddock-plugin build [--target <triple>]...
+cargo paddock-plugin pack [--target T]... [--program T=<file>]... [--key me.key] [--out F]   # dist/<id>-<version>.paddockplugin
+cargo paddock-plugin sign dist/x.paddockplugin --key me.key [--out F]
+cargo paddock-plugin verify dist/x.paddockplugin [--trust <public key text or file>]...        # exit 4 when not trusted/intact
+```
+
+- `new` writes `Cargo.toml` (dependencies: `paddock-plugin-api` and `serde_json`; dev: `paddock-plugin-test`), `manifest.toml`, a
+  library with the plugin (one tool), a `main` that is one `serve` call, a conformance test, `.cargo/config.toml` (the registry) and
+  `.gitignore`. Nothing existing is overwritten. `--api-path` depends on a checkout's crates by path (no network).
+- `build` runs `cargo build --release --bin <manifest binary>` into `<project>/target` whatever `CARGO_TARGET_DIR` says; a target
+  that is not this computer's needs `rustup target add`.
+- `pack` reads `manifest.toml` (targets, program name), takes each program from `target/` or `--program`, and writes the archive
+  through `paddock-plugin-package` (fixed times, sorted entries, `SHA256SUMS`, optional signature): the same inputs give the same bytes.
+- `verify` opens the package (layout, limits, checksums, signature) and, with `--trust`, decides trust like the app does
+  (`TrustPolicy`); without it only the integrity is checked and the output says so.
+- `test` compares what the plugin describes with its manifest (id, version, protocol, tools, views, MCP tools) and runs
+  `paddock_plugin_test::conformance`; each finding is `[check] problem`. `--program <file>` starts a program built elsewhere and
+  `--no-build` uses the existing build.
+- Pure core (`args`, `template`, plans in `pack`/`build`), the one process start in `cargo.rs` (through `paddock-proc`),
+  `FakeHost::launch` in `paddock-plugin-test` starts a program like the app's launcher does.
 
 ## `paddock-names` (plan X18)
 
@@ -1809,4 +1843,4 @@ let answer = plugin.invoke("collector", "start", json!({ "folder": path }))?;   
   `FakeClock`; nothing sleeps.
 - **Not here:** Debrief's profile/document importers, dumps, the old `PluginRequest` enum (it becomes the `debrief.*`
   contract bodies, ADR 0003 phase 2), the elevated *process* (the app starts it and runs `Invoke` with the `elevated` role),
-  the OS sandbox, and the `cargo paddock-plugin` tool.
+  the OS sandbox. The author's tool is `cargo-paddock-plugin` (below).
