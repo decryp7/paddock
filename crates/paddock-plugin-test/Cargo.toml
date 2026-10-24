@@ -20,6 +20,12 @@ path = "src/bin/fixture_v1.rs"
 test = false
 doc = false
 
+[[bin]]
+name = "paddock-plugin-misbehaving"
+path = "src/bin/misbehaving.rs"
+test = false
+doc = false
+
 [dependencies]
 paddock-ipc = { workspace = true }
 paddock-plugin-api = { workspace = true }

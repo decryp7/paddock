@@ -6,6 +6,7 @@ use paddock_ipc::ProtocolVersion;
 use paddock_plugin_api::PLATFORM_PROTOCOL;
 use paddock_plugin_api::serve::{ELEVATED_ROLE, PluginHandler};
 use paddock_plugin_test::fixture::FixturePlugin;
+use paddock_plugin_test::process::Real;
 use std::sync::Arc;
 
 fn main() {
@@ -14,11 +15,19 @@ fn main() {
         .iter()
         .position(|a| a == "--protocol")
         .and_then(|i| args.get(i + 1))
-        .map_or(PLATFORM_PROTOCOL, |v| v.parse::<ProtocolVersion>().expect("--protocol major.minor"));
+        .map_or(PLATFORM_PROTOCOL, |v| {
+            v.parse::<ProtocolVersion>()
+                .expect("--protocol major.minor")
+        });
     let result = paddock_ipc::child::serve(
         "the app",
         protocol,
-        |boot| Arc::new(PluginHandler::new(Arc::new(FixturePlugin::new()), boot.role == ELEVATED_ROLE)),
+        |boot| {
+            Arc::new(PluginHandler::new(
+                Arc::new(FixturePlugin::with_danger(Arc::new(Real))),
+                boot.role == ELEVATED_ROLE,
+            ))
+        },
         |_, _| {},
     );
     if let Err(e) = result {

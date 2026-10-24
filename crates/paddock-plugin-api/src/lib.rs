@@ -34,6 +34,7 @@
 #![deny(missing_docs)]
 
 pub mod compat;
+pub mod entry;
 pub mod extension;
 pub mod host_file;
 pub mod output;
@@ -42,20 +43,25 @@ pub mod protocol;
 pub mod serve;
 pub mod tools;
 
+#[cfg(test)]
+mod testing;
+
 pub use compat::{HostInfo, NamespaceSupport, Refusal};
+pub use entry::serve;
 pub use extension::{Contract, ExtCtx, ExtensionHandler};
 pub use paddock_ipc::{IpcError, Json, RemoteError};
 pub use plugin::{Contributions, McpTool, Plugin, RegisterError, View, ViewCtx};
-pub use protocol::{Described, Fail, HostCall, PLATFORM_PROTOCOL, PlatformRequest, ProtocolVersion};
-pub use serve::serve;
+pub use protocol::{
+    Described, Fail, HostCall, PLATFORM_PROTOCOL, PlatformRequest, ProtocolVersion,
+};
 pub use tools::{Host, Tool, ToolCtx, ToolError};
 
 /// The names most plugins need: `use paddock_plugin_api::prelude::*;`.
 pub mod prelude {
+    pub use crate::entry::serve;
     pub use crate::extension::{Contract, ExtCtx};
     pub use crate::plugin::{Contributions, McpTool, Plugin, RegisterError, View, ViewCtx};
     pub use crate::protocol::{McpBudget, McpToolInfo, ViewInfo};
-    pub use crate::serve::serve;
     pub use crate::tools::{OpSpec, Schema, Tool, ToolCtx, ToolError, ToolInfo};
     pub use paddock_ipc::RemoteError;
 }

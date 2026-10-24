@@ -100,7 +100,10 @@ impl HostInfo {
             plugin: plugin.into(),
             app: self.app.clone(),
             needs,
-            what: format!("protocol {built_for}, this {} speaks {}", self.app, self.protocol),
+            what: format!(
+                "protocol {built_for}, this {} speaks {}",
+                self.app, self.protocol
+            ),
         })
     }
 
@@ -111,7 +114,10 @@ impl HostInfo {
                 plugin: plugin.into(),
                 app: self.app.clone(),
                 needs: None,
-                what: format!("the contract \"{ns}\", which this {} does not serve", self.app),
+                what: format!(
+                    "the contract \"{ns}\", which this {} does not serve",
+                    self.app
+                ),
             });
         };
         if minor <= known.minor {
@@ -127,7 +133,10 @@ impl HostInfo {
             plugin: plugin.into(),
             app: self.app.clone(),
             needs,
-            what: format!("\"{ns}\" version {minor}, this {} serves up to {}", self.app, known.minor),
+            what: format!(
+                "\"{ns}\" version {minor}, this {} serves up to {}",
+                self.app, known.minor
+            ),
         })
     }
 }
@@ -142,22 +151,42 @@ pub fn protocol_of(v: paddock_plugin_package::ProtocolVersion) -> ProtocolVersio
 /// the badges the user saw are the truth.
 pub fn check_described(manifest: &Manifest, d: &Described) -> Result<(), Refusal> {
     let plugin = manifest.id.as_str();
-    let mismatch = |what: String| Err(Refusal::Mismatch { plugin: plugin.into(), what });
+    let mismatch = |what: String| {
+        Err(Refusal::Mismatch {
+            plugin: plugin.into(),
+            what,
+        })
+    };
     if d.id != plugin {
         return mismatch(format!("it calls itself \"{}\"", d.id));
     }
     if d.version != manifest.version.to_string() {
-        return mismatch(format!("it is version {}, the manifest says {}", d.version, manifest.version));
+        return mismatch(format!(
+            "it is version {}, the manifest says {}",
+            d.version, manifest.version
+        ));
     }
     if d.protocol != protocol_of(manifest.protocol) {
-        return mismatch(format!("it speaks protocol {}, the manifest says {}", d.protocol, manifest.protocol));
+        return mismatch(format!(
+            "it speaks protocol {}, the manifest says {}",
+            d.protocol, manifest.protocol
+        ));
     }
-    let (mut tools, mut views, mut mcp, mut exts) = (Vec::new(), Vec::new(), BTreeSet::new(), BTreeSet::new());
+    let (mut tools, mut views, mut mcp, mut exts) =
+        (Vec::new(), Vec::new(), BTreeSet::new(), BTreeSet::new());
     let mut settings = None;
     for c in &manifest.contributions {
         match c {
-            Contribution::Tool { id, actions } => tools.push((id.as_str(), actions.iter().map(|a| a.id.as_str()).collect::<BTreeSet<_>>())),
-            Contribution::View { id, actions } => views.push((id.as_str(), actions.iter().any(|a| a.writes))),
+            Contribution::Tool { id, actions } => tools.push((
+                id.as_str(),
+                actions
+                    .iter()
+                    .map(|a| a.id.as_str())
+                    .collect::<BTreeSet<_>>(),
+            )),
+            Contribution::View { id, actions } => {
+                views.push((id.as_str(), actions.iter().any(|a| a.writes)))
+            }
             Contribution::McpTool { id } => {
                 mcp.insert(id.as_str());
             }
@@ -169,17 +198,30 @@ pub fn check_described(manifest: &Manifest, d: &Described) -> Result<(), Refusal
     }
     tools.sort();
     views.sort();
-    let mut said_tools: Vec<(&str, BTreeSet<&str>)> =
-        d.tools.iter().map(|t| (t.id.as_str(), t.ops.iter().map(|o| o.name.as_str()).collect())).collect();
+    let mut said_tools: Vec<(&str, BTreeSet<&str>)> = d
+        .tools
+        .iter()
+        .map(|t| {
+            (
+                t.id.as_str(),
+                t.ops.iter().map(|o| o.name.as_str()).collect(),
+            )
+        })
+        .collect();
     said_tools.sort();
     if said_tools != tools {
         return mismatch(format!(
             "its tools ({}) are not the manifest's ({})",
-            said_tools.iter().map(|t| t.0).collect::<Vec<_>>().join(", "),
+            said_tools
+                .iter()
+                .map(|t| t.0)
+                .collect::<Vec<_>>()
+                .join(", "),
             tools.iter().map(|t| t.0).collect::<Vec<_>>().join(", ")
         ));
     }
-    let mut said_views: Vec<(&str, bool)> = d.views.iter().map(|v| (v.id.as_str(), v.writes)).collect();
+    let mut said_views: Vec<(&str, bool)> =
+        d.views.iter().map(|v| (v.id.as_str(), v.writes)).collect();
     said_views.sort();
     if said_views != views {
         return mismatch("its views, or which of them write, are not the manifest's".into());
@@ -188,13 +230,22 @@ pub fn check_described(manifest: &Manifest, d: &Described) -> Result<(), Refusal
     if said_mcp != mcp {
         return mismatch("its MCP tools are not the manifest's".into());
     }
-    if !mcp.is_empty() && !manifest.permissions.iter().any(|p| p.permission == Permission::McpExpose) {
+    if !mcp.is_empty()
+        && !manifest
+            .permissions
+            .iter()
+            .any(|p| p.permission == Permission::McpExpose)
+    {
         return mismatch("it offers MCP tools without asking for the mcpExpose permission".into());
     }
     if d.settings.as_ref().map(|s| s.id.as_str()) != settings {
         return mismatch("its settings section is not the manifest's".into());
     }
-    let said_exts: BTreeSet<(&str, u16)> = d.extensions.iter().map(|e| (e.ns.as_str(), e.minor)).collect();
+    let said_exts: BTreeSet<(&str, u16)> = d
+        .extensions
+        .iter()
+        .map(|e| (e.ns.as_str(), e.minor))
+        .collect();
     if said_exts != exts {
         return mismatch("the contracts it speaks are not the manifest's".into());
     }
@@ -251,22 +302,48 @@ pub enum Refusal {
 impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Refusal::Legacy { plugin, built_for, app, host } => write!(
+            Refusal::Legacy {
+                plugin,
+                built_for,
+                app,
+                host,
+            } => write!(
                 f,
                 "plugin {plugin} was built for an older contract (protocol {built_for}; this {app} speaks {host}); update it"
             ),
-            Refusal::PluginTooOld { plugin, built_for, app, host } => write!(
+            Refusal::PluginTooOld {
+                plugin,
+                built_for,
+                app,
+                host,
+            } => write!(
                 f,
                 "plugin {plugin} was built for an older contract (protocol {built_for}; this {app} speaks {host}); update it"
             ),
-            Refusal::AppTooOld { plugin, app, needs: Some(v), .. } => {
+            Refusal::AppTooOld {
+                plugin,
+                app,
+                needs: Some(v),
+                ..
+            } => {
                 write!(f, "plugin {plugin} needs {app} {v} or newer")
             }
-            Refusal::AppTooOld { plugin, app, needs: None, what } => {
-                write!(f, "plugin {plugin} needs a newer {app}: it uses {what}; update {app}")
+            Refusal::AppTooOld {
+                plugin,
+                app,
+                needs: None,
+                what,
+            } => {
+                write!(
+                    f,
+                    "plugin {plugin} needs a newer {app}: it uses {what}; update {app}"
+                )
             }
             Refusal::Mismatch { plugin, what } => {
-                write!(f, "plugin {plugin} does not match its manifest ({what}); reinstall or update it")
+                write!(
+                    f,
+                    "plugin {plugin} does not match its manifest ({what}); reinstall or update it"
+                )
             }
         }
     }
@@ -279,7 +356,8 @@ mod tests {
     use super::*;
 
     fn host() -> HostInfo {
-        let mut h = HostInfo::new("Debrief").serving(NamespaceSupport::new("debrief.import.v1", 2).since(2, "1.4"));
+        let mut h = HostInfo::new("Debrief")
+            .serving(NamespaceSupport::new("debrief.import.v1", 2).since(2, "1.4"));
         h.protocol = ProtocolVersion::new(2, 1);
         h.protocol_since = vec![(ProtocolVersion::new(2, 1), "1.3".into())];
         h
@@ -290,24 +368,35 @@ mod tests {
         let h = host();
         assert_eq!(h.check_protocol("p", ProtocolVersion::new(2, 0)), Ok(()));
         assert_eq!(h.check_protocol("p", ProtocolVersion::new(2, 1)), Ok(()));
-        let newer = h.check_protocol("p", ProtocolVersion::new(2, 2)).unwrap_err();
+        let newer = h
+            .check_protocol("p", ProtocolVersion::new(2, 2))
+            .unwrap_err();
         assert_eq!(
             newer.to_string(),
             "plugin p needs a newer Debrief: it uses protocol 2.2, this Debrief speaks 2.1; update Debrief"
         );
         let mut h = host();
         h.protocol = ProtocolVersion::new(2, 0);
-        h.protocol_since = vec![(ProtocolVersion::new(2, 0), "1.0".into()), (ProtocolVersion::new(2, 3), "1.9".into())];
-        let named = h.check_protocol("p", ProtocolVersion::new(2, 3)).unwrap_err();
+        h.protocol_since = vec![
+            (ProtocolVersion::new(2, 0), "1.0".into()),
+            (ProtocolVersion::new(2, 3), "1.9".into()),
+        ];
+        let named = h
+            .check_protocol("p", ProtocolVersion::new(2, 3))
+            .unwrap_err();
         assert_eq!(named.to_string(), "plugin p needs Debrief 1.9 or newer");
-        let future_major = h.check_protocol("p", ProtocolVersion::new(3, 0)).unwrap_err();
+        let future_major = h
+            .check_protocol("p", ProtocolVersion::new(3, 0))
+            .unwrap_err();
         assert!(matches!(future_major, Refusal::AppTooOld { .. }));
     }
 
     #[test]
     fn protocol_one_is_legacy_and_older_majors_say_update_the_plugin() {
         let h = host();
-        let legacy = h.check_protocol("p", ProtocolVersion::new(1, 1)).unwrap_err();
+        let legacy = h
+            .check_protocol("p", ProtocolVersion::new(1, 1))
+            .unwrap_err();
         assert!(matches!(legacy, Refusal::Legacy { .. }));
         assert_eq!(
             legacy.to_string(),
@@ -315,7 +404,9 @@ mod tests {
         );
         let mut h3 = host();
         h3.protocol = ProtocolVersion::new(3, 0);
-        let old = h3.check_protocol("p", ProtocolVersion::new(2, 0)).unwrap_err();
+        let old = h3
+            .check_protocol("p", ProtocolVersion::new(2, 0))
+            .unwrap_err();
         assert!(matches!(old, Refusal::PluginTooOld { .. }));
         assert!(old.to_string().ends_with("update it"));
     }
@@ -332,14 +423,25 @@ mod tests {
         let mut h = host();
         h.namespaces[0].minor = 1;
         h.namespaces[0].since.push((2, "1.4".into()));
-        assert_eq!(h.check_extension("p", "debrief.import.v1", 2).unwrap_err().to_string(), "plugin p needs Debrief 1.4 or newer");
+        assert_eq!(
+            h.check_extension("p", "debrief.import.v1", 2)
+                .unwrap_err()
+                .to_string(),
+            "plugin p needs Debrief 1.4 or newer"
+        );
         let unknown = h.check_extension("p", "other.v1", 0).unwrap_err();
         assert!(unknown.to_string().contains("does not serve"));
     }
 
     #[test]
     fn a_mismatch_with_the_manifest_says_what_differs() {
-        let m = Refusal::Mismatch { plugin: "p".into(), what: "tool \"x\" is not declared".into() };
-        assert_eq!(m.to_string(), "plugin p does not match its manifest (tool \"x\" is not declared); reinstall or update it");
+        let m = Refusal::Mismatch {
+            plugin: "p".into(),
+            what: "tool \"x\" is not declared".into(),
+        };
+        assert_eq!(
+            m.to_string(),
+            "plugin p does not match its manifest (tool \"x\" is not declared); reinstall or update it"
+        );
     }
 }

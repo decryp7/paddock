@@ -19,6 +19,15 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-plugin-api`, `paddock-plugin-host` and `paddock-plugin-test` (plan X51, ADR 0001 to 0003), the platform half of
+  Debrief's `debrief-plugin-api`, `-host`, `-registry` and `-test`. `paddock-plugin-api`: platform protocol 2.0
+  (`PlatformRequest`, `HostCall`), `Plugin`/`Contributions` (tools with checked schemas, settings, views, MCP tools), the
+  `Extension` mechanism (`Contract`: an app's own postcard enums routed by namespace, never decoded by the platform), version
+  rules with refusals that say who must update, host files, output files, `serve`. `paddock-plugin-host`: installed
+  `.paddockplugin` discovery (verified before every start; a changed program is quarantined), grants with default deny and
+  the pure `sandbox_for`, a `Supervisor` per plugin (restart with back-off on the injected clock, quarantine through
+  `paddock-guard`), guarded `Remote<C>` proxies, grant-checked file reads, outputs and elevated operations, `PluginHost` and
+  `Status` for the Plugins view. `paddock-plugin-test`: `FakeHost`, conformance checks, golden helpers and the fixture plugin.
 - `paddock-guard` (plan X51, ADR 0001), from Debrief's `debrief_core::guard` without its plugin types: `catch` (panic to a typed
   `Crashed`), `Quarantine` with a `QuarantinePolicy` (3 failures in 10 minutes by default) on the shared `Clock`, failures as
   `Panic`, `Hang` or `Garbled` (a typed error the owner returns is not one), manual `release`, status, an observer, quarantined

@@ -44,7 +44,9 @@ impl OutputWriter {
     /// Ends the file and returns where the app saved it.
     pub fn finish(mut self) -> Result<SavedOutput, ToolError> {
         let saved = self.send(true)?;
-        saved.ok_or_else(|| ToolError::Failed("the app did not say where it saved the output".into()))
+        saved.ok_or_else(|| {
+            ToolError::Failed("the app did not say where it saved the output".into())
+        })
     }
 }
 
@@ -67,43 +69,25 @@ impl Write for OutputWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{NoHost, ToolTask};
-    use std::sync::Mutex;
-
-    #[derive(Default)]
-    struct Rec(Mutex<Vec<(String, usize, bool)>>);
-    impl Host for Rec {
-        fn read_file(&self, _: u64, _: u64, _: u32) -> Result<Vec<u8>, ToolError> {
-            Ok(Vec::new())
-        }
-        fn report(&self, _: &str, _: Option<f32>, _: &str) {}
-        fn task_started(&self, _: &str, _: &ToolTask) {}
-        fn task_finished(&self, _: &str) {}
-        fn output(&self, name: &str, bytes: &[u8], last: bool) -> Result<Option<SavedOutput>, ToolError> {
-            self.0.lock().unwrap().push((name.into(), bytes.len(), last));
-            Ok(last.then(|| SavedOutput { name: name.into(), bytes: 0 }))
-        }
-        fn elevated(&self, _: &str, _: &str, _: serde_json::Value, _: std::time::Duration) -> Result<serde_json::Value, ToolError> {
-            Ok(serde_json::Value::Null)
-        }
-    }
+    use crate::testing::Memory;
+    use crate::tools::NoHost;
 
     #[test]
     fn output_is_sent_in_chunks_and_ended_by_finish() {
-        let host = Arc::new(Rec::default());
+        let host = Arc::new(Memory::default());
         let mut w = OutputWriter::create(host.clone(), "capture.bin").unwrap();
         w.write_all(&vec![1u8; OUTPUT_CHUNK * 2 + 10]).unwrap();
         w.flush().unwrap();
         assert_eq!(w.sent(), OUTPUT_CHUNK as u64 * 2);
         let saved = w.finish().unwrap();
         assert_eq!(saved.name, "capture.bin");
-        let seen = host.0.lock().unwrap().clone();
+        let n = OUTPUT_CHUNK;
         assert_eq!(
-            seen,
+            host.log(),
             [
-                ("capture.bin".to_string(), OUTPUT_CHUNK, false),
-                ("capture.bin".to_string(), OUTPUT_CHUNK, false),
-                ("capture.bin".to_string(), 10, true)
+                format!("output capture.bin {n} false"),
+                format!("output capture.bin {n} false"),
+                "output capture.bin 10 true".to_string()
             ]
         );
     }
@@ -117,22 +101,11 @@ mod tests {
         let ended = OutputWriter::create(Arc::new(NoHost), "a.bin").unwrap();
         assert!(ended.finish().is_err());
         // A host that never says where it saved the file.
-        struct Silent;
-        impl Host for Silent {
-            fn read_file(&self, _: u64, _: u64, _: u32) -> Result<Vec<u8>, ToolError> {
-                Ok(Vec::new())
-            }
-            fn report(&self, _: &str, _: Option<f32>, _: &str) {}
-            fn task_started(&self, _: &str, _: &ToolTask) {}
-            fn task_finished(&self, _: &str) {}
-            fn output(&self, _: &str, _: &[u8], _: bool) -> Result<Option<SavedOutput>, ToolError> {
-                Ok(None)
-            }
-            fn elevated(&self, _: &str, _: &str, _: serde_json::Value, _: std::time::Duration) -> Result<serde_json::Value, ToolError> {
-                Ok(serde_json::Value::Null)
-            }
-        }
-        let w = OutputWriter::create(Arc::new(Silent), "a.bin").unwrap();
+        let silent = Arc::new(Memory {
+            silent: true,
+            ..Memory::default()
+        });
+        let w = OutputWriter::create(silent, "a.bin").unwrap();
         assert!(w.finish().unwrap_err().to_string().contains("did not say"));
     }
 }

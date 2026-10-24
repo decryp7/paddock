@@ -8,7 +8,9 @@ use paddock_plugin_api::output::OutputWriter;
 use paddock_plugin_api::prelude::*;
 use paddock_plugin_api::protocol::{McpBudget, McpToolInfo, ViewInfo};
 use paddock_plugin_api::tools::ToolTask;
-use paddock_settings::{ApplyError, Configurable, FieldKind, SectionOwner, SettingField, SettingsSection, ValidValues};
+use paddock_settings::{
+    ApplyError, Configurable, FieldKind, SectionOwner, SettingField, SettingsSection, ValidValues,
+};
 use paddock_view::{ActionRef, Node, NodeKind, SCHEMA, ViewAction, ViewDoc, ViewPatch};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -24,13 +26,54 @@ pub const TOOL: &str = "fixture.tool";
 pub const SETTINGS: &str = "fixture.sample";
 /// The fixture's view.
 pub const VIEW: &str = "fixture.view";
-/// The fixture's action on its view.
+/// The fixture's action on its view that answers a whole new document.
 pub const ACTION: &str = "refresh";
+/// The fixture's action on its view that answers a patch of one node.
+pub const REPLACE: &str = "replace";
 /// The fixture's MCP tool.
 pub const MCP_TOOL: &str = "fixture_echo";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The things the fixture does that end or block its process. In the fixture program they are real ([`crate::process::Real`]);
+/// in a test that runs the fixture in this process they are only recorded ([`Quiet`]), so every line of the fixture runs.
+pub trait Danger: Send + Sync {
+    /// Ends the process with a failure code at once.
+    fn crash(&self);
+    /// Blocks forever and ignores everything, the cancel included.
+    fn hang(&self);
+    /// Ends the process a moment after the reply went out.
+    fn quit_soon(&self);
+    /// Ends the process with `code`.
+    fn exit(&self, code: i32);
+}
+
+/// A [`Danger`] that only records what it was asked to do.
+#[derive(Default)]
+pub struct Quiet(pub Mutex<Vec<String>>);
+
+impl Quiet {
+    /// What was asked so far.
+    pub fn asked(&self) -> Vec<String> {
+        lock(&self.0).clone()
+    }
+}
+
+impl Danger for Quiet {
+    fn crash(&self) {
+        lock(&self.0).push("crash".into());
+    }
+    fn hang(&self) {
+        lock(&self.0).push("hang".into());
+    }
+    fn quit_soon(&self) {
+        lock(&self.0).push("quit_soon".into());
+    }
+    fn exit(&self, code: i32) {
+        lock(&self.0).push(format!("exit {code}"));
+    }
 }
 
 /// What the app asks over the fixture's contract.
@@ -86,7 +129,15 @@ struct Sample(Arc<Applied>);
 impl Configurable for Sample {
     fn section(&self) -> SettingsSection {
         SettingsSection::new(SETTINGS, "Fixture", SectionOwner::App)
-            .field(SettingField::new("greeting", "Greeting", FieldKind::Text { max_len: 40, pattern: None }, "hello"))
+            .field(SettingField::new(
+                "greeting",
+                "Greeting",
+                FieldKind::Text {
+                    max_len: 40,
+                    pattern: None,
+                },
+                "hello",
+            ))
             .field(SettingField::new("shout", "Shout", FieldKind::Bool, false))
     }
 
@@ -102,6 +153,7 @@ impl Configurable for Sample {
 
 struct FixtureTool {
     applied: Arc<Applied>,
+    danger: Arc<dyn Danger>,
 }
 
 impl Tool for FixtureTool {
@@ -112,22 +164,41 @@ impl Tool for FixtureTool {
     fn describe(&self) -> ToolInfo {
         ToolInfo::new(TOOL, "Fixture tool")
             .describe("Does small things so tests can see the platform work")
-            .op(OpSpec::new("echo", "Echo").args(Schema::object().field("text", Schema::text(1000))))
+            .op(OpSpec::new("echo", "Echo")
+                .args(Schema::object().field("text", Schema::text(1000))))
             .op(OpSpec::new("greet", "Greet"))
             .op(OpSpec::new("fail", "Fail"))
             .op(OpSpec::new("deny", "Deny"))
             .op(OpSpec::new("panic", "Panic"))
             .op(OpSpec::new("crash", "Crash"))
             .op(OpSpec::new("hang", "Hang"))
-            .op(OpSpec::new("big", "Big").args(Schema::object().field("n", Schema::int(0, 1 << 30))))
-            .op(OpSpec::new("read", "Read a host file").args(Schema::object().field("id", Schema::int(0, i64::MAX)).field("len", Schema::int(0, 1 << 40))))
+            .op(OpSpec::new("big", "Big")
+                .args(Schema::object().field("n", Schema::int(0, 1 << 30))))
+            .op(OpSpec::new("read", "Read a host file").args(
+                Schema::object()
+                    .field("id", Schema::int(0, i64::MAX))
+                    .field("len", Schema::int(0, 1 << 40)),
+            ))
             .op(OpSpec::new("task", "Run a task"))
-            .op(OpSpec::new("save", "Save output").args(Schema::object().field("name", Schema::text(100)).field("bytes", Schema::int(0, 1 << 24))))
-            .op(OpSpec::new("lift", "Run elevated").args(Schema::object().field("op", Schema::text(64))))
-            .op(OpSpec::new("open", "Open a path").args(Schema::object().field(
-                "path",
-                Schema::path(paddock_plugin_api::tools::PathKind::File, paddock_plugin_api::tools::PathAccess::Read),
-            )))
+            .op(OpSpec::new("save", "Save output").args(
+                Schema::object()
+                    .field("name", Schema::text(100))
+                    .field("bytes", Schema::int(0, 1 << 24)),
+            ))
+            .op(OpSpec::new("lift", "Run elevated")
+                .args(Schema::object().field("op", Schema::text(64))))
+            .op(
+                OpSpec::new("open", "Open a path").args(Schema::object().field(
+                    "path",
+                    Schema::path(
+                        paddock_plugin_api::tools::PathKind::File,
+                        paddock_plugin_api::tools::PathAccess::Read,
+                    ),
+                )),
+            )
+            .op(OpSpec::new("quit_soon", "End the process soon"))
+            .op(OpSpec::new("log", "Log a line")
+                .args(Schema::object().field("line", Schema::text(5000))))
             .op(OpSpec::new("root", "Elevated only").elevated())
     }
 
@@ -136,17 +207,31 @@ impl Tool for FixtureTool {
             "echo" => Ok(json!({ "text": args["text"] })),
             "greet" => {
                 let (greeting, shout) = lock(&self.applied.0).clone();
-                let greeting = if greeting.is_empty() { "hello".to_string() } else { greeting };
-                Ok(json!(if shout { greeting.to_uppercase() } else { greeting }))
+                let greeting = if greeting.is_empty() {
+                    "hello".to_string()
+                } else {
+                    greeting
+                };
+                Ok(json!(if shout {
+                    greeting.to_uppercase()
+                } else {
+                    greeting
+                }))
             }
             "fail" => Err(ToolError::failed("the fixture failed on purpose")),
             "deny" => Err(ToolError::Denied("the fixture lacks a right".into())),
             "panic" => panic!("the fixture panicked on purpose"),
-            "crash" => std::process::exit(86),
-            "hang" => loop {
-                std::thread::park();
-            },
-            "big" => Ok(json!("x".repeat(usize::try_from(args["n"].as_u64().unwrap_or(0)).unwrap_or(0)))),
+            "crash" => {
+                self.danger.crash();
+                Ok(json!("crash returned"))
+            }
+            "hang" => {
+                self.danger.hang();
+                Ok(json!("hang returned"))
+            }
+            "big" => Ok(json!("x".repeat(
+                usize::try_from(args["n"].as_u64().unwrap_or(0)).unwrap_or(0)
+            ))),
             "read" => {
                 let id = args["id"].as_u64().unwrap_or(0);
                 let len = args["len"].as_u64().unwrap_or(0);
@@ -155,7 +240,12 @@ impl Tool for FixtureTool {
                 Ok(json!(String::from_utf8_lossy(&bytes)))
             }
             "task" => {
-                ctx.task_started(ToolTask { id: "job-1".into(), label: "A job".into(), kind: "fixture".into(), stoppable: true });
+                ctx.task_started(ToolTask {
+                    id: "job-1".into(),
+                    label: "A job".into(),
+                    kind: "fixture".into(),
+                    stoppable: true,
+                });
                 ctx.report("job-1", Some(0.5), "halfway");
                 Ok(json!("started"))
             }
@@ -167,20 +257,31 @@ impl Tool for FixtureTool {
                 let saved = out.finish()?;
                 Ok(json!({ "name": saved.name, "bytes": saved.bytes }))
             }
-            "lift" => ctx.elevated(args["op"].as_str().unwrap_or(""), json!({}), std::time::Duration::from_secs(5)),
-            "open" => Ok(json!(std::fs::read_to_string(PathBuf::from(args["path"].as_str().unwrap_or(""))).unwrap_or_default())),
-            "root" => Ok(json!("root")),
-            other => Err(ToolError::failed(format!("unknown operation {other}"))),
+            "lift" => ctx.elevated(
+                args["op"].as_str().unwrap_or(""),
+                json!({}),
+                std::time::Duration::from_secs(5),
+            ),
+            "open" => Ok(json!(
+                std::fs::read_to_string(PathBuf::from(args["path"].as_str().unwrap_or("")))
+                    .unwrap_or_default()
+            )),
+            "quit_soon" => {
+                self.danger.quit_soon();
+                Ok(json!("quitting"))
+            }
+            "log" => {
+                ctx.log(args["line"].as_str().unwrap_or(""));
+                Ok(json!("logged"))
+            }
+            // The only operation left is the one that runs in the elevated process.
+            _ => Ok(json!("root")),
         }
     }
 
     fn stop(&self, task: &str, ctx: &ToolCtx) -> Result<(), ToolError> {
-        if task == "job-1" {
-            ctx.task_finished(task);
-            Ok(())
-        } else {
-            Err(ToolError::Missing(format!("no task {task}")))
-        }
+        ctx.task_finished(task);
+        Ok(())
     }
 }
 
@@ -188,31 +289,75 @@ struct FixtureView;
 
 impl View for FixtureView {
     fn info(&self) -> ViewInfo {
-        ViewInfo { id: VIEW.into(), title: "Fixture view".into(), writes: false }
+        ViewInfo {
+            id: VIEW.into(),
+            title: "Fixture view".into(),
+            writes: false,
+        }
     }
 
     fn render(&self, ctx: &ViewCtx) -> Result<ViewDoc, paddock_plugin_api::ToolError> {
         let title = ctx.args["title"].as_str().unwrap_or("Fixture").to_string();
         if ctx.args["broken"].as_bool().unwrap_or(false) {
             // A document over the limits: the plugin's own serve loop refuses to send it.
-            return Ok(ViewDoc { schema: SCHEMA, title, root: Node::text("x".repeat(paddock_view::MAX_STRING + 1)), etag: 1 });
+            return Ok(ViewDoc {
+                schema: SCHEMA,
+                title,
+                root: Node::text("x".repeat(paddock_view::MAX_STRING + 1)),
+                etag: 1,
+            });
         }
-        let action = ActionRef { id: ACTION.into(), label: "Refresh".into(), confirm: None, args: paddock_ipc::Json(json!({})), writes: false };
-        let root = Node::column(vec![Node::text("Hello from the fixture"), Node::new(NodeKind::Empty {
-            icon: paddock_view::Icon::Info,
-            title: "Nothing here".into(),
-            hint: "Refresh to look again".into(),
-            action: Some(action),
-        })]);
-        Ok(ViewDoc { schema: SCHEMA, title, root, etag: 1 })
+        let action = ActionRef {
+            id: ACTION.into(),
+            label: "Refresh".into(),
+            confirm: None,
+            args: paddock_ipc::Json(json!({})),
+            writes: false,
+        };
+        let root = Node::column(vec![
+            Node::text("Hello from the fixture"),
+            Node::new(NodeKind::Empty {
+                icon: paddock_view::Icon::Info,
+                title: "Nothing here".into(),
+                hint: "Refresh to look again".into(),
+                action: Some(action),
+            }),
+        ])
+        .with_id("root");
+        Ok(ViewDoc {
+            schema: SCHEMA,
+            title,
+            root,
+            etag: 1,
+        })
     }
 
-    fn action(&self, ctx: &ViewCtx, action: &ViewAction) -> Result<ViewPatch, paddock_plugin_api::ToolError> {
+    fn action(
+        &self,
+        ctx: &ViewCtx,
+        action: &ViewAction,
+    ) -> Result<ViewPatch, paddock_plugin_api::ToolError> {
         let _ = ctx;
-        if action.action != ACTION {
-            return Err(paddock_plugin_api::ToolError::failed(format!("no action {}", action.action)));
+        if action.action == REPLACE {
+            return Ok(ViewPatch::Replace {
+                base_etag: 1,
+                etag: 3,
+                id: "root".into(),
+                node: Node::text("Replaced"),
+            });
         }
-        Ok(ViewPatch::Doc(ViewDoc { schema: SCHEMA, title: "Fixture".into(), root: Node::text("Refreshed"), etag: 2 }))
+        if action.action != ACTION {
+            return Err(paddock_plugin_api::ToolError::failed(format!(
+                "no action {}",
+                action.action
+            )));
+        }
+        Ok(ViewPatch::Doc(ViewDoc {
+            schema: SCHEMA,
+            title: "Fixture".into(),
+            root: Node::text("Refreshed"),
+            etag: 2,
+        }))
     }
 }
 
@@ -232,17 +377,28 @@ impl McpTool for FixtureMcp {
     }
 }
 
-fn handle(ctx: &ExtCtx, request: FixtureRequest) -> Result<FixtureReply, RemoteError> {
+fn handle(
+    danger: &dyn Danger,
+    ctx: &ExtCtx,
+    request: FixtureRequest,
+) -> Result<FixtureReply, RemoteError> {
     match request {
         FixtureRequest::Add(a, b) => Ok(FixtureReply::Sum(a + b)),
         FixtureRequest::Echo(t) => Ok(FixtureReply::Text(t)),
         FixtureRequest::Twice(t) => Ok(FixtureReply::Text(format!("{t}{t}"))),
         FixtureRequest::Panic => panic!("the fixture's contract panicked on purpose"),
-        FixtureRequest::Fail => Err(RemoteError::new("fixture.failed", "the fixture's contract failed on purpose")),
-        FixtureRequest::Hang => loop {
-            std::thread::park();
-        },
-        FixtureRequest::Exit(code) => std::process::exit(code),
+        FixtureRequest::Fail => Err(RemoteError::new(
+            "fixture.failed",
+            "the fixture's contract failed on purpose",
+        )),
+        FixtureRequest::Hang => {
+            danger.hang();
+            Ok(FixtureReply::Text("hang returned".into()))
+        }
+        FixtureRequest::Exit(code) => {
+            danger.exit(code);
+            Ok(FixtureReply::Text(format!("exit {code} returned")))
+        }
         FixtureRequest::Big(n) => Ok(FixtureReply::Bytes(vec![1; n])),
         FixtureRequest::Read(file) => {
             let bytes = HostFile::new(ctx.host().clone(), file)
@@ -256,12 +412,21 @@ fn handle(ctx: &ExtCtx, request: FixtureRequest) -> Result<FixtureReply, RemoteE
 /// The sample plugin.
 pub struct FixturePlugin {
     applied: Arc<Applied>,
+    danger: Arc<dyn Danger>,
 }
 
 impl FixturePlugin {
-    /// A fresh fixture.
+    /// A fresh fixture whose dangerous operations are only recorded (for tests that run it in this process).
     pub fn new() -> FixturePlugin {
-        FixturePlugin { applied: Arc::default() }
+        FixturePlugin::with_danger(Arc::new(Quiet::default()))
+    }
+
+    /// A fresh fixture whose dangerous operations are `danger`'s (the fixture program passes the real ones).
+    pub fn with_danger(danger: Arc<dyn Danger>) -> FixturePlugin {
+        FixturePlugin {
+            applied: Arc::default(),
+            danger,
+        }
     }
 }
 
@@ -285,13 +450,56 @@ impl Plugin for FixturePlugin {
     }
 
     fn register(&self, c: &mut Contributions) -> Result<(), RegisterError> {
-        c.add_tool(FixtureTool { applied: self.applied.clone() });
+        c.add_tool(FixtureTool {
+            applied: self.applied.clone(),
+            danger: self.danger.clone(),
+        });
         c.set_settings(Arc::new(Sample(self.applied.clone())));
         c.add_view(FixtureView);
         c.add_mcp_tool(FixtureMcp);
-        c.add_extension::<FixtureContract>(handle);
+        let danger = self.danger.clone();
+        c.add_extension::<FixtureContract>(move |ctx: &ExtCtx, request| {
+            handle(danger.as_ref(), ctx, request)
+        });
         Ok(())
     }
+}
+
+/// A plugin that contributes nothing.
+pub struct BarePlugin;
+
+/// The id of [`BarePlugin`].
+pub const BARE_ID: &str = "net.example.bare";
+
+impl Plugin for BarePlugin {
+    fn id(&self) -> &str {
+        BARE_ID
+    }
+
+    fn name(&self) -> &str {
+        "Bare"
+    }
+
+    fn version(&self) -> &str {
+        "0.1.0"
+    }
+
+    fn register(&self, _: &mut Contributions) -> Result<(), RegisterError> {
+        Ok(())
+    }
+}
+
+/// The manifest of [`BarePlugin`], whose program is `binary`.
+///
+/// # Panics
+///
+/// Never, for a valid `binary` name.
+pub fn bare_manifest(binary: &str) -> paddock_plugin_package::Manifest {
+    let target = paddock_plugin_package::manifest::host_target();
+    let toml = format!(
+        "format = 1\n\n[plugin]\nid = \"{BARE_ID}\"\nname = \"Bare\"\nversion = \"0.1.0\"\npublisher = \"Example\"\nprotocol = \"2.0\"\nbinary = \"{binary}\"\ntargets = [\"{target}\"]\n"
+    );
+    paddock_plugin_package::Manifest::parse(&toml).expect("the bare manifest is valid")
 }
 
 /// The fixture program (`paddock-plugin-fixture`) as `cargo build` left it, next to the running test: built first when it is
@@ -313,28 +521,38 @@ pub fn locate_v1() -> Result<PathBuf, String> {
     locate_bin("paddock-plugin-fixture-v1")
 }
 
+/// The test program `paddock-plugin-misbehaving`, which misbehaves in the way its own file name says; see [`locate`].
+///
+/// # Errors
+///
+/// When it cannot be found or built.
+pub fn locate_misbehaving() -> Result<PathBuf, String> {
+    locate_bin("paddock-plugin-misbehaving")
+}
+
 fn locate_bin(name: &str) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut dir = exe.parent().map(PathBuf::from).unwrap_or_default();
     if dir.file_name().is_some_and(|n| n == "deps") {
         dir.pop();
     }
-    find_or_build(&dir, name, || {
-        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-        std::process::Command::new(cargo)
-            .args(["build", "--quiet", "-p", "paddock-plugin-test", "--bin", name])
-            .status()
-            .is_ok_and(|s| s.success())
-    })
+    find_or_build(&dir, name, || crate::process::build_with_cargo(name))
 }
 
 /// `<dir>/<name>` (with `.exe` on Windows) when it exists, else what `build` makes of it.
-fn find_or_build(dir: &std::path::Path, name: &str, build: impl FnOnce() -> bool) -> Result<PathBuf, String> {
-    let path = dir.join(if cfg!(windows) { format!("{name}.exe") } else { name.to_string() });
+fn find_or_build(
+    dir: &std::path::Path,
+    name: &str,
+    build: impl FnOnce() -> bool,
+) -> Result<PathBuf, String> {
+    let path = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     if path.is_file() || (build() && path.is_file()) {
         Ok(path)
     } else {
-        Err(format!("{} is not there and could not be built", path.display()))
+        Err(format!(
+            "{} is not there and could not be built",
+            path.display()
+        ))
     }
 }
 
@@ -358,7 +576,7 @@ targets = ["{target}"]
 [[contributions]]
 kind = "tool"
 id = "{TOOL}"
-actions = [{{ id = "echo" }}, {{ id = "greet" }}, {{ id = "fail" }}, {{ id = "deny" }}, {{ id = "panic" }}, {{ id = "crash" }}, {{ id = "hang" }}, {{ id = "big" }}, {{ id = "read" }}, {{ id = "task" }}, {{ id = "save" }}, {{ id = "lift" }}, {{ id = "open" }}, {{ id = "root" }}]
+actions = [{{ id = "echo" }}, {{ id = "greet" }}, {{ id = "fail" }}, {{ id = "deny" }}, {{ id = "panic" }}, {{ id = "crash" }}, {{ id = "hang" }}, {{ id = "big" }}, {{ id = "read" }}, {{ id = "task" }}, {{ id = "save" }}, {{ id = "lift" }}, {{ id = "open" }}, {{ id = "quit_soon" }}, {{ id = "log" }}, {{ id = "root" }}]
 
 [[contributions]]
 kind = "settings"
@@ -367,7 +585,7 @@ id = "{SETTINGS}"
 [[contributions]]
 kind = "view"
 id = "{VIEW}"
-actions = [{{ id = "{ACTION}" }}]
+actions = [{{ id = "{ACTION}" }}, {{ id = "{REPLACE}" }}]
 
 [[contributions]]
 kind = "mcpTool"
@@ -392,8 +610,13 @@ reason = "Offers its echo tool to assistants."
 /// # Panics
 ///
 /// When `permissions` makes it invalid.
-pub fn manifest(protocol: &str, binary: &str, permissions: &str) -> paddock_plugin_package::Manifest {
-    paddock_plugin_package::Manifest::parse(&manifest_toml(protocol, binary, permissions)).expect("the fixture manifest is valid")
+pub fn manifest(
+    protocol: &str,
+    binary: &str,
+    permissions: &str,
+) -> paddock_plugin_package::Manifest {
+    paddock_plugin_package::Manifest::parse(&manifest_toml(protocol, binary, permissions))
+        .expect("the fixture manifest is valid")
 }
 
 /// Packs the fixture's `manifest` and `program` into `<dir>/fixture.paddockplugin`, signed with `sign`.
@@ -409,8 +632,12 @@ pub fn build_package(
 ) -> Result<PathBuf, paddock_plugin_package::PackageError> {
     let out = dir.join("fixture.paddockplugin");
     let target = paddock_plugin_package::manifest::host_target().to_string();
-    paddock_plugin_package::archive::build(paddock_plugin_package::archive::Build { manifest, programs: vec![(target, program)], sign }, &out)?;
-    Ok(out)
+    let build = paddock_plugin_package::archive::Build {
+        manifest,
+        programs: vec![(target, program)],
+        sign,
+    };
+    paddock_plugin_package::archive::build(build, &out).map(|_| out)
 }
 
 #[cfg(test)]
@@ -421,7 +648,9 @@ mod tests {
     fn a_program_that_is_there_is_found_and_a_missing_one_is_built_once() {
         let dir = tempfile::tempdir().unwrap();
         let name = "prog";
-        let file = dir.path().join(if cfg!(windows) { "prog.exe" } else { "prog" });
+        let file = dir
+            .path()
+            .join(if cfg!(windows) { "prog.exe" } else { "prog" });
         let made = std::cell::Cell::new(0);
         // Not there, and the build makes nothing.
         let err = find_or_build(dir.path(), name, || {
@@ -431,10 +660,14 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("could not be built") && made.get() == 1);
         // Not there, and the build makes it.
-        let found = find_or_build(dir.path(), name, || std::fs::write(&file, b"x").is_ok()).unwrap();
+        let found =
+            find_or_build(dir.path(), name, || std::fs::write(&file, b"x").is_ok()).unwrap();
         assert_eq!(found, file);
         // There: nothing is built.
-        assert_eq!(find_or_build(dir.path(), name, || panic!("must not build")).unwrap(), file);
+        assert_eq!(
+            find_or_build(dir.path(), name, || panic!("must not build")).unwrap(),
+            file
+        );
     }
 
     #[test]

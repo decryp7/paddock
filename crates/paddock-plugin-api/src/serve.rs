@@ -6,7 +6,9 @@ use crate::extension::{ExtCtx, route};
 use crate::plugin::{Contributions, Plugin, ViewCtx};
 use crate::protocol::*;
 use crate::tools::{Host, ToolCtx, ToolError, ToolTask};
-use paddock_ipc::{CallCtx, Handler, IpcError, Json, Peer, RemoteError, codes, decode_request, encode_reply};
+use paddock_ipc::{
+    CallCtx, Handler, IpcError, Json, Peer, RemoteError, codes, decode_request, encode_reply,
+};
 use paddock_view::{ViewAction, ViewDoc, ViewPatch};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -28,16 +30,6 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// A plugin process' `main`: `serve(Arc::new(MyPlugin))`.
-pub fn serve(plugin: Arc<dyn Plugin>) -> Result<(), IpcError> {
-    paddock_ipc::child::serve(
-        "the app",
-        PLATFORM_PROTOCOL,
-        move |boot| Arc::new(PluginHandler::new(plugin, boot.role == ELEVATED_ROLE)),
-        |_, _| {},
-    )
-}
-
 /// The [`Host`] of a plugin process: calls on the connection to the app.
 pub struct PeerHost(pub Peer);
 
@@ -51,7 +43,9 @@ fn to_error(e: IpcError) -> ToolError {
 
 impl Host for PeerHost {
     fn read_file(&self, id: u64, offset: u64, len: u32) -> Result<Vec<u8>, ToolError> {
-        self.0.request(&HostCall::ReadFile { id, offset, len }, READ_TIMEOUT).map_err(to_error)
+        self.0
+            .request(&HostCall::ReadFile { id, offset, len }, READ_TIMEOUT)
+            .map_err(to_error)
     }
 
     fn report(&self, task: &str, progress: Option<f32>, note: &str) {
@@ -72,10 +66,18 @@ impl Host for PeerHost {
     }
 
     fn task_finished(&self, task: &str) {
-        let _: Result<(), _> = self.0.request(&HostCall::TaskFinished { task: task.into() }, REPORT_TIMEOUT);
+        let _: Result<(), _> = self.0.request(
+            &HostCall::TaskFinished { task: task.into() },
+            REPORT_TIMEOUT,
+        );
     }
 
-    fn output(&self, name: &str, bytes: &[u8], last: bool) -> Result<Option<SavedOutput>, ToolError> {
+    fn output(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        last: bool,
+    ) -> Result<Option<SavedOutput>, ToolError> {
         let call = HostCall::Output {
             name: name.into(),
             bytes: bytes.to_vec(),
@@ -84,7 +86,24 @@ impl Host for PeerHost {
         self.0.request(&call, OUTPUT_TIMEOUT).map_err(to_error)
     }
 
-    fn elevated(&self, tool: &str, op: &str, args: Value, timeout: Duration) -> Result<Value, ToolError> {
+    fn log(&self, lines: &[String]) {
+        let lines = lines
+            .iter()
+            .take(MAX_LOG_BATCH)
+            .map(|l| cut_line(l, MAX_LOG_LINE).to_string())
+            .collect();
+        let _: Result<(), _> = self
+            .0
+            .request(&HostCall::Log { lines, dropped: 0 }, REPORT_TIMEOUT);
+    }
+
+    fn elevated(
+        &self,
+        tool: &str,
+        op: &str,
+        args: Value,
+        timeout: Duration,
+    ) -> Result<Value, ToolError> {
         let call = HostCall::Elevated {
             tool: tool.into(),
             op: op.into(),
@@ -154,10 +173,25 @@ impl Host for Tracking {
         lock(&self.tasks).remove(task);
         self.inner.task_finished(task);
     }
-    fn output(&self, name: &str, bytes: &[u8], last: bool) -> Result<Option<SavedOutput>, ToolError> {
+    fn output(
+        &self,
+        name: &str,
+        bytes: &[u8],
+        last: bool,
+    ) -> Result<Option<SavedOutput>, ToolError> {
         self.inner.output(name, bytes, last)
     }
-    fn elevated(&self, tool: &str, op: &str, args: Value, timeout: Duration) -> Result<Value, ToolError> {
+    fn log(&self, lines: &[String]) {
+        self.inner.log(lines);
+    }
+
+    fn elevated(
+        &self,
+        tool: &str,
+        op: &str,
+        args: Value,
+        timeout: Duration,
+    ) -> Result<Value, ToolError> {
         self.inner.elevated(tool, op, args, timeout)
     }
 }
@@ -223,10 +257,16 @@ impl PluginHandler {
     }
 
     /// Answers one request.
-    pub fn dispatch(&self, env: &dyn CallEnv, req: PlatformRequest) -> Result<Vec<u8>, RemoteError> {
+    pub fn dispatch(
+        &self,
+        env: &dyn CallEnv,
+        req: PlatformRequest,
+    ) -> Result<Vec<u8>, RemoteError> {
         let described = self.registered.as_ref().map_err(|e| internal(e.clone()))?;
         match req {
-            PlatformRequest::Describe => encode_reply(&Json(serde_json::to_value(described).map_err(|e| internal(e.to_string()))?)),
+            PlatformRequest::Describe => encode_reply(&Json(
+                serde_json::to_value(described).map_err(|e| internal(e.to_string()))?,
+            )),
             PlatformRequest::Extension { ns, minor, body } => {
                 let cancelled = || env.is_cancelled();
                 let ctx = ExtCtx {
@@ -235,26 +275,43 @@ impl PluginHandler {
                 };
                 route(&self.c.extensions, &described.id, &ns, minor, &body, &ctx)
             }
-            _ if self.elevated && !matches!(req, PlatformRequest::Invoke { .. } | PlatformRequest::Stop { .. }) => {
-                Err(invalid("the elevated process only runs elevated tool operations"))
+            _ if self.elevated
+                && !matches!(
+                    req,
+                    PlatformRequest::Invoke { .. } | PlatformRequest::Stop { .. }
+                ) =>
+            {
+                Err(invalid(
+                    "the elevated process only runs elevated tool operations",
+                ))
             }
             PlatformRequest::ApplySettings { json } => {
                 let (Some(s), Some(section)) = (&self.c.settings, &described.settings) else {
                     return Err(invalid("this plugin has no settings"));
                 };
                 let valid = paddock_settings::validate(section, &json).map_err(|errors| {
-                    invalid(errors.iter().map(|e| format!("{}: {}", e.key, e.message)).collect::<Vec<_>>().join("; "))
+                    invalid(
+                        errors
+                            .iter()
+                            .map(|e| format!("{}: {}", e.key, e.message))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    )
                 })?;
                 s.apply(&valid).map_err(|e| internal(e.to_string()))?;
                 encode_reply(&())
             }
             PlatformRequest::Invoke { tool, op, args } => {
-                let (info, t) = self.c.tools.iter().find(|(i, _)| i.id == tool).ok_or_else(|| invalid(format!("no tool \"{tool}\"")))?;
-                let spec = info
-                    .ops
+                let (info, t) = self
+                    .c
+                    .tools
                     .iter()
-                    .find(|o| o.name == op)
-                    .ok_or_else(|| invalid(format!("tool \"{tool}\" has no operation \"{op}\"")))?;
+                    .find(|(i, _)| i.id == tool)
+                    .ok_or_else(|| invalid(format!("no tool \"{tool}\"")))?;
+                let spec =
+                    info.ops.iter().find(|o| o.name == op).ok_or_else(|| {
+                        invalid(format!("tool \"{tool}\" has no operation \"{op}\""))
+                    })?;
                 if spec.elevated != self.elevated {
                     return Err(invalid(if spec.elevated {
                         format!("\"{tool} {op}\" runs in the plugin's elevated process")
@@ -263,14 +320,20 @@ impl PluginHandler {
                     }));
                 }
                 // The app validated the arguments (and the paths); check the shape again.
-                spec.args.validate(&args).map_err(|e| invalid(e.to_string()))?;
+                spec.args
+                    .validate(&args)
+                    .map_err(|e| invalid(e.to_string()))?;
                 let ctx = self.tool_ctx(env, &tool);
                 outcome(t.invoke(&op, args.into_inner(), &ctx).map(Json))
             }
             PlatformRequest::Stop { task } => {
                 let owner = lock(&self.tasks).get(&task).cloned();
-                let Some((_, t)) = owner.and_then(|tool| self.c.tools.iter().find(|(i, _)| i.id == tool)) else {
-                    return outcome::<()>(Err(ToolError::Missing(format!("no running task \"{task}\" to stop"))));
+                let Some((_, t)) =
+                    owner.and_then(|tool| self.c.tools.iter().find(|(i, _)| i.id == tool))
+                else {
+                    return outcome::<()>(Err(ToolError::Missing(format!(
+                        "no running task \"{task}\" to stop"
+                    ))));
                 };
                 let ctx = self.tool_ctx(env, t.id());
                 outcome(t.stop(&task, &ctx))
@@ -281,7 +344,13 @@ impl PluginHandler {
                     args: ctx.into_inner(),
                     tool: self.tool_ctx(env, &view),
                 };
-                outcome(v.render(&vctx).and_then(|doc| checked(paddock_view::validate(&doc), serde_json::to_value(&doc))).map(Json))
+                outcome(
+                    v.render(&vctx)
+                        .and_then(|doc| {
+                            checked(paddock_view::validate(&doc), serde_json::to_value(&doc))
+                        })
+                        .map(Json),
+                )
             }
             PlatformRequest::ViewAction { view, action, args } => {
                 let v = self.view(&view)?;
@@ -293,18 +362,30 @@ impl PluginHandler {
                 paddock_view::validate_action(&action).map_err(|e| invalid(e.to_string()))?;
                 outcome(
                     v.action(&vctx, &action)
-                        .and_then(|patch| checked(check_patch(&patch), serde_json::to_value(&patch)))
+                        .and_then(|patch| {
+                            checked(check_patch(&patch), serde_json::to_value(&patch))
+                        })
                         .map(Json),
                 )
             }
             PlatformRequest::McpTool { tool, args, budget } => {
-                let (info, t) = self.c.mcp.iter().find(|(i, _)| i.name == tool).ok_or_else(|| invalid(format!("no MCP tool \"{tool}\"")))?;
-                info.args.validate(&args).map_err(|e| invalid(e.to_string()))?;
+                let (info, t) = self
+                    .c
+                    .mcp
+                    .iter()
+                    .find(|(i, _)| i.name == tool)
+                    .ok_or_else(|| invalid(format!("no MCP tool \"{tool}\"")))?;
+                info.args
+                    .validate(&args)
+                    .map_err(|e| invalid(e.to_string()))?;
                 let ctx = self.tool_ctx(env, &tool);
                 let answer = t.call(args.into_inner(), budget, &ctx).and_then(|v| {
                     let size = v.to_string().len() as u64;
                     if size > budget.max_bytes {
-                        Err(ToolError::Failed(format!("the answer is {size} bytes; the budget is {}", budget.max_bytes)))
+                        Err(ToolError::Failed(format!(
+                            "the answer is {size} bytes; the budget is {}",
+                            budget.max_bytes
+                        )))
                     } else {
                         Ok(v)
                     }
@@ -315,7 +396,12 @@ impl PluginHandler {
     }
 
     fn view(&self, id: &str) -> Result<&Arc<dyn crate::plugin::View>, RemoteError> {
-        self.c.views.iter().find(|(i, _)| i.id == id).map(|(_, v)| v).ok_or_else(|| invalid(format!("no view \"{id}\"")))
+        self.c
+            .views
+            .iter()
+            .find(|(i, _)| i.id == id)
+            .map(|(_, v)| v)
+            .ok_or_else(|| invalid(format!("no view \"{id}\"")))
     }
 }
 
@@ -325,7 +411,7 @@ fn check_patch(patch: &ViewPatch) -> Result<(), paddock_view::ViewError> {
         ViewPatch::Doc(doc) => paddock_view::validate(doc),
         ViewPatch::Replace { node, .. } => paddock_view::validate(&ViewDoc {
             schema: paddock_view::SCHEMA,
-            title: String::new(),
+            title: "patch".into(),
             root: node.clone(),
             etag: 0,
         }),
@@ -333,7 +419,10 @@ fn check_patch(patch: &ViewPatch) -> Result<(), paddock_view::ViewError> {
 }
 
 /// A validated document or patch as JSON; a document the platform would refuse never leaves the plugin.
-fn checked<E: std::fmt::Display>(valid: Result<(), E>, json: Result<Value, serde_json::Error>) -> Result<Value, ToolError> {
+fn checked<E: std::fmt::Display>(
+    valid: Result<(), E>,
+    json: Result<Value, serde_json::Error>,
+) -> Result<Value, ToolError> {
     valid.map_err(|e| ToolError::Failed(format!("the view is not valid ({e})")))?;
     json.map_err(ToolError::from)
 }

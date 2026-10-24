@@ -194,7 +194,7 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -419,6 +419,16 @@ jobs:
 
       # The plugin package: manifest limits, archive layout and signature, trust, keys; properties run with the tests; the fuzz
       # targets are in paddock-plugin-package/fuzz (cargo +nightly fuzz run manifest|package).
+      # The plugin platform's API, host and test kit; the host's tests start the test kit's fixture plugin as a real process.
+      - name: paddock-plugin-api
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-plugin-api --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-api --all-features --profile ci && cargo test -p paddock-plugin-api --all-features --doc
+      - name: paddock-plugin-host
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-plugin-host --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-host --all-features --profile ci && cargo test -p paddock-plugin-host --all-features --doc
+      - name: paddock-plugin-test
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-plugin-test --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-test --all-features --profile ci && cargo test -p paddock-plugin-test --all-features --doc
       - name: paddock-plugin-package
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-plugin-package --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-package --all-features --profile ci && cargo test -p paddock-plugin-package --all-features --doc

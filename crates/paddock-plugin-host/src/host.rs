@@ -69,7 +69,9 @@ impl PluginHost {
                 Ok(installed) => {
                     let id = installed.manifest.id.to_string();
                     seen.push(id.clone());
-                    plugins.entry(id).or_insert_with(|| Supervisor::new(self.cfg.clone(), installed));
+                    plugins
+                        .entry(id)
+                        .or_insert_with(|| Supervisor::new(self.cfg.clone(), installed));
                 }
                 Err((id, e)) => {
                     seen.push(id.clone());
@@ -131,8 +133,16 @@ impl PluginHost {
 
     /// Installs or updates from the package at `path` that the user reviewed as `digest`. The old process is stopped; the new
     /// program is verified again before its first start.
-    pub fn install(&self, path: &Path, trust: &TrustPolicy, digest: &str, grants: Grants) -> Result<Installed, PackageError> {
-        let installed = self.dir.install(path, trust, &self.cfg.info, digest, grants)?;
+    pub fn install(
+        &self,
+        path: &Path,
+        trust: &TrustPolicy,
+        digest: &str,
+        grants: Grants,
+    ) -> Result<Installed, PackageError> {
+        let installed = self
+            .dir
+            .install(path, trust, &self.cfg.info, digest, grants)?;
         let id = installed.manifest.id.to_string();
         if let Some(old) = lock(&self.plugins).remove(&id) {
             old.stop();

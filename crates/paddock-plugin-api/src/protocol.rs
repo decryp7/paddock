@@ -238,7 +238,7 @@ pub struct ExtensionInfo {
 
 /// What a plugin says about itself on [`PlatformRequest::Describe`]. The app compares it with the manifest it verified:
 /// a plugin that contributes more than it declared is refused.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Described {
     /// The plugin's id.
@@ -265,11 +265,21 @@ pub struct Described {
 
 /// Checks the name of an output file or folder: letters, digits, `-`, `_` and `.`, no reserved Windows names.
 pub fn check_output_name(what: &str, name: &str) -> Result<(), String> {
-    let plain = name.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'));
+    let plain = name
+        .bytes()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'));
     let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
-    let numbered = stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && stem.as_bytes()[3].is_ascii_digit();
+    let numbered = stem.len() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem.as_bytes()[3].is_ascii_digit();
     let reserved = numbered || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL");
-    if name.is_empty() || name.len() > MAX_OUTPUT_NAME || !plain || name.starts_with('.') || name.ends_with('.') || reserved {
+    if name.is_empty()
+        || name.len() > MAX_OUTPUT_NAME
+        || !plain
+        || name.starts_with('.')
+        || name.ends_with('.')
+        || reserved
+    {
         return Err(format!(
             "invalid output {what} {name:?}: use one name of letters, digits, '-', '_' and '.' (at most {MAX_OUTPUT_NAME})"
         ));
@@ -300,35 +310,99 @@ mod tests {
     fn requests_and_calls_roundtrip_through_postcard() {
         let requests = vec![
             PlatformRequest::Describe,
-            PlatformRequest::ApplySettings { json: Json(json!({"a": [1, 2.5, "x"]})) },
-            PlatformRequest::Invoke { tool: "t".into(), op: "o".into(), args: Json(json!({"n": 1})) },
-            PlatformRequest::RenderView { view: "v".into(), ctx: Json(json!({})) },
-            PlatformRequest::ViewAction { view: "v".into(), action: "a".into(), args: Json(json!(null)) },
-            PlatformRequest::McpTool { tool: "m".into(), args: Json(json!({})), budget: McpBudget { max_bytes: 10, max_ms: 20 } },
+            PlatformRequest::ApplySettings {
+                json: Json(json!({"a": [1, 2.5, "x"]})),
+            },
+            PlatformRequest::Invoke {
+                tool: "t".into(),
+                op: "o".into(),
+                args: Json(json!({"n": 1})),
+            },
+            PlatformRequest::RenderView {
+                view: "v".into(),
+                ctx: Json(json!({})),
+            },
+            PlatformRequest::ViewAction {
+                view: "v".into(),
+                action: "a".into(),
+                args: Json(json!(null)),
+            },
+            PlatformRequest::McpTool {
+                tool: "m".into(),
+                args: Json(json!({})),
+                budget: McpBudget {
+                    max_bytes: 10,
+                    max_ms: 20,
+                },
+            },
             PlatformRequest::Stop { task: "t1".into() },
-            PlatformRequest::Extension { ns: "x.y.v1".into(), minor: 3, body: vec![1, 2, 3] },
+            PlatformRequest::Extension {
+                ns: "x.y.v1".into(),
+                minor: 3,
+                body: vec![1, 2, 3],
+            },
         ];
         for r in requests {
             assert_eq!(decode::<PlatformRequest>(&encode(&r).unwrap()).unwrap(), r);
         }
-        let task = ToolTask { id: "a".into(), label: "A".into(), kind: "k".into(), stoppable: true };
+        let task = ToolTask {
+            id: "a".into(),
+            label: "A".into(),
+            kind: "k".into(),
+            stoppable: true,
+        };
         let calls = vec![
-            HostCall::ReadFile { id: 1, offset: 2, len: 3 },
-            HostCall::Report { task: "a".into(), progress: Some(0.25), note: "n".into() },
-            HostCall::TaskStarted { tool: "t".into(), task },
+            HostCall::ReadFile {
+                id: 1,
+                offset: 2,
+                len: 3,
+            },
+            HostCall::Report {
+                task: "a".into(),
+                progress: Some(0.25),
+                note: "n".into(),
+            },
+            HostCall::TaskStarted {
+                tool: "t".into(),
+                task,
+            },
             HostCall::TaskFinished { task: "a".into() },
-            HostCall::Output { name: "o.bin".into(), bytes: vec![9; 4], last: true },
-            HostCall::Elevated { tool: "t".into(), op: "o".into(), args: Json(json!({"k": "v"})), timeout_ms: 5 },
-            HostCall::Log { lines: vec!["l".into()], dropped: 2 },
+            HostCall::Output {
+                name: "o.bin".into(),
+                bytes: vec![9; 4],
+                last: true,
+            },
+            HostCall::Elevated {
+                tool: "t".into(),
+                op: "o".into(),
+                args: Json(json!({"k": "v"})),
+                timeout_ms: 5,
+            },
+            HostCall::Log {
+                lines: vec!["l".into()],
+                dropped: 2,
+            },
         ];
         for c in calls {
             assert_eq!(decode::<HostCall>(&encode(&c).unwrap()).unwrap(), c);
         }
-        let fail = Fail { reason: Some(FailureReason::Denied), message: "no".into() };
+        let fail = Fail {
+            reason: Some(FailureReason::Denied),
+            message: "no".into(),
+        };
         assert_eq!(decode::<Fail>(&encode(&fail).unwrap()).unwrap(), fail);
-        assert_eq!((Fail::new("m").reason, Fail::new("m").to_string()), (None, "m".to_string()));
-        let saved = SavedOutput { name: "a".into(), bytes: 5 };
-        assert_eq!(decode::<SavedOutput>(&encode(&saved).unwrap()).unwrap(), saved);
+        assert_eq!(
+            (Fail::new("m").reason, Fail::new("m").to_string()),
+            (None, "m".to_string())
+        );
+        let saved = SavedOutput {
+            name: "a".into(),
+            bytes: 5,
+        };
+        assert_eq!(
+            decode::<SavedOutput>(&encode(&saved).unwrap()).unwrap(),
+            saved
+        );
     }
 
     #[test]
@@ -340,11 +414,25 @@ mod tests {
             version: "1.0.0".into(),
             protocol: PLATFORM_PROTOCOL,
             memory_limit: Some(1 << 20),
-            tools: vec![crate::tools::ToolInfo::new("t", "T").op(OpSpec::new("o", "O").args(Schema::object().field("n", Schema::int(1, 2))))],
+            tools: vec![
+                crate::tools::ToolInfo::new("t", "T")
+                    .op(OpSpec::new("o", "O").args(Schema::object().field("n", Schema::int(1, 2)))),
+            ],
             settings: None,
-            views: vec![ViewInfo { id: "v".into(), title: "V".into(), writes: true }],
-            mcp_tools: vec![McpToolInfo { name: "m".into(), description: "d".into(), args: Schema::object() }],
-            extensions: vec![ExtensionInfo { ns: "x.v1".into(), minor: 1 }],
+            views: vec![ViewInfo {
+                id: "v".into(),
+                title: "V".into(),
+                writes: true,
+            }],
+            mcp_tools: vec![McpToolInfo {
+                name: "m".into(),
+                description: "d".into(),
+                args: Schema::object(),
+            }],
+            extensions: vec![ExtensionInfo {
+                ns: "x.v1".into(),
+                minor: 1,
+            }],
         };
         let back: Described = serde_json::from_value(serde_json::to_value(&d).unwrap()).unwrap();
         assert_eq!(back, d);
@@ -355,7 +443,19 @@ mod tests {
         for ok in ["a.bin", "capture-1_final.etl", "A"] {
             check_output_name("file name", ok).unwrap();
         }
-        for bad in ["", ".hidden", "trailing.", "a/b", "a b", "..", "CON", "com1.txt", "lpt9", "NUL.log", &"a".repeat(MAX_OUTPUT_NAME + 1)] {
+        for bad in [
+            "",
+            ".hidden",
+            "trailing.",
+            "a/b",
+            "a b",
+            "..",
+            "CON",
+            "com1.txt",
+            "lpt9",
+            "NUL.log",
+            &"a".repeat(MAX_OUTPUT_NAME + 1),
+        ] {
             let e = check_output_name("file name", bad).unwrap_err();
             assert!(e.starts_with("invalid output file name"), "{bad}: {e}");
         }
