@@ -1553,9 +1553,6 @@
       <trans-unit id="pd.settings.unsaved.keep" datatype="html">
         <source>Keep editing</source>
       </trans-unit>
-      <trans-unit id="pd.setup.close" datatype="html">
-        <source>Close</source>
-      </trans-unit>
       <trans-unit id="pd.setup.empty" datatype="html">
         <source>There is nothing to set up on this computer.</source>
       </trans-unit>

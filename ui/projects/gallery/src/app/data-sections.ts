@@ -52,7 +52,7 @@ const COLUMNS: PdColumn<Plugin>[] = [
     <section class="gal-section" data-testid="table" aria-labelledby="h-table">
       <h2 id="h-table">Data table</h2>
       <p>Sort by a header, filter, choose columns; arrows, Home, End and Enter on a row; Shift+F10 or a right-click opens the row menu. Columns drop out as the table narrows.</p>
-      <div class="gal-box" data-testid="table-small">
+      <div class="gal-box gal-pad" data-testid="table-small">
         <pd-table
           label="Plugins"
           [rows]="plugins"
@@ -70,23 +70,23 @@ const COLUMNS: PdColumn<Plugin>[] = [
       <p data-testid="table-status">Opened: {{ opened() || 'none' }}. Chose: {{ chosen() || 'nothing' }}.</p>
       <h3>States</h3>
       <div class="gal-states-grid">
-        <div class="gal-box" data-testid="box-selected">
+        <div class="gal-box gal-pad" data-testid="box-selected">
           <pd-table label="Selected and sorted" [rows]="plugins.slice(0, 5)" [columns]="columns" [rowKey]="key" [rowActions]="actions" [filterable]="false" selectedKey="p1" [sort]="{ key: 'size', direction: 'desc' }" />
         </div>
-        <div class="gal-box" data-testid="box-empty">
-          <pd-table label="Empty" [rows]="none" [columns]="columns" [rowKey]="key" [filterable]="false">
+        <div class="gal-box gal-pad" data-testid="box-empty">
+          <pd-table label="Empty" [rows]="none" [columns]="columns" [rowKey]="key" [rowActions]="actions" [filterable]="false">
             <div pdTableEmpty class="gal-next"><strong>No plugins installed</strong><span>Plugins add file formats and viewers.</span><button class="pd-btn pd-btn--primary" type="button">Install a plugin</button></div>
           </pd-table>
         </div>
-        <div class="gal-box" data-testid="box-loading">
-          <pd-table label="Loading" [rows]="none" [columns]="columns" [rowKey]="key" [filterable]="false" state="loading" />
+        <div class="gal-box gal-pad" data-testid="box-loading">
+          <pd-table label="Loading" [rows]="none" [columns]="columns" [rowKey]="key" [rowActions]="actions" [filterable]="false" state="loading" />
         </div>
-        <div class="gal-box" data-testid="box-error">
-          <pd-table label="Error" [rows]="none" [columns]="columns" [rowKey]="key" [filterable]="false" state="error" errorText="The plugin list could not be read." />
+        <div class="gal-box gal-pad" data-testid="box-error">
+          <pd-table label="Error" [rows]="none" [columns]="columns" [rowKey]="key" [rowActions]="actions" [filterable]="false" state="error" errorText="The plugin list could not be read." />
         </div>
       </div>
       <h3>Grouped, and 5,000 rows in a virtual viewport</h3>
-      <div class="gal-box" data-testid="table-virtual">
+      <div class="gal-box gal-pad" data-testid="table-virtual">
         <pd-table label="Records" [rows]="many" [columns]="columns" [rowKey]="key" groupBy="kind" [maxHeight]="260" [virtual]="true" />
       </div>
     </section>
@@ -96,11 +96,11 @@ const COLUMNS: PdColumn<Plugin>[] = [
       <p>The wrapper draws a spec in the family theme; each chart has a name and a text twin for screen readers.</p>
       <div class="gal-charts">
         <div class="gal-box"><pd-chart label="Requests per hour" [spec]="line" [height]="200" /></div>
-        <div class="gal-box"><pd-chart label="Jobs by outcome per day" [spec]="stacked" [height]="200" /></div>
-        <div class="gal-box"><pd-chart label="Latency by hour" [spec]="area" [height]="200" /></div>
+        <div class="gal-box"><pd-chart label="Outcome per day" [spec]="stacked" [height]="200" /></div>
+        <div class="gal-box"><pd-chart label="Latency p95" [spec]="area" [height]="200" /></div>
         <div class="gal-box"><pd-chart label="Disk use by kind" [spec]="donut" [height]="200" /></div>
-        <div class="gal-box" data-testid="chart-loading-box"><pd-chart label="Latency by hour" [spec]="area" [height]="200" state="loading" /></div>
-        <div class="gal-box" data-testid="chart-error-box"><pd-chart label="Latency by hour" [spec]="area" [height]="200" state="error" errorText="The latency data could not be loaded." /></div>
+        <div class="gal-box" data-testid="chart-loading-box"><pd-chart label="Latency p95" [spec]="area" [height]="200" state="loading" /></div>
+        <div class="gal-box" data-testid="chart-error-box"><pd-chart label="Latency p95" [spec]="area" [height]="200" state="error" errorText="The latency data could not be loaded." /></div>
       </div>
     </section>
 
@@ -125,7 +125,8 @@ const COLUMNS: PdColumn<Plugin>[] = [
   styles: `
     .gal-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: var(--pd-space-3); }
     .gal-form { display: grid; gap: var(--pd-space-3); padding: var(--pd-space-4); max-width: 28rem; }
-    .gal-states-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--pd-space-3); }
+    .gal-pad { padding: var(--pd-space-3); }
+    .gal-states-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 36rem), 1fr)); gap: var(--pd-space-3); }
     .gal-next { display: grid; justify-items: center; gap: var(--pd-space-2); }
     .gal-next span { color: var(--pd-text-muted); }
     .gal-state { color: var(--pd-text-muted); }
@@ -153,7 +154,7 @@ export class GalData {
   }
 
   protected readonly hours = Array.from({ length: 12 }, (_, i) => `${String(i * 2).padStart(2, '0')}:00`);
-  protected readonly line: PdChartSpec = { kind: 'line', x: this.hours, unit: 'req', series: [{ name: 'Requests', values: [12, 18, 9, 22, 41, 38, 52, null, 47, 33, 21, 15], color: 'accent' }] };
+  protected readonly line: PdChartSpec = { kind: 'line', x: this.hours, unit: 'req', series: [{ name: 'Requests', values: [12, 18, 9, 22, 41, 38, 52, null, 47, null, 21, 15], color: 'accent' }] };
   protected readonly stacked: PdChartSpec = {
     kind: 'stackedBar',
     x: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
