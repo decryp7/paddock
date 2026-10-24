@@ -28,6 +28,8 @@ export const SHELL_COMMANDS = {
   notifications_record: { kind: 'quiet', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   notifications_restore: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 4194304 },
   open_login_items: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
+  packs_reload: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
+  packs_status: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   recovery_restore: { kind: 'mutation', windows: ['main'], limit: 262144 },
   recovery_safe_mode: { kind: 'mutation', windows: ['main'], limit: 262144 },
   recovery_start_fresh: { kind: 'mutation', windows: ['main'], limit: 262144 },

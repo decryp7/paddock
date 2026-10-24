@@ -548,6 +548,69 @@
       <trans-unit id="pd.notifications.unread-mark" datatype="html">
         <source>, unread</source>
       </trans-unit>
+      <trans-unit id="pd.packs.builtin" datatype="html">
+        <source>Built in</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.ignored" datatype="html">
+        <source>Keys that were ignored</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.in-use" datatype="html">
+        <source>Packs in use</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.lede" datatype="html">
+        <source>Lists the app knows are small files you can add to or change. A change is picked up by itself; a file the app cannot use is left out and named here.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.loading" datatype="html">
+        <source>Listing the packs…</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.no-status" datatype="html">
+        <source>The packs could not be listed.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.no-status-title" datatype="html">
+        <source>The packs could not be listed.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.none" datatype="html">
+        <source>This app has no packs.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.refused" datatype="html">
+        <source>Packs left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload" datatype="html">
+        <source>Reload</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload-failed" datatype="html">
+        <source>The packs could not be reloaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload-failed-title" datatype="html">
+        <source>The packs could not be reloaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reloading" datatype="html">
+        <source>Reading the packs…</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.left-out" datatype="html">
+        <source><x id="count"/> packs left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.notes" datatype="html">
+        <source>Loaded, some keys ignored</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.ok" datatype="html">
+        <source>All loaded</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.one-left-out" datatype="html">
+        <source>One pack left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.still-working" datatype="html">
+        <source>Still working. Nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.title" datatype="html">
+        <source>Knowledge packs</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.user" datatype="html">
+        <source>Yours</source>
+      </trans-unit>
       <trans-unit id="pd.pages.link-with-badge" datatype="html">
         <source><x id="page"/>, <x id="badge"/></source>
       </trans-unit>
@@ -823,6 +886,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.open" datatype="html">
         <source>Settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.packs" datatype="html">
+        <source>Knowledge packs</source>
       </trans-unit>
       <trans-unit id="pd.settings.page-failed" datatype="html">
         <source>This page could not be opened.</source>

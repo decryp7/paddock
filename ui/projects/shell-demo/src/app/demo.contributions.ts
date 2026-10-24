@@ -15,6 +15,7 @@ import {
 import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
+import { definePacksSettingsPage } from '@decryp7/paddock-ui/shell/packs';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
@@ -90,7 +91,7 @@ export const SETTINGS_DIALOG = defineDialog({
   width: 880,
   height: 620,
   // The settings commands, and the Background service page's (it asks and repairs the service from this window).
-  commands: ['settings_overview', 'settings_reset', 'settings_set', 'service_status', 'service_repair', 'service_install', 'open_login_items'],
+  commands: ['settings_overview', 'settings_reset', 'settings_set', 'service_status', 'service_repair', 'service_install', 'open_login_items', 'packs_status', 'packs_reload'],
   providers: () => import('./demo-settings-window').then((m) => m.DEMO_SETTINGS_WINDOW),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
@@ -101,9 +102,16 @@ export const SERVICE_PAGE = defineServiceSettingsPage({
   load: () => import('@decryp7/paddock-ui/shell/service/page').then((m) => m.PdServicePage),
 });
 
+/** Settings > Knowledge packs (plan X15/X23): the packs in use, which were refused and why, Reload; its providers load with the page. */
+export const PACKS_PAGE = definePacksSettingsPage({
+  providers: () => import('./packs.providers').then((m) => m.PACKS_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/packs/page').then((m) => m.PdPacksPage),
+});
+
 /** The demo's settings pages: those without a component of their own show the Rust section of the same id in the shell's generic form. */
 export const DEMO_SETTINGS_PAGES = [
   SERVICE_PAGE,
+  PACKS_PAGE,
   defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
   defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100 }),
 ] as const;

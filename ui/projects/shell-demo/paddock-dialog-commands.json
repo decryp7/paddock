@@ -1,5 +1,5 @@
 {
-  "//": "hostOnly: a dialog window provides no UI checkpoint, so the start-up contract never saves one there (ui_checkpoint is MAIN-only). exceptions: the Settings window loads its pages by the page's own loader at run time, which the call-graph walk cannot follow, so the Background service page's commands (SERVICE_SETTINGS_COMMANDS) are declared by hand; service_status is reached through the page's providers.",
+  "//": "hostOnly: a dialog window provides no UI checkpoint, so the start-up contract never saves one there (ui_checkpoint is MAIN-only). exceptions: the Settings window loads its pages by the page's own loader at run time, which the call-graph walk cannot follow, so the Background service page's commands (SERVICE_SETTINGS_COMMANDS) and the Knowledge packs page's (PACKS_SETTINGS_COMMANDS) are declared by hand; service_status is reached through the page's providers.",
   "tsconfig": "tsconfig.app.json",
   "registry": [
     "src/app/demo.contributions.ts"
@@ -7,7 +7,8 @@
   "table": [
     "src/app/generated/app-commands.ts",
     "../paddock-ui/shell/generated/shell-commands.ts",
-    "../paddock-ui/shell/service/generated/service-commands.ts"
+    "../paddock-ui/shell/service/generated/service-commands.ts",
+    "../paddock-ui/shell/packs/generated/packs-commands.ts"
   ],
   "base": [
     "window_pong",
@@ -31,7 +32,9 @@
       "declared": [
         "service_repair",
         "service_install",
-        "open_login_items"
+        "open_login_items",
+        "packs_status",
+        "packs_reload"
       ]
     }
   }

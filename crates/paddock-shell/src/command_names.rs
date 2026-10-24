@@ -26,6 +26,8 @@ pub const COMMAND_NAMES: &[&str] = &[
     "notifications_record",
     "notifications_restore",
     "open_login_items",
+    "packs_reload",
+    "packs_status",
     "recovery_restore",
     "recovery_safe_mode",
     "recovery_start_fresh",
