@@ -1,0 +1,114 @@
+use paddock_testkit::{Scratch, ScratchError};
+use std::fs;
+
+#[test]
+fn has_work_home_and_tmp_and_is_removed_on_drop() {
+    let s = Scratch::new();
+    let root = s.work().parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    assert!(s.work().is_dir() && s.home().is_dir() && s.tmp().is_dir());
+    assert!(root.exists());
+    s.finish().expect("tmp is empty");
+    assert!(!root.exists(), "the folder is deleted");
+}
+
+#[test]
+fn write_read_and_listing_are_sorted_and_relative() {
+    let s = Scratch::new();
+    s.write("b/two.txt", "2").expect("write");
+    s.write("a.txt", b"1").expect("write");
+    assert_eq!(s.read("b/two.txt").expect("read"), "2");
+    assert_eq!(s.listing().expect("list"), ["a.txt", "b/", "b/two.txt"]);
+}
+
+#[test]
+fn paths_cannot_leave_the_work_folder() {
+    let s = Scratch::new();
+    for bad in ["", "/etc/passwd", "../x", "a/../../x"] {
+        assert!(matches!(s.try_path(bad), Err(ScratchError::Escapes(_))), "{bad:?}");
+        assert!(matches!(s.write(bad, "x"), Err(ScratchError::Escapes(_))));
+    }
+    assert!(s.try_path("./ok/file").is_ok());
+    assert_eq!(s.read("missing").map_err(|e| matches!(e, ScratchError::Io(_))), Err(true));
+}
+
+#[test]
+fn a_leftover_in_tmp_is_reported_by_finish() {
+    let s = Scratch::new();
+    fs::create_dir(s.tmp().join("job-1")).expect("mkdir");
+    fs::write(s.tmp().join("job-1/log"), "x").expect("write");
+    fs::write(s.tmp().join("stray.tmp"), "x").expect("write");
+    let left = s.finish().expect_err("leftovers");
+    assert_eq!(left.0, ["job-1/", "job-1/log", "stray.tmp"]);
+    assert!(left.to_string().contains("3 item(s) left in the temp folder"));
+}
+
+#[test]
+fn dropping_with_a_leftover_fails_the_test() {
+    let result = std::panic::catch_unwind(|| {
+        let s = Scratch::new();
+        fs::write(s.tmp().join("stray.tmp"), "x").expect("write");
+    });
+    let message = match result {
+        Err(e) => e.downcast_ref::<String>().cloned().unwrap_or_default(),
+        Ok(()) => String::new(),
+    };
+    assert!(message.contains("stray.tmp"), "{message}");
+}
+
+#[test]
+fn a_panicking_test_is_not_hidden_by_the_leftover_check() {
+    // The original failure must be the one reported: the drop stays quiet while panicking.
+    let result = std::panic::catch_unwind(|| {
+        let s = Scratch::new();
+        fs::write(s.tmp().join("stray.tmp"), "x").expect("write");
+        panic!("the real failure");
+    });
+    let message = result
+        .err()
+        .and_then(|e| e.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_default();
+    assert_eq!(message, "the real failure");
+}
+
+#[test]
+fn an_unreadable_tmp_counts_as_a_leftover() {
+    let s = Scratch::new();
+    fs::remove_dir(s.tmp()).expect("remove tmp");
+    let left = s.finish().expect_err("the check never passes by accident");
+    assert!(left.0[0].starts_with("(unreadable"));
+}
+
+#[test]
+fn a_failed_test_keeps_its_folder_only_when_asked() {
+    let mut env = paddock_testkit::env_lock();
+    let root_of = |_keep: bool| {
+        let root = std::sync::Mutex::new(std::path::PathBuf::new());
+        let _ = std::panic::catch_unwind(|| {
+            let s = Scratch::new();
+            *root.lock().unwrap_or_else(|e| e.into_inner()) = s.work();
+            panic!("failing test");
+        });
+        root.into_inner().unwrap_or_default()
+    };
+    env.remove(paddock_testkit::scratch::KEEP_VAR);
+    assert!(!root_of(false).exists(), "deleted by default");
+    env.set(paddock_testkit::scratch::KEEP_VAR, "1");
+    let kept = root_of(true);
+    assert!(kept.exists(), "kept for inspection");
+    let _ = fs::remove_dir_all(kept.parent().unwrap_or(&kept));
+}
+
+#[test]
+fn errors_read_as_sentences_and_path_panics_on_a_mistake() {
+    let s = Scratch::default();
+    let escapes = s.try_path("../x").err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(escapes.contains("not a plain relative path"), "{escapes}");
+    let io = s.read("missing").err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(io.starts_with("scratch folder: "), "{io}");
+    let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.path("/abs")))
+        .err()
+        .and_then(|e| e.downcast_ref::<String>().cloned());
+    assert!(message.is_some_and(|m| m.contains("not a plain relative path")));
+    let from_io: ScratchError = std::io::Error::other("boom").into();
+    assert!(matches!(from_io, ScratchError::Io(_)));
+}

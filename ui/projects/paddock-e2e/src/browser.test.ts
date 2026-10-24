@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assertChromeForTesting, browserProblems, CHROME_ENV, isInstalledBrowser } from './browser.ts';
+import { assertChromeForTesting, browserProblems, CHROME_ENV, CHROMIUM_TEST_ENV, isInstalledBrowser, pinnedChrome } from './browser.ts';
 
 const PINNED = '/Users/me/.cache/chrome-for-testing/mac_arm-131/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 
@@ -30,7 +30,7 @@ test('an installed Chrome or Edge is refused, by channel or by path, even when n
 
 test('another binary only when it is the pinned one named in the variable', () => {
   assert.deepEqual(browserProblems({ launchOptions: { executablePath: PINNED } }, { [CHROME_ENV]: PINNED }), []);
-  assert.match(browserProblems({ launchOptions: { executablePath: PINNED } }, {})[0] ?? '', /not the pinned browser named in PADDOCK_E2E_CHROME/);
+  assert.match(browserProblems({ launchOptions: { executablePath: PINNED } }, {})[0] ?? '', /not the pinned browser named in CHROMIUM_TEST_PATH \(or PADDOCK_E2E_CHROME\)/);
 });
 
 test('the config guard checks the config and every project (with the config’s use under it)', () => {
@@ -44,4 +44,12 @@ test('the config guard checks the config and every project (with the config’s 
       e.message.includes('project a: channel "chrome"') &&
       e.message.includes('project (unnamed): executablePath /opt/google/chrome/chrome'),
   );
+});
+
+test('the pinned browser is named in CHROMIUM_TEST_PATH, or in PADDOCK_E2E_CHROME; the first wins', () => {
+  assert.equal(pinnedChrome({}), undefined);
+  assert.equal(pinnedChrome({ [CHROME_ENV]: 'b' }), 'b');
+  assert.equal(pinnedChrome({ [CHROME_ENV]: 'b', [CHROMIUM_TEST_ENV]: 'a' }), 'a');
+  assert.equal(pinnedChrome({ [CHROMIUM_TEST_ENV]: '' }), undefined);
+  assert.deepEqual(browserProblems({ launchOptions: { executablePath: PINNED } }, { [CHROMIUM_TEST_ENV]: PINNED }), []);
 });
