@@ -47,6 +47,7 @@ paddock-service = { path = "../../../crates/paddock-service", features = ["tauri
 # The sample agent's spec, heartbeat and manager (its binary is bundled as `externalBin`).
 shell-demo-agent = { path = "agent" }
 paddock-settings = { path = "../../../crates/paddock-settings", features = ["tauri"] }
+paddock-storage = { path = "../../../crates/paddock-storage" }
 paddock-startup = { path = "../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../crates/paddock-updater", features = ["tauri"] }
 paddock-window = { path = "../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }

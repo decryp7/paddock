@@ -61,6 +61,8 @@ type ChannelsSetup<R> = Box<
         ) -> Result<Arc<paddock_channels::ChannelsControl>, BoxError>
         + Send,
 >;
+type StorageSetup<R> =
+    Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_storage::Storage, BoxError> + Send>;
 type McpSetup<R> = Box<
     dyn FnOnce(&AppHandle<R>, paddock_mcp::Emit) -> Result<Arc<paddock_mcp::McpControl>, BoxError>
         + Send,
@@ -81,6 +83,7 @@ pub struct Builder<R: Runtime> {
     service: Option<ServiceSetup<R>>,
     first_run: Option<Part<R, FirstRun>>,
     files: Option<FilesSetup<R>>,
+    storage: Option<StorageSetup<R>>,
     packs: Option<PacksSetup<R>>,
     channels: Option<ChannelsSetup<R>>,
     mcp: Option<McpSetup<R>>,
@@ -108,6 +111,7 @@ impl<R: Runtime> Builder<R> {
             service: None,
             first_run: None,
             files: None,
+            storage: None,
             packs: None,
             channels: None,
             mcp: None,
@@ -201,6 +205,18 @@ impl<R: Runtime> Builder<R> {
         f: impl FnOnce(&AppHandle<R>) -> Result<paddock_files::Files, BoxError> + Send + 'static,
     ) -> Self {
         self.files = Some(Box::new(f));
+        self
+    }
+
+    /// What the app keeps on disk (plan X32): its categories (`paddock_storage::Storage::new(source).within(&dirs)`). The shell manages
+    /// the service, serves `storage_scan`, `storage_clear`, `storage_cancel`, `storage_last` and `storage_reveal` (jobs with
+    /// progress and Cancel, the outcome on `paddock://storage`) and the Settings > Storage page reads them. Needs
+    /// [`Builder::files`] for "Show in folder".
+    pub fn storage(
+        mut self,
+        f: impl FnOnce(&AppHandle<R>) -> Result<paddock_storage::Storage, BoxError> + Send + 'static,
+    ) -> Self {
+        self.storage = Some(Box::new(f));
         self
     }
 
@@ -380,6 +396,10 @@ impl<R: Runtime> Builder<R> {
                 paddock_files::tauri::invoke_handler(),
             )
             .route(
+                &paddock_storage::COMMANDS,
+                paddock_storage::tauri::invoke_handler(),
+            )
+            .route(
                 &paddock_service::COMMANDS,
                 paddock_service::tauri::invoke_handler(),
             )
@@ -488,6 +508,11 @@ impl<R: Runtime> Builder<R> {
                 }
             };
             paddock_files::tauri::install(app, files);
+        }
+
+        if let Some(f) = self.storage {
+            let storage = f(app).map_err(|e| named("storage", e))?;
+            paddock_storage::tauri::install(app, storage);
         }
 
         if let Some(f) = self.service {

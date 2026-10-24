@@ -38,6 +38,7 @@ members = [
     "paddock-service",
     "paddock-settings",
     "paddock-shell",
+    "paddock-storage",
     "paddock-siblings",
     "paddock-startup",
     "paddock-testkit",
@@ -99,6 +100,7 @@ paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "dec
 paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "decryp7" }
 paddock-shell = { path = "paddock-shell", version = "0.2.0", registry = "decryp7" }
+paddock-storage = { path = "paddock-storage", version = "0.1.0", registry = "decryp7" }
 paddock-siblings = { path = "paddock-siblings", version = "0.1.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "decryp7" }
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }

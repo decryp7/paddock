@@ -11,7 +11,7 @@ test.describe('settings (plan S10)', () => {
     await page.getByRole('button', { name: 'Settings…', exact: true }).click();
     const win = app.settings.window;
     await expect(win).toHaveAttribute('aria-modal', 'false');
-    await expect(app.settings.nav.getByRole('button')).toHaveText(['Appearance', 'Language', 'Background service', 'Notification channels', 'AI access (MCP)', 'Set-up', 'General', 'Storage', 'Knowledge packs', 'Notifications', 'Logging']);
+    await expect(app.settings.nav.getByRole('button')).toHaveText(['Appearance', 'Language', 'Background service', 'Notification channels', 'AI access (MCP)', 'Set-up', 'Storage', 'General', 'Demo data', 'Knowledge packs', 'Notifications', 'Logging']);
     // The Appearance section is the shell's; its change applies to the main window at once.
     await app.settings.choose('theme', 'Dark', win);
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
@@ -43,7 +43,7 @@ test.describe('settings (plan S10)', () => {
     await app.settings.field('volume').getByRole('spinbutton').press('Enter');
     await expect(page.getByTestId('settings-restart')).toContainText('1 change takes effect after the app restarts (Volume).');
 
-    await app.settings.nav.getByRole('button', { name: 'Storage' }).click();
+    await app.settings.nav.getByRole('button', { name: 'Demo data' }).click();
     await expect(app.settings.field('folder').getByRole('textbox', { name: 'Data folder' })).toHaveValue('');
     await expect(app.settings.field('keep')).toContainText('min');
     await expect(app.settings.field('cache')).toContainText('MB');
@@ -67,7 +67,7 @@ test.describe('settings (plan S10)', () => {
     await expect(greeting).toHaveAttribute('aria-invalid', 'true');
     await expect(app.settings.nav.getByRole('button', { name: /General/ }).getByRole('img', { name: 'unsaved changes' })).toBeVisible();
     // Moving between pages keeps the edit.
-    await app.settings.nav.getByRole('button', { name: 'Storage' }).click();
+    await app.settings.nav.getByRole('button', { name: 'Demo data' }).click();
     await app.settings.nav.getByRole('button', { name: /General/ }).click();
     await expect(greeting).toHaveValue('Hi there!');
     // Escape asks; Keep editing keeps the window; Discard closes it.
@@ -106,6 +106,8 @@ test.describe('settings (plan S10)', () => {
     await expect(app.settings.nav.getByRole('button', { name: 'AI access (MCP)' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(app.settings.nav.getByRole('button', { name: 'Set-up' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(app.settings.nav.getByRole('button', { name: 'Storage', exact: true })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(app.settings.nav.getByRole('button', { name: 'General' })).toBeFocused();
     await page.keyboard.press('End');

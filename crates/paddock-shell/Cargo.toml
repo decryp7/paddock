@@ -42,6 +42,7 @@ paddock-channels = { workspace = true, features = ["tauri"] }
 paddock-mcp = { workspace = true, features = ["tauri"] }
 paddock-service = { workspace = true, features = ["tauri"] }
 paddock-settings = { workspace = true, features = ["tauri"] }
+paddock-storage = { workspace = true, features = ["tauri"] }
 paddock-startup = { workspace = true, features = ["tauri"] }
 paddock-updater = { workspace = true, features = ["tauri"] }
 paddock-window = { workspace = true, features = ["tauri"] }
