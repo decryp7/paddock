@@ -358,3 +358,10 @@ Debrief showed its changelog as a dialog at start; the user prefers a pane. The 
 workbench apps a document view opened in the background once after an update, in pages apps a page; plus one calm
 cause-keyed notification "Updated to X · See what's new". Help ▸ What's New opens the same view. No dialog at startup.
 Debrief does this first (branch feat/whats-new-pane); the shell follows in W/S follow-up work.
+
+## 15. One Pitwall client for every app (2026-10-24)
+
+Debrief 1.1 wrote its own Pitwall client (debrief-ai `engine/pitwall/`: discovery, pairing, keychain keys, streamed
+chat, health) before `paddock-pitwall` (ADR 0004) existed. Rule 39: extract it into `paddock-pitwall` during the Pitwall
+release (with Pitwall's API additions: contextPerSlot, installed-but-not-running, job ids), publish it with the next shell
+release, and move Debrief onto it in its migration (M2); Pacenotes and Sighter start on it.
