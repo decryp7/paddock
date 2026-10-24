@@ -67,8 +67,20 @@
         "service_status",
         "settings_overview",
         "settings_reset",
-        "settings_set"
+        "settings_set",
+        "storage_cancel",
+        "storage_clear",
+        "storage_last",
+        "storage_reveal",
+        "storage_scan"
       ]
+    },
+    "pd.storage.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": true,
+      "commands": []
     },
     "pd.updates": {
       "kind": "tool",

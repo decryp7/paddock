@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-storage` and `@decryp7/paddock-ui/shell/storage` (plan X32): what an app keeps on disk and clearing it safely. Declared
+  `Category`s (cache or the user's data, a confined folder, items with the reason they stay, an optional removal through the app),
+  a bounded size walk, a scan that is the preview, `clear` that needs it, confirms data per category, re-checks every item before
+  deleting it and never leaves the app's own folders (`Storage::within`), as jobs with progress and Cancel (`storage_*` commands and
+  `paddock://storage` in the shell plugin, `Builder::storage`). `paddock_files::Files::show_folder`. UI: `StorageBackend`,
+  `StorageStore`, the Settings > Storage page and its confirmation window; the shell demo's old generic page is now "Demo data".
 - `paddock-files` and `@decryp7/paddock-ui/shell/files` (plan X31): the user's files. `PathGrants` (open only paths the user chose,
   by dialog, drop or command line; per window, bounded, expiring, canonical), the validators (`parse`, `canonical`, `output_file`,
   `child`, `confined`), validated pickers behind `Picker` (`NativePicker` over `tauri-plugin-dialog`), `Recents` (named lists in a

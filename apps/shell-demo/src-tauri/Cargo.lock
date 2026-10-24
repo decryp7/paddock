@@ -2991,6 +2991,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-files"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-proc",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-dialog",
+]
+
+[[package]]
 name = "paddock-health"
 version = "0.1.0"
 dependencies = [
@@ -3012,6 +3026,7 @@ dependencies = [
  "croner",
  "jiff",
  "paddock-commands",
+ "paddock-env",
  "paddock-workspace-hack",
  "serde",
  "sha2",
@@ -3140,6 +3155,7 @@ dependencies = [
  "paddock-diag",
  "paddock-dialogs",
  "paddock-download",
+ "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-menu",
@@ -3147,6 +3163,7 @@ dependencies = [
  "paddock-service",
  "paddock-settings",
  "paddock-startup",
+ "paddock-storage",
  "paddock-updater",
  "paddock-window",
  "paddock-workspace-hack",
@@ -3166,6 +3183,7 @@ dependencies = [
  "paddock-diag",
  "paddock-dialogs",
  "paddock-env",
+ "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-log",
@@ -3174,6 +3192,7 @@ dependencies = [
  "paddock-settings",
  "paddock-shell",
  "paddock-startup",
+ "paddock-storage",
  "paddock-updater",
  "paddock-window",
  "serde",
@@ -3201,6 +3220,20 @@ dependencies = [
  "sysinfo",
  "tauri",
  "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "paddock-storage"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-files",
+ "paddock-jobs",
+ "serde",
+ "serde_json",
+ "tauri",
 ]
 
 [[package]]

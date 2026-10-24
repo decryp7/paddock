@@ -305,6 +305,7 @@
     "pd.login",
     "pd.notifications",
     "pd.packs",
+    "pd.storage",
     "sd.general",
     "sd.storage"
   ],
@@ -382,8 +383,21 @@
         "service_status",
         "settings_overview",
         "settings_reset",
-        "settings_set"
+        "settings_set",
+        "storage_cancel",
+        "storage_clear",
+        "storage_last",
+        "storage_reveal",
+        "storage_scan"
       ]
+    },
+    "pd.storage.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": []
     },
     "pd.updates": {
       "kind": "tool",
@@ -496,7 +510,9 @@
     "pd.settings.open": "Settings…",
     "pd.settings.packs": "Knowledge packs",
     "pd.settings.service": "Background service",
+    "pd.settings.storage": "Storage",
     "pd.settings.title": "Settings",
+    "pd.storage.confirm.title": "Clear storage",
     "pd.undo.cmd.category": "Edit",
     "pd.undo.cmd.redo": "Redo",
     "pd.undo.cmd.undo": "Undo",
@@ -541,7 +557,7 @@
     "sd.pseudo-locale": "Pseudo-locale",
     "sd.reset": "Reset greetings",
     "sd.settings.general": "General",
-    "sd.settings.storage": "Storage",
+    "sd.settings.storage": "Demo data",
     "sd.status.runners": "Runners online",
     "sd.theme.dark": "Theme: dark",
     "sd.theme.light": "Theme: light",
