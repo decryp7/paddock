@@ -218,6 +218,8 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
             Some(_) => setup.checks(Duration::ZERO, Duration::ZERO, 0),
         }))
     });
+    // The first-run set-up checklist (plan X19): the service and Start at login steps of the agent above.
+    builder = builder.first_run(|_| paddock_shell::FirstRun::new());
     let files_dir = test_dir.clone();
     // User files (plan X31): path grants, the native pickers, the recent lists in the config folder, reveal and open.
     builder = builder.files(move |_| {

@@ -3,6 +3,10 @@
 //! the notification centre (window notices need it), settings with the shell's Appearance section, dialogs (an empty
 //! contract file), the start-up watchdog with its defaults, and the menu.
 
+use crate::setup::{
+    LoginItem, NotificationAccess, NotificationsItem, PitwallItem, PitwallPort, ServiceItem,
+    SetupItem,
+};
 use crate::{COMMANDS, OWN_COMMANDS, PLUGIN_NAME, commands, prefs};
 use paddock_commands::Table;
 use paddock_commands::tauri::{Guard, Routes};
@@ -71,6 +75,7 @@ pub struct Builder<R: Runtime> {
     settings: Option<Part<R, Settings>>,
     diagnostics: Option<DiagSetup<R>>,
     service: Option<ServiceSetup<R>>,
+    first_run: Option<Part<R, FirstRun>>,
     files: Option<FilesSetup<R>>,
     packs: Option<PacksSetup<R>>,
     channels: Option<ChannelsSetup<R>>,
@@ -96,6 +101,7 @@ impl<R: Runtime> Builder<R> {
             settings: None,
             diagnostics: None,
             service: None,
+            first_run: None,
             files: None,
             packs: None,
             channels: None,
@@ -167,6 +173,16 @@ impl<R: Runtime> Builder<R> {
         f: impl FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send + 'static,
     ) -> Self {
         self.service = Some(Box::new(f));
+        self
+    }
+
+    /// The first-run set-up checklist (plan X19): the background service and Start at login when the app has them
+    /// ([`Builder::service`]), then the steps `f` names (notification permission, Pitwall pairing, the app's own). The
+    /// shell serves `setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish` and the `paddock://setup`
+    /// event; the answers are kept in `setup.json` in the app's config folder. A step that cannot be built is a failed
+    /// start naming it.
+    pub fn first_run(mut self, f: impl FnOnce(&AppHandle<R>) -> FirstRun + Send + 'static) -> Self {
+        self.first_run = Some(Box::new(f));
         self
     }
 
@@ -345,6 +361,10 @@ impl<R: Runtime> Builder<R> {
                 paddock_service::tauri::invoke_handler(),
             )
             .route(
+                &crate::setup::COMMANDS,
+                crate::setup::tauri::invoke_handler(),
+            )
+            .route(
                 &paddock_packs::COMMANDS,
                 paddock_packs::tauri::invoke_handler(),
             )
@@ -521,10 +541,77 @@ impl<R: Runtime> Builder<R> {
                 .register(section)
                 .map_err(|e| named(&format!("the settings section {id}"), e))?;
         }
+        if let Some(f) = self.first_run {
+            let part = f(app);
+            let mut items: Vec<Arc<dyn SetupItem>> = Vec::new();
+            if let Some(service) = app.try_state::<Arc<paddock_service::tauri::Service>>() {
+                items.push(Arc::new(ServiceItem::new(
+                    &self.identity.name,
+                    service.control().clone(),
+                )));
+                items.push(Arc::new(LoginItem::new(
+                    &self.identity.name,
+                    settings.clone(),
+                )));
+            }
+            if let Some(access) = part.notifications {
+                items.push(Arc::new(NotificationsItem::new(
+                    &self.identity.name,
+                    access,
+                )));
+            }
+            if let Some((port, needs)) = part.pitwall {
+                items.push(Arc::new(PitwallItem::new(&self.identity.name, needs, port)));
+            }
+            items.extend(part.extra);
+            let dir = if self.in_memory {
+                None
+            } else {
+                app.path().app_config_dir().ok()
+            };
+            crate::setup::tauri::install(app, items, dir)
+                .map_err(|e| named("the set-up checklist", e))?;
+        }
         for f in self.setup {
             f(app)?;
         }
         Ok(())
+    }
+}
+
+/// What [`Builder::first_run`] adds to the shell's own steps.
+#[derive(Default)]
+pub struct FirstRun {
+    notifications: Option<Arc<dyn NotificationAccess>>,
+    pitwall: Option<(Arc<dyn PitwallPort>, paddock_pitwall::Caps)>,
+    extra: Vec<Arc<dyn SetupItem>>,
+}
+
+impl FirstRun {
+    /// No steps beyond the service and Start at login.
+    pub fn new() -> FirstRun {
+        FirstRun::default()
+    }
+
+    /// The notification-permission step over the OS (`paddock_health::tauri::native` has the real one).
+    #[must_use]
+    pub fn notifications(mut self, access: Arc<dyn NotificationAccess>) -> FirstRun {
+        self.notifications = Some(access);
+        self
+    }
+
+    /// The Pitwall step; `needs` is what the app asks of models.
+    #[must_use]
+    pub fn pitwall(mut self, port: Arc<dyn PitwallPort>, needs: paddock_pitwall::Caps) -> FirstRun {
+        self.pitwall = Some((port, needs));
+        self
+    }
+
+    /// One of the app's own steps (Debrief's tour), after the shell's.
+    #[must_use]
+    pub fn item(mut self, item: Arc<dyn SetupItem>) -> FirstRun {
+        self.extra.push(item);
+        self
     }
 }
 

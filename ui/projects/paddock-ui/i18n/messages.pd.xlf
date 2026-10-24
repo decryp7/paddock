@@ -1517,6 +1517,9 @@
       <trans-unit id="pd.settings.service" datatype="html">
         <source>Background service</source>
       </trans-unit>
+      <trans-unit id="pd.settings.setup" datatype="html">
+        <source>Set-up</source>
+      </trans-unit>
       <trans-unit id="pd.settings.show-advanced" datatype="html">
         <source>Show advanced</source>
       </trans-unit>
@@ -1549,6 +1552,75 @@
       </trans-unit>
       <trans-unit id="pd.settings.unsaved.keep" datatype="html">
         <source>Keep editing</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.empty" datatype="html">
+        <source>There is nothing to set up on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.failed" datatype="html">
+        <source>That did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.lede" datatype="html">
+        <source>A few things the app can set up for you. Each is optional, you can skip any of them, and you can come back to this list later in Settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.loading" datatype="html">
+        <source>Looking at what is set up…</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.no-state" datatype="html">
+        <source>The set-up steps could not be asked.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.no-state-title" datatype="html">
+        <source>The set-up steps could not be asked.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.open" datatype="html">
+        <source>Set-up…</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.refused" datatype="html">
+        <source>The request was not accepted.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.repair" datatype="html">
+        <source>Repair</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.settled" datatype="html">
+        <source>Everything is set up or skipped. You can change any of it later in Settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.skip" datatype="html">
+        <source>Skip for now</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.problem" datatype="html">
+        <source>Needs repair</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.skipped" datatype="html">
+        <source>Skipped</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.todo" datatype="html">
+        <source>To do</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.working" datatype="html">
+        <source>Working</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.steps" datatype="html">
+        <source>Set-up steps</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.still-working" datatype="html">
+        <source>Still working. This can take a minute; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.title" datatype="html">
+        <source>Set-up</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.unskip" datatype="html">
+        <source>Take it up again</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.working" datatype="html">
+        <source>Working…</source>
       </trans-unit>
       <trans-unit id="pd.shell.context-failed" datatype="html">
         <source>The app context failed to load: <x id="cause"/></source>
