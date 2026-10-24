@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": { "outDir": "../../out-tsc/spec", "types": ["vitest/globals", "@angular/localize"] },
-  "include": ["src/**/*.spec.ts", "shell/**/*.spec.ts", "workbench/**/*.spec.ts", "src/**/*.d.ts", "src/test-setup.ts"]
+  "include": ["src/**/*.spec.ts", "shell/**/*.spec.ts", "workbench/**/*.spec.ts", "live/**/*.spec.ts", "src/**/*.d.ts", "src/test-setup.ts"]
 }

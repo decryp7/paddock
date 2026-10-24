@@ -53,6 +53,8 @@
         "channels_test",
         "dialog_open",
         "open_login_items",
+        "packs_reload",
+        "packs_status",
         "service_install",
         "service_repair",
         "service_status",

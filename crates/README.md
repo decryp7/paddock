@@ -102,9 +102,11 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
+| `paddock-watch` | folder watching: `Debouncer` on the shared `Clock` (quiet time plus longest wait), the `ChangeSource` port with a `notify` adapter and a watcher thread, Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`) for files that are still being written (plan X23) | yes (Debrief, Spotter, Dyno, `paddock-packs`); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
@@ -969,6 +971,32 @@ let snapshot = store.current();                                             // A
 - `user_regex`: `compile`, `compile_with`, `compile_set`; `RegexLimits::DEFAULT` (Debrief: 8 MiB) and `STRICT` (Spotter: 1 MiB);
   typed `RegexError` (`TooLong`, `TooComplex`, `Invalid`) whose messages say what to fix.
 - `Snapshot::health()` gives the one line (`Ok`, `Notes`, `Degraded`) for the `packs` health or notification entry.
+- `tauri` feature: `paddock_packs::tauri::{Setup, install}` over `view::kind(id, label, store)` (the pack type erased); `Builder::packs(|app|
+  Ok(Setup::new().kind(...).health("packs")))` in `paddock-shell`. Commands `packs_status` (every window) and `packs_reload` (main windows and the
+  Settings dialog), the `paddock://packs` event to every window on a real change, and the health entry: down with the first refused pack and `Retry`
+  as its repair (a reload, served by the shell, never by a pack: rule 19), ok when none is. The UI is `@decryp7/paddock-ui/shell/packs` (Settings >
+  Knowledge packs).
+
+## `paddock-watch` (plan X23)
+
+```rust
+use paddock_watch::{Debouncer, NotifySource, Settle, SettleConfig, scan_folder, spawn};
+
+let debouncer = Arc::new(Debouncer::new(Arc::new(SystemClock), Duration::from_millis(300), Duration::from_millis(1500)));
+let _watch = spawn(debouncer, &NotifySource, &folder, /* recursive */ true, move || rescan())?;   // feature `notify`; FakeSource in tests
+
+// Debrief's watched folders: a file is ready when its size and time stopped changing.
+let mut settle = Settle::new(SettleConfig::default());
+let ready = settle.observe(&scan_folder(&folder, &|rel| is_log(rel)).files, clock.now_ms());   // ready.new / .changed / .skipped
+settle.imported(&stamp);  settle.failed(&path, "locked", now);                                  // back-off, then given up
+```
+
+- `Debouncer`: quiet time, never later than the longest wait after the first event; `poll()` is `Idle`, `Waiting(d)` or `Now`.
+  Tests move a `FakeClock`; the thread's 50 ms wake-up only bounds how late a due action runs.
+- `Settle` ignores temporary names and empty files, forgets vanished files, retries a locked file with back-off (4 attempts), reports
+  a too-large file once, and bounds its pending list; `Batcher` groups ready files into one job. `scan_folder` skips symbolic links
+  and stops at 50 000 entries or 16 levels (`Scan::truncated`).
+- Not here yet: Dyno's keep-for times (`dyno-core/src/watch.rs`) are app policy over `Settle`'s stamps and stay in Dyno.
 
 ## `paddock-log` (plan X1)
 
@@ -1196,6 +1224,36 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
   by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.
 
+## `paddock-live` (plan X29)
+
+Replaces Pitwall's `live.rs`, Dyno's `link.rs` pump, Pitcrew's `events.rs` forwarder, Spotter's push handling and the ordering gaps
+of Debrief's channels. The UI half is `@decryp7/paddock-ui/live` (see `ui/README.md`).
+
+```rust
+impl LiveState for Overview {                       // the app's state
+    type Delta = OverviewChange;
+    fn apply(&mut self, d: &OverviewChange) { /* the one fold */ }
+    fn merge(prev: &mut OverviewChange, next: &OverviewChange) -> bool { /* latest wins, or false */ }
+}
+let hub = Hub::new(Overview::default());
+let forwarder = paddock_live::tauri::register(app.handle(), "overview", &hub)?;   // paddock://live/overview + live_snapshot
+std::thread::spawn(move || paddock_live::run(&hub, &mut source, &clock, default_policy(), &cancel));
+// a Source: connect, `feed.seed(state)` (link becomes connected, a snapshot goes out), then `feed.publish(delta)` until it ends
+```
+
+- Sequence: every `publish` is the next number; a frame is `from..=seq` because merged deltas stand for several numbers. A window
+  applies a delta only when `from` is next; a gap, a reload or a new window asks `live_snapshot`. Frames are camelCase JSON with a
+  `kind` tag (`snapshot`, `delta`, `link`).
+- Bounded: each `Subscription` queues at most `with_queue_cap` frames (4 to 4096, default 256). Deltas merge into the queued one when
+  `LiveState::merge` says so (a memory sample replaces the last); a consumer that still falls behind has its queue replaced by one
+  snapshot (`resyncs()` counts it): memory never grows, nothing is lost silently. `reset` (a reseed) also replaces what was queued.
+- `run` waits its delays on the injected `Clock` (a `FakeClock` in specs); the link announces `reconnecting { attempt, retryInMs,
+  reason }` before each wait, `down` when the policy gives up and `stopped` on cancel. A connection that lasted `reset_after` starts
+  the delays over. Reasons are short sentences, never content.
+- A panic in an app's `apply` poisons nothing: locks recover (`PoisonError::into_inner`).
+- Channel names are `[a-z][a-z0-9-]{0,31}`; the command is `Query [WINDOW]` and async (rule 10); dialog windows reach it only through a
+  contract (`handler_with_grants`). Not covered: per-call streams to one caller (Debrief's `tauri::ipc::Channel` for search results
+  and the live tail) stay in the app; a feed is for shared state.
 ## `paddock-metrics` (plan X30)
 
 Replaces `metrics.rs` in Pitcrew (generic `TieredStore`), Pitwall (four tiers) and the tier maths of Dyno's agent store, and the four

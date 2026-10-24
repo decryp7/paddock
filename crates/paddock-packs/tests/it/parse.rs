@@ -154,3 +154,21 @@ fn nothing_in_a_pack_is_executed_or_followed() {
     assert!(p.pack.is_empty());
     assert_eq!(p.warnings.len(), 2);
 }
+
+#[test]
+fn error_messages_read_as_sentences() {
+    assert_eq!(
+        PackError::NotText.to_string(),
+        "the pack file is not UTF-8 text"
+    );
+    assert!(
+        PackError::Io("could not read a.toml".into())
+            .to_string()
+            .contains("a.toml")
+    );
+    assert!(
+        PackError::TooLarge { len: 9, max: 4 }
+            .to_string()
+            .contains("limit is 4")
+    );
+}
