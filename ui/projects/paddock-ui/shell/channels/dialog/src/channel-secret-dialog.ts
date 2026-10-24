@@ -14,6 +14,14 @@ import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormField],
   template: `
+    @if (!valid()) {
+      <div class="pd-secret">
+        <p class="pd-secret__error" role="alert" data-testid="channel-secret-invalid">{{ t.invalid }}</p>
+        <div class="pd-secret__actions">
+          <button type="button" class="pd-secret__btn" data-dialog-close data-testid="channel-secret-close" (click)="ref.close()">{{ t.close }}</button>
+        </div>
+      </div>
+    } @else {
     <form class="pd-secret" (submit)="$event.preventDefault(); save()" data-testid="channel-secret-form">
       <p class="pd-secret__lede">{{ lede() }}</p>
       <label class="pd-secret__field">
@@ -43,6 +51,7 @@ import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
         <button type="submit" class="pd-secret__btn primary" data-testid="channel-secret-save" [disabled]="!canSave()">{{ t.save }}</button>
       </div>
     </form>
+    }
   `,
   styles: `
     :host { display: block; color: var(--pd-text); min-width: 0; container-type: inline-size; }
@@ -66,7 +75,7 @@ export class PdChannelSecretDialog {
   protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
 
   /** The channel the secret is for. */
-  readonly channelId = input.required<string>();
+  readonly channelId = input('');
   /** The channel's name, for the title and the sentence. */
   readonly label = input('');
   /** Whether the secret is a token or a password. */
@@ -80,6 +89,8 @@ export class PdChannelSecretDialog {
 
   protected readonly t = {
     cancel: $localize`:@@pd.channels.secret.cancel:Cancel`,
+    close: $localize`:@@pd.channels.secret.close:Close`,
+    invalid: $localize`:@@pd.channels.secret.invalid:This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel's editor.`,
     save: $localize`:@@pd.channels.secret.save:Save`,
     show: $localize`:@@pd.channels.secret.show:Show what you typed`,
     hide: $localize`:@@pd.channels.secret.hide:Hide what you typed`,
@@ -90,9 +101,14 @@ export class PdChannelSecretDialog {
   constructor() {
     // The title names the channel; it is known only once the opener's inputs are set (a side effect on the window's title).
     effect(() => {
+      if (!this.valid()) return;
       const label = this.label() || this.channelId();
       this.ref.setTitle?.(this.kind() === 'password' ? $localize`:@@pd.channels.secret.title-password:Password for ${label}:channel:` : $localize`:@@pd.channels.secret.title-token:Token for ${label}:channel:`);
     });
+  }
+
+  protected valid(): boolean {
+    return this.channelId().trim() !== '';
   }
 
   protected fieldLabel(): string {
@@ -113,7 +129,7 @@ export class PdChannelSecretDialog {
   protected async save(): Promise<void> {
     const value = this.model().secret;
     const id = this.channelId();
-    if (!this.canSave()) return;
+    if (!this.valid() || !this.canSave()) return;
     this.saving.set(true);
     this.error.set(null);
     try {

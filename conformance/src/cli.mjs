@@ -9,7 +9,7 @@ import { syncMain } from './sync/main.mjs';
 import { windowWeightMain } from './window-weight/cli.mjs';
 
 const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C04,C06] [--json] [--out file] [--summary file]
-                           [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
+                           [--strict C30,C36] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
                            [--preflight vX.Y.Z [--api url --repo owner/name]]
        paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
        paddock-conformance commit-lint --file <path> | --range <rev-range>
@@ -17,7 +17,7 @@ const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C0
        paddock-conformance window-weight [kind...] [--root <dir>] [--stats <file>] [--max <kB>] [--record]   # C29, rule 35
        paddock-conformance list`;
 
-const VALUE = new Set(['stats', 'max', 'app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'allow-home']);
+const VALUE = new Set(['stats', 'max', 'app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'allow-home', 'strict']);
 
 /** Parses `--key value` / `--flag` into an object; throws on anything unknown. */
 export function parseArgs(argv) {
@@ -87,7 +87,9 @@ export async function main(argv, { log = console.log, err = console.error, env =
     });
     writeOutputs(result, { out: o.out, summary: o.summary, env });
     log(o.json ? JSON.stringify(result, null, 2) : formatText(result));
-    return result.errors ? 1 : 0;
+    // `--strict C36`: the warnings of these checks fail the run too (a check that is a warning for apps may block in one repo).
+    const strict = new Set((o.strict ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean));
+    return result.errors || result.findings.some((f) => f.severity === 'warn' && strict.has(f.check)) ? 1 : 0;
   } catch (e) {
     err(`paddock-conformance: ${e.message}`);
     return 2;
