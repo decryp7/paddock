@@ -431,6 +431,14 @@ Conventional Commits; one semver tag for the whole repo.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
+- `@decryp7/paddock-ui/shell/mcp` (plan X22, ADR 0007): Settings > AI access (MCP). `McpBackend` (Tauri over `mcp_get`, `mcp_save`, `mcp_issue_key`,
+  `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear` and the `paddock://mcp` event; in-memory with the engine's refusals), the per-window `McpStore`,
+  `defineMcpSettingsPage`/`defineMcpKeyDialog`/`defineMcpRevokeDialog`, `provideShellMcp`/`provideMcpBackend`. The page `PdMcpPage` (`/shell/mcp/page`): the
+  master switch (off by default), a switch per read-only tool, a separate off-by-default "Allow" with a warning per action tool, the clients' keys with
+  Revoke, and the shared audit viewer `PdMcpAudit` (the family's `pd-table`: time, client, tool, result, size, duration, redacted arguments; Clear). The key
+  is issued in the key dialog's window (`/shell/mcp/dialog`, a modal credential form, `mcp_issue_key` for that window only) and shown once with Copy; it is in
+  no store, event, log or URL. Shell demo: the page and both dialogs (`?mcp=calls|error`), Vitest specs and a Chromium spec with axe at 320 px.
+
 ### Fixed
 - The About, Updates and What's New contents were unstyled: their stylesheet still used the old class names (`.btn`, `.muted`, ...)
   while the templates use the `pd-` ones, so the legal-text buttons failed colour contrast in the light theme (found by the new

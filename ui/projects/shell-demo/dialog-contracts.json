@@ -35,6 +35,22 @@
         "channels_set_secret"
       ]
     },
+    "pd.mcp.key": {
+      "kind": "form",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "mcp_issue_key"
+      ]
+    },
+    "pd.mcp.revoke": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": true,
+      "commands": []
+    },
     "pd.report-problem": {
       "kind": "decision",
       "modality": "modal",
@@ -59,6 +75,11 @@
         "channels_save",
         "channels_test",
         "dialog_open",
+        "mcp_audit",
+        "mcp_audit_clear",
+        "mcp_get",
+        "mcp_revoke_key",
+        "mcp_save",
         "open_login_items",
         "packs_reload",
         "packs_status",
