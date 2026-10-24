@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Fixed
+- UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
+  injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell
+  demo's menu bar test expects Edit (undo, X44); the channels retry test steps the demo engine by hand (`?channels-step=manual`)
+  instead of racing its 400 ms timer; the dock's "attach before dockview has loaded" spec forgets the module itself instead of
+  relying on a fresh worker.
+
 ### Changed
 - X21 review 3: the resting "..." button shows the full subtle text on a selected row (the rest mix was 2.71:1 on the tint; the
   token test now covers the selected tint and surface-2); paths are cut at segment boundaries and keep their trailing segments
@@ -33,6 +40,11 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- Set-up checklist, no app wiring (plan X19 follow-up). `paddock_health::notify::os::Toaster` gains `request_permission` and
+  `open_system_settings`; `PluginToaster` implements them (the plugin's `request_permission`; macOS `open
+  x-apple.systempreferences:com.apple.Notifications-Settings.extension`, Windows `ms-settings:notifications`, GNOME
+  `gnome-control-center notifications`, otherwise the words say where to look), so `ToasterAccess` needs no closures. `LinkPort::new(link,
+  app_id)` starts Pitwall through `paddock-siblings` (`Handoff::Open`); not installed and too old come back as the step's words.
 - First-run set-up checklist (plan X19). `paddock_shell::setup` (`Builder::first_run`): the steps in order with their own checks
   (`SetupItem`), the user's answers (skipped, shown) in `setup.json` through `paddock-env`, actions run on a worker with the
   outcome on `paddock://setup`, and the commands `setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish`. The shell

@@ -26,7 +26,7 @@ mod tests;
 pub use checklist::{Checklist, Do, Emit, ListError, MAX_ID_LEN, MAX_ITEMS, Runner, SetupFile};
 pub use items::{
     LinkPort, LoginItem, NotificationAccess, NotificationsItem, PitwallItem, PitwallPort,
-    ServiceItem, ServicePort, ToasterAccess, ids,
+    ServiceItem, ServicePort, ToasterAccess, ids, start_pitwall,
 };
 pub use model::{
     Check, ItemStatus, ItemView, SetupCommandError, SetupErrorCode, SetupItem, SetupState,

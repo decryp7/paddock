@@ -11,7 +11,7 @@ publish = ["decryp7"]
 # The Tauri adapter (`paddock_health::tauri`: events, commands and their table); the core never depends on Tauri.
 tauri = ["dep:tauri", "paddock-commands/tauri"]
 # The OS notification adapter over `tauri-plugin-notification` (`paddock_health::tauri::native::PluginToaster`); the app registers the plugin.
-os-notify = ["tauri", "dep:tauri-plugin-notification"]
+os-notify = ["tauri", "dep:tauri-plugin-notification", "dep:paddock-proc"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +24,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 tauri = { workspace = true, optional = true }
 paddock-commands = { workspace = true, optional = true }
 tauri-plugin-notification = { version = "2.7", optional = true }
+# Opening the system's notification settings (no console window on Windows).
+paddock-proc = { workspace = true, optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
