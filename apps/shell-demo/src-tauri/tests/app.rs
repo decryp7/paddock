@@ -201,7 +201,10 @@ fn the_contracts_and_manifest_agree_with_the_plugin_and_the_apps_table() {
     });
     assert_eq!(builder.problems(Some(MANIFEST)), Vec::<String>::new());
     assert_eq!(builder.service_ids(), [engine::ENGINE, engine::INDEX]);
-    assert_eq!(builder.section_ids(), ["sd.general", "sd.storage"]);
+    assert_eq!(
+        builder.section_ids(),
+        ["pd.notifications", "sd.general", "sd.storage"]
+    );
 }
 
 #[test]

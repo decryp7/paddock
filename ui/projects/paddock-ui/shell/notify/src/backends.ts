@@ -1,12 +1,14 @@
-import { parseHealthSnapshot, parseNotice, parseNoticesEvent, parseNoticesSnapshot } from './wire';
+import { parseHealthSnapshot, parseNotice, parseNoticeActionEvent, parseNoticesEvent, parseNoticesSnapshot } from './wire';
 import {
   healthCause,
   NOTIFICATIONS_EVENT,
   NOTIFICATIONS_OPEN_EVENT,
+  NOTIFICATIONS_ACTION_EVENT,
   SERVICE_HEALTH_EVENT,
   type Cause,
   type Notice,
   type NoticeAction,
+  type NoticeActionEvent,
   type NoticesEvent,
   type NoticeSeverity,
   type NoticesSnapshot,
@@ -72,6 +74,11 @@ export abstract class NotificationsBackend {
   abstract listen(handler: (e: NoticesEvent) => void): Promise<Unlisten>;
   /** An OS notification was clicked: open that message. */
   abstract onOpen(handler: (id: number) => void): Promise<Unlisten>;
+  /**
+   * A button of an OS notification that only a window can run (`openSettings`, an app action): the engine sends the
+   * message's action here and this window runs it as if the button in the centre was clicked.
+   */
+  abstract onAction(handler: (e: NoticeActionEvent) => void): Promise<Unlisten>;
 }
 
 /** A payload that is not the contract is an engine bug: the answer is refused with a message, never half-used. */
@@ -129,6 +136,12 @@ export class TauriNotificationsBackend extends NotificationsBackend {
       if (typeof p === 'number' && Number.isInteger(p)) handler(p);
     });
   }
+  onAction(handler: (e: NoticeActionEvent) => void): Promise<Unlisten> {
+    return this.ipc.listen(NOTIFICATIONS_ACTION_EVENT, (p) => {
+      const e = parseNoticeActionEvent(p);
+      if (e) handler(e);
+    });
+  }
 }
 
 /** What a memory centre post carries (the engine's `NewNotice`). */
@@ -156,6 +169,7 @@ export class MemoryNotificationCentre extends NotificationsBackend {
   private revision = 0;
   private readonly listeners = new Set<(e: NoticesEvent) => void>();
   private readonly openers = new Set<(id: number) => void>();
+  private readonly actioners = new Set<(e: NoticeActionEvent) => void>();
 
   constructor(private readonly now: () => number = () => Date.now()) {
     super();
@@ -194,6 +208,11 @@ export class MemoryNotificationCentre extends NotificationsBackend {
     for (const o of [...this.openers]) o(id);
   }
 
+  /** Plays a button of an OS notification that this window runs. */
+  runAction(e: NoticeActionEvent): void {
+    for (const a of [...this.actioners]) a(e);
+  }
+
   list(): Promise<NoticesSnapshot> {
     return Promise.resolve(this.current());
   }
@@ -216,6 +235,10 @@ export class MemoryNotificationCentre extends NotificationsBackend {
   onOpen(handler: (id: number) => void): Promise<Unlisten> {
     this.openers.add(handler);
     return Promise.resolve(() => void this.openers.delete(handler));
+  }
+  onAction(handler: (e: NoticeActionEvent) => void): Promise<Unlisten> {
+    this.actioners.add(handler);
+    return Promise.resolve(() => void this.actioners.delete(handler));
   }
 
   private change(id: number, f: (n: Notice) => Notice | null): boolean {

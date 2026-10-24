@@ -111,6 +111,13 @@ export const NotificationsStore = signalStore(
       patchState(store, (s) => ({ local: [notice, ...s.local.filter((l) => l.cause !== cause)], toasts: upsertLast(s.toasts, notice) }));
       return notice;
     };
+    const post = async (n: ShellNotice): Promise<void> => {
+      try {
+        await backend.postNotice({ severity: n.level, title: n.message, ...(n.kind ? { kind: n.kind } : {}) });
+      } catch {
+        postLocal(n);
+      }
+    };
     return {
       /** A change from the engine (an older one than the window has is ignored): the new list, and a toast for the message just posted (unless already read). */
       apply(e: NoticesEvent): void {
@@ -138,13 +145,7 @@ export const NotificationsStore = signalStore(
        * 34; its event brings the toast here too). When the engine cannot take it (no centre, a notice out of its bounds),
        * this window keeps it itself ([`postLocal`]).
        */
-      async post(n: ShellNotice): Promise<void> {
-        try {
-          await backend.postNotice({ severity: n.level, title: n.message, ...(n.kind ? { kind: n.kind } : {}) });
-        } catch {
-          postLocal(n);
-        }
-      },
+      post,
 
       postLocal,
 

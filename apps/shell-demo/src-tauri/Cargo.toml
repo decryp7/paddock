@@ -28,13 +28,14 @@ tauri-build = { version = "2.7", features = [] }
 # The shell crates from this repository (path dependencies). An app outside the repository names them from the
 # `decryp7` registry instead (crates/README.md, "Consuming the crates"); scripts/new-app.mjs rewrites these lines.
 [dependencies]
-paddock-shell = { path = "../../../crates/paddock-shell", features = ["tray", "native-dialogs"] }
+paddock-shell = { path = "../../../crates/paddock-shell", features = ["tray", "native-dialogs", "os-notify"] }
 paddock-commands = { path = "../../../crates/paddock-commands", features = ["tauri"] }
 paddock-dialogs = { path = "../../../crates/paddock-dialogs", features = ["tauri"] }
 paddock-diag = { path = "../../../crates/paddock-diag", features = ["tauri"] }
 paddock-env = { path = "../../../crates/paddock-env" }
 paddock-log = { path = "../../../crates/paddock-log" }
-paddock-health = { path = "../../../crates/paddock-health", features = ["tauri"] }
+paddock-health = { path = "../../../crates/paddock-health", features = ["tauri", "os-notify"] }
+tauri-plugin-notification = "2.7"
 paddock-jobs = { path = "../../../crates/paddock-jobs", features = ["tauri"] }
 paddock-settings = { path = "../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../crates/paddock-startup", features = ["tauri"] }
