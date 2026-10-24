@@ -8,7 +8,8 @@
     "src/app/generated/app-commands.ts",
     "../paddock-ui/shell/generated/shell-commands.ts",
     "../paddock-ui/shell/service/generated/service-commands.ts",
-    "../paddock-ui/shell/channels/generated/channels-commands.ts"
+    "../paddock-ui/shell/channels/generated/channels-commands.ts",
+    "../paddock-ui/shell/packs/generated/packs-commands.ts"
   ],
   "base": [
     "window_pong",
@@ -33,6 +34,8 @@
         "service_repair",
         "service_install",
         "open_login_items",
+        "packs_status",
+        "packs_reload",
         "channels_get",
         "channels_save",
         "channels_clear_secret",

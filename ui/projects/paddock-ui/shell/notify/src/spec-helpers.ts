@@ -1,28 +1,14 @@
 // Test helpers of the notify specs (not exported from the entry point).
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { FakeClock } from '@decryp7/paddock-ui/shell/testing';
 import { MemoryNotificationCentre, MemoryServiceHealth, type MemoryRepairOutcome, type NotificationsBackend, type ServiceHealthBackend } from './backends';
-import { NOTIFY_CLOCK, type NotifyClock } from './notify-config';
+import { NOTIFY_CLOCK } from './notify-config';
 import { provideShellNotify } from './provide-notify';
 import type { Cause } from './wire.types';
 
-/** A clock moved by hand; `advance` fires every tick (once per call). */
-export class FakeClock implements NotifyClock {
-  time = 1_000_000;
-  readonly timers = new Set<{ ms: number; tick: () => void }>();
-  now(): number {
-    return this.time;
-  }
-  every(ms: number, tick: () => void): () => void {
-    const t = { ms, tick };
-    this.timers.add(t);
-    return () => void this.timers.delete(t);
-  }
-  advance(ms: number): void {
-    this.time += ms;
-    for (const t of [...this.timers]) t.tick();
-  }
-}
+/** The shell's fake clock (`@decryp7/paddock-ui/shell/testing`): the same semantics as `paddock_jobs::time::FakeClock`. */
+export { FakeClock };
 
 /** Lets promises and effects settle (zoneless). */
 export async function settle(): Promise<void> {

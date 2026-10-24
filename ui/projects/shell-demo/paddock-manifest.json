@@ -255,7 +255,8 @@
     "sd.keys",
     "sd.lab",
     "sd.pitwall",
-    "sd.runners"
+    "sd.runners",
+    "sd.schedule"
   ],
   "statusItems": [
     "sd.runners"
@@ -267,6 +268,7 @@
     "pd.logging",
     "pd.login",
     "pd.notifications",
+    "pd.packs",
     "sd.general",
     "sd.storage"
   ],
@@ -329,6 +331,8 @@
         "channels_test",
         "dialog_open",
         "open_login_items",
+        "packs_reload",
+        "packs_status",
         "service_install",
         "service_repair",
         "service_status",
@@ -441,6 +445,7 @@
     "pd.settings.logging": "Logging",
     "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",
+    "pd.settings.packs": "Knowledge packs",
     "pd.settings.service": "Background service",
     "pd.settings.title": "Settings",
     "pd.updates.notification.available": "Update available",
@@ -478,6 +483,7 @@
     "sd.page.lab": "Lab",
     "sd.page.pitwall": "Local AI",
     "sd.page.runners": "Runners",
+    "sd.page.schedule": "Schedules",
     "sd.pseudo-locale": "Pseudo-locale",
     "sd.reset": "Reset greetings",
     "sd.settings.general": "General",

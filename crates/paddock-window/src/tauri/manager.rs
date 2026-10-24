@@ -92,6 +92,30 @@ pub struct WindowConfig {
     pub exit_stall_limit: Duration,
     /// How long one teardown step may hold the exit up.
     pub step_limit: Duration,
+    /// The clock both limits run on (a `FakeClock` in tests).
+    pub clock: ExitClock,
+}
+
+/// The clock of the exit limits in a [`WindowConfig`]; equal when it is the same clock.
+#[derive(Clone)]
+pub struct ExitClock(pub Arc<dyn paddock_jobs::time::Clock>);
+
+impl Default for ExitClock {
+    fn default() -> Self {
+        ExitClock(Arc::new(paddock_jobs::time::SystemClock))
+    }
+}
+
+impl std::fmt::Debug for ExitClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ExitClock(..)")
+    }
+}
+
+impl PartialEq for ExitClock {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 impl WindowConfig {
@@ -108,6 +132,7 @@ impl WindowConfig {
             schemes: Vec::new(),
             exit_stall_limit: EXIT_STALL_LIMIT,
             step_limit: TEARDOWN_STEP_LIMIT,
+            clock: ExitClock::default(),
         }
     }
 
@@ -150,6 +175,12 @@ impl WindowConfig {
 
     pub fn step_limit(mut self, limit: Duration) -> Self {
         self.step_limit = limit;
+        self
+    }
+
+    /// The clock of the exit limits.
+    pub fn clock(mut self, clock: Arc<dyn paddock_jobs::time::Clock>) -> Self {
+        self.clock = ExitClock(clock);
         self
     }
 }

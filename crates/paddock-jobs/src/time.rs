@@ -13,8 +13,8 @@ use std::fmt;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// How often a wait looks at its cancel token (a cancel is not an event a wait can block on).
-const CANCEL_POLL: Duration = Duration::from_millis(10);
+/// The longest single OS wait (a wait for longer loops); keeps `Condvar::wait_timeout` away from overflowing durations.
+const MAX_OS_WAIT: Duration = Duration::from_secs(24 * 3600);
 
 /// The time source of everything that waits, times out, throttles or stamps a time.
 ///
@@ -69,17 +69,32 @@ impl Clock for SystemClock {
     }
 
     fn wait(&self, d: Duration, cancel: &CancelToken) -> Result<(), Cancelled> {
+        // A cancel wakes the wait at once (no polling); the token's own deadline bounds it.
+        let signal = Arc::new((Mutex::new(false), Condvar::new()));
+        let s = signal.clone();
+        let _registered = cancel.on_cancel(move || {
+            *s.0.lock().unwrap_or_else(|p| p.into_inner()) = true;
+            s.1.notify_all();
+        });
         let end = Instant::now().checked_add(d);
         loop {
             cancel.check()?;
-            let left = match end {
-                Some(end) => end.saturating_duration_since(Instant::now()),
-                None => CANCEL_POLL,
-            };
+            let mut left = end.map_or(MAX_OS_WAIT, |e| e.saturating_duration_since(Instant::now()));
             if left.is_zero() {
                 return Ok(());
             }
-            std::thread::sleep(left.min(CANCEL_POLL));
+            if let Some(r) = cancel.deadline_remaining() {
+                left = left.min(r.max(Duration::from_millis(1)));
+            }
+            let woken = signal.0.lock().unwrap_or_else(|p| p.into_inner());
+            if !*woken {
+                drop(
+                    signal
+                        .1
+                        .wait_timeout(woken, left.min(MAX_OS_WAIT))
+                        .unwrap_or_else(|p| p.into_inner()),
+                );
+            }
         }
     }
 }
@@ -89,6 +104,10 @@ struct FakeState {
     monotonic: Duration,
     wall: SystemTime,
     waiting: usize,
+    /// Waits started since the clock was made: a test's step boundary ("the second wait has begun").
+    started: u64,
+    /// Bumped on every move and every cancel of a token a wait is on, so no wake-up is lost.
+    generation: u64,
 }
 
 #[derive(Debug)]
@@ -125,6 +144,8 @@ impl FakeClock {
                 monotonic: Duration::ZERO,
                 wall,
                 waiting: 0,
+                started: 0,
+                generation: 0,
             }),
             moved: Condvar::new(),
         }))
@@ -144,6 +165,7 @@ impl FakeClock {
         let mut s = self.state();
         s.monotonic = s.monotonic.saturating_add(d);
         s.wall = s.wall.checked_add(d).unwrap_or(s.wall);
+        s.generation += 1;
         self.0.moved.notify_all();
     }
 
@@ -154,13 +176,33 @@ impl FakeClock {
 
     /// Sets the wall reading (a user changing the system time); the monotonic reading does not move.
     pub fn set_wall(&self, wall: SystemTime) {
-        self.state().wall = wall;
+        let mut s = self.state();
+        s.wall = wall;
+        s.generation += 1;
         self.0.moved.notify_all();
     }
 
     /// How many threads are blocked in [`Clock::wait`] on this clock now.
     pub fn waiters(&self) -> usize {
         self.state().waiting
+    }
+
+    /// How many waits have started on this clock so far (finished ones included).
+    pub fn waits_started(&self) -> u64 {
+        self.state().started
+    }
+
+    /// Blocks until at least `n` waits have started on this clock in total, so a test advances exactly when the work
+    /// has begun its `n`th wait (an earlier wait that has not left yet does not count twice). Returns false if that did
+    /// not happen within `guard` of real time (a hang guard).
+    pub fn wait_for_started(&self, n: u64, guard: Duration) -> bool {
+        let s = self.state();
+        let (s, _) = self
+            .0
+            .moved
+            .wait_timeout_while(s, guard, |s| s.started < n)
+            .unwrap_or_else(|p| p.into_inner());
+        s.started >= n
     }
 
     /// Blocks until at least `n` threads wait on this clock, so a test advances only once the work is blocked on it.
@@ -197,10 +239,18 @@ impl Clock for FakeClock {
         let end = {
             let mut s = self.state();
             s.waiting += 1;
+            s.started += 1;
             self.0.moved.notify_all();
             s.monotonic.saturating_add(d)
         };
+        let me = self.clone();
+        let registered = cancel.on_cancel(move || {
+            let mut s = me.state();
+            s.generation += 1;
+            me.0.moved.notify_all();
+        });
         let outcome = loop {
+            let generation = self.state().generation;
             // The token is read without the clock's lock: a deadline token on this clock reads the clock.
             if let Err(c) = cancel.check() {
                 break Err(c);
@@ -209,13 +259,11 @@ impl Clock for FakeClock {
             if s.monotonic >= end {
                 break Ok(());
             }
-            drop(
-                self.0
-                    .moved
-                    .wait_timeout(s, CANCEL_POLL)
-                    .unwrap_or_else(|p| p.into_inner()),
-            );
+            if s.generation == generation {
+                drop(self.0.moved.wait(s).unwrap_or_else(|p| p.into_inner()));
+            }
         };
+        drop(registered);
         let mut s = self.state();
         s.waiting -= 1;
         self.0.moved.notify_all();
