@@ -67,14 +67,11 @@ pub fn strip_extension(name: &str) -> &str {
 
 fn is_version_part(p: &str) -> bool {
     let l = p.to_ascii_lowercase();
-    if l.is_empty() {
-        return false;
-    }
-    if l.chars().all(|c| c.is_ascii_digit()) || ARCH.contains(&l.as_str()) {
-        return true;
-    }
-    l.strip_prefix('v')
-        .is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_digit()))
+    !l.is_empty()
+        && (l.chars().all(|c| c.is_ascii_digit())
+            || ARCH.contains(&l.as_str())
+            || l.strip_prefix('v')
+                .is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_digit())))
 }
 
 fn parts_of(stem: &str) -> Vec<&str> {
@@ -143,7 +140,6 @@ pub fn normalise_as(
     }
     let stem = strip_extension(file_name(name));
     let mut parts = parts_of(stem);
-    let all_parts = parts.clone();
     while parts.len() > 1 && parts.last().is_some_and(|p| is_version_part(p)) {
         parts.pop();
     }
@@ -157,11 +153,6 @@ pub fn normalise_as(
     while tokens.len() > 1 && tokens.last().is_some_and(|t| is_version_part(t)) {
         tokens.pop();
     }
-    if tokens.is_empty() {
-        for p in &all_parts {
-            tokens.extend(pieces(p, vocab));
-        }
-    }
     let display = tokens
         .iter()
         .map(|t| title(t))
@@ -172,10 +163,9 @@ pub fn normalise_as(
 
 fn title(w: &str) -> String {
     let mut c = w.chars();
-    match c.next() {
-        Some(f) => f.to_uppercase().chain(c).collect(),
-        None => String::new(),
-    }
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

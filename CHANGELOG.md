@@ -14,6 +14,11 @@ Conventional Commits; one semver tag for the whole repo.
   (`PdLanguagePage`, `defineLanguageSettingsPage`): System default, English, each translation by its own name, the pseudo-locale
   where the app ships it, a restart offer. `paddock-conformance` C32 runs `build --check --no-extract` over the app's
   `paddock-i18n.json`.
+- `paddock-names` search index and `names_search` (plan X18 follow-up): the catalogue keeps hash maps for the exact, joined and alias
+  rungs and an inverted index of words (prefix by range, inside-a-word by scan, typos by letter-bag and edit distance), so a
+  search over 250,000 names takes about 20 ms (was 500 ms; `cargo bench -p paddock-names` fails over 50 ms). `search_scan` ranks every
+  entry and a property test checks that both give the same answer. `NamesService` + `NamesSearchRequest`/`NamesSearchReply`
+  are the engine side of the palette's `names_search` command (arguments validated in Rust, catalogue swapped whole).
 - Conformance check C24 (rule 22): every image under `docs/screenshots` matches its `hashes.json` entry and has a `REVIEWED.md` row
   (image, SHA-256, reviewer, date) with the current hash; `docs/images` needs the row. A regenerated image that changed fails until
   it is reviewed again.
