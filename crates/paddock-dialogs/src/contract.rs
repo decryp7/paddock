@@ -614,6 +614,7 @@ mod tests {
             c.ids().collect::<Vec<_>>(),
             [
                 "pd.about",
+                "pd.channels.remove",
                 "pd.channels.secret",
                 "pd.report-problem",
                 "pd.settings",

@@ -315,3 +315,110 @@ describe('watchResize', () => {
     expect(onResize).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('DockLayout: sizes of cells and rows, edge cases', () => {
+  it('sets the planned width of side-by-side groups and the planned height of a row, and leaves groups already at size alone', () => {
+    const layout = setup();
+    const { api, groups } = fakeDock(1900, 1000, { timeline: { width: 100, height: 100 }, events: { width: 100, height: 100 }, problems: { width: 1900, height: 10 } });
+    layout.fit(api, { sizes: true });
+    expect(groups[0]!.api.setSize).toHaveBeenCalledWith({ width: expect.any(Number) });
+    // events is the anchor of its row: it takes what the others leave.
+    expect(groups[1]!.api.setSize).not.toHaveBeenCalled();
+    expect(groups[2]!.api.setSize).toHaveBeenCalledWith({ height: expect.any(Number) });
+    const settled = groups.map((g) => g.api.setSize.mock.calls.length);
+    for (const g of groups) {
+      const planned = g.api.setSize.mock.calls.at(-1)?.[0] as { width?: number; height?: number } | undefined;
+      if (!planned) continue;
+      if (planned.width !== undefined) g.width = planned.width;
+      if (planned.height !== undefined) g.height = planned.height;
+    }
+    layout.fit(api, { sizes: true });
+    expect(groups.map((g) => g.api.setSize.mock.calls.length)).toEqual(settled);
+  });
+
+  it('ignores a planned view whose group is not in the grid (floating) when applying sizes', () => {
+    const layout = setup();
+    const { api, groups } = fakeDock(1500, 900, { timeline: { width: 100, height: 900 }, 'ai-chat': { width: 372, height: 900 } });
+    for (const g of groups) g.api.location.type = 'floating';
+    layout.fit(api, { sizes: true });
+    for (const g of groups) expect(g.api.setSize).not.toHaveBeenCalled();
+  });
+
+  it('skips a planned view whose panel is gone by the time sizes are applied', () => {
+    const layout = setup();
+    const { api, groups } = fakeDock(1500, 900, { 'timeline+events': { width: 100, height: 900 }, 'ai-chat': { width: 100, height: 900 } });
+    const plan = layout.plan(api)!;
+    vi.spyOn(layout, 'plan').mockReturnValue(plan);
+    (api as { getPanel: unknown }).getPanel = () => undefined;
+    layout.fit(api, { sizes: true });
+    for (const g of groups) expect(g.api.setSize).not.toHaveBeenCalled();
+  });
+
+  it('moveBack re-adds a view whose slot has no neighbour, or whose neighbour sits in the same group', () => {
+    const layout = setup();
+    const { api } = fakeDock(1500, 900, { 'timeline+events+home': { width: 1100, height: 900 } });
+    expect(layout.moveBack(api, { id: 'home', slot: { referencePanel: null, direction: 'within' }, into: 'events' })).toBe('readd');
+    expect(layout.moveBack(api, { id: 'home', slot: { referencePanel: 'timeline', direction: 'left' }, into: 'events' })).toBe('readd');
+  });
+});
+
+describe('DockLayout.whenSized', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function observed() {
+    let fire: () => void = () => undefined;
+    const disconnect = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          fire = cb;
+        }
+        observe(): void {}
+        disconnect = disconnect;
+      },
+    );
+    const layout = setup();
+    const ctx = TestBed.inject(DockContext);
+    ctx.container = document.createElement('div');
+    return { layout, ctx, fire: () => fire(), disconnect };
+  }
+
+  it('applies at once when the dock is measured, or when there is no container to wait on', () => {
+    const { layout, ctx } = observed();
+    const apply = vi.fn();
+    layout.whenSized({ width: 10, height: 10 } as unknown as DockviewApi, apply);
+    expect(apply).toHaveBeenCalledTimes(1);
+    ctx.container = null;
+    layout.whenSized({ width: 0, height: 0 } as unknown as DockviewApi, apply);
+    expect(apply).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for the first measured size, then applies once', () => {
+    const { layout, ctx, fire, disconnect } = observed();
+    const api = { width: 0, height: 0 } as { width: number; height: number };
+    ctx.api = api as unknown as DockviewApi;
+    const apply = vi.fn();
+    layout.whenSized(api as unknown as DockviewApi, apply);
+    fire();
+    expect(apply).not.toHaveBeenCalled();
+    api.width = 800;
+    api.height = 600;
+    fire();
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(disconnect).toHaveBeenCalled();
+  });
+
+  it('drops the work when the dock was replaced while it waited', () => {
+    const { layout, ctx, fire } = observed();
+    const api = { width: 0, height: 0 } as { width: number; height: number };
+    ctx.api = api as unknown as DockviewApi;
+    const apply = vi.fn();
+    layout.whenSized(api as unknown as DockviewApi, apply);
+    ctx.api = null;
+    api.width = 800;
+    api.height = 600;
+    fire();
+    expect(apply).not.toHaveBeenCalled();
+  });
+});

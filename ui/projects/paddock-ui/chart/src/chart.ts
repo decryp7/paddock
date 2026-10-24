@@ -15,7 +15,7 @@ import {
 } from '@angular/core';
 import { readPaddockTokens, registerPaddockTheme, type PaddockChartTokens } from '@decryp7/paddock-ui';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
-import { chartOption, chartSummary, type PdChartSpec } from './options';
+import { chartOption, chartSummary, donutNarrowHeight, type PdChartSpec } from './options';
 
 /** The part of an ECharts instance `pd-chart` calls (`FakeChart` of the test kit has the same shape). */
 export interface PdChartInstance {
@@ -75,7 +75,7 @@ let nextId = 0;
   selector: 'pd-chart',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph],
-  host: { '[style.height.px]': 'height()' },
+  host: { '[style.height.px]': 'hostHeight()' },
   template: `
     @if (showTitle()) {
       <h3 class="pd-title" data-testid="chart-title">{{ title() }}</h3>
@@ -106,7 +106,8 @@ let nextId = 0;
     .pd-ghost span { height: 1px; background: var(--pd-hairline); animation: pd-pulse 1.4s ease-in-out infinite; }
     @keyframes pd-pulse { 50% { opacity: 0.4; } }
     :root[data-motion='reduce'] .pd-ghost span { animation: none; }
-    .pd-error { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--pd-space-2); padding: var(--pd-space-3); color: var(--pd-text-muted); font-size: var(--pd-text-body); }
+    .pd-error { flex: 1; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--pd-space-2); padding: var(--pd-space-3); color: var(--pd-text-muted); font-size: var(--pd-text-body); text-align: center; }
+    .pd-error span { flex: 0 1 auto; max-width: 24rem; }
     .pd-error pd-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
     .pd-retry { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
     .pd-retry:hover { background: var(--pd-hover); }
@@ -156,8 +157,19 @@ export class PdChart {
   protected readonly retryText = $localize`:@@pd.chart.retry:Retry`;
   /** The visible title: the label, then the unit ("Requests per hour, req"). */
   protected readonly title = computed(() => {
-    const unit = this.spec()?.unit;
-    return unit ? `${this.label()}, ${unit}` : this.label();
+    const [label, unit] = [this.label(), this.spec()?.unit];
+    return unit && !label.includes(`(${unit})`) ? `${label} (${unit})` : label;
+  });
+  /** The box is narrower than 400 px: a donut puts its list under the ring. */
+  private readonly narrow = signal(false);
+  private readonly boxWidth = signal(320);
+  private static readonly TITLE_PX = 30;
+  /** The host's height: the asked one, or more for a narrow donut (ring on top, list under it, all inside the card). */
+  protected readonly hostHeight = computed(() => {
+    const spec = this.spec();
+    const titleRoom = this.showTitle() ? PdChart.TITLE_PX : 0;
+    const needed = spec?.kind === 'donut' && !this.option() && this.narrow() ? titleRoom + donutNarrowHeight(Math.min(spec.x.length, 5)) : 0;
+    return Math.max(this.height(), needed);
   });
   protected readonly description = computed(() => {
     const spec = this.spec();
@@ -168,7 +180,7 @@ export class PdChart {
     if (raw) return raw;
     const [spec, tokens] = [this.spec(), this.tokens()];
     this.appearance();
-    return spec && tokens ? chartOption(spec, tokens, { animate: !reducedMotion() }) : null;
+    return spec && tokens ? chartOption(spec, tokens, { animate: !reducedMotion(), narrow: this.narrow(), width: this.boxWidth(), height: this.hostHeight() - (this.showTitle() ? PdChart.TITLE_PX : 0) }) : null;
   });
 
   constructor() {
@@ -208,14 +220,26 @@ export class PdChart {
     const instance = lib.init(this.surface().nativeElement, theme);
     instance.on('click', (e) => this.chartClick.emit(e));
     this.instance = instance;
+    const width = Math.round(this.host.getBoundingClientRect().width);
+    if (width > 0) this.measured(width);
     this.tokens.set(tokens);
     this.generation.update((n) => n + 1);
+  }
+
+  /** Remembers the box's width; the narrow layout starts under 400 px. */
+  private measured(width: number): void {
+    this.boxWidth.set(width);
+    this.narrow.set(width < 400);
   }
 
   /** Follows the box (resize) and the appearance (colours). */
   private observe(): void {
     if (typeof ResizeObserver !== 'undefined') {
-      const resize = new ResizeObserver(() => this.instance?.resize());
+      const resize = new ResizeObserver((entries) => {
+        const width = Math.round(entries[0]?.contentRect.width ?? 0);
+        if (width > 0) this.measured(width);
+        this.instance?.resize();
+      });
       resize.observe(this.host);
       this.destroyRef.onDestroy(() => resize.disconnect());
     }

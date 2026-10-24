@@ -11,7 +11,7 @@ test.describe('settings (plan S10)', () => {
     await page.getByRole('button', { name: 'Settings…', exact: true }).click();
     const win = app.settings.window;
     await expect(win).toHaveAttribute('aria-modal', 'false');
-    await expect(app.settings.nav.getByRole('button')).toHaveText(['Appearance', 'Language', 'Background service', 'Notification channels', 'AI access (MCP)', 'General', 'Storage', 'Knowledge packs', 'Notifications', 'Logging']);
+    await expect(app.settings.nav.getByRole('button')).toHaveText(['Appearance', 'Language', 'Background service', 'Notification channels', 'AI access (MCP)', 'Set-up', 'General', 'Storage', 'Knowledge packs', 'Notifications', 'Logging']);
     // The Appearance section is the shell's; its change applies to the main window at once.
     await app.settings.choose('theme', 'Dark', win);
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
@@ -104,6 +104,8 @@ test.describe('settings (plan S10)', () => {
     await expect(app.settings.nav.getByRole('button', { name: 'Notification channels' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(app.settings.nav.getByRole('button', { name: 'AI access (MCP)' })).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(app.settings.nav.getByRole('button', { name: 'Set-up' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(app.settings.nav.getByRole('button', { name: 'General' })).toBeFocused();
     await page.keyboard.press('End');

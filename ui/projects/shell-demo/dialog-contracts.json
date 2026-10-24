@@ -88,7 +88,25 @@
         "service_status",
         "settings_overview",
         "settings_reset",
-        "settings_set"
+        "settings_set",
+        "setup_act",
+        "setup_finish",
+        "setup_repair",
+        "setup_skip",
+        "setup_state"
+      ]
+    },
+    "pd.setup": {
+      "kind": "tool",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "setup_act",
+        "setup_finish",
+        "setup_repair",
+        "setup_skip",
+        "setup_state"
       ]
     },
     "pd.updates": {

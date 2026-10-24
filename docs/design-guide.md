@@ -172,13 +172,18 @@ Order matters: adjacent series differ in hue AND lightness. Assign by series ide
 | 3 | bluish green | #3DD39D | #087D51 |
 | 4 | reddish purple | #D68CC2 | #B04C95 |
 | 5 | vermilion | #F07D3A | #BE3108 |
-| 6 | periwinkle | #8FA3FF | #494FDB |
+| 6 | periwinkle | #7A70FF | #494FDB |
 | 7 | yellow | #E8DC5A | #816A1D |
 | 8 | grey | #A2ACB1 | #6F737D |
 Sequential ramp (one hue, 6 steps, for heatmaps): from surface-2 to accent-500 in OKLCH lightness steps (dark: light
 increases; light: dark increases). Diverging: series 1 - neutral - series 2 (never red/green). Event/level colours in
 Debrief (fatal/error/warn/info/debug) use the status set + shape, not this palette. Validate with the dataviz skill's
 palette validator and a Machado CVD simulation before freezing; adjacent pairs delta-E >= 20 under deuteranopia/protanopia.
+Scope of the rule (no 8-colour categorical palette passes all 28 pairs, so the rule says where it must hold): delta-E >= 20
+under protanopia, deuteranopia and tritanopia for every **order-adjacent** pair and every **ring-adjacent** pair (a donut closes on
+itself: `ringOrder` picks the slot order), and slot 6 is >= 20 from every other slot under protanopia and deuteranopia (slots 1/4 and 2/5 stay weak in any 8-colour palette). A chart with **5 or
+more** coloured series must also be keyed without colour (direct labels, or hover isolation with the name in the tooltip), and
+series beyond 6 fold into one neutral "Other". `ui/test/tokens/tokens.spec.ts` and `ring.spec.ts` enforce it.
 
 ## 5. Elevation and materials (per OS)
 
@@ -244,7 +249,7 @@ palette validator and a Machado CVD simulation before freezing; adjacent pairs d
 - **Tables**: row 32 (Standard), header 28 sticky, 11/12 px uppercase-free muted labels sentence case, numbers
   right-aligned tabular with units in header, first column strong, hover surface-2, selected = accent 12% tint plus
   2 px left bar, truncation with tooltip, row actions appear on hover/focus but remain keyboard reachable (the "..."
-  button stays visible at 40% opacity). Sort affordance visible. Never clip the last column: use sticky action column.
+  button stays visible in `--pd-row-action-rest`, subtle text at 75% (65% measured 2.75:1 in light), 3:1 or better; 100% text colour on hover, focus and open). Sort affordance visible. Never clip the last column: use sticky action column.
 - **Toolbars**: 44 px, ghost buttons by default (no border until hover), one primary (filled accent) at the far right,
   groups separated by a 1 px divider, segmented controls for 2-4 mutually exclusive options (time range).
 - **Buttons**: primary (accent fill), secondary (surface-2 + border-strong), ghost, danger (danger fill only in

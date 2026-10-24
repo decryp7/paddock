@@ -4,7 +4,22 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Fixed
+- UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
+  injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell
+  demo's menu bar test expects Edit (undo, X44); the channels retry test steps the demo engine by hand (`?channels-step=manual`)
+  instead of racing its 400 ms timer; the dock's "attach before dockview has loaded" spec forgets the module itself instead of
+  relying on a fresh worker.
+
 ### Changed
+- X21 review 2 (`ui/docs/review/x21-data/REVIEW.md`): `pd-middle-text` measures the room it is given (`flex: 1 1 0`), so paths are cut
+  only as far as needed and grow back when the table widens; the donut lays out by the card's own width (list under the ring below
+  400 px, the card grows to hold it), the total in its middle is drawn at the ring's centre (a tree-shaken loader needs
+  ECharts' `GraphicComponent`), shares add up to 100, a two-way sort hint, no count while loading or empty and a stable action
+  track, locale-formatted counts, titles as "Label (unit)", short fields narrow the control only, disabled fields read as
+  read-only. Design guide: dark palette slot 6 is #7A70FF (slot 6 is at least 20 from every other slot under protan and deutan),
+  the scope of the CVD rule is written down, and the row "..." button rests in `--pd-row-action-rest` (subtle text at 75%, 3:1) instead of 40% opacity.
+
 - X21 data parts after the independent review (`ui/docs/review/x21-data/REVIEW.md`): `pd-table` keeps its primary column at 128 px
   or more (optional columns drop out from the right as the table narrows; the action column is sized to what the rows can show;
   compact toolbar), rows are 32 px by default (24/32/36 by density) under a 28 px header, a quiet sort chevron shows on hover and
@@ -26,6 +41,36 @@ Conventional Commits; one semver tag for the whole repo.
   in a versioned file, the client keys persisted through `paddock-secrets`, the audit log announced to every window;
   `paddock_shell::Builder::mcp`. The UI side is `@decryp7/paddock-ui/shell/mcp` (Settings > AI access (MCP), the key and revoke dialogs,
   the audit viewer).
+- Set-up checklist, no app wiring (plan X19 follow-up). `paddock_health::notify::os::Toaster` gains `request_permission` and
+  `open_system_settings`; `PluginToaster` implements them (the plugin's `request_permission`; macOS `open
+  x-apple.systempreferences:com.apple.Notifications-Settings.extension`, Windows `ms-settings:notifications`, GNOME
+  `gnome-control-center notifications`, otherwise the words say where to look), so `ToasterAccess` needs no closures. `LinkPort::new(link,
+  app_id)` starts Pitwall through `paddock-siblings` (`Handoff::Open`); not installed and too old come back as the step's words.
+- First-run set-up checklist (plan X19). `paddock_shell::setup` (`Builder::first_run`): the steps in order with their own checks
+  (`SetupItem`), the user's answers (skipped, shown) in `setup.json` through `paddock-env`, actions run on a worker with the
+  outcome on `paddock://setup`, and the commands `setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish`. The shell
+  brings four steps over small ports: the background service (`paddock-service`; Install, Repair, or Open Login Items where the
+  user's switch is off), Start at login (the `pd.login` setting), notification permission (`Toaster::permission` through
+  `ToasterAccess`, Repair opens the system settings) and Pitwall pairing (`paddock-pitwall`'s `Link` through `LinkPort`, with the
+  shared needs-AI view and the pairing code to compare); an app adds its own (Debrief's tour). Every step is skippable and a step
+  with a problem always has a Repair. `@decryp7/paddock-ui/shell/setup`: `SetupBackend` (Tauri and in-memory), `SetupStore`,
+  `defineSetup` (a modeless `tool` window `pd.setup` and the Settings > Set-up page), `SETUP_CONTRIBUTIONS` (Help > Set-up…) and
+  `provideShellSetup` (the main window opens the window once on a first run); the components are in `shell/setup/page`.
+- `paddock-siblings` (plan X45): hand-off between the apps, from Pitcrew's `debrief_link.rs` and `handoff.rs`. `AppSpec` / `FAMILY` hold
+  what each app accepts (the hand-off rows of `docs/ecosystem.md`); `Handoff` is `Open`, `Import { files }` (absolute existing files,
+  at most 32, the app's extensions) or `Show { item }` (plain words); `Siblings::open` refuses an unknown app, itself and anything
+  the app does not accept before looking for it, finds the program (`PATH`, then the install places per OS, the pre-rename name as
+  "needs update"), and starts it detached with the paths or one deep link of its scheme (`pitcrew://show/machine/mac-mini`);
+  "not installed" is a plain `Outcome`. The receiving side parses with `Handoff::from_paths` / `from_link`. `testing` has a file
+  system and a spawner that start nothing.
+- Paddock Workbench Demo (plan X50 W8): `apps/workbench-demo`, the workbench demo as an installable app on the `paddock-shell` and `paddock-workbench` plugins (layouts in the config folder, pop-out panels with the drag ghost, the assistant on Pitwall with one read-only sample tool and a calm "Pitwall not running" state), its own icon, ad-hoc macOS sealing, a release workflow from `workbench-demo-v*` tags (`scripts/workbench-demo-release.mjs`, `scripts/workbench-demo/`), a CI job, and the starter section in its README. `ui/projects/workbench-demo` picks the Tauri backends when `inTauri()` and boots main, pop-out and dialog windows; `workbenchInvoke` (`@decryp7/paddock-ui/workbench`) sends the plugin's commands to it.
+- `paddock-workbench` plugin (plan X50 W7): `paddock_workbench::Builder` (`layouts`, `panels`, `window_hooks`, `assistant`, each optional) builds the Tauri plugin `paddock-workbench`: the layout, panel and assistant commands in one composed table behind one guard, generated permission sets `default`/`popout`/`dialog` per window class, and generated `WORKBENCH_COMMANDS`/`WORKBENCH_PLUGIN` in `workbench/generated`.
+- Every Paddock crate that parses untrusted input has a never-panics test (`paddock_testkit::assert_never_panics`, new: the one-line
+  form of `corpus` + `never_panics`), so C36 reports nothing and is strict in Paddock's own CI (`paddock-conformance --strict C36`: the
+  warnings of the named checks fail the run). C36 now assigns a file to the nearest crate above it.
+- The `sidecar-self-test` composite action (rule 23 on Linux and Windows bundles) and its use in the shell demo's release workflow. The
+  demo agent's `--self-test` is `paddock_proc::self_test` now (a failing check exits 1; before it always exited 0). `paddock-proc` was
+  already in the agent through `paddock-service`, so no dependency was added.
 - `paddock-files` and `@decryp7/paddock-ui/shell/files` (plan X31): the user's files. `PathGrants` (open only paths the user chose,
   by dialog, drop or command line; per window, bounded, expiring, canonical), the validators (`parse`, `canonical`, `output_file`,
   `child`, `confined`), validated pickers behind `Picker` (`NativePicker` over `tauri-plugin-dialog`), `Recents` (named lists in a
@@ -482,6 +527,11 @@ Conventional Commits; one semver tag for the whole repo.
   ...'s launch agent". `SMAppService.status` is NotFound until the app registers once; that now reads as "not installed" and
   Install registers (a real failure comes from `register`, with macOS's reason in the message). `parse_job` reads only the job's
   own level of `launchctl print`, so macOS 26's coalition blocks (`state = active`) no longer make a running agent "refused".
+- The Linux guest of `tools/macos-vm-smoke.sh` runs for real: lingering gives `tart exec` a `systemd --user` session, the
+  update smoke checks the app's own status, and `--then` runs the new desktop smoke (`scripts/shell-demo/smoke-desktop-linux.sh`:
+  Xvfb, stalonetray, dunst; the tray icon is embedded, a notification reaches the server when the agent stops, Quit in the tray
+  menu exits 0 with nothing left). `scripts/shell-demo/build-linux-arm64.sh` builds N and N+1 in one throw-away container; the
+  `service-smoke` workflow runs both guests. The shell demo's Cargo.lock lists `paddock-cli`.
 - The service smoke builds N+1 with the agent's version bumped too (it reported the old version for ever), installs to
   /Applications as a user does, and checks the app's own status is "running" after install and after the update.
 

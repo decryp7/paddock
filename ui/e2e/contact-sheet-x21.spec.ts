@@ -87,8 +87,11 @@ test.describe('contact sheet: data parts', () => {
     test(`table at 320 px ${theme}`, async ({ page }) => {
       await open(page, theme, 320);
       await shoot(page, theme, 'Table at 320 px: the name keeps its room, other columns drop out, compact toolbar, nothing scrolls sideways', 'table-320', page.locator('[data-testid="table-small"]'));
-      await page.locator('section[data-testid="chart"] canvas').first().waitFor();
-      await shoot(page, theme, 'Charts at 320 px (titles, unit, donut with labels)', 'charts-320', page.locator('section[data-testid="chart"]'));
+      // Every chart and state in one frame: a tall viewport, so nothing is scrolled or cut, and the canvases settled.
+      await page.setViewportSize({ width: 320, height: 2600 });
+      await page.getByRole('img', { name: 'Disk use by kind' }).locator('canvas').waitFor();
+      await page.waitForTimeout(900);
+      await shoot(page, theme, 'Charts at 320 px: titles, the donut with its list under the ring, loading and error', 'charts-320', page.locator('section[data-testid="chart"]'));
     });
 
     test(`chart ${theme}`, async ({ page }) => {
