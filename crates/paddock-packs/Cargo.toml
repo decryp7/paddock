@@ -1,0 +1,25 @@
+[package]
+name = "paddock-packs"
+version = "0.1.0"
+description = "Knowledge packs for the Paddock apps (rule 21): TOML packs, built-in plus the user's packs folder, parsed once with limits, typed with unknown keys reported, one bad pack refused whole without touching the rest, a debounced reload that builds the new set and swaps it, and user regexes compiled with caps."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+# The folder watcher over the `notify` crate (`paddock_packs::watch::NotifySource`), the real-folder adapter of the
+# `ChangeSource` port. Its calls live in `src/watch/native.rs` and are left out of the coverage job.
+watch = ["dep:notify"]
+
+[dependencies]
+paddock-env = { workspace = true }
+paddock-jobs = { workspace = true }
+regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
+serde = { version = "1", features = ["derive"] }
+serde_ignored = "0.1"
+toml = "0.9"
+notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
+
+[dev-dependencies]
+tempfile = "3"

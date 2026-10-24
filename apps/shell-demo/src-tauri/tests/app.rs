@@ -7,6 +7,7 @@
 use paddock_commands::testing::{WriteMode, sync_generated};
 use paddock_health::ServiceSpec;
 use paddock_shell::{AppIdentity, PLUGIN_NAME};
+use paddock_shell_demo::agent;
 use paddock_shell_demo::engine::{self, DemoJob, Engine};
 use paddock_shell_demo::{
     APP_ID, APP_NAME, COMMANDS, MANIFEST, Place, VERSION, invoke_handler, shell, shell_with_log,
@@ -202,11 +203,7 @@ fn the_contracts_and_manifest_agree_with_the_plugin_and_the_apps_table() {
     assert_eq!(builder.problems(Some(MANIFEST)), Vec::<String>::new());
     assert_eq!(
         builder.service_ids(),
-        [
-            engine::ENGINE,
-            engine::INDEX,
-            paddock_shell_demo::agent::HEALTH_ID
-        ]
+        [engine::ENGINE, engine::INDEX, agent::HEALTH_ID]
     );
     assert_eq!(
         builder.section_ids(),
@@ -627,8 +624,7 @@ fn the_tray_shows_what_needs_attention_and_repairs_it_through_the_shell() {
 /// `Contents/Library/LaunchAgents` and the NSIS hooks. A stale one fails; `PADDOCK_WRITE_TS=1` rewrites them.
 #[test]
 fn the_agents_bundled_plist_and_installer_hooks_are_generated_from_its_spec() {
-    use paddock_shell_demo::agent;
-    let plist = app_dir().join(format!("macos/{}.plist", agent::LABEL));
+    let plist = app_dir().join("macos/agent.plist");
     sync_generated(&plist, &agent::bundled_plist(), WriteMode::from_env()).unwrap();
     sync_generated(
         &app_dir().join("windows/installer-hooks.nsh"),
@@ -642,7 +638,7 @@ fn the_agents_bundled_plist_and_installer_hooks_are_generated_from_its_spec() {
     .unwrap();
     assert_eq!(
         mac["bundle"]["macOS"]["files"][format!("Library/LaunchAgents/{}.plist", agent::LABEL)],
-        format!("macos/{}.plist", agent::LABEL)
+        "macos/agent.plist"
     );
     let win: Value = serde_json::from_str(
         &std::fs::read_to_string(app_dir().join("tauri.windows.conf.json")).unwrap(),
@@ -665,7 +661,7 @@ fn the_agent_is_a_service_of_the_app_with_its_health_entry() {
     assert_eq!(status["condition"], "notInstalled", "{status}");
     let health = call(&main, true, "health_snapshot", json!({})).unwrap();
     assert_eq!(
-        service(&health, paddock_shell_demo::agent::HEALTH_ID)["repair"],
+        service(&health, agent::HEALTH_ID)["repair"],
         "install",
         "{health}"
     );
@@ -676,5 +672,29 @@ fn the_agent_is_a_service_of_the_app_with_its_health_entry() {
             .unwrap()
             .iter()
             .any(|s| s["id"] == "pd.login")
+    );
+}
+
+/// The agent is the app's: same version (each read from its own Cargo.toml) and bundled as `externalBin`.
+#[test]
+fn the_agent_carries_the_apps_version_and_is_bundled_next_to_it() {
+    assert_eq!(agent::VERSION, VERSION);
+    assert_eq!(
+        (agent::APP_ID, agent::APP_NAME),
+        (APP_ID, APP_NAME),
+        "the agent shares the app's folders"
+    );
+    let conf: Value =
+        serde_json::from_str(&std::fs::read_to_string(app_dir().join("tauri.conf.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        conf["bundle"]["externalBin"],
+        json!(["binaries/shell-demo-agent"])
+    );
+    assert!(
+        conf["build"]["beforeBuildCommand"]
+            .as_str()
+            .unwrap()
+            .contains("sidecar.mjs")
     );
 }

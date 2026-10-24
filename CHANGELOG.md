@@ -13,6 +13,51 @@ Conventional Commits; one semver tag for the whole repo.
   own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C31: an
   e2e spec runs axe, every dialog of the contract file is covered, warnings for a missing keyboard flow or accent test. The shell
   demo's `shell-demo-a11y.spec.ts` runs it all. `ShellDialogs.loaded()` now waits for the dialog shell itself (a window still on the splash passed it).
+- Conformance check C24 (rule 22): every image under `docs/screenshots` matches its `hashes.json` entry and has a `REVIEWED.md` row
+  (image, SHA-256, reviewer, date) with the current hash; `docs/images` needs the row. A regenerated image that changed fails until
+  it is reviewed again.
+- `@decryp7/paddock-e2e` `paddockConfig()` and `captureDocScreens()` (plan X39). The config preset: projects Chromium and WebKit
+  (plus `screenshots` only with `SCREENSHOTS=1`), the port from an environment variable (required on CI), Chrome for Testing
+  only through `CHROMIUM_TEST_PATH`, `retries: 0`, traces on failure, blob reports for shards. The runner takes the five apps'
+  screenshot tables: both themes at 1440 x 900 @2x, frozen clock, long pages framed, `docs/screenshots/<theme>/<name>.png` and a
+  `hashes.json` for the review gate (`clock: 'paused'` stops the fake clock at exactly the frozen time). Node tests for the pure parts and a Playwright self-test on `data:` pages.
+- `paddock-testkit` (plan X40): the Rust test kit. `Scratch` (work, home and tmp folders, a leftover check on drop), `env_lock()` and
+  `EnvLock::hermetic` (HOME, APPDATA, XDG_* and TMPDIR in the scratch folder, restored afterwards), golden files with
+  `PADDOCK_UPDATE_GOLDEN`, `FakeRunner` for OS-command seams, `corpus`/`never_panics`, and `FakeClock` re-exported from
+  `paddock_jobs::time`.
+- Conformance check C30 (warning level, rule 40): a `#[test]` fn that compares a duration measured with `elapsed()`,
+  `Instant::now() - x` or `duration_since` against a limit; a `thread::sleep` in a test that uses threads; and `Date.now()`/`performance.now()`
+  differences under `expect` in TypeScript specs. A hang guard of at least 10 s may carry `// conformance: hang-guard`.
+  First findings in Paddock: `paddock-diag` window.rs, `paddock-proc` login.rs and supervised.rs, `paddock-updater` tests,
+  `paddock-window` exit.rs and tauri/tests.rs.
+- `paddock-names` (plan X18): identifier search per rule 20, from Debrief's `names/` (segmentation with the embedded word list,
+  normalisation, grouping of spellings, typo distance, the ranking ladder and the clarifying question) and Dyno's counter search
+  (every word in any order, other fields ranked below the name). `Catalogue::new` / `text` / `with_vocabulary`, `Entry`,
+  `search` -> `Search { matches (how, why), clarify }`, `Style::{Path, Text}`. Pure and bounded; property tests for
+  never-panic, determinism and self-lookup.
+- `paddock-channels` (plan X17): outbound notification channels (webhook, ntfy, e-mail) from Pitcrew's `notify-channels` and
+  Spotter's `mail.rs`. `Settings` with `validate`, secrets through `paddock-secrets` (`channel:<id>`), bounded `Message`s,
+  `Dispatcher` (parallel channels, retries with `paddock_jobs::time` back-off and `Retry-After`, cancel, panics contained,
+  `test` / `test_with` for the settings page), ports `HttpPoster` (`UreqPoster` over `paddock-download`'s agent, proxy and OS
+  certificates) and `MailSender` (`LettreSender`), `FakePoster` / `FakeMail`. `paddock_download::ureq_agent` is new: the one
+  place the TLS and proxy set-up of a ureq agent lives.
+- `paddock-ipc` (plan X13, ADR 0001 step 1): the family's one IPC from `debrief-ipc` and `dyno-ipc` (with Pitcrew's service
+  pipe SDDL). Postcard frames with a skip of oversized frames (one call fails, not the link), private endpoints, the token +
+  pid + protocol-version handshake, a thread-based peer (calls both ways, streams with credits, cancel, pushes, busy, typed
+  errors), the launcher on `paddock-proc` and the child loop, and the companion `link`: an owner-only discovery file
+  (stale and untrusted files ignored), `LinkServer`, and `LinkClient` with reconnect back-off on `paddock_jobs::time` and
+  replacing a companion of another build. A frame-codec fuzz target (`crates/paddock-ipc/fuzz`); JSON numbers in `Json`
+  now cross unchanged (`float_roundtrip`, found by the fuzzer).
+- `paddock-packs` (plan X15, decision D11): knowledge packs for all apps. `PackKind` (serde type, format number, the app's own
+  rules), `parse_pack` with `Limits` (file size, entries, string length, nesting, values, files), unknown keys as named warnings,
+  a bad pack refused whole with a reason while the rest load (last good version kept), `PackLoader`/`PackStore` (build new, then
+  swap, observers told once per real change), `Reloader` (debounced hot reload on the fake-able `Clock`), the `ChangeSource` port
+  with a `notify` adapter (feature `watch`; X23 takes it over), `Snapshot::health()` and `user_regex` (length and size caps, typed
+  errors; merges Debrief's and Spotter's copies).
+- Shell demo: the sample agent is its own crate, bundled as `externalBin` on every OS (`agent/sidecar.mjs` in
+  `beforeBuildCommand`), ad-hoc sealed with the app; `shell-demo-agent --self-test` runs from the built bundle in the macOS
+  verification (which also checks every Mach-O's TeamIdentifier) and from the .deb / the bundled .exe in the release
+  workflow. `scripts/new-app.mjs` carries the agent into new apps, renamed.
 - `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
   It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
   actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
