@@ -28,13 +28,13 @@ export const CHANNELS_STYLES = `
   .pd-ch__icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
   .pd-ch__icon:hover:not(:disabled) { background: var(--pd-hover); color: var(--pd-text); }
   .pd-ch__icon:disabled { opacity: 0.5; cursor: default; }
-  .pd-ch__confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--pd-space-1); font-size: var(--pd-text-label); }
   .pd-ch__test { display: inline-flex; align-items: center; gap: var(--pd-space-2); padding: 2px var(--pd-space-2); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); font-size: var(--pd-text-label); overflow-wrap: anywhere; min-width: 0; }
   .pd-ch__test--ok { background: var(--pd-success-tint); }
   .pd-ch__test--bad { background: var(--pd-danger-tint); }
   .pd-ch__spin { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--pd-border-control); border-top-color: var(--pd-accent); animation: pd-ch-spin 0.9s linear infinite; }
   @keyframes pd-ch-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .pd-ch__spin { animation: none; } }
+  .pd-ch__progress { display: block; color: var(--pd-text-muted); }
   .pd-ch__notice { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); min-width: 0; }
   .pd-ch__notice strong { font-weight: var(--pd-weight-medium); }
   .pd-ch__skeleton { display: flex; flex-direction: column; gap: var(--pd-space-2); }

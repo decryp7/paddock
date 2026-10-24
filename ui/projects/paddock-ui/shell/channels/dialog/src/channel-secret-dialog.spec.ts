@@ -19,7 +19,7 @@ describe('the channel secret dialog', () => {
       providers: [provideZonelessChangeDetection(), provideChannelsBackend({ backend: () => memory }), { provide: DIALOG_REF, useValue: ref }],
     });
     const fixture = TestBed.createComponent(PdChannelSecretDialog);
-    fixture.componentRef.setInput('channelId', inputs.channelId ?? 'slack');
+    if (inputs.channelId !== '') fixture.componentRef.setInput('channelId', inputs.channelId ?? 'slack');
     if (inputs.label !== undefined) fixture.componentRef.setInput('label', inputs.label);
     if (inputs.kind) fixture.componentRef.setInput('kind', inputs.kind);
     await fixture.whenStable();
@@ -100,6 +100,20 @@ describe('the channel secret dialog', () => {
     expect(d.input().getAttribute('aria-invalid')).toBe('true');
     expect(d.input().value).toBe('s3cret');
     expect((d.q('channel-secret-save') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('opened without a channel it says so inline with a Close button, and shows no field to type a secret in', async () => {
+    const d = await open({ channelId: '' });
+    const note = d.el.querySelector('[data-testid="channel-secret-invalid"]')!;
+    expect(note.getAttribute('role')).toBe('alert');
+    expect(text(note)).toContain('without a channel');
+    expect(d.el.querySelector('input')).toBeNull();
+    expect(d.titles).toEqual([]);
+    const close = d.el.querySelector('[data-testid="channel-secret-close"]') as HTMLElement;
+    expect(close.hasAttribute('data-dialog-close')).toBe(true);
+    close.click();
+    expect(d.closed).toEqual([undefined]);
+    expect(d.memory.secretOf('')).toBeUndefined();
   });
 
   it('does nothing on Enter without a secret, and Cancel resolves nothing', async () => {

@@ -9,7 +9,7 @@
  * take a minute) arrives as an event and is never timed out (rules 10, 12).
  *
  * The page (`PdChannelsPage`, `@decryp7/paddock-ui/shell/channels/page`) and the dialog (`PdChannelSecretDialog`,
- * `@decryp7/paddock-ui/shell/channels/dialog`) are chunks of their own that only their windows load.
+ * `@decryp7/paddock-ui/shell/channels/dialog`, with the remove confirmation `PdChannelRemoveDialog`) are chunks of their own that only their windows load.
  *
  * ```ts
  * export const CHANNELS_PAGE = defineChannelsSettingsPage({
@@ -27,7 +27,7 @@
 export { ChannelsBackend, TauriChannelsBackend, type ChannelsIpc, type Unlisten } from './src/backend';
 export { MemoryChannelsBackend, settingsProblem, type MemoryChannelsOptions, type TestOutcome } from './src/memory';
 export { parseChannel, parseChannelsView, parseChannelsEvent, parseTestStarted, asChannelsError, channelsMessage } from './src/wire';
-export { ChannelsStore, type ChannelsStoreType, type TestState, type SaveStatus } from './src/channels.store';
+export { ChannelsStore, type ChannelsStoreType, type TestState, type TestProgress, type SaveStatus } from './src/channels.store';
 export {
   EMPTY_DRAFT,
   channelNeedsSecret,
@@ -43,13 +43,16 @@ export {
 export {
   CHANNELS_SETTINGS_PAGE,
   CHANNELS_SECRET_DIALOG_ID,
+  CHANNELS_REMOVE_DIALOG_ID,
   CHANNELS_SETTINGS_COMMANDS,
   CHANNELS_SECRET_DIALOG_COMMANDS,
   defineChannelsSettingsPage,
   defineChannelsSecretDialog,
+  defineChannelsRemoveDialog,
   channelsContributions,
   type ChannelsSettingsPageOptions,
   type ChannelsSecretDialogOptions,
+  type ChannelsRemoveDialogOptions,
 } from './src/channels.contributions';
 export { provideShellChannels, provideChannelsBackend, type ShellChannelsOptions } from './src/provide-channels';
 // The wire types, the event and the command names (a mirror of paddock-channels' adapter until it generates them).
