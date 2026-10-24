@@ -169,7 +169,7 @@ pub(super) fn open_on<R: Runtime>(
         host: host.to_string(),
         panel: panel.clone(),
         title: title.clone(),
-        keep_on_top: keep_on_top,
+        keep_on_top,
         last: None,
     })?;
     let monitors = monitors_from(&host_os.available_monitors().unwrap_or_default());
@@ -184,7 +184,7 @@ pub(super) fn open_on<R: Runtime>(
         host,
         panel: &panel,
         title: &window_title(&title, &host_title),
-        keep_on_top: keep_on_top,
+        keep_on_top,
         os,
     };
     if let Err(e) = build_window(app, &spec, &placed, &host_window) {

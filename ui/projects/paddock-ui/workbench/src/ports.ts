@@ -40,9 +40,9 @@ const NONE = signal<readonly string[]>([]).asReadonly();
 const NULL = signal<string | null>(null).asReadonly();
 const warn = (what: string): void => console.warn(`[paddock-workbench] no workbench frame in this window; cannot ${what}`);
 
-export const WORKBENCH_PORTS = new InjectionToken<WorkbenchPorts>('PADDOCK_WORKBENCH_PORTS', {
-  providedIn: 'root',
-  factory: () => ({
+/** The ports of a window without a workbench frame: each logs a warning and does nothing. */
+export function defaultWorkbenchPorts(): WorkbenchPorts {
+  return {
     showView: (id) => {
       warn(`show view ${id}`);
       return Promise.resolve(false);
@@ -59,8 +59,10 @@ export const WORKBENCH_PORTS = new InjectionToken<WorkbenchPorts>('PADDOCK_WORKB
     hideExplorer: () => warn('hide the side bar'),
     explorerShown: NULL,
     openPalette: () => warn('open the palette'),
-  }),
-});
+  };
+}
+
+export const WORKBENCH_PORTS = new InjectionToken<WorkbenchPorts>('PADDOCK_WORKBENCH_PORTS', { providedIn: 'root', factory: defaultWorkbenchPorts });
 
 /** Where a pop-out window should appear: screen coordinates of its top-left corner (logical px), and its size. */
 export interface PopOutPlacement {
