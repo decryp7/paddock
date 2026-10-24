@@ -3013,6 +3013,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-updater"
 version = "0.1.0"
 dependencies = [
