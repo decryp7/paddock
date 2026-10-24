@@ -298,3 +298,9 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   exactly) and CI never saw it because the Rust tests ran on Linux only. Run the Rust test suite on every OS the app
   ships for (macOS host runner included). Also: don't run macOS tests under `nice` — it is SIP-protected and strips
   `DYLD_*` variables.
+- Progress that can go backwards is fixed in the owner, not the callers: Spotter's parallel folder walkers reported the
+  found count out of order; the Job now drops lower reports within a phase and calls its sink under the gate lock, so
+  every caller with parallel reporters is fixed at once (rule 11). Replay the exact interleaving in a deterministic test.
+- Every app's macOS verify script checks ad-hoc bundles for the hardened-runtime flag, one TeamIdentifier across all
+  Mach-Os and a `--version`/self-test of every sidecar started from the built app; three of four apps had no macOS
+  bundle check at all, and building the `.app` only when updater keys exist hid that.
