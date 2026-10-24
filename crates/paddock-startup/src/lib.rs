@@ -71,6 +71,8 @@ paddock_commands::command_table! {
     Mutation [MAIN] => tauri::recovery_start_fresh,
     /// Safe mode: the app restarts with extensions, plugins and the last session off.
     Mutation [MAIN] => tauri::recovery_safe_mode,
+    /// Restart the whole app keeping its session (a language change): the checkpoints are written, then the app's relaunch runs.
+    Mutation [WINDOW] => tauri::app_relaunch,
     /// The answer to a liveness ping.
     Quiet [WINDOW] => tauri::window_pong,
 }

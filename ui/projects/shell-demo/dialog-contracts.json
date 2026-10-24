@@ -46,6 +46,7 @@
       "requiredChoice": false,
       "instanced": false,
       "commands": [
+        "app_relaunch",
         "channels_clear_secret",
         "channels_get",
         "channels_save",
