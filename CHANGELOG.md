@@ -40,6 +40,7 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- The shell demo desktop app serves Settings > AI access (MCP): `Builder::mcp` with a sample server (two read-only tools, one action), the settings in its config folder and the client keys in the OS credential store.
 - `paddock-mcp` follow-ups (plan X22): `notifications/cancelled` stops the running call (its token is cancelled, it gets no answer);
   the tool calls of one connection run concurrently up to `Limits::max_concurrent_calls` (default 4) and are answered in any order,
   while everything else stays in order; `McpControl` and the Tauri adapter (feature `tauri`: `mcp_get`, `mcp_save`, `mcp_issue_key`
