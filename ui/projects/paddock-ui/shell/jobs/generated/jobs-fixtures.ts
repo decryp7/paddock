@@ -1,4 +1,4 @@
-// Generated from paddock-jobs' wire model by its tests (Rust round trip). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs --features tauri --test tauri generated.
+// Generated from paddock-jobs' wire model by its tests (Rust round trip). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs --features tauri --test it tauri::generated.
 
 /** One `paddock://jobs` snapshot of every shape, as Rust serialises them: queued, discovering, determinate bytes,
  * not cancellable, done, failed, cancelled by the user and by a deadline. */

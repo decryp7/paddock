@@ -13,6 +13,12 @@ Conventional Commits; one semver tag for the whole repo.
   own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C33: an
   e2e spec runs axe, every dialog of the contract file is covered, warnings for a missing keyboard flow or accent test. The shell
   demo's `shell-demo-a11y.spec.ts` runs it all. `ShellDialogs.loaded()` now waits for the dialog shell itself (a window still on the splash passed it).
+- `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
+  macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
+  deleted, one at a time, with disk and load checks (rule 7).
+- `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
+  dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
+  volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.
 - i18n kit (plan X48). `paddock-i18n build [--config paddock-i18n.json] [--check] [--no-extract]` runs an app's whole translation
   build from one declaration: the `localize-extract` run over its built output, every catalog (sources, manifests, extraction),
   the pseudo-locale and each translated `messages.<tag>.xlf` into its runtime JSON together with the shell's translations
@@ -292,6 +298,14 @@ Conventional Commits; one semver tag for the whole repo.
 - Sentence case for the shell's About items: "Check for updates…", "What’s new" (and "What’s new in <version>").
 - The shell demo's product name is "Paddock Shell Demo"; its Rust side is the app (`apps/shell-demo/src-tauri` writes
   `app-commands.ts`); `paddock-shell`'s `tests/demo.rs` keeps only the plugin's checks over the demo's files.
+
+### Fixed
+- `paddock-service` (C21 VM smoke): the first Install of a bundled macOS agent failed on every fresh Mac with "macOS cannot find
+  ...'s launch agent". `SMAppService.status` is NotFound until the app registers once; that now reads as "not installed" and
+  Install registers (a real failure comes from `register`, with macOS's reason in the message). `parse_job` reads only the job's
+  own level of `launchctl print`, so macOS 26's coalition blocks (`state = active`) no longer make a running agent "refused".
+- The service smoke builds N+1 with the agent's version bumped too (it reported the old version for ever), installs to
+  /Applications as a user does, and checks the app's own status is "running" after install and after the update.
 
 ## 0.2.0 - 2026-10-24 (the first shell release)
 
