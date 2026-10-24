@@ -1,5 +1,7 @@
 import { inject, signal, type Signal } from '@angular/core';
+import { inTauri } from '@decryp7/paddock-ui/ipc';
 import { WORKBENCH_PORTS } from '@decryp7/paddock-ui/workbench';
+import { desktopIpc } from './desktop';
 import { DemoJobs } from './demo-jobs';
 import { DemoRepo } from './repo';
 
@@ -29,6 +31,11 @@ export function workbenchDemoContext(): WorkbenchDemoContext {
       selected.set(path);
       return ports.showView('wd.code', { key: path });
     },
-    reindex: () => void jobs.startIndex(),
+    // The desktop app starts the sample job in the engine (the shell's job registry); the browser plays it.
+    reindex: () => {
+      const ipc = inTauri() ? desktopIpc() : null;
+      if (ipc) void ipc.invoke<number>('demo_reindex').catch((e: unknown) => console.error(e));
+      else void jobs.startIndex();
+    },
   };
 }
