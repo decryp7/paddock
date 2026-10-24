@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-bench` (plan X26, rule 16): the benchmark harness with stored budgets. `Recorder` (median of several runs on an
+  injected `Clock`; `ManualClock` for tests), `Kind` (startup, throughput, first event, query latency, memory: unit and
+  direction), `Results` (versioned results file per app, atomic, bounded), `Budgets` (`budgets.toml`: limit, tolerance, regression
+  against the previous run, `propose`), `check` (pass, tolerated, over budget, regressed, missing, wrong kind, unbudgeted;
+  text, Markdown, JSON) and the `paddock-bench check|propose` command (exit 5 on a miss). `.gitea/workflow-templates/bench-nightly.yml`
+  is the nightly workflow template.
 - `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
   It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
   actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the

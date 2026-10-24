@@ -2766,6 +2766,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-bench"
+version = "0.1.0"
+dependencies = [
+ "paddock-env",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
 name = "paddock-commands"
 version = "0.1.0"
 dependencies = [
