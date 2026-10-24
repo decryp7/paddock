@@ -16,21 +16,21 @@ use std::sync::Arc;
 pub const EVENT: &str = crate::EVENT_NAME;
 
 /// Manages the control (a second call returns the managed one).
-pub fn install<R: Runtime>(
+pub fn install<R: Runtime, E>(
     app: &AppHandle<R>,
-    build: impl FnOnce(crate::control::Emit) -> Arc<ChannelsControl>,
-) -> Arc<ChannelsControl> {
+    build: impl FnOnce(crate::control::Emit) -> Result<Arc<ChannelsControl>, E>,
+) -> Result<Arc<ChannelsControl>, E> {
     if let Some(existing) = app.try_state::<Arc<ChannelsControl>>() {
-        return existing.inner().clone();
+        return Ok(existing.inner().clone());
     }
     let handle = app.clone();
     let emit: crate::control::Emit = Arc::new(move |e: &ChannelsEvent| {
         // A failed emit means the app is closing; nothing is left to tell.
         let _ = handle.emit(EVENT, e);
     });
-    let control = build(emit);
+    let control = build(emit)?;
     app.manage(control.clone());
-    control
+    Ok(control)
 }
 
 type Managed<'a> = State<'a, Arc<ChannelsControl>>;

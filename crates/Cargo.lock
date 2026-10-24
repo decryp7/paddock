@@ -3396,6 +3396,7 @@ dependencies = [
 name = "paddock-shell"
 version = "0.2.0"
 dependencies = [
+ "paddock-channels",
  "paddock-commands",
  "paddock-diag",
  "paddock-dialogs",
