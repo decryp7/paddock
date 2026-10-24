@@ -88,7 +88,11 @@ fn the_oldest_entries_are_dropped_beyond_the_capacity_and_ids_are_never_reused()
     // The capacity is clamped to something sensible.
     assert_eq!(Journal::in_memory(0, clock()).record(rule("a")).id, 1);
     let many = Journal::in_memory(usize::MAX, clock());
-    assert!(DEFAULT_CAPACITY <= MAX_CAPACITY);
+    assert_eq!(
+        DEFAULT_CAPACITY.min(MAX_CAPACITY),
+        DEFAULT_CAPACITY,
+        "the default fits the maximum"
+    );
     assert_eq!(many.entries(1).len(), 0);
 }
 

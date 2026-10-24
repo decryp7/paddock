@@ -21,14 +21,15 @@ export interface UndoableAction {
   readonly announce?: boolean;
 }
 
-interface Entry {
+/** One recorded edit. */
+export interface UndoEntry {
   readonly action: UndoableAction;
   readonly at: number;
 }
 
 interface UndoState {
-  past: readonly Entry[];
-  future: readonly Entry[];
+  past: readonly UndoEntry[];
+  future: readonly UndoEntry[];
   running: boolean;
   /** The toast being shown; `seq` tells a newer toast from the one a timer was started for. */
   toast: { readonly label: string; readonly seq: number } | null;
