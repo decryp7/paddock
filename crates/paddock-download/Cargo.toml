@@ -7,13 +7,31 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
-# Scaffold from plan S0: the publish job holds the crate back until its work package removes this marker.
-[package.metadata.paddock]
-scaffold = true
-
 [features]
-# The Tauri adapter (`paddock_download::tauri`); the core above it never depends on Tauri.
+default = ["http"]
+# The HTTPS transport (`paddock_download::HttpTransport`: ureq and rustls, certificates checked against the operating system's
+# store). Without it the app brings its own `Transport`.
+http = ["dep:ureq", "dep:rustls"]
+# The Tauri adapter (`paddock_download::tauri`: one shared `Downloader` in the app state); the core never depends on Tauri.
 tauri = ["dep:tauri"]
 
 [dependencies]
+paddock-jobs = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+httpdate = "1"
 tauri = { workspace = true, optional = true }
+# No gzip: a download asks for `identity`, so byte ranges stay byte ranges.
+ureq = { version = "3.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
+
+[dev-dependencies]
+sha2 = "0.10"
+tempfile = "3"
+# The adapter is tested on Tauri's mock runtime.
+tauri = { workspace = true, features = ["test"] }
+
+[[bench]]
+name = "segmented"
+harness = false
+required-features = ["http"]

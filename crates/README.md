@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7) and `paddock-menu` (S13) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7), `paddock-download` (S8) and `paddock-menu` (S13) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -285,6 +285,40 @@ tauri::Builder::default()
   thread only, so the Tauri menus are built in tests on Windows and Linux.
 - Generated TypeScript: `ui/projects/paddock-ui/shell/menu/generated/menu.ts`
   (`PADDOCK_WRITE_TS=1 cargo test -p paddock-menu --lib generated`).
+
+## `paddock-download` (plan S8)
+
+Downloads with one in-order SHA-256 while writing (rule 15, ADR 0008 §5, ADR 0012 §3), ported from Debrief's model
+downloader (`debrief-ai::models::{download, segmented}`) with the hash moved into the write path:
+
+```rust
+let downloader = Arc::new(Downloader::http(HttpConfig::default())?);  // one per app: the host caps hold across downloads
+let req = Request::new(url, models_dir.join("model.gguf"), Integrity::Sha256(Sha256Digest::from_hex(&pinned)?))?;
+let ctx = jobs.register("download", "Downloading the model", Some("model.gguf"));
+let d = downloader.clone();
+pool.spawn_job(ctx, move |ctx| Ok(d.download(ctx, &req)?))?;      // the command returns the job id at once
+```
+
+- Phases (`phases`): `connect` (items, 1), `resume` (bytes of the kept prefix, only when resuming), `download` (bytes;
+  a growing count when the host gives no size), `verify` (items, 1: the digest computed while writing is compared, then
+  one rename; never a second read). Each phase starts at 0 and never goes backwards; Cancel is noticed within 250 ms in
+  every phase, because the job's worker only supervises the transfer threads.
+- A `bytes=0-0` probe decides: a 206 host is downloaded in ranges (`Config::connections`, default 4, when the file is at
+  least `segment_threshold`), positioned writes, an idle connection takes over the far half of the lowest slow range, and
+  ranges ahead of the hash wait in memory (at most `max_buffer`, default 64 MiB); a host without ranges is one stream,
+  and a dropped connection restarts it and skips the bytes already written.
+- `HostCaps` (default 4 connections per host across all downloads; `with_cap(host, n)`); 429/503 lower the download's
+  connections and hold every request to that host for `Retry-After` (seconds or an HTTP date, clamped to
+  `backoff..=max_wait`); failures retry with exponential back-off; no bytes for `stall_timeout` ends as `Stalled`.
+- Resume: `<name>.part.json` (versioned) keeps the written and hashed prefix; the same request resumes when the size,
+  the pinned checksum and the host's strong ETag (else Last-Modified) still match; ranges carry `If-Range`.
+- Bounds: `Config::max_bytes` / `Request::max_bytes` before writing and while streaming; a pinned `Request::size` must
+  match. Typed `DownloadError` (`keeps_partial()` says whether a rerun resumes); `From<DownloadError> for JobError`.
+- The network is a port (`Transport`); `HttpTransport` (feature `http`, default) is ureq with rustls and the OS
+  certificate store, a proxy only when configured, `Accept-Encoding: identity`. Feature `tauri`: `tauri::manage` puts one
+  shared `Downloader` in the app state, `tauri::downloader(app)` returns it.
+- Tests run against an in-process HTTP server and a scripted transport (no network); `cargo bench -p paddock-download`
+  compares one stream with 2, 4 and 8 connections on a server that limits each connection.
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.
