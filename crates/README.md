@@ -92,7 +92,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
-| `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
+| `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
+| `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
@@ -101,6 +102,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
+| `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
+| `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
@@ -679,6 +682,107 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   when an app's tests set `PADDOCK_SECRETS_FORBID_REAL=1` (put it in the app's test environment), so a test that reaches the
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
+
+## `paddock-names` (plan X18)
+
+Rule 20 as a pure library: the user types "grafic bilder" and finds `CompanyA.Graphic.Builder.exe`, or "memory pages" and finds
+`\\Memory\\Pages/sec`. The app's engine builds a `Catalogue` and exposes `search` as a command (the palette and the assistant
+call the command; the matching is never written in TypeScript).
+
+```rust
+use paddock_names::{Candidate, Catalogue, Entry, Style, group, vocabulary_from};
+
+// Names with counts -> one group per entity (spellings joined) -> entries.
+let vocab = vocabulary_from(&candidates);                       // learns the words the data separates
+let entries = group(&candidates, &vocab).iter().map(|g| Entry::from(g).kind("process")).collect();
+let names = Catalogue::with_vocabulary(entries, Style::Path, vocab)?;
+let found = names.search("grafic bilder", 5);                  // found.matches[0].how == How::Typo, .why says so
+if let Some(q) = found.clarify { /* "By 'builder', do you mean A (process) or B (process)?" -> q.options are ids */ }
+
+// Counters, symbols, models: plain words, other fields rank below the name.
+let counters = Catalogue::text(vec![Entry::new(path, "Bytes Received/sec").fields(&["Network Interface", "lo0"])])?;
+```
+
+- `How`, best first: `UserAlias`, `Exact`, `Joined`, `Parts`, `Alias`, `Prefix`, `Words` (every word anywhere, any order),
+  `Typo` (only when nothing matches better). Order is score, then weight, then id, so results are deterministic.
+- `Style::Path` reads the last path component and drops extension, vendor prefix, version and architecture; `Style::Text`
+  drops nothing (`Pages/sec`, `lo0`).
+- Bounds: 250,000 entries (more is `NamesError::TooManyEntries`), 256 characters of a query or a name, 24 names, 8 fields and 16
+  aliases per entry, 50 matches. Nothing panics on any text.
+- Stays in the app: the entity catalogue, AI aliases (pass them as `Entry::aliases`), the user's corrections (`user_aliases`),
+  context ranking and co-occurrence merging (layer on the returned matches).
+## `paddock-channels` (plan X17)
+
+Where the apps send alerts, from Pitcrew's `notify-channels` and Spotter's `mail.rs`:
+
+```rust
+use paddock_channels::{Dispatcher, Message, Severity, Settings, UreqPoster, LettreSender};
+use paddock_download::ProxyMode;
+use paddock_jobs::{CancelToken, time::SystemClock};
+
+settings.validate()?;                                    // on Save: the message says what to fix; at most 8 channels
+let d = Dispatcher::new(settings, secrets, Arc::new(UreqPoster::new(ProxyMode::System)?), Arc::new(LettreSender), Arc::new(SystemClock));
+let msg = Message::new("diskLow", Severity::Error, "Disk low", "C: has 2 GB left", "runner-1");
+let deliveries = d.dispatch(&msg, &cancel);              // blocks: run it in a job; one Delivery per channel, in order
+let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // "Send test" before Save; d.test(id, ..) after
+```
+
+- Settings hold no secret: a webhook or ntfy channel with `auth` uses the token `Name("channel:<id>", "token")`, an e-mail
+  channel with a `username` uses `Name("channel:<id>", "password")` (`ChannelConfig::secret_name`); an old Pitcrew
+  entry moves with `paddock_secrets::rename_entry`. `forget_secret` removes it when the channel is deleted.
+- Bounded: title one line of at most 200 characters, body at most 64 KiB (cut on a character boundary with a marker), at most 8
+  channels, 10 recipients, 64 events a channel, 8 KiB a header; the answer's body is never read.
+- Retries: transient failures only (no connection, timeout, HTTP 408/425/429/5xx, a 4xx mail reply), at most 3 attempts by default
+  (`RetryPolicy`, 5 at most), waits from `paddock_jobs::time::Backoff` (2 s doubling to 30 s), a server's `Retry-After` honoured up
+  to that cap, every wait cancellable and on the injected `Clock` (tests use `FakeClock`). A bad configuration, a missing secret,
+  a refused login or certificate, or a 4xx rejection is reported at once. The test send makes one attempt.
+- Containment: every channel runs on its own thread under `catch_unwind`; a panic is `SendError::Panicked` and the others still
+  deliver. Redirects are never followed (a 3xx is a rejection). Errors name the host only (no path, query or login) and never a
+  secret. SMTP does not use the HTTP proxy.
+- Tests use `FakePoster` / `FakeMail` (scripted, recording) or an in-process loopback server; the real adapters are tested
+  against those servers only.
+## `paddock-ipc` (plan X13, ADR 0001 step 1)
+
+The family's one IPC between an app and its own processes (workers, plugins, agents, services), from Debrief's
+`debrief-ipc` (frames, peer with credits and cancel, launcher, child loop) and Dyno's `dyno-ipc` (sync threads, token,
+endpoint, pushes), with Pitcrew's service pipe access list. Synchronous and thread-based, no async runtime; HTTP on loopback
+stays only for Pitwall's public API (D5).
+
+```rust
+// A child that connects back (a worker or plugin).
+let child = paddock_ipc::launch(&ChildSpec::new(exe, "the AI worker").arg("--worker"), Arc::new(NoCalls))?;
+let answer: Reply = child.peer().request(&Request::Ask(q), Some(Duration::from_secs(30)))?;
+// In the child's main: paddock_ipc::child::serve("Debrief", PROTOCOL, |_| Arc::new(typed(handle)), |_, _| {})
+
+// A companion the app did not necessarily start (agent, service).
+let server = LinkServer::start(ServerConfig::new(dirs.runtime().join("agent.json"), BUILD), handler)?; // companion
+let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json"), BUILD, "the agent"),
+                               None, Some(launcher), Some(on_state))?;                              // app
+```
+
+- `frame`: 4-byte length + postcard `Frame` (Debrief's frame version 2 plus `Push` at the end), `FrameLimit` 1 KiB to 64 MiB
+  (16 MiB default). A frame over the limit is skipped without being allocated and fails only its call (`IpcError::TooLarge`,
+  or a `tooLarge` failure to the other side); a length beyond 64 MiB or garbage ends the connection. `ProtocolVersion`
+  (same major, known minor) refuses with a message that says which side to update.
+- `endpoint`: a Unix socket in a 0700 folder (`Listener::bind_in(AppDirs::runtime())`, temporary folder as fallback) or a
+  named pipe with an `Access` list: `owner_only()` (D:P(A;;GA;;;OW), 0600) or `service_for_interactive_users()` (Pitcrew's
+  SDDL for a Windows service serving the user's app); fixed endpoints for services (`Listener::bind_fixed`).
+- `handshake`: `Host`/`Client`; `Hello { version, protocol, token, pid }` checked in constant time and against the pid the OS
+  reports (and the launched child's pid); refusals are `Fail { id: 0 }` with code `version` or `auth`.
+- `peer`: `call`/`request` (timeout, then cancel and `cancel_grace`), `stream`/`CallStream` (credits; drop cancels),
+  `push`/`on_push` (bounded, dropped and counted when the listener lags), `Handler`/`typed`, `CallCtx` (`send_item`,
+  `is_cancelled`, `cancel_probe`, call back into the other side), `max_concurrent_calls` (`busy`). Codes in `codes`.
+- `launch`/`child`: `ChildSpec` → `paddock_proc::Supervised` (no console window, own process group, tree ended on drop,
+  optional `MemoryCap`, clean environment), the `Bootstrap` JSON line on stdin (stdin stays open as the lifeline), and the
+  child's `serve`/`read_bootstrap`/`connect`/`lifeline`. `Bootstrap::extra` carries what an app adds (Debrief's sandbox).
+- `link`: `Discovery` (endpoint, token, pid, build, protocol; written owner-only through `paddock_env::write_atomic`, read
+  bounded; `Found::Stale` for a dead pid, `Found::Untrusted` for a file others could write), `LinkServer` (accept thread,
+  `peers()` for pushes, removes its file on stop), `LinkClient` (state `Connecting`/`Connected`/`Retrying`/`GaveUp`/`Stopped`,
+  `paddock_jobs::time::Backoff` on the injected clock, `retry()`, `Replace::{Terminate, Ask, Never}` for a companion of
+  another build; never its own process), and the pure `plan`.
+- Tests start real processes through the `paddock-ipc-test-child` binary and leave none behind; nothing sleeps or measures
+  time (gates, channels, a `FakeClock` for the back-off). `fuzz/` holds the frame-codec fuzz target
+  (`cargo +nightly fuzz run frame`).
 
 ## `paddock-env` (plan X7)
 

@@ -3,16 +3,21 @@
 # Gitea cargo registry `decryp7` (crates/.cargo/config.toml) by the tag workflow only (.gitea/workflows/publish.yml).
 [workspace]
 resolver = "3"
+# Fuzz targets are their own workspaces (cargo-fuzz).
+exclude = ["paddock-ipc/fuzz"]
 members = [
+    "paddock-channels",
     "paddock-commands",
     "paddock-dialogs",
     "paddock-diag",
     "paddock-download",
     "paddock-env",
     "paddock-health",
+    "paddock-ipc",
     "paddock-jobs",
     "paddock-log",
     "paddock-menu",
+    "paddock-names",
     "paddock-packs",
     "paddock-pitwall",
     "paddock-proc",
@@ -37,14 +42,17 @@ tauri = { version = "2.12", default-features = false }
 
 # The workspace's own crates, for one crate depending on another: `paddock-jobs = { workspace = true }`. The version is
 # the one published to the `decryp7` registry (keep it equal to the crate's `version`); the path is used in the workspace.
+paddock-channels = { path = "paddock-channels", version = "0.1.0", registry = "decryp7" }
 paddock-commands = { path = "paddock-commands", version = "0.1.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "decryp7" }
 paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
 paddock-download = { path = "paddock-download", version = "0.1.0", registry = "decryp7" }
 paddock-env = { path = "paddock-env", version = "0.1.0", registry = "decryp7" }
 paddock-health = { path = "paddock-health", version = "0.1.0", registry = "decryp7" }
+paddock-ipc = { path = "paddock-ipc", version = "0.1.0", registry = "decryp7" }
 paddock-jobs = { path = "paddock-jobs", version = "0.1.0", registry = "decryp7" }
 paddock-log = { path = "paddock-log", version = "0.1.0", registry = "decryp7" }
+paddock-names = { path = "paddock-names", version = "0.1.0", registry = "decryp7" }
 paddock-menu = { path = "paddock-menu", version = "0.1.0", registry = "decryp7" }
 paddock-packs = { path = "paddock-packs", version = "0.1.0", registry = "decryp7" }
 paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "decryp7" }

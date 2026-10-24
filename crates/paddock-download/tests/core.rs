@@ -4,9 +4,9 @@
 mod support;
 
 use paddock_download::{
-    ByteRange, Config, ContentRange, DownloadError, Downloader, Get, Headers, HostCaps, Integrity,
-    MAX_URL_LEN, Request, Response, Sha256Digest, Transport, TransportError, TransportErrorKind,
-    host_of, parse_content_range, parse_length, parse_retry_after, phases,
+    ByteRange, Config, ContentRange, DownloadError, Downloader, Fetch, Get, Headers, HostCaps,
+    Integrity, MAX_URL_LEN, Request, Response, Sha256Digest, Transport, TransportError,
+    TransportErrorKind, host_of, parse_content_range, parse_length, parse_retry_after, phases,
 };
 use paddock_jobs::{CancelReason, JobError};
 use std::io::{self, Cursor, Read};
@@ -1046,4 +1046,24 @@ fn the_platform_free_space_is_read_and_sizes_read_well() {
             format!("the download needs {text}")
         );
     }
+}
+
+#[test]
+fn a_small_get_that_fails_for_good_is_not_retried_and_names_the_host() {
+    let script = Arc::new(Script::new(|_, _| {
+        Err(TransportError::new(
+            TransportErrorKind::Tls,
+            "unknown issuer",
+        ))
+    }));
+    let d = Downloader::new(script.clone());
+    let e = d
+        .get_bytes("https://updates.example.test/latest.json", &Fetch::new())
+        .unwrap_err();
+    assert!(
+        matches!(&e, DownloadError::Network { host, detail }
+            if host == "updates.example.test" && detail.contains("unknown issuer")),
+        "{e:?}"
+    );
+    assert_eq!(script.calls.load(Ordering::SeqCst), 1);
 }

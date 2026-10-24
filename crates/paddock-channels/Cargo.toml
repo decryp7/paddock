@@ -1,0 +1,29 @@
+[package]
+name = "paddock-channels"
+version = "0.1.0"
+description = "Outbound notification channels for the Paddock apps: webhook, ntfy and e-mail with secrets from paddock-secrets, bounded payloads, retries with back-off on the family's clock, and a test send."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+default = ["http", "smtp"]
+# The real HTTP poster (`UreqPoster`: ureq and rustls, certificates checked against the operating system's store, the proxy of
+# `paddock-download`). Without it the app brings its own `HttpPoster`.
+http = ["dep:ureq", "dep:rustls", "paddock-download/http"]
+# The real SMTP sender (`LettreSender`: lettre with rustls and the platform verifier). Without it the app brings its own `MailSender`.
+smtp = ["dep:lettre"]
+
+[dependencies]
+paddock-jobs = { workspace = true }
+paddock-secrets = { workspace = true }
+paddock-download = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls", "ring", "rustls-platform-verifier"], optional = true }
+
+[dev-dependencies]
+proptest = "1"
