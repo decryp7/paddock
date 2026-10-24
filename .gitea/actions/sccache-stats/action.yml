@@ -1,0 +1,11 @@
+name: sccache-stats
+description: Prints sccache --show-stats (hit rate) in the job log; use it as the last step with `if: always()`. Does nothing when sccache is absent.
+runs:
+  using: composite
+  steps:
+    - name: sccache statistics
+      shell: bash
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats || echo "::notice::sccache statistics are unavailable (the cache server was not reachable)."
+        fi

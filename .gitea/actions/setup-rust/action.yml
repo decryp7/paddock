@@ -13,6 +13,12 @@ inputs:
   tauri-linux-deps:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
+  sccache-redis-endpoint:
+    description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Linux jobs only; empty means sccache's local disk."
+    default: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
+  sccache-redis-db:
+    description: "Redis database number for sccache. The shared server gives sccache database 5 (docs/dev-setup.md); never another number."
+    default: ${{ vars.SCCACHE_REDIS_DB }}
 runs:
   using: composite
   steps:
@@ -34,14 +40,30 @@ runs:
         cargo --version
     - name: sccache
       shell: bash
+      env:
+        REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
+        REDIS_DB: ${{ inputs.sccache-redis-db }}
       run: |
         # A shared compile cache when the runner image has sccache (the garage image and the host runners do); otherwise plain rustc.
-        if command -v sccache >/dev/null 2>&1; then
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          sccache --version
-        else
+        if ! command -v sccache >/dev/null 2>&1; then
           echo "::notice::sccache is not installed on this runner; building without the shared compile cache."
+          exit 0
         fi
+        {
+          echo "RUSTC_WRAPPER=sccache"
+          # Cached builds are not incremental; an unreachable cache must slow a build down, never fail it.
+          echo "CARGO_INCREMENTAL=0"
+          echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+        } >> "$GITHUB_ENV"
+        # Only Linux jobs use the shared server (same network as the server); macOS and Windows keep sccache's local disk.
+        if [ "$RUNNER_OS" = "Linux" ] && [ -n "$REDIS_ENDPOINT" ]; then
+          echo "SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" >> "$GITHUB_ENV"
+          echo "SCCACHE_REDIS_DB=${REDIS_DB:-5}" >> "$GITHUB_ENV"
+          echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
+        else
+          echo "sccache: local disk"
+        fi
+        sccache --version
     - name: Linux dependencies for Tauri
       if: runner.os == 'Linux' && inputs.tauri-linux-deps == 'true'
       shell: bash

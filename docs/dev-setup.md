@@ -38,6 +38,20 @@ export CARGO_BUILD_JOBS=2           # per job; several run at once (Mac mini: ab
 
 Change `RUSTC_WRAPPER` only between builds: it is part of Cargo's fingerprint, so changing it rebuilds the target folder.
 
+## Shared build cache
+
+CI Linux Rust jobs share one compile cache: a Dragonfly (Redis-compatible) server at `172.16.1.188:6379`, no password,
+cache mode, shared with other services. sccache uses **database 5 only**; never use another database number.
+
+- Gitea Actions variables (set by the user, org or repo level): `SCCACHE_REDIS_ENDPOINT=redis://172.16.1.188:6379` and
+  `SCCACHE_REDIS_DB=5`. The `setup-rust` action reads them as its input defaults. Unset, sccache falls back to its local disk.
+- The database goes in `SCCACHE_REDIS_DB`, never in the URL: sccache 0.18 ignores a `/5` path and writes to database 0.
+- Only Linux jobs use the server (it is on the runners' network); macOS and Windows keep the local disk.
+- The action also sets `CARGO_INCREMENTAL=0` and `SCCACHE_IGNORE_SERVER_IO_ERROR=1`, so an unreachable cache slows a build
+  and never fails it.
+- Hit rates: the `sccache-stats` step at the end of each job prints `sccache --show-stats`; look at "Cache hits rate". A
+  cold first run is all misses; later runs of the same crates should mostly hit.
+
 ## Parallel work (people and agents)
 
 - One git worktree per task (`git worktree add -b <branch> ~/.<app>-wt-<task> origin/<base>`); the main checkout stays on

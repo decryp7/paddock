@@ -14,7 +14,8 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `plan` | skip a nightly while main is unchanged since a green nightly; skip a main push whose commit is tagged | Debrief's `plan` job |
 | `nightly-mark` | record a fully green nightly (the marker `plan` looks up) | Debrief's `nightly-mark` job |
 | `cache-restore`, `cache-save` | the restore, then save-always cache pattern: a failing run still warms the cache; saved only when the key had no exact hit | the `actions/cache` blocks in every job |
-| `setup-rust` | toolchain with components and targets, sccache when the runner has it, the Tauri Linux libraries | `dtolnay/rust-toolchain` + apt lines |
+| `setup-rust` | toolchain with components and targets, sccache when the runner has it (shared Redis backend on Linux, `vars.SCCACHE_REDIS_ENDPOINT`/`_DB`), the Tauri Linux libraries | `dtolnay/rust-toolchain` + apt lines |
+| `sccache-stats` | `sccache --show-stats` in the job log (last step, `if: always()`; composite actions have no post step) | new |
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
 | `build-env` | `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE` for the About page (`option_env!`) | nothing set them before |
