@@ -1,0 +1,393 @@
+// Control styles (plan X37): buttons, fields, selects, checks, chips, segmented controls, tabs and keycaps, themed only through
+// the --pd-* tokens (no colour of their own), so they follow the app's accent, density and contrast like everything else.
+// Every class starts with pd- (an app's global CSS can never collide); modifiers use BEM: .pd-btn--primary.
+// Base: Pitcrew's _controls.scss, with Debrief's hit-target rule (24 px minimum).
+
+// ---- Buttons: secondary by default; at most one .pd-btn--primary per region (design guide §8).
+.pd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pd-space-2);
+  min-height: var(--pd-button-height);
+  padding: 0 var(--pd-space-3);
+  border: 1px solid var(--pd-border-control);
+  border-radius: var(--pd-radius-control);
+  background: var(--pd-surface-2);
+  color: var(--pd-text);
+  font: inherit;
+  font-weight: var(--pd-weight-medium);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: default;
+  transition:
+    background var(--pd-duration-micro) var(--pd-ease-move),
+    border-color var(--pd-duration-micro) var(--pd-ease-move),
+    color var(--pd-duration-micro) var(--pd-ease-move);
+
+  &:hover:not(:disabled, [aria-disabled='true']) {
+    background: var(--pd-surface-3);
+    text-decoration: none;
+  }
+
+  &:active:not(:disabled, [aria-disabled='true']) {
+    background: var(--pd-pressed);
+  }
+
+  &:disabled,
+  &[aria-disabled='true'] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  // Icons inside a button (a pd-glyph, a mat-icon or an svg) are 16 px and never shrink.
+  pd-glyph,
+  .mat-icon,
+  > svg {
+    flex: none;
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.pd-btn--primary {
+  border-color: transparent;
+  background: var(--pd-accent-fill);
+  color: var(--pd-on-accent);
+
+  &:hover:not(:disabled, [aria-disabled='true']) {
+    background: var(--pd-accent-fill-hover);
+  }
+
+  &:active:not(:disabled, [aria-disabled='true']) {
+    background: var(--pd-accent-fill-hover);
+  }
+}
+
+// Danger: the text and icon in the danger colour; the fill is for the confirmation of a destructive action only.
+.pd-btn--danger {
+  color: var(--pd-danger);
+}
+
+.pd-btn--danger-fill {
+  border-color: transparent;
+  background: var(--pd-danger-fill);
+  color: var(--pd-on-danger);
+
+  &:hover:not(:disabled, [aria-disabled='true']) {
+    background: var(--pd-danger-fill);
+    filter: brightness(1.08);
+  }
+}
+
+// Ghost: no border or fill until hover (toolbars, row actions).
+.pd-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--pd-text-muted);
+
+  &:hover:not(:disabled, [aria-disabled='true']) {
+    background: var(--pd-hover);
+    color: var(--pd-text);
+  }
+
+  &:active:not(:disabled, [aria-disabled='true']) {
+    background: var(--pd-pressed);
+  }
+}
+
+// Compact: the 28 px button.
+.pd-btn--sm {
+  min-height: var(--pd-control-height);
+  padding: 0 var(--pd-space-2);
+  font-size: var(--pd-text-label);
+  gap: var(--pd-space-1);
+
+  pd-glyph,
+  .mat-icon,
+  > svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+// Icon-only: square, with an aria-label and a tooltip on the element (never without).
+.pd-btn--icon {
+  width: var(--pd-button-height);
+  min-width: var(--pd-hit-min);
+  padding: 0;
+
+  &.pd-btn--sm {
+    width: var(--pd-control-height);
+  }
+}
+
+.pd-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pd-space-2);
+}
+
+// ---- Fields: text inputs, native selects and text areas share one look; the label, hint and error go in .pd-field.
+.pd-input,
+.pd-select,
+.pd-textarea {
+  min-width: 0;
+  min-height: var(--pd-control-height);
+  padding: 0 var(--pd-space-3);
+  border: 1px solid var(--pd-border-control);
+  border-radius: var(--pd-radius-input);
+  background: var(--pd-surface-1);
+  color: var(--pd-text);
+  font: inherit;
+  transition:
+    border-color var(--pd-duration-micro) var(--pd-ease-move),
+    box-shadow var(--pd-duration-micro) var(--pd-ease-move);
+
+  &::placeholder {
+    color: var(--pd-text-subtle);
+  }
+
+  // Focus: the accent border and a 2 px ring at 35 % alpha (design guide §6), on top of the global keyboard ring.
+  &:focus,
+  &:focus-visible {
+    outline: none;
+    border-color: var(--pd-accent);
+    box-shadow: 0 0 0 2px var(--pd-accent-ring);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &[aria-invalid='true'] {
+    border-color: var(--pd-danger);
+  }
+
+  &[aria-invalid='true']:focus-visible {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--pd-danger) 35%, transparent);
+  }
+}
+
+.pd-textarea {
+  min-height: calc(var(--pd-control-height) * 2);
+  padding-block: var(--pd-space-2);
+  line-height: var(--pd-lh-body);
+  resize: vertical;
+}
+
+.pd-input--sm,
+.pd-select--sm {
+  min-height: var(--pd-hit-min);
+  padding: 0 var(--pd-space-2);
+  font-size: var(--pd-text-label);
+}
+
+// A native select drawn without the system arrow (a themed, non-native list is a component of the shell's Settings window).
+.pd-select {
+  appearance: none;
+  padding-inline-end: var(--pd-space-8);
+  background-image: linear-gradient(45deg, transparent 50%, var(--pd-text-muted) 50%), linear-gradient(135deg, var(--pd-text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 11px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+
+  &:dir(rtl) {
+    background-position:
+      15px 50%,
+      11px 50%;
+  }
+}
+
+.pd-select--sm {
+  padding-inline-end: var(--pd-space-6);
+}
+
+.pd-field {
+  display: grid;
+  gap: var(--pd-space-1);
+  min-width: 0;
+  align-content: start;
+
+  > label,
+  > .pd-field__label {
+    font-size: var(--pd-text-label);
+    font-weight: var(--pd-weight-medium);
+    color: var(--pd-text-muted);
+  }
+}
+
+.pd-field__hint {
+  font-size: var(--pd-text-label);
+  color: var(--pd-text-muted);
+}
+
+.pd-field__error {
+  font-size: var(--pd-text-label);
+  color: var(--pd-danger);
+}
+
+.pd-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--pd-space-4);
+}
+
+// A value with its unit beside it ("30" "seconds").
+.pd-with-unit {
+  display: flex;
+  align-items: center;
+  gap: var(--pd-space-2);
+
+  .pd-input {
+    width: 100%;
+  }
+
+  > span {
+    color: var(--pd-text-muted);
+    font-size: var(--pd-text-label);
+    white-space: nowrap;
+  }
+}
+
+// ---- Check and radio: the native control in the accent, 16 px with a 24 px hit area from the label.
+.pd-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pd-space-2);
+  min-height: var(--pd-hit-min);
+  cursor: default;
+
+  input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--pd-accent-fill);
+  }
+}
+
+// ---- Chips: removable or plain tags.
+.pd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pd-space-1);
+}
+
+.pd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pd-space-1);
+  height: 22px;
+  padding: 0 var(--pd-space-2);
+  border: 1px solid var(--pd-hairline);
+  border-radius: var(--pd-radius-pill);
+  background: var(--pd-surface-2);
+  color: var(--pd-text-muted);
+  font-size: var(--pd-text-label);
+  white-space: nowrap;
+
+  > button {
+    display: inline-flex;
+    padding: 0;
+    border: 0;
+    border-radius: var(--pd-radius-pill);
+    background: none;
+    color: inherit;
+  }
+
+  pd-glyph,
+  .mat-icon {
+    width: 12px;
+    height: 12px;
+  }
+}
+
+// ---- Segmented control (a few mutually exclusive options): buttons with aria-pressed or aria-checked.
+.pd-segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--pd-radius-control);
+  background: var(--pd-surface-3);
+  border: 1px solid var(--pd-hairline);
+
+  > button {
+    min-height: calc(var(--pd-control-height) - 6px);
+    padding: 0 var(--pd-space-3);
+    border: 0;
+    border-radius: calc(var(--pd-radius-control) - 2px);
+    background: transparent;
+    color: var(--pd-text-muted);
+    font: inherit;
+    font-size: var(--pd-text-label);
+    font-weight: var(--pd-weight-medium);
+    transition:
+      background var(--pd-duration-micro) var(--pd-ease-move),
+      color var(--pd-duration-micro) var(--pd-ease-move);
+
+    &:hover {
+      color: var(--pd-text);
+    }
+
+    &[aria-pressed='true'],
+    &[aria-checked='true'] {
+      background: var(--pd-surface-1);
+      color: var(--pd-text);
+      box-shadow: var(--pd-shadow-1);
+    }
+  }
+}
+
+// ---- Tabs: a row of buttons with aria-selected, the selected one underlined in the accent.
+.pd-tabs {
+  display: flex;
+  gap: var(--pd-space-1);
+  border-bottom: 1px solid var(--pd-hairline);
+
+  > button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--pd-space-2);
+    min-height: 36px;
+    padding: 0 var(--pd-space-3);
+    border: 0;
+    background: none;
+    color: var(--pd-text-muted);
+    font: inherit;
+    font-weight: var(--pd-weight-medium);
+
+    &:hover,
+    &[aria-selected='true'] {
+      color: var(--pd-text);
+    }
+
+    &[aria-selected='true']::after {
+      content: '';
+      position: absolute;
+      inset-inline: var(--pd-space-2);
+      bottom: -1px;
+      height: 2px;
+      border-radius: 2px;
+      background: var(--pd-accent);
+    }
+  }
+}
+
+// ---- Keycap: a shortcut in text ("Ctrl K").
+.pd-kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--pd-border-control);
+  border-bottom-width: 2px;
+  border-radius: var(--pd-radius-tag);
+  font-family: var(--pd-font-sans);
+  font-size: var(--pd-text-caption);
+  color: var(--pd-text-muted);
+  text-align: center;
+}
