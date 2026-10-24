@@ -11,6 +11,8 @@
 import { warn } from '../finding.mjs';
 
 const HANG_GUARD = /conformance:\s*hang-guard/;
+/** The waiver of a sleep must say why: `// conformance: hang-guard — <reason>` (a dash, an en dash or a hyphen, then words). */
+const SLEEP_WAIVER = /conformance:\s*hang-guard\s*[—–-]+\s*(\S.{2,})/;
 const MIN_GUARD_MS = 10_000;
 // A measurement: a duration read off a real clock. A bare `Instant::now()` used as the base of a computed instant is deterministic.
 const CLOCK_READ = /\.elapsed\s*\(\)|\.duration_since\s*\(|\b(?:Instant|SystemTime)::now\s*\(\)\s*-/;
@@ -97,7 +99,7 @@ export function wallClockAsserts(source) {
 /** Signals in a test body that a sleep is waiting for another thread. */
 const THREADED = /\bthread::(?:spawn|scope)\b|\.spawn\s*\(|\.join\s*\(\)|\bmpsc\b|\bchannel\s*\(|\.recv(?:_timeout)?\s*\(|\bAtomic\w+|\bArc::|\bMutex\b|\bCondvar\b/;
 
-/** `thread::sleep` calls in threaded `#[test]` fns of a Rust file: [{ line, text, waived }]. */
+/** `thread::sleep` calls in threaded `#[test]` fns of a Rust file: [{ line, text, waived }] (`waived`: false, 'reason', or 'no-reason' when the comment gives none). */
 export function threadSleeps(source) {
   const masked = mask(source);
   const raw = source.split('\n');
@@ -113,7 +115,8 @@ export function threadSleeps(source) {
     for (const m of body.matchAll(/\b(?:thread::)?sleep\s*\(/g)) {
       if (!/thread::sleep|std::thread/.test(m[0]) && !/\buse\s+std::thread::sleep\b/.test(masked)) continue;
       const line = masked.slice(0, open + m.index).split('\n').length;
-      const waived = HANG_GUARD.test(raw[line - 1] ?? '') || HANG_GUARD.test(raw[line - 2] ?? '');
+      const near = [raw[line - 1] ?? '', raw[line - 2] ?? ''];
+      const waived = near.some((l) => SLEEP_WAIVER.test(l)) ? 'reason' : near.some((l) => HANG_GUARD.test(l)) ? 'no-reason' : false;
       out.push({ line, text: (raw[line - 1] ?? '').trim().slice(0, 100), waived });
     }
   }
@@ -170,7 +173,8 @@ export default {
           else if (a.guard < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.guard} ms is too tight to be one: ${a.text}`, 'Raise the limit to at least 10 s, or replace it with a FakeClock.'));
         }
         for (const s of threadSleeps(text)) {
-          if (!s.waived) out.push(warn('C30', 40, f, s.line, `sleeps in a test that uses threads: ${s.text}`, 'Wait for the event (a channel, a gate, `FakeClock::wait_for_waiters`) instead of a sleep; a deliberate sleep carries `// conformance: hang-guard`.'));
+          if (s.waived === 'no-reason') out.push(warn('C30', 40, f, s.line, `the sleep's waiver gives no reason: ${s.text}`, 'Write `// conformance: hang-guard — <why this sleep is needed>`.'));
+          else if (!s.waived) out.push(warn('C30', 40, f, s.line, `sleeps in a test that uses threads: ${s.text}`, 'Wait for the event (a channel, a gate, `FakeClock::wait_for_waiters`) instead of a sleep; a deliberate sleep carries `// conformance: hang-guard — <why>`.'));
         }
       } else if (/\.(?:spec|test|e2e|shot)\.[mc]?[jt]sx?$|(?:^|\/)(?:e2e|tests?)\/[^/]*\.[mc]?[jt]sx?$/.test(f)) {
         const text = ctx.read(f);

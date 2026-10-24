@@ -1,0 +1,7 @@
+# Waivers for Paddock's own conformance run (see .gitea/workflows/ci.yml, job "conformance"). Each one expires.
+
+[[waiver]]
+check = "C15"
+path = "ui/projects/paddock-e2e/src/*"
+reason = "the unit tests of the installed-Chrome guard must name the installed Chrome (channel and paths) to prove it is refused"
+expires = "2027-04-30"
