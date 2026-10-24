@@ -671,9 +671,10 @@ fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Conn
                 l.next(),
             ) {
                 // The file can appear a moment before the endpoint takes connections (and a slow machine shows it): a refused or
-                // half-made handshake is tried again until the start limit, not a failed launch.
+                // half-made handshake is tried again until the start limit, not a failed launch; when the browser is gone (the memory cap
+                // ended it, it crashed) the checks below say why.
                 match Connection::connect(port, path.trim()) {
-                    Err(Error::Connection(_)) if Instant::now() <= end && process.is_running() => {}
+                    Err(Error::Connection(_)) if Instant::now() <= end => {}
                     done => return done,
                 }
             }
