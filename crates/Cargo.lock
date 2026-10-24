@@ -2895,6 +2895,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-names"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "paddock-pitwall"
 version = "0.1.0"
 dependencies = [
