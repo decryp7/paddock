@@ -11,10 +11,14 @@
 //       writes the runtime JSON the app's loader imports. Inputs: runtime JSONs (`{ locale, translations }`, e.g. the
 //       package's i18n/messages.pd.en-XA.json) and XLIFF files (their <target>s; for the pseudo-locale en-XA, the
 //       generated pseudo text of every <source>). An id translated twice, differently, fails.
+//   paddock-i18n build [--config paddock-i18n.json] [--no-extract] [--check]
+//       the whole build an app declares in paddock-i18n.json (see i18n-build.mjs): the extraction from the built output,
+//       every catalog, the pseudo-locale and every translated locale's runtime JSON. `--no-extract` reads the committed
+//       catalogs instead of extracting (no build needed).
 //
 // `--check` writes nothing and fails when the file on disk differs (CI: "run npm run i18n and commit the result").
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildCatalog,
@@ -29,6 +33,7 @@ import {
   targetTranslations,
   writeXliff,
 } from './i18n-messages.mjs';
+import { loadConfig, runBuild } from './i18n-build.mjs';
 
 export const PSEUDO_LOCALE = 'en-XA';
 
@@ -36,7 +41,7 @@ export const PSEUDO_LOCALE = 'en-XA';
 export function parseArgs(argv) {
   const flags = new Map();
   const positional = [];
-  const BOOLEAN = new Set(['check']);
+  const BOOLEAN = new Set(['check', 'no-extract']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--')) {
@@ -139,7 +144,11 @@ export function main(argv) {
     if (!locale || !out) throw new Error('merge needs --locale <tag> and --out <file.json>');
     return emit(out, mergeText(locale, positional), check);
   }
-  throw new Error('usage: paddock-i18n catalog --out <file.xlf> ... | paddock-i18n merge --locale <tag> --out <file.json> <input>...');
+  if (command === 'build') {
+    const config = loadConfig(resolve(flags.get('config')?.[0] ?? 'paddock-i18n.json'));
+    return runBuild(config, { check, extract: !flags.has('no-extract'), run: main }).join('\n');
+  }
+  throw new Error('usage: paddock-i18n build [--config f] [--no-extract] | paddock-i18n catalog --out <file.xlf> ... | paddock-i18n merge --locale <tag> --out <file.json> <input>...');
 }
 
 /** Run as the bin (also through npm's symlink in node_modules/.bin), not imported by the tests. */

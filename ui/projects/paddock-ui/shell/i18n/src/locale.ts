@@ -3,10 +3,24 @@
  * the application (and any translated module) is loaded. Ported from Debrief's `i18n/locale.ts` without app names.
  */
 
-/** What the user picked (Settings ▸ General ▸ Language): the system's language, English, or the pseudo-locale. */
-export type LanguageChoice = 'system' | 'en' | 'pseudo';
+/**
+ * What the user picked (Settings ▸ Language): the system's language, English, the pseudo-locale, or one shipped
+ * translation by its BCP 47 tag (`de`, `pt-BR`; see `isLocaleTag`). Anything else read from storage is "system".
+ */
+export type LanguageChoice = 'system' | 'en' | 'pseudo' | (string & {});
 
+/** The choices that are not a translation: the system's language, English and the pseudo-locale. */
 export const LANGUAGE_CHOICES: readonly LanguageChoice[] = ['system', 'en', 'pseudo'];
+
+/** A language tag a translation can be shipped for (two or three letters, then subtags), valid for `Intl`. */
+export function isLocaleTag(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 35 || !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value)) return false;
+  try {
+    return Intl.getCanonicalLocales(value).length === 1;
+  } catch {
+    return false;
+  }
+}
 
 /** The language the source strings are written in (no translations are loaded for it). */
 export const SOURCE_LOCALE = 'en-US';
@@ -30,6 +44,11 @@ export function resolveLocale(choice: LanguageChoice, preferred: readonly string
   if (choice === 'en') return SOURCE_LOCALE;
   if (choice === 'pseudo') return PSEUDO_LOCALE;
   const all = [SOURCE_LOCALE, ...shipped.filter((l) => l !== PSEUDO_LOCALE)];
+  if (choice !== 'system') {
+    // A chosen translation: that locale if it is shipped (or another region of its language), else as "system".
+    const own = all.find((l) => l.toLowerCase() === choice.toLowerCase()) ?? all.find((l) => language(l) === language(choice));
+    if (own) return own;
+  }
   for (const tag of preferred) {
     if (!tag || all.every((l) => language(l) !== language(tag))) continue;
     try {

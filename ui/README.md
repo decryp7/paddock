@@ -136,6 +136,7 @@ so a manager app never bundles the workbench:
 | `/shell/settings` | settings over the `paddock-settings` adapter, what a main window imports: `SettingsBackend` (Tauri, memory), `SettingsStore`, the model, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
 | `/shell/settings/window` | the Settings window, loaded only by it: `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `SettingsDrafts` (Signal Forms), `settingsWindowProviders` | S10, S16 |
 | `/icons`, `/format`, `/prefs`, `/select`, `/testing`, `/shell/feel` | the `pd:` icon set and `outlineIcon`; one formatting API and the middle ellipsis; guarded localStorage; the themed `pd-select`; the DOM test kit (`installTestKit`, helpers, fake ECharts); the native-feel guard | X36, X35, X12, X38 |
+| `/ipc`, `/ipc/testing` | the app IPC kit: `CommandError` (generated from `paddock_commands::CommandError`) with `toCommandError`, `CommandFailure`; `withCallTimeout` for request/reply commands (never jobs, rule 12) and `callTimeoutProblems`; `provideBackend` (Tauri or a lazily imported mock); the mock kit `parseMockOptions` (`?mock=&latency=&fail=&hold=`), `formatMockOptions`, `withMockOptions` | X28 |
 | `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/shell/startup`, `/shell/dialogs`, `/shell/about` | one shell part each | S5-S11 |
 | `/shell/diagnostics` | report a problem over the `paddock-diag` adapter: `DiagnosticsBackend` (Tauri, memory), `DiagnosticsStore`, the Report a Problem decision dialog (description, every file with its size, Save through the engine's native dialog), `diagnosticsContributions` (Help item, the Logging settings page), `provideShellDiagnostics`, `provideWebviewLog` (the page's errors in the engine's log) | X2 |
@@ -432,7 +433,11 @@ provideThemes(CONSOLE_THEME),                                                   
 - i18n (ADR 0012 §6): `$localize` with runtime-loaded translations, one build for every language. Install
   `@angular/localize/init` in the app's `polyfills` and `"types": ["@angular/localize"]`. The shell's messages use `@@pd.`
   ids; contributions' `msg(id, text)` read their text through the loaded translations, so they need nothing else.
-  `LanguageStore` keeps the choice (`paddock.language`: system, en, pseudo) and says when a restart is needed.
+  `LanguageStore` keeps the choice (`paddock.language`: system, en, pseudo, or a shipped translation's tag such as `de`) and says when a restart is needed.
+  Settings > Language: add `defineLanguageSettingsPage({ load })` (`/shell/i18n/settings`) to the app's `settingsPages` and the Settings
+  window's pages; `load` is `() => import('@decryp7/paddock-ui/shell/i18n/page').then((m) => m.PdLanguagePage)`. The Settings window's
+  own providers carry `LANGUAGE_CONFIG` (the shipped locales, how the app restarts): it is a root token with a default, so a
+  provider added by the lazily loaded page would lose against it. Names come from `Intl.DisplayNames` in the language's own tongue.
 - Translation files: the package ships `i18n/messages.pd.xlf` (the shell's catalog) and `i18n/messages.pd.en-XA.json`
   (its pseudo-locale). An app builds its own catalog (its `msg()` and `$localize` messages with `@@id`s, scanned from the
   sources) and loader files with the bin:
@@ -443,6 +448,17 @@ provideThemes(CONSOLE_THEME),                                                   
     node_modules/@decryp7/paddock-ui/i18n/messages.pd.en-XA.json src/locale/messages.xlf
   ```
 
+  An app does not keep those commands in a script of its own: it declares the build once in `paddock-i18n.json` (the
+  extraction from its built output with Angular's `localize-extract`, its catalogs, the pseudo-locale and any
+  `messages.<tag>.xlf` translations folded into `messages.<tag>.json` together with the shell's) and runs
+
+  ```sh
+  npx paddock-i18n build               # regenerate; after the app build when a catalog takes the built $localize messages
+  npx paddock-i18n build --check       # CI: writes nothing, fails on drift
+  npx paddock-i18n build --check --no-extract   # no build needed: the committed catalogs against their sources (conformance C32)
+  ```
+
+  See `paddock-i18n.json` here (the package and the shell demo) and `projects/paddock-ui/bin/i18n-build.mjs` for the format.
   `--check` writes nothing and fails on drift (CI). Here `npm run i18n` (after `npm run build`) regenerates the package's
   files and the shell demo's; CI runs `npm run i18n:check`. The shell demo's View > Appearance switches theme, a sample
   pack, high contrast, reduced motion and the pseudo-locale; `e2e/shell-demo-locale.spec.ts` finds no unmarked English
@@ -549,3 +565,27 @@ Apps adopt the package one by one in their design passes; nothing here edits the
 All apps: remove copied `_tokens`/`_base` rules as components move over; keep the CSP rule (`inlineCritical: false`, no
 inline style attributes: the components only bind styles through Angular's CSSOM bindings, and the gallery test checks
 `index.html` has none).
+
+### The app IPC kit (`@decryp7/paddock-ui/ipc`, plan X28)
+
+```ts
+import { CommandError, provideBackend, toCommandError, withCallTimeout, inTauri } from '@decryp7/paddock-ui/ipc';
+import { parseMockOptions } from '@decryp7/paddock-ui/ipc/testing';
+
+export const BACKEND = new InjectionToken<AppBackend>('AppBackend');
+
+// app.config.ts: the real backend in Tauri, the mock (imported lazily, so not in the release bundle) in a dev browser.
+provideBackend(BACKEND, {
+  tauri: () => withCallTimeout(new TauriBackend(), { subject: 'The Pitwall server', limits: { loadModel: 180_000 }, untimed: ['startImport'] }),
+  mock: async (options) => (await import('./mock-backend')).createMock(options),
+}, () => ({ inTauri: inTauri(), search: location.search, allowMock: isDevMode(), mockOptions: parseMockOptions }));
+```
+
+- A command rejects with `CommandError { code, message, retryable, hint?, field?, cause?, kind? }`; `kind` carries the app's own
+  distinction. Components react to `code` and `retryable`; `toCommandError(e)` makes any rejection one and never throws.
+- `withCallTimeout` rejects a request/reply call that does not answer in time with `code: 'timeout'` (retryable). It is a Proxy, so a
+  new method gets the default (15 s) without a table entry. **A command that starts a job is `untimed`** (rule 12: the UI never
+  times out a running job; the job reports through events, the panel shows "Still working"). `callTimeoutProblems(methods, policy)`
+  finds names in the policy that are not methods (a typo would leave a call on the default).
+- The mock kit plays latency, failures (`?fail=save:2` fails the first two calls), held answers (`?hold=load`, released by
+  `__paddockMockRelease('load')`) and records the calls; `formatMockOptions` builds the query string in Playwright specs.

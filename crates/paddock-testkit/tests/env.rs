@@ -62,7 +62,10 @@ fn hermetic_points_the_user_folders_and_tmp_into_the_scratch() {
             "TEMP",
             "TMP",
         ] {
-            let value = env.get(key).map(std::path::PathBuf::from).unwrap_or_default();
+            let value = env
+                .get(key)
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default();
             assert!(
                 value.starts_with(scratch.work().parent().unwrap_or(&value)),
                 "{key} = {}",
@@ -82,7 +85,11 @@ fn two_tests_never_hold_the_lock_at_once() {
         .map(|_| {
             std::thread::spawn(|| {
                 let _env = env_lock();
-                assert_eq!(INSIDE.fetch_add(1, Ordering::SeqCst), 0, "another holder is inside");
+                assert_eq!(
+                    INSIDE.fetch_add(1, Ordering::SeqCst),
+                    0,
+                    "another holder is inside"
+                );
                 INSIDE.fetch_sub(1, Ordering::SeqCst);
             })
         })

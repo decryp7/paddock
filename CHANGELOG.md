@@ -10,9 +10,50 @@ Conventional Commits; one semver tag for the whole repo.
   declared; an empty list is an error), and the keyboard-only helpers `tabWalk`, `expectTabOrder` (no trap, no stop without a focus
   indicator), `expectReachableByKeyboard` and `expectEscapeReturnsFocus`. `@decryp7/paddock-ui/shell`: `accentProblems`, `cssRules`,
   `resolveTokens` and `definedAccents`, the contrast and colour-vision targets of `test:tokens` as pure functions an app runs on its
-  own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C31: an
+  own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C33: an
   e2e spec runs axe, every dialog of the contract file is covered, warnings for a missing keyboard flow or accent test. The shell
   demo's `shell-demo-a11y.spec.ts` runs it all. `ShellDialogs.loaded()` now waits for the dialog shell itself (a window still on the splash passed it).
+- i18n kit (plan X48). `paddock-i18n build [--config paddock-i18n.json] [--check] [--no-extract]` runs an app's whole translation
+  build from one declaration: the `localize-extract` run over its built output, every catalog (sources, manifests, extraction),
+  the pseudo-locale and each translated `messages.<tag>.xlf` into its runtime JSON together with the shell's translations
+  (Debrief's `build-locales` and this repo's `scripts/build-i18n.mjs` are replaced by it; `--check` writes nothing and fails on
+  drift, `--no-extract` reads the committed catalogs so no build is needed). `LanguageChoice` now also names a shipped
+  translation by its tag, `isLocaleTag` validates one, and `@decryp7/paddock-ui/shell/i18n/page` is the Settings > Language page
+  (`PdLanguagePage`, `defineLanguageSettingsPage`): System default, English, each translation by its own name, the pseudo-locale
+  where the app ships it, a restart offer. `paddock-conformance` C32 runs `build --check --no-extract` over the app's
+  `paddock-i18n.json`.
+- `app_relaunch` (`paddock-startup`, a window-class command: any window, a dialog lists it in its contract) and
+  `StartupBuilder::relaunch(|app| app.restart())`: the checkpoints are written to the session first, then the app's relaunch
+  runs, so the whole app restarts (a language change from the Settings window); without a hook it answers `relaunchUnavailable`,
+  a failing one `relaunchFailed` and the app keeps running. The shell demo wires it; the Language page calls it through
+  `LANGUAGE_CONFIG.reload`.
+- The app IPC kit (plan X28). `paddock_commands::CommandError` / `ErrorCode`: the one error envelope (code, message, retryable,
+  hint, field, cause, kind), with constructors, `From` for `io::Error`, strings and the guard's `Refusal`, and its TypeScript
+  generated into `@decryp7/paddock-ui/ipc`. `@decryp7/paddock-ui/ipc`: `toCommandError`, `CommandFailure`, `withCallTimeout` (a
+  Proxy with a default, per-method limits and `untimed` for job-starting commands, rule 12) and `callTimeoutProblems`,
+  `provideBackend` (Tauri or a lazily imported mock). `@decryp7/paddock-ui/ipc/testing`: `parseMockOptions` / `formatMockOptions`
+  (`?mock=&latency=&fail=&hold=`) and `withMockOptions` (latency, failures, held answers, recorded calls).
+- `paddock-bench` (plan X26, rule 16): the benchmark harness with stored budgets. `Recorder` (median of several runs on an
+  injected `Clock`; `ManualClock` for tests), `Kind` (startup, throughput, first event, query latency, memory: unit and
+  direction), `Results` (versioned results file per app, atomic, bounded), `Budgets` (`budgets.toml`: limit, tolerance, regression
+  against the previous run, `propose`), `check` (pass, tolerated, over budget, regressed, missing, wrong kind, unbudgeted;
+  text, Markdown, JSON) and the `paddock-bench check|propose` command (exit 5 on a miss). `.gitea/workflow-templates/bench-nightly.yml`
+  is the nightly workflow template.
+- `paddock-cli` (plan X25): the family's command-line conventions. `Exit` (0 ok, 1 failure, 2 usage, 3 not running, 4 refused,
+  5 findings, 130 interrupted), `CliError` with a next step, `finish` (one JSON object on stdout in `--json` mode, errors
+  included), `Table` (text, CSV, JSON; bounded cells), `Progress` (throttled, de-duplicated phase lines on stderr, injected time)
+  and `StopFlag`, `Help` and `version_line`, `CommonFlags`, `parse_time`, `parse_size`, `format_size`. `paddock_service::Verb`
+  describes itself for `--help`, rejects extra arguments with a hint and decides `status`'s exit code.
+- Paddock runs its own conformance checks in CI (C06, C14, C15, C16, C29, C30, C31; the app-only ones are skipped with reasons in
+  `ci.yml`); C24 runs non-blocking until the `docs/images` review lands. New check C31: ADR numbers are unique. The waiver of a
+  Rust test sleep (C30) must give a reason: `// conformance: hang-guard — <why>`.
+- Tests no longer sleep to wait for other threads: `paddock-jobs` `tests/parallel.rs` and `tests/pool.rs` (gates, a barrier and
+  event waits) and `paddock-window`'s exit-watchdog test (the process end is a channel event).
+- `paddock-names` search index and `names_search` (plan X18 follow-up): the catalogue keeps hash maps for the exact, joined and alias
+  rungs and an inverted index of words (prefix by range, inside-a-word by scan, typos by letter-bag and edit distance), so a
+  search over 250,000 names takes about 20 ms (was 500 ms; `cargo bench -p paddock-names` fails over 50 ms). `search_scan` ranks every
+  entry and a property test checks that both give the same answer. `NamesService` + `NamesSearchRequest`/`NamesSearchReply`
+  are the engine side of the palette's `names_search` command (arguments validated in Rust, catalogue swapped whole).
 - Conformance check C24 (rule 22): every image under `docs/screenshots` matches its `hashes.json` entry and has a `REVIEWED.md` row
   (image, SHA-256, reviewer, date) with the current hash; `docs/images` needs the row. A regenerated image that changed fails until
   it is reviewed again.

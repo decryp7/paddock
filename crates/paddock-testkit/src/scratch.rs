@@ -21,7 +21,10 @@ pub enum ScratchError {
 impl fmt::Display for ScratchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ScratchError::Escapes(p) => write!(f, "{p:?} is not a plain relative path inside the scratch folder"),
+            ScratchError::Escapes(p) => write!(
+                f,
+                "{p:?} is not a plain relative path inside the scratch folder"
+            ),
             ScratchError::Io(e) => write!(f, "scratch folder: {e}"),
         }
     }
@@ -41,7 +44,12 @@ pub struct Leftovers(pub Vec<String>);
 
 impl fmt::Display for Leftovers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} item(s) left in the temp folder: {}", self.0.len(), self.0.join(", "))
+        write!(
+            f,
+            "{} item(s) left in the temp folder: {}",
+            self.0.len(),
+            self.0.join(", ")
+        )
     }
 }
 
@@ -70,7 +78,9 @@ impl Scratch {
 
     /// A new scratch folder, or why it could not be made.
     pub fn try_new() -> Result<Scratch, ScratchError> {
-        let dir = tempfile::Builder::new().prefix("paddock-testkit-").tempdir()?;
+        let dir = tempfile::Builder::new()
+            .prefix("paddock-testkit-")
+            .tempdir()?;
         // Canonical, so paths compare equal to what the code under test resolves (macOS /var vs /private/var).
         let root = dir.path().canonicalize()?;
         for sub in ["work", "home", "tmp"] {
@@ -101,7 +111,9 @@ impl Scratch {
     /// `rel` inside [`work`](Scratch::work), or an error when it is absolute, empty or contains `..`.
     pub fn try_path(&self, rel: &str) -> Result<PathBuf, ScratchError> {
         let p = Path::new(rel);
-        let plain = !rel.is_empty() && p.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+        let plain = !rel.is_empty()
+            && p.components()
+                .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
         if plain {
             Ok(self.work().join(p))
         } else {
@@ -161,7 +173,8 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         let panicking = std::thread::panicking();
         let left = (!self.checked && !panicking).then(|| self.leftovers());
-        let keep = panicking && std::env::var_os(KEEP_VAR).is_some_and(|v| !v.is_empty() && v != "0");
+        let keep =
+            panicking && std::env::var_os(KEEP_VAR).is_some_and(|v| !v.is_empty() && v != "0");
         if let Some(dir) = self.dir.take()
             && keep
         {

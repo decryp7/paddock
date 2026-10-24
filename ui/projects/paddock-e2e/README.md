@@ -6,7 +6,7 @@ The Playwright half of the Paddock shell test kit (ADR 0012 §7, plan S16; the T
 
 The accent colour check is the unit-test half of accessibility: `accentProblems(cssRules(tokensCss), 'myaccent')` in `@decryp7/paddock-ui/shell`
 (contrast of the accent as text, focus ring and fill, the text on the fill, colour-vision simulation, distance from the warning hue and,
-if asked, from other accents and the status colours). Conformance check C31 requires both halves.
+if asked, from other accents and the status colours). Conformance check C33 requires both halves.
 
 ```ts
 // playwright.config.ts
