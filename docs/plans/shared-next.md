@@ -409,3 +409,15 @@ in the branch). "Owned" is in the Paddock repo.
 - Tray model: checked/toggle items.
 - `uiTimeoutProblems`: false positive on identifiers that merely contain "setTimeout" (e.g. `setTimeoutSecs`).
 - Health `Cause` hints should use the repair button's real label.
+
+## Shell gaps found by Pitwall's move (2026-10-24, for 0.3.0)
+
+- Frame elements use unprefixed classes (`.page`, `.status`) that app global CSS breaks: prefix every shell class `pd-`.
+- A quit started through `exit_app` can't be called off (an app's "Ask each time" cancel leaves the window layer "quitting").
+- `uiTimeoutProblems` false positives on setters named `...timeout...(` (also seen in Pitcrew).
+- No shared UI native-feel guard (browser keys, context menu); Pitwall keeps its own `core/native-feel.ts`.
+- `pd.updates` missing from `settings_overview` in mock-runtime test mode.
+- paddock-download: async-friendly transport (or documented private runtime), custom headers, a JSON GET helper, `NotEnoughSpace` naming the path/drive, an external cancel token, constants for caller-added phases, EventSink panics surfaced, a "resumable?" accessor.
+- `JobsStore.follow` in windows without jobs providers.
+- In-memory about/settings backends need shell-only fixtures.
+- The dialog-command checker must run in apps (ship it with its inputs in the npm package).
