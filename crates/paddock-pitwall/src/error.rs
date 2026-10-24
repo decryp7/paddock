@@ -19,6 +19,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 /// What the user can do about a problem; the UI turns each into a button (or a line of advice).
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NextStep {

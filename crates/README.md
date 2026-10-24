@@ -924,3 +924,8 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   error shapes, scripted pairing, failures with `Retry-After`, held and dying streams. It waits on conditions, never on the clock.
   `tests/contract.rs` runs the client against it; with `PADDOCK_PITWALL_HTTP_RS=<pitwall>/crates/pitwall-server/src/http.rs` it also
   checks that Pitwall's router still has every route (Pitwall's CI should set it).
+- `AiSnapshot` (`Session::snapshot`): the one value the shared `<pd-needs-ai>` draws (`@decryp7/paddock-ui/shell/pitwall`): state,
+  the engine's sentence and buttons, the waiting pairing code, whether the app has an engine of its own. The app registers the
+  four commands of `status::COMMANDS` (`pitwall_state`, `pitwall_connect`, `pitwall_cancel_pairing`, `pitwall_use_builtin`) over
+  its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
+  by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.
