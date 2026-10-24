@@ -441,7 +441,27 @@ impl Chromium {
             stop.clone(),
             timed_out.clone(),
         );
-        match connect(&dir, &mut process, opts.start_limit) {
+        let started = connect(&dir, &mut process, opts.start_limit).and_then(|conn| {
+            // The memory watcher looks every 200 ms, so a browser that is quick to start can be connected before its first
+            // look: one look now, with the same cap and sampler, so "over the cap while it starts" does not depend on timing.
+            match (opts.memory_cap, process.id()) {
+                (Some(limit), Some(pid)) => {
+                    let used = opts
+                        .memory_sampler
+                        .as_ref()
+                        .map_or_else(|| paddock_proc::tree_memory(pid), |sample| sample(pid));
+                    if used > limit {
+                        Err(Error::Launch(
+                            "the browser used more memory than allowed while it started".into(),
+                        ))
+                    } else {
+                        Ok(conn)
+                    }
+                }
+                _ => Ok(conn),
+            }
+        });
+        match started {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
                 process,
@@ -650,7 +670,12 @@ fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Conn
                 l.next().and_then(|p| p.trim().parse::<u16>().ok()),
                 l.next(),
             ) {
-                return Connection::connect(port, path.trim());
+                // The file can appear a moment before the endpoint takes connections (and a slow machine shows it): a refused or
+                // half-made handshake is tried again until the start limit, not a failed launch.
+                match Connection::connect(port, path.trim()) {
+                    Err(Error::Connection(_)) if Instant::now() <= end && process.is_running() => {}
+                    done => return done,
+                }
             }
         }
         if !process.is_running() {

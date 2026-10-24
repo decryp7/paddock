@@ -1,4 +1,4 @@
-import type { CategoryClearResult, ClearRequest, ItemView, Skipped, StorageCategory, StorageClearResult, StorageEvent, StorageKind, StorageUsage } from '../generated/storage';
+import type { CategoryClearResult, ClearRequest, ItemView, SizeNode, Skipped, StorageCategory, StorageClearResult, StorageEvent, StorageKind, StorageTree, StorageUsage } from '../generated/storage';
 
 // Payloads from the engine are parsed once, at this edge: what is not the expected shape is dropped, and what passes is rebuilt
 // from known fields only (an unknown extra field never travels on).
@@ -50,6 +50,21 @@ export function parseStorageUsage(v: unknown): StorageUsage | null {
   return { categories: categories as StorageCategory[], totalBytes: v['totalBytes'], capped: v['capped'] };
 }
 
+/** A size node (and everything below it, to the depth the engine keeps), or null when it is not one. Bounded in depth here too. */
+function parseNode(v: unknown, depth = 0): SizeNode | null {
+  if (depth > 8 || !isObject(v) || typeof v['name'] !== 'string' || !isCount(v['bytes']) || !isCount(v['folded']) || !Array.isArray(v['children'])) return null;
+  const children = v['children'].map((c) => parseNode(c, depth + 1));
+  if (children.some((c) => c === null)) return null;
+  return { name: v['name'], bytes: v['bytes'], folded: v['folded'], children: children as SizeNode[] };
+}
+
+/** A `StorageTree` from the event, or null when the payload is not one. */
+export function parseStorageTree(v: unknown): StorageTree | null {
+  if (!isObject(v) || typeof v['id'] !== 'string' || typeof v['capped'] !== 'boolean') return null;
+  const root = parseNode(v['root']);
+  return root ? { id: v['id'], root, capped: v['capped'] } : null;
+}
+
 function parseSkipped(v: unknown): Skipped | null {
   return isObject(v) && typeof v['path'] === 'string' && typeof v['reason'] === 'string' ? { path: v['path'], reason: v['reason'] } : null;
 }
@@ -85,6 +100,10 @@ export function parseStorageEvent(v: unknown): StorageEvent | null {
     case 'cleared': {
       const result = parseClearResult(v['result']);
       return result ? { state: 'cleared', result } : null;
+    }
+    case 'tree': {
+      const tree = parseStorageTree(v['tree']);
+      return tree ? { state: 'tree', tree } : null;
     }
     case 'cancelled':
       return { state: 'cancelled' };

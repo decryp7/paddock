@@ -44,7 +44,11 @@ name?: string,
 /**
  * When it was last opened or saved, in milliseconds since the Unix epoch.
  */
-openedAt: number, };
+openedAt: number, 
+/**
+ * It was a folder when it was recorded (the UI draws the folder glyph).
+ */
+folder?: boolean, };
 
 export type RecentList = { 
 /**
