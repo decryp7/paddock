@@ -564,6 +564,110 @@ Denies the notifications_restore command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-recovery-restore`
+
+</td>
+<td>
+
+Enables the recovery_restore command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-recovery-restore`
+
+</td>
+<td>
+
+Denies the recovery_restore command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-recovery-safe-mode`
+
+</td>
+<td>
+
+Enables the recovery_safe_mode command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-recovery-safe-mode`
+
+</td>
+<td>
+
+Denies the recovery_safe_mode command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-recovery-start-fresh`
+
+</td>
+<td>
+
+Enables the recovery_start_fresh command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-recovery-start-fresh`
+
+</td>
+<td>
+
+Denies the recovery_start_fresh command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-recovery-status`
+
+</td>
+<td>
+
+Enables the recovery_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-recovery-status`
+
+</td>
+<td>
+
+Denies the recovery_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-settings-overview`
 
 </td>

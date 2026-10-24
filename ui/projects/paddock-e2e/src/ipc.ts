@@ -32,6 +32,7 @@ export const START_REPLIES: Readonly<Record<string, unknown>> = Object.freeze({
   window_ready: { recovered: null, ui: null },
   window_pong: null,
   ui_checkpoint: null,
+  recovery_status: { safeMode: false, unclean: null },
   window_boot_error: null,
   'plugin:event|unlisten': null,
 });

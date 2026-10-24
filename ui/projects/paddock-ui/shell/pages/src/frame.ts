@@ -5,13 +5,14 @@ import { cycleRegions, PdIcon, PdStatusBar, PdTitleBar, regionKey, regionTarget 
 import { DialogHost } from '@decryp7/paddock-ui/shell/dialogs';
 import { MENU_MODE, PdMenuBar } from '@decryp7/paddock-ui/shell/menu';
 import { PdNotificationHost } from '@decryp7/paddock-ui/shell/notify';
+import { PdRecoveryNotice, PdSafeModeBadge, RecoveryStore } from '@decryp7/paddock-ui/shell/startup';
 import { PagesFrameStore } from './pages-frame.store';
 import { PAGES_CONFIG } from './pages';
 import { PdPagesSidebar } from './sidebar';
 
 /**
  * The window of a manager app (Pitwall, Pitcrew, Spotter, Dyno; ADR 0012, plan S14): the title bar with the menu bar
- * (S13), the sidebar of contributed pages beside the routed page, the status bar with the contributed status items (the
+ * (S13), the safe-mode badge and the unclean-shutdown notice (X3), the sidebar of contributed pages beside the routed page, the status bar with the contributed status items (the
  * service chip and the notifications of S4, the jobs of S9), the notification host and the dialog host. The sidebar is
  * expanded, a rail or over the page by the layout plan (`sidebarFit`); F6 cycles the regions. Use it as the root
  * component's whole template, with `provideShellPages(...)` in the window's providers.
@@ -21,8 +22,8 @@ import { PdPagesSidebar } from './sidebar';
 @Component({
   selector: 'pd-shell-frame',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, PdTitleBar, PdMenuBar, PdIcon, PdPagesSidebar, PdStatusBar, PdNotificationHost, DialogHost],
-  providers: [PagesFrameStore],
+  imports: [RouterOutlet, PdTitleBar, PdMenuBar, PdIcon, PdPagesSidebar, PdStatusBar, PdNotificationHost, DialogHost, PdRecoveryNotice, PdSafeModeBadge],
+  providers: [PagesFrameStore, RecoveryStore],
   host: {
     '[attr.data-sidebar]': 'store.mode()',
     '[class.drawer-open]': 'store.drawer()',
@@ -38,8 +39,9 @@ import { PdPagesSidebar } from './sidebar';
           <pd-icon name="pd:sidebar" />
         </button>
         <pd-menu-bar />
-        <ng-container ngProjectAs="[slot=end]"><ng-content select="[slot=title-end]" /></ng-container>
+        <ng-container ngProjectAs="[slot=end]"><pd-safe-mode-badge /><ng-content select="[slot=title-end]" /></ng-container>
       </pd-title-bar>
+      <pd-recovery-notice />
     </header>
     <div class="body">
       <nav id="pd-pages-nav" class="sidebar" [attr.aria-label]="t.pages" data-pd-region="sidebar" tabindex="-1" [class.drawer]="store.drawer()" [hidden]="store.mode() === 'overlay' && !store.drawer()">

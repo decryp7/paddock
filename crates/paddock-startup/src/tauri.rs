@@ -22,8 +22,9 @@ pub mod native;
 pub use native::NativeAsker;
 
 use crate::{
-    Action, BootErrorKind, Checkpoints, Choice, Config, ConfigError, PING_EVENT, Pong, Prompt,
-    Question, ReadyReply, Recovery, Watchdog, clean_error, ready_reply,
+    Action, BootErrorKind, Checkpoints, Choice, Config, ConfigError, Lifecycle, PING_EVENT, Pong,
+    Prompt, Question, ReadyReply, Recovery, RestorePlan, StartReport, Watchdog, clean_error,
+    ready_reply,
 };
 use ::tauri::ipc::Invoke;
 use ::tauri::webview::{PageLoadEvent, PageLoadPayload};
@@ -76,6 +77,12 @@ pub enum StartupErrorCode {
     NotInstalled,
     /// The request was malformed (a UI checkpoint that is not an object).
     Invalid,
+    /// The app did not give the contract a [`Lifecycle`] (`StartupBuilder::lifecycle`): there is nothing to recover.
+    NoLifecycle,
+    /// The app has no Safe Mode restart (`StartupBuilder::safe_mode`).
+    SafeModeUnavailable,
+    /// The Safe Mode restart failed; the notice stays so the user can choose again.
+    SafeModeFailed,
 }
 
 impl StartupError {
@@ -104,6 +111,7 @@ pub struct StartupBuilder<R: Runtime> {
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
     asker: Option<Arc<dyn Asker<R>>>,
+    lifecycle: Option<Lifecycle>,
 }
 
 impl<R: Runtime> StartupBuilder<R> {
@@ -158,6 +166,14 @@ impl<R: Runtime> StartupBuilder<R> {
         self.asker(NativeAsker)
     }
 
+    /// The run's lifecycle ([`Lifecycle::begin`], called as early as possible in `main`): the running marker, the
+    /// autosaved session and the restore offer behind the `recovery_*` commands. Without one the contract keeps UI
+    /// checkpoints in memory only and reports a normal start. [`end_run`] ends it on a clean exit.
+    pub fn lifecycle(mut self, lifecycle: Lifecycle) -> Self {
+        self.lifecycle = Some(lifecycle);
+        self
+    }
+
     /// The state to install, or why the timings are inconsistent.
     pub fn build(self) -> Result<Startup<R>, ConfigError> {
         Ok(Startup {
@@ -168,6 +184,8 @@ impl<R: Runtime> StartupBuilder<R> {
             unresponsive: self.unresponsive,
             on_ready: self.on_ready,
             asker: self.asker,
+            lifecycle: self.lifecycle,
+            session_refusal_logged: AtomicBool::new(false),
             started: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
         })
@@ -183,6 +201,9 @@ pub struct Startup<R: Runtime> {
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
     asker: Option<Arc<dyn Asker<R>>>,
+    lifecycle: Option<Lifecycle>,
+    /// A state the session refuses (too large) is logged once, not at every checkpoint.
+    session_refusal_logged: AtomicBool,
     started: AtomicBool,
     stopped: AtomicBool,
 }
@@ -202,7 +223,13 @@ impl<R: Runtime> Startup<R> {
             unresponsive: None,
             on_ready: None,
             asker: None,
+            lifecycle: None,
         }
+    }
+
+    /// The run's lifecycle, if the app gave one.
+    pub fn lifecycle(&self) -> Option<&Lifecycle> {
+        self.lifecycle.as_ref()
     }
 
     /// Runs `f` on the watchdog.
@@ -351,8 +378,85 @@ impl<R: Runtime> Startup<R> {
                 message: "the UI state must be an object".into(),
             });
         }
+        if let Some(life) = &self.lifecycle
+            && let Err(e) = life.checkpoint(label, ui.clone())
+            && !self.session_refusal_logged.swap(true, Ordering::Relaxed)
+        {
+            log::warn!(Window = label; "Window {label}'s UI state is not kept in the session: {e}");
+        }
         lock(&self.checkpoints).put(label, ui);
         Ok(())
+    }
+
+    /// How this run started and what the restore notice offers (a normal start without a lifecycle). The notice is the
+    /// `main` window's: another window hears about safe mode only.
+    pub fn recovery_status(&self, label: &str) -> StartReport {
+        match &self.lifecycle {
+            Some(life) => {
+                let mut report = life.report(self.safe_mode.is_some());
+                if label != "main" {
+                    report.unclean = None;
+                }
+                report
+            }
+            None => StartReport {
+                safe_mode: false,
+                unclean: None,
+            },
+        }
+    }
+
+    fn life(&self) -> Result<&Lifecycle, StartupError> {
+        self.lifecycle.as_ref().ok_or_else(|| StartupError {
+            code: StartupErrorCode::NoLifecycle,
+            message: "the app gave the start-up contract no lifecycle (StartupBuilder::lifecycle)"
+                .into(),
+        })
+    }
+
+    /// The user chose Restore in window `label`.
+    pub fn recovery_restore(&self, label: &str) -> Result<RestorePlan, StartupError> {
+        let plan = self.life()?.restore(label);
+        log::info!(Window = label, Windows = plan.windows.len() as u64; "Restoring the previous session");
+        Ok(plan)
+    }
+
+    /// The user chose Start fresh.
+    pub fn recovery_start_fresh(&self) -> Result<(), StartupError> {
+        self.life()?.start_fresh();
+        log::info!("Starting fresh; the previous session was forgotten");
+        Ok(())
+    }
+
+    /// The user chose Safe mode in window `label`: the app's restart runs, and only when it worked is the notice settled.
+    pub fn recovery_safe_mode(&self, app: &AppHandle<R>, label: &str) -> Result<(), StartupError> {
+        let life = self.life()?;
+        let Some(restart) = &self.safe_mode else {
+            return Err(StartupError {
+                code: StartupErrorCode::SafeModeUnavailable,
+                message: "the app has no Safe Mode restart (StartupBuilder::safe_mode)".into(),
+            });
+        };
+        restart(app, label).map_err(|message| {
+            log::error!(Window = label; "Could not restart in Safe Mode: {message}");
+            StartupError {
+                code: StartupErrorCode::SafeModeFailed,
+                message,
+            }
+        })?;
+        life.chose_safe_mode();
+        Ok(())
+    }
+}
+
+/// A clean exit: stops the ticker, writes the last checkpoint and removes the running marker, so the next start does
+/// not report a crash. The shell calls it at `RunEvent::Exit`; an app without the shell plugin does the same.
+pub fn end_run<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(startup) = app.try_state::<Startup<R>>() {
+        startup.stop();
+        if let Some(life) = startup.lifecycle() {
+            life.end();
+        }
     }
 }
 
@@ -484,7 +588,16 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) -> Option<JoinHandle<()>> {
 
 /// The invoke handler of [`COMMANDS`](crate::COMMANDS) (put it behind `paddock_commands::tauri::Guard`).
 pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
-    ::tauri::generate_handler![window_ready, window_boot_error, ui_checkpoint, window_pong]
+    ::tauri::generate_handler![
+        window_ready,
+        window_boot_error,
+        ui_checkpoint,
+        window_pong,
+        recovery_status,
+        recovery_restore,
+        recovery_start_fresh,
+        recovery_safe_mode
+    ]
 }
 
 fn state<R: Runtime>(webview: &Webview<R>) -> Result<::tauri::State<'_, Startup<R>>, StartupError> {
@@ -526,6 +639,32 @@ pub async fn ui_checkpoint<R: Runtime>(
 pub async fn window_pong<R: Runtime>(webview: Webview<R>, seq: u64) -> Result<(), StartupError> {
     state(&webview)?.pong(&webview, seq);
     Ok(())
+}
+
+/// How this run started: safe mode, and after an unclean shutdown what the notice offers until the user decides.
+#[::tauri::command]
+pub async fn recovery_status<R: Runtime>(webview: Webview<R>) -> Result<StartReport, StartupError> {
+    Ok(state(&webview)?.recovery_status(webview.label()))
+}
+
+/// The user chose Restore: the previous session, with the calling window's own UI state.
+#[::tauri::command]
+pub async fn recovery_restore<R: Runtime>(
+    webview: Webview<R>,
+) -> Result<RestorePlan, StartupError> {
+    state(&webview)?.recovery_restore(webview.label())
+}
+
+/// The user chose Start fresh: the previous session is forgotten.
+#[::tauri::command]
+pub async fn recovery_start_fresh<R: Runtime>(webview: Webview<R>) -> Result<(), StartupError> {
+    state(&webview)?.recovery_start_fresh()
+}
+
+/// The user chose Safe mode: the app restarts in it.
+#[::tauri::command]
+pub async fn recovery_safe_mode<R: Runtime>(webview: Webview<R>) -> Result<(), StartupError> {
+    state(&webview)?.recovery_safe_mode(webview.app_handle(), webview.label())
 }
 
 #[cfg(test)]

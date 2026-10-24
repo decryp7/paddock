@@ -547,6 +547,54 @@
           "markdownDescription": "Denies the notifications_restore command without any pre-configured scope."
         },
         {
+          "description": "Enables the recovery_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-recovery-restore",
+          "markdownDescription": "Enables the recovery_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the recovery_restore command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-recovery-restore",
+          "markdownDescription": "Denies the recovery_restore command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the recovery_safe_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-recovery-safe-mode",
+          "markdownDescription": "Enables the recovery_safe_mode command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the recovery_safe_mode command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-recovery-safe-mode",
+          "markdownDescription": "Denies the recovery_safe_mode command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the recovery_start_fresh command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-recovery-start-fresh",
+          "markdownDescription": "Enables the recovery_start_fresh command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the recovery_start_fresh command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-recovery-start-fresh",
+          "markdownDescription": "Denies the recovery_start_fresh command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the recovery_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-recovery-status",
+          "markdownDescription": "Enables the recovery_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the recovery_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-recovery-status",
+          "markdownDescription": "Denies the recovery_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the settings_overview command without any pre-configured scope.",
           "type": "string",
           "const": "allow-settings-overview",
@@ -853,10 +901,10 @@
           "markdownDescription": "The main window's set: every shell command a top-level window may call.\n#### This default permission set includes:\n\n- `main`"
         },
         {
-          "description": "Every shell command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-about-info`\n- `allow-about-legal`\n- `allow-about-whats-new`\n- `allow-about-whats-new-start`\n- `allow-app-quit`\n- `allow-dialog-open`\n- `allow-health-repair`\n- `allow-health-snapshot`\n- `allow-job-cancel`\n- `allow-jobs-snapshot`\n- `allow-menu-set`\n- `allow-notifications-dismiss`\n- `allow-notifications-list`\n- `allow-notifications-mark-all-read`\n- `allow-notifications-mark-read`\n- `allow-notifications-post`\n- `allow-notifications-record`\n- `allow-notifications-restore`\n- `allow-settings-overview`\n- `allow-settings-reset`\n- `allow-settings-set`\n- `allow-shell-version`\n- `allow-ui-checkpoint`\n- `allow-updates-cancel`\n- `allow-updates-check`\n- `allow-updates-download`\n- `allow-updates-install-on-quit`\n- `allow-updates-restart`\n- `allow-updates-set-preferences`\n- `allow-updates-status`\n- `allow-window-boot-error`\n- `allow-window-close`\n- `allow-window-focus`\n- `allow-window-new`\n- `allow-window-pong`\n- `allow-window-ready`\n- `allow-window-resolve-close`\n- `allow-window-resolve-open`\n- `allow-window-set-title`\n- `allow-window-take-pending`\n- `allow-windows-list`",
+          "description": "Every shell command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-about-info`\n- `allow-about-legal`\n- `allow-about-whats-new`\n- `allow-about-whats-new-start`\n- `allow-app-quit`\n- `allow-dialog-open`\n- `allow-health-repair`\n- `allow-health-snapshot`\n- `allow-job-cancel`\n- `allow-jobs-snapshot`\n- `allow-menu-set`\n- `allow-notifications-dismiss`\n- `allow-notifications-list`\n- `allow-notifications-mark-all-read`\n- `allow-notifications-mark-read`\n- `allow-notifications-post`\n- `allow-notifications-record`\n- `allow-notifications-restore`\n- `allow-recovery-restore`\n- `allow-recovery-safe-mode`\n- `allow-recovery-start-fresh`\n- `allow-recovery-status`\n- `allow-settings-overview`\n- `allow-settings-reset`\n- `allow-settings-set`\n- `allow-shell-version`\n- `allow-ui-checkpoint`\n- `allow-updates-cancel`\n- `allow-updates-check`\n- `allow-updates-download`\n- `allow-updates-install-on-quit`\n- `allow-updates-restart`\n- `allow-updates-set-preferences`\n- `allow-updates-status`\n- `allow-window-boot-error`\n- `allow-window-close`\n- `allow-window-focus`\n- `allow-window-new`\n- `allow-window-pong`\n- `allow-window-ready`\n- `allow-window-resolve-close`\n- `allow-window-resolve-open`\n- `allow-window-set-title`\n- `allow-window-take-pending`\n- `allow-windows-list`",
           "type": "string",
           "const": "main",
-          "markdownDescription": "Every shell command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-about-info`\n- `allow-about-legal`\n- `allow-about-whats-new`\n- `allow-about-whats-new-start`\n- `allow-app-quit`\n- `allow-dialog-open`\n- `allow-health-repair`\n- `allow-health-snapshot`\n- `allow-job-cancel`\n- `allow-jobs-snapshot`\n- `allow-menu-set`\n- `allow-notifications-dismiss`\n- `allow-notifications-list`\n- `allow-notifications-mark-all-read`\n- `allow-notifications-mark-read`\n- `allow-notifications-post`\n- `allow-notifications-record`\n- `allow-notifications-restore`\n- `allow-settings-overview`\n- `allow-settings-reset`\n- `allow-settings-set`\n- `allow-shell-version`\n- `allow-ui-checkpoint`\n- `allow-updates-cancel`\n- `allow-updates-check`\n- `allow-updates-download`\n- `allow-updates-install-on-quit`\n- `allow-updates-restart`\n- `allow-updates-set-preferences`\n- `allow-updates-status`\n- `allow-window-boot-error`\n- `allow-window-close`\n- `allow-window-focus`\n- `allow-window-new`\n- `allow-window-pong`\n- `allow-window-ready`\n- `allow-window-resolve-close`\n- `allow-window-resolve-open`\n- `allow-window-set-title`\n- `allow-window-take-pending`\n- `allow-windows-list`"
+          "markdownDescription": "Every shell command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-about-info`\n- `allow-about-legal`\n- `allow-about-whats-new`\n- `allow-about-whats-new-start`\n- `allow-app-quit`\n- `allow-dialog-open`\n- `allow-health-repair`\n- `allow-health-snapshot`\n- `allow-job-cancel`\n- `allow-jobs-snapshot`\n- `allow-menu-set`\n- `allow-notifications-dismiss`\n- `allow-notifications-list`\n- `allow-notifications-mark-all-read`\n- `allow-notifications-mark-read`\n- `allow-notifications-post`\n- `allow-notifications-record`\n- `allow-notifications-restore`\n- `allow-recovery-restore`\n- `allow-recovery-safe-mode`\n- `allow-recovery-start-fresh`\n- `allow-recovery-status`\n- `allow-settings-overview`\n- `allow-settings-reset`\n- `allow-settings-set`\n- `allow-shell-version`\n- `allow-ui-checkpoint`\n- `allow-updates-cancel`\n- `allow-updates-check`\n- `allow-updates-download`\n- `allow-updates-install-on-quit`\n- `allow-updates-restart`\n- `allow-updates-set-preferences`\n- `allow-updates-status`\n- `allow-window-boot-error`\n- `allow-window-close`\n- `allow-window-focus`\n- `allow-window-new`\n- `allow-window-pong`\n- `allow-window-ready`\n- `allow-window-resolve-close`\n- `allow-window-resolve-open`\n- `allow-window-set-title`\n- `allow-window-take-pending`\n- `allow-windows-list`"
         },
         {
           "description": "Every shell command a panel popped out of a window (`p-<host>-<n>`) may call.\n#### This permission set includes:\n\n- `allow-about-info`\n- `allow-about-legal`\n- `allow-about-whats-new`\n- `allow-app-quit`\n- `allow-health-repair`\n- `allow-health-snapshot`\n- `allow-job-cancel`\n- `allow-jobs-snapshot`\n- `allow-menu-set`\n- `allow-notifications-dismiss`\n- `allow-notifications-list`\n- `allow-notifications-mark-all-read`\n- `allow-notifications-mark-read`\n- `allow-notifications-post`\n- `allow-notifications-record`\n- `allow-notifications-restore`\n- `allow-settings-overview`\n- `allow-shell-version`\n- `allow-updates-status`\n- `allow-window-boot-error`\n- `allow-window-focus`\n- `allow-window-pong`\n- `allow-window-ready`\n- `allow-windows-list`",
