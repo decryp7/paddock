@@ -1,0 +1,329 @@
+//! macOS: the launch agent inside the app bundle registered through `SMAppService` ([`LaunchdBundled`]), and a plist
+//! file loaded with `launchctl bootstrap` ([`LaunchdFile`], development builds and launch daemons). Both read launchd's
+//! own report (`launchctl print`, `print-disabled`) to see a stale registration (R03) and the user's switch.
+
+use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+use crate::parse::{JobReport, parse_job, parse_print_disabled, plist_program};
+use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};
+use crate::port::{AppService, AppServiceStatus, RegisterError, System};
+use crate::render::{LaunchdProgram, launchd_plist};
+use crate::spec::ServiceSpec;
+use std::path::PathBuf;
+use std::time::Duration;
+
+/// `launchctl print` of a service launchd does not know exits with this.
+const NOT_FOUND: i32 = 113;
+
+/// launchd's report of the job: `Some(default)` when launchd does not know it, `None` when it could not be asked.
+fn job_report(sys: &mut dyn System, target: &str) -> Option<JobReport> {
+    let out = sys.run(LAUNCHCTL, &["print", target]).ok()?;
+    if out.success() {
+        Some(parse_job(&out.stdout))
+    } else if out.code == Some(NOT_FOUND) || out.stderr.contains("Could not find service") {
+        Some(JobReport::default())
+    } else {
+        None
+    }
+}
+
+fn job_of(report: Option<JobReport>) -> Job {
+    match report {
+        None => Job::Unknown,
+        Some(r) if !r.found => Job::Absent,
+        Some(r) if r.stale() => Job::Refused,
+        Some(r) if r.running => Job::Running,
+        Some(_) => Job::NotRunning,
+    }
+}
+
+/// Whether launchd's override database marks the label disabled (`None`: not listed or not readable).
+fn disabled(sys: &mut dyn System, domain: &str, label: &str) -> Option<bool> {
+    let out = sys.run(LAUNCHCTL, &["print-disabled", domain]).ok()?;
+    if !out.success() {
+        return None;
+    }
+    parse_print_disabled(&out.stdout, label)
+}
+
+/// `launchctl bootout <target>`; a job launchd does not know is fine.
+fn bootout(sys: &mut dyn System, target: &str) -> Result<(), String> {
+    match sys.run(LAUNCHCTL, &["bootout", target]) {
+        Ok(o) if o.success() => Ok(()),
+        Ok(o)
+            if o.code == Some(3)
+                || o.code == Some(NOT_FOUND)
+                || o.stderr.contains("No such process") =>
+        {
+            Ok(())
+        }
+        Ok(o) => Err(format!("launchctl bootout: {}", o.reason())),
+        Err(e) => Err(format!("launchctl bootout {e}")),
+    }
+}
+
+fn gone(sys: &mut dyn System, target: &str) -> bool {
+    job_report(sys, target).is_some_and(|r| !r.found)
+}
+
+/// The launch agent inside the app bundle (`Contents/Library/LaunchAgents/<label>.plist`, rendered by
+/// [`launchd_plist`] with [`LaunchdProgram::Bundled`]), registered through `SMAppService`; the user approves it in
+/// Login Items.
+pub struct LaunchdBundled {
+    spec: ServiceSpec,
+    uid: u32,
+    app: Box<dyn AppService>,
+    sys: Box<dyn System>,
+}
+
+impl LaunchdBundled {
+    /// The bundled agent of `spec` for the user `uid` (`paddock_service::native::current_uid()`).
+    pub fn new(
+        spec: ServiceSpec,
+        uid: u32,
+        app: Box<dyn AppService>,
+        sys: Box<dyn System>,
+    ) -> Self {
+        Self {
+            spec,
+            uid,
+            app,
+            sys,
+        }
+    }
+
+    fn target(&self) -> String {
+        launchd_target(&self.spec, self.uid)
+    }
+}
+
+impl Backend for LaunchdBundled {
+    fn mechanism(&self) -> Mechanism {
+        Mechanism::LaunchdBundled
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            automatic: true,
+            pinned_identity: true,
+            login_items: true,
+        }
+    }
+
+    fn inspect(&mut self) -> Inspection {
+        let status = self.app.status();
+        let domain = launchd_domain(self.spec.kind(), self.uid);
+        let off = disabled(self.sys.as_mut(), &domain, self.spec.label()) == Some(true);
+        let registration = match status {
+            AppServiceStatus::NotFound => Registration::Unavailable(format!(
+                "macOS cannot find {}'s launch agent: open {} from the Applications folder (the agent is part of the app).",
+                self.spec.name(),
+                self.spec.name()
+            )),
+            AppServiceStatus::RequiresApproval => Registration::NeedsApproval,
+            _ if off => Registration::SwitchedOff,
+            AppServiceStatus::NotRegistered => Registration::Absent,
+            AppServiceStatus::Enabled => Registration::Registered,
+        };
+        let target = self.target();
+        Inspection {
+            registration,
+            job: job_of(job_report(self.sys.as_mut(), &target)),
+            ..Inspection::absent()
+        }
+    }
+
+    fn register(&mut self) -> Result<(), RegisterError> {
+        self.app.register()
+    }
+
+    fn unregister(&mut self) -> Result<(), String> {
+        self.app.unregister()
+    }
+
+    fn evict(&mut self) -> Result<(), String> {
+        let target = self.target();
+        bootout(self.sys.as_mut(), &target)
+    }
+
+    fn job_gone(&mut self) -> bool {
+        let target = self.target();
+        gone(self.sys.as_mut(), &target)
+    }
+
+    fn pause(&mut self, how_long: Duration) {
+        self.sys.pause(how_long);
+    }
+
+    fn open_login_items(&mut self) -> bool {
+        self.app.open_login_items();
+        true
+    }
+}
+
+/// A plist file (`~/Library/LaunchAgents` or `/Library/LaunchDaemons`) loaded with `launchctl bootstrap`.
+pub struct LaunchdFile {
+    spec: ServiceSpec,
+    uid: u32,
+    plist: PathBuf,
+    target: Target,
+    sys: Box<dyn System>,
+}
+
+impl LaunchdFile {
+    /// The plist file `plist` (`paths::launchd_plist_path`) starting `target`, for the user `uid`.
+    pub fn new(
+        spec: ServiceSpec,
+        uid: u32,
+        plist: PathBuf,
+        target: Target,
+        sys: Box<dyn System>,
+    ) -> Self {
+        Self {
+            spec,
+            uid,
+            plist,
+            target,
+            sys,
+        }
+    }
+
+    /// The text this copy registers.
+    pub fn definition(&self) -> String {
+        let wd = self
+            .target
+            .working_dir
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned());
+        let log = self
+            .target
+            .log
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned());
+        launchd_plist(
+            &self.spec,
+            LaunchdProgram::File {
+                exe: &self.target.exe_text(),
+                working_dir: wd.as_deref(),
+                log: log.as_deref(),
+            },
+        )
+    }
+
+    fn launchd_target(&self) -> String {
+        launchd_target(&self.spec, self.uid)
+    }
+}
+
+fn denied(text: &str) -> bool {
+    text.contains("Operation not permitted") || text.contains("Permission denied")
+}
+
+impl Backend for LaunchdFile {
+    fn mechanism(&self) -> Mechanism {
+        Mechanism::LaunchdFile
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            automatic: true,
+            pinned_identity: true,
+            login_items: false,
+        }
+    }
+
+    fn inspect(&mut self) -> Inspection {
+        let target = self.launchd_target();
+        let job = job_of(job_report(self.sys.as_mut(), &target));
+        let text = match self.sys.read(&self.plist) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Inspection {
+                    job,
+                    ..Inspection::absent()
+                };
+            }
+            Err(e) => {
+                return Inspection {
+                    registration: Registration::Unavailable(format!(
+                        "{} cannot be read: {e}",
+                        self.plist.display()
+                    )),
+                    job,
+                    ..Inspection::absent()
+                };
+            }
+        };
+        let domain = launchd_domain(self.spec.kind(), self.uid);
+        let off = disabled(self.sys.as_mut(), &domain, self.spec.label()) == Some(true);
+        let program = plist_program(&text);
+        let program_exists = program
+            .as_ref()
+            .map(|p| self.sys.is_program(std::path::Path::new(p)));
+        Inspection {
+            registration: if off {
+                Registration::SwitchedOff
+            } else {
+                Registration::Registered
+            },
+            job,
+            points_here: program.as_ref().map(|p| *p == self.target.exe_text()),
+            program,
+            program_exists,
+            definition_current: Some(text == self.definition()),
+        }
+    }
+
+    fn register(&mut self) -> Result<(), RegisterError> {
+        let text = self.definition();
+        if let Err(e) = self.sys.write(&self.plist, &text) {
+            return Err(if e.kind() == std::io::ErrorKind::PermissionDenied {
+                RegisterError::NeedsElevation
+            } else {
+                RegisterError::Other(format!(
+                    "{} could not be written: {e}",
+                    self.plist.display()
+                ))
+            });
+        }
+        let domain = launchd_domain(self.spec.kind(), self.uid);
+        let plist = self.plist.to_string_lossy().into_owned();
+        match self.sys.run(LAUNCHCTL, &["bootstrap", &domain, &plist]) {
+            Ok(o) if o.success() => Ok(()),
+            Ok(o) if denied(&o.stderr) => Err(RegisterError::NeedsElevation),
+            Ok(o) => Err(RegisterError::Other(format!(
+                "launchctl bootstrap: {}",
+                o.reason()
+            ))),
+            Err(e) => Err(RegisterError::Other(format!("launchctl bootstrap {e}"))),
+        }
+    }
+
+    fn unregister(&mut self) -> Result<(), String> {
+        match self.sys.remove(&self.plist) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!(
+                "{} could not be removed: {e}",
+                self.plist.display()
+            )),
+        }
+    }
+
+    fn evict(&mut self) -> Result<(), String> {
+        let target = self.launchd_target();
+        bootout(self.sys.as_mut(), &target)
+    }
+
+    fn job_gone(&mut self) -> bool {
+        let target = self.launchd_target();
+        gone(self.sys.as_mut(), &target)
+    }
+
+    fn pause(&mut self, how_long: Duration) {
+        self.sys.pause(how_long);
+    }
+
+    fn definition(&self) -> Option<String> {
+        Some(Self::definition(self))
+    }
+}

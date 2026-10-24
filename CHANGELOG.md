@@ -5,6 +5,18 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-service` (plan X4, decision D4, rule 24, catalogue R03/R05): background services and login items. One
+  `ServiceSpec` rendered (pure, golden-tested) as the bundled launchd plist for `SMAppService` or a plist file, the systemd
+  user or system unit, the Windows `Run` value, the Windows service as `sc.exe` calls and the NSIS installer hooks (they
+  replace the hand-written `src-tauri/macos/*.plist` and `src-tauri/windows/installer-hooks.nsh`). Backends for
+  `SMAppService`, plist + `launchctl`, systemd, the `Run` value and the Service Control Manager (directly or through one UAC
+  prompt), all behind the `System`/`AppService`/`Elevator` ports with recording fakes (`testing`). `plan` + `repair::replace`:
+  unregister, `launchctl bootout`, wait until gone (bounded), register, check, retried; once per version change where the
+  OS pins the build, automatically for a refused job while the service is down, a missing or moved program re-pointed, a
+  newer copy's registration left alone, the user's switch never overridden, nothing installed unasked. `Manager` (status,
+  `on_start`, repair, install, uninstall, the registered version in `service-<label>.json`, a cross-copy lock,
+  `RepairTracker` progress), `ServiceStatus::health` for `paddock-health`, the `pd.login` launch-at-login section, the
+  exe-changed restart (`watch`), the login-shell `PATH` for a supervised program (`supervised`) and the shared verbs.
 - `paddock-diag` and `@decryp7/paddock-ui/shell/diagnostics` (plan X2, decision D9): Report a problem, the three designs of Debrief,
   Dyno and Pitcrew as one. A diagnostics zip of the app's log (newest part, read from the end), system facts, settings (secrets
   masked) and crash marker, plus the sections an app adds; one `Redactor` (secrets from Pitcrew and Debrief, personal data from Dyno,
