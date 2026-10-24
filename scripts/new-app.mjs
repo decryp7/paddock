@@ -109,7 +109,7 @@ export function rustRewrites({ id, name, identifier }, versions) {
       { all: (text) => registryDependencies(text, versions) },
     ],
     'src/main.rs': [['paddock_shell_demo::run();', `${lib}::run();`]],
-    'build.rs': [['shell-demo-agent-', `${agent}-`]],
+    'build.rs': [['"shell-demo-agent"', `"${agent}"`]],
     'agent/Cargo.toml': [
       [/^# The Paddock Shell Demo's sample background agent/m, `# ${name}'s sample background agent (from Paddock Shell Demo's)`],
       ['name = "shell-demo-agent"', `name = "${agent}"`],
@@ -120,7 +120,10 @@ export function rustRewrites({ id, name, identifier }, versions) {
     ],
     'agent/src/lib.rs': agentSpec,
     'agent/src/main.rs': [['shell_demo_agent::', `${agentLib}::`]],
-    'agent/sidecar.mjs': [['shell-demo-agent', agent]],
+    'agent/sidecar.mjs': [
+      ["'../../../../conformance/src/sidecar/sidecar.mjs'", "'@decryp7/paddock-conformance/sidecar'"],
+      ['shell-demo-agent', agent],
+    ],
     'macos/agent.plist': [
       ['net.decryptology.paddock-shell-demo.agent', `${identifier}.agent`],
       ['net.decryptology.paddock-shell-demo', identifier],
@@ -223,7 +226,7 @@ export function appPackageJson({ id, name }, uiPackage, paddockVersion, tauriCli
     },
     dependencies: Object.fromEntries(Object.entries(deps).sort(([a], [b]) => a.localeCompare(b))),
     devDependencies: Object.fromEntries(
-      Object.entries({ ...dev, '@decryp7/paddock-e2e': `^${paddockVersion}`, '@tauri-apps/cli': tauriCli }).sort(([a], [b]) => a.localeCompare(b)),
+      Object.entries({ ...dev, '@decryp7/paddock-conformance': `^${paddockVersion}`, '@decryp7/paddock-e2e': `^${paddockVersion}`, '@tauri-apps/cli': tauriCli }).sort(([a], [b]) => a.localeCompare(b)),
     ),
   };
 }
