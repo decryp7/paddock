@@ -19,6 +19,13 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-mcp` follow-ups (plan X22): `notifications/cancelled` stops the running call (its token is cancelled, it gets no answer);
+  the tool calls of one connection run concurrently up to `Limits::max_concurrent_calls` (default 4) and are answered in any order,
+  while everything else stays in order; `McpControl` and the Tauri adapter (feature `tauri`: `mcp_get`, `mcp_save`, `mcp_issue_key`
+  for the key dialog's window only, `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear`, the `paddock://mcp` event) with the settings
+  in a versioned file, the client keys persisted through `paddock-secrets`, the audit log announced to every window;
+  `paddock_shell::Builder::mcp`. The UI side is `@decryp7/paddock-ui/shell/mcp` (Settings > AI access (MCP), the key and revoke dialogs,
+  the audit viewer).
 - `paddock-files` and `@decryp7/paddock-ui/shell/files` (plan X31): the user's files. `PathGrants` (open only paths the user chose,
   by dialog, drop or command line; per window, bounded, expiring, canonical), the validators (`parse`, `canonical`, `output_file`,
   `child`, `confined`), validated pickers behind `Picker` (`NativePicker` over `tauri-plugin-dialog`), `Recents` (named lists in a
