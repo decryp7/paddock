@@ -428,7 +428,7 @@ jobs:
     name: release
     if: startsWith(github.ref, 'refs/tags/v')
     # Gated: a tag publishes only when every check job and every installer build passed (a skipped or failed need blocks it).
-    needs: [rust-lint, rust-test, windows, macos, licences, frontend, bundle]
+    needs: [rust-lint, rust-test, windows, macos, licences, frontend, e2e, bundle]
     runs-on: ubuntu-latest
     container:
       image: catthehacker/ubuntu:act-latest
