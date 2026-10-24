@@ -252,6 +252,8 @@ export class ShellDialogs {
   }
   /** Resolves once the window has left Loading without an error. */
   async loaded(): Promise<void> {
+    // The shell itself first: before it mounts there is no "loading" marker either, and a window still on the start-up splash would pass.
+    await expect(this.shell).toBeVisible();
     await expect(this.shell.getByTestId('dialog-loading')).toHaveCount(0);
     await expect(this.shell.getByTestId('dialog-error')).toHaveCount(0);
   }

@@ -54,8 +54,12 @@ export async function axeTargets(page: Page, targets: readonly AxeTarget[], opti
   for (const theme of options.themes ?? THEMES) {
     await page.emulateMedia({ colorScheme: theme });
     for (const target of targets) {
+      // A fresh document each time: a change of the hash alone keeps the previous window (and its theme transition) alive.
+      await page.goto('about:blank');
       await page.goto(target.url);
       await target.ready?.(page);
+      // Colours are measured at rest, not in the middle of a fade.
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
       const found = await axeViolations(page, options);
       if (found.length) failures[`${target.name} (${theme})`] = found;
     }
