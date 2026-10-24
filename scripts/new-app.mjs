@@ -102,7 +102,7 @@ export function rustRewrites({ id, name, identifier }, versions) {
       ['include_str!("../../CHANGELOG.md")', 'include_str!("../../../CHANGELOG.md")'],
       ['include_str!("../../../../LICENSE-MIT")', 'include_str!("../../../LICENSE-MIT")'],
       ['include_str!("../../../../LICENSE-APACHE")', 'include_str!("../../../LICENSE-APACHE")'],
-      [/option_env!\("SHELL_DEMO_(COMMIT|BUILT)"\)/g, (_m, k) => `option_env!("${id.toUpperCase().replaceAll('-', '_')}_${k}")`],
+      [/option_env!\("PADDOCK_BUILD_(COMMIT|DATE)"\)/g, (_m, k) => `option_env!("${id.toUpperCase().replaceAll('-', '_')}_${k === 'DATE' ? 'BUILT' : k}")`],
     ],
     'src/tray.rs': [[/shell-demo-tray-/g, `${id}-tray-`]],
     'tests/app.rs': [
