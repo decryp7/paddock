@@ -74,7 +74,10 @@ export function labelTabOverflow(root: HTMLElement): { dispose(): void } {
       chip.setAttribute('role', 'button');
       chip.tabIndex = 0;
       // The chip points down like the list it opens (dockview draws a right-pointing chevron).
-      chip.querySelector('svg')?.replaceWith(glyphSvg('chevron-down', 14));
+      // (dockview's own style turns its right-pointing chevron by 90 degrees; `.pd-dock-overflow-chevron` undoes that for ours.)
+      const chevron = glyphSvg('chevron-down', 14);
+      chevron.classList.add('pd-dock-overflow-chevron');
+      chip.querySelector('svg')?.replaceWith(chevron);
       chip.querySelectorAll('svg, span').forEach((el) => el.setAttribute('aria-hidden', 'true'));
     });
   const onKey = (e: KeyboardEvent) => {
@@ -98,6 +101,36 @@ export function labelTabOverflow(root: HTMLElement): { dispose(): void } {
       root.removeEventListener('keydown', onKey);
       root.removeEventListener('mouseover', label);
       root.removeEventListener('focusin', label);
+    },
+  };
+}
+
+/**
+ * The tab you are looking at stays visible: when a strip is too narrow for its tabs, the active tab is scrolled into the
+ * strip and the others are the ones the overflow chip lists. Re-checked when the active tab changes (class changes), tabs
+ * come and go, the strip resizes, and on `refresh()` (the dock calls it after a layout change). Never scrolls a strip whose
+ * active tab is already entirely inside it.
+ */
+export function keepActiveTabVisible(root: HTMLElement): { refresh(): void; dispose(): void } {
+  const refresh = () =>
+    root.querySelectorAll<HTMLElement>('.dv-tabs-container').forEach((strip) => {
+      const tab = strip.querySelector<HTMLElement>('.dv-tab.dv-active-tab');
+      if (!tab) return;
+      const box = strip.getBoundingClientRect();
+      const at = tab.getBoundingClientRect();
+      if (at.left < box.left) strip.scrollLeft += at.left - box.left;
+      else if (at.right > box.right) strip.scrollLeft += Math.min(at.right - box.right, at.left - box.left);
+    });
+  const observer = new MutationObserver(refresh);
+  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(refresh);
+  resize?.observe(root);
+  refresh();
+  return {
+    refresh,
+    dispose: () => {
+      observer.disconnect();
+      resize?.disconnect();
     },
   };
 }

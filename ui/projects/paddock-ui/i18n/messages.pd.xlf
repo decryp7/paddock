@@ -2561,11 +2561,14 @@
       <trans-unit id="pd.wb.dock.cmd.layout-delete" datatype="html">
         <source>Delete saved layout</source>
       </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-manage" datatype="html">
+        <source>Manage layouts…</source>
+      </trans-unit>
       <trans-unit id="pd.wb.dock.cmd.layout-reset" datatype="html">
         <source>Reset perspective</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.cmd.layout-save" datatype="html">
-        <source>Save current as perspective</source>
+        <source>Save layout…</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.cmd.panel-menu" datatype="html">
         <source>Panel menu</source>
@@ -2632,6 +2635,72 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.layout.fit.undo" datatype="html">
         <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-apply" datatype="html">
+        <source>Apply</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-apply-for" datatype="html">
+        <source>Apply layout <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-delete" datatype="html">
+        <source>Delete</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-delete-for" datatype="html">
+        <source>Delete layout <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-deleted" datatype="html">
+        <source>Deleted layout <x id="name"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-empty" datatype="html">
+        <source>No saved layouts yet. Save the current arrangement from the Window menu.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-loading" datatype="html">
+        <source>Loading layouts…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-rename" datatype="html">
+        <source>Rename</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-rename-for" datatype="html">
+        <source>Rename layout <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-rename-label" datatype="html">
+        <source>New name</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-title" datatype="html">
+        <source>Manage layouts</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.name-duplicate" datatype="html">
+        <source>A layout with this name exists. Pick another name.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.name-empty" datatype="html">
+        <source>Give the layout a name.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.name-too-long" datatype="html">
+        <source>Use at most <x id="max"/> characters.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-hint" datatype="html">
+        <source>Saves the windows and panels as they are now.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-label" datatype="html">
+        <source>Layout name</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-ok" datatype="html">
+        <source>Save</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-title" datatype="html">
+        <source>Save layout</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.notice.action" datatype="html">
         <source>Undo</source>
