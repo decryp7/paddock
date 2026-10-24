@@ -14,6 +14,11 @@ Conventional Commits; one semver tag for the whole repo.
   (`PdLanguagePage`, `defineLanguageSettingsPage`): System default, English, each translation by its own name, the pseudo-locale
   where the app ships it, a restart offer. `paddock-conformance` C32 runs `build --check --no-extract` over the app's
   `paddock-i18n.json`.
+- `app_relaunch` (`paddock-startup`, a window-class command: any window, a dialog lists it in its contract) and
+  `StartupBuilder::relaunch(|app| app.restart())`: the checkpoints are written to the session first, then the app's relaunch
+  runs, so the whole app restarts (a language change from the Settings window); without a hook it answers `relaunchUnavailable`,
+  a failing one `relaunchFailed` and the app keeps running. The shell demo wires it; the Language page calls it through
+  `LANGUAGE_CONFIG.reload`.
 - `paddock-names` search index and `names_search` (plan X18 follow-up): the catalogue keeps hash maps for the exact, joined and alias
   rungs and an inverted index of words (prefix by range, inside-a-word by scan, typos by letter-bag and edit distance), so a
   search over 250,000 names takes about 20 ms (was 500 ms; `cargo bench -p paddock-names` fails over 50 ms). `search_scan` ranks every
