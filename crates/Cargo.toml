@@ -30,6 +30,9 @@ members = [
     "paddock-packs",
     "paddock-panels",
     "paddock-pitwall",
+    "paddock-plugin-api",
+    "paddock-plugin-host",
+    "paddock-plugin-test",
     "paddock-proc",
     "paddock-secrets",
     "paddock-service",
@@ -87,6 +90,9 @@ paddock-net = { path = "paddock-net", version = "0.1.0", registry = "decryp7" }
 paddock-packs = { path = "paddock-packs", version = "0.1.0", registry = "decryp7" }
 paddock-panels = { path = "paddock-panels", version = "0.1.0", registry = "decryp7" }
 paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "decryp7" }
+paddock-plugin-api = { path = "paddock-plugin-api", version = "0.1.0", registry = "decryp7" }
+paddock-plugin-host = { path = "paddock-plugin-host", version = "0.1.0", registry = "decryp7" }
+paddock-plugin-test = { path = "paddock-plugin-test", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
 paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
