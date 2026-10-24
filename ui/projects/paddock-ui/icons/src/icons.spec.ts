@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ICON_GRID, ICON_STROKE, outlineIcon } from './outline';
-import { PD_ICON_PATHS } from './paths';
+import { PD_ICON_DOTS, PD_ICON_PATHS } from './paths';
 import { PD_ICON_NAMESPACE, pdIconLiterals, pdIconSvg, registerPaddockIcons } from './register';
 
 /** Every number in path data, to check the glyphs stay on the grid. */
@@ -21,13 +21,41 @@ describe('the pd: icon set', () => {
   it('draws every glyph on the 24 px grid inside a 2 px margin (absolute coordinates only, arcs checked by end point)', () => {
     for (const [name, d] of Object.entries(PD_ICON_PATHS)) {
       // Only absolute commands are used, so every pair of numbers is a point except arc flags/radii: bound them all by the grid.
-      expect(d, name).toMatch(/^[MmLlHhVvCcSsAaZz0-9 .,-]+$/);
+      expect(d, name).toMatch(/^[MmLlHhVvCcSsAaZz0-9 .,-]*$/);
+      if (d === '') expect(PD_ICON_DOTS[name as keyof typeof PD_ICON_PATHS], `${name} has no lines, so it has dots`).toBeDefined();
       for (const n of numbers(d)) expect(Math.abs(n), `${name} ${n}`).toBeLessThanOrEqual(ICON_GRID);
     }
   });
 
-  it('makes an SVG literal stroked with currentColor, 1.75 wide, with round caps and joins', () => {
+  it('draws dots as filled circles, never as strokes (a stroke wider than the circle leaves a ring, review P1-1)', () => {
+    for (const n of ['alert', 'info', 'keyboard', 'more'] as const) expect(PD_ICON_DOTS[n]?.length, n).toBeGreaterThan(0);
+    for (const [name, d] of Object.entries(PD_ICON_PATHS)) {
+      // No tiny arc sub-path (radius under 1) can be in the path data: that was the dot.
+      expect(d, name).not.toMatch(/a\s*0?\.\d+[ ,]0?\.\d+/i);
+    }
+    const svg = pdIconSvg('alert');
+    expect(svg).toMatch(/<circle [^>]*fill="currentColor" stroke="none"\/>/);
+    expect((pdIconSvg('more').match(/<circle /g) ?? []).length).toBe(3);
+    for (const dots of Object.values(PD_ICON_DOTS)) for (const [cx, cy, r] of dots ?? []) {
+      expect(r).toBeGreaterThanOrEqual(0.8);
+      expect(cx - r).toBeGreaterThanOrEqual(2.5);
+      expect(cy - r).toBeGreaterThanOrEqual(2.5);
+    }
+  });
+
+  it('keeps the "!" of alert clear of the triangle base at 16 px (review P1-2)', () => {
+    const [, cy, r] = PD_ICON_DOTS.alert?.[0] ?? [0, 0, 0];
+    const px = (grid: number): number => (grid * 16) / 24;
+    // Clear space in px at 16 px between the dot and the base line's inner edge (stroke 1.5), and between stem and dot.
+    expect(px(19.5 - cy - r) - 0.75).toBeGreaterThanOrEqual(1);
+    const stemEnd = Number(/v([\d.]+)$/.exec(PD_ICON_PATHS.alert)?.[1]) + Number(/zM12 ([\d.]+)v/.exec(PD_ICON_PATHS.alert)?.[1]);
+    expect(px(cy - r - stemEnd) - 0.75).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it('makes an SVG literal stroked with currentColor, 1.5 screen px wide at any size, with round caps and joins', () => {
     const svg = pdIconSvg('refresh');
+    expect(ICON_STROKE).toBe(1.5);
+    expect(svg).toContain('vector-effect="non-scaling-stroke"');
     expect(svg).toContain('viewBox="0 0 24 24"');
     expect(svg).toContain('stroke="currentColor"');
     expect(svg).toContain(`stroke-width="${ICON_STROKE}"`);

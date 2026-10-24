@@ -342,8 +342,8 @@ mod tests {
         // The pipe is shared with the grandchild: EOF means every holder is dead.
         let mut rest = Vec::new();
         r.read_to_end(&mut rest).unwrap();
-        assert!(!crate::is_alive(pid), "the child leaked");
-        assert!(!crate::is_alive(grand), "the grandchild leaked");
+        assert!(crate::testchild::is_gone(pid), "the child leaked");
+        assert!(crate::testchild::is_gone(grand), "the grandchild leaked");
         assert!(reg.pids().is_empty(), "a dropped child leaves the registry");
     }
 
@@ -361,7 +361,7 @@ mod tests {
         assert!(b.wait().is_some_and(|s| !s.success()));
         let mut rest = Vec::new();
         r.read_to_end(&mut rest).unwrap();
-        assert!(!crate::is_alive(grand));
+        assert!(crate::testchild::is_gone(grand));
         assert_eq!(reg.end_all(), 0);
     }
 
@@ -472,7 +472,7 @@ mod tests {
             .find_map(|l| l.strip_prefix("pid "))
         {
             assert!(
-                !crate::is_alive(g.parse().unwrap()),
+                crate::testchild::is_gone(g.parse().unwrap()),
                 "the grandchild survived the memory stop"
             );
         }
