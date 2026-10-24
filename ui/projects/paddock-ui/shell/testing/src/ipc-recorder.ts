@@ -1,8 +1,10 @@
+import { SHELL_PLUGIN } from '@decryp7/paddock-ui/shell';
 /**
  * Records the IPC commands a window sends, at the seam every Tauri app goes through: `@tauri-apps/api`'s `invoke` calls
  * `window.__TAURI_INTERNALS__.invoke`. The recorder installs a stand-in that answers from `answers` (else a value that
- * tolerates any use) and lists each command name; plugin commands (`plugin:...`) are not recorded (their permissions are
- * the plugin's).
+ * tolerates any use) and lists each command name. The shell plugin's commands (`plugin:paddock-shell|<command>`) are
+ * recorded and answered by their plain names, as dialog contracts name them; other plugins' commands are not recorded
+ * (their permissions are the plugin's).
  */
 export interface IpcRecorder {
   /** The command names sent while recording, in order. */
@@ -25,6 +27,8 @@ interface TauriInternalsHost {
   __TAURI_EVENT_PLUGIN_INTERNALS__?: unknown;
 }
 
+const SHELL_PREFIX = `plugin:${SHELL_PLUGIN}|`;
+
 export function recordIpc(options: { label?: string; answers?: Readonly<Record<string, unknown>> } = {}): IpcRecorder {
   const host = globalThis as TauriInternalsHost;
   const before = { internals: host.__TAURI_INTERNALS__, events: host.__TAURI_EVENT_PLUGIN_INTERNALS__ };
@@ -38,8 +42,9 @@ export function recordIpc(options: { label?: string; answers?: Readonly<Record<s
     transformCallback: () => callback++,
     unregisterCallback: () => undefined,
     convertFileSrc: (p: string) => p,
-    invoke: (cmd: string) => {
+    invoke: (wire: string) => {
       if (!live) return new Promise(() => undefined);
+      const cmd = wire.startsWith(SHELL_PREFIX) ? wire.slice(SHELL_PREFIX.length) : wire;
       if (!cmd.startsWith('plugin:')) sent.push(cmd);
       return Promise.resolve(cmd in answers ? answers[cmd] : ANY_ANSWER);
     },

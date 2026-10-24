@@ -55,7 +55,16 @@ pub struct ChannelInfo {
     pub label: String,
 }
 
-/// The update preferences the user sets (kept in the record).
+/// Where the update preferences are kept: the shell's `pd.updates` settings section (`paddock-shell`), so the
+/// settings are their one writer and source (rule 40). [`save`](PreferenceStore::save) stores them and puts them into
+/// effect through [`Updater::apply_preferences`] (the store's own change path, which also serves a change made in the
+/// Settings window). Without a store the preferences live in memory for the run.
+pub trait PreferenceStore: Send + Sync {
+    /// Stores `prefs` and applies them; an error refuses the change.
+    fn save(&self, prefs: &Preferences) -> Result<(), UpdateError>;
+}
+
+/// The update preferences the user sets (kept by the [`PreferenceStore`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
@@ -218,6 +227,7 @@ pub struct Updater {
     downloader: Arc<Downloader>,
     installer: Option<Arc<dyn Installer>>,
     hooks: Option<Arc<dyn ServiceHooks>>,
+    store: std::sync::OnceLock<Arc<dyn PreferenceStore>>,
     records: Arc<RecordStore>,
     inner: Mutex<Inner>,
     emit: Emit,
@@ -256,21 +266,22 @@ impl Updater {
             },
             (true, None) => UpdatePhase::Idle,
         };
-        let channel = rec
-            .channel
-            .filter(|c| config.channels.iter().any(|ch| ch.id == *c))
-            .or_else(|| config.channels.first().map(|c| c.id.clone()))
+        let channel = config
+            .channels
+            .first()
+            .map(|c| c.id.clone())
             .unwrap_or_default();
         Updater {
             current,
             downloader,
             installer: None,
             hooks: None,
+            store: std::sync::OnceLock::new(),
             inner: Mutex::new(Inner {
                 phase,
                 last_checked: rec.last_checked,
                 prefs: Preferences {
-                    auto_check: rec.auto_check,
+                    auto_check: false,
                     channel,
                 },
                 found: None,
@@ -294,6 +305,19 @@ impl Updater {
     pub fn with_service_hooks(mut self, hooks: Arc<dyn ServiceHooks>) -> Updater {
         self.hooks = Some(hooks);
         self
+    }
+
+    /// Keeps the preferences in `store` (until it applies stored ones, the updater starts with automatic checks off on
+    /// the first channel).
+    pub fn with_preference_store(self, store: Arc<dyn PreferenceStore>) -> Updater {
+        self.set_preference_store(store);
+        self
+    }
+
+    /// As [`Updater::with_preference_store`] on a shared updater (the shell, once the store's section is registered).
+    /// False when it already has one (the first store stays).
+    pub fn set_preference_store(&self, store: Arc<dyn PreferenceStore>) -> bool {
+        self.store.set(store).is_ok()
     }
 
     /// Another clock (seconds since 1970) for the last-checked time and the automatic check (tests).
@@ -667,8 +691,40 @@ impl Updater {
         })
     }
 
-    /// Sets the preferences. A channel change forgets the update found (refused while a download or install runs).
+    /// Sets the preferences: through the [`PreferenceStore`] when there is one (it applies them), else at once. A channel
+    /// change forgets the update found (refused while a download or install runs).
     pub fn set_preferences(&self, prefs: Preferences) -> Result<UpdateStatus, UpdateError> {
+        let Some(store) = self.store.get().cloned() else {
+            return self.apply_preferences(prefs);
+        };
+        self.check_preferences(&prefs)?;
+        {
+            let inner = self.lock();
+            if inner.prefs.channel != prefs.channel
+                && !matches!(inner.phase, UpdatePhase::Unavailable)
+            {
+                inner.phase.next(Event::Reset)?;
+            }
+        }
+        store.save(&prefs)?;
+        Ok(self.status())
+    }
+
+    fn check_preferences(&self, prefs: &Preferences) -> Result<(), UpdateError> {
+        match self.channel(&prefs.channel) {
+            Some(_) => Ok(()),
+            None => Err(UpdateError::Invalid {
+                detail: format!(
+                    "There is no release channel '{}'.",
+                    prefs.channel.chars().take(32).collect::<String>()
+                ),
+            }),
+        }
+    }
+
+    /// Puts preferences into effect (the [`PreferenceStore`]'s change path; [`Updater::set_preferences`] without a store).
+    /// A channel change forgets the update found (refused while a download or install runs).
+    pub fn apply_preferences(&self, prefs: Preferences) -> Result<UpdateStatus, UpdateError> {
         if self.channel(&prefs.channel).is_none() {
             return Err(UpdateError::Invalid {
                 detail: format!(
@@ -685,13 +741,12 @@ impl Updater {
                 inner.found = None;
                 inner.generation += 1;
             }
-            inner.prefs = prefs.clone();
+            if inner.prefs == prefs {
+                return Ok(self.status_of(&inner));
+            }
+            inner.prefs = prefs;
             self.status_of(&inner)
         };
-        let _ = self.records.update(|r| {
-            r.auto_check = prefs.auto_check;
-            r.channel = Some(prefs.channel.clone());
-        });
         (self.emit)(&status);
         Ok(status)
     }

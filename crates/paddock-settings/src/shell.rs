@@ -74,6 +74,45 @@ pub fn appearance() -> SettingsSection {
         )
 }
 
+/// The id of the shell's Updates section (the update preferences; its page is the Updates dialog's settings).
+pub const UPDATES: &str = "pd.updates";
+
+/// The update preferences: automatic checks (off by default; nothing is downloaded without asking) and the release
+/// channel, one of `channels` (`(id, label)`, the first is the default). The settings are the preferences' one writer
+/// and source: `paddock-shell` applies this section to `paddock-updater` and stores the Updates dialog's changes here.
+/// `None` without a channel (a build without updates has nothing to choose).
+pub fn updates(channels: &[(&str, &str)]) -> Option<SettingsSection> {
+    let first = channels.first()?.0;
+    let options = channels
+        .iter()
+        .map(|(v, l)| EnumOption::new(*v, *l))
+        .collect();
+    Some(
+        SettingsSection::new(UPDATES, "Updates", SectionOwner::Shell)
+            .describe("How the app looks for new versions.")
+            .field(
+                SettingField::new(
+                    "autoCheck",
+                    "Check for updates automatically",
+                    FieldKind::Bool,
+                    false,
+                )
+                .describe(
+                    "A minute after start and then daily. Nothing is downloaded without asking.",
+                ),
+            )
+            .field(
+                SettingField::new(
+                    "channel",
+                    "Release channel",
+                    FieldKind::Enum { options },
+                    first,
+                )
+                .describe("Which releases to offer."),
+            ),
+    )
+}
+
 /// A theme pack id as the UI writes it (`db.theme.console`), or empty for none.
 pub const PACK_ID: &str = r"(?:[a-z][a-z0-9]*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+)?";
 
@@ -101,6 +140,26 @@ mod tests {
             s.fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(),
             ["theme", "contrast", "motion", "density", "pack"]
         );
+    }
+
+    #[test]
+    fn the_updates_section_offers_the_channels_and_needs_one() {
+        assert!(updates(&[]).is_none());
+        let s = updates(&[("stable", "Stable"), ("beta", "Beta")]).unwrap();
+        s.check().unwrap();
+        assert_eq!(s.id, UPDATES);
+        assert_eq!(
+            s.find("autoCheck").map(|f| f.default.clone()),
+            Some(serde_json::json!(false))
+        );
+        assert_eq!(
+            s.find("channel").map(|f| f.default.clone()),
+            Some(serde_json::json!("stable"))
+        );
+        let ok = |v: &str| {
+            crate::values::validate_field(s.find("channel").unwrap(), &serde_json::json!(v)).is_ok()
+        };
+        assert!(ok("beta") && !ok("nightly"));
     }
 
     #[test]

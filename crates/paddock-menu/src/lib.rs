@@ -52,5 +52,12 @@ pub use route::{Focus, applies, route};
 #[cfg(feature = "tauri")]
 pub mod tauri;
 
+paddock_commands::command_table! {
+    /// The menu's command (`paddock_menu::tauri::invoke_handler` serves it; the shell plugin folds it into its table).
+    pub static COMMANDS;
+    /// The window's menu model: shown natively on macOS, validated elsewhere.
+    Quiet [MAIN | POPOUT] limit paddock_commands::MIB => tauri::menu_set,
+}
+
 #[cfg(test)]
 mod generated;

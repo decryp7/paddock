@@ -30,8 +30,11 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { createAnalysis, readRegistry } from './dialog-commands-analysis.mjs';
 
-/** The commands of `paddock_dialogs`' base set: every dialog window may call them whatever its contract says. */
-export const SHELL_BASE_COMMANDS = ['dialog_take_input', 'dialog_close', 'dialog_fit_height'];
+/**
+ * The commands of `paddock_dialogs`' base set: every dialog window may call them whatever its contract says. A copy of
+ * the generated `DIALOG_BASE_COMMANDS` (the bin runs on plain Node); check-dialog-commands.test.mjs keeps them equal.
+ */
+export const SHELL_BASE_COMMANDS = ['dialog_take_input', 'dialog_close', 'dialog_fit_height', 'notifications_post', 'notifications_list'];
 
 const CLASSES = { MAIN: 'main', POPOUT: 'popout', DIALOG: 'dialog' };
 

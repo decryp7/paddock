@@ -15,6 +15,7 @@ import {
   indexPath,
   indexVersions,
   lockstepProblems,
+  shellVersionProblems,
   mask,
   missingExports,
   npmPackages,
@@ -149,6 +150,11 @@ describe('npm packages', () => {
   });
   test('the real packages are in lockstep', () => {
     assert.deepEqual(lockstepProblems(npmPackages(join(root, 'ui/projects'), '/d')), []);
+    // The shell plugin crate carries the npm package's version (ADR 0012 §3), checked here and by paddock-shell's tests.
+    const ui = [{ name: '@decryp7/paddock-ui', version: '0.2.0' }];
+    assert.deepEqual(shellVersionProblems([{ name: 'paddock-shell', version: '0.2.0' }], ui), []);
+    assert.match(shellVersionProblems([{ name: 'paddock-shell', version: '0.1.0' }], ui)[0], /bump both together/);
+    assert.deepEqual(shellVersionProblems([{ name: 'paddock-jobs', version: '0.1.0' }], ui), []);
   });
 });
 

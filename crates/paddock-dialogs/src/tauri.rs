@@ -517,6 +517,18 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     }
 }
 
+/// The invoke handler of [`COMMANDS`](crate::COMMANDS) (put it behind `paddock_commands::tauri::Guard` with
+/// [`grant_of`] as its dialog grants).
+pub fn invoke_handler<R: Runtime>()
+-> impl Fn(::tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    ::tauri::generate_handler![
+        dialog_open,
+        dialog_take_input,
+        dialog_close,
+        dialog_fit_height
+    ]
+}
+
 /// Opens a dialog window for the calling window. Async: a window must not be created from a synchronous command.
 #[::tauri::command]
 pub async fn dialog_open<R: Runtime>(

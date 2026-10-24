@@ -249,9 +249,10 @@ describe('the notification centre', () => {
     health.fail('store', cause('The log store stopped.', { hint: 'Choose Restart.' }));
     health.fail('store', cause('The log store stopped.', { hint: 'Choose Restart.' }));
     const update = centre.post({ cause: 'update:2', source: 'update', severity: 'info', title: 'Update ready', primary: { type: 'install', version: '2' }, secondary: { type: 'unknown' } });
-    TestBed.inject(NotificationsStore).post({ level: 'warning', kind: 'sd.save', message: 'Saved with warnings' });
+    await TestBed.inject(NotificationsStore).post({ level: 'warning', kind: 'sd.save', message: 'Saved with warnings' });
     await f.whenStable();
-    expect(all(el, 'h3').map((h) => h.textContent)).toEqual(['update', 'Services', 'Saving']);
+    // Newest first (same time: the later post first); the window's notice is the engine's message now.
+    expect(all(el, 'h3').map((h) => h.textContent)).toEqual(['Saving', 'update', 'Services']);
     const outage = one(el, '[data-cause="health:store"]');
     expect(outage.textContent).toContain('The log store stopped. (×2)');
     expect(outage.textContent).toContain('Choose Restart.');

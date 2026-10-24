@@ -17,6 +17,7 @@ use crate::model::{Change, SERVICE_HEALTH_EVENT, Snapshot, is_service_id};
 use crate::notify::centre::{NewNotice, Notice, NoticeId, NoticeScope};
 use crate::notify::health::{HealthNotice, for_change};
 use crate::notify::persist::NoticesRecord;
+use crate::notify::window::{WindowNotice, WindowNoticeScope};
 use crate::notify::{
     Caps, NOTIFICATIONS_EVENT, NoticesEvent, NoticesSnapshot, NotificationCentre, OPEN_EVENT,
     RestoredNotices,
@@ -352,6 +353,23 @@ pub async fn notifications_dismiss<R: Runtime>(
     Ok(done)
 }
 
+/// Posts a notice of the calling window (`SHELL_PORTS.notify`) to the centre: validated and bounded, keyed by the
+/// engine's cause (`ui:<kind>:<title>`), so the same notice again counts up. An app-scope notice reaches every window,
+/// a window-scope one the caller's window and its dialogs and pop-outs. Returns the message as listed.
+#[::tauri::command]
+pub async fn notifications_post<R: Runtime>(
+    app: AppHandle<R>,
+    webview: Webview<R>,
+    notice: WindowNotice,
+) -> Result<Notice, HealthError> {
+    let window =
+        (notice.scope() == WindowNoticeScope::Window).then(|| resolve(webview.label()).to_string());
+    let new = notice.into_new()?;
+    centre(&app)?;
+    post(&app, window.as_deref(), new, false)
+        .ok_or_else(|| HealthError::unavailable("The notification centre"))
+}
+
 /// The calling window's project messages for saving with its project (`NoticesRecord` v1).
 #[::tauri::command]
 pub async fn notifications_record<R: Runtime>(
@@ -388,6 +406,7 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => notifications_mark_read,
     Mutation [WINDOW] => notifications_mark_all_read,
     Mutation [WINDOW] => notifications_dismiss,
+    Mutation [WINDOW] limit 16 * paddock_commands::KIB => notifications_post,
     Quiet [WINDOW] => notifications_record,
     Mutation [WINDOW] limit 4 * paddock_commands::MIB => notifications_restore,
 }

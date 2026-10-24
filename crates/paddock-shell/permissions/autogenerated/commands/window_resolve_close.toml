@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-window-resolve-close"
+description = "Enables the window_resolve_close command without any pre-configured scope."
+commands.allow = ["window_resolve_close"]
+
+[[permission]]
+identifier = "deny-window-resolve-close"
+description = "Denies the window_resolve_close command without any pre-configured scope."
+commands.deny = ["window_resolve_close"]

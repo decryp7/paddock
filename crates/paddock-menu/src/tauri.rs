@@ -215,6 +215,12 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 }
 
 /// The calling window's menus for the native menu bar (macOS). Elsewhere the model is validated and not shown.
+/// The invoke handler of [`COMMANDS`](crate::COMMANDS) (put it behind `paddock_commands::tauri::Guard`).
+pub fn invoke_handler<R: Runtime>()
+-> impl Fn(::tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    ::tauri::generate_handler![menu_set]
+}
+
 #[::tauri::command]
 pub async fn menu_set<R: Runtime>(
     app: AppHandle<R>,

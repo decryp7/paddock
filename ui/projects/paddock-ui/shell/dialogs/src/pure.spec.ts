@@ -1,4 +1,4 @@
-import { defineDialog, msg, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { defineDialog, DIALOG_BASE_COMMANDS, msg, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { DIALOG_BOUNDS_KEY, isRememberedPlace, loadDialogBounds, MAX_REMEMBERED, rememberDialogBounds } from './bounds';
 import { allowedCommands, commandCovered, dialogContract, dialogContractFile, serializeDialogContracts } from './contracts';
 import { DeniedCommands, isDenial } from './denied';
@@ -79,8 +79,8 @@ describe('contract file', () => {
   it('covers exact names and prefixes, and lists what a dialog may call', () => {
     expect(commandCovered(['a', 'ui_*'], 'ui_theme')).toBe(true);
     expect(commandCovered(['a', 'ui_*'], 'b')).toBe(false);
-    expect(allowedCommands(def({ kind: 'tool', commands: ['x'] }), ['y'])).toEqual(['dialog_take_input', 'dialog_close', 'dialog_fit_height', 'y', 'x']);
-    expect(allowedCommands({ commands: [] })).toHaveLength(3);
+    expect(allowedCommands(def({ kind: 'tool', commands: ['x'] }), ['y'])).toEqual([...DIALOG_BASE_COMMANDS, 'y', 'x']);
+    expect(allowedCommands({ commands: [] })).toEqual([...DIALOG_BASE_COMMANDS]);
   });
 });
 

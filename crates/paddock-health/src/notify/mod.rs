@@ -15,6 +15,7 @@
 pub mod centre;
 pub mod health;
 pub mod persist;
+pub mod window;
 mod writer;
 
 use crate::clock::Clock;

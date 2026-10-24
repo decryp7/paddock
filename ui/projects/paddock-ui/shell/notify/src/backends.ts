@@ -1,4 +1,4 @@
-import { parseHealthSnapshot, parseNoticesEvent, parseNoticesSnapshot } from './wire';
+import { parseHealthSnapshot, parseNotice, parseNoticesEvent, parseNoticesSnapshot } from './wire';
 import {
   healthCause,
   NOTIFICATIONS_EVENT,
@@ -14,19 +14,24 @@ import {
   type ServiceHealth,
   type ServiceHealthSnapshot,
   type ServiceState,
+  type HealthCommand,
+  type WindowNotice,
 } from './wire.types';
 
 /** Stops listening. */
 export type Unlisten = () => void;
 
-/** The commands of `paddock_health::tauri` this entry point calls (mirrors `HEALTH_COMMANDS`; checked by the drift spec). */
-export type NotifyCommand =
+/** The commands of `paddock_health::tauri` this entry point calls (a name outside `HEALTH_COMMANDS` does not compile). */
+export type NotifyCommand = Extract<
+  HealthCommand,
   | 'health_snapshot'
   | 'health_repair'
   | 'notifications_list'
   | 'notifications_mark_read'
   | 'notifications_mark_all_read'
-  | 'notifications_dismiss';
+  | 'notifications_dismiss'
+  | 'notifications_post'
+>;
 
 /**
  * The app's IPC as these backends need it, so the package does not depend on `@tauri-apps/api`: pass Tauri's `invoke` and
@@ -58,6 +63,11 @@ export abstract class NotificationsBackend {
   abstract markRead(id: number): Promise<boolean>;
   abstract markAllRead(): Promise<number>;
   abstract dismiss(id: number): Promise<boolean>;
+  /**
+   * Posts a notice of this window (`SHELL_PORTS.notify`) to the engine's centre, which keys it by its own cause
+   * (`ui:<kind>:<title>`) and tells every window (rule 34). Rejects when the engine refuses it (bounds) or is not there.
+   */
+  abstract postNotice(notice: WindowNotice): Promise<Notice>;
   /** Every change of this window's list (with the message just posted, for its toast). */
   abstract listen(handler: (e: NoticesEvent) => void): Promise<Unlisten>;
   /** An OS notification was clicked: open that message. */
@@ -104,6 +114,9 @@ export class TauriNotificationsBackend extends NotificationsBackend {
   }
   async dismiss(id: number): Promise<boolean> {
     return (await this.ipc.invoke<unknown>('notifications_dismiss', { id })) === true;
+  }
+  async postNotice(notice: WindowNotice): Promise<Notice> {
+    return contract(parseNotice(await this.ipc.invoke<unknown>('notifications_post', { notice })), 'a notification');
   }
   listen(handler: (e: NoticesEvent) => void): Promise<Unlisten> {
     return this.ipc.listen(NOTIFICATIONS_EVENT, (p) => {
@@ -158,6 +171,13 @@ export class MemoryNotificationCentre extends NotificationsBackend {
     this.notices = [...this.notices.filter((n) => n.cause !== p.cause), notice];
     this.emit(p.quiet ? null : notice);
     return notice;
+  }
+
+  /** A window's notice, keyed as the engine keys it (`ui:<kind or severity>:<title>`, source the kind or `app`). */
+  postNotice(n: WindowNotice): Promise<Notice> {
+    const title = n.title.trim();
+    if (!title) return Promise.reject(new Error('a notice needs a title'));
+    return Promise.resolve(this.post({ cause: `ui:${n.kind ?? n.severity}:${title}`, source: n.kind ?? 'app', severity: n.severity, title, body: n.body ?? '' }));
   }
 
   /** The cause cleared: its message goes. True when one was listed. */

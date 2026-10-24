@@ -50,7 +50,7 @@ fn windows(config: WindowConfig, quits: &Calls) -> WindowsBuilder<MockRuntime> {
 
 fn app_with(windows: Windows<MockRuntime>) -> App {
     let app = mock_builder()
-        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(handler()))
+        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(invoke_handler()))
         .build(mock_context(noop_assets()))
         .unwrap();
     app.manage(windows);
@@ -228,7 +228,7 @@ fn a_login_start_builds_no_window_only_when_a_tray_can_bring_it_back() {
 #[test]
 fn without_the_state_everything_says_so_and_nothing_breaks() {
     let app = mock_builder()
-        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(handler()))
+        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(invoke_handler()))
         .build(mock_context(noop_assets()))
         .unwrap();
     let h = app.handle();
@@ -1196,7 +1196,7 @@ fn the_configuration_and_the_feel_apply_to_built_windows() {
     };
     context.config_mut().app.windows.push(declared);
     let app = mock_builder()
-        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(handler()))
+        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(invoke_handler()))
         .build(context)
         .unwrap();
     app.manage(windows(WindowConfig::new("App"), &calls()).build());

@@ -80,6 +80,7 @@ describe('paddock-manifest.json', () => {
       { menu: 'view', command: 'sd.refresh', group: 'models', order: 200, accelerator: 'CmdOrCtrl+Shift+R' },
     ]);
     expect([m.pages, m.statusItems, m.settingsPages, m.healthServices]).toEqual([['sd.models'], ['sd.serving'], ['sd.engines'], ['sd.engine']]);
+    expect(m.settingsForms).toEqual([]); // sd.engines has a component of its own
     expect(m.dialogs).toEqual({
       // The minimum is the kind's floor (a viewer's 680x560); a side left out is the least a dialog can be (plan §13).
       'sd.about': { kind: 'viewer', modality: 'modeless', instanced: true, requiredChoice: false, minSize: { width: 680, height: 560 }, commands: ['plugin:paddock-shell|about_*'] },
@@ -118,6 +119,7 @@ describe('paddock-manifest.json', () => {
         pages: [1],
         statusItems: [],
         settingsPages: [],
+        settingsForms: [2],
         healthServices: [],
         dialogs: { a: { kind: 'popup', modality: 'modal', instanced: false, requiredChoice: false, minSize: { width: 1 }, commands: [1] }, b: 3 },
         notificationKinds: [],
@@ -135,6 +137,7 @@ describe('paddock-manifest.json', () => {
       'menus[0].order: missing or of the wrong type',
       'menus[0].accelerator: missing or of the wrong type',
       'pages[0]: expected a string',
+      'settingsForms[0]: expected a string',
       'dialogs.a.kind: missing or of the wrong type',
       'dialogs.a.minSize: missing or of the wrong type',
       'dialogs.a.commands: missing or of the wrong type',

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-window-resolve-open"
+description = "Enables the window_resolve_open command without any pre-configured scope."
+commands.allow = ["window_resolve_open"]
+
+[[permission]]
+identifier = "deny-window-resolve-open"
+description = "Denies the window_resolve_open command without any pre-configured scope."
+commands.deny = ["window_resolve_open"]

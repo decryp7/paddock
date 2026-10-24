@@ -90,8 +90,48 @@ pub mod tauri;
 ///
 /// The table is validated at compile time ([`Table::new`]): a duplicate name, a command callable from no window class,
 /// a name that is not `lower_snake_case` or a limit outside [`MIN_LIMIT`]..=[`MAX_LIMIT`] does not compile.
+///
+/// A table can also be **composed** of other tables (`static NAME = [A, B, ...];`): the shell plugin folds every shell
+/// crate's table into one, validated the same way, so a command two crates both declare does not compile. Each part
+/// keeps its own handler; `tauri::Routes` sends a call to the handler of the part that lists it.
+///
+/// ```
+/// paddock_commands::command_table! {
+///     pub static HEALTH;
+///     Query [WINDOW] => health::health_snapshot,
+/// }
+/// paddock_commands::command_table! {
+///     pub static JOBS;
+///     Mutation [WINDOW] => jobs::job_cancel,
+/// }
+/// paddock_commands::command_table! {
+///     /// Every command of the shell.
+///     pub static SHELL = [HEALTH, JOBS];
+/// }
+/// assert_eq!(SHELL.specs().len(), 2);
+/// assert_eq!(SHELL.kind_of("job_cancel"), paddock_commands::Kind::Mutation);
+/// ```
+///
+/// Two parts naming the same command do not compile:
+///
+/// ```compile_fail,E0080
+/// paddock_commands::command_table! { pub static A; Query [WINDOW] => a::status, }
+/// paddock_commands::command_table! { pub static B; Query [MAIN] => b::status, }
+/// paddock_commands::command_table! { pub static BOTH = [A, B]; }
+/// ```
 #[macro_export]
 macro_rules! command_table {
+    (
+        $(#[$table_meta:meta])* $vis:vis static $table:ident = [ $($part:path),* $(,)? ] $(;)?
+    ) => {
+        $(#[$table_meta])*
+        $vis static $table: $crate::Table = {
+            const PARTS: &[&$crate::Table] = &[ $( &$part ),* ];
+            const N: usize = $crate::table::total(PARTS);
+            static SPECS: [$crate::Spec; N] = $crate::table::concat::<N>(PARTS);
+            $crate::Table::new(&SPECS)
+        };
+    };
     (
         $(#[$table_meta:meta])* $vis:vis static $table:ident, macro $handler:ident;
         $( $(#[$doc:meta])* $kind:ident [$($win:ident)|+] $(limit $limit:expr)? => $($seg:ident)::+ ),* $(,)?

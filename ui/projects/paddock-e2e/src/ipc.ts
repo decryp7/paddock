@@ -6,6 +6,9 @@ import type { Page } from '@playwright/test';
  * and delivers events to the page's listeners (Rust's `emit`). The shell's real Tauri backends run against it.
  */
 
+/** The shell plugin's prefix: its commands are recorded and answered by their plain names (`health_snapshot`). */
+export const SHELL_PLUGIN_PREFIX = 'plugin:paddock-shell|';
+
 /** A recorded call. `at` is the page's `Date.now()` when it was made. */
 export interface IpcCall {
   readonly cmd: string;
@@ -79,7 +82,7 @@ export class TauriFake {
 /** Installs the fake before the page's scripts run (call before `goto`). */
 export async function installTauriFake(page: Page, options: TauriFakeOptions = {}): Promise<TauriFake> {
   await page.addInitScript(
-    ({ replies, hold, otherwise, platform }) => {
+    ({ replies, hold, otherwise, platform, prefix }) => {
       type Held = { cmd: string; args: unknown; resolve: (v: unknown) => void; reject: (e: unknown) => void };
       const w = window as unknown as Record<string, unknown>;
       if (platform) Object.defineProperty(navigator, 'platform', { get: () => platform });
@@ -120,8 +123,9 @@ export async function installTauriFake(page: Page, options: TauriFakeOptions = {
           w[`_${id}`] = f;
           return id;
         },
-        invoke: (cmd: string, args: unknown) =>
+        invoke: (sent: string, args: unknown) =>
           new Promise((resolve, reject) => {
+            const cmd = sent.startsWith(prefix) ? sent.slice(prefix.length) : sent;
             calls.push({ cmd, args, at: Date.now() });
             const h = { cmd, args, resolve, reject };
             if (released) answer(h);
@@ -134,6 +138,7 @@ export async function installTauriFake(page: Page, options: TauriFakeOptions = {
       hold: options.hold === true,
       otherwise: options.otherwise ?? 'reject',
       platform: options.platform ? PLATFORMS[options.platform] : null,
+      prefix: SHELL_PLUGIN_PREFIX,
     },
   );
   return new TauriFake(page);

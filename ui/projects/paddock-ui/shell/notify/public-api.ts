@@ -31,6 +31,12 @@ export {
   type Notice,
   type NoticesSnapshot,
   type NoticesEvent,
+  type WindowNotice,
+  type WindowNoticeScope,
+  type HealthError,
+  type HealthErrorCode,
+  HEALTH_COMMANDS,
+  type HealthCommand,
 } from './src/wire.types';
 export { parseHealthSnapshot, parseNotice, parseNoticesSnapshot, parseNoticesEvent } from './src/wire';
 export {

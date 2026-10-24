@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-jobs-snapshot"
+description = "Enables the jobs_snapshot command without any pre-configured scope."
+commands.allow = ["jobs_snapshot"]
+
+[[permission]]
+identifier = "deny-jobs-snapshot"
+description = "Denies the jobs_snapshot command without any pre-configured scope."
+commands.deny = ["jobs_snapshot"]

@@ -83,6 +83,34 @@ export const NotificationsStore = signalStore(
     };
     const dismissToast = (cause: string): void => patchState(store, (s) => ({ toasts: s.toasts.filter((t) => t.cause !== cause) }));
     const isLocal = (id: number): boolean => id < 0;
+    /** A notice this window keeps itself (the engine could not take it); the same kind and text again merges into it with a count. */
+    const postLocal = (n: ShellNotice): Notice => {
+      const cause = localCause(n);
+      const at = clock.now();
+      const known = store.local().find((l) => l.cause === cause);
+      const notice: Notice = known
+        ? { ...known, count: known.count + 1, at: Math.max(at, known.at), read: false }
+        : {
+            id: -++localIds,
+            source: n.kind ?? LOCAL_SOURCE,
+            severity: n.level,
+            title: n.message,
+            body: '',
+            code: null,
+            at,
+            firstAt: at,
+            count: 1,
+            read: false,
+            primary: null,
+            secondary: null,
+            tertiary: null,
+            link: { window: null, jobId: null, path: null },
+            cause,
+            scope: 'project',
+          };
+      patchState(store, (s) => ({ local: [notice, ...s.local.filter((l) => l.cause !== cause)], toasts: upsertLast(s.toasts, notice) }));
+      return notice;
+    };
     return {
       /** A change from the engine (an older one than the window has is ignored): the new list, and a toast for the message just posted (unless already read). */
       apply(e: NoticesEvent): void {
@@ -105,34 +133,20 @@ export const NotificationsStore = signalStore(
         }
       },
 
-      /** `SHELL_PORTS.notify`: a notice of the UI's own; the same kind and text again merges into it with a count. */
-      post(n: ShellNotice): Notice {
-        const cause = localCause(n);
-        const at = clock.now();
-        const known = store.local().find((l) => l.cause === cause);
-        const notice: Notice = known
-          ? { ...known, count: known.count + 1, at: Math.max(at, known.at), read: false }
-          : {
-              id: -++localIds,
-              source: n.kind ?? LOCAL_SOURCE,
-              severity: n.level,
-              title: n.message,
-              body: '',
-              code: null,
-              at,
-              firstAt: at,
-              count: 1,
-              read: false,
-              primary: null,
-              secondary: null,
-              tertiary: null,
-              link: { window: null, jobId: null, path: null },
-              cause,
-              scope: 'project',
-            };
-        patchState(store, (s) => ({ local: [notice, ...s.local.filter((l) => l.cause !== cause)], toasts: upsertLast(s.toasts, notice) }));
-        return notice;
+      /**
+       * `SHELL_PORTS.notify`: a notice of the UI's own goes to the engine's centre, which lists it for every window (rule
+       * 34; its event brings the toast here too). When the engine cannot take it (no centre, a notice out of its bounds),
+       * this window keeps it itself ([`postLocal`]).
+       */
+      async post(n: ShellNotice): Promise<void> {
+        try {
+          await backend.postNotice({ severity: n.level, title: n.message, ...(n.kind ? { kind: n.kind } : {}) });
+        } catch {
+          postLocal(n);
+        }
       },
+
+      postLocal,
 
       async markRead(id: number): Promise<void> {
         if (isLocal(id)) patchState(store, (s) => ({ local: s.local.map((l) => (l.id === id ? { ...l, read: true } : l)) }));

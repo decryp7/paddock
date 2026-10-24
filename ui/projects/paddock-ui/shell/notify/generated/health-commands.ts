@@ -8,6 +8,7 @@ export const HEALTH_COMMANDS = {
   notifications_list: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   notifications_mark_all_read: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   notifications_mark_read: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+  notifications_post: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 16384 },
   notifications_record: { kind: 'quiet', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   notifications_restore: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 4194304 },
 } as const;

@@ -12,7 +12,7 @@ use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Runtime, WebviewWindow};
 
 /// The invoke handler of [`COMMANDS`](crate::COMMANDS) (put it behind `paddock_commands::tauri::Guard`).
-pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
+pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     ::tauri::generate_handler![
         window_new,
         window_close,

@@ -618,15 +618,19 @@ fn preferences_are_validated_kept_and_a_channel_change_forgets_the_update() {
         })
         .unwrap();
     assert_eq!((s.phase, s.channel.as_str()), (UpdatePhase::Idle, "beta"));
-    let rec = r.records.load();
-    assert_eq!(
-        (rec.auto_check, rec.channel.as_deref()),
-        (true, Some("beta"))
-    );
-    // The next updater starts with them.
+    // The same again announces nothing new and keeps the state.
+    let again = r
+        .updater
+        .set_preferences(Preferences {
+            auto_check: true,
+            channel: "beta".into(),
+        })
+        .unwrap();
+    assert_eq!(again.channel, "beta");
+    // Without a store they live for the run: the next updater starts with the defaults.
     let r2 = rig_with("1.0.0", Some(key()), r.dir, |u| u);
     let s = r2.updater.status();
-    assert_eq!((s.auto_check, s.channel.as_str()), (true, "beta"));
+    assert_eq!((s.auto_check, s.channel.as_str()), (false, "stable"));
     // Busy while a download runs.
     let r = rig();
     r.publish("9.9.9", "update.bin.sig");
@@ -651,28 +655,90 @@ fn preferences_are_validated_kept_and_a_channel_change_forgets_the_update() {
     );
 }
 
+/// A store that keeps what it was given and applies it when told (as the settings section does).
+#[derive(Default)]
+struct Kept {
+    saved: Mutex<Vec<Preferences>>,
+    refuse: std::sync::atomic::AtomicBool,
+}
+
+impl PreferenceStore for Kept {
+    fn save(&self, prefs: &Preferences) -> Result<(), UpdateError> {
+        if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(UpdateError::Invalid {
+                detail: "refused by the store".into(),
+            });
+        }
+        self.saved.lock().unwrap().push(prefs.clone());
+        Ok(())
+    }
+}
+
 #[test]
-fn the_channel_kept_in_the_record_is_used_when_it_still_exists() {
-    let dir = tempfile::tempdir().unwrap();
-    let records = RecordStore::new(Some(&dir.path().join("config")));
-    let _ = records.update(|r| r.channel = Some("beta".into()));
-    let r = rig_with("1.0.0", Some(key()), dir, |u| u);
-    assert_eq!(r.updater.status().channel, "beta");
-    r.server.json(
-        BETA_URL,
-        &manifest("9.9.9", &signature("update.bin.sig"), true),
+fn with_a_store_the_preferences_go_through_it_and_take_effect_when_it_applies_them() {
+    let r = rig();
+    let kept = Arc::new(Kept::default());
+    assert!(r.updater.set_preference_store(kept.clone()));
+    assert!(
+        !r.updater.set_preference_store(Arc::new(Kept::default())),
+        "the first store stays"
     );
-    r.check().unwrap();
-    assert_eq!(r.server.hits(BETA_URL), 1);
-    let dir = tempfile::tempdir().unwrap();
-    let _ = RecordStore::new(Some(&dir.path().join("config")))
-        .update(|r| r.channel = Some("gone".into()));
+    let beta = Preferences {
+        auto_check: true,
+        channel: "beta".into(),
+    };
+    let s = r.updater.set_preferences(beta.clone()).unwrap();
     assert_eq!(
-        rig_with("1.0.0", Some(key()), dir, |u| u)
-            .updater
-            .status()
-            .channel,
-        "stable"
+        (s.auto_check, s.channel.as_str()),
+        (false, "stable"),
+        "not yet applied"
+    );
+    assert_eq!(*kept.saved.lock().unwrap(), vec![beta.clone()]);
+    let s = r.updater.apply_preferences(beta).unwrap();
+    assert_eq!((s.auto_check, s.channel.as_str()), (true, "beta"));
+    // An unknown channel never reaches the store; a refusing store refuses the change.
+    assert!(matches!(
+        r.updater.set_preferences(Preferences {
+            auto_check: true,
+            channel: "nightly".into()
+        }),
+        Err(UpdateError::Invalid { .. })
+    ));
+    kept.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        r.updater
+            .set_preferences(Preferences {
+                auto_check: false,
+                channel: "stable".into()
+            })
+            .is_err()
+    );
+    assert_eq!(kept.saved.lock().unwrap().len(), 1);
+    // Busy while a download runs: a channel change is refused before the store hears of it.
+    kept.refuse
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let r = rig();
+    let kept = Arc::new(Kept::default());
+    r.updater.set_preference_store(kept.clone());
+    r.publish("9.9.9", "update.bin.sig");
+    r.check().unwrap();
+    r.updater.begin_download().unwrap();
+    assert!(matches!(
+        r.updater.set_preferences(Preferences {
+            auto_check: false,
+            channel: "beta".into()
+        }),
+        Err(UpdateError::Busy { .. })
+    ));
+    assert!(kept.saved.lock().unwrap().is_empty());
+    // The same channel is fine while busy.
+    assert!(
+        r.updater
+            .set_preferences(Preferences {
+                auto_check: true,
+                channel: "stable".into()
+            })
+            .is_ok()
     );
 }
 

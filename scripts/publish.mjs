@@ -139,6 +139,17 @@ export function lockstepProblems(packages) {
   return packages.filter((p) => p.version !== lead.version).map((p) => `${p.name} is ${p.version}; npm packages carry @decryp7/paddock-ui's version ${lead.version}`);
 }
 
+/**
+ * The shell plugin crate and the npm package are one version across the boundary (ADR 0012 §3): the UI checks
+ * `shell_version` against its own at start-up, so `paddock-shell` carries @decryp7/paddock-ui's version.
+ */
+export function shellVersionProblems(crateList, packages) {
+  const shell = crateList.find((c) => c.name === 'paddock-shell');
+  const lead = packages.find((p) => p.name === '@decryp7/paddock-ui');
+  if (!shell || !lead || shell.version === lead.version) return [];
+  return [`paddock-shell is ${shell.version}; it carries @decryp7/paddock-ui's version ${lead.version} (bump both together)`];
+}
+
 /** Publishing runs only in CI on the tag of this version (rule 9). */
 export function tagProblems(env, version) {
   const problems = [];
@@ -313,6 +324,7 @@ async function main() {
   const problems = [
     ...crateProblems(crateList),
     ...lockstepProblems(packages),
+    ...shellVersionProblems(crateList, packages),
     ...crateStepsMissing(ciYaml, crateList.map((c) => c.name)).map((n) => `${n} has no clippy and test step in .gitea/workflows/ci.yml (job crate)`),
     ...(opts.publish ? tagProblems(env, lead?.version) : []),
   ];

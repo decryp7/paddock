@@ -29,9 +29,10 @@ describe('define*', () => {
   });
 
   it("types dialog commands as the app's names plus the shell plugin's", () => {
-    // Without a ShellTypes.appCommand augmentation the app's part is string; the shell's table is empty for now (S17).
+    // Without a ShellTypes.appCommand augmentation the app's part is string; the shell's part is the plugin's table (S17).
     expectTypeOf<IpcCommandName>().toEqualTypeOf<string>();
-    expectTypeOf<ShellCommand>().toEqualTypeOf<never>();
+    expectTypeOf<'notifications_post' | 'shell_version' | 'dialog_open'>().toExtend<ShellCommand>();
+    expectTypeOf<'demo_status'>().not.toExtend<ShellCommand>();
   });
 
   it('checks messages', () => {

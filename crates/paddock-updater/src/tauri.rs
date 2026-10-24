@@ -14,7 +14,7 @@
 //!     paddock_updater::tauri::install(app.handle(), updates)?;
 //!     Ok(())
 //! })
-//! .invoke_handler(paddock_commands::tauri::Guard::new(&paddock_updater::COMMANDS).wrap(paddock_updater::tauri::handler()))
+//! .invoke_handler(paddock_commands::tauri::Guard::new(&paddock_updater::COMMANDS).wrap(paddock_updater::tauri::invoke_handler()))
 //! .run(|app, event| if let tauri::RunEvent::Exit = event { paddock_updater::tauri::on_exit(app); })
 //! ```
 //!
@@ -416,7 +416,7 @@ pub fn on_exit<R: Runtime>(app: &AppHandle<R>) -> ExitAction {
 }
 
 /// The commands' invoke handler (every command of [`COMMANDS`](crate::COMMANDS)); wrap it in the app's guard.
-pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
+pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     ::tauri::generate_handler![
         updates_status,
         updates_check,
@@ -439,7 +439,7 @@ pub fn handler_with_grants<R: Runtime, G: DialogGrant + 'static>(
 ) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     Guard::new(&crate::COMMANDS)
         .dialog_grants(lookup)
-        .wrap(handler())
+        .wrap(invoke_handler())
 }
 
 /// The managed state as a command argument: a command of an app that did not call [`install`] is refused by Tauri

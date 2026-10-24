@@ -141,6 +141,26 @@ export type RestoredNotices = { snapshot: NoticesSnapshot, warning: string | nul
 
 export type NoticesRecord = { version: number, notices: Array<Notice>, };
 
+export type WindowNoticeScope = "app" | "window";
+
+export type WindowNotice = { 
+/**
+ * `info`, `success`, `warning` or `error` (`critical` is the engine's).
+ */
+severity: NoticeSeverity, 
+/**
+ * One sentence for the user (1 to [`MAX_TITLE`] characters).
+ */
+title: string, 
+/**
+ * More detail (at most [`MAX_BODY`] characters).
+ */
+body?: string, 
+/**
+ * What kind of notice (`[a-z0-9.-]`, at most [`MAX_KIND`]); its source in the list. Not `health`.
+ */
+kind?: string, scope?: WindowNoticeScope, };
+
 export type HealthErrorCode = "unavailable" | "invalid" | "refused";
 
 export type HealthError = { code: HealthErrorCode, 

@@ -227,6 +227,39 @@ const fn same(a: &str, b: &str) -> bool {
     true
 }
 
+/// The number of commands in `parts` together (used by [`command_table!`](crate::command_table) to compose tables).
+#[doc(hidden)]
+pub const fn total(parts: &[&Table]) -> usize {
+    let mut n = 0;
+    let mut i = 0;
+    while i < parts.len() {
+        n += parts[i].specs.len();
+        i += 1;
+    }
+    n
+}
+
+/// Every entry of `parts`, in order (used by [`command_table!`](crate::command_table) to compose tables). `N` must be
+/// [`total`]`(parts)`; any other length fails the build that evaluates it.
+#[doc(hidden)]
+pub const fn concat<const N: usize>(parts: &[&Table]) -> [Spec; N] {
+    let mut out = [Spec::new("", Kind::Quiet, Windows::NONE, 0); N];
+    let mut k = 0;
+    let mut i = 0;
+    while i < parts.len() {
+        let mut j = 0;
+        while j < parts[i].specs.len() {
+            assert!(k < N, "command table: the composed length is wrong");
+            out[k] = parts[i].specs[j];
+            k += 1;
+            j += 1;
+        }
+        i += 1;
+    }
+    assert!(k == N, "command table: the composed length is wrong");
+    out
+}
+
 /// Every command an app (or a shell plugin) serves, in one validated list.
 #[derive(Debug, Clone, Copy)]
 pub struct Table {
