@@ -6,6 +6,7 @@
 //! added at the end of an enum (a minor change of `schema`). Every `u64` crosses JavaScript as a number, so the validator
 //! keeps them below 2^53.
 
+use crate::grant::GrantRef;
 use paddock_ipc::Json;
 use serde::{Deserialize, Serialize};
 
@@ -471,6 +472,8 @@ pub enum FieldKind {
     },
     /// A file or folder chosen with the host's dialog; the plugin only ever sees the grant.
     Path {
+        // ts-rs cannot derive `GrantRef` (validating serde attributes); on the wire it is the string `GrantRef` in view.ts.
+        #[cfg_attr(test, ts(type = "GrantRef | null"))]
         value: Option<GrantRef>,
         folder: bool,
     },
@@ -488,11 +491,6 @@ pub struct ChoiceOption {
     pub value: String,
     pub label: String,
 }
-
-/// The id of a path grant the user gave the plugin (a name from the plugin's manifest; the host resolves it).
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GrantRef(pub String);
 
 /// The name of a secret in the host's keychain.
 #[cfg_attr(test, derive(ts_rs::TS))]

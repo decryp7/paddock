@@ -1033,7 +1033,7 @@ let manifest = Manifest::parse(&std::fs::read_to_string("manifest.toml")?)?;    
 let key = SecretKey::generate_to(&dir.join("publisher.key"))?;                        // 0600, never replaces an existing key
 archive::build(Build { manifest, programs: vec![(target, &exe)], sign: Some(&key) }, &out)?;   // deterministic .paddockplugin
 let pkg = Package::open(&out)?;                                                       // bounded read, checksums, signature
-pkg.manifest.check_compatible(PLATFORM_PROTOCOL, &app_namespaces, "Debrief")?;        // says who must update
+HostInfo::new("Debrief").check_protocol(id, pkg.manifest.protocol)?;                  // paddock-plugin-api: says who must update
 let trust = policy.decide(&pkg.signature)?;                                           // Builtin | Signed | Unsigned (developer mode)
 let sha = pkg.extract(&out, manifest::host_target(), &installed)?;                    // exec bit, re-verified while copying
 archive::verify_installed(&installed, &sha)?;                                         // before every start: changed binary = Tampered
@@ -1046,11 +1046,12 @@ archive::verify_installed(&installed, &sha)?;                                   
   `McpExpose`, `Memory { mib }`, `Cpu { percent }`; default deny, each kind once, lists of 1 to 64 names. `manifest.toml` is
   bounded (64 KiB, 256 contributions, 64 actions each, 16 targets) and **unknown keys are refused** (as in Debrief); the model
   types are plain serde (no `untagged`/`flatten`/internal tags), so the same `Manifest` crosses the postcard IPC, where the host
-  runs `Manifest::check` on it. `check_compatible` applies the one rule (same major, known minor) to the platform protocol and to
-  every namespace, with texts that say who must update.
+  runs `Manifest::check` on it. Compatibility is not here: `paddock_plugin_api::compat::HostInfo` judges a manifest's protocol and
+  namespaces with the one rule of `paddock_ipc::ProtocolVersion` (`accepts`, `skew`, `introduced_in`) and words who must update.
 - `names`: `PluginId`, `GrantRef`, `ProgramRef`, `HostPattern` (`*.example.com`), `Namespace`: newtypes that validate in
-  `new` and in `Deserialize`, so a name from the wire is as valid as one from a file. `version::ProtocolVersion` is a plain serde
-  copy of `paddock_ipc`'s rule on purpose (a package must be verifiable without the IPC crate); conversion is two field moves.
+  `new` and in `Deserialize`, so a name from the wire is as valid as one from a file. `ProtocolVersion` is re-exported from `paddock_ipc` (the one
+  implementation; the package depends on `paddock-ipc`, which is a dependency only, nothing is launched) and `GrantRef` from
+  `paddock-view` (the one type a path field and a folder permission share).
 - `archive`: zip with `manifest.toml`, `bin/<target>/<binary>[.exe]`, `SHA256SUMS` and an optional detached Ed25519 `signature`
   over the digest of the manifest bytes plus the sums bytes. `Package::read`/`open` (with `Limits`: 256 MiB package, 128 MiB program,
   512 MiB total, 64 entries; sizes counted while reading) refuse traversal, absolute and drive names, links, encrypted, duplicate and
