@@ -488,3 +488,31 @@ fn without_diagnostics_there_is_no_logging_section() {
             .all(|s| s["id"] != "pd.logging")
     );
 }
+
+#[test]
+fn os_notifications_add_the_notifications_page_and_a_change_reaches_the_notifier() {
+    use paddock_health::notify::os::{OsLevel, SharedOsSettings};
+    let shared = SharedOsSettings::default();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .os_notifications(shared.clone()));
+    let main = window(&app, "main");
+    let overview = invoke(&main, "settings_overview", json!({})).unwrap();
+    assert!(
+        overview["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "pd.notifications"),
+        "{overview}"
+    );
+    let set = invoke(
+        &main,
+        "settings_set",
+        json!({ "section": "pd.notifications", "values": { "level": "off" } }),
+    )
+    .unwrap();
+    assert_eq!(set["applied"], true, "{set}");
+    assert_eq!(shared.get().level, OsLevel::Off);
+}

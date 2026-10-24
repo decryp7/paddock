@@ -60,6 +60,7 @@ fn demo_shell() -> Builder<MockRuntime> {
             ServiceSpec::new("sd.engine", "the demo engine"),
             ServiceSpec::new("sd.index", "the search index"),
         ])
+        .os_notifications(paddock_health::notify::os::SharedOsSettings::default())
         .section(section("sd.general", "General"))
         .section(section("sd.storage", "Storage"))
         .in_memory()
@@ -84,7 +85,10 @@ fn a_drifted_demo_is_reported() {
     let bad = demo_shell().dialog_contracts("{").problems(None);
     assert!(bad[0].contains("not valid"), "{bad:?}");
     assert_eq!(demo_shell().service_ids(), ["sd.engine", "sd.index"]);
-    assert_eq!(demo_shell().section_ids(), ["sd.general", "sd.storage"]);
+    assert_eq!(
+        demo_shell().section_ids(),
+        ["pd.notifications", "sd.general", "sd.storage"]
+    );
 }
 
 #[test]

@@ -64,6 +64,18 @@ describe('TauriNotificationsBackend', () => {
     expect(opened).toEqual([7]);
   });
 
+  it('hears the buttons of an OS notification that this window runs, and drops what is not one', async () => {
+    const { ipc, emit } = fakeIpc({});
+    const b = new TauriNotificationsBackend(ipc);
+    const heard: unknown[] = [];
+    await b.onAction((e) => heard.push(e));
+    emit('paddock://notifications-action', { id: 4, action: { type: 'openSettings', section: 'general' } });
+    emit('paddock://notifications-action', { id: 'four', action: { type: 'openSettings' } });
+    emit('paddock://notifications-action', { id: 4, action: null });
+    emit('paddock://notifications-action', 'junk');
+    expect(heard).toEqual([{ id: 4, action: { type: 'openSettings', section: 'general' } }]);
+  });
+
   it('reads a non-number count as none and refuses a malformed list', async () => {
     const b = new TauriNotificationsBackend(fakeIpc({ notifications_mark_all_read: null, notifications_list: null }).ipc);
     await expect(b.markAllRead()).resolves.toBe(0);
@@ -108,6 +120,12 @@ describe('MemoryNotificationCentre', () => {
     off();
     c.open(4);
     expect(opened).toEqual([3]);
+    const ran: number[] = [];
+    const offAction = await c.onAction((e) => ran.push(e.id));
+    c.runAction({ id: 1, action: { type: 'x' } });
+    offAction();
+    c.runAction({ id: 2, action: { type: 'x' } });
+    expect(ran).toEqual([1]);
   });
 });
 
