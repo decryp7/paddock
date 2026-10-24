@@ -11,7 +11,7 @@ use crate::hosts::{HostCaps, Permit};
 use crate::request::{Integrity, Request, Sha256Digest};
 use crate::resume::ResumeState;
 use crate::transport::{
-    ByteRange, ContentRange, Get, Response, Transport, is_identity, parse_content_range,
+    ByteRange, ContentRange, Get, Header, Response, Transport, is_identity, parse_content_range,
     parse_length, parse_retry_after, validator,
 };
 use paddock_jobs::{CancelToken, HashingWriter, JobContext, Phase};
@@ -34,6 +34,28 @@ pub mod phases {
     pub const DOWNLOAD: &str = "download";
     /// "Verifying": the digest computed while writing is compared and the file renamed into place (items, total 1; no read).
     pub const VERIFY: &str = "verify";
+    /// The phases a download reports, in order.
+    pub const ALL: [&str; 4] = [CONNECT, RESUME, DOWNLOAD, VERIFY];
+
+    /// The labels the downloader gives its phases (so an app that adds phases around a download speaks the same way).
+    pub const CONNECT_LABEL: &str = "Connecting";
+    pub const RESUME_LABEL: &str = "Checking the partial download";
+    pub const DOWNLOAD_LABEL: &str = "Downloading";
+    pub const VERIFY_LABEL: &str = "Verifying";
+
+    /// Ids for the phases apps usually add after a download, in the same job (`download` first, then these on their own scales).
+    /// They never collide with [`ALL`]; use them instead of private spellings so the Jobs list reads alike across apps.
+    pub const UNPACK: &str = "unpack";
+    pub const UNPACK_LABEL: &str = "Unpacking";
+    pub const INSTALL: &str = "install";
+    pub const INSTALL_LABEL: &str = "Installing";
+    pub const SELF_TEST: &str = "self-test";
+    pub const SELF_TEST_LABEL: &str = "Checking that it starts";
+
+    /// True for a phase the downloader itself reports.
+    pub fn is_download_phase(id: &str) -> bool {
+        ALL.contains(&id)
+    }
 }
 
 const BUF: usize = paddock_jobs::CHUNK;
@@ -55,6 +77,10 @@ pub struct Downloaded {
     pub connections: usize,
     /// True when the host served byte ranges (so a stop can be resumed).
     pub ranges: bool,
+    /// How many progress events the app's [`EventSink`](paddock_jobs::EventSink) panicked on during this download (each panic
+    /// is contained and the event dropped, so the Jobs list may have missed updates). Zero for a healthy sink; show or log a
+    /// non-zero value.
+    pub sink_panics: u64,
 }
 
 /// Free bytes on the disk that holds a folder (the platform call; tests pass their own).
@@ -62,16 +88,16 @@ pub type FreeSpace = dyn Fn(&Path) -> io::Result<u64> + Send + Sync;
 
 /// Runs downloads. Cheap to share (`Arc<Downloader>`); one per app, so the [`HostCaps`] hold across all its downloads.
 pub struct Downloader {
-    net: Net,
+    pub(crate) net: Net,
     free_space: Arc<FreeSpace>,
 }
 
 /// What the transfer threads need of the downloader.
 #[derive(Clone)]
-struct Net {
-    transport: Arc<dyn Transport>,
-    hosts: Arc<HostCaps>,
-    config: Config,
+pub(crate) struct Net {
+    pub(crate) transport: Arc<dyn Transport>,
+    pub(crate) hosts: Arc<HostCaps>,
+    pub(crate) config: Config,
 }
 
 impl Downloader {
@@ -137,7 +163,32 @@ impl Downloader {
     /// [`paddock_jobs::CANCEL_LATENCY_TARGET_MS`] in every phase. Blocks the calling thread: call it from a job worker, never
     /// from a UI or IPC thread.
     pub fn download(&self, ctx: &JobContext, req: &Request) -> Result<Downloaded, DownloadError> {
-        ctx.cancel_token().check().map_err(cancelled)?;
+        self.download_inner(ctx, req, None)
+    }
+
+    /// As [`download`](Self::download), and `external` also cancels it (an app-level "stop all", a UI window closing, a
+    /// deadline): either the job's token or `external` stops the transfer within the same latency, with the reason of the one
+    /// that fired and the partial file kept.
+    pub fn download_with_cancel(
+        &self,
+        ctx: &JobContext,
+        req: &Request,
+        external: &CancelToken,
+    ) -> Result<Downloaded, DownloadError> {
+        self.download_inner(ctx, req, Some(external.clone()))
+    }
+
+    fn download_inner(
+        &self,
+        ctx: &JobContext,
+        req: &Request,
+        external: Option<CancelToken>,
+    ) -> Result<Downloaded, DownloadError> {
+        let cancels = Cancels {
+            job: ctx.cancel_token().clone(),
+            external,
+        };
+        cancels.check()?;
         req.dest()
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
@@ -147,8 +198,8 @@ impl Downloader {
             // Known in advance: refused before connecting.
             self.check_space(req, size)?;
         }
-        ctx.phase(Phase::items(phases::CONNECT, "Connecting", 1));
-        let ctl = Arc::new(Ctl::new(ctx.cancel_token().clone()));
+        ctx.phase(Phase::items(phases::CONNECT, phases::CONNECT_LABEL, 1));
+        let ctl = Arc::new(Ctl::new(cancels));
         let probe = self.probe(req, &ctl)?;
         ctx.add(1);
         ctl.touch();
@@ -193,7 +244,11 @@ impl Downloader {
             .min(size);
         let needed = (size - written).saturating_add(self.net.config.disk_reserve);
         if free < needed {
-            return Err(DownloadError::NotEnoughSpace { needed, free });
+            return Err(DownloadError::NotEnoughSpace {
+                needed,
+                free,
+                path: std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()),
+            });
         }
         Ok(())
     }
@@ -209,7 +264,7 @@ impl Downloader {
             match rx.recv_timeout(TICK) {
                 Ok(probe) => return probe,
                 Err(RecvTimeoutError::Timeout) => {
-                    if let Err(c) = ctl.cancel.check() {
+                    if let Err(c) = ctl.cancel.check_raw() {
                         ctl.stop();
                         return Err(DownloadError::Cancelled(c.0));
                     }
@@ -257,7 +312,7 @@ impl Downloader {
                 "Checking the partial download",
                 Some(have),
             ));
-            hash_prefix(&file, have, &mut hasher, ctx)?;
+            hash_prefix(&file, have, &mut hasher, ctx, &ctl.cancel)?;
         }
         state.hashed = have;
         state.save(&resume_path)?;
@@ -293,7 +348,7 @@ impl Downloader {
         match result {
             Ok(done) => {
                 state.hashed = size;
-                let out = self.finalize(ctx, req, done, have, peak, true);
+                let out = self.finalize(ctx, req, ctl, done, have, peak, true);
                 if out.as_ref().is_err_and(DownloadError::keeps_partial) {
                     let _ = state.save(&resume_path);
                 }
@@ -334,6 +389,7 @@ impl Downloader {
             hosts: self.net.hosts.clone(),
             url: req.url().to_string(),
             host: req.host().to_string(),
+            headers: req.headers().to_vec(),
             config: self.net.config.clone(),
             counter: ctx.clone(),
             size,
@@ -344,7 +400,7 @@ impl Downloader {
             .and_then(|()| self.supervise(ctl, &mut || Ok(())));
         match result {
             Ok(done) => {
-                let out = self.finalize(ctx, req, done, 0, 1, false);
+                let out = self.finalize(ctx, req, ctl, done, 0, 1, false);
                 if out.is_err() {
                     remove(&part);
                 }
@@ -373,7 +429,7 @@ impl Downloader {
                 ctl.stop();
                 return Err(e);
             }
-            if let Err(c) = ctl.cancel.check() {
+            if let Err(c) = ctl.cancel.check_raw() {
                 ctl.stop();
                 return Err(DownloadError::Cancelled(c.0));
             }
@@ -394,10 +450,12 @@ impl Downloader {
     }
 
     /// The verify phase: compares what was computed while writing (no read), then syncs and renames the file into place.
+    #[allow(clippy::too_many_arguments)]
     fn finalize(
         &self,
         ctx: &JobContext,
         req: &Request,
+        ctl: &Ctl,
         done: Finished,
         resumed_from: u64,
         connections: usize,
@@ -405,8 +463,8 @@ impl Downloader {
     ) -> Result<Downloaded, DownloadError> {
         // The last count of the download phase goes out before the next phase starts on its own scale.
         ctx.reporter().flush();
-        ctx.phase(Phase::items(phases::VERIFY, "Verifying", 1));
-        ctx.cancel_token().check().map_err(cancelled)?;
+        ctx.phase(Phase::items(phases::VERIFY, phases::VERIFY_LABEL, 1));
+        ctl.cancel.check()?;
         let sha256 = Sha256Digest(done.digest);
         let (part, resume_path) = (req.part_path(), req.resume_path());
         let refuse = |e: DownloadError| {
@@ -444,6 +502,7 @@ impl Downloader {
             resumed_from,
             connections,
             ranges,
+            sink_panics: ctx.reporter().sink_panics(),
         })
     }
 }
@@ -470,6 +529,7 @@ impl Net {
                 }),
                 if_range: None,
                 body_timeout: Some(self.config.range_timeout),
+                headers: req.headers(),
             };
             let resp = match self.transport.get(&get) {
                 Ok(r) => r,
@@ -572,8 +632,8 @@ struct Finished {
 
 /// What every thread of one download shares: stop, the first failure, the outcome, the hash frontier and the time of the last
 /// byte (or deliberate wait), for the stall check.
-struct Ctl {
-    cancel: CancelToken,
+pub(crate) struct Ctl {
+    pub(crate) cancel: Cancels,
     stop: AtomicBool,
     fatal: Mutex<Option<DownloadError>>,
     outcome: Mutex<Option<Finished>>,
@@ -585,7 +645,7 @@ struct Ctl {
 }
 
 impl Ctl {
-    fn new(cancel: CancelToken) -> Self {
+    pub(crate) fn new(cancel: Cancels) -> Self {
         Ctl {
             cancel,
             stop: AtomicBool::new(false),
@@ -599,11 +659,11 @@ impl Ctl {
         }
     }
 
-    fn halted(&self) -> bool {
+    pub(crate) fn halted(&self) -> bool {
         self.stop.load(Ordering::Acquire) || self.cancel.is_cancelled()
     }
 
-    fn halt_error(&self) -> DownloadError {
+    pub(crate) fn halt_error(&self) -> DownloadError {
         DownloadError::Cancelled(
             self.cancel
                 .reason()
@@ -620,7 +680,7 @@ impl Ctl {
     }
 
     /// A byte arrived, or the download waits on purpose (back-off, host cap): not a stall.
-    fn touch(&self) {
+    pub(crate) fn touch(&self) {
         self.last.store(self.now_ms(), Ordering::Release);
     }
 
@@ -648,7 +708,7 @@ impl Ctl {
     }
 
     /// Sleeps `d` in short slices, counting as a deliberate wait. False when the download stopped meanwhile.
-    fn nap(&self, d: Duration) -> bool {
+    pub(crate) fn nap(&self, d: Duration) -> bool {
         let until = Instant::now() + d;
         loop {
             if self.halted() {
@@ -664,15 +724,48 @@ impl Ctl {
     }
 }
 
+/// The job's cancel token and an optional second one from the caller; either one stops the download.
+#[derive(Clone)]
+pub(crate) struct Cancels {
+    pub(crate) job: CancelToken,
+    pub(crate) external: Option<CancelToken>,
+}
+
+impl Cancels {
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.job.is_cancelled()
+            || self
+                .external
+                .as_ref()
+                .is_some_and(CancelToken::is_cancelled)
+    }
+
+    /// The reason of the token that fired (the job's first).
+    pub(crate) fn reason(&self) -> Option<paddock_jobs::CancelReason> {
+        self.job
+            .reason()
+            .or_else(|| self.external.as_ref().and_then(CancelToken::reason))
+    }
+
+    pub(crate) fn check_raw(&self) -> Result<(), paddock_jobs::Cancelled> {
+        self.reason()
+            .map_or(Ok(()), |r| Err(paddock_jobs::Cancelled(r)))
+    }
+
+    pub(crate) fn check(&self) -> Result<(), DownloadError> {
+        self.check_raw().map_err(cancelled)
+    }
+}
+
 /// Counts failures and throttles of one request loop.
 #[derive(Default)]
-struct Retry {
+pub(crate) struct Retry {
     failures: u32,
     throttles: u32,
 }
 
 impl Retry {
-    fn failed(
+    pub(crate) fn failed(
         &mut self,
         config: &Config,
         ctl: &Ctl,
@@ -690,7 +783,7 @@ impl Retry {
         }
     }
 
-    fn throttled(
+    pub(crate) fn throttled(
         &mut self,
         config: &Config,
         hosts: &HostCaps,
@@ -811,11 +904,12 @@ fn hash_prefix(
     len: u64,
     hasher: &mut HashingWriter<'static, io::Sink>,
     ctx: &JobContext,
+    cancel: &Cancels,
 ) -> Result<(), DownloadError> {
     let mut buf = vec![0u8; RESUME_BUF];
     let mut at = 0;
     while at < len {
-        ctx.cancel_token().check().map_err(cancelled)?;
+        cancel.check()?;
         let n = (len - at).min(buf.len() as u64) as usize;
         read_exact_at(file, &mut buf[..n], at)?;
         hasher.write_all(&buf[..n])?;
@@ -918,6 +1012,7 @@ struct Segments {
     hosts: Arc<HostCaps>,
     url: String,
     host: String,
+    headers: Vec<Header>,
     validator: Option<String>,
     config: Config,
     counter: JobContext,
@@ -964,6 +1059,7 @@ impl Segments {
             hosts: d.hosts.clone(),
             url: req.url().to_string(),
             host: req.host().to_string(),
+            headers: req.headers().to_vec(),
             validator,
             config: d.config.clone(),
             counter,
@@ -1125,6 +1221,7 @@ impl Segments {
                 }),
                 if_range: self.validator.as_deref(),
                 body_timeout: Some(self.config.range_timeout),
+                headers: &self.headers,
             };
             let attempt = match self.transport.get(&get) {
                 Ok(resp) => self.receive(t, pos, resp).unwrap_or_else(Attempt::Fatal),
@@ -1285,6 +1382,7 @@ struct Stream {
     hosts: Arc<HostCaps>,
     url: String,
     host: String,
+    headers: Vec<Header>,
     config: Config,
     counter: JobContext,
     size: Option<u64>,
@@ -1356,6 +1454,7 @@ impl Stream {
             range: None,
             if_range: None,
             body_timeout: None,
+            headers: &self.headers,
         };
         match self.transport.get(&get) {
             Ok(r) if r.status == 200 => Ok(Some((r, permit))),

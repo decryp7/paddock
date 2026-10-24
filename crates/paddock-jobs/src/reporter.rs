@@ -10,7 +10,7 @@ pub const DEFAULT_MIN_INTERVAL_MS: u64 = 100;
 const NEVER: u64 = u64::MAX;
 
 /// Where snapshots go (Tauri: `app.emit(EVENT_NAME, snapshot)`). Called with the reporter's lock held so events arrive in `seq`
-/// order: it must be quick and must not call back into the reporter. A panic in a sink is contained and dropped.
+/// order: it must be quick and must not call back into the reporter. A panic in a sink is contained, the event dropped and the panic counted ([`Reporter::sink_panics`]).
 pub trait EventSink: Send + Sync {
     fn emit(&self, snapshot: &JobSnapshot);
 }
@@ -51,6 +51,7 @@ struct Shared {
     done: AtomicU64,
     last_emit_ms: AtomicU64,
     dirty: AtomicBool,
+    sink_panics: AtomicU64,
     inner: Mutex<Inner>,
 }
 
@@ -106,6 +107,7 @@ impl Reporter {
             done: AtomicU64::new(0),
             last_emit_ms: AtomicU64::new(NEVER),
             dirty: AtomicBool::new(false),
+            sink_panics: AtomicU64::new(0),
             inner: Mutex::new(Inner {
                 state: JobState::Queued,
                 seq: 0,
@@ -118,6 +120,12 @@ impl Reporter {
         let g = lock(&r.0.inner);
         r.emit_locked(g);
         r
+    }
+
+    /// How many times the [`EventSink`] panicked on an event of this job (each panic is contained and the event dropped). An
+    /// owner of the job can surface a non-zero count instead of letting a broken sink fail silently.
+    pub fn sink_panics(&self) -> u64 {
+        self.0.sink_panics.load(Ordering::Relaxed)
     }
 
     pub fn id(&self) -> JobId {
@@ -158,7 +166,9 @@ impl Reporter {
         let snap = self.build(&g);
         self.0.dirty.store(false, Ordering::Relaxed);
         self.0.last_emit_ms.store(now, Ordering::Relaxed);
-        let _ = catch_unwind(AssertUnwindSafe(|| self.0.sink.emit(&snap)));
+        if catch_unwind(AssertUnwindSafe(|| self.0.sink.emit(&snap))).is_err() {
+            self.0.sink_panics.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Progress after the end of the job is dropped: the terminal snapshot is the last event.
