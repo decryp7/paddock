@@ -7,7 +7,7 @@
 //! - [`manifest`]: `manifest.toml` ([`Manifest`], [`Permission`], [`Contribution`]), parsed once with limits;
 //! - [`names`]: the validated names the manifest uses ([`PluginId`], [`GrantRef`], [`ProgramRef`], [`HostPattern`],
 //!   [`Namespace`]);
-//! - [`version`]: [`ProtocolVersion`] (the one compatibility rule, platform and contracts alike);
+//! - [`ProtocolVersion`]: `paddock_ipc`'s, the one compatibility rule (platform protocol and contract minors alike);
 //! - [`archive`]: reading, verifying, packing and extracting a package ([`Package`], [`archive::build`],
 //!   [`archive::verify_installed`]);
 //! - [`keys`]: Ed25519 publisher keys ([`SecretKey`], [`PublicKey`]);
@@ -21,12 +21,11 @@ pub mod keys;
 pub mod manifest;
 pub mod names;
 pub mod trust;
-pub mod version;
 
 pub use archive::{Package, Signature};
 pub use error::PackageError;
 pub use keys::{PublicKey, SecretKey};
 pub use manifest::{Action, Contribution, Manifest, Permission, PermissionRequest};
 pub use names::{GrantRef, HostPattern, Namespace, PluginId, ProgramRef};
+pub use paddock_ipc::ProtocolVersion;
 pub use trust::{SignatureStatus, Trust, TrustPolicy, TrustSettings, TrustStore, TrustedKey};
-pub use version::ProtocolVersion;
