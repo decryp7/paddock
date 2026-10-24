@@ -15,6 +15,9 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadManifest } from '../conformance/src/sync/baseline.mjs';
+import { fill } from '../conformance/src/sync/fill.mjs';
+import { inspectBlock, loadBlocks } from '../conformance/src/sync/blocks.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -219,6 +222,32 @@ export function tsconfigJson(uiTsconfig) {
   return { compileOnSave: false, compilerOptions, angularCompilerOptions: uiTsconfig.angularCompilerOptions };
 }
 
+/**
+ * The repo root of a new app from Paddock's templates (plan X27, X43): the baseline config files, an AGENTS.md made of the
+ * shared doc blocks, docs/suite-lessons.md, docs/releasing.md and the README skeleton. The generator's own tsconfig and the
+ * Cargo profiles (the app has no root Cargo.toml yet) are not taken from the template.
+ */
+export function writeRepoRoot(dest, { id, name }) {
+  const config = { app: id, appName: name, appDir: 'app' };
+  const put = (path, text) => {
+    const file = join(dest, path);
+    if (existsSync(file)) return;
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  };
+  for (const e of loadManifest(root)) {
+    if (e.path === 'app/tsconfig.json' || e.path === 'Cargo.toml') continue;
+    put(e.path, fill(e.text, config));
+  }
+  const registry = loadBlocks(root);
+  for (const [file, names] of Object.entries(registry.defaultTargets)) {
+    let text = file === 'AGENTS.md' ? `# ${name}: engineering rules for coding agents and contributors\n` : '';
+    for (const n of names) text = inspectBlock(text, registry.blocks.find((b) => b.name === n), config).desired;
+    put(file, text);
+  }
+  put('README.md', fill(readFileSync(join(root, 'docs', 'blocks', 'readme-skeleton.md'), 'utf8'), config));
+}
+
 /** The new app's changelog: one release, started from the demo. */
 export function changelog(name, date) {
   return `# Changelog\n\n## [0.1.0] - ${date}\n\n### Added\n\n- ${name}, started from Paddock Shell Demo: the Paddock app shell with its sample pages, services, jobs, settings and dialogs.\n`;
@@ -297,7 +326,7 @@ export function createApp(args, today = new Date().toISOString().slice(0, 10)) {
     json('app/angular.json', angularJson(angular.projects['shell-demo']));
     json('app/tsconfig.json', tsconfigJson(uiTsconfig));
     writeFileSync(join(dest, 'CHANGELOG.md'), changelog(args.name, today));
-    for (const f of ['LICENSE-MIT', 'LICENSE-APACHE']) cpSync(join(root, f), join(dest, f));
+    writeRepoRoot(dest, args);
     writeFileSync(
       join(dest, '.gitignore'),
       '/app/node_modules/\n/app/dist/\n/app/.angular/\n/app/out-tsc/\n/app/src-tauri/target/\n/app/src-tauri/gen/\n.DS_Store\n',

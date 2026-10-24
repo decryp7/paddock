@@ -1,0 +1,23 @@
+{
+  "name": "@decryp7/paddock-eslint",
+  "version": "0.1.0",
+  "description": "The ESLint flat-config preset of the Paddock apps: rules 27 to 39 as rules (OnPush, zoneless, effects, signal reads, request status, stores, templates, styles) on top of angular-eslint and typescript-eslint.",
+  "license": "MIT OR Apache-2.0",
+  "main": "src/index.cjs",
+  "exports": { ".": "./src/index.cjs", "./rules": "./src/rules/index.cjs" },
+  "files": ["src"],
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test test/*.test.cjs" },
+  "peerDependencies": {
+    "@eslint/js": ">=9",
+    "angular-eslint": ">=21",
+    "eslint": ">=9",
+    "typescript-eslint": ">=8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "angular-eslint": "^22.6.0",
+    "eslint": "^10.13.0",
+    "typescript-eslint": "^8.71.2"
+  }
+}

@@ -1,0 +1,44 @@
+name: publish-release
+description: "Publishes the Gitea release: release notes (changelog + the First launch block), latest.json for the updater, and the installers in artifacts-dir. Only for a v* tag run (rule 9)."
+inputs:
+  app-name:
+    description: Product name for the First launch block (Pitcrew).
+    required: true
+  changelog:
+    description: File with this release's changelog (git cliff --latest).
+    required: true
+  artifacts-dir:
+    description: Folder with the installers and their .sig files.
+    default: artifacts
+  token:
+    description: A Gitea token with write:repository (RELEASE_TOKEN).
+    required: true
+  public-base-url:
+    description: "Where installed apps download from, without the tag (default https://dev.decryptology.net/<repo>/releases/download)."
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GITEA_TOKEN: ${{ inputs.token }}
+        APP_NAME: ${{ inputs.app-name }}
+        CHANGELOG: ${{ inputs.changelog }}
+        DIR: ${{ inputs.artifacts-dir }}
+        BASE: ${{ inputs.public-base-url }}
+      run: |
+        set -euo pipefail
+        P="${{ github.action_path }}/../../../conformance"
+        tag="${{ github.ref_name }}"
+        [[ "${{ github.ref }}" == refs/tags/v* ]] || { echo "::error::releases are published from a v* tag only (rule 9)"; exit 1; }
+        node "$P/ci/release-notes.mjs" --app "$APP_NAME" --changelog "$CHANGELOG" --out "$DIR/RELEASE_NOTES.md"
+        # Inside the runners github.server_url is Gitea's internal http address, which the updater must never be given.
+        base="${BASE:-https://dev.decryptology.net/${{ github.repository }}/releases/download}/$tag"
+        if find "$DIR" -name '*.sig' | grep -q .; then
+          node "$P/release/latest-json.mjs" --dir "$DIR" --version "$tag" --notes "$DIR/RELEASE_NOTES.md" --base-url "$base" --out "$DIR/latest.json"
+          # The signatures are in latest.json; the .sig files are not release assets.
+          find "$DIR" -name '*.sig' -delete
+        else
+          echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
+        fi
+        node "$P/release/publish.mjs" --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" --tag "$tag" --notes "$DIR/RELEASE_NOTES.md" --dir "$DIR"

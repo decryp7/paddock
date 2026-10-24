@@ -113,6 +113,9 @@ jobs:
         with:
           node-version: 24
 
+      # The About page's commit and date (plan X10): PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE for option_env!.
+      - uses: ./.gitea/actions/build-env
+
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         if: runner.os == 'Windows'
 
@@ -122,9 +125,7 @@ jobs:
       - name: Build the installers
         env:
           CI: "true"
-          SHELL_DEMO_COMMIT: ${{ github.sha }}
         run: |
-          export SHELL_DEMO_BUILT="$(date -u +%Y-%m-%d)"
           bash scripts/shell-demo/bundle.sh "${{ matrix.bundles }}"
 
       # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and on the app inside

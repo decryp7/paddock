@@ -1,0 +1,21 @@
+name: conformance
+description: "Runs paddock-conformance on the app (checks, waivers, job summary). The Paddock checkout is the one this action came from."
+inputs:
+  app:
+    description: The app id (pitcrew).
+    required: true
+  args:
+    description: Extra arguments, e.g. "--bundle target/dist/bundle --artifacts artifacts".
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+        P="$(cd "${{ github.action_path }}/../../.." && pwd)"
+        # shellcheck disable=SC2086
+        node "$P/conformance/bin/paddock-conformance.mjs" --app "$APP" --paddock "$P" --summary "$RUNNER_TEMP/conformance.md" --out "$RUNNER_TEMP/conformance.json" $ARGS

@@ -20,6 +20,31 @@ Conventional Commits; one semver tag for the whole repo.
   INSTALL, SELF_TEST, is_download_phase}`, `Downloaded::sink_panics` and `Reporter::sink_panics` in `paddock-jobs`
   (an `EventSink` panic was dropped silently). The engine stays thread-based and blocking (documented: use `spawn_blocking`
   or the `JobPool`); there is no private async runtime.
+- Shared CI, lint and repo baseline (plans X10, X11, X27, X42, X43, X46, X47; `@decryp7/paddock-conformance` 0.2.0):
+  - `.gitea/actions/*`: composite actions `plan` and `nightly-mark` (skip a nightly while main is unchanged since a green
+    one, skip a tagged main push), `cache-restore` and `cache-save` (restore, then save-always), `setup-rust` (sccache),
+    `setup-node`, `strip-signing-keys`, `build-env` (`PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE` for the About page, which no
+    CI set before), `tauri-bundle`, `macos-verify`, `install-test-browser` (pinned Chrome for Testing), `licences`,
+    `conformance`, `publish-release` (notes with the First launch block, `latest.json`, the release) and `host-cleanup`; and the
+    reusable workflows `app-release`, `app-e2e` and `app-licences`. Their scripts are in `conformance/ci/`, tested. C03, C04
+    and C15 recognise them.
+  - `@decryp7/paddock-eslint` (`eslint/`): the flat-config preset with rules 27 to 39 as rules (OnPush written out, zoneless,
+    effect justification, signal reads before `await`, request status union, store file, scope and injection count,
+    `patchState` only in stores, no `[ngClass]` or `[innerHTML]`, raw colours and fonts in styles) on angular-eslint and
+    typescript-eslint; Debrief's `lint-effects` and `lint-styles` are rules now. `lint/clippy.toml` and
+    `lint/workspace-lints.toml` are the Rust presets; check C13 keeps an app's copies a superset.
+  - Repo baseline: `templates/repo/` (editorconfig, rustfmt, licences, `deny.toml`, `cliff.toml`, `lefthook.yml`,
+    `about.toml`, Renovate preset, tsconfig, Cargo profiles), `renovate/app.json` (`local>decryp7/paddock//renovate/app`, the
+    Paddock crates and packages in one PR per release), `@decryp7/paddock-tsconfig`, check C28 and
+    `paddock-conformance sync [--write]`. `docs/blocks/` holds the shared AGENTS.md sections, suite lessons, releasing and
+    First launch text; C23 keeps the marked blocks equal. `new-app.mjs` now writes the repo root from both.
+  - `paddock-notices` (X42): `THIRD_PARTY_NOTICES.md` from cargo-about and the npm lock, deterministic, `--check` for CI; the
+    licence list is one list shared by `deny.toml`, `about.toml` and the generator.
+  - C29 (X46): window weight budgets from `ng build --stats-json`, `paddock-conformance window-weight --record` writes measured
+    plus 10%.
+  - `tools/` (X47): `bootstrap.sh`, `verify-installed.sh`, `linux-container.sh`, `prune-build-folders.sh` and `.ps1`,
+    `host-cleanup.sh`, with the app as a parameter.
+  - Shell Demo reads its build commit and date from `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE`.
 - `paddock-env` (plan X7, decision D3): folders and state files. `AppDirs` (data, config, cache, logs, runtime per OS from an
   injectable environment; `<ID>_HOME` override in debug builds only; portable mode; Windows is Local, the old Roaming folder
   is named for the one-time move) and `VersionedFile<T>` (atomic write with fsync and `.bak`, migration chain, a damaged file

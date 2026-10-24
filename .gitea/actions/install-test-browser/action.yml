@@ -1,0 +1,30 @@
+name: install-test-browser
+description: "Installs the pinned Chrome for Testing (SHA-256 checked) and sets CHROMIUM_TEST_PATH and <PREFIX>_REQUIRE_TEST_BROWSER=1, so tests never use an installed browser (rule 7) and a missing browser fails instead of skipping."
+inputs:
+  pin:
+    description: A JSON pin file { version, base, sums }. Give this or rust-source.
+    default: ""
+  rust-source:
+    description: A Rust source holding PINNED_VERSION, BASE and the checksum table (Debrief's runtime.rs).
+    default: ""
+  env-prefix:
+    description: Upper-case app prefix for the REQUIRE variable (DEBRIEF gives DEBRIEF_REQUIRE_TEST_BROWSER).
+    required: true
+  dir:
+    description: Where to install it.
+    default: ${{ runner.temp }}/paddock-test-browser
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PIN: ${{ inputs.pin }}
+        RUST_SOURCE: ${{ inputs.rust-source }}
+        PREFIX: ${{ inputs.env-prefix }}
+        DIR: ${{ inputs.dir }}
+      run: |
+        set -euo pipefail
+        args=(--dir "$DIR" --env-prefix "$PREFIX")
+        if [ -n "$PIN" ]; then args+=(--pin "$PIN"); fi
+        if [ -n "$RUST_SOURCE" ]; then args+=(--rust-source "$RUST_SOURCE"); fi
+        node "${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs" "${args[@]}"

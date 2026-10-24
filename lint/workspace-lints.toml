@@ -1,0 +1,9 @@
+# The `[workspace.lints]` tables every app workspace carries (plan X11, check C13). An app may add lints and may raise a
+# level; it may not lower or drop one. Every member crate opts in with `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

@@ -1,0 +1,29 @@
+name: cache-restore
+description: "Restores a build cache by exact key, else the newest of the same kind. Pair with cache-save (if: always()) at the end of the job."
+inputs:
+  kind:
+    description: What is cached (clippy, test-registry, licences); it is the key prefix.
+    required: true
+  paths:
+    description: Paths to cache, one per line.
+    required: true
+  key-files:
+    description: Files whose hash is the key (glob).
+    default: Cargo.lock
+  lookup-only:
+    description: Only look for the exact key; download nothing.
+    default: "false"
+outputs:
+  cache-hit:
+    description: "'true' on an exact key hit."
+    value: ${{ steps.restore.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.paths }}
+        key: ${{ inputs.kind }}-${{ runner.os }}-${{ hashFiles(inputs.key-files) }}
+        restore-keys: ${{ inputs.kind }}-${{ runner.os }}-
+        lookup-only: ${{ inputs.lookup-only }}

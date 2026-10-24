@@ -23,15 +23,44 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C06 | every step exporting a Tauri key strips whitespace first | |
 | C07 | version agreement; release job needs the gates; with `--preflight vX.Y.Z` the tag preflight | `--api --repo` for the CI-green part |
 | C08 | the shared release scripts are used; with `--artifacts` the release files | `--artifacts` |
+| C13 | Rust lint preset (`lint/`): `[workspace.lints]` at least as strict, every member crate `[lints] workspace = true`, `clippy.toml` keeps every `disallowed-methods` path | `--paddock` |
 | C14 | tests run hermetically (`run --`); workflows that run tests without it are warned | |
 | C15 | no test or script uses the installed Chrome; CI requires the test browser | |
 | C16 | no spec or mock hard-codes the current app version | |
-| C23 | commit messages (no Co-Authored-By, no AI attribution); `commit-lint` CLI | a git checkout |
+| C23 | commit messages (no Co-Authored-By, no AI attribution); `commit-lint` CLI. With `--paddock`: the shared doc blocks of `AGENTS.md` (rules and the common sections), `docs/suite-lessons.md`, `docs/releasing.md` equal `docs/blocks` | a git checkout; `--paddock` for the blocks |
+| C28 | the repo baseline (`.editorconfig`, `rustfmt.toml`, licences, `deny.toml` tables, `cliff.toml`, `lefthook.yml`, Renovate preset, tsconfig, Cargo profiles, ...) equals `templates/repo` | `--paddock` |
+| C29 | each window's initial JS (from `ng build --stats-json`) is within its `windowWeight` budget in `paddock.conformance.json`; a budget above measured + 10% warns (rule 35). `window-weight [kind...] [--max kB] [--record]` prints a window's weight and records budgets | the build stats |
+
+## Sync (X27, X43)
+
+```sh
+paddock-conformance sync --app pitcrew [--root <app>] [--paddock <paddock checkout>] [--write]
+```
+
+Shows what differs from Paddock's `templates/repo` (C28) and `docs/blocks` (C23); `--write` repairs it. A doc block sits
+between `<!-- paddock:block NAME rev=XXXXXXXX -->` and `<!-- /paddock:block NAME -->`; the section an app had under the
+same heading is replaced the first time, text outside the markers is never touched. The `rules` block is derived from
+`docs/rules.md`. Change the text in Paddock first. Not every app section moves: put what is specific to the app in its
+own sections ("Design principles in Pitcrew").
+
+## Third-party notices (X42)
+
+```sh
+paddock-notices --app Pitcrew [--root .] [--manifest app/src-tauri/Cargo.toml ...] [--npm app] [--out app/src-tauri/resources]
+                [--rust-json cargo-about.json ...] [--about about.toml] [--check]
+```
+
+Writes `THIRD_PARTY_NOTICES.md` (Rust licences from `cargo about generate` with the app's `about.toml`, npm production
+dependencies from `package-lock.json` and `node_modules`), deterministic. `--check` fails when the committed file is stale;
+a package none of whose licence options is permissive fails both modes. The allowed licences are one list
+(`src/notices/licences.mjs`), equal to `templates/repo/deny.toml` and `about.toml` (a test keeps them equal). Install first:
+`cargo install cargo-about --locked --features cli`, `npm ci --omit=dev --ignore-scripts`.
 
 ## Configuration
 
 `paddock.conformance.json` (optional): `app`, `appDir`, `tauriDir`, `workflowsDir`, `sidecars` (`[{ "name": "x-worker", "args": ["--self-test"] }]`),
-`nonGates` (job ids the release job need not wait for), `commitRange`.
+`nonGates` (job ids the release job need not wait for), `commitRange`, `appName` (display name for templates; default the id with a capital),
+`docBlocks` (`{ "AGENTS.md": ["rules", ...] }` replaces the default targets), `windowWeight` (`{ stats, windows: { main: { maxKb, entries? } } }`), `baselineSkip` (template paths this app does not take; prefer a waiver).
 
 `paddock.waivers.toml`:
 
@@ -44,6 +73,12 @@ expires = "2026-12-01"
 ```
 
 A waiver past its date, or without a reason or date, is an error itself (W001, W002). No silent skips.
+
+## CI scripts (`ci/`) and the shared actions
+
+`plan.mjs`, `build-env.mjs`, `release-notes.mjs`, `install-test-browser.mjs` and `tauri-bundle.sh` are what the composite actions
+in `.gitea/actions/` run (see its README); they are plain Node and bash, tested here, and work from a Paddock checkout. A
+workflow that uses the actions can drop the steps they replace, and C03, C04 and C15 accept them.
 
 ## Release scripts (`release/`)
 

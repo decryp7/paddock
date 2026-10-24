@@ -1,18 +1,31 @@
 {
   "name": "@decryp7/paddock-conformance",
-  "version": "0.1.0",
-  "description": "One shared conformance check every Paddock app runs in CI (checks, waivers that expire, findings, job summary) and the shared release scripts.",
+  "version": "0.2.0",
+  "description": "One shared conformance check every Paddock app runs in CI (checks, waivers that expire, findings, job summary), the repo baseline and doc-block sync, the shared release and CI scripts, window budgets and the third-party notices generator.",
   "type": "module",
   "license": "MIT OR Apache-2.0",
-  "bin": { "paddock-conformance": "bin/paddock-conformance.mjs" },
+  "bin": {
+    "paddock-conformance": "bin/paddock-conformance.mjs",
+    "paddock-notices": "bin/paddock-notices.mjs"
+  },
   "exports": {
     ".": "./src/index.mjs",
     "./commit-lint": "./src/commit-lint.mjs",
     "./release/publish": "./release/publish.mjs",
     "./release/latest-json": "./release/latest-json.mjs",
-    "./release/strip-keys": "./release/strip-keys.mjs"
+    "./release/strip-keys": "./release/strip-keys.mjs",
+    "./notices": "./src/notices/generate.mjs"
   },
-  "files": ["bin", "src", "release"],
-  "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test test/*.test.mjs" }
+  "files": [
+    "bin",
+    "src",
+    "release",
+    "ci"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
 }

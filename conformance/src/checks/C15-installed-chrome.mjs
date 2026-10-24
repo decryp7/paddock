@@ -24,7 +24,7 @@ export default {
       });
     }
     const usesPlaywright = ctx.files().some((f) => /playwright\.config\./.test(f));
-    if (usesPlaywright && !ctx.workflows().some((w) => /[A-Z_]*REQUIRE_TEST_BROWSER/.test(w.text))) {
+    if (usesPlaywright && !ctx.workflows().some((w) => /[A-Z_]*REQUIRE_TEST_BROWSER|\.gitea\/actions\/install-test-browser/.test(w.text))) {
       out.push(warn('C15', 7, ctx.config.workflowsDir, 1, 'Playwright is used but no workflow sets <APP>_REQUIRE_TEST_BROWSER=1, so a missing browser skips instead of failing', 'Set the REQUIRE_TEST_BROWSER env var in the CI test jobs.'));
     }
     return out;

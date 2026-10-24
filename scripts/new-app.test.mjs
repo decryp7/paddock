@@ -90,6 +90,13 @@ describe('a new app', () => {
     assert.ok(existsSync(join(dest, 'LICENSE-MIT')) && existsSync(join(dest, 'CHANGELOG.md')));
     assert.ok(!existsSync(join(dest, 'app/src-tauri/Cargo.lock')), 'the lock file is made by the new app\'s first build');
     assert.ok(!existsSync(join(dest, 'app/src-tauri/target')) && !existsSync(join(dest, 'app/src-tauri/gen')));
+    // The repo root comes from the templates: baseline files, an AGENTS.md of shared blocks, the README skeleton.
+    assert.match(read('rustfmt.toml'), /max_width = 140/);
+    assert.match(read('cliff.toml'), /All notable changes to Pacenotes/);
+    assert.match(read('AGENTS.md'), /<!-- paddock:block rules rev=[0-9a-f]{8} -->/);
+    assert.match(read('README.md'), /^# Pacenotes\n/);
+    assert.match(read('docs/releasing.md'), /Pacenotes is not code-signed yet/);
+    assert.equal(read('app/tsconfig.json').includes('paddock-tsconfig'), false, 'the generator keeps its own tsconfig');
     const pkg = JSON.parse(read('app/package.json'));
     assert.match(pkg.dependencies['@decryp7/paddock-ui'], /^\^\d+\.\d+\.\d+$/);
     assert.equal(JSON.parse(read('app/angular.json')).projects.app.architect.build.options.outputPath, 'dist/app');
