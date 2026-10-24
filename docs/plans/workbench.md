@@ -349,3 +349,10 @@ retry and checkpoint debounce then go back to `setTimeout`. A lint must express 
   image) before shell/integrate is merged to main, so coverage is confirmed locally first (rule 3).
 - `paddock-download` has no free-disk pre-check (Debrief has one): add it (bounded, platform call, clear "needs N GB,
   M GB free" error before connecting) before Pitwall's model downloads move onto it.
+
+## 14. What's New is a view, not a popup (user, 2026-10-24)
+
+Debrief showed its changelog as a dialog at start; the user prefers a pane. The shell's What's New (S11) becomes: in
+workbench apps a document view opened in the background once after an update, in pages apps a page; plus one calm
+cause-keyed notification "Updated to X · See what's new". Help ▸ What's New opens the same view. No dialog at startup.
+Debrief does this first (branch feat/whats-new-pane); the shell follows in W/S follow-up work.
