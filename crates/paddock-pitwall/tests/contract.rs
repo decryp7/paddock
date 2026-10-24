@@ -1,7 +1,7 @@
 //! Contract tests of the Pitwall client against an in-process fake that mirrors Pitwall's routes (loopback, an ephemeral
 //! port, no real Pitwall, no real credential store, no sleeping: waits are channel and condition waits).
 
-use paddock_health::{Health, ManualClock, RepairAction, ServiceState};
+use paddock_health::{FakeClock, Health, RepairAction, ServiceState};
 use paddock_pitwall::discovery::{FILE_NAME, Found};
 use paddock_pitwall::engine::{EngineChoice, Routed, Session, run_or_fallback};
 use paddock_pitwall::health::{Fallback, SERVICE_ID, report, service_spec};
@@ -618,7 +618,7 @@ struct Rig {
     link: Arc<Link>,
     events: Receiver<LinkEvent>,
     ticks: Option<Sender<()>>,
-    clock: ManualClock,
+    clock: FakeClock,
 }
 
 fn rig_with(state: FakeState, stepped: bool, pid: u32, api: u32) -> Rig {
@@ -626,7 +626,7 @@ fn rig_with(state: FakeState, stepped: bool, pid: u32, api: u32) -> Rig {
     let dir = tempfile::tempdir().unwrap();
     fake.write_discovery(dir.path(), pid, api);
     let secrets = Arc::new(MemorySecrets::new("Debrief"));
-    let clock = ManualClock::at(1_000_000);
+    let clock = FakeClock::at_wall_ms(1_000_000);
     let (tx, rx) = channel();
     let sleeper: Arc<dyn Sleeper> = if stepped {
         Arc::new(Ticks(Mutex::new(rx)))
@@ -1049,7 +1049,7 @@ fn a_denied_expired_or_cancelled_pairing_changes_nothing_and_says_so() {
     );
     r.link.connect(false).unwrap();
     r.ticks.as_ref().unwrap().send(()).unwrap();
-    r.clock.advance(301_000);
+    r.clock.advance(Duration::from_millis(301_000));
     r.ticks.as_ref().unwrap().send(()).unwrap();
     next_event(&r, |_| r.link.view().pairing.is_none());
     assert!(r.link.view().problem.unwrap().contains("expired"));
@@ -1512,10 +1512,17 @@ fn a_cache_bypass_shows_in_the_provenance() {
 
 #[test]
 fn a_held_answer_goes_on_when_it_is_released() {
-    let fake = FakePitwall::start(FakeState { chat: ChatScript::HoldFirst, ..keyed() });
+    let fake = FakePitwall::start(FakeState {
+        chat: ChatScript::HoldFirst,
+        ..keyed()
+    });
     let c = client(&fake).with_timeouts(
         Timeouts::QUICK,
-        Timeouts { connect: Duration::from_secs(1), first_byte: Duration::from_secs(300), idle: Duration::from_secs(300) },
+        Timeouts {
+            connect: Duration::from_secs(1),
+            first_byte: Duration::from_secs(300),
+            idle: Duration::from_secs(300),
+        },
     );
     let h = std::thread::spawn(move || c.chat(&chat_req("x")));
     while fake.requests_to("/v1/chat/completions").is_empty() {
