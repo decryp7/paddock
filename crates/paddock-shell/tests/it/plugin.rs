@@ -786,14 +786,19 @@ fn user_files_bring_their_commands_recent_lists_and_drop_grants() {
     )
     .unwrap();
     assert_eq!(started.lock().unwrap().len(), 1);
-    // Without a picker (and without native dialogs) choosing says so; a tray popover may not choose at all.
-    let e = invoke(
+    // Without a picker (and without native dialogs) choosing says so; with the native dialogs there is one, and on the mock
+    // runtime nothing is chosen. A tray popover may not choose at all.
+    let picked = invoke(
         &main,
         "files_pick",
         json!({ "request": { "kind": "openFile" } }),
-    )
-    .unwrap_err();
-    assert_eq!(e["code"], "unavailable", "{e}");
+    );
+    if cfg!(feature = "native-dialogs") {
+        assert_eq!(picked.unwrap(), json!([]));
+    } else {
+        let e = picked.unwrap_err();
+        assert_eq!(e["code"], "unavailable", "{e}");
+    }
     assert!(
         text(
             &invoke(

@@ -167,6 +167,10 @@ jobs:
     defaults:
       run:
         working-directory: crates
+    env:
+      # The job runs as root in the container, where Chromium refuses to start with its sandbox (the real-browser test of
+      # paddock-chromium); the driver drops the sandbox only for root AND with this opt-in.
+      PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: ./.gitea/actions/setup-rust
@@ -219,6 +223,8 @@ jobs:
         shell: bash
     env:
       CARGO_TERM_COLOR: always
+      # Root in the Linux container: Chromium needs the opt-in to start without its sandbox (ignored when not root).
+      PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
 

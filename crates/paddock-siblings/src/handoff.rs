@@ -117,7 +117,9 @@ impl Handoff {
             return Err(SiblingError::TooManyFiles(files.len()));
         }
         for f in &files {
-            if !f.is_absolute() {
+            // `has_root` accepts `/data/a.log` on every host (on Windows it has a root but no drive); a relative path, which
+            // would depend on the working directory, has none.
+            if !f.is_absolute() && !f.has_root() {
                 return Err(bad(f, "it is not an absolute path"));
             }
             if f.components().any(|c| matches!(c, Component::ParentDir)) {
