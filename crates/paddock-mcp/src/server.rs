@@ -1,7 +1,7 @@
 //! The server: one `handle` per line from a client, the same for every transport.
 
 use crate::audit::{AuditEntry, AuditSink, Outcome, redact_arguments};
-use crate::jsonrpc::{Incoming, RpcError, code, error_line, parse, result_line};
+use crate::jsonrpc::{Id, Incoming, RpcError, code, error_line, parse, result_line};
 use crate::page;
 use crate::registry::{
     Access, CallCtx, Policy, RegisterError, ResourceDef, ToolDef, ToolError, ToolOutput,
@@ -15,8 +15,9 @@ use paddock_jobs::{CancelReason, CancelToken, Clock};
 use paddock_log::Redact;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The server's bounds (ADR 0007 rule 4).
@@ -34,6 +35,8 @@ pub struct Limits {
     pub default_timeout: Duration,
     /// Calls that timed out but are still running; above this new calls are refused until they end.
     pub max_abandoned: usize,
+    /// Tool calls of one connection that run at the same time; further calls wait until one ends.
+    pub max_concurrent_calls: usize,
 }
 
 impl Default for Limits {
@@ -45,25 +48,62 @@ impl Default for Limits {
             hard_result_bytes: 1 << 20,
             default_timeout: Duration::from_secs(30),
             max_abandoned: 8,
+            max_concurrent_calls: 4,
         }
     }
 }
 
-/// One client connection's state.
-#[derive(Debug, Clone)]
-pub struct Session {
-    /// Who the client is (from its key or from `initialize`).
-    pub client: String,
-    initialized: bool,
+/// What wakes a call that waits for its tool: the answer, or a cancel from the client.
+enum Msg {
+    Done(std::thread::Result<Result<ToolOutput, ToolError>>),
+    Cancelled,
 }
 
+/// A running call that `notifications/cancelled` can stop.
+struct Inflight {
+    token: CancelToken,
+    wake: mpsc::Sender<Msg>,
+}
+
+/// One client connection's state. Shared between the threads of a connection (calls run concurrently), so it is all interior.
+#[derive(Default)]
+pub struct Session {
+    client: Mutex<String>,
+    initialized: AtomicBool,
+    calls: Mutex<Calls>,
+}
+
+/// The calls of a session: the running ones, and the ids of recent cancels that arrived before their call started (a connection
+/// reads the cancel while the call's worker thread is still starting). The second list is bounded.
+#[derive(Default)]
+struct Calls {
+    running: HashMap<Id, Inflight>,
+    early: std::collections::VecDeque<Id>,
+}
+
+const MAX_EARLY_CANCELS: usize = 64;
+
 impl Session {
-    /// A session for `client` (the name the transport knows it by).
+    /// A session for `client` (the name the transport knows it by; empty to take the name from `initialize`).
     pub fn new(client: &str) -> Session {
         Session {
-            client: client.into(),
-            initialized: false,
+            client: Mutex::new(client.into()),
+            ..Session::default()
         }
+    }
+
+    /// Who the client is.
+    pub fn client(&self) -> String {
+        self.client
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn calls(&self) -> MutexGuard<'_, Calls> {
+        self.calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -171,18 +211,50 @@ impl Server {
         read(&self.policy).clone()
     }
 
-    /// Handles one line from a client; returns the line to send back, if any.
-    pub fn handle(&self, session: &mut Session, line: &str) -> Option<String> {
+    /// Handles one line from a client; returns the line to send back, if any. Callable from several threads at once for the same
+    /// session (that is how a connection runs calls concurrently); a call cancelled by the client gets no answer, as the
+    /// specification says.
+    pub fn handle(&self, session: &Session, line: &str) -> Option<String> {
         match parse(line) {
             Err((id, e)) => Some(error_line(id.as_ref(), &e)),
             Ok(Incoming::Response) => None,
-            Ok(Incoming::Notification { .. }) => None,
-            Ok(Incoming::Request { id, method, params }) => {
-                Some(match self.request(session, &method, &params) {
-                    Ok(v) => result_line(&id, v),
-                    Err(e) => error_line(Some(&id), &e),
-                })
+            Ok(Incoming::Notification { method, params }) => {
+                if method == "notifications/cancelled" {
+                    self.cancel_call(session, &params);
+                }
+                None
             }
+            Ok(Incoming::Request { id, method, params }) => {
+                match self.request(session, &id, &method, &params) {
+                    Reply::Done(Ok(v)) => Some(result_line(&id, v)),
+                    Reply::Done(Err(e)) => Some(error_line(Some(&id), &e)),
+                    Reply::Silent => None,
+                }
+            }
+        }
+    }
+
+    /// Whether `line` is a tool call, which a connection may run on a worker thread while it keeps reading.
+    pub(crate) fn defers(line: &str) -> bool {
+        matches!(parse(line), Ok(Incoming::Request { method, .. }) if method == "tools/call")
+    }
+
+    fn cancel_call(&self, session: &Session, params: &Map<String, Value>) {
+        let Some(id) = params
+            .get("requestId")
+            .and_then(|v| serde_json::from_value::<Id>(v.clone()).ok())
+        else {
+            return;
+        };
+        let mut calls = session.calls();
+        if let Some(call) = calls.running.get(&id) {
+            call.token.cancel_with(CancelReason::User);
+            let _ = call.wake.send(Msg::Cancelled);
+        } else {
+            if calls.early.len() == MAX_EARLY_CANCELS {
+                calls.early.pop_front();
+            }
+            calls.early.push_back(id);
         }
     }
 
@@ -202,7 +274,23 @@ impl Server {
 
     fn request(
         &self,
-        session: &mut Session,
+        session: &Session,
+        id: &Id,
+        method: &str,
+        params: &Map<String, Value>,
+    ) -> Reply {
+        if method == "tools/call"
+            && read(&self.policy).enabled
+            && session.initialized.load(Ordering::SeqCst)
+        {
+            return self.call_tool(session, id, params);
+        }
+        Reply::Done(self.simple_request(session, method, params))
+    }
+
+    fn simple_request(
+        &self,
+        session: &Session,
         method: &str,
         params: &Map<String, Value>,
     ) -> Result<Value, RpcError> {
@@ -221,7 +309,7 @@ impl Server {
         if method == "initialize" {
             return Ok(self.initialize(session, params));
         }
-        if !session.initialized {
+        if !session.initialized.load(Ordering::SeqCst) {
             return Err(RpcError::new(
                 code::INVALID_REQUEST,
                 "send initialize first",
@@ -229,7 +317,6 @@ impl Server {
         }
         match method {
             "tools/list" => self.list_tools(params),
-            "tools/call" => self.call_tool(session, params),
             "resources/list" => self.list_resources(params),
             "resources/read" => self.read_resource(params),
             "resources/templates/list" => Ok(json!({"resourceTemplates": []})),
@@ -240,15 +327,20 @@ impl Server {
         }
     }
 
-    fn initialize(&self, session: &mut Session, params: &Map<String, Value>) -> Value {
-        session.initialized = true;
+    fn initialize(&self, session: &Session, params: &Map<String, Value>) -> Value {
+        session.initialized.store(true, Ordering::SeqCst);
         if let Some(name) = params
             .get("clientInfo")
             .and_then(|c| c.get("name"))
             .and_then(Value::as_str)
-            && session.client.is_empty()
         {
-            session.client = name.chars().take(64).collect();
+            let mut client = session
+                .client
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if client.is_empty() {
+                *client = name.chars().take(64).collect();
+            }
         }
         let tools = !read(&self.tools).is_empty();
         let resources = !read(&self.resources).is_empty();
@@ -360,22 +452,18 @@ impl Server {
         Ok(serde_json::to_value(result).unwrap_or(Value::Null))
     }
 
-    fn call_tool(&self, session: &Session, params: &Map<String, Value>) -> Result<Value, RpcError> {
-        let name = params
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| RpcError::new(code::INVALID_PARAMS, "name is required"))?;
+    fn call_tool(&self, session: &Session, id: &Id, params: &Map<String, Value>) -> Reply {
+        let err = |code, m: &str| Reply::Done(Err(RpcError::new(code, m)));
+        let Some(name) = params.get("name").and_then(Value::as_str) else {
+            return err(code::INVALID_PARAMS, "name is required");
+        };
         let started = self.clock.monotonic();
         let args = match params.get("arguments") {
             None => Value::Object(Map::new()),
             Some(v @ Value::Object(_)) => v.clone(),
-            Some(_) => {
-                return Err(RpcError::new(
-                    code::INVALID_PARAMS,
-                    "arguments must be an object",
-                ));
-            }
+            Some(_) => return err(code::INVALID_PARAMS, "arguments must be an object"),
         };
+        let client = session.client();
         let audit = |outcome: Outcome, bytes: usize| {
             let wall = self
                 .clock
@@ -386,10 +474,10 @@ impl Server {
             let duration_ms =
                 u64::try_from(self.clock.monotonic().saturating_sub(started).as_millis())
                     .unwrap_or(u64::MAX);
-            log::info!(target: "paddock_mcp", "tool {name} by {} ended {outcome:?} after {duration_ms} ms, {bytes} bytes", session.client);
+            log::info!(target: "paddock_mcp", "tool {name} by {client} ended {outcome:?} after {duration_ms} ms, {bytes} bytes");
             self.audit.record(AuditEntry {
                 at_ms: wall,
-                client: session.client.clone(),
+                client: client.clone(),
                 tool: name.to_string(),
                 arguments: redact_arguments(self.redactor.as_ref(), &args, 0),
                 result_bytes: bytes,
@@ -403,14 +491,13 @@ impl Server {
             .filter(|t| read(&self.policy).exposes(t));
         let Some(tool) = tool else {
             audit(Outcome::Refused, 0);
-            return Err(RpcError::new(
-                code::INVALID_PARAMS,
-                format!("Unknown tool: {name}"),
-            ));
+            return err(code::INVALID_PARAMS, &format!("Unknown tool: {name}"));
         };
         let fail = |outcome: Outcome, text: String| {
             audit(outcome, text.len());
-            Ok(serde_json::to_value(CallToolResult::error(text)).unwrap_or(Value::Null))
+            Reply::Done(Ok(
+                serde_json::to_value(CallToolResult::error(text)).unwrap_or(Value::Null)
+            ))
         };
         if let Err(m) = tool.check_args(&args) {
             return fail(
@@ -435,11 +522,29 @@ impl Server {
         }
         let ctx = CallCtx {
             cancel: CancelToken::new(),
-            client: session.client.clone(),
+            client: client.clone(),
             cursor,
         };
         let timeout = tool.timeout.unwrap_or(self.limits.default_timeout);
-        match self.run(&tool, ctx, handler_args, timeout) {
+        let (tx, rx) = mpsc::channel();
+        {
+            let mut calls = session.calls();
+            if let Some(i) = calls.early.iter().position(|e| e == id) {
+                calls.early.remove(i);
+                ctx.cancel.cancel_with(CancelReason::User);
+                let _ = tx.send(Msg::Cancelled);
+            }
+            calls.running.insert(
+                id.clone(),
+                Inflight {
+                    token: ctx.cancel.clone(),
+                    wake: tx.clone(),
+                },
+            );
+        }
+        let outcome = self.run(&tool, ctx, handler_args, timeout, tx, rx);
+        session.calls().running.remove(id);
+        match outcome {
             Run::Done(Ok(out)) => {
                 let cap = tool
                     .max_result_bytes
@@ -448,7 +553,7 @@ impl Server {
                 let result = shape(out, cap);
                 let bytes = result.text().len();
                 audit(Outcome::Ok, bytes);
-                Ok(serde_json::to_value(result).unwrap_or(Value::Null))
+                Reply::Done(Ok(serde_json::to_value(result).unwrap_or(Value::Null)))
             }
             Run::Done(Err(ToolError(m))) => fail(Outcome::ToolError, m),
             Run::TimedOut => fail(
@@ -465,13 +570,25 @@ impl Server {
                     self.info.name
                 ),
             ),
+            Run::Cancelled => {
+                audit(Outcome::Cancelled, 0);
+                Reply::Silent
+            }
         }
     }
 
     /// Runs the handler on its own thread so a slow or panicking tool cannot stall or take down the server. A call that passes its
-    /// time limit is cancelled through its token and abandoned; it counts against `max_abandoned` until it really ends.
-    fn run(&self, tool: &ToolDef, ctx: CallCtx, args: Value, timeout: Duration) -> Run {
-        let (tx, rx) = mpsc::channel();
+    /// time limit, or that the client cancels, is cancelled through its token and abandoned; it counts against `max_abandoned`
+    /// until it really ends.
+    fn run(
+        &self,
+        tool: &ToolDef,
+        ctx: CallCtx,
+        args: Value,
+        timeout: Duration,
+        tx: mpsc::Sender<Msg>,
+        rx: mpsc::Receiver<Msg>,
+    ) -> Run {
         let state = Arc::new(AtomicU8::new(RUNNING));
         let (handler, cancel, abandoned, st) = (
             tool.handler.clone(),
@@ -481,7 +598,7 @@ impl Server {
         );
         std::thread::spawn(move || {
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&ctx, &args)));
-            let _ = tx.send(r);
+            let _ = tx.send(Msg::Done(r));
             if st
                 .compare_exchange(RUNNING, FINISHED, Ordering::SeqCst, Ordering::SeqCst)
                 .is_err()
@@ -489,27 +606,24 @@ impl Server {
                 abandoned.fetch_sub(1, Ordering::SeqCst);
             }
         });
-        match rx.recv_timeout(timeout) {
-            Ok(Ok(r)) => Run::Done(r),
-            Ok(Err(_)) => Run::Panicked,
-            Err(_) => {
-                self.abandoned.fetch_add(1, Ordering::SeqCst);
-                if state
-                    .compare_exchange(RUNNING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_ok()
-                {
-                    cancel.cancel_with(CancelReason::Deadline);
-                    Run::TimedOut
-                } else {
-                    // It finished in the instant between the timeout and now: take its answer.
-                    self.abandoned.fetch_sub(1, Ordering::SeqCst);
-                    match rx.recv() {
-                        Ok(Ok(r)) => Run::Done(r),
-                        _ => Run::Panicked,
-                    }
-                }
-            }
+        let stop = match rx.recv_timeout(timeout) {
+            Ok(m) => match settled(m) {
+                Some(done) => return done,
+                None => Run::Cancelled,
+            },
+            Err(_) => Run::TimedOut,
+        };
+        self.abandoned.fetch_add(1, Ordering::SeqCst);
+        if state
+            .compare_exchange(RUNNING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            cancel.cancel_with(CancelReason::Deadline);
+            return stop;
         }
+        // It finished in the instant between the stop and now: take its answer.
+        self.abandoned.fetch_sub(1, Ordering::SeqCst);
+        rx.iter().find_map(settled).unwrap_or(Run::Panicked)
     }
 
     /// The calendar time the server's clock reports.
@@ -526,6 +640,22 @@ enum Run {
     Done(Result<ToolOutput, ToolError>),
     TimedOut,
     Panicked,
+    Cancelled,
+}
+
+/// The end of a call from the tool's side: its answer, a panic, or `None` for a cancel (not an end).
+fn settled(m: Msg) -> Option<Run> {
+    match m {
+        Msg::Done(Ok(r)) => Some(Run::Done(r)),
+        Msg::Done(Err(_)) => Some(Run::Panicked),
+        Msg::Cancelled => None,
+    }
+}
+
+/// What a request comes to: an answer, or none (the client cancelled it).
+enum Reply {
+    Done(Result<Value, RpcError>),
+    Silent,
 }
 
 /// A tool's output as a result: the text cut at `cap` bytes, a note when it was cut or there is a next page, the structured data
