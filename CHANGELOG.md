@@ -5,7 +5,7 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
-- Shared sccache backend (plan X10): `setup-rust` takes `sccache-redis-endpoint`/`sccache-redis-db` (defaults from `vars.SCCACHE_REDIS_*`); Linux jobs use the shared Redis database 5; `CARGO_INCREMENTAL=0`, `SCCACHE_IGNORE_SERVER_IO_ERROR=1`; new `sccache-stats` action; used in Paddock CI.
+- Shared sccache backend (plan X10): `setup-rust` takes `sccache-redis-endpoint`/`sccache-redis-db` (defaults from `vars.SCCACHE_REDIS_*`); every OS uses the shared Redis database 5 (`sccache-backend: auto|redis|local`); a pinned, checksum-verified sccache is installed when the runner has none; `CARGO_INCREMENTAL=0`, `SCCACHE_IGNORE_SERVER_IO_ERROR=1`; new `sccache-stats` action; used in Paddock CI.
 - `paddock-proc` (plan X6): child processes. `command` (no console window on Windows), `clean_env` and `lower_priority`;
   `run_bounded` (timeout, output cap, the whole tree ended, typed `RunError`); `Supervised` children (own process group,
   `terminate` with grace, tree ended on drop, an optional `MemoryCap` with warning, stop and peak, a `Registry` and

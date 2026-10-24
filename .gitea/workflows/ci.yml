@@ -199,18 +199,14 @@ jobs:
           echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      # Linux: the shared sccache backend (Redis, database 5). macOS and Windows keep sccache's local disk.
+      # Toolchain and sccache on every OS: the shared Redis backend (database 5) when the Gitea variables are set. The macOS
+      # leg can switch to the local disk with `sccache-backend: local` if the network proves slower than its disk.
       - uses: ./.gitea/actions/setup-rust
-        if: runner.os == 'Linux'
         with:
           components: clippy
+          sccache-backend: auto
           sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        if: runner.os == 'Windows'
-        with:
-          components: clippy
 
       - name: Toolchain present
         run: |
@@ -280,7 +276,7 @@ jobs:
         run: cargo clippy -p paddock-window --all-targets --all-features -- -D warnings && cargo test -p paddock-window --all-features
 
       - uses: ./.gitea/actions/sccache-stats
-        if: ${{ always() && runner.os == 'Linux' }}
+        if: always()
 
   # Paddock Shell Demo (apps/shell-demo, plan S18): the shell plugin in a real app, in its own workspace, with the UI it
   # embeds. Inside this repo it is the first consumer: a change to a shell crate or to the UI that breaks an app fails
