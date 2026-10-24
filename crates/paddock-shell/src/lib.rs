@@ -63,6 +63,7 @@ paddock_commands::command_table! {
         paddock_health::tauri::COMMANDS,
         paddock_dialogs::COMMANDS,
         paddock_diag::COMMANDS,
+        paddock_files::COMMANDS,
         paddock_service::COMMANDS,
         paddock_packs::COMMANDS,
         paddock_channels::COMMANDS,
