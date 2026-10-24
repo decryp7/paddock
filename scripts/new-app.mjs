@@ -226,6 +226,7 @@ export function workbenchRustRewrites({ id, name, identifier }, versions) {
       ['pub const APP_ID: &str = "workbench-demo";', `pub const APP_ID: &str = "${id}";`],
       ['pub const APP_NAME: &str = "Paddock Workbench Demo";', `pub const APP_NAME: &str = "${name}";`],
       ['`WORKBENCH_DEMO_HOME`', `\`${id.toUpperCase().replaceAll('-', '_')}_HOME\``],
+      ['include_str!("../../../../ui/projects/workbench-demo/dialog-contracts.json")', 'include_str!("../../dialog-contracts.json")'],
     ],
     'tests/app.rs': [
       ['use paddock_workbench_demo::', `use ${lib}::`],
