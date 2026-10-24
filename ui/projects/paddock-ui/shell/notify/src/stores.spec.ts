@@ -219,9 +219,9 @@ describe('NotificationsStore', () => {
     const store = TestBed.inject(NotificationsStore);
     await settle();
     const first = store.postLocal({ level: 'error', message: 'Could not save', kind: 'sd.save' });
-    clock.time += 5;
+    clock.advance(5);
     store.postLocal({ level: 'error', message: 'Could not save', kind: 'sd.save' });
-    clock.time += 5;
+    clock.advance(5);
     store.postLocal({ level: 'info', message: 'Saved' });
     expect(first.id).toBeLessThan(0);
     expect(localCause({ level: 'info', message: 'Saved' })).toBe('ui:info:Saved');
