@@ -838,7 +838,7 @@ async fn x_select(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         let v = json_body(&body)?;
         let spec = v.get("model").and_then(Value::as_str).unwrap_or("auto");
         let r = st.serving.resolve(&ModelRef::Named(spec.to_string()), false, false)?;
-        Ok(axum::Json(json!({"model": r.id.as_str(), "chosenBy": r.chosen_by, "loaded": st.serving.is_loaded(&r.id)})).into_response())
+        Ok(axum::Json(json!({"model": r.id.as_str(), "chosenBy": r.chosen_by, "loaded": st.serving.is_loaded(&r.id), "contextPerSlot": st.serving.context_per_slot(&r.id)})).into_response())
     };
     go().unwrap_or_else(|e| fail(&e, ApiFamily::Extended))
 }
@@ -856,7 +856,7 @@ async fn x_models(State(st): S, h: HeaderMap) -> Response {
             let all = crate::library::capabilities(f);
             let blocked = st.serving.blocked(&f.id, &all);
             let servable: Vec<_> = all.into_iter().filter(|c| !blocked.iter().any(|b| b.capability == *c)).collect();
-            json!({"id": f.id.as_str(), "capabilities": servable, "unavailable": blocked, "contextMax": f.info.context_length, "sizeBytes": f.size, "loaded": loaded.iter().any(|l| l.model_id == f.id.as_str())})
+            json!({"id": f.id.as_str(), "capabilities": servable, "unavailable": blocked, "contextMax": f.info.context_length, "contextPerSlot": st.serving.context_per_slot(&f.id), "sizeBytes": f.size, "loaded": loaded.iter().any(|l| l.model_id == f.id.as_str())})
         })
         .collect();
     axum::Json(json!({"models": v})).into_response()
