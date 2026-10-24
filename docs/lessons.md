@@ -309,3 +309,9 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   input usable afterwards.
 - When an app needs a shared component that isn't published yet, it vendors a copy and marks it (rule 39 debt):
   Sighter's POC copied paddock-ui's job view. Publish shared parts early (the shell's publish job) so apps never fork.
+- Raw engine error strings reached the UI three times in one Sighter POC (connect failed, Python missing, Pitwall
+  missing), each fixed per screen. Rule 40: one shared problem component (plain words, details folded, a working next
+  step or Repair per rule 19, neutral styling for optional features) and a test that no page renders an engine string
+  directly. The shell's notify entry (`PdServiceError`/`WaitingFor`) is the family's version; apps use it.
+- Lime-vs-amber (and similar hue pairs) can be far apart for normal vision yet collapse under deuteranopia: check every
+  accent against warning/success/danger in CVD simulation, and never let colour alone carry warning (icon + word).
