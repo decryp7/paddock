@@ -31,6 +31,13 @@ const ratio = (v: Vars, fg: string, bg: string): number => contrast(col(v, fg), 
 describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
   const v = resolve(rules, scheme, 'debrief', mode);
 
+  it('the resting "..." button of a table row (subtle text at 75 % on the surface) is 3:1 against surface-1', () => {
+    const [fg, bg] = [col(v, '--pd-text-subtle'), col(v, '--pd-surface-1')];
+    const mixed = { r: fg.r * 0.75 + bg.r * 0.25, g: fg.g * 0.75 + bg.g * 0.25, b: fg.b * 0.75 + bg.b * 0.25, a: 1 };
+    expect(contrast(mixed, bg)).toBeGreaterThanOrEqual(3);
+    expect(v['--pd-row-action-rest'] ?? '').toContain('75%');
+  });
+
   it.each(SURFACES)('text on %s is AAA (7:1)', (s) => {
     expect(contrast(col(v, '--pd-text'), col(v, s))).toBeGreaterThanOrEqual(7);
   });
@@ -142,6 +149,16 @@ describe.each(SCHEMES)('chart palette under colour-vision deficiency, %s', (sche
       for (let j = i + 1; j < sim.length; j++) {
         expect(deltaE(sim[i] as Rgba, sim[j] as Rgba), `${i + 1} vs ${j + 1} under ${kind}`).toBeGreaterThanOrEqual(14);
       }
+  });
+
+  // Slot 6 is the one the review found too close to slot 1 (both blues); it keeps clear of every other slot. Other weak pairs exist
+  // in any 8-colour palette (1 and 4, 2 and 5): that is why a chart with 5 or more series must also be keyed without colour.
+  it.each(['protanopia', 'deuteranopia'] as Cvd[])('slot 6 is >= 20 apart from every other slot under %s', (kind) => {
+    const sim = palette.map((c) => simulate(c, kind));
+    for (let i = 0; i < sim.length; i++) {
+      if (i === 5) continue;
+      expect(deltaE(sim[i] as Rgba, sim[5] as Rgba), `${i + 1} vs 6 under ${kind}`).toBeGreaterThanOrEqual(20);
+    }
   });
 
   it('normal vision: every pair of the 8 colours is >= 20 apart', () => {

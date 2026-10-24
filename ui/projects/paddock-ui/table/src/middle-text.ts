@@ -49,7 +49,7 @@ export function middleTruncate(text: string, fits: (candidate: string) => boolea
 
 /**
  * A path, id or hash on one line, shortened in the middle (UI rule 9) to the width it is given, with the full value as the tooltip. Measures the
- * text in its own font; where that is not possible it falls back to the CSS ellipsis at the end.
+ * text in its own font, against the width it is GIVEN (`flex: 1 1 0`, never the width of the text it shows, or the box would shrink to the cut text and never grow back); where that is not possible it falls back to the CSS ellipsis at the end.
  */
 @Component({
   selector: 'pd-middle-text',
@@ -57,7 +57,7 @@ export function middleTruncate(text: string, fits: (candidate: string) => boolea
   host: { '[attr.title]': 'value()' },
   template: `{{ shown() }}`,
   styles: `
-    :host { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    :host { display: block; flex: 1 1 0; min-width: 0; width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   `,
 })
 export class PdMiddleText {
