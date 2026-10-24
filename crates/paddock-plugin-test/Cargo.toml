@@ -1,0 +1,35 @@
+[package]
+name = "paddock-plugin-test"
+version = "0.1.0"
+description = "Testing plugins (ADR 0001): a fake host that calls a plugin in-process through a real paddock-ipc connection pair, the conformance checks every plugin runs (describe, unknown requests refused, malformed input contained, view documents valid, limits), golden helpers, and paddock-plugin-fixture, a sample plugin (one tool, one settings section, one view, one contract) the host's tests start as a real process."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+# The sample plugin for tests: the host crate's tests start it as a real process. Never shipped by an app.
+[[bin]]
+name = "paddock-plugin-fixture"
+path = "src/bin/fixture.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "paddock-plugin-fixture-v1"
+path = "src/bin/fixture_v1.rs"
+test = false
+doc = false
+
+[dependencies]
+paddock-ipc = { workspace = true }
+paddock-plugin-api = { workspace = true }
+paddock-plugin-package = { workspace = true }
+paddock-settings = { workspace = true }
+paddock-testkit = { workspace = true }
+paddock-view = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+tempfile = "3"
