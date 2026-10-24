@@ -30,6 +30,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C23 | commit messages (no Co-Authored-By, no AI attribution); `commit-lint` CLI. With `--paddock`: the shared doc blocks of `AGENTS.md` (rules and the common sections), `docs/suite-lessons.md`, `docs/releasing.md` equal `docs/blocks` | a git checkout; `--paddock` for the blocks |
 | C28 | the repo baseline (`.editorconfig`, `rustfmt.toml`, licences, `deny.toml` tables, `cliff.toml`, `lefthook.yml`, Renovate preset, tsconfig, Cargo profiles, ...) equals `templates/repo` | `--paddock` |
 | C29 | each window's initial JS (from `ng build --stats-json`) is within its `windowWeight` budget in `paddock.conformance.json`; a budget above measured + 10% warns (rule 35). `window-weight [kind...] [--max kB] [--record]` prints a window's weight and records budgets | the build stats |
+| C30 | Rust tests do not assert on the wall clock: in a `#[test]` fn an assertion comparing `elapsed()`, `Instant::now()`, `SystemTime::now()` (or a variable assigned from one) with a `Duration` is a warning; a hang guard of at least 10 s carries `// conformance: hang-guard`. Use a `FakeClock` | |
 
 ## Sync (X27, X43)
 

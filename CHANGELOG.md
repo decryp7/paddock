@@ -9,6 +9,10 @@ Conventional Commits; one semver tag for the whole repo.
   `EnvLock::hermetic` (HOME, APPDATA, XDG_* and TMPDIR in the scratch folder, restored afterwards), golden files with
   `PADDOCK_UPDATE_GOLDEN`, `FakeRunner` for OS-command seams, `corpus`/`never_panics`, and `FakeClock` re-exported from
   `paddock_jobs::time`.
+- Conformance check C30 (warning level, rule 40): a `#[test]` fn that compares a duration measured with `elapsed()`,
+  `Instant::now() - x` or `duration_since` against a limit. A hang guard of at least 10 s may carry `// conformance: hang-guard`.
+  First findings in Paddock: `paddock-diag` window.rs, `paddock-proc` login.rs and supervised.rs, `paddock-updater` tests,
+  `paddock-window` exit.rs and tauri/tests.rs.
 - `paddock-packs` (plan X15, decision D11): knowledge packs for all apps. `PackKind` (serde type, format number, the app's own
   rules), `parse_pack` with `Limits` (file size, entries, string length, nesting, values, files), unknown keys as named warnings,
   a bad pack refused whole with a reason while the rest load (last good version kept), `PackLoader`/`PackStore` (build new, then
