@@ -696,26 +696,25 @@ fn the_notification_step_asks_once_and_repairs_a_refusal_by_opening_the_system_s
 }
 
 #[test]
-fn the_toaster_access_reads_the_permission_and_uses_the_apps_closures() {
+fn the_toaster_access_uses_the_toasters_own_request_and_settings_and_the_apps_closures_replace_them()
+ {
     use paddock_health::notify::os::FakeToaster;
     let toaster = Arc::new(FakeToaster::default());
-    toaster.set_permission(Permission::Denied);
+    toaster.set_permission(Permission::Unknown);
+    toaster.set_permission_after_request(Permission::Denied);
     let plain = ToasterAccess::new(toaster.clone());
-    assert_eq!(plain.permission(), Permission::Denied);
+    assert_eq!(plain.permission(), Permission::Unknown);
     assert_eq!(
         plain.request(),
         Permission::Denied,
-        "without a closure asking reads the permission again"
+        "the toaster asks the OS"
     );
-    assert!(
-        plain
-            .open_system_settings()
-            .unwrap_err()
-            .contains("notification settings")
-    );
+    assert_eq!(plain.permission(), Permission::Denied);
+    plain.open_system_settings().unwrap();
+    assert_eq!(toaster.settings_opened(), 1);
     let opened = Arc::new(AtomicUsize::new(0));
     let count = opened.clone();
-    let wired = ToasterAccess::new(toaster)
+    let wired = ToasterAccess::new(toaster.clone())
         .request_with(|| Permission::Granted)
         .open_settings_with(move || {
             count.fetch_add(1, Ordering::SeqCst);
@@ -724,6 +723,28 @@ fn the_toaster_access_reads_the_permission_and_uses_the_apps_closures() {
     assert_eq!(wired.request(), Permission::Granted);
     wired.open_system_settings().unwrap();
     assert_eq!(opened.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        toaster.settings_opened(),
+        1,
+        "the closure replaced the toaster's"
+    );
+    // A toaster without a page of its own (the trait's defaults) says where to look.
+    struct Bare;
+    impl paddock_health::notify::os::Toaster for Bare {
+        fn show(
+            &self,
+            _: &paddock_health::notify::os::OsToast,
+        ) -> Result<(), paddock_health::notify::os::ToastError> {
+            Ok(())
+        }
+    }
+    let bare = ToasterAccess::new(Arc::new(Bare));
+    assert_eq!(bare.request(), Permission::Unknown);
+    assert!(
+        bare.open_system_settings()
+            .unwrap_err()
+            .contains("notification settings")
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -839,22 +860,56 @@ fn the_pitwall_step_reports_a_paused_pitwall_as_a_problem_with_start_as_its_repa
 }
 
 #[test]
-fn the_link_port_asks_the_link_and_the_app_starts_pitwall() {
+fn the_link_port_asks_the_link_and_starts_pitwall_through_the_siblings() {
+    use paddock_env::Os;
     use paddock_pitwall::{AppIdentity, Link, LinkConfig, Locator};
     use paddock_secrets::MemorySecrets;
+    use paddock_siblings::Siblings;
+    use paddock_siblings::testing::{FakeFiles, FakeSpawner};
     let dir = tempfile::tempdir().unwrap();
     let link = Link::new(LinkConfig::new(
         AppIdentity::new("demo", "Demo").unwrap(),
         Locator::in_dir(dir.path(), None, Arc::new(|_| false)),
         Arc::new(MemorySecrets::new("Demo")),
     ));
-    let port = LinkPort::new(link.clone());
+    let siblings = |installed: &[&str]| {
+        let spawner = Arc::new(FakeSpawner::new());
+        let s = Siblings::new(
+            "debrief",
+            Os::MacOs,
+            None,
+            Box::new(|_| None),
+            Arc::new(FakeFiles::with(installed.iter().copied())),
+            spawner.clone(),
+        )
+        .unwrap();
+        (Arc::new(s), spawner)
+    };
+    let (installed, spawner) = siblings(&["/Applications/Pitwall.app/Contents/MacOS/pitwall"]);
+    let port = LinkPort::with_siblings(link.clone(), installed);
     assert_eq!(port.probe().found, FoundKind::Installed);
     assert!(port.connect().is_err(), "nothing runs to pair with");
-    assert!(port.start().unwrap_err().contains("Open Pitwall"));
+    port.start().unwrap();
+    assert_eq!(spawner.launched().len(), 1);
+    // Not installed and too old are the step's words; a failing start is an error.
+    let (missing, _) = siblings(&[]);
+    assert!(
+        start_pitwall(&missing)
+            .unwrap_err()
+            .contains("Pitwall was not found")
+    );
+    let (old, _) = siblings(&["/usr/local/bin/imt"]);
+    assert!(start_pitwall(&old).unwrap_err().contains("not found"));
+    let (broken, spawner) = siblings(&["/Applications/Pitwall.app/Contents/MacOS/pitwall"]);
+    spawner.fail_with(Some("denied"));
+    assert!(start_pitwall(&broken).unwrap_err().contains("denied"));
+    // Real machine, an app of the family: constructs without starting anything; outside the family: says to open it by hand.
+    let _ = LinkPort::new(link.clone(), "debrief");
+    let outside = LinkPort::new(link.clone(), "shell-demo");
+    assert!(outside.start().unwrap_err().contains("Open Pitwall"));
     let started = Arc::new(AtomicBool::new(false));
     let flag = started.clone();
-    let port = LinkPort::new(link).starter(move || {
+    let port = LinkPort::new(link, "shell-demo").starter(move || {
         flag.store(true, Ordering::SeqCst);
         Ok(())
     });

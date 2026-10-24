@@ -19,6 +19,11 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- Set-up checklist, no app wiring (plan X19 follow-up). `paddock_health::notify::os::Toaster` gains `request_permission` and
+  `open_system_settings`; `PluginToaster` implements them (the plugin's `request_permission`; macOS `open
+  x-apple.systempreferences:com.apple.Notifications-Settings.extension`, Windows `ms-settings:notifications`, GNOME
+  `gnome-control-center notifications`, otherwise the words say where to look), so `ToasterAccess` needs no closures. `LinkPort::new(link,
+  app_id)` starts Pitwall through `paddock-siblings` (`Handoff::Open`); not installed and too old come back as the step's words.
 - First-run set-up checklist (plan X19). `paddock_shell::setup` (`Builder::first_run`): the steps in order with their own checks
   (`SetupItem`), the user's answers (skipped, shown) in `setup.json` through `paddock-env`, actions run on a worker with the
   outcome on `paddock://setup`, and the commands `setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish`. The shell

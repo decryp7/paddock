@@ -46,6 +46,20 @@ export function fakeTestOutcome(search: string = globalThis.location?.search ?? 
   return OUTCOMES.find((o) => o === wanted) ?? 'succeed';
 }
 
+/**
+ * `?channels-step=manual`: the engine's steps wait until the test calls `window.__sdChannelsStep()` (one step per call), so a
+ * test sees each phase of a test send for as long as it wants instead of racing a 400 ms timer.
+ */
+function manualSteps(search: string = globalThis.location?.search ?? ''): boolean {
+  return new URLSearchParams(search).get('channels-step') === 'manual';
+}
+
+const queued: (() => void)[] = [];
+function queueStep(step: () => void): void {
+  queued.push(step);
+  (globalThis as { __sdChannelsStep?: () => void }).__sdChannelsStep = () => queued.shift()?.();
+}
+
 let memory: ChannelsBackend | null = null;
 
 /**
@@ -61,7 +75,7 @@ export function demoChannelsBackend(): ChannelsBackend {
     secrets: start.secrets,
     getFailures: start.getFailures,
     outcome: fakeTestOutcome(),
-    schedule: (step) => void setTimeout(step, 400),
+    schedule: manualSteps() ? queueStep : (step) => void setTimeout(step, 400),
   });
   return memory;
 }

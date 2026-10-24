@@ -1,6 +1,6 @@
 import type { Signal } from '@angular/core';
 import { defineCommand, defineKeybinding, defineMenuItem, defineNotificationKind, msg, type ContributionBatch, type ShellContext } from '@decryp7/paddock-ui/shell';
-import { UNDO_NOTICE_KINDS } from './undo.store';
+import { UNDO_NOTICE_KINDS } from './undo-kinds';
 
 /** What the undo commands need from the app's context: the window's `UndoStore` (any object with these members). */
 export interface UndoControls {
