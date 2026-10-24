@@ -10,3 +10,4 @@ publish = ["decryp7"]
 [dependencies]
 paddock-jobs = { workspace = true }
 tempfile = "3"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
