@@ -148,6 +148,32 @@ Denies the app_quit command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-app-relaunch`
+
+</td>
+<td>
+
+Enables the app_relaunch command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-app-relaunch`
+
+</td>
+<td>
+
+Denies the app_relaunch command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-diagnostics-cancel`
 
 </td>
