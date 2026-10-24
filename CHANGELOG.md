@@ -5,6 +5,11 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-names` search index and `names_search` (plan X18 follow-up): the catalogue keeps hash maps for the exact, joined and alias
+  rungs and an inverted index of words (prefix by range, inside-a-word by scan, typos by letter-bag and edit distance), so a
+  search over 250,000 names takes about 20 ms (was 500 ms; `cargo bench -p paddock-names` fails over 50 ms). `search_scan` ranks every
+  entry and a property test checks that both give the same answer. `NamesService` + `NamesSearchRequest`/`NamesSearchReply`
+  are the engine side of the palette's `names_search` command (arguments validated in Rust, catalogue swapped whole).
 - `paddock-names` (plan X18): identifier search per rule 20, from Debrief's `names/` (segmentation with the embedded word list,
   normalisation, grouping of spellings, typo distance, the ranking ladder and the clarifying question) and Dyno's counter search
   (every word in any order, other fields ranked below the name). `Catalogue::new` / `text` / `with_vocabulary`, `Entry`,
