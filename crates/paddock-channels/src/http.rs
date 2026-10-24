@@ -1,7 +1,10 @@
-//! The port to the network for webhook and ntfy: one POST. [`UreqPoster`] (feature `http`) is the real one.
+//! The port to the network for webhook and ntfy: one POST. [`EgressPoster`] is the real one, on `paddock-net`.
 
-use paddock_download::{Header, TransportError};
-use std::time::Duration;
+use paddock_download::{Header, TransportError, TransportErrorKind, parse_retry_after};
+use paddock_jobs::CancelToken;
+use paddock_net::{Egress, NetError, Policy, Reach, Request};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 /// Longest header value sent (an `Authorization` token is the longest in practice).
 pub const MAX_HEADER_VALUE: usize = 8 * 1024;
@@ -37,121 +40,63 @@ pub trait HttpPoster: Send + Sync {
     fn post(&self, request: &PostRequest) -> Result<PostResponse, TransportError>;
 }
 
-#[cfg(feature = "http")]
-mod real {
-    use super::{HttpPoster, PostRequest, PostResponse};
-    use crate::SendError;
-    use paddock_download::{
-        HttpConfig, ProxyMode, ProxyRules, TransportError, TransportErrorKind, parse_retry_after,
-        ureq_agent,
-    };
-    use std::sync::{Arc, RwLock};
-    use std::time::{Duration, SystemTime};
-
-    /// [`HttpPoster`] over HTTPS with ureq: certificates are checked against the operating system's trust store (a corporate
-    /// TLS-inspecting proxy whose root IT installed works as in the browser; checking is never switched off), the proxy is
-    /// chosen like `paddock-download` does ([`ProxyMode`]), redirects are never followed.
-    ///
-    /// Plan X16 (`paddock-net`) will own the one outbound policy; this poster is the part that moves there.
-    pub struct UreqPoster {
-        mode: ProxyMode,
-        rules: RwLock<Arc<ProxyRules>>,
-    }
-
-    impl UreqPoster {
-        /// Reads the proxy rules once (for [`ProxyMode::System`] from the environment and the operating system). An unusable
-        /// proxy setting is an error that names it.
-        pub fn new(mode: ProxyMode) -> Result<UreqPoster, SendError> {
-            let rules = Self::rules_for(&mode)?;
-            Ok(UreqPoster {
-                mode,
-                rules: RwLock::new(Arc::new(rules)),
-            })
-        }
-
-        fn rules_for(mode: &ProxyMode) -> Result<ProxyRules, SendError> {
-            match mode {
-                ProxyMode::System => {
-                    ProxyRules::detect().map_err(|e| SendError::Proxy(e.to_string()))
-                }
-                ProxyMode::Direct => Ok(ProxyRules::none()),
-                ProxyMode::Rules(r) => Ok(r.clone()),
-            }
-        }
-
-        /// Reads the system's proxy settings again; only [`ProxyMode::System`] changes, and the old rules stay when the new
-        /// ones are unusable.
-        pub fn reload_proxy(&self) -> Result<(), SendError> {
-            if self.mode == ProxyMode::System {
-                let rules = Arc::new(Self::rules_for(&self.mode)?);
-                *self.rules.write().unwrap_or_else(|p| p.into_inner()) = rules;
-            }
-            Ok(())
-        }
-
-        fn agent(&self, url: &str) -> Result<ureq::Agent, TransportError> {
-            let rules = self.rules.read().unwrap_or_else(|p| p.into_inner()).clone();
-            // Redirects are never followed: one could leak the message or token to another host.
-            let config = HttpConfig {
-                proxy: ProxyMode::Direct,
-                user_agent: concat!("paddock-channels/", env!("CARGO_PKG_VERSION")).to_string(),
-                connect_timeout: Duration::from_secs(30),
-                response_timeout: Duration::from_secs(60),
-                max_redirects: 0,
-            };
-            ureq_agent(&config, rules.for_url(url))
-                .map_err(|e| TransportError::new(TransportErrorKind::Proxy, e.to_string()))
-        }
-    }
-
-    impl HttpPoster for UreqPoster {
-        fn post(&self, request: &PostRequest) -> Result<PostResponse, TransportError> {
-            let agent = self.agent(&request.url)?;
-            let mut req = agent.post(&request.url);
-            for h in &request.headers {
-                req = req.header(h.name.as_str(), h.value.as_str());
-            }
-            let resp = req
-                .config()
-                .timeout_global(Some(request.timeout))
-                .build()
-                .send(&request.body[..])
-                .map_err(classify)?;
-            let retry_after = resp
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| parse_retry_after(v, SystemTime::now()));
-            Ok(PostResponse {
-                status: resp.status().as_u16(),
-                retry_after,
-            })
-        }
-    }
-
-    fn classify(e: ureq::Error) -> TransportError {
-        use TransportErrorKind as K;
-        let kind = match &e {
-            ureq::Error::Timeout(_) => K::Timeout,
-            ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::TimedOut => K::Timeout,
-            ureq::Error::Io(io)
-                if io
-                    .get_ref()
-                    .is_some_and(|inner| inner.is::<rustls::Error>()) =>
-            {
-                K::Tls
-            }
-            ureq::Error::Io(_)
-            | ureq::Error::HostNotFound
-            | ureq::Error::ConnectionFailed
-            | ureq::Error::Protocol(_) => K::Connect,
-            ureq::Error::Tls(_) | ureq::Error::Rustls(_) => K::Tls,
-            ureq::Error::InvalidProxyUrl | ureq::Error::ConnectProxyFailed(_) => K::Proxy,
-            _ => K::Invalid,
-        };
-        TransportError::new(kind, e.to_string())
+/// The policy for the network calls of notification channels: https only (plain http to this computer when `reach` is
+/// [`Reach::Loopback`]), no redirects (a redirect could leak the message or token to another host, so it counts as a
+/// rejection), the given reach (a webhook on the local network needs [`Reach::Lan`], a test against this computer
+/// [`Reach::Loopback`]).
+pub fn channel_policy(reach: Reach) -> Policy {
+    Policy {
+        user_agent: concat!("paddock-channels/", env!("CARGO_PKG_VERSION")).to_string(),
+        ..Policy::default().reach(reach).max_redirects(0)
     }
 }
 
-#[cfg(feature = "http")]
-pub use real::UreqPoster;
+/// [`HttpPoster`] over the app's [`Egress`]: every request obeys the family's outbound policy (reach, scheme, offline mode,
+/// connection reuse). Build the egress with [`channel_policy`].
+pub struct EgressPoster {
+    egress: Arc<Egress>,
+}
+
+impl EgressPoster {
+    /// A poster over `egress`.
+    pub fn new(egress: Arc<Egress>) -> EgressPoster {
+        EgressPoster { egress }
+    }
+}
+
+impl HttpPoster for EgressPoster {
+    fn post(&self, request: &PostRequest) -> Result<PostResponse, TransportError> {
+        let mut req = Request::post(&request.url, request.body.clone());
+        req.headers = request.headers.clone();
+        // The answer's body is never read: a chatty server cannot make a notification expensive.
+        let answer = self
+            .egress
+            .stream_within(
+                &req,
+                &CancelToken::new(),
+                request.timeout,
+                Some(request.timeout),
+            )
+            .map_err(to_transport)?;
+        let retry_after = answer
+            .headers
+            .iter()
+            .find(|(n, _)| n == "retry-after")
+            .and_then(|(_, v)| parse_retry_after(v, SystemTime::now()));
+        Ok(PostResponse {
+            status: answer.status,
+            retry_after,
+        })
+    }
+}
+
+fn to_transport(e: NetError) -> TransportError {
+    let kind = match &e {
+        NetError::Connect(_) => TransportErrorKind::Connect,
+        NetError::Timeout(_) => TransportErrorKind::Timeout,
+        NetError::Tls(_) => TransportErrorKind::Tls,
+        NetError::Proxy(_) => TransportErrorKind::Proxy,
+        _ => TransportErrorKind::Invalid,
+    };
+    TransportError::new(kind, e.to_string())
+}
