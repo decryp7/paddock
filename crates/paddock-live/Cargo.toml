@@ -1,0 +1,28 @@
+[package]
+name = "paddock-live"
+version = "0.1.0"
+description = "The live feed of the Paddock apps: Rust owns the state and pushes a snapshot plus ordered deltas with sequence numbers to the windows; a window that reloads or sees a gap asks for a snapshot; every queue is bounded and a slow consumer is resynchronised instead of growing; a source runner reconnects with back-off on the shared Clock. The Tauri adapter emits the frames as events and answers live_snapshot."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[package.metadata.paddock]
+scaffold = true
+
+[features]
+# The Tauri adapter (`paddock_live::tauri`: the `paddock://live/<channel>` events, `live_snapshot` in a `paddock-commands`
+# table); the core never depends on Tauri.
+tauri = ["dep:tauri", "dep:paddock-commands", "paddock-commands/tauri"]
+
+[dependencies]
+paddock-jobs = { workspace = true }
+paddock-commands = { workspace = true, optional = true }
+tauri = { workspace = true, optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+paddock-testkit = { workspace = true }
+tauri = { workspace = true, features = ["test"] }
+paddock-commands = { workspace = true }

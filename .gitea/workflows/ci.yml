@@ -307,6 +307,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-testkit --all-targets --all-features -- -D warnings && cargo test -p paddock-testkit --all-features
 
+      - name: paddock-live
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-live --all-targets --all-features -- -D warnings && cargo test -p paddock-live --all-features
+
       - name: paddock-channels
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-channels --all-targets --all-features -- -D warnings && cargo test -p paddock-channels --all-features
