@@ -13,6 +13,22 @@ Conventional Commits; one semver tag for the whole repo.
   own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C33: an
   e2e spec runs axe, every dialog of the contract file is covered, warnings for a missing keyboard flow or accent test. The shell
   demo's `shell-demo-a11y.spec.ts` runs it all. `ShellDialogs.loaded()` now waits for the dialog shell itself (a window still on the splash passed it).
+- `@decryp7/paddock-ui` data parts (plan X21): `/table` (`pd-table`: sortable columns with `aria-sort`, filter, column menu, optional
+  group rows, CDK virtual scroll above 100 lines, one tab stop with arrow/Home/End/Page keys, Enter opens, Shift+F10 and right-click
+  open the row menu, up to two hover icon actions plus a "..." button and the same list in the menu with destructive items last,
+  columns that drop out by the table's own width so nothing scrolls sideways at 320 px, middle ellipsis for paths); `/chart`
+  (`pd-chart` over ECharts loaded lazily through `PD_ECHARTS`, theme and palette from the tokens and re-read on a theme change,
+  accessible name and text twin, `chartOption` for line, area, bar, stacked bar and donut, escaped tooltips, works with the test
+  kit's `FakeECharts` through `fakeEchartsLoader`); `/forms` (`pd-field` and `pdFieldControl` for Signal Forms: label, hint and one error
+  with the alert icon at 14 px, when errors show, words for the built-in kinds). Based on Pitwall's and Spotter's `row-nav`/`row-menu`,
+  Pitcrew's, Pitwall's and Spotter's chart options and the settings window's field. Gallery sections, Playwright specs (gallery and
+  shell-demo; the demo's Runners page now uses `pd-table`) and a contact sheet at `ui/docs/review/x21-data/` for the independent
+  review (not approved yet).
+- `paddock-archive` (plan X24): safe unpacking of zip, tar, tar.gz and tar.xz. Limits on entries, file size, total size, expansion
+  ratio, depth and path length, checked while writing; `..`, absolute paths, drive letters, device names and case-only duplicates
+  refused; `Links` (refuse, skip, copy, keep-relative), `Layout` (keep, strip, flat), a name filter, file modes; all-or-nothing
+  `extract` through a staging folder that is swapped in; `extract_job` for a `paddock-jobs` job with phases and Cancel; `sweep_stale`;
+  a fuzz target.
 - `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
   macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
   deleted, one at a time, with disk and load checks (rule 7).
