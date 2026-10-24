@@ -5,9 +5,13 @@ fn replies_by_program_and_argument_prefix_first_rule_wins() {
     let r = FakeRunner::new();
     r.on("launchctl", &["print", "gui/501/net.x.agent"])
         .reply(Reply::ok("state = running"));
-    r.on("launchctl", &["print"]).reply(Reply::fails("Could not find service"));
+    r.on("launchctl", &["print"])
+        .reply(Reply::fails("Could not find service"));
     r.on("launchctl", &[]).reply(Reply::ok(""));
-    assert_eq!(r.run("launchctl", &["print", "gui/501/net.x.agent"]), Reply::ok("state = running"));
+    assert_eq!(
+        r.run("launchctl", &["print", "gui/501/net.x.agent"]),
+        Reply::ok("state = running")
+    );
     assert_eq!(
         r.run("launchctl", &["print", "gui/501/other"]),
         Reply::fails("Could not find service")
@@ -23,8 +27,17 @@ fn queued_replies_are_used_in_order_and_the_last_repeats() {
     r.on("systemctl", &["--user", "is-active"])
         .reply(Reply::fails("inactive"))
         .then(Reply::ok("active"));
-    let answers: Vec<_> = (0..3).map(|_| r.run("systemctl", &["--user", "is-active", "x.service"])).collect();
-    assert_eq!(answers, [Reply::fails("inactive"), Reply::ok("active"), Reply::ok("active")]);
+    let answers: Vec<_> = (0..3)
+        .map(|_| r.run("systemctl", &["--user", "is-active", "x.service"]))
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            Reply::fails("inactive"),
+            Reply::ok("active"),
+            Reply::ok("active")
+        ]
+    );
 }
 
 #[test]
@@ -32,7 +45,10 @@ fn an_unscripted_command_is_an_error_and_is_still_recorded() {
     let r = FakeRunner::new();
     r.on("reg", &["query"]).reply(Reply::ok("x"));
     match r.run("reg", &["delete", "HKCU\\Run"]) {
-        Reply::Failed(m) => assert!(m.contains("unscripted command `reg delete HKCU\\Run`"), "{m}"),
+        Reply::Failed(m) => assert!(
+            m.contains("unscripted command `reg delete HKCU\\Run`"),
+            "{m}"
+        ),
         other => panic!("{other:?}"),
     }
     // A rule that never got a reply does not match either.

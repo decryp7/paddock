@@ -12,11 +12,16 @@ fn the_corpus_is_deterministic_bounded_and_covers_the_hostile_shapes() {
     assert!(c.contains(&Vec::new()));
     assert!(c.iter().any(|v| v.len() == SEED.len() - 1), "a truncation");
     assert!(
-        c.iter().any(|v| v.contains(&0xc3) && std::str::from_utf8(v).is_err()),
+        c.iter()
+            .any(|v| v.contains(&0xc3) && std::str::from_utf8(v).is_err()),
         "invalid UTF-8"
     );
     assert!(c.iter().any(|v| v.contains(&0)), "a NUL");
-    assert_eq!(corpus(b"").len(), 4, "an empty seed still gives the fixed shapes");
+    assert_eq!(
+        corpus(b"").len(),
+        4,
+        "an empty seed still gives the fixed shapes"
+    );
 }
 
 #[test]

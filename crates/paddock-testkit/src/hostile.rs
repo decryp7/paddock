@@ -41,7 +41,10 @@ pub fn corpus(seed: &[u8]) -> Vec<Vec<u8>> {
 
 /// Runs `parse` on every input and returns the inputs it panicked on (empty: it never panicked). The parser's result
 /// (an error for bad input is fine) is ignored. For a test: `assert!(never_panics(&corpus(SEED), parse).is_empty())`.
-pub fn never_panics<I: AsRef<[u8]>, R>(inputs: &[I], mut parse: impl FnMut(&[u8]) -> R) -> Vec<Vec<u8>> {
+pub fn never_panics<I: AsRef<[u8]>, R>(
+    inputs: &[I],
+    mut parse: impl FnMut(&[u8]) -> R,
+) -> Vec<Vec<u8>> {
     inputs
         .iter()
         .filter(|input| catch_unwind(AssertUnwindSafe(|| parse(input.as_ref()))).is_err())
