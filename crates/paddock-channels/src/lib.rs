@@ -31,7 +31,7 @@ pub use config::{
 };
 pub use control::{
     ChannelsControl, ChannelsError, ChannelsEvent, ChannelsView, Emit, ErrorCode, FileSettings,
-    MAX_TESTS, MemorySettings, SettingsStore,
+    MAX_TESTS, MemorySettings, SettingsStore, TestPhase, TestStarted,
 };
 pub use dispatch::{
     DEFAULT_TIMEOUT, Delivery, Dispatcher, Phase, Progress, RetryPolicy, TEST_KIND,

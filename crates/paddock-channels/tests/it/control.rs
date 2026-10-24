@@ -209,7 +209,10 @@ fn a_test_returns_at_once_and_reports_its_outcome_as_an_event() {
         ok,
         attempts,
         message,
-    } = next(&r);
+    } = next(&r)
+    else {
+        panic!("a test outcome")
+    };
     assert_eq!(
         (test_id, channel_id.as_str(), ok, attempts, message),
         (id, "w", true, 1, None)
@@ -240,11 +243,15 @@ fn a_failed_test_says_what_to_do_and_a_missing_secret_is_named() {
     let cfg = webhook("w", true);
     r.control.set_secret("w", "tok").unwrap();
     r.control.test(cfg.clone()).unwrap();
-    let ChannelsEvent::Test { ok, message, .. } = next(&r);
+    let ChannelsEvent::Test { ok, message, .. } = next(&r) else {
+        panic!("a test outcome")
+    };
     assert!(!ok && message.unwrap().contains("HTTP 401"));
     r.control.clear_secret("w").unwrap();
     r.control.test(cfg).unwrap();
-    let ChannelsEvent::Test { ok, message, .. } = next(&r);
+    let ChannelsEvent::Test { ok, message, .. } = next(&r) else {
+        panic!("a test outcome")
+    };
     assert!(!ok && message.unwrap().contains("not stored"));
     let mut bad = webhook("w", false);
     bad.transport = Transport::Webhook {
@@ -257,7 +264,10 @@ fn a_failed_test_says_what_to_do_and_a_missing_secret_is_named() {
         attempts,
         message,
         ..
-    } = next(&r);
+    } = next(&r)
+    else {
+        panic!("a test outcome")
+    };
     assert!(!ok && attempts == 0 && message.unwrap().contains("https://"));
 }
 
