@@ -199,3 +199,42 @@ fn direct_mode_ignores_proxies_and_reload_changes_nothing_for_fixed_modes() {
     sys.reload_proxy().unwrap();
     assert!(sys.proxy_rules().for_url("http://127.0.0.1:1/").is_none());
 }
+
+#[test]
+fn proxy_rules_per_scheme_and_the_no_proxy_forms_that_are_rare_or_malformed() {
+    let http = ProxyServer::parse("http://proxy.example:3128").unwrap();
+    let rules = ProxyRules::per_scheme(Some(http), None);
+    assert!(
+        rules.for_url("http://a.example/").is_some()
+            && rules.for_url("https://a.example/").is_none()
+    );
+    assert!(rules.no_proxy().is_empty());
+    // IPv6 literals with and without a port, short IPv4 forms, CIDR of both families and malformed entries.
+    let list = "[::1]:8080, fd00::/8, 169.254/16, 10.0.0.0/8, 10.1.0.0/40, fe80::/200, [bad, :80, .., *., a*b.example, 300.1.1.1/8";
+    let no = paddock_download::NoProxy::parse(list);
+    assert!(no.matches("::1", 8080) && !no.matches("::1", 80));
+    assert!(no.matches("fd00::5", 1) && no.matches("169.254.9.9", 1) && no.matches("10.9.9.9", 1));
+    assert!(no.matches("axb.example", 1));
+    // Mixed families never match each other's networks, and an all-zero prefix matches everything of its family.
+    assert!(!no.matches("203.0.113.5", 1));
+    let all_v4 = paddock_download::NoProxy::parse("0.0.0.0/0");
+    assert!(all_v4.matches("203.0.113.5", 1) && !all_v4.matches("::1", 1));
+    assert!(paddock_download::NoProxy::parse("::/0").matches("2001:db8::1", 1));
+    // Host and port forms of a proxy server: IPv6 with a port, junk after a bracket, too many colons.
+    assert!(ProxyServer::parse("http://[::1]:3128").is_ok());
+    for bad in [
+        "http://[::1]x",
+        "http://[::1]:abc",
+        "http://a:b:c",
+        "http://a:99999",
+    ] {
+        assert!(ProxyServer::parse(bad).is_err(), "{bad}");
+    }
+    let shown = format!(
+        "{:?}",
+        ProxyServer::parse("http://u:secret@proxy.example:3128").unwrap()
+    );
+    assert!(shown.contains("password hidden") && !shown.contains("secret"));
+    // The process environment is read by `from_env` (the result depends on the machine; only that it answers).
+    let _ = ProxyRules::from_env();
+}

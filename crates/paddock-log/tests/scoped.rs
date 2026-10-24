@@ -411,3 +411,71 @@ fn a_panic_between_log_calls_does_not_stop_the_log() {
     });
     assert_eq!(rig.lines().len(), 2);
 }
+
+#[test]
+fn every_value_kind_level_and_a_later_span_record_reach_the_file() {
+    let rig = Rig::new();
+    let cfg = rig.config().with_settings(LogSettings {
+        level: LogLevel::Trace,
+        ..LogSettings::default()
+    });
+    Logging::new(cfg).scoped(|_| {
+        tracing::trace!(
+            Ratio = 0.5f64,
+            Delta = -3i64,
+            Count = 4u64,
+            Flag = true,
+            "trace event"
+        );
+        // A span field declared empty and filled in later reaches the events inside the span.
+        let span = tracing::info_span!("work", Phase = tracing::field::Empty);
+        span.record("Phase", "pack");
+        let _in = span.enter();
+        tracing::info!("inside");
+        // Records from `log` at every level, with and without key/values, reach the same file.
+        let kvs: &[(&str, log::kv::Value)] = &[("K", log::kv::Value::from(1u64))];
+        for level in [
+            log::Level::Error,
+            log::Level::Warn,
+            log::Level::Info,
+            log::Level::Debug,
+            log::Level::Trace,
+        ] {
+            assert!(TracingBridge.enabled(&log::Metadata::builder().level(level).build()));
+            TracingBridge.log(
+                &log::Record::builder()
+                    .level(level)
+                    .target("dep")
+                    .key_values(&kvs)
+                    .args(format_args!("kv {level}"))
+                    .build(),
+            );
+        }
+        TracingBridge.flush();
+    });
+    let got = rig.lines();
+    assert_eq!(got[0]["@l"], "Verbose");
+    assert_eq!(
+        (
+            got[0]["Ratio"].as_f64(),
+            got[0]["Delta"].as_i64(),
+            got[0]["Count"].as_u64(),
+            got[0]["Flag"].as_bool()
+        ),
+        (Some(0.5), Some(-3), Some(4), Some(true))
+    );
+    assert_eq!(got[1]["Phase"], "pack");
+    let levels: Vec<_> = got[2..]
+        .iter()
+        .map(|l| {
+            l.get("@l")
+                .and_then(Value::as_str)
+                .unwrap_or("Information")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        levels,
+        ["Error", "Warning", "Information", "Debug", "Verbose"]
+    );
+}
