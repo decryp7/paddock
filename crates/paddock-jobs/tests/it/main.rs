@@ -5,6 +5,7 @@ mod common;
 
 mod eta;
 mod hash;
+mod journal;
 mod model_and_cancel;
 mod parallel;
 mod pool;
