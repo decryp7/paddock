@@ -39,7 +39,7 @@ Conventional Commits; one semver tag for the whole repo.
   `UndoStore` (the history of the user's edits: labels, merge keys, groups, limit 100; port of Debrief's `UndoStack`), Edit > Undo and
   Redo (`UNDO_CONTRIBUTIONS`, Mod+Z / Mod+Shift+Z), the `pd-undo-toast` "Done, Undo" toast, `ActivityStore`, the Activity page
   (`ACTIVITY_CONTRIBUTIONS`) and `TauriActivityBackend` / `MemoryActivityBackend`. The shell demo shows all of it (Say hello is
-  undoable). `paddock-jobs` now depends on `paddock-env`.
+  undoable). `paddock-jobs` now depends on `paddock-env`. The `tauri` feature adds `paddock_jobs::tauri_activity`: `manage(app, journal)` emits every entry on `paddock://activity`, the commands `activity_list`, `activity_undo` (runs the app's `Activity::on_undo` handler off the IPC thread, then marks the entry undone; the handler's `Err` text is the user's message) and `activity_mark`, with generated names in `shell/undo/generated/`. The schedule and journal tests moved into the single `it` test binary.
 - `paddock-chromium` and `paddock-runtime` (plan X14). `paddock-chromium` is the one Chromium driver, merged from Debrief's
   `chromium-driver` and Spotter's `spotter-render`: one command-line builder with the start page always last, `Sandbox::decide`
   (root plus an explicit opt-in only), launch as a `paddock-proc` supervised tree with a time limit on an injected clock and a
