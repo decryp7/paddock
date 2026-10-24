@@ -15,6 +15,7 @@
 
 mod codec;
 mod error;
+mod grant;
 mod model;
 mod patch;
 mod validate;
@@ -24,6 +25,7 @@ mod tests;
 
 pub use codec::{DECODE_DEPTH, from_json, from_postcard, to_json, to_postcard};
 pub use error::{PatchError, ViewError};
+pub use grant::{GrantRef, MAX_NAME, valid_ident};
 pub use model::*;
 pub use patch::apply_patch;
 pub use validate::{validate, validate_action};

@@ -215,3 +215,25 @@ fn profiles_are_unique_and_leftovers_of_dead_processes_are_swept() {
     assert_eq!(profiles_dir(&dirs), dirs.cache().join("browser-profiles"));
     assert!(format!("{:?}", opts(base.path())).contains("Headless"));
 }
+
+#[test]
+fn the_cap_is_checked_once_more_when_the_browser_connects() {
+    let mut o = opts(Path::new("/b"));
+    o.memory_cap = Some(10);
+    o.memory_sampler = Some(Arc::new(u64::from));
+    assert!(
+        over_cap_at_start(&o, Some(11))
+            .unwrap()
+            .to_string()
+            .contains("more memory than allowed")
+    );
+    assert!(over_cap_at_start(&o, Some(10)).is_none());
+    assert!(over_cap_at_start(&o, None).is_none(), "no process");
+    o.memory_sampler = None;
+    assert!(
+        over_cap_at_start(&o, Some(std::process::id())).is_some(),
+        "this process uses more than 10 bytes"
+    );
+    o.memory_cap = None;
+    assert!(over_cap_at_start(&o, Some(11)).is_none(), "no cap");
+}

@@ -16,7 +16,7 @@
 use crate::grants::Grants;
 use paddock_env::{AppDirs, VersionedFile};
 use paddock_jobs::time::Clock;
-use paddock_plugin_api::compat::{HostInfo, protocol_of};
+use paddock_plugin_api::compat::HostInfo;
 use paddock_plugin_package::archive::verify_installed;
 use paddock_plugin_package::keys::{from_hex, to_hex};
 use paddock_plugin_package::manifest::host_target;
@@ -296,7 +296,7 @@ impl PluginsDir {
             .collect();
         let label = m.id.to_string();
         let compatible = host
-            .check_protocol(&label, protocol_of(m.protocol))
+            .check_protocol(&label, m.protocol)
             .and_then(|()| {
                 m.namespaces()
                     .try_for_each(|n| host.check_extension(&label, n.ns(), n.minor))

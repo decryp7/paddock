@@ -6,6 +6,7 @@
 //! namespace, which a host either serves or does not know. Its minor is declared by both sides.
 
 use crate::protocol::{Described, PLATFORM_PROTOCOL, ProtocolVersion};
+use paddock_ipc::Skew;
 use paddock_plugin_package::{Contribution, Manifest, Permission};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -70,10 +71,10 @@ impl HostInfo {
 
     /// Whether the plugin `plugin`, built for `built_for`, can be served.
     pub fn check_protocol(&self, plugin: &str, built_for: ProtocolVersion) -> Result<(), Refusal> {
-        if self.protocol.accepts(built_for) {
+        let Some(skew) = self.protocol.skew(built_for) else {
             return Ok(());
-        }
-        if built_for.major < self.protocol.major {
+        };
+        if skew == Skew::ChildBehind {
             return Err(if built_for.major == 1 {
                 Refusal::Legacy {
                     plugin: plugin.into(),
@@ -90,12 +91,11 @@ impl HostInfo {
                 }
             });
         }
-        let needs = self
-            .protocol_since
-            .iter()
-            .filter(|(v, _)| *v >= built_for)
-            .min_by_key(|(v, _)| *v)
-            .map(|(_, app_version)| app_version.clone());
+        let needs = ProtocolVersion::introduced_in(
+            self.protocol_since.iter().map(|(v, a)| (*v, a.as_str())),
+            built_for,
+        )
+        .map(str::to_owned);
         Err(Refusal::AppTooOld {
             plugin: plugin.into(),
             app: self.app.clone(),
@@ -120,15 +120,16 @@ impl HostInfo {
                 ),
             });
         };
-        if minor <= known.minor {
+        // A contract's minor follows the protocol rule ([`ProtocolVersion::accepts`]); its major is in its name.
+        let minor_of = |m: u16| ProtocolVersion::new(0, m);
+        if minor_of(known.minor).accepts(minor_of(minor)) {
             return Ok(());
         }
-        let needs = known
-            .since
-            .iter()
-            .filter(|(m, _)| *m >= minor)
-            .min_by_key(|(m, _)| *m)
-            .map(|(_, v)| v.clone());
+        let needs = ProtocolVersion::introduced_in(
+            known.since.iter().map(|(m, v)| (minor_of(*m), v.as_str())),
+            minor_of(minor),
+        )
+        .map(str::to_owned);
         Err(Refusal::AppTooOld {
             plugin: plugin.into(),
             app: self.app.clone(),
@@ -139,11 +140,6 @@ impl HostInfo {
             ),
         })
     }
-}
-
-/// The IPC crate's version type for a manifest's (the same `major.minor`, two types so a package can be read without the IPC).
-pub fn protocol_of(v: paddock_plugin_package::ProtocolVersion) -> ProtocolVersion {
-    ProtocolVersion::new(v.major, v.minor)
 }
 
 /// Compares what a plugin says it contributes (`Describe`) with the manifest the app verified. Everything must match:
@@ -166,7 +162,7 @@ pub fn check_described(manifest: &Manifest, d: &Described) -> Result<(), Refusal
             d.version, manifest.version
         ));
     }
-    if d.protocol != protocol_of(manifest.protocol) {
+    if d.protocol != manifest.protocol {
         return mismatch(format!(
             "it speaks protocol {}, the manifest says {}",
             d.protocol, manifest.protocol

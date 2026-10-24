@@ -180,7 +180,7 @@ fn sample() -> ViewDoc {
             field(
                 "p",
                 FieldKind::Path {
-                    value: Some(GrantRef("src".into())),
+                    value: Some(GrantRef::new("src").unwrap()),
                     folder: true,
                 },
             ),
@@ -1209,13 +1209,13 @@ fn forms_check_fields() {
         })
         .is_ok()
     );
-    assert!(matches!(
+    assert!(
         kind(FieldKind::Path {
-            value: Some(GrantRef(String::new())),
-            folder: false
-        }),
-        Err(ViewError::Invalid { .. })
-    ));
+            value: Some(GrantRef::new("src").unwrap()),
+            folder: true
+        })
+        .is_ok()
+    );
     assert!(kind(FieldKind::SecretRef { value: None }).is_ok());
     assert!(matches!(
         kind(FieldKind::SecretRef {
@@ -1746,7 +1746,7 @@ fn view_ts() -> String {
         Field::decl(),
         FieldKind::decl(),
         ChoiceOption::decl(),
-        GrantRef::decl(),
+        GrantRefTs::decl(),
         SecretRef::decl(),
         ReviewList::decl(),
         Finding::decl(),
@@ -1790,3 +1790,8 @@ fn generated_typescript_is_current() {
         .join("../../ui/projects/paddock-ui/view/generated/view.ts");
     sync_generated(&path, &view_ts(), WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
 }
+
+/// The TypeScript of [`GrantRef`]: a plain string on the wire (`grant::tests` checks the JSON and postcard forms).
+#[derive(ts_rs::TS)]
+#[ts(rename = "GrantRef", type = "string")]
+struct GrantRefTs;

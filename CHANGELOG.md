@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Added
+- `cargo-paddock-plugin` (X51, ADR 0001): the plugin author's tool, `cargo paddock-plugin new | build | pack | keygen | sign | verify
+  | run | test` on `paddock-cli` conventions (ported from Debrief's `cargo-debrief-plugin`). `new` makes a project that depends on
+  `paddock-plugin-api` alone; `pack` writes a deterministic `.paddockplugin` (optionally Ed25519-signed); `verify` checks checksums,
+  signature and trusted keys (exit 4 on failure); `test` starts the built program against a fake host, compares it with its
+  manifest and runs the conformance checks (exit 5 on findings). `paddock-plugin-test` gains `FakeHost::launch(program, args)`, which
+  starts a plugin program through the same launcher as the app.
+
 ### Fixed
 - UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
   injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell
@@ -12,6 +20,12 @@ Conventional Commits; one semver tag for the whole repo.
   relying on a fresh worker.
 
 ### Changed
+- BREAKING (X51, unreleased crates): one `ProtocolVersion` and one `GrantRef`. `paddock-plugin-package` drops its own
+  `ProtocolVersion` (and the `version` module) and re-exports `paddock_ipc::ProtocolVersion`; `paddock_ipc` gains `Skew`,
+  `ProtocolVersion::skew` and `introduced_in`, which `paddock-plugin-api`'s `HostInfo` now builds on instead of a second copy of
+  the rule. `Manifest::check_compatible` and `paddock_plugin_api::compat::protocol_of` are removed (use `HostInfo`).
+  `paddock_view::GrantRef` is now the validated type of `paddock-plugin-package` (private field, `GrantRef::new`; still a plain
+  string in JSON, postcard and TypeScript), re-exported by the package; the view validator no longer re-checks it.
 - X21 review 3: the resting "..." button shows the full subtle text on a selected row (the rest mix was 2.71:1 on the tint; the
   token test now covers the selected tint and surface-2); paths are cut at segment boundaries and keep their trailing segments
   (`…/Debrief/plugins/viewer/plugin-1.bin`); the donut total is one line; chart loading shows muted bars and a label (never an empty
@@ -48,6 +62,11 @@ Conventional Commits; one semver tag for the whole repo.
   with the file name and show the folder as a muted second line; `pd-path-text` keeps the separator beside the ellipsis. Glyphs: the
   page fold fixed, bigger `file-code` brackets, a lighter `archive` lid, a `reveal` glyph for the action. The contact sheet is
   1440 x 900 at 2x with 320 px, hover, menu and confirmation shots.
+- `conformance/ci/pin-runtime.mjs`: pins any `paddock-runtime` catalogue (size and SHA-256 measured while downloading, `--version`,
+  `--chrome-for-testing`); `install-test-browser.mjs --catalogue` and the action's `catalogue:` input install the build a catalogue
+  pins. `paddock-chromium`'s waits (`start_page`, start-up, `wait_ready`) run on the injected clock; its real-browser test runs
+  in the Linux CI job. The `paddock-ci` image (v2) carries Chrome for Testing 156.0.8078.47, the build `chromium.toml` pins
+  (was 156.0.8078.4); `scripts/ci-image.test.mjs` keeps them equal.
 - Files and storage follow-ups (plan X31/X32). `paddock-storage`: the size tree (`Storage::tree`, `storage_tree`, `StorageEvent::Tree`:
   depth 3, 12 items per folder with the rest folded, bounded in entries and time, no links, one volume) and, in `shell/storage`, a
   Folders button on the Storage page that shows it as a `pd-table` grouped by top-level folder. `paddock-files`: `Files::open_at_line` and

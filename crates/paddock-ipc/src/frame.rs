@@ -75,24 +75,56 @@ impl ProtocolVersion {
         self.major == child.major && child.minor <= self.minor
     }
 
-    /// Why a host (`host_name`, e.g. "Debrief") speaking `self` refuses `label` built for `child`, telling the user what
-    /// to update; `None` when [`ProtocolVersion::accepts`] holds.
-    pub fn mismatch(self, child: ProtocolVersion, label: &str, host_name: &str) -> Option<String> {
+    /// Which side is behind when a host speaking `self` cannot serve a child built for `child`; `None` when
+    /// [`ProtocolVersion::accepts`] holds. A child with an older major is behind; a child with a newer major or a newer
+    /// minor means the host is behind. This is the one place the "who must update" decision is made.
+    pub fn skew(self, child: ProtocolVersion) -> Option<Skew> {
         if self.accepts(child) {
             None
         } else if child.major < self.major {
-            Some(format!(
+            Some(Skew::ChildBehind)
+        } else {
+            Some(Skew::HostBehind)
+        }
+    }
+
+    /// The release note for the first entry of `since` (a protocol version and the app version that introduced it) that
+    /// has `needed`, for "needs 1.4 or newer"; the oldest such entry wins. `None` when no entry reaches `needed`.
+    pub fn introduced_in<'a>(
+        since: impl IntoIterator<Item = (ProtocolVersion, &'a str)>,
+        needed: ProtocolVersion,
+    ) -> Option<&'a str> {
+        since
+            .into_iter()
+            .filter(|(v, _)| *v >= needed)
+            .min_by_key(|(v, _)| *v)
+            .map(|(_, app_version)| app_version)
+    }
+
+    /// Why a host (`host_name`, e.g. "Debrief") speaking `self` refuses `label` built for `child`, telling the user what
+    /// to update; `None` when [`ProtocolVersion::accepts`] holds.
+    pub fn mismatch(self, child: ProtocolVersion, label: &str, host_name: &str) -> Option<String> {
+        self.skew(child).map(|skew| match skew {
+            Skew::ChildBehind => format!(
                 "{label} is too old: it was built for protocol {child} and this {host_name} speaks {self}; it needs an update \
                  built for protocol {}.x",
                 self.major
-            ))
-        } else {
-            Some(format!(
+            ),
+            Skew::HostBehind => format!(
                 "{label} needs a newer {host_name}: it was built for protocol {child} and this {host_name} speaks {self}; update \
                  {host_name} to a version that speaks protocol {child} or later"
-            ))
-        }
+            ),
+        })
     }
+}
+
+/// Which side must update when a [`ProtocolVersion`] is refused ([`ProtocolVersion::skew`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Skew {
+    /// The child (plugin, agent) was built for an older major: it must be updated.
+    ChildBehind,
+    /// The child needs a newer major or minor than the host speaks: the host (the app) must be updated.
+    HostBehind,
 }
 
 impl std::fmt::Display for ProtocolVersion {
