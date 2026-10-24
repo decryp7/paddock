@@ -338,3 +338,17 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   gets SIGPIPE and the pipeline reports failure (the shell demo's macOS verify said "DMG is not signed" for a signed
   DMG). Capture the output first (`out=$(codesign …)`), then match. Debrief's and Pitwall's verify scripts use the same
   pattern and get the same fix when next touched.
+
+## A CI job container whose PID 1 is `sleep` never reaps orphans (2026-10-25, Debrief 1.1.1)
+
+Gitea's Linux job containers run `sleep` as PID 1. A process killed after its parent died is reparented to PID 1 and
+stays a zombie for ever, and `kill(pid, 0)` still reports it. A test that checks "the grandchild is gone" passed only
+when the shell happened to reap it first. **Rule:** "process gone" checks treat a zombie as gone (read the state from
+`/proc/<pid>/stat` on Linux, `proc_pidinfo` on macOS); `paddock_proc::is_alive` already does.
+
+## Build a command line in one function (2026-10-25, Debrief 1.1.1)
+
+Chromium's arguments were assembled in three places; after two branches merged, `--no-sandbox` landed after the start
+page on Linux as root (only CI runs as root, so the macOS gate never saw it). **Rule:** one function builds the whole
+command line, puts positional arguments last, and is tested for every combination of options on any OS (inject
+"is root"/sandbox as a value).
