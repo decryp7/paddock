@@ -10,6 +10,20 @@ Conventional Commits; one semver tag for the whole repo.
   `DialogGrant` hook for per-dialog contracts, the Tauri `Guard` (refuses and logs before arguments are parsed),
   `Table::contract_problems`, the async-only check and generated-file check for tests, and generated TypeScript:
   `shell/generated/commands.ts` (wire types) and `shell/generated/shell-commands.ts` (command names).
+- App shell contributions core (plan S2, ADR 0012 §2, lazy by construction per plan §9) in `@decryp7/paddock-ui/shell`:
+  `defineCommand`, `defineKeybinding`, `defineMenuItem`, `definePage`, `defineStatusItem`, `defineSettingsPage`,
+  `defineDialog`, `defineHealthService`, `defineNotificationKind` (frozen static data plus loaders; texts are `msg(id, text)`
+  so message ids survive to run time), `provideContributions<T>`, `ContributionRegistry` with kinds the workbench extends
+  (`defineContributionKind`, `provideContributionKinds`), `ShellContext<T>` with the app part loaded on first use or when
+  idle (`provideShellContext`), `CommandService` (defensive `when`/`enabled`, failures become notices), `loadPart`
+  (component plus its own providers), key binding parsing and accelerators, `ShellTypes.ipcCommand` for the generated
+  IPC command union (plan S1), and the `paddock-manifest.json` writer, parser and drift check.
+- `@decryp7/paddock-ui/shell/testing`: `assertContributionsValid` (duplicate ids, key conflicts per scope, menu items and
+  keys naming missing commands, missing icons and message ids, dialogs without a kind or with a forbidden modality,
+  `min > pref`, unknown kinds) and `checkRegistrationSource` / `assertRegistrationsLazy` (a `*.contributions.ts` file
+  imports no store, service, backend, command class or component).
+- `shell-demo` registers one contribution of every kind, runs commands against a lazily loaded app context and checks
+  both lints.
 - App shell scaffold (plan S0 of `docs/plans/workbench.md`, ADR 0012): secondary entry points `@decryp7/paddock-ui/shell`,
   `/shell/{startup,notify,dialogs,jobs,settings,about,menu,pages,i18n,store,testing}`, `/workbench` and
   `/workbench/{dock,panels,palette,explorer,assistant,testing}` (empty until their work packages land); the

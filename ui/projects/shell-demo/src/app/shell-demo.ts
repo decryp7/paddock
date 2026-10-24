@@ -1,5 +1,7 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { SuEmptyState } from '@decryp7/paddock-ui';
+import { CommandService, ContributionRegistry, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { DemoNotices } from './demo-notices';
 
 /** One part of the shell and the work package of docs/plans/workbench.md that brings it to this app. */
 interface ShellPart {
@@ -37,6 +39,33 @@ const PARTS: readonly ShellPart[] = [
         heading="The shell arrives here part by part"
         description="Each part below is built into the shell by its work package and shown in this app."
       />
+      <section class="contributions" aria-labelledby="sd-contributions">
+        <h2 id="sd-contributions">Contributions</h2>
+        <p class="context" data-testid="app-context">App context: {{ contextLoaded() ? 'loaded' : 'not loaded yet' }}</p>
+        <div class="commands" role="group" aria-label="Commands">
+          @for (command of available(); track command.id) {
+            <button type="button" class="cmd" [attr.data-command]="command.id" [disabled]="!commands.isEnabled(command)" (click)="run(command.id)">
+              {{ command.title.text }}
+            </button>
+          }
+        </div>
+        <ul class="notices" aria-live="polite" aria-label="Notices">
+          @for (notice of notices(); track notice.n) {
+            <li [class.error]="notice.level === 'error'">{{ notice.message }}</li>
+          }
+        </ul>
+        <table class="kinds">
+          <caption>Registered contributions</caption>
+          <thead>
+            <tr><th scope="col">Kind</th><th scope="col">Count</th></tr>
+          </thead>
+          <tbody>
+            @for (kind of kinds; track kind.name) {
+              <tr><td><code>{{ kind.name }}</code></td><td>{{ kind.count }}</td></tr>
+            }
+          </tbody>
+        </table>
+      </section>
       <table class="parts">
         <caption>Shell parts</caption>
         <thead>
@@ -58,8 +87,32 @@ const PARTS: readonly ShellPart[] = [
     .parts th, .parts td { text-align: start; padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); }
     .parts th { color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); }
     .parts code { overflow-wrap: anywhere; }
+    .contributions { display: flex; flex-direction: column; gap: var(--pd-space-3); }
+    .contributions h2 { margin: 0; font-size: var(--pd-text-subtitle); }
+    .context { margin: 0; color: var(--pd-text-muted); }
+    .commands { display: flex; flex-wrap: wrap; gap: var(--pd-space-2); }
+    .cmd { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); }
+    .cmd:disabled { color: var(--pd-text-subtle); }
+    .notices { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--pd-space-1); min-height: 1lh; }
+    .notices li { overflow-wrap: anywhere; }
+    .notices li.error { color: var(--pd-danger); }
+    .kinds { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); }
+    .kinds caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }
+    .kinds th, .kinds td { text-align: start; padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); }
+    .kinds th { color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); }
   `,
 })
 export class ShellDemo {
   protected readonly parts = PARTS;
+  protected readonly commands = inject(CommandService);
+  private readonly registry = inject(ContributionRegistry);
+  private readonly host = inject(ShellContextHost);
+  protected readonly notices = inject(DemoNotices).notices;
+  protected readonly available = this.commands.available;
+  protected readonly contextLoaded = computed(() => this.host.context() !== null);
+  protected readonly kinds = this.registry.kinds.map((k) => ({ name: k.name, count: this.registry.items(k.name).length }));
+
+  protected run(id: string): void {
+    void this.commands.run(id);
+  }
 }
