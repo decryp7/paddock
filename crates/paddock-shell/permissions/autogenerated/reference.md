@@ -174,6 +174,136 @@ Denies the app_relaunch command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-channels-clear-secret`
+
+</td>
+<td>
+
+Enables the channels_clear_secret command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-channels-clear-secret`
+
+</td>
+<td>
+
+Denies the channels_clear_secret command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-channels-get`
+
+</td>
+<td>
+
+Enables the channels_get command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-channels-get`
+
+</td>
+<td>
+
+Denies the channels_get command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-channels-save`
+
+</td>
+<td>
+
+Enables the channels_save command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-channels-save`
+
+</td>
+<td>
+
+Denies the channels_save command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-channels-set-secret`
+
+</td>
+<td>
+
+Enables the channels_set_secret command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-channels-set-secret`
+
+</td>
+<td>
+
+Denies the channels_set_secret command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-channels-test`
+
+</td>
+<td>
+
+Enables the channels_test command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-channels-test`
+
+</td>
+<td>
+
+Denies the channels_test command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-diagnostics-cancel`
 
 </td>

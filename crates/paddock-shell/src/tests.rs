@@ -92,6 +92,7 @@ fn every_command_is_async() {
         "paddock-files",
         "paddock-service",
         "paddock-packs",
+        "paddock-channels",
         "paddock-jobs",
         "paddock-settings",
         "paddock-updater",

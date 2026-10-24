@@ -27,7 +27,7 @@ test.describe('pages frame (plan S14)', () => {
     await expect(app.frame.heading).toHaveText('Overview');
     await expect(page).toHaveTitle('Overview – Paddock Shell Demo');
     await expect(app.sidebar.link('Overview')).toHaveAttribute('aria-current', 'page');
-    await expect(app.sidebar.links).toHaveText([/^Overview$/, /^Runners/, /^Local AI$/, /^Dialogs$/, /^Files$/, /^Keyboard$/, /^About$/]);
+    await expect(app.sidebar.links).toHaveText([/^Overview$/, /^Runners/, /^Local AI$/, /^Dialogs$/, /^Schedules$/, /^Files$/, /^Keyboard$/, /^About$/]);
 
     await app.sidebar.link('Keyboard').click();
     await expect(app.frame.heading).toHaveText('Keyboard');
@@ -235,7 +235,7 @@ test.describe('pages frame (plan S14)', () => {
   for (const width of LAYOUT_WIDTHS) {
     test(`no horizontal scroll at ${width} px on any page (rule 18)`, async ({ app, page }) => {
       await page.setViewportSize({ width, height: 700 });
-      for (const hash of ['#/home', '#/dialogs', '#/keys', '#/runners', '#/about']) {
+      for (const hash of ['#/home', '#/dialogs', '#/schedule', '#/keys', '#/runners', '#/about']) {
         await app.frame.open(hash);
         await expectNoHorizontalScroll(page, `${hash} at ${width}`);
         await expectWithinWidth(page, '#pd-main', width);
