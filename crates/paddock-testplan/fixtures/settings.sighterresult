@@ -1,0 +1,43 @@
+format = "sighterresult"
+version = 1
+plan = "settings-smoke"
+plan_hash = "0000000000000000000000000000000000000000000000000000000000000000"
+run_id = "run-2026-10-25-001"
+started = "2026-10-25T08:30:00Z"
+
+[env]
+os = "Windows 11"
+dpi = 144
+theme = "dark"
+language = "en"
+resolution = "1920x1080"
+app_build = "2.4.0+7"
+sighter_version = "1.0.0"
+
+[[cases]]
+case = "TC-1"
+requirements = ["REQ-142", "REQ-142#AC-2"]
+status = "pass"
+duration_ms = 4200
+evidence = [{ kind = "screenshot", path = "evidence/tc-1/final.png", sha256 = "1111111111111111111111111111111111111111111111111111111111111111" }]
+
+[[cases.steps]]
+index = 0
+status = "pass"
+screen_seen = "Main"
+score = 0.98
+
+[[cases.steps]]
+index = 1
+status = "pass"
+screen_seen = "Settings"
+score = 1.0
+evidence = [{ kind = "ocr_text", path = "evidence/tc-1/step-2.txt", sha256 = "2222222222222222222222222222222222222222222222222222222222222222" }]
+
+[[cases]]
+case = "TC-2"
+requirements = ["REQ-143"]
+status = "fail"
+iteration = 1
+duration_ms = 8100
+reason = "Welcome never appeared"

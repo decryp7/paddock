@@ -1,0 +1,16 @@
+[package]
+name = "paddock-testplan"
+version = "0.1.0"
+description = "The Paddock test-plan formats (ADR 0005): `.sighterplan` and `.sighterresult` as TOML, typed ids and steps, secrets by reference with redacting writers, a canonical writer, traceability coverage, plan diff and JUnit export. Pure: no I/O beyond the bytes it is given."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+toml = "0.9"
+
+[dev-dependencies]
+proptest = "1"

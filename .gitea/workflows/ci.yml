@@ -301,6 +301,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-testkit --all-targets --all-features -- -D warnings && cargo test -p paddock-testkit --all-features
 
+      # The test-plan formats: properties (parse after write, no panics on any bytes) run with the tests; the fuzz target in
+      # paddock-testplan/fuzz is built by the nightly fuzz job.
+      - name: paddock-testplan
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-testplan --all-targets --all-features -- -D warnings && cargo test -p paddock-testplan --all-features
+
       - name: paddock-metrics
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-metrics --all-targets --all-features -- -D warnings && cargo test -p paddock-metrics --all-features
