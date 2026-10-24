@@ -105,6 +105,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-files` | user files: path grants (open only paths the user chose, canonicalised), validated open/save pickers behind a port, recent lists (recorded only after a granted open, re-granted on use), reveal, open with the default program (never what runs on open) and web addresses (plan X31; from Debrief `paths.rs`, `recent.rs`, `opener.rs`) | yes (all apps; Pacenotes and Sighter from their first commit); built |
+| `paddock-storage` | what an app keeps on disk and clearing it safely: declared categories (cache the app can rebuild, the user's data), a bounded size walk (entries, time on an injected clock, depth, no links, one volume), a preview that is measured first, a re-check before every delete, confirmation for data, nothing outside the app's own folders, as jobs with progress and Cancel (plan X32; from Debrief `storage/`, Dyno `cleanup/{walk,guard}.rs`, Pitwall `leftovers.rs`, Pitcrew cache clean) | yes (all apps); built |
 | `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
@@ -938,6 +939,36 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 - Tests start real processes through the `paddock-ipc-test-child` binary and leave none behind; nothing sleeps or measures
   time (gates, channels, a `FakeClock` for the back-off). `fuzz/` holds the frame-codec fuzz target
   (`cargo +nightly fuzz run frame`).
+
+## `paddock-storage` (plan X32)
+
+The Settings > Storage mechanism in one place. The app declares what it keeps; the crate measures, previews and clears.
+
+```rust
+use paddock_storage::{Category, Item, Kind, Storage, from_this_run};
+
+// shell: Builder::new(identity).files(..).storage(|_| Ok(Storage::new(Arc::new(categories)).within(&dirs)))
+let cache = Category::new("cache", "Cache", Kind::Cache).folder(dirs.cache()).entries(|_| None).note("Rebuilt when needed.");
+let logs = Category::new("logs", "Logs", Kind::Data).folder(dirs.logs())
+    .entries(move |p| from_this_run(p, Some(started), "written")).note("Logs written in this session are kept.");
+let models = Category::new("models", "Models", Kind::Data).folder(models_dir)
+    .item(Item::path(model).removed_by(|p| engine.delete_model(p)).protected(active_reason)); // the engine stops using it first
+```
+
+- **Boundary.** `Storage::within(&dirs)` (plus `also_within` for the web view's profile or a temp folder the app owns): a category
+  whose folder resolves, links included, outside those folders is shown but never cleared.
+- **Preview first.** `scan` returns sizes, `clearable_bytes`, the biggest items and `capped` (lower bounds) and keeps what it saw.
+  `clear` refuses without that preview (`noPreview`) and uses it up; `validate` refuses unknown, duplicate or too many categories
+  before a job exists.
+- **Confirmation.** A `data` category is cleared only when the request says `confirmed`; the UI gets that from a modal window.
+  Nothing is ever cleared by itself (Pitwall's leftovers are a category the user clears).
+- **Re-check before every delete** (`guard::recheck`, from Dyno): the item still exists, is not a link, has the kind the preview
+  saw, resolves through its real parent inside the category's folder, was listed by the preview and has not changed since. What
+  fails stays, with the reason, in the result.
+- **Jobs.** `storage_scan` and `storage_clear` start a job (phase-labelled progress from the first moment, Cancel in every phase,
+  one job at a time) and return at once; the outcome is a `paddock://storage` event. `Run` is the port, `Recorder` its fake.
+- **UI.** `@decryp7/paddock-ui/shell/storage` (+ `/page`, `/dialog`): `StorageBackend` (Tauri, memory with the same rules),
+  `StorageStore`, the Storage page and the `pd.storage.confirm` decision window.
 
 ## `paddock-files` (plan X31)
 

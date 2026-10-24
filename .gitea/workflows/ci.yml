@@ -344,6 +344,9 @@ jobs:
       - name: paddock-files
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-files --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-files --all-features --profile ci && cargo test -p paddock-files --all-features --doc
+      - name: paddock-storage
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-storage --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-storage --all-features --profile ci && cargo test -p paddock-storage --all-features --doc
 
       - name: paddock-testkit
         if: ${{ !cancelled() }}
