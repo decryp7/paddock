@@ -262,6 +262,7 @@
   ],
   "settingsPages": [
     "pd.appearance",
+    "pd.language",
     "pd.logging",
     "pd.login",
     "pd.notifications",
@@ -310,6 +311,7 @@
       "requiredChoice": false,
       "minSize": null,
       "commands": [
+        "app_relaunch",
         "open_login_items",
         "service_install",
         "service_repair",
@@ -417,6 +419,7 @@
     "pd.diag.open": "Report a problem…",
     "pd.diag.title": "Report a problem",
     "pd.settings.appearance": "Appearance",
+    "pd.settings.language": "Language",
     "pd.settings.logging": "Logging",
     "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",

@@ -33,6 +33,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C29 | each window's initial JS (from `ng build --stats-json`) is within its `windowWeight` budget in `paddock.conformance.json`; a budget above measured + 10% warns (rule 35). `window-weight [kind...] [--max kB] [--record]` prints a window's weight and records budgets | the build stats |
 | C30 | Rust tests do not assert on the wall clock: in a `#[test]` fn an assertion comparing `elapsed()`, `Instant::now()`, `SystemTime::now()` (or a variable assigned from one) with a `Duration` is a warning; a hang guard of at least 10 s carries `// conformance: hang-guard`. Also a `thread::sleep` in a test that starts threads or uses channels, atomics or locks (the comment alone waives a deliberate one), and `Date.now()`/`performance.now()` differences under `expect` in TypeScript specs (not when the spec uses fake timers or `page.clock`). Use a `FakeClock` | |
 | C31 | ADR numbers are unique: no two files in `docs/adr/` share a `NNNN-` number, and numbers have four digits (parallel branches each took "the next one") | |
+| C32 | the translation catalogs are current: `paddock-i18n build --check --no-extract` over the app's `paddock-i18n.json` (every catalog equals its sources, every runtime JSON equals its catalog); a missing config warns | `npm ci` (the app's installed `@decryp7/paddock-ui`) |
 
 ## Sync (X27, X43)
 

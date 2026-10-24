@@ -8,6 +8,20 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
   dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
   volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.
+- i18n kit (plan X48). `paddock-i18n build [--config paddock-i18n.json] [--check] [--no-extract]` runs an app's whole translation
+  build from one declaration: the `localize-extract` run over its built output, every catalog (sources, manifests, extraction),
+  the pseudo-locale and each translated `messages.<tag>.xlf` into its runtime JSON together with the shell's translations
+  (Debrief's `build-locales` and this repo's `scripts/build-i18n.mjs` are replaced by it; `--check` writes nothing and fails on
+  drift, `--no-extract` reads the committed catalogs so no build is needed). `LanguageChoice` now also names a shipped
+  translation by its tag, `isLocaleTag` validates one, and `@decryp7/paddock-ui/shell/i18n/page` is the Settings > Language page
+  (`PdLanguagePage`, `defineLanguageSettingsPage`): System default, English, each translation by its own name, the pseudo-locale
+  where the app ships it, a restart offer. `paddock-conformance` C32 runs `build --check --no-extract` over the app's
+  `paddock-i18n.json`.
+- `app_relaunch` (`paddock-startup`, a window-class command: any window, a dialog lists it in its contract) and
+  `StartupBuilder::relaunch(|app| app.restart())`: the checkpoints are written to the session first, then the app's relaunch
+  runs, so the whole app restarts (a language change from the Settings window); without a hook it answers `relaunchUnavailable`,
+  a failing one `relaunchFailed` and the app keeps running. The shell demo wires it; the Language page calls it through
+  `LANGUAGE_CONFIG.reload`.
 - The app IPC kit (plan X28). `paddock_commands::CommandError` / `ErrorCode`: the one error envelope (code, message, retryable,
   hint, field, cause, kind), with constructors, `From` for `io::Error`, strings and the guard's `Refusal`, and its TypeScript
   generated into `@decryp7/paddock-ui/ipc`. `@decryp7/paddock-ui/ipc`: `toCommandError`, `CommandFailure`, `withCallTimeout` (a

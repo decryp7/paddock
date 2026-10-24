@@ -433,7 +433,11 @@ provideThemes(CONSOLE_THEME),                                                   
 - i18n (ADR 0012 §6): `$localize` with runtime-loaded translations, one build for every language. Install
   `@angular/localize/init` in the app's `polyfills` and `"types": ["@angular/localize"]`. The shell's messages use `@@pd.`
   ids; contributions' `msg(id, text)` read their text through the loaded translations, so they need nothing else.
-  `LanguageStore` keeps the choice (`paddock.language`: system, en, pseudo) and says when a restart is needed.
+  `LanguageStore` keeps the choice (`paddock.language`: system, en, pseudo, or a shipped translation's tag such as `de`) and says when a restart is needed.
+  Settings > Language: add `defineLanguageSettingsPage({ load })` (`/shell/i18n/settings`) to the app's `settingsPages` and the Settings
+  window's pages; `load` is `() => import('@decryp7/paddock-ui/shell/i18n/page').then((m) => m.PdLanguagePage)`. The Settings window's
+  own providers carry `LANGUAGE_CONFIG` (the shipped locales, how the app restarts): it is a root token with a default, so a
+  provider added by the lazily loaded page would lose against it. Names come from `Intl.DisplayNames` in the language's own tongue.
 - Translation files: the package ships `i18n/messages.pd.xlf` (the shell's catalog) and `i18n/messages.pd.en-XA.json`
   (its pseudo-locale). An app builds its own catalog (its `msg()` and `$localize` messages with `@@id`s, scanned from the
   sources) and loader files with the bin:
@@ -444,6 +448,17 @@ provideThemes(CONSOLE_THEME),                                                   
     node_modules/@decryp7/paddock-ui/i18n/messages.pd.en-XA.json src/locale/messages.xlf
   ```
 
+  An app does not keep those commands in a script of its own: it declares the build once in `paddock-i18n.json` (the
+  extraction from its built output with Angular's `localize-extract`, its catalogs, the pseudo-locale and any
+  `messages.<tag>.xlf` translations folded into `messages.<tag>.json` together with the shell's) and runs
+
+  ```sh
+  npx paddock-i18n build               # regenerate; after the app build when a catalog takes the built $localize messages
+  npx paddock-i18n build --check       # CI: writes nothing, fails on drift
+  npx paddock-i18n build --check --no-extract   # no build needed: the committed catalogs against their sources (conformance C32)
+  ```
+
+  See `paddock-i18n.json` here (the package and the shell demo) and `projects/paddock-ui/bin/i18n-build.mjs` for the format.
   `--check` writes nothing and fails on drift (CI). Here `npm run i18n` (after `npm run build`) regenerates the package's
   files and the shell demo's; CI runs `npm run i18n:check`. The shell demo's View > Appearance switches theme, a sample
   pack, high contrast, reduced motion and the pseudo-locale; `e2e/shell-demo-locale.spec.ts` finds no unmarked English
