@@ -1,12 +1,12 @@
-import { outlineIcon } from './outline';
-import { PD_ICON_PATHS, type PdIconName } from './paths';
+import { outlineIconWithDots } from './outline';
+import { PD_ICON_DOTS, PD_ICON_PATHS, type PdIconName } from './paths';
 
 /** The namespace of the generic set: `<mat-icon svgIcon="pd:refresh">`. */
 export const PD_ICON_NAMESPACE = 'pd';
 
 /** The SVG literal of one glyph. */
 export function pdIconSvg(name: PdIconName): string {
-  return outlineIcon(PD_ICON_PATHS[name]);
+  return outlineIconWithDots([PD_ICON_PATHS[name]], PD_ICON_DOTS[name] ?? []);
 }
 
 /** Every glyph as `[name, svg literal]`, in a stable order. */
