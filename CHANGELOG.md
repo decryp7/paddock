@@ -290,6 +290,11 @@ Conventional Commits; one semver tag for the whole repo.
   ...'s launch agent". `SMAppService.status` is NotFound until the app registers once; that now reads as "not installed" and
   Install registers (a real failure comes from `register`, with macOS's reason in the message). `parse_job` reads only the job's
   own level of `launchctl print`, so macOS 26's coalition blocks (`state = active`) no longer make a running agent "refused".
+- The Linux guest of `tools/macos-vm-smoke.sh` runs for real: lingering gives `tart exec` a `systemd --user` session, the
+  update smoke checks the app's own status, and `--then` runs the new desktop smoke (`scripts/shell-demo/smoke-desktop-linux.sh`:
+  Xvfb, stalonetray, dunst; the tray icon is embedded, a notification reaches the server when the agent stops, Quit in the tray
+  menu exits 0 with nothing left). `scripts/shell-demo/build-linux-arm64.sh` builds N and N+1 in one throw-away container; the
+  `service-smoke` workflow runs both guests. The shell demo's Cargo.lock lists `paddock-cli`.
 - The service smoke builds N+1 with the agent's version bumped too (it reported the old version for ever), installs to
   /Applications as a user does, and checks the app's own status is "running" after install and after the update.
 
