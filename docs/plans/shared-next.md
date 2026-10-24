@@ -632,3 +632,11 @@ The items kept back above also go into 0.3.0:
 | X52 | `paddock-testplan` | ADR 0005 |
 | X53 | Shared CI image and cache server for every app | ci-speed notes, X10 |
 | X54 | `paddock-proc` follow-up: Windows job object (`KILL_ON_JOB_CLOSE`) so orphaned helpers end too | X6 report |
+
+## Follow-ups from finished packages (for 0.3.0)
+
+- X3: wire `Lifecycle::begin` into the Shell Demo app for a real-Tauri smoke of the recovery flow; place the
+  unclean-shutdown notice and safe-mode badge in the workbench frame (X50); a real killed-child test.
+- X6: Windows job object (X54).
+- Tooling (user asked, coordinator proposal pending): `cargo-hakari`, lighter dev debuginfo, `cargo-machete` check;
+  measure bun/pnpm vs npm in X53.
