@@ -3617,6 +3617,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-siblings"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-siblings",
+ "paddock-window",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-startup"
 version = "0.1.0"
 dependencies = [
