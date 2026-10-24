@@ -235,12 +235,14 @@ test.describe('UI basics review fixes (regressions)', () => {
     const r = await page.locator('[data-testid="path-win-240"] pd-path-text').evaluate((host) => {
       const part = (c: string) => host.querySelector(c) as HTMLElement;
       const clipped = (e: HTMLElement) => e.scrollWidth > e.clientWidth;
-      return { dirClipped: clipped(part('.pd-head')), nameClipped: clipped(part('.pd-name')), tailClipped: clipped(part('.pd-tail')), shown: part('.pd-name').textContent! + part('.pd-tail').textContent! };
+      return { nameOverflow: part('.pd-name').scrollWidth - part('.pd-name').getBoundingClientRect().width, dirClipped: clipped(part('.pd-head')), nameClipped: clipped(part('.pd-name')), tailClipped: clipped(part('.pd-tail')), shown: part('.pd-name').textContent! + part('.pd-tail').textContent! };
     });
     expect(r.dirClipped).toBe(true);
     expect(r.nameClipped).toBe(false);
     expect(r.tailClipped).toBe(false);
     expect(r.shown).toContain('Service.2026-10-24.log');
+    // Nothing of the name is replaced by an ellipsis: the displayed text is the whole value of both spans, not clipped by a sub-pixel.
+    expect(r.nameOverflow).toBeLessThanOrEqual(0);
   });
 
   test('keycaps do not touch (P2-12)', async ({ page }) => {
