@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Added
+- X51 `@decryp7/paddock-ui/view`: `<pd-view>`, the renderer of the declarative views plugins return (ADR 0002, `paddock-view`). Every
+  node kind (stack, text, table with sort and paging, lazy tree, graph, diagram, form, review list, matrix, chart, badge, progress,
+  empty, needs-AI, link); an unknown kind says "Update the app to view this" for that node only. Documents are validated on receipt by a
+  TypeScript mirror of the engine limits (`validateViewDoc`), patches (`applyViewPatch`: replace by id with the base etag checked, or a
+  whole document) are applied by `ViewStore` (stale or invalid: inline error with Retry, the last good view stays), actions leave as
+  `ViewAction` with the host keys `row`, `page`, `node`, `finding`, `reason`, `values`, `column`, `descending` (matrix cells add `row`,
+  `col`, `rowId`, `colId`). Confirmations, the OS browser and the path and secret pickers are the host's (`VIEW_HOST`, refused by default).
+  Gallery section, Playwright spec (axe, 320 px) and the review sheet `ui/docs/review/x51-view/`.
+
 ### Fixed
 - UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
   injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell

@@ -1,0 +1,168 @@
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import type { Node } from '../generated/view';
+import { PdViewButton, PdViewLink } from './button';
+import { PdViewChart } from './chart';
+import { PdViewForm } from './form';
+import { diagramScene, graphScene, PdViewScene } from './scene';
+import { childKey, glyphFor, shapeOf, toneOf } from './model';
+import { PdViewMatrix } from './matrix';
+import { PdViewReview } from './review';
+import { PdViewTable } from './table';
+import { ViewRuntime } from './runtime';
+import { PdViewTone, TONE_CSS, toneClass } from './tone';
+import { PdViewTree } from './tree';
+
+/**
+ * One node of a view and everything under it: it picks the component for the node's kind (`shapeOf`) and draws it, and a stack draws
+ * its children with this same component. All text is bound as text, never as markup; tones map to design tokens; a kind this version
+ * does not know is shown as "Update the app to view this" for that node only, and the rest of the view still draws.
+ */
+@Component({
+  selector: 'pd-view-node',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdGlyph, PdViewButton, PdViewLink, PdViewTone, PdViewTable, PdViewTree, PdViewScene, PdViewForm, PdViewReview, PdViewMatrix, PdViewChart],
+  host: { '[attr.data-kind]': 'shape().tag', '[attr.data-node-id]': 'node().id || null' },
+  template: `
+    @let s = shape();
+    @switch (s.tag) {
+      @case ('stack') {
+        <div class="pd-view-stack" [class.pd-view-stack--row]="s.v.dir === 'row'">
+          @for (c of s.v.children; track childKey(c, $index)) {
+            <pd-view-node [node]="c" />
+          }
+        </div>
+      }
+      @case ('text') {
+        <p class="pd-view-text" [class]="textClass(s.v.style, s.v.tone)" [attr.role]="s.v.style === 'heading' || s.v.style === 'subheading' ? 'heading' : null" [attr.aria-level]="s.v.style === 'heading' ? 3 : s.v.style === 'subheading' ? 4 : null">
+          <pd-view-tone [tone]="s.v.tone" />{{ s.v.text }}
+        </p>
+      }
+      @case ('table') {
+        <pd-view-table [table]="s.v" [label]="title()" />
+      }
+      @case ('tree') {
+        <pd-view-tree [tree]="s.v" [label]="title()" />
+      }
+      @case ('graph') {
+        <pd-view-scene [scene]="graph(s.v)" [label]="title() || graphName" />
+      }
+      @case ('diagram') {
+        <pd-view-scene [scene]="diagram(s.v)" [label]="title() || diagramName" />
+      }
+      @case ('form') {
+        <pd-view-form [form]="s.v" />
+      }
+      @case ('reviewList') {
+        <pd-view-review [list]="s.v" [label]="title()" />
+      }
+      @case ('matrix') {
+        <pd-view-matrix [matrix]="s.v" [label]="title()" />
+      }
+      @case ('chart') {
+        <pd-view-chart [chart]="s.v" />
+      }
+      @case ('badge') {
+        <span class="pd-view-badge" [class]="toneClass(s.v.tone)"><pd-view-tone [tone]="s.v.tone" />{{ s.v.text }}</span>
+      }
+      @case ('progress') {
+        <div class="pd-view-progress">
+          <div class="pd-view-progress__row">
+            <span class="pd-view-progress__label" [id]="progressId()">{{ s.v.label || progressName }}</span>
+            <span class="pd-view-progress__value">{{ percent(s.v.value) }}%</span>
+          </div>
+          <div class="pd-view-progress__track" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="percent(s.v.value)" [attr.aria-labelledby]="progressId()">
+            <div class="pd-view-progress__fill" [style.width.%]="percent(s.v.value)"></div>
+          </div>
+        </div>
+      }
+      @case ('empty') {
+        <div class="pd-view-empty">
+          <pd-glyph [name]="glyph(s.v.icon)" [size]="24" />
+          <p class="pd-view-empty__title">{{ s.v.title }}</p>
+          @if (s.v.hint) {
+            <p class="pd-view-empty__hint">{{ s.v.hint }}</p>
+          }
+          @if (s.v.action; as a) {
+            <pd-view-button [action]="a" variant="primary" />
+          }
+        </div>
+      }
+      @case ('needsAi') {
+        <section class="pd-view-needs-ai" data-testid="view-needs-ai" [attr.aria-label]="s.v.feature">
+          <pd-glyph name="chat" [size]="20" />
+          <div class="pd-view-needs-ai__body">
+            <p class="pd-view-needs-ai__title">{{ s.v.feature }}</p>
+            <p class="pd-view-needs-ai__message">{{ s.v.reason || needsAiDefault }}</p>
+            <pd-view-button [action]="s.v.setup" variant="primary" />
+          </div>
+        </section>
+      }
+      @case ('link') {
+        <pd-view-link [link]="s.v.target" [text]="s.v.label" />
+      }
+      @default {
+        <p class="pd-view-unknown" role="note" data-testid="view-unknown">
+          <pd-glyph name="info" [size]="14" />{{ updateApp }}
+        </p>
+      }
+    }
+  `,
+  styles: `
+    ${TONE_CSS}
+    :host { display: block; min-width: 0; }
+    .pd-view-stack { display: flex; flex-direction: column; gap: var(--pd-space-3); min-width: 0; }
+    .pd-view-stack--row { flex-direction: row; flex-wrap: wrap; align-items: flex-start; }
+    .pd-view-stack--row > * { flex: 1 1 14rem; min-width: 0; }
+    .pd-view-text { margin: 0; color: var(--pd-text-body); line-height: var(--pd-lh-body); overflow-wrap: anywhere; white-space: pre-line; }
+    .pd-view-text.pd-view-tone-info, .pd-view-text.pd-view-tone-good, .pd-view-text.pd-view-tone-warn, .pd-view-text.pd-view-tone-bad { color: var(--pd-view-tone); }
+    .pd-view-text--heading { font-size: var(--pd-text-title); line-height: var(--pd-lh-title); font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
+    .pd-view-text--subheading { font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
+    .pd-view-text--caption { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
+    .pd-view-text--code { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); white-space: pre-wrap; }
+    .pd-view-badge { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: 20px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); background: var(--pd-view-tint); color: var(--pd-view-tone); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); white-space: nowrap; max-width: 100%; }
+    .pd-view-progress { display: grid; gap: var(--pd-space-1); }
+    .pd-view-progress__row { display: flex; justify-content: space-between; gap: var(--pd-space-2); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-view-progress__value { font-variant-numeric: tabular-nums; }
+    .pd-view-progress__track { height: 6px; border-radius: var(--pd-radius-pill); background: var(--pd-neutral-tint); overflow: hidden; }
+    .pd-view-progress__fill { height: 100%; background: var(--pd-accent); border-radius: inherit; transition: width calc(var(--pd-duration) * var(--pd-motion-scale, 1)) var(--pd-ease-move); }
+    @media (prefers-reduced-motion: reduce) { .pd-view-progress__fill { transition: none; } }
+    .pd-view-empty { display: grid; justify-items: center; gap: var(--pd-space-2); padding: var(--pd-space-6) var(--pd-space-4); text-align: center; color: var(--pd-text-muted); }
+    .pd-view-empty__title { margin: 0; font-size: var(--pd-text-subtitle); font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
+    .pd-view-empty__hint { margin: 0; max-width: 48ch; }
+    .pd-view-needs-ai { display: flex; gap: var(--pd-space-3); align-items: flex-start; padding: var(--pd-space-4); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); }
+    .pd-view-needs-ai__body { display: grid; gap: var(--pd-space-2); justify-items: start; min-width: 0; }
+    .pd-view-needs-ai__title { margin: 0; color: var(--pd-text); font-weight: var(--pd-weight-semibold); overflow-wrap: anywhere; }
+    .pd-view-needs-ai__message { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; }
+    .pd-view-unknown { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0; padding: var(--pd-space-2) var(--pd-space-3); border: 1px dashed var(--pd-border-strong); border-radius: var(--pd-radius-control); color: var(--pd-text-muted); }
+  `,
+})
+export class PdViewNode {
+  readonly node = input.required<Node>();
+  private readonly runtime = inject(ViewRuntime);
+  /** The view's title: the accessible name of the table, tree, list and drawing nodes. */
+  protected readonly title = this.runtime.title;
+  protected readonly shape = computed(() => shapeOf(this.node()));
+  protected readonly childKey = childKey;
+  protected readonly toneClass = toneClass;
+  protected readonly graph = graphScene;
+  protected readonly diagram = diagramScene;
+  protected readonly graphName = $localize`:@@pd.view.graph:Graph`;
+  protected readonly diagramName = $localize`:@@pd.view.diagram:Diagram`;
+  protected readonly progressName = $localize`:@@pd.view.progress:Progress`;
+  protected readonly needsAiDefault = $localize`:@@pd.view.needs-ai:This needs local AI, which is not ready.`;
+  protected readonly updateApp = $localize`:@@pd.view.unknown:Update the app to view this`;
+  private static next = 0;
+  private readonly uid = ++PdViewNode.next;
+  protected readonly progressId = () => `pd-view-progress-${this.uid}`;
+
+  protected glyph(icon: unknown): string {
+    return glyphFor(icon);
+  }
+  protected percent(v: number): number {
+    return Math.round(Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0)) * 100);
+  }
+  protected textClass(style: string, tone: unknown): string {
+    return `pd-view-text--${style} ${toneClass(toneOf(tone))}`;
+  }
+}
