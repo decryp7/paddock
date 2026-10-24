@@ -478,3 +478,36 @@ Gaps left:
 - **Dyno:** `dyno-cli` `render.rs` tables, the common flags in `args.rs`, and the exit handling in `lib.rs`.
 - **Agent and service programs** (`debrief-agent`, `pitcrew-service` `cli.rs`, `dyno-agent` `cli.rs`): `Verb::add_to_help`,
   `Verb::status_exit` (3 when not running), `Verb::reject_extra`.
+
+## X14 built: adoption and gaps (2026-10-25)
+
+`paddock-chromium` 0.1.0 and `paddock-runtime` 0.1.0 (crates/README.md). The pinned-runtime half is its own crate so FFmpeg
+and llama.cpp users do not depend on a browser driver. Both apps pinned the same Chrome for Testing (156.0.8078.47, same
+hashes); `chromium.toml` adds sizes and `linux-aarch64`. What each app deletes when it adopts them:
+
+| App | Replaced | Stays in the app | API changes to make |
+|---|---|---|---|
+| Debrief | the whole `crates/chromium-driver`; `app/src-tauri/src/browser/runtime.rs` download/unpack/self-test half (`install_blocking`, `download`, `copy_hashed`, `SUMS`, `MAX_DOWNLOAD`) → `runtime::install` as a job; later `debrief-video/src/runtime/{catalog,store,unpack}.rs` and `debrief-ai/src/runtimes/{catalog,store,unpack}.rs` → `paddock-runtime` (their `RuntimeKind`: locate + self-test) | `browser/` sessions, research, placement (it passes `WindowBounds`), the FFmpeg test clip and llama.cpp self-tests | `LaunchOptions::new(Profile::Throwaway(profiles_dir(&dirs)))` instead of `Default` (profiles in the cache folder, not `$TMPDIR`); `Window::OnScreen(Some(bounds))` for `window`; `close()` replaces `close_gracefully(CLOSE_GRACE)`; drop now closes gracefully (was a kill); `CHROMIUM_PATH` is passed as `find(Some("CHROMIUM_PATH"), installed(&store))`; `DEBRIEF_BROWSER_NO_SANDBOX` → `PADDOCK_BROWSER_NO_SANDBOX` (CI `build.yml`); `DEBRIEF_FAKE_BROWSER` → `PADDOCK_FAKE_BROWSER` (the start-up refusal); fake helper test path stays the app's own |
+| Spotter | `crates/spotter-render/src/{cdp,launch,page,process,discover,ready,challenge,install,manifest}.rs`, `chromium-manifest.toml`, `tests/{install,install_progress,real_browser}.rs`; the reqwest/tokio download | `adapter.rs` (`ChromiumRenderer`, `PageRenderer`), `status.rs` (its UI status), `scripts/pin-chromium.mjs` (point it at `paddock-chromium/src/chromium.toml` in Paddock; it must also write `size`) | `Mode::{OffScreen,Headless,OnScreen}` → `Window::{OffScreen,Headless,OnScreen(None)}`; `memory_cap`/`max_lifetime` stay; `EndedBy` stays; `SPOTTER_TEST_BROWSER`/`_DIR` → `CHROMIUM_TEST_PATH` only (no default cache folder); `SPOTTER_TEST_BROWSER_NO_SANDBOX` → `PADDOCK_BROWSER_NO_SANDBOX` (honoured only as root); `Page::attach` no longer adds the DOM tracker: call `track_dom_changes()` after `new_page()`; `challenge::detect(&Signals)` unchanged, `Snapshot::signals()` builds them; install progress is the job's phases (`download`, `unpack`, `self-test`, `install`) instead of `spotter_core::job` |
+
+Tests: `paddock-runtime` 13 unit + 13 store tests against an in-memory host (fresh install with every phase in order,
+update and rollback, older releases removed, self-test failure quarantined with the newest kept, a broken release in use
+quarantined with the previous taking over, checksum mismatch, no executable, unpack limits, a zip that lies about its
+size, cancel and resume, one install at a time across processes, a state that cannot be saved, damaged state and markers,
+sweep); `paddock-chromium` 53 unit tests against the fake browser (every command-line combination keeps the start page
+last, the root/no-sandbox branch through the real launch path, time limit on a `FakeClock`, memory cap with a gated
+sampler and at start, failed start with the browser's error output, garbled port file, start timeout, window closed by the
+user, quit, dropped connection, stalled loads, back during a close, event flood, page snapshot/wait/capture/screenshot, a
+whole install of a local build); `tests/real_browser.rs` with Chrome for Testing (headless; `Browser.close`; no process or
+profile left). Line coverage 100% of both crates (the fake browser is excluded like `paddock-proc`'s test child).
+
+Gaps left:
+- Archives other than `.zip`: FFmpeg's Linux builds are `.tar.xz` (needs a tar + xz reader); Debrief keeps its own unpack
+  for those until then.
+- The real-browser test runs in CI only where a job installs Chrome for Testing and sets `CHROMIUM_TEST_PATH` (the apps'
+  CI does; Paddock's `crate` job does not yet).
+- Windows: `taskkill /T /F` ends the browser tree (no job object yet, see `paddock-proc`); the fake browser is Unix only,
+  so the launch tests run on Linux and macOS; the pure command-line tests run everywhere.
+- `wait_ready`, `start_page` and the start wait poll the OS clock (bounded production waits); only the lifetime limit runs on
+  the injected clock.
+- Spotter's `pin-chromium.mjs` and Debrief's `install-test-browser.mjs` are still per app (X9 scripts survey).
