@@ -1,10 +1,8 @@
-import { afterNextRender, ApplicationRef, computed, EnvironmentInjector, inject, Injectable, Injector, signal } from '@angular/core';
+import { afterNextRender, ApplicationRef, computed, createComponent, DestroyRef, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
+import { PdIcon } from '@decryp7/paddock-ui/shell';
+import { panelId as makePanelId, parsePanelId, WorkbenchRegistry, type PerspectiveDef, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { dockview, loadDockview } from './dockview-loader';
-import { Logger } from '../core/logger';
-import { CommandRegistry } from '../extensions/command-registry';
-import { formatKeybinding } from '../extensions/keybinding';
-import { ContextMenuService } from '../ui/context-menu.service';
 import { AngularContentRenderer, MissingViewRenderer } from './angular-panel';
 import { AutoHideEvent, autoHideReduce, EMPTY_AUTO_HIDE } from './auto-hide';
 import { DockAutoHide } from './dock-auto-hide';
@@ -12,6 +10,7 @@ import { DockContext } from './dock-context';
 import { keepGroupsUnscrolled, labelTabOverflow, observeFloatingAria } from './dock-dom';
 import { DockSlot, isLayoutTarget, Point, Rect, resolveGuideDrop, Side } from './dock-geometry';
 import { DockLayout } from './dock-layout';
+import { DockMenu } from './dock-menu';
 import { DockPersistence } from './dock-persistence';
 import { DockPlacement } from './dock-placement';
 import { DockPolicy } from './dock-policy';
@@ -21,28 +20,27 @@ import { FloatingMove } from './floating-move';
 import { TabDragOut } from './tab-drag-out';
 import { DragOutCue } from './drag-out-cue';
 import { DropGuides } from './drop-guides';
-import { FullScreenPrefs, OsWindow } from './os-window';
 import { GroupActions } from './group-actions';
-import { DockExtras, SavedLayout } from './layout-store';
+import { DockExtras, readLayout, SavedLayout, toEnvelope } from './layout-store';
 import { PanelAction, panelMenu, panelsToClose, pinnedIndex } from './panel-menu';
 import { PanelTab, TAB_COMPONENT, tabPanelId } from './panel-tab';
 import { cycle, openSwitcher, selected, SwitcherState, switcherItems, touchMru } from './switcher';
 import { viewKind, ViewKind } from './view-kind';
-import { buildPerspective, BuiltInPerspective } from './perspective-layouts';
+import { Perspectives } from './perspectives';
+import { WindowLayouts } from './window-layouts';
 
-export { PANEL } from './dock-context';
-export { defaultAutoHidden } from './dock-placement';
-export { keepGroupsUnscrolled, observeFloatingAria } from './dock-dom';
+let liveDock: WorkbenchDock | null = null;
 
-/** An inline problem shown over the dock (e.g. a pop-out window could not be created), with an optional retry. */
-export interface DockNotice {
-  message: string;
-  retry?: () => void;
+/** The dock of this window, for the contributed commands (null before the frame provides one). */
+export function currentDock(): WorkbenchDock | null {
+  return liveDock;
 }
+
+export { keepGroupsUnscrolled, observeFloatingAria } from './dock-dom';
 
 /**
  * The dock, as components see it: creates the dockview instance, restores/persists the user's layout, and opens,
- * closes, focuses, floats, pops out, auto-hides and pins panels for the views in `ViewRegistry` (documents in the
+ * closes, focuses, floats, pops out, auto-hides and pins panels for the registered views (documents in the
  * centre, tool windows around them, as in Visual Studio). It coordinates focused services:
  * - `DockPlacement`: where panels go (default layout, new views, slots, floating, guides);
  * - `DockAutoHide`: auto-hidden tool windows;
@@ -51,7 +49,7 @@ export interface DockNotice {
  * Components use this service instead of touching dockview.
  */
 @Injectable()
-export class DockService {
+export class WorkbenchDock {
   private readonly ctx = inject(DockContext);
   private readonly placement = inject(DockPlacement);
   private readonly autoHider = inject(DockAutoHide);
@@ -61,8 +59,8 @@ export class DockService {
   private readonly appRef = inject(ApplicationRef);
   private readonly injector = inject(EnvironmentInjector);
   private readonly lazy = inject(Injector);
-  private readonly logger = inject(Logger);
-  private readonly menus = inject(ContextMenuService);
+  private readonly menus = inject(DockMenu);
+  private readonly registry = inject(WorkbenchRegistry);
 
   private disposers: { dispose(): void }[] = [];
   private stopResize: (() => void) | null = null;
@@ -74,17 +72,18 @@ export class DockService {
   /** Conditional views that were available at the last check, to detect "became available". */
   private readonly wasAvailable = new Set<string>();
   private evaluated = false;
-  /** In a pop-out window: views are shown by the host (set by the pop-out shell). */
-  private remote: ((id: string) => void) | null = null;
+  /** Bumped by every attach and detach: an attach that finds it changed while waiting for the store gives up. */
+  private attachment = 0;
+  private readyWaiters: (() => void)[] = [];
+  private unreturned: (() => void) | null = null;
   private fullScreenGroup: DockviewGroupPanel | null = null;
   private pendingAttach: HTMLElement | null = null;
-  private fullScreenOs = false;
 
   /** Ids of the panels currently open: docked, auto-hidden or popped out to a window. */
   readonly openIds = computed<ReadonlySet<string>>(() => {
     const ids = new Set(this.ctx.docked());
     for (const i of this.ctx.autoHide().items) ids.add(i.id);
-    for (const id of this.ctx.windows()?.poppedIds() ?? []) ids.add(id);
+    for (const id of this.ctx.windows()?.poppedOut() ?? []) ids.add(id);
     return ids;
   });
   /** Auto-hidden tool windows and which one is slid out. */
@@ -93,8 +92,8 @@ export class DockService {
   readonly pinnedTabs = this.ctx.pinned.asReadonly();
   /** The layout as last saved (projects and sessions save it too). */
   readonly savedLayout = this.persistence.savedLayout;
-  /** An inline problem to show over the dock. */
-  readonly notice = signal<DockNotice | null>(null);
+  /** An inline notice over the dock (a pop-out failed; the layout was fitted, with Undo). */
+  readonly notice = this.ctx.notice;
   /** The Ctrl+Tab navigator, when open. */
   readonly switcher = signal<SwitcherState | null>(null);
   readonly fullScreen = signal(false);
@@ -106,18 +105,20 @@ export class DockService {
   /** Ticks on every layout change of the dock (panels that keep native content in place follow it). */
   readonly layoutChanged = this.ctx.layoutVersion.asReadonly();
 
-  /** The user's current binding of the auto-hide command as shown on this platform; empty when it has none. */
-  autoHideShortcut(): string {
-    const binding = this.lazy.get(CommandRegistry).find('window.autoHide')?.keybinding;
-    return binding ? formatKeybinding(binding) : '';
-  }
+  /** The panels open now (docked, auto-hidden, floating or popped out): view ids and `<view>#<key>`, in a stable order. */
+  readonly openPanels: Signal<readonly string[]> = computed(() => [...this.openIds()].sort());
+  /** The panel in front in the group that has focus, or null. */
+  readonly activePanel: Signal<string | null> = this.activeView.asReadonly();
+  /** The perspective in use (the first offered one until the user switches). */
+  readonly activePerspective: Signal<string | null> = computed(() => this.lazy.get(Perspectives).activePerspective());
+  /** The layouts the user saved by name. */
+  readonly namedLayouts: Signal<readonly { name: string; savedAt: number }[]> = computed(() => this.lazy.get(WindowLayouts).list().map((l) => ({ name: l.name, savedAt: l.savedAt })));
 
   constructor() {
-    inject(DockPolicy).start({
-      ready: this.ctx.apiReady,
-      show: (id) => this.show(id),
-      revealInspector: () => this.revealInspector(),
-      syncConditionalViews: () => this.syncConditionalViews(),
+    inject(DockPolicy).start({ ready: this.ctx.apiReady, syncConditionalViews: () => this.syncConditionalViews() });
+    liveDock = this;
+    inject(DestroyRef).onDestroy(() => {
+      if (liveDock === this) liveDock = null;
     });
   }
 
@@ -128,7 +129,7 @@ export class DockService {
 
   /** Slides the auto-hidden tool window `id` back in when it is the one slid out; a docked, floating or popped-out one stays. */
   slideIn(id: string): void {
-    if (!this.remote && this.ctx.autoHide().open === id) this.autoHider.event({ type: 'blur' });
+    if (this.ctx.autoHide().open === id) this.autoHider.event({ type: 'blur' });
   }
 
   /**
@@ -136,7 +137,6 @@ export class DockService {
    * notification's action just opened). Tried now and again after the next render, which shows a view just opened.
    */
   focusFront(): void {
-    if (this.remote) return;
     const focus = () => {
       const flyout = this.ctx.autoHide().open !== null ? document.getElementById('pd-dock-ah-flyout') : null;
       const target = flyout?.querySelector<HTMLElement>('.pd-panel') ?? flyout ?? this.api?.activePanel?.view.content.element ?? null;
@@ -148,11 +148,6 @@ export class DockService {
     afterNextRender(focus, { injector: this.lazy });
   }
 
-  /** Slides the auto-hidden inspector out (see `DockAutoHide.revealInspector`); nothing in a pop-out. */
-  revealInspector(): void {
-    if (!this.remote) this.autoHider.revealInspector();
-  }
-
   isOpen(id: string): boolean {
     return this.openIds().has(id);
   }
@@ -162,16 +157,11 @@ export class DockService {
    * a tab behind another, an auto-hidden window that is not slid out, and a pop-out.)
    */
   isVisible(id: string): boolean {
-    return this.ctx.shown().has(id) || this.ctx.autoHide().open === id || (this.ctx.windows()?.poppedIds().has(id) ?? false);
+    return this.ctx.shown().has(id) || this.ctx.autoHide().open === id || (this.ctx.windows()?.poppedOut().includes(id) ?? false);
   }
 
   kindOf(id: string): ViewKind {
     return this.ctx.kindOf(id);
-  }
-
-  /** In a pop-out window: showing a view asks the host to show it (the pop-out has no layout of its own). */
-  setRemote(remote: ((id: string) => void) | null): void {
-    this.remote = remote;
   }
 
   /**
@@ -188,6 +178,7 @@ export class DockService {
       return;
     }
     this.detach();
+    const token = ++this.attachment;
     this.ctx.container = container;
     const api = lib.createDockview(container, {
       theme: { name: 'debrief', className: 'pd-dockview' },
@@ -213,10 +204,11 @@ export class DockService {
       },
       createComponent: (o) => {
         const view = this.views.find(o.name);
-        return view ? new AngularContentRenderer(view.component, this.appRef, this.injector, view.title) : new MissingViewRenderer(o.name);
+        return view ? new AngularContentRenderer(view, this.appRef, this.injector) : new MissingViewRenderer(o.name);
       },
       defaultTabComponent: TAB_COMPONENT,
-      createTabComponent: (o) => (o.name === TAB_COMPONENT ? new PanelTab((id, el) => this.openPanelMenu(id, el)) : undefined),
+      createTabComponent: (o) =>
+        o.name === TAB_COMPONENT ? new PanelTab((id, el) => this.openPanelMenu(id, el), (id, host) => this.drawTabIcon(id, host), (id) => this.isClosable(id)) : undefined,
       createRightHeaderActionComponent: () =>
         new GroupActions({
           openMenu: (g, anchor) => g.activePanel && this.openPanelMenu(g.activePanel.id, anchor),
@@ -224,7 +216,6 @@ export class DockService {
             available: (g) => !!g.activePanel && this.canAutoHide(g.activePanel.id),
             run: (g) => g.activePanel && this.unpin(g.activePanel.id),
             chooseSide: (g, anchor, at) => g.activePanel && this.openAutoHideSideMenu(g.activePanel.id, anchor, at),
-            shortcut: () => this.autoHideShortcut(),
           },
         }),
     });
@@ -234,7 +225,7 @@ export class DockService {
       if (!id) return;
       if (e.key === 'Delete') {
         e.preventDefault();
-        this.close(id);
+        if (this.isClosable(id)) this.close(id);
       } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
         e.preventDefault();
         this.openPanelMenu(id, e.target as HTMLElement);
@@ -254,14 +245,13 @@ export class DockService {
     // there opens the window exactly where the ghost was.
     const dragCue = new DragOutCue(cue, {
       cueRect: (id, p, outcome) => this.placement.cueRect(id, p, outcome),
-      beginDragOut: (id) => this.ctx.windows()?.beginDragOut(id) ?? null,
+      beginDragOut: () => null,
     });
     const tabDrag = new TabDragOut(container, {
       outcome: (id, p) => this.tabDropOutcome(id, p),
       popOut: (id, at) => {
-        const ending = dragCue.takeEnd();
-        if (!ending) void this.popOut(id, { at });
-        else void ending.then((rect) => this.popOut(id, rect ? { rect } : { at }));
+        dragCue.takeEnd();
+        void this.popOut(id, { at });
       },
       cue: (id, p, outcome) => dragCue.update(id, p, outcome),
     });
@@ -296,26 +286,34 @@ export class DockService {
         if (e.panel) this.ctx.mru = touchMru(this.ctx.mru, e.panel.id);
       }),
     ];
+    void this.persistence.load().then((saved) => {
+      if (token !== this.attachment || this.ctx.api !== api) return;
+      this.start(api, saved);
+    });
+    this.unreturned = this.ctx.windows()?.onReturned((panel) => this.returned(panel)) ?? null;
+  }
+
+  /** Builds the first arrangement (the saved one when it restores, else the default) and starts fitting it to the window. */
+  private start(api: DockviewApi, saved: SavedLayout | null): void {
     this.ctx.restoring = true;
     let extras: DockExtras;
     let loaded: SavedLayout | null = null;
     try {
-      const saved = this.persistence.load();
       if (saved) {
         try {
           api.fromJSON(saved.layout);
           extras = saved.extras;
           loaded = saved;
         } catch (e) {
-          this.logger.warn('ui.layout', 'Saved layout could not be restored; using the default', { Error: String(e) });
+          console.warn('[paddock-dock] the saved layout could not be restored; using the default', String(e));
           this.persistence.clear();
           api.clear();
           this.fresh = true;
-          extras = this.placement.buildDefault(api);
+          extras = this.defaultExtras(api);
         }
       } else {
         this.fresh = true;
-        extras = this.placement.buildDefault(api);
+        extras = this.defaultExtras(api);
       }
       this.applyExtras(extras);
     } finally {
@@ -325,6 +323,10 @@ export class DockService {
     this.evaluated = false;
     this.wasAvailable.clear();
     this.ctx.apiReady.set(true);
+    const waiters = this.readyWaiters;
+    this.readyWaiters = [];
+    waiters.forEach((w) => w());
+    this.syncConditionalViews();
     const stopResize = this.layout.watchResize(api, () => this.fitToWindow(api, null));
     const stopDrag = this.layout.watchSashDrag(() => {
       this.layout.rememberSizes(api);
@@ -335,11 +337,14 @@ export class DockService {
       stopDrag();
     };
     this.layout.whenSized(api, () => this.fitToWindow(api, loaded));
-    if (extras.poppedOut.length) void this.ctx.windows()?.restore(extras.poppedOut);
   }
 
   detach(): void {
     this.pendingAttach = null;
+    this.attachment++;
+    this.unreturned?.();
+    this.unreturned = null;
+    this.readyWaiters = [];
     this.persistence.cancel();
     this.disposers.forEach((d) => d.dispose());
     this.disposers = [];
@@ -355,20 +360,29 @@ export class DockService {
     this.ctx.autoHide.set(EMPTY_AUTO_HIDE);
   }
 
-  /** Restores the default arrangement (Investigate) and forgets the saved one. */
+  /** Restores the default arrangement (the first offered perspective) and forgets the saved one. */
   reset(): void {
     this.fitted = null;
     this.ctx.displaced.clear();
     this.ctx.userSizes = {};
     this.persistence.clear();
-    this.rebuild((api) => this.placement.buildDefault(api));
+    this.rebuild((api) => this.defaultExtras(api));
   }
 
-  /** Replaces the arrangement with a built-in perspective's, built from scratch (see `buildPerspective`). */
-  buildPerspective(id: BuiltInPerspective): void {
-    this.rebuild((api) =>
-      buildPerspective(id, { api, buildDefault: () => this.placement.buildDefault(api), find: (v) => this.views.find(v) }),
-    );
+  /** Alias of `reset` for the frame: Window > Reset layout. */
+  resetLayout(): void {
+    this.reset();
+  }
+
+  /** The arrangement of a fresh dock: the first perspective offered now, else an empty dock. */
+  private defaultExtras(api: DockviewApi): DockExtras {
+    const first = this.registry.availablePerspectives()[0];
+    return first ? this.placement.buildFrom(api, first.views, first.focus) : { autoHidden: [], pinnedTabs: [] };
+  }
+
+  /** Replaces the arrangement with a perspective's, built from scratch from its views (see `PerspectiveDef`). */
+  buildPerspective(def: PerspectiveDef): void {
+    this.rebuild((api) => this.placement.buildFrom(api, def.views, def.focus));
   }
 
   /** Clears the dock (and pop-outs) and builds an arrangement into it; it is then persisted as the current one. */
@@ -378,8 +392,6 @@ export class DockService {
     this.fitted = null;
     this.ctx.displaced.clear();
     this.ctx.userSizes = {};
-    const windows = this.ctx.windows();
-    for (const id of [...(windows?.poppedIds() ?? [])]) void windows?.discard(id);
     this.ctx.restoring = true;
     try {
       api.clear();
@@ -408,15 +420,11 @@ export class DockService {
 
   /** Opens the view if needed and brings it to the front. Unknown or unavailable views are ignored. */
   show(id: string, options: { inactive?: boolean } = {}): void {
-    if (this.remote) {
-      this.remote(id);
-      return;
-    }
     const api = this.api;
     const view = this.views.find(id);
     if (!api || !view) return;
     const windows = this.ctx.windows();
-    if (windows?.poppedIds().has(id)) {
+    if (windows?.poppedOut().includes(id)) {
       if (!options.inactive) windows.focus(id);
       return;
     }
@@ -433,7 +441,7 @@ export class DockService {
       if (!options.inactive) existing.api.setActive();
       return;
     }
-    if (!this.views.available().includes(view)) return;
+    if (!this.views.isOffered(id)) return;
     this.fitted = null;
     this.placement.addView(api, view, options.inactive ?? false, id);
   }
@@ -445,21 +453,17 @@ export class DockService {
   showBeside(id: string, referencePanel: string, direction: 'below' | 'right'): void {
     const api = this.api;
     const view = this.views.find(id);
-    if (this.remote || !api || !view || api.getPanel(id) || !api.getPanel(referencePanel) || !this.views.available().includes(view)) {
+    if (!api || !view || api.getPanel(id) || !api.getPanel(referencePanel) || !this.views.isOffered(id)) {
       this.show(id);
       return;
     }
     if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
-    api.addPanel({ id, component: view.id, title: view.title, position: { referencePanel, direction } });
+    api.addPanel({ id, component: view.id, title: view.title.text, position: { referencePanel, direction } });
   }
 
   close(id: string): void {
     this.ctx.displaced.delete(id);
-    const windows = this.ctx.windows();
-    if (windows?.poppedIds().has(id)) {
-      void windows.discard(id);
-      return;
-    }
+    if (this.ctx.poppedSlots.delete(id)) return;
     if (this.ctx.isAutoHidden(id)) {
       this.autoHider.remove(id);
       return;
@@ -518,11 +522,53 @@ export class DockService {
 
   /* --------------------------------------------------------------- pop-outs */
 
-  /** Pops a panel out into a real window ("Pop out to window"), exactly at `rect` or under the screen point `at` (a dragged tab). */
+  /** Can this panel move to a window of its own: a pop-out service is there and the view allows it. */
+  canPopOut(id: string): boolean {
+    return this.ctx.canPopOut(id);
+  }
+
+  /**
+   * Pops a panel out into a real window of its own ("Pop out to window"), at the screen point `at` (a dragged tab) or
+   * the rect `rect` (screen px), else where the service puts it. The panel leaves the dock when the window opens and
+   * returns where it was when the window closes or docks back; it stays docked, with a notice and Retry, on failure.
+   */
   async popOut(id: string, where: { at?: Point; rect?: Rect } = {}): Promise<boolean> {
     const windows = this.ctx.windows();
-    if (!windows || !id || !this.api?.getPanel(id)) return false;
-    return windows.popOut(id, where.rect ? { rect: where.rect } : where.at ? { at: where.at } : {});
+    if (!windows || !id || !this.api?.getPanel(id) || !this.ctx.canPopOut(id)) return false;
+    const size = this.panelRect(id) ?? { x: 0, y: 0, width: 640, height: 480 };
+    const placement = where.rect
+      ? { x: where.rect.x, y: where.rect.y, width: where.rect.width, height: where.rect.height }
+      : where.at
+        ? { x: Math.round(window.screenX + where.at.x), y: Math.round(window.screenY + where.at.y), width: Math.round(size.width), height: Math.round(size.height) }
+        : undefined;
+    const slot = this.placement.captureSlot(id) ?? { referencePanel: null, direction: 'within' as const };
+    let ok = false;
+    try {
+      ok = await windows.popOut(id, placement);
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      this.ctx.notice.set({
+        key: 'popout',
+        message: $localize`:@@pd.wb.dock.popout.failed:The panel could not be moved to its own window.`,
+        action: { label: $localize`:@@pd.wb.dock.popout.retry:Retry`, run: () => void this.popOut(id, where) },
+      });
+      return false;
+    }
+    this.ctx.poppedSlots.set(id, slot);
+    this.takeOut(id);
+    return true;
+  }
+
+  /** A popped-out panel's window closed or docked back: the panel returns where it was. */
+  private returned(panel: string): void {
+    const slot = this.ctx.poppedSlots.get(panel);
+    this.ctx.poppedSlots.delete(panel);
+    if (!this.api || !this.views.find(panel) || this.api.getPanel(panel)) return;
+    this.placement.restoreSlot(panel, slot ?? null);
+    this.ctx.refreshOpen();
+    this.persistence.schedule();
   }
 
   /** Pops out the active panel (keyboard command). */
@@ -658,7 +704,9 @@ export class DockService {
       hasRight: order.indexOf(id) < order.length - 1,
       groups: api.groups.filter((g) => g.api.location.type === 'grid').length,
       pinnedTab: this.ctx.pinned().has(id),
-      canPopout: this.ctx.windows()?.canPopOut() ?? false,
+      canPopout: this.ctx.canPopOut(id),
+      popOutAvailable: this.ctx.windows() !== null,
+      closable: this.isClosable(id),
       inDocumentWell: group.panels.some((p) => p.id !== id && this.kindOf(p.id) === 'document'),
     });
     const box = anchor?.getBoundingClientRect();
@@ -686,7 +734,7 @@ export class DockService {
     if (!api || !panel) return;
     const group = panel.group;
     const order = group.panels.map((p) => p.id);
-    const closeAll = (ids: string[]) => ids.forEach((p) => this.close(p));
+    const closeAll = (ids: string[]) => ids.forEach((p) => this.closeView(p));
     switch (action) {
       case 'float':
         this.placement.floatPanel(panel);
@@ -707,7 +755,7 @@ export class DockService {
         this.unpin(id);
         break;
       case 'close':
-        this.close(id);
+        this.closeView(id);
         break;
       case 'closeOthers':
         closeAll(panelsToClose(order, id, 'others', this.ctx.pinned()));
@@ -742,7 +790,7 @@ export class DockService {
   /** Closes every document except pinned tabs ("Close all documents"). */
   closeAllDocuments(): void {
     const ids = (this.api?.panels ?? []).map((p) => p.id).filter((id) => this.kindOf(id) === 'document');
-    for (const id of panelsToClose(ids, '', 'all', this.ctx.pinned())) this.close(id);
+    for (const id of panelsToClose(ids, '', 'all', this.ctx.pinned())) this.closeView(id);
   }
 
   /* -------------------------------------------------------------- switcher */
@@ -783,27 +831,21 @@ export class DockService {
   /* ----------------------------------------------------------- full screen */
 
   /**
-   * Window › Full screen (Shift+Alt+Enter), as in VS: shows only the document well with the app's chrome hidden,
-   * and/or makes the OS window full screen (the `FullScreenPrefs` mode). The same shortcut toggles back; Escape
-   * does not exit.
+   * Window > Full screen, as in VS: shows only the document well with the app's chrome hidden (the class
+   * `pd-dock-full-screen` on the document element, which the frame styles). The same command toggles back.
    */
   toggleFullScreen(): void {
     if (this.fullScreen()) {
       this.exitFullScreen();
       return;
     }
-    const mode = this.lazy.get(FullScreenPrefs).mode();
     this.fullScreen.set(true);
-    this.fullScreenOs = mode !== 'chrome';
-    if (mode !== 'os') {
-      const group = this.placement.documentWell();
-      document.documentElement.classList.add('pd-dock-full-screen');
-      if (group && !group.api.isMaximized()) {
-        group.api.maximize();
-        this.fullScreenGroup = group;
-      }
+    const group = this.placement.documentWell();
+    document.documentElement.classList.add('pd-dock-full-screen');
+    if (group && !group.api.isMaximized()) {
+      group.api.maximize();
+      this.fullScreenGroup = group;
     }
-    if (this.fullScreenOs) void this.lazy.get(OsWindow).setFullscreen(true);
   }
 
   private exitFullScreen(): void {
@@ -812,8 +854,6 @@ export class DockService {
     document.documentElement.classList.remove('pd-dock-full-screen');
     if (this.fullScreenGroup?.api.isMaximized()) this.fullScreenGroup.api.exitMaximized();
     this.fullScreenGroup = null;
-    if (this.fullScreenOs) void this.lazy.get(OsWindow).setFullscreen(false);
-    this.fullScreenOs = false;
   }
 
   /* --------------------------------------------------------------- layouts */
@@ -911,6 +951,10 @@ export class DockService {
    * `hide`: it is open and the plan has no room for it; `show`: it is closed and fits with the grow-back margin;
    * `keep`: nothing to do. The plan decides, with the same priorities as everything else.
    */
+  verdict(open: boolean, explorerWidth: number): 'hide' | 'show' | 'keep' {
+    return this.explorerVerdict(open, explorerWidth);
+  }
+
   explorerVerdict(open: boolean, explorerWidth: number): 'hide' | 'show' | 'keep' {
     const api = this.api;
     if (!api) return 'keep';
@@ -928,7 +972,7 @@ export class DockService {
       api.fromJSON(saved.layout);
       this.applyExtras(saved.extras);
     } catch (e) {
-      this.logger.warn('ui.layout', 'The saved layout could not be restored', { Error: String(e) });
+      console.warn('[paddock-dock] the saved layout could not be restored', String(e));
     } finally {
       this.ctx.restoring = false;
     }
@@ -942,12 +986,10 @@ export class DockService {
   }
 
   /** Applies a saved arrangement (named layout, project, session). Falls back to the default when it is broken. */
-  applyLayout(saved: SavedLayout): boolean {
+  applySaved(saved: SavedLayout): boolean {
     const api = this.api;
     if (!api) return false;
     this.fitted = null;
-    const windows = this.ctx.windows();
-    for (const id of [...(windows?.poppedIds() ?? [])]) if (!saved.extras.poppedOut.some((p) => p.id === id)) void windows?.discard(id);
     this.ctx.restoring = true;
     let ok = true;
     try {
@@ -956,9 +998,9 @@ export class DockService {
         this.applyExtras(saved.extras);
       } catch (e) {
         ok = false;
-        this.logger.warn('ui.layout', 'Window layout could not be applied; using the default', { Error: String(e) });
+        console.warn('[paddock-dock] the layout could not be applied; using the default', String(e));
         api.clear();
-        this.applyExtras(this.placement.buildDefault(api));
+        this.applyExtras(this.defaultExtras(api));
       }
     } finally {
       this.ctx.restoring = false;
@@ -968,8 +1010,6 @@ export class DockService {
     this.syncConditionalViews();
     this.persistence.schedule();
     if (ok) this.layout.whenSized(api, () => this.fitToWindow(api, saved));
-    const popped = windows?.poppedIds() ?? new Set<string>();
-    if (ok) void windows?.restore(saved.extras.poppedOut.filter((p) => !popped.has(p.id)));
     return ok;
   }
 
@@ -990,26 +1030,112 @@ export class DockService {
     this.persistence.schedule();
   }
 
-  /** Opens/closes views that depend on the workspace (`DebriefView.when`). */
+  /**
+   * Opens and closes views by their live `when` (the context): a view that stops being offered is closed; one that
+   * starts to be offered and asks for `autoOpen` opens in the background. Nothing happens before the app's context is
+   * loaded (a restored layout must not lose its views to a context that is not there yet).
+   */
   syncConditionalViews(): void {
     const api = this.api;
-    if (!api) return;
+    if (!api || !this.views.contextLoaded()) return;
+    for (const id of [...this.openIds()]) {
+      const view = this.views.find(id);
+      if (view?.when && !this.views.isOffered(id)) this.close(id);
+    }
     const available = new Set(this.views.available().map((v) => v.id));
     for (const view of this.views.all) {
       if (!view.when) continue;
-      const open = this.isOpen(view.id);
       if (!available.has(view.id)) {
-        if (open) this.close(view.id);
         this.wasAvailable.delete(view.id);
         continue;
       }
       const becameAvailable = !this.wasAvailable.has(view.id);
       this.wasAvailable.add(view.id);
-      // Only views that ask for it open by themselves (the rest are offered); after a restore the user's layout
-      // wins, so only newly available views are opened (in the background).
-      const autoOpen = view.autoOpen === true;
-      if (autoOpen && becameAvailable && !open && (this.evaluated || this.fresh)) this.placement.addView(api, view, true);
+      // After a restore the user's layout wins, so only views that become offered later open (in the background).
+      if (view.autoOpen === true && becameAvailable && !this.isOpen(view.id) && (this.evaluated || this.fresh)) this.placement.addView(api, view, true);
     }
     this.evaluated = true;
   }
+
+  /* ----------------------------------------------------------- the public API */
+
+  private dockReady(): Promise<void> {
+    return this.ctx.apiReady() ? Promise.resolve() : new Promise<void>((resolve) => this.readyWaiters.push(resolve));
+  }
+
+  /**
+   * Opens a view (or one of its instances, `key`) and brings it to the front, or leaves it in the background. Waits for
+   * the dock to have a layout. Resolves false when the view is unknown, not offered now, or the dock was detached.
+   */
+  async showView(id: string, options: ShowViewOptions = {}): Promise<boolean> {
+    const view = this.views.find(id);
+    if (!view || !this.views.isOffered(id)) return false;
+    let panel: string;
+    try {
+      panel = options.key !== undefined && options.key !== null ? makePanelId(id, options.key) : id;
+    } catch {
+      return false;
+    }
+    if (options.key !== undefined && view.instances !== true) return false;
+    const token = this.attachment;
+    await this.dockReady();
+    if (token !== this.attachment || !this.api) return false;
+    this.show(panel, options.background ? { inactive: true } : {});
+    return this.isOpen(panel);
+  }
+
+  /** Closes a panel (a view, or `<view>#<key>`); a panel whose view is not closable stays. */
+  closeView(panel: string): void {
+    if (this.isClosable(panel)) this.close(panel);
+  }
+
+  /** Can the user close this panel (the view allows it)? */
+  isClosable(id: string): boolean {
+    return this.views.find(id)?.closable !== false;
+  }
+
+  /** Switches to a perspective; false when it is unknown. */
+  async applyPerspective(id: string): Promise<boolean> {
+    const p = this.lazy.get(Perspectives);
+    await p.ready;
+    await this.dockReady();
+    return p.switchTo(id);
+  }
+
+  /** Saves the current arrangement under a name (the cleaned name, or null for an empty one). */
+  saveNamedLayout(name: string): string | null {
+    return this.lazy.get(WindowLayouts).saveCurrent(name);
+  }
+
+  /** Applies a layout saved by name; false when unknown or it could not be applied. */
+  applyNamedLayout(name: string): boolean {
+    return this.lazy.get(WindowLayouts).apply(name);
+  }
+
+  deleteNamedLayout(name: string): void {
+    this.lazy.get(WindowLayouts).remove(name);
+  }
+
+  /** The arrangement for the window's UI checkpoint (a recovery reload restores it), or null before the dock has one. */
+  checkpoint(): unknown {
+    const now = this.persistence.current();
+    return now ? toEnvelope(now) : null;
+  }
+
+  /** Applies a checkpoint's arrangement (what `checkpoint` returned); false when it is unreadable. */
+  restoreCheckpoint(raw: unknown): boolean {
+    const saved = readLayout(raw);
+    return saved ? this.applySaved(saved) : false;
+  }
+
+  /** Draws a tab's icon (the view's `icon`) with the window's icon component. */
+  private drawTabIcon(id: string, host: HTMLElement): () => void {
+    const icon = this.views.find(id)?.icon;
+    if (!icon) return () => undefined;
+    const ref = createComponent(PdIcon, { environmentInjector: this.injector, hostElement: host });
+    ref.setInput('name', icon);
+    this.appRef.attachView(ref.hostView);
+    return () => ref.destroy();
+  }
+
 }

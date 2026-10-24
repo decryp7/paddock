@@ -71,7 +71,7 @@ export class DockLayout {
   }
 
   /** The row of the main column a panel sits in: an extra instance of a view (a second timeline) is stacked below the first, in a row of its own. */
-  private rowOf(id: string, view: Parameters<typeof viewRow>[0]): string {
+  private rowOf(id: string, view: Parameters<typeof viewRow>[0] & { id: string }): string {
     return id === view.id ? viewRow(view) : id;
   }
 

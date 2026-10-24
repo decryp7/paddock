@@ -322,7 +322,7 @@ export class DockPlacement {
     return tabDropOutcome({
       inside: !outsideViewport(p, { width: window.innerWidth, height: window.innerHeight }),
       overDropZone: onStrip || onGuide,
-      canPopOut: this.ctx.windows()?.canPopOut() ?? false,
+      canPopOut: this.ctx.canPopOut(id),
     });
   }
 

@@ -24,7 +24,7 @@ export class WindowLayouts {
   apply(name: string): boolean {
     const layout = this.named.find(name);
     if (!layout) return false;
-    const ok = this.dock.applyLayout(layout.saved);
+    const ok = this.dock.applySaved(layout.saved);
     if (!ok) this.ctx.notice.set({ key: 'layout.apply', message: $localize`:@@pd.wb.dock.windowLayouts.applyFailed:Layout "${layout.name}:name:" could not be applied; the default layout is shown` });
     return ok;
   }
