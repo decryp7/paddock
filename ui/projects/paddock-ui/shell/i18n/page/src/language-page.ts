@@ -6,11 +6,13 @@ import { LANGUAGE_CONFIG, languageOptions, LanguageStore, type LanguageChoice } 
  * pseudo-locale where the app ships it). A choice is saved at once; translations load at start-up, so the page then says
  * the window has to restart and offers the restart (`LANGUAGE_CONFIG.reload`: the app relaunches keeping its session; by default this window reloads). `LANGUAGE_CONFIG` is a root token
  * with a default: the app provides it in the Settings window's own providers (the dialog's `providers`), not in the page's, because a
- * default in the root injector is found before anything a lazily loaded page adds.
+ * default in the root injector is found before anything a lazily loaded page adds; the page builds its own `LanguageStore`.
  */
 @Component({
   selector: 'pd-language-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // Its own store: built from the `LANGUAGE_CONFIG` this page sees (the Settings window's providers), not the root's one.
+  providers: [LanguageStore],
   template: `
     <section aria-labelledby="pd-language-title" data-testid="language-page">
       <h2 id="pd-language-title">{{ t.title }}</h2>

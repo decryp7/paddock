@@ -37,6 +37,7 @@
       "requiredChoice": false,
       "instanced": false,
       "commands": [
+        "app_relaunch",
         "open_login_items",
         "service_install",
         "service_repair",

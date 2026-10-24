@@ -90,8 +90,9 @@ export const SETTINGS_DIALOG = defineDialog({
   title: msg('pd.settings.title', 'Settings'),
   width: 880,
   height: 620,
-  // The settings commands, and the Background service page's (it asks and repairs the service from this window).
-  commands: ['settings_overview', 'settings_reset', 'settings_set', 'service_status', 'service_repair', 'service_install', 'open_login_items'],
+  // The settings commands, the Background service page's (it asks and repairs the service from this window) and the
+  // whole-app relaunch of the Language page.
+  commands: ['settings_overview', 'settings_reset', 'settings_set', 'service_status', 'service_repair', 'service_install', 'open_login_items', 'app_relaunch'],
   providers: () => import('./demo-settings-window').then((m) => m.DEMO_SETTINGS_WINDOW),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
