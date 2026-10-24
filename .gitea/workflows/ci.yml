@@ -387,6 +387,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-assistant --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-assistant --all-features --profile ci && cargo test -p paddock-assistant --all-features --doc
 
+      # The plugin package: manifest limits, archive layout and signature, trust, keys; properties run with the tests; the fuzz
+      # targets are in paddock-plugin-package/fuzz (cargo +nightly fuzz run manifest|package).
+      - name: paddock-plugin-package
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-plugin-package --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-package --all-features --profile ci && cargo test -p paddock-plugin-package --all-features --doc
+
       - name: paddock-pitwall
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-pitwall --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-pitwall --all-features --profile ci && cargo test -p paddock-pitwall --all-features --doc

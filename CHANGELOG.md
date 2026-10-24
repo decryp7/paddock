@@ -5,6 +5,13 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-plugin-package` (plan X51, ADR 0001): the `.paddockplugin` package and manifest model, ported from Debrief's
+  `debrief-plugin-package` and `debrief-plugin-api` manifest. `Manifest` with `Contribution` (tool, settings, view, MCP tool,
+  extension namespace; `writes` marking on actions) and `Permission` (opened file paths, read/write folders by grant, programs,
+  network hosts, named elevated operations, MCP, memory, CPU), parsed once from `manifest.toml` with limits and typed errors;
+  validated names (`PluginId`, `GrantRef`, `HostPattern`, `Namespace`); a zip with `SHA256SUMS` and a detached Ed25519 signature,
+  bounded reading (traversal, links, size and entry limits), `build`, `extract`, `verify_installed`; keys saved owner-only; trust
+  levels Builtin / Signed / Unsigned with a versioned `TrustStore`. Fuzz targets for the manifest and the archive reader.
 - `paddock-mcp` (plan X22, ADR 0007): the local-only MCP server. `Server` with `ToolDef`/`ResourceDef` registration, `Policy` (off by
   default, read-only tools, actions only by name), schema validation, result caps, cursors, time limits with cancel, panic
   containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers
