@@ -357,8 +357,15 @@ fn classify_read_error(e: &std::io::Error) -> Result<ReadFailure, HttpError> {
 
 /// A failed connect: a limit that ran out, or nothing listening.
 fn connect_error(e: &std::io::Error) -> HttpError {
+    connect_error_on(e, cfg!(windows))
+}
+
+/// [`connect_error`] for a given OS. Windows retries a connection to a closed port for about two seconds before it reports
+/// "refused", so a connect that times out on the loopback address means that nothing listens there: a running server accepts at
+/// once. On other systems a timeout stays a timeout (a full backlog is a busy server, not a missing one).
+fn connect_error_on(e: &std::io::Error, windows: bool) -> HttpError {
     match e.kind() {
-        ErrorKind::TimedOut | ErrorKind::WouldBlock => HttpError::Timeout("connecting"),
+        ErrorKind::TimedOut | ErrorKind::WouldBlock if !windows => HttpError::Timeout("connecting"),
         _ => HttpError::Refused(e.to_string()),
     }
 }
@@ -635,10 +642,8 @@ mod tests {
             .unwrap()
             .port();
         let closed = send(free, &Request::get("/"), Timeouts::QUICK, None);
-        // Windows retries a connection to a closed port for about two seconds, so a short connect timeout ends first.
         assert!(
-            matches!(closed, Err(HttpError::Refused(_)))
-                || (cfg!(windows) && matches!(closed, Err(HttpError::Timeout("connecting")))),
+            matches!(closed, Err(HttpError::Refused(_))),
             "{:?}",
             closed.as_ref().err()
         );
@@ -738,14 +743,19 @@ mod tests {
             classify_read_error(&Error::from(ErrorKind::InvalidData)),
             Err(HttpError::Protocol(_))
         ));
-        assert_eq!(
-            connect_error(&Error::from(ErrorKind::TimedOut)),
-            HttpError::Timeout("connecting")
-        );
-        assert_eq!(
-            connect_error(&Error::from(ErrorKind::WouldBlock)),
-            HttpError::Timeout("connecting")
-        );
+        for kind in [ErrorKind::TimedOut, ErrorKind::WouldBlock] {
+            assert_eq!(
+                connect_error_on(&Error::from(kind), false),
+                HttpError::Timeout("connecting")
+            );
+            assert!(
+                matches!(
+                    connect_error_on(&Error::from(kind), true),
+                    HttpError::Refused(_)
+                ),
+                "on Windows a connect that times out on the loopback address is a closed port"
+            );
+        }
         assert!(matches!(
             connect_error(&Error::from(ErrorKind::ConnectionRefused)),
             HttpError::Refused(_)

@@ -5,5 +5,6 @@ mod common;
 
 mod behaviour;
 mod contract;
+mod control;
 mod never_panics;
 mod transports;

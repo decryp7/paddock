@@ -493,6 +493,7 @@ mod tests {
             panic!("poison");
         })
         .join();
-        assert!(r.record_path("files", "/a", None));
+        let absolute = if cfg!(windows) { r"C:\a" } else { "/a" };
+        assert!(r.record_path("files", absolute, None));
     }
 }
