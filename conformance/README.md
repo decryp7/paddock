@@ -42,6 +42,19 @@ same heading is replaced the first time, text outside the markers is never touch
 `docs/rules.md`. Change the text in Paddock first. Not every app section moves: put what is specific to the app in its
 own sections ("Design principles in Pitcrew").
 
+## Third-party notices (X42)
+
+```sh
+paddock-notices --app Pitcrew [--root .] [--manifest app/src-tauri/Cargo.toml ...] [--npm app] [--out app/src-tauri/resources]
+                [--rust-json cargo-about.json ...] [--about about.toml] [--check]
+```
+
+Writes `THIRD_PARTY_NOTICES.md` (Rust licences from `cargo about generate` with the app's `about.toml`, npm production
+dependencies from `package-lock.json` and `node_modules`), deterministic. `--check` fails when the committed file is stale;
+a package none of whose licence options is permissive fails both modes. The allowed licences are one list
+(`src/notices/licences.mjs`), equal to `templates/repo/deny.toml` and `about.toml` (a test keeps them equal). Install first:
+`cargo install cargo-about --locked --features cli`, `npm ci --omit=dev --ignore-scripts`.
+
 ## Configuration
 
 `paddock.conformance.json` (optional): `app`, `appDir`, `tauriDir`, `workflowsDir`, `sidecars` (`[{ "name": "x-worker", "args": ["--self-test"] }]`),
