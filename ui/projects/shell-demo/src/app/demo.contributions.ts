@@ -17,6 +17,7 @@ import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shel
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
 import { defineLanguageSettingsPage } from '@decryp7/paddock-ui/shell/i18n/settings';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
+import { defineSetup } from '@decryp7/paddock-ui/shell/setup';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
 
@@ -92,7 +93,7 @@ export const SETTINGS_DIALOG = defineDialog({
   height: 620,
   // The settings commands, the Background service page's (it asks and repairs the service from this window) and the
   // whole-app relaunch of the Language page.
-  commands: ['settings_overview', 'settings_reset', 'settings_set', 'service_status', 'service_repair', 'service_install', 'open_login_items', 'app_relaunch'],
+  commands: ['settings_overview', 'settings_reset', 'settings_set', 'service_status', 'service_repair', 'service_install', 'open_login_items', 'setup_state', 'setup_act', 'setup_repair', 'setup_skip', 'setup_finish', 'app_relaunch'],
   providers: () => import('./demo-settings-window').then((m) => m.DEMO_SETTINGS_WINDOW),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
@@ -101,6 +102,16 @@ export const SETTINGS_DIALOG = defineDialog({
 export const SERVICE_PAGE = defineServiceSettingsPage({
   providers: () => import('./service.providers').then((m) => m.SERVICE_PROVIDERS),
   load: () => import('@decryp7/paddock-ui/shell/service/page').then((m) => m.PdServicePage),
+});
+
+/**
+ * The first-run set-up checklist (plan X19): a modeless window (the main window opens it once on a first run) and the same
+ * checklist as Settings > Set-up. The providers load with them.
+ */
+export const SETUP = defineSetup({
+  providers: () => import('./setup.providers').then((m) => m.SETUP_PROVIDERS),
+  loadPage: () => import('@decryp7/paddock-ui/shell/setup/page').then((m) => m.PdSetupPage),
+  loadDialog: () => import('@decryp7/paddock-ui/shell/setup/page').then((m) => m.PdSetupDialog),
 });
 
 /** Settings > Language: System default, English and the pseudo-locale (the demo ships no real translation). */
@@ -112,6 +123,7 @@ export const LANGUAGE_PAGE = defineLanguageSettingsPage({
 export const DEMO_SETTINGS_PAGES = [
   LANGUAGE_PAGE,
   SERVICE_PAGE,
+  SETUP.page,
   defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
   defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100 }),
 ] as const;
@@ -122,7 +134,7 @@ export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import(
 /** Report a problem (plan X2): a decision that shows every file with its size before saving; its window boots the demo's diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);

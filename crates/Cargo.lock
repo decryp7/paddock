@@ -3316,6 +3316,8 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-menu",
+ "paddock-pitwall",
+ "paddock-secrets",
  "paddock-service",
  "paddock-settings",
  "paddock-startup",
