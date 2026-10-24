@@ -4,11 +4,12 @@ import { assertChromeForTesting, e2ePort } from './projects/paddock-e2e/src/inde
 /**
  * Browser checks of the reference apps (`npx playwright test`): the gallery (`ng serve gallery`) and the shell demo
  * (`ng serve shell-demo`), and the documentation screenshots (`SCREENSHOTS=1 npx playwright test`, written to
- * ../docs/screenshots). Ports come from PW_PORT and SHELL_DEMO_PORT (one pair per worktree; CI must set them). The
+ * ../docs/screenshots). Ports come from PW_PORT, SHELL_DEMO_PORT and WORKBENCH_DEMO_PORT (one pair per worktree; CI must set them). The
  * browser is Playwright's Chromium (Chrome for Testing), never the installed Chrome (rule 7, @decryp7/paddock-e2e).
  */
 const PORT = e2ePort('PW_PORT', 4300);
 const SHELL_DEMO_PORT = e2ePort('SHELL_DEMO_PORT', 4301);
+const WORKBENCH_DEMO_PORT = e2ePort('WORKBENCH_DEMO_PORT', 4302);
 
 export default assertChromeForTesting(
   defineConfig({
@@ -29,6 +30,7 @@ export default assertChromeForTesting(
       { name: 'gallery', testMatch: ['gallery.spec.ts', 'data.spec.ts'], use: { baseURL: `http://localhost:${PORT}` } },
       { name: 'review', testMatch: ['contact-sheet.spec.ts', 'contact-sheet-x21.spec.ts'] },
       { name: 'shell-demo', testMatch: /shell-demo(-[a-z]+)?\.spec\.ts$/, use: { baseURL: `http://localhost:${SHELL_DEMO_PORT}` } },
+      { name: 'workbench-demo', testMatch: /workbench-demo(-[a-z]+)?\.spec\.ts$/, use: { baseURL: `http://localhost:${WORKBENCH_DEMO_PORT}` } },
     ],
     webServer: [
       {
@@ -40,6 +42,12 @@ export default assertChromeForTesting(
       {
         command: `npm run build:css && npx ng serve shell-demo --port ${SHELL_DEMO_PORT}`,
         url: `http://localhost:${SHELL_DEMO_PORT}`,
+        reuseExistingServer: true,
+        timeout: 180_000,
+      },
+      {
+        command: `npm run build:css && npx ng serve workbench-demo --port ${WORKBENCH_DEMO_PORT}`,
+        url: `http://localhost:${WORKBENCH_DEMO_PORT}`,
         reuseExistingServer: true,
         timeout: 180_000,
       },
