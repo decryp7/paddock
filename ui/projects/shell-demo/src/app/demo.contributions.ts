@@ -11,6 +11,7 @@ import {
   msg,
   type ContributionBatch,
 } from '@decryp7/paddock-ui/shell';
+import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import type { DemoContext } from './demo-context';
 
 // The registration file of the shell demo: static data and loaders only (plan §9). Its lints run in
@@ -51,6 +52,13 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       run: (ctx) => void ctx.startQuietJob(),
     }),
     defineCommand<DemoContext>({
+      id: 'sd.compact',
+      title: msg('sd.compact', 'Compact notices'),
+      category: msg('sd.category.demo', 'Demo'),
+      checked: (ctx) => ctx.compact(),
+      run: (ctx) => ctx.toggleCompact(),
+    }),
+    defineCommand<DemoContext>({
       id: 'sd.fail',
       title: msg('sd.fail', 'Fail on purpose'),
       category: msg('sd.category.demo', 'Demo'),
@@ -59,10 +67,18 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       },
     }),
   ],
-  keybindings: [defineKeybinding({ command: 'sd.greet', key: 'Mod+Shift+H' })],
+  keybindings: [defineKeybinding({ command: 'sd.greet', key: 'Mod+Shift+H' }), defineKeybinding({ command: 'sd.compact', key: 'Mod+Alt+K' })],
   menus: [
     defineMenuItem({ menu: 'help', command: 'sd.greet', group: 'demo', order: 100 }),
     defineMenuItem({ menu: 'help', command: 'sd.reset', group: 'demo', order: 200 }),
+    defineMenuItem({ menu: 'view', command: 'sd.compact', group: 'notices', order: 100 }),
+    defineMenuItem({ menu: 'file', command: 'sd.job.start', group: 'jobs', order: 100 }),
+    defineMenuItem({ menu: 'file', command: 'sd.job.quiet', group: 'jobs', order: 200 }),
+    // In the submenu Help > More demos.
+    defineMenuItem({ menu: 'sd.more', command: 'sd.fail', group: 'demo', order: 100 }),
+    // The context menu of the notices list (pd-context-menu menu="sd.notices"); it may repeat menu-bar commands.
+    defineMenuItem({ menu: 'sd.notices', command: 'sd.greet', group: 'demo', order: 100 }),
+    defineMenuItem({ menu: 'sd.notices', command: 'sd.reset', group: 'demo', order: 200 }),
   ],
   pages: [definePage({ id: 'sd.home', title: msg('sd.page.home', 'Home'), icon: 'pd:home', order: 100, load: placeholder })],
   statusItems: [defineStatusItem({ id: 'sd.greetings', title: msg('sd.status.greetings', 'Greetings'), side: 'end', priority: 50, load: placeholder })],
@@ -80,3 +96,8 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
   healthServices: [defineHealthService({ id: 'sd.engine', label: msg('sd.health.engine', 'the demo engine'), icon: 'pd:engine' })],
   notificationKinds: [defineNotificationKind({ id: 'sd.greeting', title: msg('sd.notification.greeting', 'Greeting'), actions: ['again'] })],
 };
+
+/** The demo's submenus (plan S13), registered with `provideSubmenus`. */
+export const DEMO_SUBMENUS: readonly SubmenuDef<DemoContext>[] = [
+  defineSubmenu<DemoContext>({ id: 'sd.more', menu: 'help', title: msg('sd.menu.more', 'More demos'), group: 'more', order: 900 }),
+];

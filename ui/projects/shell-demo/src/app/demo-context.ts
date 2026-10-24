@@ -12,6 +12,9 @@ export interface DemoContext {
   startJob(): number;
   /** Starts a job that reports nothing until cancelled ("Still working"). */
   startQuietJob(): number;
+  /** Whether the notices are drawn compact (a menu toggle). */
+  readonly compact: () => boolean;
+  toggleCompact(): void;
 }
 
 /** Built once, in the root injection context, when the shell first needs the context. */
@@ -24,5 +27,7 @@ export const demoContext: AppContextFactory<DemoContext> = () => {
     reset: () => log.reset(),
     startJob: () => jobs.startImport(),
     startQuietJob: () => jobs.startQuiet(),
+    compact: log.compact,
+    toggleCompact: () => log.toggleCompact(),
   };
 };

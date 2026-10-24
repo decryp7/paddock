@@ -5,6 +5,23 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Menus and keys (plan S13, ADR 0012; ported from Debrief ADR 0008 and `menu.rs`): crate `paddock-menu` 0.1.0 validates the
+  UI's menu model (`parse`: limits on menus, entries, depth, ids, labels; key bindings to native accelerators), builds the
+  macOS menu bar with the standard items (`native_spec`: app menu with Services and Hide and `pd.app.quit` last, Edit
+  with Undo..Select All, Window with Minimize and Zoom; `outline` snapshot), diffs it (`Unchanged`, states in place,
+  `Rebuild`), routes clicks to the focused top-level window (`Focus`, `route`), and checks the manifest's menus and keys
+  (`manifest::check`: every item routes, every key has an accelerator, a command in one menu-bar menu only). Tauri
+  adapter: `install`, `menu_set` (async; answers `MenuApplied`), `on_window_event`, `menu_chosen` on `paddock://menu`,
+  `NativeMenu::builds` (a start builds twice, the same model again builds nothing); generated
+  `shell/menu/generated/menu.ts`. `@decryp7/paddock-ui/shell/menu`: `defineSubmenu` / `provideSubmenus` (the `submenus`
+  kind with its lint: missing parent, cycle, depth, a command in two menus), the pure menu model (`buildMenus`,
+  `buildMenu` for context menus), `AppMenu`, `pd-menu-bar` and `pd-context-menu` on the CDK menu, `Keymap` (effective
+  bindings with user overrides persisted under `paddock.keybindings`, followed across windows, conflicts reported,
+  `bind`/`reset`, dispatch by `data-pd-key-scope` scope with the text-field rules) with `provideKeyboardShortcuts`, the
+  key helpers (`matchesKey`, `formatKey`, `ariaKeyShortcuts`, `recordKey`), and `NativeMenuBridge` (first build once the
+  app is ready, changes coalesced to the next idle moment, again on focus, shortcut echo ignored) with
+  `tauriNativeMenuPort` and `provideNativeMenu`. `@angular/cdk` (^22) is an optional peer dependency. `shell-demo` has
+  the menu bar, a submenu, a toggle, a context menu and a shortcuts editor, with Chromium e2e.
 - Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,
   `problems` against the command table, kind size policy), `Grant` for the `paddock-commands` guard, pure placement on
   the parent's monitor (mixed DPI, negative coordinates, remembered offset, never the primary display as default),

@@ -426,7 +426,7 @@ fn the_tauri_menu_of_a_spec_has_every_item_and_updates_states_in_place() {
             assert!(!c.is_checked().expect("checked"));
             assert!(!c.is_enabled().expect("enabled"));
         }
-        other => panic!("a check item, found {other:?}"),
+        _ => panic!("a check item"),
     }
     assert!(
         !set_states_in(
@@ -448,6 +448,37 @@ fn the_tauri_menu_of_a_spec_has_every_item_and_updates_states_in_place() {
         )
         .expect("no error"),
         "a plain item cannot take a check mark"
+    );
+}
+
+/// The Tauri bar on an app without windows (each window would take the menu natively): built, then updated in place.
+/// Not on macOS, for the reason above; `install` there would build the native menu bar.
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn the_tauri_bar_sets_the_app_menu_and_install_manages_the_platform_state() {
+    use crate::native::native_spec;
+    let app = mock_builder()
+        .build(mock_context(noop_assets()))
+        .expect("a mock app");
+    install(app.handle());
+    assert!(
+        !state(&app).is_native(),
+        "no native menu bar on this platform"
+    );
+    let model: NativeMenuModel =
+        serde_json::from_value(wire(true, true, "Find")["menu"].clone()).expect("wire");
+    let spec = native_spec(&parse(model).expect("valid"), "Demo");
+    NativeBar::<MockRuntime>::build(&TauriBar, app.handle(), &spec).expect("set");
+    assert!(app.menu().is_some());
+    let sidebar = Item {
+        id: "sd.sidebar".into(),
+        label: "Sidebar".into(),
+        accelerator: None,
+        checked: Some(false),
+        enabled: true,
+    };
+    assert!(
+        NativeBar::<MockRuntime>::set_states(&TauriBar, app.handle(), &[sidebar]).expect("updated")
     );
 }
 

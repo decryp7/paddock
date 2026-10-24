@@ -96,7 +96,8 @@ so a manager app never bundles the workbench:
 |---|---|---|
 | `@decryp7/paddock-ui/shell` | contributions, `ShellContext`, frame parts, widgets | S2, S14 |
 | `/shell/jobs` | jobs over the `paddock-jobs` adapter: `JobsBackend` (Tauri, memory), `JobsStore`, `pd-jobs-list`, `pd-jobs-status`, `JobFollow`, `provideShellJobs`, `JOBS_CONTRIBUTIONS` | S9 |
-| `/shell/startup`, `/shell/notify`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/menu`, `/shell/pages`, `/shell/i18n`, `/shell/store`, `/shell/testing` | one shell part each | S4-S16 |
+| `/shell/menu` | menus and keys: `defineSubmenu`, the menu model, `AppMenu`, `pd-menu-bar`, `pd-context-menu`, `Keymap` with user overrides, `NativeMenuBridge` over `paddock-menu` | S13 |
+| `/shell/startup`, `/shell/notify`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/pages`, `/shell/i18n`, `/shell/store`, `/shell/testing` | one shell part each | S4-S16 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -128,6 +129,40 @@ to `reportBootstrapFailure`; start-up reads the window depends on go through `re
 After a recovery reload the window shows a calm notice through the shell's notify port and restores its checkpoint.
 `index.html` keeps the `.pd-splash` (`role="status"`) inside the root element; `splashProblems(html, 'app-root')` checks it.
 In the browser build `MockStartupBackend` plays a recovery reload when `sessionStorage['paddock.mock.recover']` is set.
+
+### Menus and keys (`@decryp7/paddock-ui/shell/menu`, plan S13)
+
+One model from the contributions feeds the in-app menu bar, context menus and (macOS app) the native menu bar:
+
+```ts
+import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { provideKeyboardShortcuts, provideMenus, provideNativeMenu, provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
+
+providers: [
+  provideMenus({ appName: 'Pitwall' }),                     // the app menu's title; registers the submenu kind
+  provideSubmenus(defineSubmenu({ id: 'pw.models.recent', menu: 'file', title: msg('pw.models.recent', 'Open recent'), order: 300 })),
+  provideKeyboardShortcuts(),                               // key presses run commands (Keymap.dispatch)
+  provideNativeMenu({                                       // main windows; active only in the macOS desktop app
+    port: tauriNativeMenuPort({ invoke, listen: (e, h) => getCurrentWebviewWindow().listen(e, (ev) => h(ev.payload)) }),
+    gate: () => windowReady,                                // optional: the app's "reported ready" signal
+  }),
+]
+```
+
+- Menu items are `defineMenuItem({ menu, command, group, order })`: groups become separators, a toggle is a command with
+  `checked`, a disabled item a command whose `enabled` is false; unavailable commands, hidden entries and empty submenus
+  are left out. A namespaced menu id that is not a submenu is a context menu: `<pd-context-menu menu="pw.models.row">`.
+  A command sits in one menu-bar menu (the native menu bar shows an id once; the lint reports a second one).
+- `<pd-menu-bar>` (ARIA menubar on `@angular/cdk/menu`, renders nothing in the macOS app) and `<pd-context-menu>` show
+  shortcut hints (`⇧⌘P` on macOS, `Ctrl+Shift+P` elsewhere) and `aria-keyshortcuts`.
+- `Keymap`: the effective bindings (declared, with the user's overrides by command id under
+  `localStorage['paddock.keybindings']`, version 1, followed across windows), `conflicts`, `bind(command, key, { force })`
+  (refuses an invalid key, and a key another command or a `RESERVED_KEYS` entry has in that scope), `reset`, `resetAll`,
+  `suspend`/`resume` while recording (`recordKey`). Key presses run the innermost scope's binding first
+  (`pdKeyScope` / `data-pd-key-scope`, then `window`); text fields keep typing and their editing chords.
+- `NativeMenuBridge` sends the model once the gate opens (default: the app's context loaded), coalesces changes to the
+  next idle moment, sends again on focus, and ignores the native echo of a shortcut that just ran.
 
 ### Jobs (`@decryp7/paddock-ui/shell/jobs`, plan S9)
 

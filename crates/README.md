@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3) and `paddock-dialogs` (S5) and `paddock-startup` (S7) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7) and `paddock-menu` (S13) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -251,6 +251,39 @@ paddock_startup::tauri::install(tauri::Builder::default(), startup) // manage + 
   contract includes.
 - Generated TypeScript: `ui/projects/paddock-ui/shell/startup/generated/startup.ts` (wire types) and
   `startup-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-startup --lib generated`).
+
+## `paddock-menu` (plan S13)
+
+One menu model for the native menu bar and the in-app menus (ADR 0012 §3, ported from Debrief's `menu.rs`, ADR 0008).
+The UI builds the model from its contributions and draws it itself on Windows and Linux; on macOS it sends it with
+`menu_set` once the app reported ready (later changes coalesced), and this crate shows it natively:
+
+```rust
+paddock_commands::command_table! {
+    static COMMANDS, macro handler;
+    Quiet [MAIN | POPOUT] limit 1 * MIB => paddock_menu::tauri::menu_set,
+    // ... the app's commands
+}
+tauri::Builder::default()
+    .setup(|app| Ok(paddock_menu::tauri::install(app.handle())))  // manages NativeMenu (product name), routes clicks
+    .invoke_handler(Guard::new(&COMMANDS).wrap(handler!()))
+    .on_window_event(|w, e| paddock_menu::tauri::on_window_event(w, e)) // the menu bar follows the focused window
+```
+
+- `parse` refuses a model over the limits (16 menus, 1000 entries, depth 4, ids of 128 `[A-Za-z0-9._:/-]`, labels of
+  120 characters without control characters, no duplicate item id; unknown fields) and turns bindings into accelerators
+  (`accelerator("Mod+Shift+O")` is `CmdOrCtrl+Shift+O`; a binding a menu cannot show keeps working in the page).
+- `native_spec(model, app_name)` adds the standard macOS items; `outline` is its snapshot form (the crate's snapshot test
+  pins it). `diff` answers `Unchanged`, `States` (check marks and enabled states updated in place) or `Rebuild`;
+  `NativeMenu::builds` counts the builds (a start builds twice: the standard menus at `install`, then the UI's).
+- A click goes as `paddock://menu` (the item id) to the focused top-level window only (a dialog or pop-out stands for its
+  host); a model from a window that is not the target is answered `notFocused` and sent again on focus.
+- `manifest::check(json)` over the app's `paddock-manifest.json`: every menu item routes to a command, every key converts
+  to an accelerator, a command sits in one menu-bar menu. Run it in a test of the app.
+- The native menu bar is a port (`NativeBar`: `TauriBar`, a fake in tests); on macOS native menus are created on the main
+  thread only, so the Tauri menus are built in tests on Windows and Linux.
+- Generated TypeScript: `ui/projects/paddock-ui/shell/menu/generated/menu.ts`
+  (`PADDOCK_WRITE_TS=1 cargo test -p paddock-menu --lib generated`).
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.

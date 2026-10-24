@@ -1,6 +1,6 @@
 import { provideZonelessChangeDetection, signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { provideShellContext, SHELL_IDLE, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { MENU_EVENT, type NativeMenuModel } from '../generated/menu';
 import { AppMenu } from './app-menu';
 import { Keymap } from './keymap';
@@ -8,7 +8,7 @@ import type { TopMenu } from './menu-model';
 import {
   NATIVE_MENU_GATE,
   NATIVE_MENU_PORT,
-  NATIVE_MENU_TIMING,
+  NATIVE_MENU_SCHEDULE,
   NativeMenuBridge,
   NO_NATIVE_MENU,
   provideNativeMenu,
@@ -68,37 +68,35 @@ describe('the native menu model', () => {
   });
 });
 
-/** Timers run by hand (no sleeps): `fire(ms)` runs the live timers set for `ms`. */
-function manualTimers() {
-  const timers: { fn: () => void; ms: number; live: boolean }[] = [];
+/** Idle callbacks run by hand (no sleeps): `idle()` runs the work scheduled so far. */
+function manualIdle() {
+  let queue: { work: () => void; live: boolean }[] = [];
   return {
-    setTimer: (fn: () => void, ms: number) => {
-      const t = { fn, ms, live: true };
-      timers.push(t);
-      return () => void (t.live = false);
+    schedule: (work: () => void) => {
+      const w = { work, live: true };
+      queue.push(w);
+      return () => void (w.live = false);
     },
-    fire: (ms: number) =>
-      timers
-        .filter((t) => t.live && t.ms === ms)
-        .forEach((t) => {
-          t.live = false;
-          t.fn();
-        }),
+    idle: () => {
+      const now = queue;
+      queue = [];
+      for (const w of now) if (w.live) w.work();
+    },
   };
 }
 
 const settle = () => TestBed.tick();
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function bridge(port: Partial<NativeMenuPort>, gate: WritableSignal<boolean> = signal(true), mode: 'native' | 'in-app' = 'native') {
+function bridge(port: Partial<NativeMenuPort>, gate: WritableSignal<boolean> = signal(true)) {
   const menus = signal<readonly TopMenu[]>(MENUS);
   const ran: string[] = [];
-  const timers = manualTimers();
+  const timers = manualIdle();
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
-      { provide: AppMenu, useValue: { menus, run: (id: string) => (ran.push(id), Promise.resolve(true)), mode } },
-      { provide: NATIVE_MENU_TIMING, useValue: { debounceMs: 150, firstDebounceMs: 600, maxWaitMs: 3000, setTimer: timers.setTimer } },
+      { provide: AppMenu, useValue: { menus, run: (id: string) => (ran.push(id), Promise.resolve(true)), mode: 'native' } },
+      { provide: NATIVE_MENU_SCHEDULE, useValue: timers.schedule },
       { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: () => Promise.resolve(undefined), notify: () => undefined } },
       provideNativeMenu({ port: { ...NO_NATIVE_MENU, ...port }, gate: () => gate }),
     ],
@@ -121,71 +119,81 @@ describe('NativeMenuBridge', () => {
     TestBed.inject(AppMenu);
     settle();
     expect(sent).toEqual([]);
-    // Without an app context the app is ready at once.
-    expect(TestBed.inject(NATIVE_MENU_GATE)()).toBe(true);
   });
 
-  it('waits longer before the first build than between later ones', () => {
-    const sent: NativeMenuModel[] = [];
-    const { menus, timers, b } = bridge({ setAppMenu: async (m) => void sent.push(m) });
-    settle();
-    timers.fire(150);
-    expect(sent).toHaveLength(0);
-    timers.fire(600);
-    expect(sent).toHaveLength(1);
-    menus.set([MENUS[0]!]);
-    settle();
-    timers.fire(150);
-    expect(sent).toHaveLength(2);
-    expect(b.sent()).toBe(2);
+  it('opens the default gate once the app context has loaded or failed to, and at once without one', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    expect(TestBed.inject(NATIVE_MENU_GATE)()).toBe(true);
+    for (const load of [() => Promise.resolve(() => ({})), () => Promise.reject(new Error('chunk failed'))]) {
+      TestBed.resetTestingModule();
+      let idle: () => void = () => undefined;
+      TestBed.configureTestingModule({
+        providers: [
+          provideZonelessChangeDetection(),
+          provideShellContext(load, { prefetch: 'first-use' }),
+          { provide: SHELL_IDLE, useValue: (w: () => void) => (idle = w) },
+        ],
+      });
+      const gate = TestBed.inject(NATIVE_MENU_GATE);
+      expect(gate()).toBe(false);
+      idle();
+      await flush();
+      expect(gate()).toBe(true);
+    }
+  });
+
+  it('the default schedule runs once when idle unless cancelled', () => {
+    const idles: (() => void)[] = [];
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), { provide: SHELL_IDLE, useValue: (w: () => void) => idles.push(w) }] });
+    const schedule = TestBed.inject(NATIVE_MENU_SCHEDULE);
+    const ran: string[] = [];
+    schedule(() => ran.push('a'));
+    schedule(() => ran.push('b'))();
+    idles.forEach((w) => w());
+    expect(ran).toEqual(['a']);
   });
 
   it('builds once at start: nothing before the app is ready, the changes of the start as one', () => {
     const sent: NativeMenuModel[] = [];
     const gate = signal(false);
-    const { menus, timers } = bridge({ setAppMenu: async (m) => void sent.push(m) }, gate);
+    const listened = vi.fn(async () => () => undefined);
+    const { menus, timers, b } = bridge({ setAppMenu: async (m) => void sent.push(m), onMenu: listened }, gate);
     menus.set([MENUS[0]!]);
     settle();
-    timers.fire(600);
+    timers.idle();
     menus.set([...MENUS]);
     settle();
-    timers.fire(600);
+    timers.idle();
     window.dispatchEvent(new Event('focus'));
     expect(sent).toHaveLength(0);
+    expect(listened).not.toHaveBeenCalled();
     gate.set(true);
     settle();
+    expect(listened).toHaveBeenCalledTimes(1);
     menus.set([MENUS[1]!]);
     settle();
     menus.set([...MENUS]);
     settle();
-    timers.fire(600);
-    timers.fire(150);
+    timers.idle();
     expect(sent).toEqual([toNativeModel(MENUS, new Set(['pd.edit.undo', 'pd.edit.redo']))]);
+    expect(b.sent()).toBe(1);
   });
 
   it('sends the model once per change and again when the window gets the focus', () => {
     const sent: NativeMenuModel[] = [];
     const { menus, timers } = bridge({ setAppMenu: async (m) => void sent.push(m) });
     settle();
-    timers.fire(600);
+    timers.idle();
     menus.set([...MENUS]);
     settle();
-    timers.fire(150);
+    timers.idle();
     expect(sent).toHaveLength(1);
-    window.dispatchEvent(new Event('focus'));
+    menus.set([MENUS[0]!]);
+    settle();
+    timers.idle();
     expect(sent).toHaveLength(2);
-  });
-
-  it('sends the menus after the longest wait when the app never reports ready', () => {
-    const sent: NativeMenuModel[] = [];
-    const { timers } = bridge({ setAppMenu: async (m) => void sent.push(m) }, signal(false));
-    settle();
-    timers.fire(600);
-    expect(sent).toHaveLength(0);
-    timers.fire(3000);
-    settle();
-    timers.fire(600);
-    expect(sent).toHaveLength(1);
+    window.dispatchEvent(new Event('focus'));
+    expect(sent).toHaveLength(3);
   });
 
   it('retries after a failed update and warns', async () => {
@@ -199,7 +207,7 @@ describe('NativeMenuBridge', () => {
       },
     });
     settle();
-    timers.fire(600);
+    timers.idle();
     await flush();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('no menu'));
     fail = false;
@@ -212,6 +220,7 @@ describe('NativeMenuBridge', () => {
   it('runs chosen items, but not the echo of a shortcut that just ran the same command', async () => {
     let chosen: (id: string) => void = () => undefined;
     const { ran } = bridge({ onMenu: async (h) => ((chosen = h), () => undefined) });
+    settle();
     await flush();
     chosen('sd.sidebar');
     const keymap = TestBed.inject(Keymap);
@@ -224,6 +233,7 @@ describe('NativeMenuBridge', () => {
   it('degrades when native menu events are unavailable, and unlistens when destroyed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     bridge({ onMenu: () => Promise.reject(new Error('no events')) });
+    settle();
     await flush();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('native menu events are unavailable'));
     warn.mockRestore();
@@ -231,12 +241,14 @@ describe('NativeMenuBridge', () => {
     const unlisten = vi.fn();
     const { b } = bridge({ onMenu: async () => unlisten });
     b.start();
+    settle();
     await flush();
     TestBed.resetTestingModule();
     expect(unlisten).toHaveBeenCalledTimes(1);
     const late = vi.fn();
     let resolve: (u: () => void) => void = () => undefined;
     bridge({ onMenu: () => new Promise((r) => (resolve = r)) });
+    settle();
     TestBed.resetTestingModule();
     resolve(late);
     await flush();

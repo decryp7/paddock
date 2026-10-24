@@ -2,6 +2,9 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import { CommandService, ContributionRegistry, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { PdJobsStatus } from '@decryp7/paddock-ui/shell/jobs';
+import { PdContextMenu, PdMenuBar } from '@decryp7/paddock-ui/shell/menu';
+import { DemoShortcuts } from './demo-shortcuts';
+import type { DemoContext } from './demo-context';
 import { DemoNote } from './demo-note';
 import { DemoNotices } from './demo-notices';
 
@@ -33,8 +36,12 @@ const PARTS: readonly ShellPart[] = [
 @Component({
   selector: 'sd-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState, PdJobsStatus],
+  imports: [SuEmptyState, PdJobsStatus, PdMenuBar, PdContextMenu, DemoShortcuts],
   template: `
+    <!-- The title bar region the pages frame (plan S14) will own: the in-app menu bar (hidden in the macOS app). -->
+    <header class="title-bar">
+      <pd-menu-bar />
+    </header>
     <main class="page">
       <h1>Paddock shell demo</h1>
       <pd-empty-state
@@ -51,11 +58,13 @@ const PARTS: readonly ShellPart[] = [
             </button>
           }
         </div>
-        <ul class="notices" aria-live="polite" aria-label="Notices">
-          @for (notice of notices(); track notice.n) {
-            <li [class.error]="notice.level === 'error'">{{ notice.message }}</li>
-          }
-        </ul>
+        <pd-context-menu menu="sd.notices" label="Notice actions">
+          <ul class="notices" aria-live="polite" aria-label="Notices" [class.compact]="compact()">
+            @for (notice of notices(); track notice.n) {
+              <li [class.error]="notice.level === 'error'">{{ notice.message }}</li>
+            }
+          </ul>
+        </pd-context-menu>
         <table class="kinds">
           <caption>Registered contributions</caption>
           <thead>
@@ -67,6 +76,11 @@ const PARTS: readonly ShellPart[] = [
             }
           </tbody>
         </table>
+      </section>
+      <section class="menus" aria-labelledby="sd-menus">
+        <h2 id="sd-menus">Menus and keys</h2>
+        <p class="context">The menu bar above and the notices' context menu come from the contributions; the keys below can be changed and are kept.</p>
+        <sd-shortcuts />
       </section>
       <section class="startup" aria-labelledby="sd-startup">
         <h2 id="sd-startup">Start-up contract</h2>
@@ -116,6 +130,10 @@ const PARTS: readonly ShellPart[] = [
     .kinds caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }
     .kinds th, .kinds td { text-align: start; padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); }
     .kinds th { color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); }
+    .title-bar { display: flex; align-items: center; min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); background: var(--pd-surface-1); border-bottom: 1px solid var(--pd-hairline); }
+    .notices.compact { gap: 0; font-size: var(--pd-text-caption); }
+    .menus { display: flex; flex-direction: column; gap: var(--pd-space-2); }
+    .menus h2 { margin: 0; font-size: var(--pd-text-subtitle); }
     .startup { display: flex; flex-direction: column; gap: var(--pd-space-2); }
     .startup h2 { margin: 0; font-size: var(--pd-text-subtitle); }
     .note { display: flex; flex-direction: column; gap: var(--pd-space-1); max-width: 40ch; }
@@ -131,6 +149,8 @@ export class ShellDemo {
   protected readonly note = inject(DemoNote).note;
   protected readonly available = this.commands.available;
   protected readonly contextLoaded = computed(() => this.host.context() !== null);
+  /** The View > Compact notices toggle, read through the app context (its state is not in the first-paint bundle). */
+  protected readonly compact = computed(() => (this.host.context() as Partial<DemoContext> | null)?.compact?.() ?? false);
   protected readonly kinds = this.registry.kinds.map((k) => ({ name: k.name, count: this.registry.items(k.name).length }));
 
   protected run(id: string): void {

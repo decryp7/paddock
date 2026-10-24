@@ -1,5 +1,4 @@
 import {
-  computed,
   DestroyRef,
   effect,
   EnvironmentProviders,
@@ -13,7 +12,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { SHELL_IDLE, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { MENU_EVENT, MENU_SET_COMMAND, type MenuApplied, type NativeMenuEntry, type NativeMenuModel } from '../generated/menu';
 import { AppMenu } from './app-menu';
 import { Keymap } from './keymap';
@@ -57,41 +56,40 @@ export const NO_NATIVE_MENU: NativeMenuPort = Object.freeze({
 
 export const NATIVE_MENU_PORT = new InjectionToken<NativeMenuPort>('PADDOCK_NATIVE_MENU_PORT', { providedIn: 'root', factory: () => NO_NATIVE_MENU });
 
-/** When the menu bar is built: after the gate opens (or at most `maxWaitMs` after start), changes coalesced. */
-export interface NativeMenuTiming {
-  /** Changes within this long are sent as one (the menus settle in bursts while features register). */
-  readonly debounceMs: number;
-  /** The quiet time before the first build: features deferred to the first idle moment register just after ready. */
-  readonly firstDebounceMs: number;
-  /** The menus are sent this long after start even if the gate never opens. */
-  readonly maxWaitMs: number;
-  /** Runs `fn` after `ms`; returns a cancel function (tests run timers by hand). */
-  setTimer(fn: () => void, ms: number): () => void;
-}
+/**
+ * Schedules a send of the menus for when the window is next idle and returns its cancel: changes that arrive before
+ * then are sent as one (the menus settle in bursts while features register). Tests run the work by hand.
+ */
+export type NativeMenuSchedule = (work: () => void) => () => void;
 
-export const NATIVE_MENU_TIMING = new InjectionToken<NativeMenuTiming>('PADDOCK_NATIVE_MENU_TIMING', {
+export const NATIVE_MENU_SCHEDULE = new InjectionToken<NativeMenuSchedule>('PADDOCK_NATIVE_MENU_SCHEDULE', {
   providedIn: 'root',
-  factory: () => ({
-    debounceMs: 150,
-    firstDebounceMs: 600,
-    maxWaitMs: 3000,
-    setTimer: (fn, ms) => {
-      const id = setTimeout(fn, ms);
-      return () => clearTimeout(id);
-    },
-  }),
+  factory: () => {
+    const idle = inject(SHELL_IDLE);
+    return (work) => {
+      let live = true;
+      idle(() => live && work());
+      return () => void (live = false);
+    };
+  },
 });
 
 /**
- * Opens when the app is ready: by default once the app's part of the context is loaded (until then `when`, `enabled`
- * and `checked` cannot be asked, so the menus are not final). The start-up contract (plan S7) or the app may provide its
- * own ready signal. The native menu bar is then built once instead of once per feature that registers during the start.
+ * Opens when the app is ready: by default once the app's part of the context has loaded (or failed to; until then
+ * `when`, `enabled` and `checked` cannot be asked, so the menus are not final). The load is started when the window is
+ * idle. The start-up contract or the app may provide its own ready signal. The native menu bar is then built once instead
+ * of once per feature that registers during the start.
  */
 export const NATIVE_MENU_GATE = new InjectionToken<Signal<boolean>>('PADDOCK_NATIVE_MENU_GATE', {
   providedIn: 'root',
   factory: () => {
     const host = inject(ShellContextHost);
-    return computed(() => host.context() !== null);
+    const open = signal(host.context() !== null);
+    if (!open()) {
+      const settle = () => open.set(true);
+      inject(SHELL_IDLE)(() => void host.load().then(settle, settle));
+    }
+    return open.asReadonly();
   },
 });
 
@@ -134,9 +132,9 @@ export const ECHO_MS = 400;
 
 /**
  * Mirrors the menus into the macOS native menu bar and runs what is chosen there. The first model is sent once the app
- * is ready (`NATIVE_MENU_GATE`), later changes coalesced (`NATIVE_MENU_TIMING`), and only when it changed (Rust diffs
- * again and updates check marks in place); it is sent again when the window gets the focus, as the menu bar shows the
- * focused window's menus.
+ * is ready (`NATIVE_MENU_GATE`), changes coalesced until the window is idle (`NATIVE_MENU_SCHEDULE`), and only when it
+ * changed (Rust diffs again and updates check marks in place); it is sent again when the window gets the focus, as the
+ * menu bar shows the focused window's menus.
  */
 @Injectable({ providedIn: 'root' })
 export class NativeMenuBridge {
@@ -146,11 +144,8 @@ export class NativeMenuBridge {
   private readonly destroyRef = inject(DestroyRef);
   private readonly injector = inject(Injector);
   private readonly gate = inject(NATIVE_MENU_GATE);
-  private readonly timing = inject(NATIVE_MENU_TIMING);
+  private readonly later = inject(NATIVE_MENU_SCHEDULE);
   private readonly noShortcut = inject(NO_NATIVE_SHORTCUT);
-  /** The start's longest wait is over. */
-  private readonly waited = signal(false);
-  private readonly open = computed(() => this.gate() || this.waited());
   private readonly sentCount = signal(0);
   private pending: NativeMenuModel | null = null;
   private cancelPending: (() => void) | null = null;
@@ -164,31 +159,39 @@ export class NativeMenuBridge {
   start(): void {
     if (this.started) return;
     this.started = true;
-    const cancelWait = this.timing.setTimer(() => this.waited.set(true), this.timing.maxWaitMs);
     // An effect because the native menu bar is outside the signal graph (IPC); it only schedules a send.
     effect(
       () => {
         const model = toNativeModel(this.app.menus(), this.noShortcut);
-        if (!this.open()) return;
+        if (!this.gate()) return;
         untracked(() => this.schedule(model));
       },
       { injector: this.injector },
     );
     const onFocus = () => {
-      if (!untracked(this.open)) return;
+      if (!untracked(this.gate)) return;
       this.lastSent = '';
       this.flush(toNativeModel(untracked(this.app.menus), this.noShortcut));
     };
     window.addEventListener('focus', onFocus);
     let unlisten: (() => void) | null = null;
     let destroyed = false;
-    this.port.onMenu((id) => this.chosen(id)).then(
-      (u) => (destroyed ? u() : (unlisten = u)),
-      (e: unknown) => console.warn(`[paddock-menu] native menu events are unavailable: ${String(e)}`),
+    // Menu events are listened to once the app is ready, like the first build: nothing reaches the IPC before then.
+    const listen = () =>
+      this.port.onMenu((id) => this.chosen(id)).then(
+        (u) => (destroyed ? u() : (unlisten = u)),
+        (e: unknown) => console.warn(`[paddock-menu] native menu events are unavailable: ${String(e)}`),
+      );
+    const listening = effect(
+      () => {
+        if (!this.gate()) return;
+        untracked(listen);
+        listening.destroy();
+      },
+      { injector: this.injector },
     );
     this.destroyRef.onDestroy(() => {
       destroyed = true;
-      cancelWait();
       this.cancelPending?.();
       window.removeEventListener('focus', onFocus);
       unlisten?.();
@@ -201,19 +204,16 @@ export class NativeMenuBridge {
     void this.app.run(id);
   }
 
-  /** Sends `model` after the debounce, replacing a model still waiting. */
+  /** Sends `model` when the window is next idle, replacing a model still waiting. */
   private schedule(model: NativeMenuModel): void {
     this.pending = model;
     this.cancelPending?.();
-    this.cancelPending = this.timing.setTimer(
-      () => {
-        this.cancelPending = null;
-        const m = this.pending;
-        this.pending = null;
-        if (m) this.send(m);
-      },
-      this.sentCount() > 0 ? this.timing.debounceMs : this.timing.firstDebounceMs,
-    );
+    this.cancelPending = this.later(() => {
+      this.cancelPending = null;
+      const m = this.pending;
+      this.pending = null;
+      if (m) this.send(m);
+    });
   }
 
   /** Sends `model` now, dropping a model still waiting. */

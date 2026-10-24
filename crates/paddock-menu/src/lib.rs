@@ -13,7 +13,7 @@
 //! - [`native`]: [`native_spec`], the macOS menu bar of a model with the standard items (app menu with Services and Hide
 //!   and the shell's Quit last, Edit with Undo..Select All, Window with Minimize and Zoom), [`diff`] (unchanged, states
 //!   in place, or a rebuild) and [`outline`], the snapshot form.
-//! - [`route`]: clicks go to the focused top-level window (a dialog or pop-out stands for its host).
+//! - [`route`](mod@route): clicks go to the focused top-level window (a dialog or pop-out stands for its host).
 //! - [`manifest`]: [`manifest::check`] over the app's `paddock-manifest.json`: every menu item routes, every key has an
 //!   accelerator, a command is in one menu only.
 //!
