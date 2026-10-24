@@ -2495,9 +2495,6 @@
       <trans-unit id="pd.wb.assistant.thinking" datatype="html">
         <source>Thinking…</source>
       </trans-unit>
-      <trans-unit id="pd.wb.assistant.title" datatype="html">
-        <source>Assistant</source>
-      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
@@ -2713,9 +2710,6 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.panelTab.close" datatype="html">
         <source>Close (Delete)</source>
-      </trans-unit>
-      <trans-unit id="pd.wb.dock.panelTab.menu" datatype="html">
-        <source>Panel menu (Shift+F10)</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.perspective-1" datatype="html">
         <source>Switch to perspective 1</source>
