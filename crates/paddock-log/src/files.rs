@@ -2,7 +2,7 @@
 //! removed, and standard output for development.
 
 use crate::clef::{Enrichment, format_event};
-use crate::clock::Clock;
+use crate::clock::{Clock, now_utc};
 use crate::error::lock;
 use chrono::{Duration, NaiveDate};
 use serde_json::Map;
@@ -85,7 +85,7 @@ impl DailyFiles {
     /// The file lines go to today.
     pub fn active_file(&self) -> PathBuf {
         self.dir
-            .join(file_name(&self.prefix, self.clock.now().date_naive()))
+            .join(file_name(&self.prefix, now_utc(&*self.clock).date_naive()))
     }
 
     /// Why the file cannot be written, in words for the user; `None` while it works.
@@ -116,7 +116,7 @@ impl DailyFiles {
                 self.prune(today);
             }
             Err(e) => {
-                st.failed_at = Some(self.clock.now());
+                st.failed_at = Some(now_utc(&*self.clock));
                 st.problem = Some(format!(
                     "the log file {} cannot be written ({e}); check the folder's rights and free space",
                     path.display()
@@ -146,7 +146,7 @@ impl DailyFiles {
 
 impl LineSink for DailyFiles {
     fn write_line(&self, level: log::Level, line: &str) {
-        let now = self.clock.now();
+        let now = now_utc(&*self.clock);
         let today = now.date_naive();
         let mut st = lock(&self.state);
         if st.day != Some(today) {
@@ -224,16 +224,16 @@ fn parse_day(prefix: &str, name: &str) -> Option<NaiveDate> {
 mod tests {
     use super::*;
     use crate::clef::test_enrichment;
-    use crate::clock::ManualClock;
+    use crate::clock::FakeClock;
     use chrono::{TimeZone, Utc};
 
-    fn clock() -> Arc<ManualClock> {
-        Arc::new(ManualClock::new(
-            Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap(),
+    fn clock() -> Arc<FakeClock> {
+        Arc::new(FakeClock::at_wall(
+            Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap().into(),
         ))
     }
 
-    fn files(dir: &Path, keep: u32, max: u64, c: &Arc<ManualClock>) -> DailyFiles {
+    fn files(dir: &Path, keep: u32, max: u64, c: &Arc<FakeClock>) -> DailyFiles {
         DailyFiles::new(dir, "demo", keep, max, c.clone(), test_enrichment())
     }
 
@@ -262,7 +262,7 @@ mod tests {
         std::fs::write(t.path().join("notes.txt"), "mine").unwrap();
         for _ in 0..5 {
             f.write_line(log::Level::Info, "day");
-            c.advance(Duration::days(1));
+            c.advance(Duration::days(1).to_std().unwrap());
         }
         f.write_line(log::Level::Info, "today");
         let mut names: Vec<String> = std::fs::read_dir(t.path())
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(text.matches("daily limit").count(), 1);
         assert!(text.ends_with("an error\n"));
         // Tomorrow has a fresh budget and a fresh notice.
-        c.advance(Duration::days(1));
+        c.advance(Duration::days(1).to_std().unwrap());
         f.write_line(log::Level::Info, &big);
         assert_eq!(
             std::fs::read_to_string(f.active_file()).unwrap(),
@@ -331,7 +331,7 @@ mod tests {
         std::fs::remove_file(t.path().join("blocker")).unwrap();
         f.write_line(log::Level::Info, "still waiting");
         assert_eq!(f.dropped(), 3, "no retry before the delay");
-        c.advance(Duration::seconds(31));
+        c.advance(Duration::seconds(31).to_std().unwrap());
         f.write_line(log::Level::Info, "back");
         assert_eq!(std::fs::read_to_string(f.active_file()).unwrap(), "back\n");
         assert_eq!(f.problem(), None);
@@ -347,7 +347,7 @@ mod tests {
         // On Unix an open file survives its folder being removed, so only the reopen path is exercised there.
         std::fs::remove_dir_all(&dir).unwrap();
         f.write_line(log::Level::Info, "second");
-        c.advance(Duration::days(1));
+        c.advance(Duration::days(1).to_std().unwrap());
         f.write_line(log::Level::Info, "third");
         assert_eq!(std::fs::read_to_string(f.active_file()).unwrap(), "third\n");
     }

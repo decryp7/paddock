@@ -1,8 +1,8 @@
 use crate::cancel::CancelToken;
-use crate::clock::{Clock, SystemClock};
 use crate::error::{JobError, panic_text};
 use crate::model::{JobId, JobKind, JobSnapshot, JobState, Phase};
 use crate::reporter::{Counter, DEFAULT_MIN_INTERVAL_MS, EventSink, Reporter, UncancellableGuard};
+use crate::time::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -97,7 +97,7 @@ pub struct JobRegistry {
 
 impl JobRegistry {
     pub fn new(sink: Arc<dyn EventSink>) -> Self {
-        Self::with_clock(sink, Arc::new(SystemClock::new()), DEFAULT_MIN_INTERVAL_MS)
+        Self::with_clock(sink, Arc::new(SystemClock), DEFAULT_MIN_INTERVAL_MS)
     }
 
     pub fn with_clock(
@@ -123,7 +123,8 @@ impl JobRegistry {
         self.register_with(kind, title, subject, CancelToken::new())
     }
 
-    /// As [`register`](Self::register) with a deadline: the token cancels itself with reason `Deadline` after `limit`.
+    /// As [`register`](Self::register) with a deadline: the token cancels itself with reason `Deadline` after `limit` on
+    /// the registry's clock (a [`FakeClock`](crate::time::FakeClock) in tests runs it out without waiting).
     pub fn register_with_deadline(
         &self,
         kind: &str,
@@ -131,7 +132,12 @@ impl JobRegistry {
         subject: Option<&str>,
         limit: Duration,
     ) -> JobContext {
-        self.register_with(kind, title, subject, CancelToken::with_deadline(limit))
+        self.register_with(
+            kind,
+            title,
+            subject,
+            CancelToken::with_deadline_on(self.clock.clone(), limit),
+        )
     }
 
     fn register_with(

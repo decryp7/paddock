@@ -9,6 +9,8 @@ publish = ["decryp7"]
 
 [dependencies]
 paddock-env = { workspace = true }
+# The family's clock port (`paddock_jobs::time`).
+paddock-jobs = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log = { version = "0.4", features = ["std", "kv"] }
 serde = { version = "1", features = ["derive"] }

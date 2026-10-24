@@ -18,7 +18,7 @@ pub mod persist;
 pub mod window;
 mod writer;
 
-use crate::clock::Clock;
+use crate::Clock;
 use centre::{APP_CAP, Centre, NewNotice, Notice, NoticeId, NoticeScope, PROJECT_CAP, Posted};
 use persist::NoticesRecord;
 use serde::Serialize;
@@ -180,7 +180,7 @@ impl NotificationCentre {
     /// Posts a message: app-scoped ones to the app list, project-scoped ones to `window`'s (without a window they go to
     /// the app list too).
     pub fn post(&self, window: Option<&str>, mut new: NewNotice) -> Posted {
-        let now = self.clock.now_ms();
+        let now = self.clock.wall_ms();
         let id = self.id();
         if new.link.window.is_none() {
             new.link.window = window.map(str::to_string);
@@ -345,7 +345,7 @@ impl NotificationCentre {
         *lock(&self.pending) = Some(PendingOpen {
             id,
             window: window.map(str::to_string),
-            at: self.clock.now_ms(),
+            at: self.clock.wall_ms(),
         });
     }
 
@@ -353,7 +353,7 @@ impl NotificationCentre {
     /// window it was posted for.
     pub fn take_pending(&self) -> Option<(NoticeId, Option<String>)> {
         let p = lock(&self.pending).take()?;
-        (self.clock.now_ms() - p.at <= OPEN_WITHIN_MS).then_some((p.id, p.window))
+        (self.clock.wall_ms() - p.at <= OPEN_WITHIN_MS).then_some((p.id, p.window))
     }
 }
 

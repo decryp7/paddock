@@ -5,6 +5,11 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock_jobs::time` (plan X20): one clock for the family. `Clock` (monotonic and wall readings, a cancellable `wait`),
+  `SystemClock`, `FakeClock` (moves only with `advance`; `wait_for_waiters` lets a test advance once the work is blocked on
+  it), `Deadline`, and `Backoff`/`BackoffPolicy`/`Retry` (Pitwall's restart policy; `retry_forever` for reconnecting
+  clients). `CancelToken::with_deadline_on(clock, limit)`; `JobRegistry::register_with_deadline` now measures the limit on
+  the registry's clock, so a fake clock runs a job's time limit out without sleeping.
 - `paddock-diag` and `@decryp7/paddock-ui/shell/diagnostics` (plan X2, decision D9): Report a problem, the three designs of Debrief,
   Dyno and Pitcrew as one. A diagnostics zip of the app's log (newest part, read from the end), system facts, settings (secrets
   masked) and crash marker, plus the sections an app adds; one `Redactor` (secrets from Pitcrew and Debrief, personal data from Dyno,
@@ -111,6 +116,11 @@ Conventional Commits; one semver tag for the whole repo.
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
 ### Changed
+- Breaking (plan X20): `paddock-jobs`, `paddock-log` and `paddock-health` share one `Clock` (`paddock_jobs::time`). The old
+  `ManualClock`s are gone: use `FakeClock` (`new()`, `at_wall(..)`, `at_wall_ms(..)`, `advance(Duration)`/`advance_ms(u64)`).
+  `paddock-health`'s epoch reading is `Clock::wall_ms` (was `now_ms`); `paddock-log`'s UTC reading is `paddock_log::now_utc(&clock)`
+  (was `Clock::now`); `paddock_health::clock` is removed (the types are at the crate root). `SystemClock` is a unit struct
+  everywhere (`SystemClock::new()` is gone).
 - Breaking, `paddock-download`: `HttpConfig::proxy` is a `ProxyMode` (was `Option<String>`, and the environment was never read;
   now the system's proxy is used unless `ProxyMode::Direct`); `Get` has a `headers` field and `Transport` implementations
   must send them; `DownloadError::NotEnoughSpace` has a `path` field and its message changed; `Downloaded` has a
