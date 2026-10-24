@@ -43,11 +43,12 @@ export {
   ASSISTANT_CONTEXT,
   WORKBENCH_KINDS,
   PALETTE_PREFIX,
+  COMMANDS_PREFIX,
   layoutProblems,
   targetProblems,
   activityTarget,
 } from './src/kinds';
-export { provideWorkbenchContributions, provideWorkbenchKinds, type WorkbenchBatch } from './src/provide';
+export { provideWorkbenchContributions, provideWorkbenchKinds, provideLiveContributions, type WorkbenchBatch } from './src/provide';
 export {
   WorkbenchRegistry,
   VIEW_PANEL,
@@ -58,4 +59,16 @@ export {
   isOffered,
   type PanelRef,
 } from './src/registry';
-export { WORKBENCH_PORTS, PANEL_WINDOWS, type WorkbenchPorts, type ShowViewOptions, type PanelWindowsPort, type PopOutPlacement } from './src/ports';
+export {
+  WORKBENCH_PORTS,
+  PANEL_WINDOWS,
+  DOCK_PORT,
+  EXPLORER_PLAN,
+  type WorkbenchPorts,
+  type ShowViewOptions,
+  type PanelWindowsPort,
+  type PopOutPlacement,
+  type DockPort,
+  type ExplorerPlan,
+  type ExplorerVerdict,
+} from './src/ports';
