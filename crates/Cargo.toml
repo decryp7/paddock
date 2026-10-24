@@ -4,7 +4,7 @@
 [workspace]
 resolver = "3"
 # Fuzz targets are their own workspaces (cargo-fuzz).
-exclude = ["paddock-ipc/fuzz"]
+exclude = ["paddock-ipc/fuzz", "paddock-testplan/fuzz"]
 members = [
     "paddock-bench",
     "paddock-cli",
@@ -30,6 +30,7 @@ members = [
     "paddock-shell",
     "paddock-startup",
     "paddock-testkit",
+    "paddock-testplan",
     "paddock-updater",
     "paddock-window",
 ]
@@ -69,5 +70,6 @@ paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "d
 paddock-shell = { path = "paddock-shell", version = "0.2.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "decryp7" }
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
+paddock-testplan = { path = "paddock-testplan", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.1.0", registry = "decryp7" }
