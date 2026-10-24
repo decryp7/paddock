@@ -367,7 +367,7 @@ fn build_window<R: Runtime>(
 }
 
 /// An owned window of `owner`: above it, minimised and hidden with it (Windows: owner; macOS: child; Linux: transient).
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "mock-runtime")))]
 fn owned_by<'a, R: Runtime>(
     b: Builder<'a, R>,
     owner: &WebviewWindow<R>,
@@ -375,8 +375,9 @@ fn owned_by<'a, R: Runtime>(
     b.parent(owner).map_err(failed)
 }
 
-/// The mock runtime has no native windows to own: tests check the bookkeeping only.
-#[cfg(test)]
+/// The mock runtime has no native windows to own (on Linux its `gtk_window` is unimplemented): tests check the
+/// bookkeeping only. Other crates' tests enable it with the `mock-runtime` feature.
+#[cfg(any(test, feature = "mock-runtime"))]
 fn owned_by<'a, R: Runtime>(
     b: Builder<'a, R>,
     _owner: &WebviewWindow<R>,
