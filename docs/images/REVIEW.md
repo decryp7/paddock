@@ -109,3 +109,100 @@ icons were already approved in the icon reviews; nothing here differs from those
 
 Note for the generator: the copies in `src/icons` are hand-synced. A small check (or having `ecosystem.mjs` read
 `icons/<app>/<app>-macos.svg` and prefix ids at build time) would keep them from drifting; not a finding against the images.
+
+## Review 2 (2026-10-25)
+
+Independent re-review under rule 22 (a reviewer who neither drew nor reviewed these images before) of the regenerated hero and
+integration drawings and the new hand-offs drawing, on `docs/image-fixes` at 26f6a88. All six PNGs were viewed at full size in
+both themes; the SVGs were checked against the PNGs (coordinates and text agree, same generator run), for type sizes at the
+~900 px README width and for theme support (`prefers-color-scheme` in the hero, `light-dark()` in the draw.io exports). Text
+checked against [ecosystem.md](../ecosystem.md), `crates/README.md` and shell 0.3.0 in `docs/plans/shared-next.md`; statuses
+against the published releases (Debrief's newest published release is still v1.0.1; v1.1.1 is tagged, not published). The
+`?v=` links in ecosystem.md and README.md match the files' SHA-256.
+
+### Summary
+
+| Image | Verdict | P1 | P2 | P3 |
+|---|---|---|---|---|
+| `paddock-ecosystem.svg`, `-light.png`, `-dark.png` | approve | | | 3 |
+| `paddock-integrations.svg`, `-light.png`, `-dark.png` | fix | | 1 | 3 |
+| `paddock-handoffs.svg`, `-light.png`, `-dark.png` (new) | approve | | | 3 |
+| integrations and hand-offs (footer date) | | | | 1 |
+
+6 approved (rows in [REVIEWED.md](REVIEWED.md)), 3 to fix (the integrations SVG and its two PNGs). New findings: 0 P1, 1 P2,
+10 P3. Of the 16 earlier findings, 15 are fixed and 1 is not yet applicable (Debrief v1.1.1 is not published).
+
+### Earlier findings
+
+| # | Earlier finding | Verdict |
+|---|---|---|
+| Hero P1 | Job logs, Issues, Smoke tests run through the Pitwall band | **Fixed.** The band is 140–1430; Job logs (and Issues, which joins it) climb the left gutter at x=100, Smoke tests passes the right end at x=1470. No edge touches the band. |
+| Hero P2 | Foundation band without shared crates | **Fixed.** "Rust crates" and "Conformance checks" chips; "UI kit, design system" merged. ecosystem.md lists both. |
+| Hero P2 | App shell chips at 0.1/0.2 | **Fixed.** Safe mode, Report a problem, Services and login items, Storage, Undo added; the ecosystem.md paragraph matches chip for chip. |
+| Hero P3 | Edge labels louder than descriptions | **Fixed.** 17 px weight 500, same size as the card text. |
+| Hero P3 | Status chips 14 px | **Fixed.** 16 px (9.0 px at README width, exactly the floor). |
+| Hero P3 | "Releasing soon" in hub violet | **Fixed.** Neutral grey chip. |
+| Hero P3 | Orange dot under Pitcrew | **Fixed.** Plain muted text. |
+| Hero P3 | Debrief chip to v1.1.1 when published | **Not yet applicable.** v1.0.1 is still the newest published release; the chip and the status table agree. |
+| Integrations P1 | `paddock-pitwall` drawn as planned | **Fixed.** Solid green library node, no pill; ecosystem.md row no longer says planned. |
+| Integrations P2 | Pacenotes missing as Pitwall client | **Fixed.** Pacenotes (planned) in "Apps on this machine" with its arrow. |
+| Integrations P2 | Legend does not match | **Fixed.** Planned = solid outline plus pill, external = dashed; the legend shows exactly these. |
+| Integrations P2 | Dashed means two things | **Fixed.** Hand-offs moved to their own drawing with solid arrows; only Smoke tests (later) is dashed, as in the hero. |
+| Integrations P2 | Too small at README width | **Fixed.** 1042 px canvas: 12 px text is 10.4 px and 11 px pills and footer 9.5 px at 900 px. The hand-offs drawing (1059 px) is the same. |
+| Integrations P3 | Local API too tall; empty hand-off gutter | **Fixed.** Local API is as tall as its text; the hand-off gutter is now ~75 px. |
+| Integrations P3 | Debrief MCP server missing | **Fixed.** Under "MCP servers", planned. |
+| Integrations P3 | Results hand-off missing | **Fixed.** Sighter → Pacenotes "Results" in the hand-offs drawing. |
+
+### `paddock-ecosystem.svg`, `-light.png`, `-dark.png` (hero): approve
+
+The hero now reads cleanly: no edge implies a Pitwall dependency, the foundation is current with shell 0.3.0, and the type
+hierarchy is right (names, then descriptions and edge labels at one size, then chips). Polish only:
+
+- P3 (author-flagged): the "Job logs" pill (x 53.5–146.5) sticks out 21.5 px past the card column's left edge (75), the only
+  element outside the grid; "Smoke tests" (1411–1529) overhangs the right edge (1525) by 4 px. Move the left trunk to x≈122 so
+  the pill starts at the column edge (it stays 18 px clear of the band, and the pill sits below the band anyway), and nudge the
+  right line to x≈1462.
+- P3: the shared trunk at y=540 crosses the dotted Pacenotes ↔ Pitwall stub at x=245, 26 px under the stub's arrowhead, and
+  "Issues" merges into "Job logs" at (100, 820) with no junction mark. Both read correctly on a second look, but a small gap in
+  the dotted stub at the crossing (a "bridge") and a 4 px junction dot would make them read at a glance.
+- P3: the "PADDOCK" eyebrow is 15 px on the 1600 px canvas, 8.4 px at README width (minimum 9). Use 16 px.
+
+### `paddock-integrations.svg`, `-light.png`, `-dark.png` (deployment): fix
+
+- **P2: Spotter and Dyno are drawn as using `paddock-pitwall` today; the text says later.** All five app → `paddock-pitwall`
+  arrows are solid "Request" arrows and the subtitle says "Apps reach it through one shared client", while the ecosystem.md
+  contract row says "Debrief, Pacenotes and Sighter use it, Spotter and Dyno later" (and `crates/README.md` agrees). Neither
+  Spotter nor Dyno has any Pitwall client code yet, and Debrief's own client has not been switched to the crate on `main`
+  either. Draw the Spotter and Dyno arrows dashed with a "Later" legend entry (the grammar the hero and hand-offs already use),
+  or change the table and alt text; the drawing and the text must say the same thing.
+- P3: Debrief's MCP server note says "first, after Debrief 1.0.2"; Debrief has moved past 1.0.2 (1.1.1 tagged). Reword both here
+  and in the ecosystem.md MCP row ("first, after Debrief 1.1" or simply "Debrief first").
+- P3: about a quarter of the canvas is empty: the bottom-left below the Pitwall group beside "Other MCP clients" (~600 × 260 px)
+  and the ~130 px band between the two groups that holds only the "HTTP, one key per app" label. Putting "Other MCP clients" in
+  the MCP column under the servers' group, or the legend in the bottom-left, would make it about 200 px shorter.
+- P3: the "Engine process" group uses the same grey dashed outline as the "Outside Paddock" legend swatch. llama.cpp is in fact
+  third-party, so it is not wrong, but a process boundary and "outside Paddock" are different statements; give process groups
+  a dotted or lighter outline, or label the legend swatch "Outside Paddock (node)".
+
+### `paddock-handoffs.svg`, `-light.png`, `-dark.png` (new): approve
+
+Correct, complete against the contract table (run bundles, job logs, issues, log checks, trace to code, video repro, test plans
+and results, watch list, machine health, smoke tests later), legible in both themes, one arrow grammar, legend matches. Polish:
+
+- P3: labels differ from the hero for the same hand-off: "Installed software" (hero) vs "Watch list" (here), "Test plans, MCP
+  host" vs "Test plans (MCP)". Pick one wording per hand-off for both drawings.
+- P3: "Newer version" (Spotter → Pacenotes) appears here and in Pacenotes' section but not in the contract table or the hero;
+  "Supervises" (Pitcrew → Gitea runners) is not data although the legend says "arrow shows the data", and the runners are not
+  an app although the subtitle says "between apps". Add a contract row for Newer version, and either drop the runners row (the
+  CI row in the table covers it) or label its legend meaning.
+- P3: 26 identical grey boxes, with Debrief repeated six times, make it read as a table drawn with boxes rather than a picture.
+  The design guide gives each app an accent and an icon tile; a 3 px accent bar (or the 20 px icon tile) on each app box would
+  let the eye find an app at once, and grouping the six "→ Debrief" rows into one fan-in would halve the repetition. "Video repro
+  (MCP)" nearly fills its gap; one more 20 px of gap would let it breathe.
+
+### Footer date (integrations, hand-offs)
+
+- P3 (author-flagged): the footers say "updated 2026-10-24" because the generator stamps the UTC date; the commit was made
+  2026-10-25 02:03 +0800, and every other date in the docs (ADRs, REVIEW.md, REVIEWED.md) is the author's local date. Not
+  misleading, but a reader will see a date one day before the commit. Stamp the local date (or the commit date) in the
+  generator; no regeneration needed only for this.
