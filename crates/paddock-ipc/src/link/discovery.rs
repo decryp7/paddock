@@ -73,7 +73,7 @@ pub fn read(path: &Path, is_alive: impl Fn(u32) -> bool) -> Found {
     let Ok(meta) = std::fs::metadata(path) else {
         return Found::Nothing;
     };
-    if let Err(why) = private(&meta) {
+    if let Err(why) = private(path, &meta) {
         return Found::Untrusted(why);
     }
     if meta.len() > MAX_DISCOVERY {
@@ -93,16 +93,13 @@ pub fn read(path: &Path, is_alive: impl Fn(u32) -> bool) -> Found {
 }
 
 #[cfg(unix)]
-fn private(meta: &std::fs::Metadata) -> Result<(), String> {
+fn private(_path: &Path, meta: &std::fs::Metadata) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt;
     // SAFETY: geteuid has no preconditions and cannot fail.
     #[allow(unsafe_code)]
     let me = unsafe { libc::geteuid() };
     if meta.uid() != me {
-        return Err(format!(
-            "the discovery file belongs to user {}, not to this user",
-            meta.uid()
-        ));
+        return Err(format!("the discovery file belongs to user {}", meta.uid()));
     }
     if meta.mode() & 0o077 != 0 {
         return Err(format!(
@@ -113,8 +110,81 @@ fn private(meta: &std::fs::Metadata) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn private(_meta: &std::fs::Metadata) -> Result<(), String> {
-    // Windows: the file is in the user's profile (`%LOCALAPPDATA%`), which only the user and administrators may write.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn private(path: &Path, _meta: &std::fs::Metadata) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::{
+        EqualSid, GetTokenInformation, IsWellKnownSid, OWNER_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        WinBuiltinAdministratorsSid,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut owner: PSID = null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+    // SAFETY: a NUL-terminated path; the out pointers are valid; the descriptor is freed below and `owner` points into it.
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    if rc != ERROR_SUCCESS {
+        return Err(format!(
+            "the discovery file's owner cannot be read (error {rc})"
+        ));
+    }
+    let mut token: HANDLE = null_mut();
+    let mut buf = vec![0u8; 256];
+    let mut len = 0u32;
+    // SAFETY: the current process pseudo-handle; `token` is closed below; `buf` is valid for `buf.len()` bytes.
+    let mine = unsafe {
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) != 0
+            && GetTokenInformation(
+                token,
+                TokenUser,
+                buf.as_mut_ptr().cast(),
+                buf.len() as u32,
+                &mut len,
+            ) != 0
+    };
+    // SAFETY: `buf` holds a TOKEN_USER when `mine`; both SIDs stay valid until the frees below.
+    let ok = mine
+        && unsafe {
+            let user = &*(buf.as_ptr() as *const TOKEN_USER);
+            EqualSid(owner, user.User.Sid) != 0
+                || IsWellKnownSid(owner, WinBuiltinAdministratorsSid) != 0
+        };
+    // SAFETY: handles and memory obtained above, released once.
+    unsafe {
+        if !token.is_null() {
+            CloseHandle(token);
+        }
+        LocalFree(descriptor);
+    }
+    if ok {
+        Ok(())
+    } else {
+        Err("the discovery file belongs to another user".into())
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn private(_path: &Path, _meta: &std::fs::Metadata) -> Result<(), String> {
     Ok(())
 }
