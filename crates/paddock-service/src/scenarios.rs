@@ -38,13 +38,16 @@ fn pitwall() -> ServiceSpec {
 
 /// launchd and `SMAppService` as R03 showed them: a job keeps the launch constraint (the cdhash) of the build that
 /// registered it; registering over a live job changes nothing; only bootout, then register, gives a job for the
-/// current build.
+/// current build. Like macOS 26 in the C21 VM smoke, `SMAppService.status` of an app that never registered is
+/// `NotFound` (Background Task Management has no record yet); after `unregister` it is `NotRegistered`.
 #[derive(Debug)]
 struct Launchd {
     /// The build that is installed now.
     build: u32,
     /// `SMAppService` says registered.
     registered: bool,
+    /// Background Task Management has a record of the app (it registered once).
+    known: bool,
     /// The job and the build its constraint is for.
     job: Option<u32>,
     /// The user switched the item off in Login Items.
@@ -71,6 +74,7 @@ fn launchd(build: u32, registered_by: Option<u32>) -> Sim {
     Arc::new(Mutex::new(Launchd {
         build,
         registered: registered_by.is_some(),
+        known: registered_by.is_some(),
         job: registered_by,
         switched_off: false,
         bootout_hangs: false,
@@ -81,7 +85,8 @@ fn launchd(build: u32, registered_by: Option<u32>) -> Sim {
 }
 
 const SPAWN_FAILED: &str = "gui/501/net.decryptology.pitwall.service = {\n\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n\tjob state = spawn failed\n\tproperties = partial import | keepalive | runatload | has LWCR\n}\n";
-const HEALTHY: &str = "gui/501/net.decryptology.pitwall.service = {\n\tstate = running\n\tjob state = running\n\tproperties = keepalive | runatload | has LWCR\n}\n";
+/// macOS 26's report of a running job: nested blocks (the coalitions) carry their own `state = active`.
+const HEALTHY: &str = "gui/501/net.decryptology.pitwall.service = {\n\tstate = running\n\tresource coalition = {\n\t\tstate = active\n\t}\n\tjob state = running\n\tjetsam coalition = {\n\t\tstate = active\n\t}\n\tproperties = keepalive | runatload | has LWCR\n}\n";
 
 fn wire(sim: &Sim, sys: &FakeSystem) {
     let s = sim.clone();
@@ -136,6 +141,7 @@ impl AppService for SimApp {
         match (l.registered, &l.register_error) {
             (_, Some(RegisterError::NeedsApproval)) => AppServiceStatus::RequiresApproval,
             (true, _) => AppServiceStatus::Enabled,
+            (false, _) if !l.known => AppServiceStatus::NotFound,
             (false, _) => AppServiceStatus::NotRegistered,
         }
     }
@@ -146,6 +152,7 @@ impl AppService for SimApp {
             return Err(e);
         }
         l.registered = true;
+        l.known = true;
         if l.job.is_none() {
             l.job = Some(l.build);
         }
@@ -417,10 +424,27 @@ fn nothing_is_installed_unasked_and_install_registers_and_remembers() {
     let sim = launchd(1, None);
     let sys = FakeSystem::new();
     let mut m = mac_manager(&sim, &sys, d.path(), "1.0.0");
+    // Regression (C21 VM smoke): on a fresh Mac SMAppService says NotFound until the first register; that is "not
+    // installed" (Install offered and it registers), not "cannot be registered from here".
+    assert_eq!(
+        SimApp(sim.clone(), sys.clone()).status(),
+        AppServiceStatus::NotFound
+    );
     assert_eq!(m.on_start(&no_cancel()), Started::Left(Hold::NotInstalled));
     assert!(changes(&sys).is_empty());
-    assert_eq!(m.status().condition, Condition::NotInstalled);
+    let st = m.status();
+    assert_eq!(st.condition, Condition::NotInstalled);
+    assert!(st.can_install, "{st:?}");
     assert_eq!(m.install(&no_cancel()).unwrap(), RepairOutcome::Recovered);
+    assert_eq!(
+        changes(&sys),
+        [
+            "unregister",
+            &format!("/bin/launchctl bootout {TARGET}"),
+            "register"
+        ]
+    );
+    assert!(sim.lock().unwrap().healthy());
     assert_eq!(m.recorded().registered_version.as_deref(), Some("1.0.0"));
     m.uninstall().unwrap();
     assert_eq!(m.recorded().registered_version, None);
@@ -591,8 +615,11 @@ fn launchd_reports_that_cannot_be_read_are_unknown_not_healthy() {
     let app = FakeAppService::new(&sys);
     app.set_status(AppServiceStatus::NotFound);
     let mut b = LaunchdBundled::new(pitwall(), 501, Box::new(app), Box::new(sys.clone()));
-    assert!(
-        matches!(b.inspect().registration, crate::backend::Registration::Unavailable(w) if w.contains("Applications"))
+    // NotFound is what a never-registered app reads: absent, so Install registers (a real failure to register from
+    // here comes back from `register` itself).
+    assert_eq!(
+        b.inspect().registration,
+        crate::backend::Registration::Absent
     );
     assert!(b.open_login_items());
     assert!(
@@ -1204,21 +1231,24 @@ fn repair_refuses_what_it_cannot_or_need_not_do() {
         matches!(m.repair(&no_cancel()), Ok(RepairOutcome::Recovered)),
         "Repair pressed: the user's call"
     );
+    // An app that really cannot register from where it is (NotFound, and `register` refuses): Install says why,
+    // and nothing is left registered.
     let app = FakeAppService::new(&sys);
     app.set_status(AppServiceStatus::NotFound);
+    app.register_results([Err(RegisterError::Unavailable(
+        "macOS cannot find Pitwall's launch agent".into(),
+    ))]);
     let b = LaunchdBundled::new(pitwall(), 501, Box::new(app), Box::new(sys.clone()));
     let mut m = Manager::new("Pitwall", Box::new(b), d.path(), LABEL, "1.0.0", || false);
     assert!(matches!(
         m.repair(&no_cancel()),
-        Err(ServiceError::Unavailable(_))
+        Err(ServiceError::Unavailable(w)) if w.contains("cannot find")
     ));
-    assert_eq!(m.check(), crate::plan::Plan::Leave(Hold::Unavailable(
-        "macOS cannot find Pitwall's launch agent: open Pitwall from the Applications folder (the agent is part of the app).".into()
-    )));
+    assert_eq!(m.check(), crate::plan::Plan::Leave(Hold::NotInstalled));
     assert_eq!(m.mechanism(), crate::backend::Mechanism::LaunchdBundled);
     let st = m.status();
-    assert_eq!(st.condition, Condition::Unavailable);
-    assert!(st.health().repair.is_none());
+    assert_eq!(st.condition, Condition::NotInstalled);
+    assert!(st.can_install);
     // NewerOwner refusal for an explicit repair cannot happen (requested wins), but uninstall of nothing works.
     let sys = FakeSystem::new();
     let b = Systemd::new(
