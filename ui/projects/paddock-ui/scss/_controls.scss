@@ -170,7 +170,7 @@
   // Disabled reads as read-only at a glance: a quieter fill and a hairline border, not an enabled field with grey text.
   &:disabled {
     border-color: var(--pd-hairline);
-    background: var(--pd-surface-2);
+    background: color-mix(in srgb, var(--pd-surface-2), var(--pd-text) 3%);
     color: var(--pd-text-muted);
     cursor: not-allowed;
   }

@@ -31,10 +31,17 @@ const ratio = (v: Vars, fg: string, bg: string): number => contrast(col(v, fg), 
 describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
   const v = resolve(rules, scheme, 'debrief', mode);
 
-  it('the resting "..." button of a table row (subtle text at 75 % on the surface) is 3:1 against surface-1', () => {
-    const [fg, bg] = [col(v, '--pd-text-subtle'), col(v, '--pd-surface-1')];
-    const mixed = { r: fg.r * 0.75 + bg.r * 0.25, g: fg.g * 0.75 + bg.g * 0.25, b: fg.b * 0.75 + bg.b * 0.25, a: 1 };
-    expect(contrast(mixed, bg)).toBeGreaterThanOrEqual(3);
+  it('the resting "..." button of a table row is 3:1 on a plain row, and the full subtle text is 3:1 on the selected tint and on surface-2', () => {
+    const mix = (a: Rgba, b: Rgba, k: number): Rgba => ({ r: a.r * k + b.r * (1 - k), g: a.g * k + b.g * (1 - k), b: a.b * k + b.b * (1 - k), a: 1 });
+    const [subtle, s1, s2, accent] = [col(v, '--pd-text-subtle'), col(v, '--pd-surface-1'), col(v, '--pd-surface-2'), col(v, '--pd-accent')];
+    // --pd-row-action-rest: subtle at 75 % mixed into surface-1; a selected row (the accent tint, about 14 %) shows the full subtle text instead.
+    const rest = mix(subtle, s1, 0.75);
+    expect(contrast(rest, s1)).toBeGreaterThanOrEqual(3);
+    // Rows that sit on surface-2 (the group band, hover) show the button in the text colour, never in the rest mix.
+    expect(contrast(rest, s2), 'rest on surface-2 (information only)').toBeGreaterThan(2.5);
+    const selected = mix(accent, s1, 0.14);
+    expect(contrast(subtle, selected), 'full subtle on the selected tint').toBeGreaterThanOrEqual(3);
+    expect(contrast(subtle, s2), 'full subtle on surface-2').toBeGreaterThanOrEqual(3);
     expect(v['--pd-row-action-rest'] ?? '').toContain('75%');
   });
 

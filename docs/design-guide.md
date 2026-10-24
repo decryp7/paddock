@@ -179,11 +179,12 @@ Sequential ramp (one hue, 6 steps, for heatmaps): from surface-2 to accent-500 i
 increases; light: dark increases). Diverging: series 1 - neutral - series 2 (never red/green). Event/level colours in
 Debrief (fatal/error/warn/info/debug) use the status set + shape, not this palette. Validate with the dataviz skill's
 palette validator and a Machado CVD simulation before freezing; adjacent pairs delta-E >= 20 under deuteranopia/protanopia.
-Scope of the rule (no 8-colour categorical palette passes all 28 pairs, so the rule says where it must hold): delta-E >= 20
+Scope of the rule (no 8-colour categorical palette passes all 28 pairs, so the rule says where it must hold). It supersedes the one-line
+requirement above for deuteranopia/protanopia: delta-E >= 20
 under protanopia, deuteranopia and tritanopia for every **order-adjacent** pair and every **ring-adjacent** pair (a donut closes on
-itself: `ringOrder` picks the slot order), and slot 6 is >= 20 from every other slot under protanopia and deuteranopia (slots 1/4 and 2/5 stay weak in any 8-colour palette). A chart with **5 or
+itself: `ringOrder` picks the slot order), and slot 6 is >= 20 from every other slot under protanopia and deuteranopia (slots 1/4 and 2/5 stay weak in any 8-colour palette). A chart with **4 or
 more** coloured series must also be keyed without colour (direct labels, or hover isolation with the name in the tooltip), and
-series beyond 6 fold into one neutral "Other". `ui/test/tokens/tokens.spec.ts` and `ring.spec.ts` enforce it.
+series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and slot 6 under tritanopia is 11.7 (both blues; rare, and outside the slot 6 rule, which is protan/deutan). `ui/test/tokens/tokens.spec.ts` and `ring.spec.ts` enforce it.
 
 ## 5. Elevation and materials (per OS)
 
@@ -248,7 +249,7 @@ series beyond 6 fold into one neutral "Other". `ui/test/tokens/tokens.spec.ts` a
   hover, focus ring). No nested bordered cards.
 - **Tables**: row 32 (Standard), header 28 sticky, 11/12 px uppercase-free muted labels sentence case, numbers
   right-aligned tabular with units in header, first column strong, hover surface-2, selected = accent 12% tint plus
-  2 px left bar, truncation with tooltip, row actions appear on hover/focus but remain keyboard reachable (the "..."
+  2 px left bar, truncation with tooltip (a path is cut at segment boundaries and keeps the trailing segments, `…/Debrief/plugins/viewer/plugin-1.bin`, because the shared head is the part rows have in common), row actions appear on hover/focus but remain keyboard reachable (the "..."
   button stays visible in `--pd-row-action-rest`, subtle text at 75% (65% measured 2.75:1 in light), 3:1 or better; 100% text colour on hover, focus and open). Sort affordance visible. Never clip the last column: use sticky action column.
 - **Toolbars**: 44 px, ghost buttons by default (no border until hover), one primary (filled accent) at the far right,
   groups separated by a 1 px divider, segmented controls for 2-4 mutually exclusive options (time range).
@@ -333,7 +334,7 @@ Colour
 8. Status = icon + word + colour; accent never used as status.
 9. Charts use the Paddock palette in stable order; no red/green pairs.
 Charts
-10. Titles name metric, unit, window; legends interactive; direct labels for <=3 series; axes tabular 11 px; gridlines hairline.
+10. Titles name metric, unit, window; legends interactive; direct labels for <=3 series, from 4 series a non-colour key too (hover isolation with the name in the tooltip, `pd-chart` does it); axes tabular 11 px; gridlines hairline.
 11. Empty, loading, error states present for every chart.
 12. Event markers shape-coded; thresholds dashed + labelled.
 Components

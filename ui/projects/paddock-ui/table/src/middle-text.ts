@@ -24,11 +24,27 @@ export function tailOf(text: string): string {
 }
 
 /**
- * `text` shortened in the middle so that it fits: the start, one ellipsis and the kept tail as ONE piece of text, so the join looks
- * the same in every row (separate boxes left a different gap each time). `fits` says whether a candidate is narrow enough.
+ * `text` shortened to fit, as ONE piece of text so the join looks the same in every row. A path is cut at segment boundaries and
+ * keeps as many TRAILING segments as fit (`…/Debrief/plugins/viewer/plugin-1.bin`): the head is the part rows share, the end is the
+ * part that tells them apart. Anything else (an id, a hash, a name without a separator), and a path whose last segment alone is too
+ * wide, is cut in the middle by characters around the kept tail. `fits` says whether a candidate is narrow enough.
  */
 export function middleTruncate(text: string, fits: (candidate: string) => boolean): string {
   if (fits(text)) return text;
+  const parts = text.split(/(?<=[/\\])/);
+  if (parts.length > 2) {
+    // `parts` keep their trailing separator; drop leading parts until `…` + the rest fits.
+    for (let from = 1; from < parts.length; from += 1) {
+      const rest = parts.slice(from).join('');
+      const separator = text[text.length - rest.length - 1] ?? '/';
+      if (fits(`…${separator}${rest}`)) return `…${separator}${rest}`;
+    }
+  }
+  return charTruncate(text, fits);
+}
+
+/** The character-level cut: the start, one ellipsis and the kept tail. */
+function charTruncate(text: string, fits: (candidate: string) => boolean): string {
   const tail = tailOf(text);
   const room = text.length - tail.length;
   if (room <= 0) return text;
