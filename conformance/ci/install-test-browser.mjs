@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Installs the pinned Chrome for Testing build into a folder, so tests never launch an installed Chrome/Edge/Chromium
 // (rule 7, check C15; plan X10, generalised from Debrief's install-test-browser.mjs). The archive is verified against its
-// SHA-256 before it is extracted. The pin is the app's own: a JSON file { version, base, sums: { platform: sha256 } } or, as in
-// Debrief, the Rust source that holds PINNED_VERSION / BASE / a table of ("platform", "sha256") pairs.
+// SHA-256 before it is extracted. The pin is a `paddock-runtime` catalogue (paddock-chromium's chromium.toml, the build the apps
+// download), or still the app's own: a JSON file { version, base, sums: { platform: sha256 } } or, as in Debrief, the Rust
+// source that holds PINNED_VERSION / BASE / a table of ("platform", "sha256") pairs.
 //
-//   node install-test-browser.mjs --pin app/chromium-pin.json|--rust-source app/src-tauri/src/browser/runtime.rs
+//   node install-test-browser.mjs --catalogue chromium.toml|--pin app/chromium-pin.json|--rust-source runtime.rs
 //        [--dir <folder>] [--env-prefix DEBRIEF]
 //
 // Prints `CHROMIUM_TEST_PATH=<executable>`; with $GITHUB_ENV set it appends that line and `<PREFIX>_REQUIRE_TEST_BROWSER=1`
@@ -15,6 +16,8 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { CFT_PLATFORMS } from './pin-runtime.mjs';
+import { entryFor, platformKey, readCatalogue } from './runtime-catalogue.mjs';
 
 /** The pin from a Rust source (`PINNED_VERSION: &str = "..."`, `const BASE: &str = "..."`, `("linux64", "<sha256>")` pairs). */
 export function parseRustPin(rs) {
@@ -58,10 +61,25 @@ export function executableIn(dir, id) {
 export async function install({ pin, dir, id = platformId(), fetchBytes = defaultFetch, extract = defaultExtract }) {
   const sha = pin.sums[id];
   if (!sha) throw new Error(`no checksum for ${id} in the pin`);
+  return installBuild({ version: pin.version, url: urlFor(pin, id), sha, id, dir, fetchBytes, extract });
+}
+
+/**
+ * Installs the build a `paddock-runtime` catalogue pins for `key` (this machine's by default) into `dir`. Returns the executable.
+ */
+export async function installFromCatalogue({ text, dir, key = platformKey(), fetchBytes = defaultFetch, extract = defaultExtract }) {
+  const cat = readCatalogue(text);
+  const e = entryFor(cat, key);
+  const id = CFT_PLATFORMS[key];
+  if (!id) throw new Error(`Chrome for Testing has no build for ${key}`);
+  if (!/^[0-9a-f]{64}$/.test(e.sha256 ?? '')) throw new Error(`the checksum for ${key} is not a SHA-256`);
+  return installBuild({ version: cat.version, url: e.url, sha: e.sha256, id, dir, fetchBytes, extract });
+}
+
+async function installBuild({ version, url, sha, id, dir, fetchBytes, extract }) {
   const exe = executableIn(dir, id);
   const stamp = join(dir, '.pinned-version');
-  if (existsSync(stamp) && readFileSync(stamp, 'utf8').trim() === pin.version && existsSync(exe)) return exe;
-  const url = urlFor(pin, id);
+  if (existsSync(stamp) && readFileSync(stamp, 'utf8').trim() === version && existsSync(exe)) return exe;
   const bytes = await fetchBytes(url);
   const got = createHash('sha256').update(bytes).digest('hex');
   if (got !== sha) throw new Error(`checksum mismatch for ${url}: ${got}`);
@@ -72,7 +90,7 @@ export async function install({ pin, dir, id = platformId(), fetchBytes = defaul
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     extract(zip, dir);
-    writeFileSync(stamp, pin.version);
+    writeFileSync(stamp, version);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -96,20 +114,21 @@ export function parseArgs(argv) {
   const o = {};
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
-    if (!['--pin', '--rust-source', '--dir', '--env-prefix'].includes(k)) throw new Error(`unknown option ${k}`);
+    if (!['--catalogue', '--pin', '--rust-source', '--dir', '--env-prefix'].includes(k)) throw new Error(`unknown option ${k}`);
     if (argv[i + 1] === undefined) throw new Error(`${k} needs a value`);
     o[k.slice(2)] = argv[++i];
   }
-  if (!!o.pin === !!o['rust-source']) throw new Error('give exactly one of --pin <json> and --rust-source <file>');
+  if ([o.catalogue, o.pin, o['rust-source']].filter(Boolean).length !== 1) throw new Error('give exactly one of --catalogue <toml>, --pin <json> and --rust-source <file>');
   if (o['env-prefix'] && !/^[A-Z][A-Z0-9_]*$/.test(o['env-prefix'])) throw new Error('--env-prefix must be upper-case letters, digits and underscores');
   return o;
 }
 
 async function main(argv, env = process.env) {
   const o = parseArgs(argv);
-  const pin = checkPin(o.pin ? JSON.parse(readFileSync(o.pin, 'utf8')) : parseRustPin(readFileSync(o['rust-source'], 'utf8')));
   const dir = o.dir ?? env.PADDOCK_TEST_BROWSER_DIR ?? join(homedir(), '.cache', 'paddock-test-browser');
-  const exe = await install({ pin, dir });
+  const exe = o.catalogue
+    ? await installFromCatalogue({ text: readFileSync(o.catalogue, 'utf8'), dir })
+    : await install({ pin: checkPin(o.pin ? JSON.parse(readFileSync(o.pin, 'utf8')) : parseRustPin(readFileSync(o['rust-source'], 'utf8'))), dir });
   const lines = [`CHROMIUM_TEST_PATH=${exe}`, ...(o['env-prefix'] ? [`${o['env-prefix']}_REQUIRE_TEST_BROWSER=1`] : [])];
   console.log(lines.join('\n'));
   if (env.GITHUB_ENV) appendFileSync(env.GITHUB_ENV, `${lines.join('\n')}\n`);

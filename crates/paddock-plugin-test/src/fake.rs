@@ -3,8 +3,8 @@
 //! records them.
 
 use paddock_ipc::{
-    CallCtx, Client, FrameLimit, Handler, Host, IpcError, Json, Peer, PeerOptions, RemoteError,
-    codes, decode_request, encode_reply,
+    CallCtx, Child, ChildSpec, Client, FrameLimit, Handler, Host, IpcError, Json, Peer,
+    PeerOptions, RemoteError, codes, decode_request, encode_reply,
 };
 use paddock_plugin_api::Plugin;
 use paddock_plugin_api::extension::Contract;
@@ -19,6 +19,7 @@ use paddock_view::{ViewAction, ViewDoc, ViewPatch};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -152,8 +153,10 @@ impl Handler for Services {
 pub struct FakeHost {
     host_side: Peer,
     // Kept so the plugin's side of the connection and the private socket live as long as the fake host.
-    _plugin_side: Peer,
-    _host: Host,
+    _plugin_side: Option<Peer>,
+    _host: Option<Host>,
+    // The started program of `launch`; its whole process tree ends when the fake host is dropped.
+    _child: Option<Child>,
     services: Arc<Services>,
 }
 
@@ -198,8 +201,34 @@ impl FakeHost {
         let plugin_side = Peer::start(plugin_conn, handler, PeerOptions::new("the app"))?;
         Ok(FakeHost {
             host_side,
-            _plugin_side: plugin_side,
-            _host: host,
+            _plugin_side: Some(plugin_side),
+            _host: Some(host),
+            _child: None,
+            services,
+        })
+    }
+
+    /// Starts the plugin **program** `program` as the app would (same launcher, bootstrap and handshake as the real host,
+    /// speaking the platform protocol), and answers its calls back from memory like [`FakeHost::start`]. `args` are passed to
+    /// the program. The program's process tree ends when the fake host is dropped.
+    ///
+    /// # Errors
+    ///
+    /// When the program cannot be started, exits before it connects, or speaks another protocol (the text says who must
+    /// update).
+    pub fn launch(program: &Path, args: &[&str]) -> Result<FakeHost, IpcError> {
+        let services = Arc::new(Services::default());
+        let mut spec = ChildSpec::new(program, "plugin under test");
+        spec.protocol = PLATFORM_PROTOCOL;
+        spec.host_name = "the fake host".into();
+        spec.start_timeout = Duration::from_secs(30);
+        spec.args = args.iter().map(Into::into).collect();
+        let child = paddock_ipc::launch(&spec, services.clone())?;
+        Ok(FakeHost {
+            host_side: child.peer().clone(),
+            _plugin_side: None,
+            _host: None,
+            _child: Some(child),
             services,
         })
     }

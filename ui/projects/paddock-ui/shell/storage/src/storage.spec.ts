@@ -10,7 +10,8 @@ import { MemoryStorageBackend, StorageBackend, TauriStorageBackend, sampleCatego
 import { provideShellStorage } from './provide-storage';
 import { STORAGE_CONFIRM_DIALOG_ID, STORAGE_SETTINGS_COMMANDS, STORAGE_SETTINGS_PAGE, defineStorageConfirmDialog, defineStorageSettingsPage, storageContributions } from './storage.contributions';
 import { StorageStore } from './storage.store';
-import { treeRows } from './tree-rows';
+import { floorBytes } from './bytes-text';
+import { treeTable } from './tree-rows';
 import { clearRequest, parseStorageEvent, parseStorageTree, parseStorageUsage } from './wire';
 
 /** Lets the simulated engine and the stores settle (microtasks only). */
@@ -349,19 +350,43 @@ describe('the size tree', () => {
     }
   });
 
-  it('is flattened into rows grouped by top-level folder, with files and folds apart', () => {
-    const rows = treeRows(TREE, { files: 'Files here', smaller: 'Smaller items', others: (n) => `${n} smaller items` });
-    expect(rows.map((r) => [r.group, r.name, r.bytes, r.share])).toEqual([
-      ['thumbs', 'thumbs', 60, 60],
-      ['thumbs', 'a', 40, 40],
-      ['thumbs', 'b', 20, 20],
-      ['Files here', 'x.bin', 30, 30],
-      ['Smaller items', '4 smaller items', 10, 10],
+  it('is flattened into rows grouped by top-level folder, with the folder size on the group and nothing counted twice', () => {
+    const { rows, groups } = treeTable(TREE, { files: 'Files here', smaller: 'Smaller items', others: (n) => `${n} smaller items` });
+    expect(rows.map((r) => [r.group, r.name, r.kind, r.depth, r.bytes, r.share])).toEqual([
+      ['thumbs', 'a', 'file', 0, 40, 40],
+      ['thumbs', 'b', 'file', 0, 20, 20],
+      ['Files here', 'x.bin', 'file', 0, 30, 30],
+      ['Smaller items', '4 smaller items', 'fold', 0, 10, 10],
     ]);
+    expect(groups).toEqual({ thumbs: { bytes: 60, share: 60 }, 'Files here': { bytes: 30, share: 30 }, 'Smaller items': { bytes: 10, share: 10 } });
+    // The direct rows of every group add up to the group; the groups add up to the category.
+    for (const [name, g] of Object.entries(groups)) {
+      expect(rows.filter((r) => r.group === name && r.depth === 0).reduce((n, r) => n + r.bytes, 0)).toBe(g.bytes);
+      expect(rows.filter((r) => r.group === name && r.depth === 0).reduce((n, r) => n + r.share, 0)).toBeCloseTo(g.share, 5);
+    }
+    expect(Object.values(groups).reduce((n, g) => n + g.bytes, 0)).toBe(TREE.root.bytes);
     expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
-    expect(treeRows({ ...TREE, root: node('Empty', 0, [node('f', 0)]) }, { files: 'F', smaller: 'S', others: String })[0]?.share).toBe(0);
-    const nested = treeRows({ id: 'c', capped: false, root: node('C', 10, [node('d', 10, [node('e', 10, [node('f', 10)])])]) }, { files: 'F', smaller: 'S', others: String });
-    expect(nested.map((r) => r.name)).toEqual(['d', 'e', 'e/f']);
+  });
+
+  it('shows a folder inside a folder one level deeper with its path, and handles empty trees', () => {
+    const words = { files: 'F', smaller: 'S', others: String };
+    const nested = treeTable({ id: 'c', capped: false, root: node('C', 10, [node('d', 10, [node('e', 6, [node('f', 6)]), node('', 4, [], 3)])]) }, words);
+    expect(nested.rows.map((r) => [r.name, r.kind, r.depth])).toEqual([['e', 'folder', 0], ['e/f', 'file', 1], ['3', 'fold', 0]]);
+    expect(nested.groups['d']).toEqual({ bytes: 10, share: 100 });
+    const empty = treeTable({ id: 'c', capped: false, root: node('Empty', 0, [node('f', 0)]) }, words);
+    expect(empty.groups['F']).toEqual({ bytes: 0, share: 0 });
+    expect(treeTable({ id: 'c', capped: false, root: node('C', 0) }, words).rows).toEqual([]);
+  });
+
+  it('writes a lower bound rounded down, never up', () => {
+    expect(floorBytes(Math.floor(3.96 * 1024 ** 3))).toBe(`${new Intl.NumberFormat(undefined, { minimumFractionDigits: 1 }).format(3.9)} GB`);
+    expect(floorBytes(4 * 1024 ** 3)).toContain('4');
+    expect(floorBytes(0)).toBe('0 B');
+    expect(floorBytes(1023)).toBe('1023 B');
+    expect(floorBytes(1536)).toContain('KB');
+    expect(floorBytes(5 * 1024 ** 5)).toContain('TB');
+    expect(floorBytes(-1)).toBe('—');
+    expect(floorBytes(Number.NaN)).toBe('—');
   });
 
   it('is walked as a job whose outcome is an event, and refused for an unknown or missing folder', async () => {

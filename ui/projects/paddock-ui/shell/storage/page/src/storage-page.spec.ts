@@ -56,21 +56,61 @@ describe('the Storage page', () => {
       q(id)!.click();
       await flush();
     };
-    return { h, dialogs, el, q, click, flush };
+    /** A category's row of the table. */
+    const row = (id: string): HTMLElement => el.querySelector(`.pd-row[data-key="${id}"]`) as HTMLElement;
+    /** Presses a row's hover icon button. */
+    const inline = async (id: string, label: string): Promise<void> => {
+      (row(id).querySelector(`.pd-inline[aria-label="${label}"]`) as HTMLButtonElement).click();
+      await flush();
+    };
+    /** Opens a row's "…" menu and chooses an item. */
+    const menu = async (id: string, label: string): Promise<void> => {
+      (row(id).querySelector('.pd-more') as HTMLButtonElement).click();
+      await flush();
+      const item = Array.from(document.querySelectorAll<HTMLElement>('.pd-popmenu__item')).find((i) => text(i) === label);
+      item!.click();
+      await flush();
+    };
+    const menuItems = async (id: string): Promise<{ label: string; danger: boolean }[]> => {
+      (row(id).querySelector('.pd-more') as HTMLButtonElement).click();
+      await flush();
+      const items = Array.from(document.querySelectorAll<HTMLElement>('.pd-popmenu__item')).map((i) => ({ label: text(i), danger: i.classList.contains('pd-popmenu__item--danger') }));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await flush();
+      return items;
+    };
+    return { h, dialogs, el, q, click, flush, row, inline, menu, menuItems };
   }
 
-  it('lists what the app keeps with sizes, marks lower bounds and offers Clear only where something can go', async () => {
+  it('lists what the app keeps in one shared table, one line per row, grouped by what it is, with lower bounds written in words', async () => {
     const p = await open();
-    expect(text(p.q('storage-total')!)).toContain('≥');
-    expect(p.el.querySelectorAll('tbody tr')).toHaveLength(3);
-    expect(text(p.q('storage-row-cache')!)).toContain('Cache');
-    expect(text(p.q('storage-row-models')!)).toContain('≥');
+    expect(text(p.q('storage-total')!)).toContain('at least');
+    expect(text(p.q('storage-total')!)).not.toContain('≥');
+    expect(p.el.querySelector('pd-table[data-testid="storage-table"]')).not.toBeNull();
+    expect(Array.from(p.el.querySelectorAll('.pd-group')).map((g) => text(g.querySelector('.pd-group-name')!))).toEqual(['Cache: rebuilt by the app', 'Your data: cannot be rebuilt']);
+    // The group heading carries the aggregate, right-aligned in the Size column, rounded down for a lower bound.
+    expect(text(p.el.querySelector('.pd-group-summary.pd-end')!)).toBe('46 MB');
+    expect(text(Array.from(p.el.querySelectorAll('.pd-group-summary.pd-end'))[1]!)).toMatch(/^≥ \d/);
+    expect(text(p.row('models'))).toContain('≥');
+    expect(p.row('cache').querySelectorAll('.pd-storage__title')).toHaveLength(1);
+    expect(text(p.row('cache'))).not.toContain('CacheCache');
+    expect(p.el.querySelector('.pd-th.pd-end')).not.toBeNull();
+    // The cache button is an ordinary button, not the page's accent primary.
+    expect(p.q('storage-clear-cache')!.className).not.toContain('primary');
     expect(text(p.q('storage-clear-cache')!)).toContain('Clear cache');
-    expect(p.q('storage-clear-cache')!.className).toContain('pd-storage__btn--primary');
-    expect(p.q('storage-clear-logs')).not.toBeNull();
-    expect(p.q('storage-clear-cache-row')).toBeNull();
-    expect(p.el.querySelector('caption')?.textContent).toContain('What the app keeps');
-    for (const b of Array.from(p.el.querySelectorAll('.pd-storage__actions button'))) expect(b.getAttribute('aria-label')).toBeTruthy();
+  });
+
+  it('gives a row two hover icon buttons and a menu that ends with Clear in danger text, only where something can go', async () => {
+    const p = await open();
+    expect(Array.from(p.row('logs').querySelectorAll('.pd-inline')).map((b) => b.getAttribute('aria-label'))).toEqual(['What is inside', 'Show in the file manager']);
+    expect(await p.menuItems('logs')).toEqual([
+      { label: 'What is inside', danger: false },
+      { label: 'Show in the file manager', danger: false },
+      { label: 'Clear Logs', danger: true },
+    ]);
+    TestBed.resetTestingModule();
+    const gone = await open({ measured: true, categories: sampleCategories().map((c) => (c.id === 'models' ? { ...c, clearableItems: 0, exists: false } : c)) });
+    expect(gone.row('models').querySelectorAll('.pd-inline')).toHaveLength(0);
   });
 
   it('asks first, then clears the cache and says what it freed', async () => {
@@ -98,11 +138,16 @@ describe('the Storage page', () => {
     await p.click('storage-clear-cache');
     expect(p.h.pending()).toBe(0);
     p.dialogs.answer = true;
-    await p.click('storage-clear-logs');
+    await p.menu('logs', 'Clear Logs');
     expect(p.dialogs.opened.at(-1)).toEqual({ id: STORAGE_CONFIRM_DIALOG_ID, inputs: { what: 'Logs', bytes: 5_000_000, data: true } });
     await p.h.all();
     await p.flush();
     expect(text(p.q('storage-result')!)).toContain('freed');
+    // A cache category clears from its own row too, without the data confirmation.
+    TestBed.resetTestingModule();
+    const q = await open();
+    await q.menu('cache', 'Clear Cache');
+    expect(q.dialogs.opened.at(-1)?.inputs).toMatchObject({ data: false });
   });
 
   it('shows Cancel while it runs and what was done when it stopped', async () => {
@@ -115,7 +160,7 @@ describe('the Storage page', () => {
     await p.h.all();
     await p.flush();
     expect(p.q('storage-working')).toBeNull();
-    await p.click('storage-clear-logs');
+    await p.menu('logs', 'Clear Logs');
     await p.h.next();
     await p.click('storage-cancel');
     await p.h.all();
@@ -123,10 +168,10 @@ describe('the Storage page', () => {
     expect(text(p.q('storage-result')!)).toContain('Stopped');
   });
 
-  it('shows a refusal inline with Retry, and a failed ask with Retry', async () => {
+  it('shows a refusal inline with its hint, and a failed ask with Retry', async () => {
     const p = await open();
     p.h.memory.reveal = () => Promise.reject({ code: 'notFound', message: 'That folder is gone.', retryable: false, hint: 'Measure again.' });
-    await p.click('storage-show-cache');
+    await p.inline('cache', 'Show in the file manager');
     const failure = p.q('storage-failure')!;
     expect(failure.getAttribute('role')).toBe('alert');
     expect(text(failure)).toContain('That folder is gone.');
@@ -151,8 +196,7 @@ describe('the Storage page', () => {
   });
 
   it('lists what a clear left in place and why', async () => {
-    const categories = sampleCategories();
-    const p = await open({ measured: true, categories });
+    const p = await open({ measured: true, categories: sampleCategories() });
     p.h.memory.send({
       state: 'cleared',
       result: { freedBytes: 0, cancelled: false, categories: [{ id: 'logs', freedBytes: 0, removedFiles: 0, skippedCount: 2, skipped: [{ path: '/demo/app/logs/a.log', reason: 'in use' }], error: 'It holds your own data: confirm to clear it.' }] },
@@ -163,9 +207,9 @@ describe('the Storage page', () => {
     expect(text(p.q('storage-skipped')!)).toContain('in use');
   });
 
-  it('shows the size tree of a folder as a grouped table, and hides it again', async () => {
+  it('shows the size tree with the folder size on its group row and glyphs on the items, and closes it again', async () => {
     const p = await open();
-    await p.click('storage-tree-cache');
+    await p.inline('cache', 'What is inside');
     expect(text(p.q('storage-working')!)).toContain('Measuring what the app keeps');
     await p.h.next();
     await p.flush();
@@ -174,30 +218,29 @@ describe('the Storage page', () => {
     await p.flush();
     const tree = p.q('storage-tree')!;
     expect(text(tree.querySelector('h3')!)).toBe('What is in Cache');
-    expect(tree.querySelector('pd-table')).not.toBeNull();
-    expect(text(tree)).toContain('thumbnails');
+    const groups = Array.from(tree.querySelectorAll('.pd-group'));
+    expect(groups.map((g) => text(g.querySelector('.pd-group-name')!))).toEqual(['thumbnails', 'previews', 'Smaller items']);
+    expect(groups[0]?.querySelector('.pd-group-name')?.classList.contains('pd-mono')).toBe(true);
+    // The folder's size and share are on its heading; its two items below add up to it.
+    expect(text(groups[0]!.querySelector('.pd-group-summary.pd-end')!)).toMatch(/MB/);
     expect(text(tree)).toContain('7 smaller items');
-    expect(p.q('storage-tree-cache')!.getAttribute('aria-expanded')).toBe('true');
-    await p.click('storage-tree-cache');
+    expect(text(tree)).toMatch(/\d+ items/);
+    expect(tree.querySelectorAll('.pd-storage__item pd-glyph svg').length).toBeGreaterThan(3);
+    expect(tree.querySelector('[data-testid="storage-tree-capped"]')).toBeNull();
+    p.q('storage-tree-close')!.click();
+    await p.flush();
     expect(p.q('storage-tree')).toBeNull();
-    await p.click('storage-tree-cache');
+    await p.inline('cache', 'What is inside');
     expect(p.q('storage-tree')).not.toBeNull();
+    await p.inline('cache', 'What is inside');
+    expect(p.q('storage-tree')).toBeNull();
   });
 
   it('says when the walk stopped early', async () => {
-    const h = held({ measured: true });
-    const own = h.memory;
-    const dialogs = new FakeDialogs();
-    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellStorage({ backend: () => own }), { provide: DialogService, useValue: dialogs }] });
-    const fixture = TestBed.createComponent(PdStoragePage);
-    await settle();
-    await fixture.whenStable();
-    const el = fixture.nativeElement as HTMLElement;
-    (el.querySelector('[data-testid="storage-tree-models"]') as HTMLButtonElement).click();
-    await settle();
-    own.send({ state: 'tree', tree: { id: 'models', capped: true, root: { name: 'Models', bytes: 5, folded: 0, children: [] } } });
-    await settle();
-    await fixture.whenStable();
-    expect(el.querySelector('[data-testid="storage-tree-capped"]')?.textContent).toContain('stopped early');
+    const p = await open();
+    await p.inline('models', 'What is inside');
+    p.h.memory.send({ state: 'tree', tree: { id: 'models', capped: true, root: { name: 'Models', bytes: 5, folded: 0, children: [] } } });
+    await p.flush();
+    expect(p.q('storage-tree-capped')?.textContent).toContain('stopped early');
   });
 });

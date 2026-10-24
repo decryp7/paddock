@@ -90,11 +90,21 @@ describe('PdPathText', () => {
 
   it('splits the file name from the start the layout may shorten, with the full value as the tooltip', () => {
     const el = make({ value: '/var/log/app/system.log' });
-    expect(el.querySelector('.pd-head')?.textContent).toBe('/var/log/app/');
+    // The directory shrinks, the "/" before the name never does (review: the ellipsis must not swallow the separator).
+    expect(el.querySelector('.pd-head')?.textContent).toBe('/var/log/app');
+    expect(el.querySelector('.pd-sep')?.textContent).toBe('/');
+    expect(el.textContent?.replace(/\s+/g, '')).toContain('/var/log/app/system.log');
     expect(el.querySelector('.pd-name')?.textContent).toBe('');
     expect(el.querySelector('.pd-tail')?.textContent).toBe('system.log');
     expect(el.querySelector('.pd-text')?.getAttribute('title')).toBe('/var/log/app/system.log');
     expect(el.querySelector('.pd-copy')).toBeNull();
+  });
+
+  it('keeps a Windows separator and has none for a bare name', () => {
+    const win = make({ value: 'C:\\logs\\app\\system.log' });
+    expect(win.querySelector('.pd-sep')?.textContent).toBe('\\');
+    expect(win.querySelector('.pd-head')?.textContent).toBe('C:\\logs\\app');
+    expect(make({ value: 'system.log' }).querySelector('.pd-sep')?.textContent).toBe('');
   });
 
   it('shows what it is given but copies and titles the full value', async () => {
