@@ -148,6 +148,84 @@ Denies the app_quit command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-diagnostics-cancel`
+
+</td>
+<td>
+
+Enables the diagnostics_cancel command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-diagnostics-cancel`
+
+</td>
+<td>
+
+Denies the diagnostics_cancel command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-diagnostics-preview`
+
+</td>
+<td>
+
+Enables the diagnostics_preview command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-diagnostics-preview`
+
+</td>
+<td>
+
+Denies the diagnostics_preview command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-diagnostics-save`
+
+</td>
+<td>
+
+Enables the diagnostics_save command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-diagnostics-save`
+
+</td>
+<td>
+
+Denies the diagnostics_save command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-dialog-close`
 
 </td>
@@ -349,6 +427,32 @@ Enables the jobs_snapshot command without any pre-configured scope.
 <td>
 
 Denies the jobs_snapshot command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-log-from-webview`
+
+</td>
+<td>
+
+Enables the log_from_webview command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-log-from-webview`
+
+</td>
+<td>
+
+Denies the log_from_webview command without any pre-configured scope.
 
 </td>
 </tr>

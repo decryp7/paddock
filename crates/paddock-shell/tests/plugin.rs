@@ -407,3 +407,81 @@ fn a_part_that_fails_to_set_up_stops_the_start_with_its_name() {
         "the shell already registers the Appearance section"
     );
 }
+
+#[test]
+fn diagnostics_put_the_logging_section_on_the_log_and_the_report_commands_in_dialogs_only() {
+    use paddock_diag::{AppInfo, tauri::Setup};
+    use paddock_env::{AppDirs, AppId, MapVars, Os};
+    use paddock_log::{LogConfig, LogLevel, Logging};
+    let dir = tempfile::tempdir().unwrap();
+    let id = AppId::new("demo", "Shell Demo").unwrap();
+    let dirs = AppDirs::resolve(
+        &id,
+        Os::MacOs,
+        &MapVars::new().with("DEMO_HOME", dir.path()),
+        None,
+        true,
+    )
+    .unwrap();
+    let config = LogConfig::new(&id, "app", "1.2.3")
+        .with_log_dir(dirs.logs())
+        .with_stdout(false)
+        .with_panic_hook(false);
+    Logging::new(config).scoped(|handle| {
+        let handle = handle.clone();
+        let for_setup = handle.clone();
+        let app = app(Builder::new(identity())
+            .in_memory()
+            .native_menu(false)
+            .diagnostics(move |_| {
+                Setup::new(AppInfo::new("demo", "Shell Demo", "1.2.3", ""), dirs).log(for_setup)
+            }));
+        let main = window(&app, "main");
+        let overview = invoke(&main, "settings_overview", json!({})).unwrap();
+        let logging = overview["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == "pd.logging")
+            .cloned()
+            .unwrap();
+        assert_eq!(logging["values"]["level"], "info", "{logging}");
+        // Changing the level in the Settings window reaches the running log at once.
+        let set = invoke(
+            &main,
+            "settings_set",
+            json!({ "section": "pd.logging", "values": { "level": "debug" } }),
+        )
+        .unwrap();
+        assert_eq!(set["applied"], true, "{set}");
+        assert_eq!(handle.level(), LogLevel::Debug);
+        // The report commands are a dialog's; the main window is refused, and webview log lines are open to it.
+        assert!(
+            text(&invoke(&main, "diagnostics_preview", json!({ "description": "" })).unwrap_err())
+                .contains("not allowed")
+        );
+        assert_eq!(
+            invoke(
+                &main,
+                "log_from_webview",
+                json!({ "level": "warn", "message": "x" })
+            )
+            .unwrap(),
+            Value::Null
+        );
+    });
+}
+
+#[test]
+fn without_diagnostics_there_is_no_logging_section() {
+    let app = app(Builder::new(identity()).in_memory().native_menu(false));
+    let main = window(&app, "main");
+    let overview = invoke(&main, "settings_overview", json!({})).unwrap();
+    assert!(
+        overview["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["id"] != "pd.logging")
+    );
+}

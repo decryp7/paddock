@@ -2850,10 +2850,13 @@ version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-diag",
  "paddock-dialogs",
  "paddock-download",
+ "paddock-env",
  "paddock-health",
  "paddock-jobs",
+ "paddock-log",
  "paddock-menu",
  "paddock-settings",
  "paddock-startup",

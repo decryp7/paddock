@@ -38,7 +38,21 @@ fn generated_files() -> Vec<(&'static str, String)> {
         "\n/** The event the outcome of a save is sent on, to every window. */\nexport const DIAGNOSTICS_EVENT = '{}';\n",
         crate::EVENT_NAME
     );
+    // The Logging section as `settings_overview` answers it, written by the settings service from the Rust schema: the shell demo's
+    // browser build shows it without a Rust engine.
+    let settings = paddock_settings::Settings::in_memory();
+    settings
+        .register(std::sync::Arc::new(crate::logging::schema()))
+        .unwrap();
+    let section = serde_json::to_string_pretty(&settings.overview().sections[0]).unwrap();
+    let fixtures = format!(
+        "// Generated from paddock-diag's own code by its tests (Rust round trips). Do not edit: {REGENERATE}.\n\n\
+import type {{ SectionView }} from '@decryp7/paddock-ui/shell/settings';\n\n\
+/** The \"Logging\" settings section at its defaults, as `settings_overview` answers it. */\n\
+export const LOGGING_SECTION_FIXTURE: SectionView = {section};\n"
+    );
     vec![
+        ("diagnostics-fixtures.ts", fixtures),
         (
             "diagnostics.ts",
             format!("{header}{}{consts}", types.join("\n")),
