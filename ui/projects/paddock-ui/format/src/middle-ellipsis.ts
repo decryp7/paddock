@@ -43,6 +43,28 @@ export function splitForEllipsis(text: string, keepTail = DEFAULT_KEEP_TAIL): Sp
   return { head: chars.slice(0, start).join(''), tail: chars.slice(start).join('') };
 }
 
+/** A path cut into three parts that shrink in order: the directory, then the start of the file name; the tail never shrinks. */
+export interface SplitPath {
+  /** Everything up to and including the last separator (shrinks first). */
+  dir: string;
+  /** The start of the file name (shrinks second). */
+  name: string;
+  /** The end of the file name from a word start, at most `keepTail` characters: the extension and the last word. */
+  tail: string;
+}
+
+/**
+ * Splits `text` for a layout ellipsis that shortens the directory first, then the start of the file name, and keeps the
+ * extension and last word whole. A file name of at most `keepTail` characters is all tail. Text with no separator has no `dir`.
+ */
+export function splitPath(text: string, keepTail = DEFAULT_KEEP_TAIL): SplitPath {
+  const chars = Array.from(text);
+  const cut = lastSeparatorIndex(chars) + 1;
+  const dir = chars.slice(0, cut).join('');
+  const { head, tail } = splitForEllipsis(chars.slice(cut).join(''), keepTail);
+  return { dir, name: head, tail };
+}
+
 /**
  * Shortens `text` to at most `max` characters (code points) by replacing the middle with an ellipsis. A path keeps its
  * start and its file name ("C:\ProgramData\…\Builder.Service.log"); other text keeps its start and its end. `max`

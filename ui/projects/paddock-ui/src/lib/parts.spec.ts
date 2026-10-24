@@ -90,8 +90,9 @@ describe('PdPathText', () => {
 
   it('splits the file name from the start the layout may shorten, with the full value as the tooltip', () => {
     const el = make({ value: '/var/log/app/system.log' });
-    expect(el.querySelector('.pd-head')?.textContent).toBe('/var/log/app');
-    expect(el.querySelector('.pd-tail')?.textContent).toBe('/system.log');
+    expect(el.querySelector('.pd-head')?.textContent).toBe('/var/log/app/');
+    expect(el.querySelector('.pd-name')?.textContent).toBe('');
+    expect(el.querySelector('.pd-tail')?.textContent).toBe('system.log');
     expect(el.querySelector('.pd-text')?.getAttribute('title')).toBe('/var/log/app/system.log');
     expect(el.querySelector('.pd-copy')).toBeNull();
   });
