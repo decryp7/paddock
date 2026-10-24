@@ -2,6 +2,8 @@
 
 ## Layout
 
+Machine setup shared by every Paddock app (tools, build cache, worktrees, test runs): [paddock/docs/dev-setup.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/dev-setup.md). This page adds only what is specific to this app.
+
 ```
 crates/spotter-core      pure logic: versions, filters, soak time, diffing, scheduling, notification policy, config
 crates/spotter-sources   source adapters behind the ReleaseSource port (folders, HTTP, JSON, forges, feeds, pages)
