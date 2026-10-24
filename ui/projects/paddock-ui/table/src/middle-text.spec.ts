@@ -6,18 +6,26 @@ import { PD_MEASURE_TEXT, PdMiddleText, middleTruncate, tailOf } from './middle-
 const within = (chars: number) => (s: string) => s.length <= chars;
 
 describe('middle truncation', () => {
-  it('keeps the file name and one ellipsis, as one piece of text', () => {
+  it('cuts a path at segment boundaries and keeps the trailing segments that tell rows apart', () => {
+    const path = '/Users/alex/Library/Application Support/Debrief/plugins/viewer/plugin-1.bin';
+    expect(middleTruncate(path, within(100))).toBe(path);
+    expect(middleTruncate(path, within(40))).toBe('…/Debrief/plugins/viewer/plugin-1.bin');
+    expect(middleTruncate(path, within(30))).toBe('…/plugins/viewer/plugin-1.bin');
+    expect(middleTruncate(path, within(21))).toBe('…/viewer/plugin-1.bin');
+    // Rows that share a long head are told apart by what is kept.
+    const kinds = ['viewer', 'format', 'exporter'].map((k) => middleTruncate(`/Users/alex/Library/Application Support/Debrief/plugins/${k}/plugin-1.bin`, within(40)));
+    expect(new Set(kinds).size).toBe(3);
+    expect(middleTruncate('C:\\Users\\alex\\Documents\\Reports\\q3.xlsx', within(28))).toBe('…\\Documents\\Reports\\q3.xlsx');
+  });
+
+  it('cuts an id, a hash or a name by characters around the kept tail, and a path whose last segment alone is too wide', () => {
     expect(tailOf('/opt/plugins/alpha/plugin-0.bin')).toBe('/plugin-0.bin');
     expect(tailOf('2001:db8:1::24:0000:abcd:ef01:2345')).toBe('::abcd:ef01:2345'.slice(-14));
     expect(tailOf('x'.repeat(60) + '/' + 'y'.repeat(40))).toBe('y'.repeat(14));
-    expect(middleTruncate('/opt/plugins/alpha/plugin-0.bin', within(40))).toBe('/opt/plugins/alpha/plugin-0.bin');
-    expect(middleTruncate('/opt/plugins/alpha/plugin-0.bin', within(24))).toBe('/opt/plugi…/plugin-0.bin');
-    // The join is the same in every row: no gap, the ellipsis touches both parts.
-    const rows = ['/Users/alex/Application Support/Debrief/plugins/syslog/plugin-0.bin', '/Users/alex/Application Support/Debrief/plugins/journal/plugin-11.bin'];
-    for (const r of rows) expect(middleTruncate(r, within(30))).toMatch(/^[^…]+…\/plugin-\d+\.bin$/);
-  });
-
-  it('never gives up the tail, even in a very narrow box', () => {
+    // The kept tail is never given up, even when it alone is wider than the box: the CSS ellipsis takes over from there.
+    expect(middleTruncate('abcdef0123456789abcdef0123456789', within(12))).toBe('…cdef0123456789');
+    expect(middleTruncate('abcdef0123456789abcdef0123456789', within(20))).toBe('abcde…cdef0123456789');
+    expect(middleTruncate('a/b', within(1))).toBe('…/b');
     expect(middleTruncate('/a/b/c/plugin-0.bin', within(3))).toBe('…/plugin-0.bin');
     expect(middleTruncate('short', within(1))).toBe('short');
   });
@@ -52,7 +60,7 @@ describe('pd-middle-text', () => {
     const shown = f.nativeElement.querySelector('pd-middle-text').textContent as string;
     HTMLElement.prototype.getBoundingClientRect = original;
     expect(shown.length * 8).toBeLessThanOrEqual(200);
-    expect(shown).toMatch(/…\/plugin-0\.bin$/);
+    expect(shown).toMatch(/^…\/.*plugin-0\.bin$/);
     expect(f.nativeElement.querySelector('pd-middle-text').getAttribute('title')).toBe(full);
   });
 
@@ -98,10 +106,7 @@ describe('pd-middle-text', () => {
     expect(el.textContent).toBe(full);
   });
 
-  it('cuts equal-length values in one column to heads within one character, and never cuts a value that fits', () => {
-    const rows = ['/Users/alex/Application Support/Debrief/plugins/syslog/plugin-0.bin', '/Users/alex/Application Support/Debrief/plugins/journal/plugin-1.bin', '/Users/alex/Application Support/Debrief/plugins/dumps/plugin-12.bin'];
-    const heads = rows.map((r) => middleTruncate(r, within(40)).split('…')[0]!.length);
-    expect(Math.max(...heads) - Math.min(...heads)).toBeLessThanOrEqual(2);
+  it('never cuts a value that fits', () => {
     expect(middleTruncate('/data/records/0002/entry.bin', within(60))).toBe('/data/records/0002/entry.bin');
   });
 });

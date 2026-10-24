@@ -84,7 +84,8 @@ let nextId = 0;
     @switch (state()) {
       @case ('loading') {
         <div class="pd-ghost" role="status" [attr.aria-label]="loadingText" data-testid="chart-loading">
-          <span></span><span></span><span></span><span></span>
+          <div class="pd-ghost-bars" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          <span class="pd-ghost-label">{{ loadingText }}…</span>
         </div>
       }
       @case ('error') {
@@ -102,11 +103,17 @@ let nextId = 0;
     .pd-surface { flex: 1; min-height: 0; width: 100%; }
     .pd-surface[hidden] { display: none; }
     .pd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
-    .pd-ghost { flex: 1; display: grid; align-content: space-evenly; padding: var(--pd-space-3); }
-    .pd-ghost span { height: 1px; background: var(--pd-hairline); animation: pd-pulse 1.4s ease-in-out infinite; }
-    @keyframes pd-pulse { 50% { opacity: 0.4; } }
-    :root[data-motion='reduce'] .pd-ghost span { animation: none; }
-    .pd-error { flex: 1; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--pd-space-2); padding: var(--pd-space-3); color: var(--pd-text-muted); font-size: var(--pd-text-body); text-align: center; }
+    /* Loading is not "no data": muted bars in place of the plot and a label, so it never reads as an empty chart. */
+    .pd-ghost { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--pd-space-2); padding: var(--pd-space-3); min-height: 0; }
+    .pd-ghost-bars { flex: 1; display: flex; align-items: flex-end; gap: var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); min-height: 0; }
+    .pd-ghost-bars span { flex: 1; border-radius: 4px 4px 0 0; background: var(--pd-hover); animation: pd-pulse 1.4s ease-in-out infinite; }
+    .pd-ghost-bars span:nth-child(1) { height: 35%; } .pd-ghost-bars span:nth-child(2) { height: 55%; } .pd-ghost-bars span:nth-child(3) { height: 42%; }
+    .pd-ghost-bars span:nth-child(4) { height: 70%; } .pd-ghost-bars span:nth-child(5) { height: 50%; } .pd-ghost-bars span:nth-child(6) { height: 62%; } .pd-ghost-bars span:nth-child(7) { height: 30%; }
+    .pd-ghost-label { color: var(--pd-text-muted); font-size: var(--pd-text-label); text-align: center; }
+    @keyframes pd-pulse { 50% { opacity: 0.5; } }
+    :root[data-motion='reduce'] .pd-ghost-bars span { animation: none; }
+    /* The message and Retry are one group, centred in the plot (Retry right under the message). */
+    .pd-error { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--pd-space-2); padding: var(--pd-space-3); color: var(--pd-text-muted); font-size: var(--pd-text-body); text-align: center; }
     .pd-error span { flex: 0 1 auto; max-width: 24rem; }
     .pd-error pd-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
     .pd-retry { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
