@@ -1,3 +1,4 @@
+import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideShellTesting, render, settle } from '@decryp7/paddock-ui/shell/testing';
@@ -53,6 +54,18 @@ describe('PdPopoutTitleBar', () => {
     await settle(view.fixture);
     expect(button('popout-on-top')!.getAttribute('aria-pressed')).toBe('true');
     expect(button('popout-on-top')!.title).toContain('(on)');
+  });
+
+  it('draws Dock back with the dock-in glyph and Keep on top with layers, tinted when on', async () => {
+    const { view, button } = await setup();
+    const d = (id: string) => button(id)!.querySelector('svg path')!.getAttribute('d');
+    expect(d('popout-dock-back')).toBe(PD_ICON_PATHS['dock-in']);
+    expect(d('popout-on-top')).toBe(PD_ICON_PATHS['layers']);
+    button('popout-on-top')!.click();
+    await settle(view.fixture);
+    expect(button('popout-on-top')!.classList.contains('pd-on')).toBe(true);
+    const css = Array.from(document.querySelectorAll('style')).map((st) => st.textContent).join('');
+    expect(css).toMatch(/\.pd-btn\.pd-on[^{]*\{[^}]*background: var\(--pd-accent-tint\)/);
   });
 
   it('draws minimise, maximise and close and the resize edges where the window has no frame', async () => {
