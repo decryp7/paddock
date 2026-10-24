@@ -572,3 +572,197 @@ fn edit_distance_counts_swaps_and_respects_the_cap() {
         (1, 2, 5)
     );
 }
+
+#[test]
+fn joined_says_whether_the_name_was_run_together() {
+    let c = Catalogue::new(vec![
+        Entry::new("one", "gfxbuilder_v2.exe"),
+        Entry::new("two", "graphic_builder_2.exe"),
+    ])
+    .unwrap();
+    let m = top(&c, "gfx builder");
+    assert_eq!((m.id.as_str(), m.how), ("one", How::Joined));
+    assert!(m.why.contains("one word"), "{}", m.why);
+    let m = top(&c, "graphic builder");
+    assert_eq!((m.id.as_str(), m.how), ("two", How::Joined));
+    assert!(m.why.contains("spelled differently"), "{}", m.why);
+}
+
+#[test]
+fn plurals_inside_words_and_spelled_names_are_found() {
+    let c = Catalogue::new(vec![
+        Entry::new("v", "Graphic.Viewer.exe").spelled(&["graphicviewer.exe"]),
+    ])
+    .unwrap();
+    assert_eq!(top(&c, "graphic viewers").id, "v");
+    let t = Catalogue::text(vec![Entry::new("p", "Bytes Received/sec")]).unwrap();
+    let m = top(&t, "ytes");
+    assert_eq!(m.how, How::Words);
+    assert!(
+        t.search("by", 5)
+            .matches
+            .iter()
+            .all(|m| m.how == How::Prefix),
+        "two letters must start a word"
+    );
+    assert!(
+        t.search("yt", 5).matches.is_empty(),
+        "two letters are not found inside a word"
+    );
+}
+
+// --- the index never changes a result -----------------------------------------------------------------------------------
+
+#[test]
+fn the_index_gives_the_same_answers_as_ranking_every_entry() {
+    let queries = [
+        "graphic builder",
+        "graphicbuilder",
+        "grafic bilder",
+        "builder",
+        "tray",
+        "tray agent",
+        "report",
+        "xyz",
+        "the graphic builders",
+        "gra bui",
+        "ilder",
+        "e",
+        "ab",
+        "memory pages",
+        "bytes recieved lo0",
+        "lo0",
+        "processor",
+        "ytes",
+        "procesor time",
+        "Bytes Received/sec",
+        "",
+        "...",
+        "great builder",
+    ];
+    for c in [programs(), counters()] {
+        for q in queries {
+            assert_eq!(c.search(q, 20), c.search_scan(q, 20), "{q:?}");
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn indexed_and_scanned_searches_agree_on_random_catalogues(
+        names in proptest::collection::vec("[a-z]{1,9}([ ._-][a-z]{1,9}){0,3}", 1..40),
+        fields in proptest::collection::vec("[a-z0-9]{1,6}", 0..3),
+        q in "[a-z]{1,9}([ ._-][a-z]{1,9}){0,2}",
+        text in any::<bool>(),
+    ) {
+        let entries: Vec<Entry> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let f: Vec<&str> = fields.iter().map(String::as_str).collect();
+                let mut e = Entry::new(format!("{i:03}"), n.clone()).fields(&f).weight(i as u64);
+                if i % 5 == 0 { e.aliases.push(n.replace(' ', "")); }
+                if i % 7 == 0 { e.user_aliases.push(format!("my {n}")); }
+                e
+            })
+            .collect();
+        let c = if text { Catalogue::text(entries).unwrap() } else { Catalogue::new(entries).unwrap() };
+        prop_assert_eq!(c.search(&q, 30), c.search_scan(&q, 30));
+        let first = names[0].clone();
+        prop_assert_eq!(c.search(&first, 30), c.search_scan(&first, 30));
+        let mangled = format!("{}x", first.replace(' ', ""));
+        prop_assert_eq!(c.search(&mangled, 30), c.search_scan(&mangled, 30));
+    }
+}
+
+// --- the names_search command --------------------------------------------------------------------------------------------
+
+#[test]
+fn the_service_validates_swaps_and_answers() {
+    let svc = NamesService::new();
+    let req = |q: &str, limit| NamesSearchRequest {
+        query: q.into(),
+        limit,
+    };
+    let empty = svc.search(&req("graphic", None)).unwrap();
+    assert_eq!(
+        (empty.matches.len(), empty.searchable),
+        (0, 0),
+        "nothing to search before the first catalogue"
+    );
+    let entries: Vec<Entry> = programs_entries();
+    assert_eq!(svc.replace(entries, Style::Path), Ok(3));
+    let r = svc.search(&req("grafic bilder", Some(5))).unwrap();
+    assert_eq!(
+        (r.matches[0].id.as_str(), r.searchable),
+        ("graphic builder", 3)
+    );
+    assert!(svc.search(&req("builder", None)).unwrap().clarify.is_some());
+    assert_eq!(
+        svc.search(&req(&"x".repeat(MAX_TEXT_CHARS + 1), None)),
+        Err(RequestError::QueryTooLong)
+    );
+    for bad in [0, MAX_MATCHES + 1] {
+        assert_eq!(
+            svc.search(&req("x", Some(bad))),
+            Err(RequestError::BadLimit)
+        );
+    }
+    assert!(
+        RequestError::QueryTooLong.to_string().contains("256")
+            && RequestError::BadLimit.to_string().contains("50")
+    );
+    // A refused rebuild keeps the old catalogue.
+    assert!(
+        svc.replace(vec![Entry::default(); MAX_ENTRIES + 1], Style::Text)
+            .is_err()
+    );
+    assert_eq!(svc.search(&req("tray", None)).unwrap().searchable, 3);
+    assert_eq!(
+        svc.replace(vec![Entry::new("a", "Bytes/sec")], Style::Text),
+        Ok(1)
+    );
+    assert_eq!(svc.search(&req("bytes", None)).unwrap().matches[0].id, "a");
+}
+
+#[test]
+fn the_command_shapes_are_camel_case_json_and_refuse_unknown_fields() {
+    assert_eq!(NAMES_SEARCH, "names_search");
+    let r: NamesSearchRequest = serde_json::from_str(r#"{"query":"x","limit":3}"#).unwrap();
+    assert_eq!(r.limit, Some(3));
+    assert_eq!(
+        serde_json::from_str::<NamesSearchRequest>(r#"{"query":"x"}"#)
+            .unwrap()
+            .limit,
+        None
+    );
+    assert!(serde_json::from_str::<NamesSearchRequest>(r#"{"query":"x","scope":"all"}"#).is_err());
+    let svc = NamesService::new();
+    svc.replace(programs_entries(), Style::Path).unwrap();
+    let reply = svc
+        .search(&NamesSearchRequest {
+            query: "builder".into(),
+            limit: None,
+        })
+        .unwrap();
+    let json = serde_json::to_value(&reply).unwrap();
+    assert!(
+        json["searchable"].is_number()
+            && json["matches"][0]["how"].is_string()
+            && json["clarify"]["options"].is_array()
+    );
+}
+
+fn programs_entries() -> Vec<Entry> {
+    let names = [
+        cand("CompanyA.Graphic.Builder.exe", 1),
+        cand("graphicbuilder.exe", 2),
+        cand("CompanyA.Tray.Agent.exe", 1),
+        cand("CompanyA.Report.Builder.exe", 1),
+    ];
+    let vocab = vocabulary_from(&names);
+    group(&names, &vocab)
+        .iter()
+        .map(|g| Entry::from(g).kind("process"))
+        .collect()
+}

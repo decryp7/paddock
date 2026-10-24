@@ -94,6 +94,20 @@ jobs:
       - name: Tests
         run: npm test
 
+      # Paddock runs its own conformance checks (plan X9). Only the checks that apply to a library repository run; the rest
+      # are skipped on purpose, each for a reason:
+      #   C03 icons, C04 macOS signing, C13 Rust lint preset (needs a root Cargo.toml; the crates workspace is crates/),
+      #   C28 repo baseline (Paddock is the source of templates/repo), C29 window weight (the demo's budgets are not set)
+      #     are app-only or Paddock owns the source of what they compare;
+      #   C07 release preflight and C08 release artifacts: Paddock releases through publish.yml, not an app release job;
+      #   C23 commit lint and doc blocks: Paddock's AGENTS.md is the source of the blocks, and its history predates the
+      #     100-character subject rule.
+      # C24 needs every docs/images file reviewed (docs/images/REVIEWED.md). C14 (hermetic wrapper), C29 and C30 (wall clock) report warnings; C15 has a dated waiver (paddock.waivers.toml).
+      - name: Paddock itself (applicable checks)
+        working-directory: .
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31
+
+
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
   # PATH of shims, so no launchd, systemd, Docker or installed app is touched. New-app templates are covered by scripts/.
   tools:
@@ -112,7 +126,7 @@ jobs:
         run: node --test tools/test/*.test.mjs
 
       - name: new-app templates
-        run: node --test scripts/new-app.test.mjs
+        run: node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs
 
   # @decryp7/paddock-eslint (eslint/, plan X11): RuleTester cases per rule and the preset run through ESLint on temp files.
   eslint-preset:
@@ -153,10 +167,12 @@ jobs:
       # Native glue files are left out (crates/README.md: never logic, reviewed by hand), and so are paddock-proc's test child (a
       # re-executed test binary that its parent ends with SIGKILL, so its coverage data is never written) and paddock-ipc's (the same); paddock-ipc's endpoint/{unix,windows}.rs are
       # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered).
+      # The gate (scripts/coverage-gate.mjs) leaves out only the `#[tauri::command]` attribute lines: llvm-cov charges every
+      # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
-          awk -F'[:,]' '/^DA:/{t++; if($3>0)h++} END{p=100*h/t; printf "lines %d/%d = %.2f%%\n", h, t, p; if(p<99) exit 1}' lcov.info
+          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -266,6 +282,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-proc --all-targets --all-features -- -D warnings && cargo test -p paddock-proc --all-features
 
+      - name: paddock-bench
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-bench --all-targets --all-features -- -D warnings && cargo test -p paddock-bench --all-features
+      - name: paddock-cli
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-cli --all-targets --all-features -- -D warnings && cargo test -p paddock-cli --all-features
       # The IPC with real child processes (its own test child) and the companion link; the fuzz target is built on Linux.
       - name: paddock-ipc
         if: ${{ !cancelled() }}
@@ -274,6 +296,22 @@ jobs:
       - name: paddock-env
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo test -p paddock-env --all-features
+
+      - name: paddock-testkit
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-testkit --all-targets --all-features -- -D warnings && cargo test -p paddock-testkit --all-features
+
+      - name: paddock-metrics
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-metrics --all-targets --all-features -- -D warnings && cargo test -p paddock-metrics --all-features
+
+      - name: paddock-channels
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-channels --all-targets --all-features -- -D warnings && cargo test -p paddock-channels --all-features
+
+      - name: paddock-names
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-names --all-targets --all-features -- -D warnings && cargo test -p paddock-names --all-features
 
       - name: paddock-packs
         if: ${{ !cancelled() }}

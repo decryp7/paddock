@@ -17,8 +17,10 @@
 mod catalogue;
 mod distance;
 mod group;
+mod index;
 mod normalise;
 mod segment;
+mod service;
 
 pub use catalogue::{
     Catalogue, Clarification, Entry, How, MAX_ALIASES, MAX_ENTRIES, MAX_FIELDS, MAX_MATCHES,
@@ -30,3 +32,4 @@ pub use normalise::{
     NormName, Style, file_name, normalise, normalise_as, squash, strip_extension, vendor_prefixes,
 };
 pub use segment::{MAX_SEGMENTS, MAX_TOKEN_CHARS, Vocabulary, pieces, segment, split_raw};
+pub use service::{NAMES_SEARCH, NamesSearchReply, NamesSearchRequest, NamesService, RequestError};
