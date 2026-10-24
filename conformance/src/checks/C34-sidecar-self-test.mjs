@@ -1,4 +1,4 @@
-// C33: every sidecar answers `--self-test` and CI starts it from the built bundle (rule 23, plan X34). Each `bundle.externalBin`
+// C34: every sidecar answers `--self-test` and CI starts it from the built bundle (rule 23, plan X34). Each `bundle.externalBin`
 // of the Tauri config is (1) listed in `paddock.conformance.json` "sidecars", which C04 starts from the bundle with its self-test
 // arguments, and (2) implemented: the crate that builds it handles the flag (`paddock_proc::self_test`, or its own check of
 // `--self-test`).
@@ -29,7 +29,7 @@ export function crateDirOf(ctx, name) {
 }
 
 export default {
-  id: 'C33',
+  id: 'C34',
   title: 'Sidecars implement --self-test and CI starts them from the bundle',
   rule: 23,
   run(ctx) {
@@ -41,14 +41,14 @@ export default {
       for (const name of externalBins(ctx.read(conf) ?? '')) {
         if (seen.has(name)) continue;
         seen.add(name);
-        if (!declared.has(name)) out.push(error('C33', 23, conf, 1, `the sidecar ${name} is not in "sidecars" of paddock.conformance.json, so CI never starts it from the bundle`, `Add { "name": "${name}", "args": ["--self-test"] } to "sidecars".`));
+        if (!declared.has(name)) out.push(error('C34', 23, conf, 1, `the sidecar ${name} is not in "sidecars" of paddock.conformance.json, so CI never starts it from the bundle`, `Add { "name": "${name}", "args": ["--self-test"] } to "sidecars".`));
         const dir = crateDirOf(ctx, name);
         if (dir === null) {
-          out.push(warn('C33', 23, conf, 1, `cannot find the crate that builds ${name}, so its --self-test is unchecked`, 'Build sidecars from crates of the workspace (a [[bin]] or a package named like the sidecar).'));
+          out.push(warn('C34', 23, conf, 1, `cannot find the crate that builds ${name}, so its --self-test is unchecked`, 'Build sidecars from crates of the workspace (a [[bin]] or a package named like the sidecar).'));
           continue;
         }
         const handles = ctx.files().some((f) => f.endsWith('.rs') && (dir === '' || f.startsWith(`${dir}/`)) && SELF_TEST.test(ctx.read(f) ?? ''));
-        if (!handles) out.push(error('C33', 23, `${dir ? `${dir}/` : ''}Cargo.toml`, 1, `${name} does not implement --self-test`, 'Call paddock_proc::self_test::handle(...) first in main (it starts, runs its checks, touches nothing and exits 0).'));
+        if (!handles) out.push(error('C34', 23, `${dir ? `${dir}/` : ''}Cargo.toml`, 1, `${name} does not implement --self-test`, 'Call paddock_proc::self_test::handle(...) first in main (it starts, runs its checks, touches nothing and exits 0).'));
       }
     }
     return out;

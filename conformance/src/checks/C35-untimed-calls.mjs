@@ -1,4 +1,4 @@
-// C34: the UI never times out a running job (rule 12), and a call that is left untimed is a deliberate choice. Every entry in
+// C35: the UI never times out a running job (rule 12), and a call that is left untimed is a deliberate choice. Every entry in
 // the `untimed` list of a `withCallTimeout(...)` policy (@decryp7/paddock-ui/ipc) must be declared by the app in
 // `paddock.conformance.json` "untimedCommands": { "<method>": "<why: it starts a job / it waits for the user>" }. A method
 // that merely takes long gets a generous `limits` entry instead. A declared command that no policy lists any more is stale.
@@ -43,7 +43,7 @@ export function untimedPolicies(source) {
 }
 
 export default {
-  id: 'C34',
+  id: 'C35',
   title: 'Untimed calls are declared job-starting or user-waiting commands',
   rule: 12,
   run(ctx) {
@@ -57,19 +57,19 @@ export default {
       if (!text.includes('withCallTimeout')) continue;
       for (const p of untimedPolicies(text)) {
         if (p.untimed === null) {
-          out.push(warn('C34', 12, f, p.line, 'the untimed list is not a literal array of method names, so it cannot be checked', 'Write untimed: ["method", ...] with string literals.'));
+          out.push(warn('C35', 12, f, p.line, 'the untimed list is not a literal array of method names, so it cannot be checked', 'Write untimed: ["method", ...] with string literals.'));
           continue;
         }
         for (const name of p.untimed) {
           used.add(name);
           const why = declared[name];
-          if (why === undefined) out.push(error('C34', 12, f, p.line, `${name} is untimed but not declared in "untimedCommands" of paddock.conformance.json`, 'Declare it with the reason (it starts a job that reports through events, or it waits for the user); if it only takes long, give it a limit instead.'));
-          else if (typeof why !== 'string' || why.trim().length < 8) out.push(error('C34', 12, 'paddock.conformance.json', 1, `untimedCommands.${name} needs a reason (why the call is never timed out)`, 'Write what the command does: starts a job, waits for the user, ...'));
+          if (why === undefined) out.push(error('C35', 12, f, p.line, `${name} is untimed but not declared in "untimedCommands" of paddock.conformance.json`, 'Declare it with the reason (it starts a job that reports through events, or it waits for the user); if it only takes long, give it a limit instead.'));
+          else if (typeof why !== 'string' || why.trim().length < 8) out.push(error('C35', 12, 'paddock.conformance.json', 1, `untimedCommands.${name} needs a reason (why the call is never timed out)`, 'Write what the command does: starts a job, waits for the user, ...'));
         }
       }
     }
     for (const name of Object.keys(declared)) {
-      if (!used.has(name)) out.push(warn('C34', 12, 'paddock.conformance.json', 1, `untimedCommands.${name} is declared but no withCallTimeout policy lists it`, 'Remove the stale entry.'));
+      if (!used.has(name)) out.push(warn('C35', 12, 'paddock.conformance.json', 1, `untimedCommands.${name} is declared but no withCallTimeout policy lists it`, 'Remove the stale entry.'));
     }
     return out;
   },
