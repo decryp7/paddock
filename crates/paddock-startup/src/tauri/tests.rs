@@ -506,6 +506,10 @@ fn commands_fail_plainly_when_the_contract_is_not_installed() {
             "window_boot_error",
             json!({ "kind": "error", "message": "x" }),
         ),
+        ("recovery_status", json!({})),
+        ("recovery_restore", json!({})),
+        ("recovery_start_fresh", json!({})),
+        ("recovery_safe_mode", json!({})),
     ] {
         assert_eq!(
             invoke(&w, cmd, body).unwrap_err()["code"],
