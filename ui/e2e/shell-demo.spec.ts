@@ -301,6 +301,38 @@ test.describe('notifications and service health (plan S4)', () => {
     await expect(app.notifications.toastItems).toHaveCount(0);
   });
 
+  test('the status bar spinner of a running job is 14 px with a 2 px stroke', async ({ app, page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Start sample job' }).click();
+    const dot = app.statusBar.jobs.locator('.pd-dot');
+    await expect(app.statusBar.jobs).toContainText('running');
+    const style = await dot.evaluate((el) => {
+      const c = getComputedStyle(el);
+      return { width: c.width, height: c.height, stroke: c.borderTopWidth };
+    });
+    expect(style).toEqual({ width: '14px', height: '14px', stroke: '2px' });
+  });
+
+  test('a toast is at most 360 px wide, and in a small window one line above the status bar', async ({ app, page }) => {
+    await page.clock.install();
+    await page.setViewportSize({ width: 700, height: 700 });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Notify three times' }).click();
+    const toast = app.notifications.toastItems;
+    await expect(toast).toHaveCount(1);
+    expect((await toast.boundingBox())?.width).toBeLessThanOrEqual(360);
+    await page.setViewportSize({ width: 400, height: 700 });
+    const box = (await toast.boundingBox())!;
+    expect(box.width).toBeLessThanOrEqual(360);
+    // One line of message, the first action and the close: far from a fifth of the window, and clear of the status bar.
+    expect(box.height).toBeLessThan(0.1 * 700);
+    const bar = (await page.getByRole('contentinfo', { name: 'Status bar' }).boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(bar.y);
+    await expect(toast.getByTestId('notification-dismiss')).toBeVisible();
+    await expect(toast.locator('.pd-body')).toBeHidden();
+    await expectNoHorizontalScroll(page);
+  });
+
   test('the same notice three times is one toast with a count, which times out and stays in the centre', async ({ app, page }) => {
     await page.clock.install();
     await page.goto('/');
