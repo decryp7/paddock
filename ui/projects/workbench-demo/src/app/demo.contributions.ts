@@ -1,4 +1,4 @@
-import { defineCommand, defineKeybinding, defineMenuItem, msg } from '@decryp7/paddock-ui/shell';
+import { defineCommand, defineKeybinding, defineMenuItem, defineStatusItem, msg } from '@decryp7/paddock-ui/shell';
 import {
   defineActivityItem,
   defineAssistantContext,
@@ -44,19 +44,12 @@ export const DEMO_VIEWS = [
     load: () => import('./views/code-view').then((m) => m.CodeView),
   }),
   defineView<Ctx>({
-    id: 'wd.outline',
-    title: msg('wd.view.outline', 'Outline'),
-    icon: 'pd:menu',
-    layout: { area: 'side', min: { width: 240, height: 200 }, pref: { width: 300, height: 400 }, priority: 60 },
-    order: 300,
-    load: () => import('./views/outline-view').then((m) => m.OutlineView),
-  }),
-  defineView<Ctx>({
     id: 'wd.problems',
     title: msg('wd.view.problems', 'Problems'),
     icon: 'pd:alert',
     category: msg('wd.category.analysis', 'Analysis'),
-    layout: { area: 'analysis', min: { width: 420, height: 160 }, pref: { width: 800, height: 240 }, priority: 55 },
+    // It folds to one column below 360 px, so its true minimum is small (ADR 0011: declare what the view needs).
+    layout: { area: 'analysis', min: { width: 240, height: 160 }, pref: { width: 800, height: 300 }, priority: 55 },
     order: 400,
     load: () => import('./views/problems-view').then((m) => m.ProblemsView),
   }),
@@ -79,6 +72,13 @@ const files = defineExplorerProvider<Ctx, FileNode>({
     else void navigator.clipboard?.writeText(node.id).catch(() => undefined);
   },
   drag: (node) => (node.folder ? null : { type: 'text/plain', data: node.id }),
+  // The Explorer follows the file the user works on (review P3-14): every folder of its path, then the file.
+  reveal: (ctx) => {
+    const path = ctx.selectedPath();
+    if (!path) return null;
+    const parts = path.split('/');
+    return parts.map((_, i) => parts.slice(0, i + 1).join('/'));
+  },
   empty: { text: msg('wd.explorer.files.empty', 'The repository is empty.') },
 });
 
@@ -99,10 +99,10 @@ const outline = defineExplorerProvider<Ctx>({
   roots: (ctx) => {
     const path = ctx.selectedPath();
     const symbols = path ? (ctx.repo.file(path)?.symbols ?? []) : [];
-    return Promise.resolve({ nodes: symbols.map((s) => ({ id: `${path}#${s.name}`, label: s.name, description: s.kind, truncate: 'end' as const, expandable: false })) });
+    return Promise.resolve({ nodes: symbols.map((s) => ({ id: `${path}#${s.name}`, label: s.name, description: `${s.kind} · line ${s.line}`, truncate: 'end' as const, expandable: false })) });
   },
   open: (node, ctx) => void ctx.openFile(node.id.split('#')[0] as string),
-  empty: { text: msg('wd.explorer.symbols.empty', 'Open a file to see its symbols.') },
+  empty: { text: msg('wd.explorer.symbols.empty', 'No symbols in the selected file.') },
 });
 
 export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
@@ -115,6 +115,15 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
   menus: [
     defineMenuItem({ menu: 'file', command: 'wd.open-readme', group: 'open', order: 100 }),
     defineMenuItem({ menu: 'file', command: 'wd.reindex', group: 'repo', order: 200 }),
+  ],
+  statusItems: [
+    defineStatusItem<Ctx>({
+      id: 'wd.status.index',
+      title: msg('wd.status.index', 'Repository index'),
+      side: 'start',
+      priority: 600,
+      load: () => import('./index-status').then((m) => m.IndexStatus),
+    }),
   ],
   views: DEMO_VIEWS,
   explorerProviders: [files, outline],
@@ -130,7 +139,6 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
       badge: (ctx) => ctx.repo.problems.length,
       badgeLabel: (ctx) => `${ctx.repo.problems.length} problems`,
     }),
-    defineActivityItem<Ctx>({ id: 'wd.act.outline', title: msg('wd.act.outline', 'Outline'), icon: 'pd:menu', order: 400, run: { view: 'wd.outline' } }),
     defineActivityItem<Ctx>({
       id: 'wd.act.layouts',
       title: msg('wd.act.layouts', 'Perspectives'),
@@ -181,8 +189,8 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
     }),
   ],
   perspectives: [
-    definePerspective<Ctx>({ id: 'wd.understand', title: msg('wd.p.understand', 'Understand'), icon: 'pd:search', order: 100, views: ['wd.orientation', 'wd.outline'], focus: 'wd.orientation' }),
-    definePerspective<Ctx>({ id: 'wd.review', title: msg('wd.p.review', 'Review'), icon: 'pd:check', order: 200, views: ['wd.problems', 'wd.outline'] }),
+    definePerspective<Ctx>({ id: 'wd.understand', title: msg('wd.p.understand', 'Understand'), icon: 'pd:search', order: 100, views: ['wd.orientation', 'pd.assistant'], focus: 'wd.orientation' }),
+    definePerspective<Ctx>({ id: 'wd.review', title: msg('wd.p.review', 'Review'), icon: 'pd:check', order: 200, views: ['wd.problems', 'wd.orientation'] }),
   ],
   sharedState: [
     defineSharedState<Ctx, string | null>({

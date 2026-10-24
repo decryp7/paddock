@@ -1708,6 +1708,136 @@ Denies the shell_version command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-storage-cancel`
+
+</td>
+<td>
+
+Enables the storage_cancel command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-storage-cancel`
+
+</td>
+<td>
+
+Denies the storage_cancel command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-storage-clear`
+
+</td>
+<td>
+
+Enables the storage_clear command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-storage-clear`
+
+</td>
+<td>
+
+Denies the storage_clear command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-storage-last`
+
+</td>
+<td>
+
+Enables the storage_last command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-storage-last`
+
+</td>
+<td>
+
+Denies the storage_last command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-storage-reveal`
+
+</td>
+<td>
+
+Enables the storage_reveal command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-storage-reveal`
+
+</td>
+<td>
+
+Denies the storage_reveal command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-storage-scan`
+
+</td>
+<td>
+
+Enables the storage_scan command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-storage-scan`
+
+</td>
+<td>
+
+Denies the storage_scan command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-tray-close`
 
 </td>

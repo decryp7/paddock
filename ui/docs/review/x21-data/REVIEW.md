@@ -439,3 +439,27 @@ own background. Extend the token contrast test to the selected tint and the grou
 **Approved**, on the condition that R3-P2-1 is fixed with its contrast test (a measured number in the test is enough; it
 needs no new sheet review). The P3s can follow in normal work; R3-P3-2 (chart loading vs empty) and R3-P3-6 (4-series
 guide gap) are the ones I would take before the chart wrapper is adopted by a second app.
+
+## Review 3 verification
+
+Same reviewer, 2026-10-25, against `1f613fb` (merged as `a58e5d0`) and the regenerated sheet. Read-only; pixels measured as
+above.
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| R3-P2-1 "…" on the selected tint | **Fixed** | `*-table-selected`: the selected row's dots are #5F6775 on #DFE8F9 = **4.63:1** light, #8B93A0 on #1F293B = **4.71:1** dark. Plain rows are unchanged at 3.34 / 3.82. `tokens.spec.ts` now checks subtle on the 14% accent tint (the same mix as `--pd-accent-tint`) and on surface-2. |
+| Rest mix on surface-2 (2.98:1 light, 3.56:1 dark) | **Accept the argument** | The rest colour never meets surface-2 at rest: `.pd-grid` paints rows on surface-1 whatever panel the table sits in; group bands (the only surface-2 rows) carry no row button (0 differing pixels at the band's right edge in `*-table-virtual`); hover and focus switch the button to `--pd-text`. The spec records 2.98 as information only. If a later variant (zebra rows, a surface-2 table) puts resting rows on surface-2, it must use the selected-row rule. |
+| P3-1 centre total | Fixed | "88 GB" on one line at 16 px, centred, both widths. |
+| P3-2 chart loading | Fixed | Seven muted ghost bars on a baseline plus "Loading chart…"; it no longer reads as an empty chart. Reduced motion stops the pulse. |
+| P3-3 chart error | Fixed | Glyph, message and Retry are one centred group, Retry 8 px under the message. |
+| P3-4 filter while loading | Fixed in code, not visible | The gallery's loading/empty/error tables are `[filterable]="false"`, so the frames were never showing the component hide its filter (my finding came from the demo). The component now keeps the filter, disabled, while loading or empty (`table.spec.ts`). No frame shows it; fine. |
+| P3-5 path cut | Fixed | Every Location row is "…/Debrief/plugins/<kind>/plugin-N.bin": the part that tells rows apart is kept, cut at segment boundaries, one join in every row, stable on hover/focus/selection. Full values still show where they fit (`*-table-virtual`). Optional later: keep the root segment too ("/Users/…/Debrief/…") when the column has room, which would also use the ~25% of the column now left empty. |
+| P3-6 4-series key | Fixed | Guide §4 and rule 10 say "4 or more"; `pd-chart` sets `emphasis.focus: 'series'` from 4 series. |
+| P3-7 light 1↔6 tritan | Fixed | Recorded in the guide as a known weak pair. |
+| P3-8 dark disabled field | Fixed | The Workspace fill is now visibly lifted from the card in `dark-forms`. |
+| P3-9 sheet hygiene | Fixed | Columns button is ghost in every frame (the pointer is parked); the focus-row caption matches; records now map 0001 → `/data/records/1/`; the guide's palette lines say which one supersedes. Titles carry the window ("last 7 days", "last 24 h"). |
+
+No new findings: no regressions in the table, chart, or form frames in either scheme.
+
+**Final verdict: Approved.** All P1s and P2s from reviews 1–3 are fixed in the pixels, and the two deviations from review 2
+are sound and documented in the design guide.

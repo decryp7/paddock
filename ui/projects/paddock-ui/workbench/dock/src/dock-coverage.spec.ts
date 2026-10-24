@@ -125,11 +125,14 @@ describe('the group header', () => {
     expect(TestBed.inject(DockMenu).state()).not.toBeNull();
   });
 
-  it('opens the panel menu from the menu button of a tab', async () => {
+  it('has no per-tab menu button (the group "..." and the right-click menu remain) and draws the close as a 14 px glyph', async () => {
     const { dock, rendered } = await mountDock({ views: VIEWS });
     await dock.showView('a.one');
     await settle(rendered.fixture);
-    rendered.one<HTMLElement>('.pd-dock-tab-menu').click();
+    expect(rendered.element.querySelector('.pd-dock-tab-menu')).toBeNull();
+    const glyph = rendered.one<HTMLElement>('.pd-dock-tab-close svg');
+    expect([glyph.getAttribute('width'), glyph.getAttribute('height')]).toEqual(['14', '14']);
+    rendered.one<HTMLElement>('.pd-dock-tab').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     expect(TestBed.inject(DockMenu).state()).not.toBeNull();
   });
 });

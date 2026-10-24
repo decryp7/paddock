@@ -40,6 +40,33 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-plugin-api`, `paddock-plugin-host` and `paddock-plugin-test` (plan X51, ADR 0001 to 0003), the platform half of
+  Debrief's `debrief-plugin-api`, `-host`, `-registry` and `-test`. `paddock-plugin-api`: platform protocol 2.0
+  (`PlatformRequest`, `HostCall`), `Plugin`/`Contributions` (tools with checked schemas, settings, views, MCP tools), the
+  `Extension` mechanism (`Contract`: an app's own postcard enums routed by namespace, never decoded by the platform), version
+  rules with refusals that say who must update, host files, output files, `serve`. `paddock-plugin-host`: installed
+  `.paddockplugin` discovery (verified before every start; a changed program is quarantined), grants with default deny and
+  the pure `sandbox_for`, a `Supervisor` per plugin (restart with back-off on the injected clock, quarantine through
+  `paddock-guard`), guarded `Remote<C>` proxies, grant-checked file reads, outputs and elevated operations, `PluginHost` and
+  `Status` for the Plugins view. `paddock-plugin-test`: `FakeHost`, conformance checks, golden helpers and the fixture plugin.
+- `paddock-guard` (plan X51, ADR 0001), from Debrief's `debrief_core::guard` without its plugin types: `catch` (panic to a typed
+  `Crashed`), `Quarantine` with a `QuarantinePolicy` (3 failures in 10 minutes by default) on the shared `Clock`, failures as
+  `Panic`, `Hang` or `Garbled` (a typed error the owner returns is not one), manual `release`, status, an observer, quarantined
+  owners kept in a versioned state file that tolerates a missing or damaged file, and `Guard::call`, the building block of
+  guarded adapters (refuses a quarantined or hung owner, runs under a time budget on the clock, catches panics, abandons hangs).
+- `paddock-view` (plan X51, ADR 0002): the declarative view model plugins return. `ViewDoc` with `Node`/`NodeKind` (stack, text,
+  table, tree, graph, diagram, form, review list, matrix, chart, badge, progress, empty, needs-AI, link), `ActionRef` (with a
+  label), `ViewAction`, `ViewPatch` and `apply_patch`; JSON (camelCase) and postcard codecs with a size limit and a decode depth
+  guard; `validate` with the ADR limits (errors name the node path; http and https links only; every interactive node labelled);
+  a never-panics property test and a cargo-fuzz target (`crates/paddock-view/fuzz`); generated TypeScript in
+  `@decryp7/paddock-ui` (`view/generated/view.ts`, stale-checked by a test). The `<pd-view>` renderer is the next step.
+- The shell demo desktop app serves Settings > AI access (MCP): `Builder::mcp` with a sample server (two read-only tools, one action), the settings in its config folder and the client keys in the OS credential store.
+- `paddock-storage` and `@decryp7/paddock-ui/shell/storage` (plan X32): what an app keeps on disk and clearing it safely. Declared
+  `Category`s (cache or the user's data, a confined folder, items with the reason they stay, an optional removal through the app),
+  a bounded size walk, a scan that is the preview, `clear` that needs it, confirms data per category, re-checks every item before
+  deleting it and never leaves the app's own folders (`Storage::within`), as jobs with progress and Cancel (`storage_*` commands and
+  `paddock://storage` in the shell plugin, `Builder::storage`). `paddock_files::Files::show_folder`. UI: `StorageBackend`,
+  `StorageStore`, the Settings > Storage page and its confirmation window; the shell demo's old generic page is now "Demo data".
 - `paddock-mcp` follow-ups (plan X22): `notifications/cancelled` stops the running call (its token is cancelled, it gets no answer);
   the tool calls of one connection run concurrently up to `Limits::max_concurrent_calls` (default 4) and are answered in any order,
   while everything else stays in order; `McpControl` and the Tauri adapter (feature `tauri`: `mcp_get`, `mcp_save`, `mcp_issue_key`
@@ -104,6 +131,13 @@ Conventional Commits; one semver tag for the whole repo.
   channel (ordered delivery, nothing after the call settled, failure, handler error, last-message marker, abort). `paddock-metrics`:
   `folder_size` does not cross volumes (`other_volumes`) and reads a folder entry by entry, so a cancel or the time limit is seen
   between reads. CI: a step for `paddock-net`; `paddock-archive` and `paddock-net` take the workspace hack.
+- `paddock-plugin-package` (plan X51, ADR 0001): the `.paddockplugin` package and manifest model, ported from Debrief's
+  `debrief-plugin-package` and `debrief-plugin-api` manifest. `Manifest` with `Contribution` (tool, settings, view, MCP tool,
+  extension namespace; `writes` marking on actions) and `Permission` (opened file paths, read/write folders by grant, programs,
+  network hosts, named elevated operations, MCP, memory, CPU), parsed once from `manifest.toml` with limits and typed errors;
+  validated names (`PluginId`, `GrantRef`, `HostPattern`, `Namespace`); a zip with `SHA256SUMS` and a detached Ed25519 signature,
+  bounded reading (traversal, links, size and entry limits), `build`, `extract`, `verify_installed`; keys saved owner-only; trust
+  levels Builtin / Signed / Unsigned with a versioned `TrustStore`. Fuzz targets for the manifest and the archive reader.
 - `paddock-mcp` (plan X22, ADR 0007): the local-only MCP server. `Server` with `ToolDef`/`ResourceDef` registration, `Policy` (off by
   default, read-only tools, actions only by name), schema validation, result caps, cursors, time limits with cancel, panic
   containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers
@@ -489,6 +523,12 @@ Conventional Commits; one semver tag for the whole repo.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
+### Changed
+- This repository's own documentation screenshots (the gallery and the shell demo, `ui/docs/screenshots`) are taken by the kit's
+  `captureDocScreens` (`ui/e2e/screenshots.spec.ts`, `npm run screenshots`): 1440 x 900 at twice the density, a fake clock at one
+  fixed time, UTC and en-GB, both themes, with a `hashes.json`. `captureDocScreens` accepts `folder/name` screens and an `element`
+  to photograph. Conformance C24 takes its screenshot folders from `screenshotDirs` in `paddock.conformance.json` (this repository:
+  `ui/docs/screenshots`). The images are regenerated and wait for a fresh review (no `REVIEWED.md` rows yet, so C24 reports them).
 - `@decryp7/paddock-ui/shell/mcp` (plan X22, ADR 0007): Settings > AI access (MCP). `McpBackend` (Tauri over `mcp_get`, `mcp_save`, `mcp_issue_key`,
   `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear` and the `paddock://mcp` event; in-memory with the engine's refusals), the per-window `McpStore`,
   `defineMcpSettingsPage`/`defineMcpKeyDialog`/`defineMcpRevokeDialog`, `provideShellMcp`/`provideMcpBackend`. The page `PdMcpPage` (`/shell/mcp/page`): the

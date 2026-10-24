@@ -147,7 +147,11 @@ export class DockLayout {
       if (!mins.length) continue;
       const minimumWidth = Math.max(...mins.map((m) => m.width));
       const minimumHeight = Math.max(...mins.map((m) => m.height));
-      g.api.setConstraints({ minimumWidth, ...(minimumHeight ? { minimumHeight } : {}) });
+      // In a window smaller than a view's minimum (the plan overflows: 320 px), the group is held to the window, not the
+      // declared size, so the view lays out by its container queries instead of being clipped (review P1-2).
+      const fitW = api.width > 0 ? Math.min(minimumWidth, api.width) : minimumWidth;
+      const fitH = api.height > 0 ? Math.min(minimumHeight, api.height) : minimumHeight;
+      g.api.setConstraints({ minimumWidth: fitW, ...(fitH ? { minimumHeight: fitH } : {}) });
       // The declared minimum, readable from outside (the scenario tests assert every group against it).
       g.element.dataset['minWidth'] = String(minimumWidth);
       g.element.dataset['minHeight'] = String(minimumHeight);

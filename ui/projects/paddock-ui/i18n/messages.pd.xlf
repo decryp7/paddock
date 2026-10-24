@@ -1736,6 +1736,9 @@
       <trans-unit id="pd.settings.show-advanced" datatype="html">
         <source>Show advanced</source>
       </trans-unit>
+      <trans-unit id="pd.settings.storage" datatype="html">
+        <source>Storage</source>
+      </trans-unit>
       <trans-unit id="pd.settings.store.load-failed" datatype="html">
         <source>The settings could not be loaded.</source>
       </trans-unit>
@@ -1912,6 +1915,138 @@
       </trans-unit>
       <trans-unit id="pd.startup.session-restored" datatype="html">
         <source>Your last session was restored.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.cancelling" datatype="html">
+        <source>Cancelling…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear" datatype="html">
+        <source>Clear…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-cache" datatype="html">
+        <source>Clear cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-cache-size" datatype="html">
+        <source>Clear cache (<x id="size"/>)…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-label" datatype="html">
+        <source>Clear <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clearing" datatype="html">
+        <source>Clearing…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-folder" datatype="html">
+        <source>Folder</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-name" datatype="html">
+        <source>Kept</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-cache" datatype="html">
+        <source>The app rebuilds it when it needs it.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-data" datatype="html">
+        <source>This is your own data. It cannot be rebuilt, and clearing it cannot be undone.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-invalid" datatype="html">
+        <source>This window was opened without anything to clear. Close it and choose Clear on the Storage page.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-question" datatype="html">
+        <source>Clear <x id="what"/>? Up to <x id="size"/> is removed.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-title" datatype="html">
+        <source>Clear <x id="what"/>?</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-yes" datatype="html">
+        <source>Clear</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm.title" datatype="html">
+        <source>Clear storage</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.exact" datatype="html">
+        <source><x id="files"/> files, <x id="clearable"/> can be cleared</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.failed" datatype="html">
+        <source>That did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.freed" datatype="html">
+        <source>Cleared. <x id="size"/> freed.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.kind-cache" datatype="html">
+        <source>Cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.kind-data" datatype="html">
+        <source>Your data</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.lede" datatype="html">
+        <source>What this app keeps on your computer. Nothing is removed unless you ask, and only inside the app's own folders.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.loading" datatype="html">
+        <source>Asking what the app keeps…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.measure" datatype="html">
+        <source>Measure again</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.measuring" datatype="html">
+        <source>Measuring what the app keeps…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.no-usage" datatype="html">
+        <source>What the app keeps could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.no-usage-title" datatype="html">
+        <source>What the app keeps could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.show" datatype="html">
+        <source>Show</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.show-label" datatype="html">
+        <source>Show <x id="name"/> in the file manager</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.skipped-many" datatype="html">
+        <source><x id="count"/> items left in place</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.skipped-one" datatype="html">
+        <source>1 item left in place</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.still-working" datatype="html">
+        <source>Still working. This can take a while for big folders; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.stopped" datatype="html">
+        <source>Stopped. <x id="size"/> freed so far; the rest was left as it was.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.table-label" datatype="html">
+        <source>What the app keeps</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.the-cache" datatype="html">
+        <source>the cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.title" datatype="html">
+        <source>Storage</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.total" datatype="html">
+        <source>The app keeps <x id="size"/> on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.working" datatype="html">
+        <source>Working…</source>
       </trans-unit>
       <trans-unit id="pd.table.actions" datatype="html">
         <source>Actions</source>
@@ -2225,11 +2360,29 @@
       <trans-unit id="pd.wb.assistant.allow-hint" datatype="html">
         <source>Lets the assistant propose changes. Each one still asks for your approval.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.answer-failed" datatype="html">
+        <source>The answer failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.answer-ready" datatype="html">
+        <source>Answer ready</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.allow" datatype="html">
         <source>Allow</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.arguments" datatype="html">
+        <source>Arguments</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.decline" datatype="html">
         <source>Decline</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.details" datatype="html">
+        <source>Details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.no-arguments" datatype="html">
+        <source>None</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
+        <source>Tool</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.attached" datatype="html">
         <source>Attached context</source>
@@ -2254,6 +2407,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.delete" datatype="html">
         <source>Delete conversation</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.deleted" datatype="html">
+        <source>Deleted &quot;<x id="title"/>&quot;</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.dismiss" datatype="html">
         <source>Dismiss</source>
@@ -2285,6 +2441,30 @@
       <trans-unit id="pd.wb.assistant.feature" datatype="html">
         <source>The assistant</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.incompatible" datatype="html">
+        <source>Update to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.model" datatype="html">
+        <source>Download a model in Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.not-installed" datatype="html">
+        <source>Install Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.not-running" datatype="html">
+        <source>Start Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.pairing" datatype="html">
+        <source>Connect Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.paused" datatype="html">
+        <source>Resume Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.unavailable" datatype="html">
+        <source>Pitwall is not available right now</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.jump" datatype="html">
+        <source>Jump to latest</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.loading" datatype="html">
         <source>Loading…</source>
       </trans-unit>
@@ -2315,9 +2495,6 @@
       <trans-unit id="pd.wb.assistant.thinking" datatype="html">
         <source>Thinking…</source>
       </trans-unit>
-      <trans-unit id="pd.wb.assistant.title" datatype="html">
-        <source>Assistant</source>
-      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
@@ -2332,6 +2509,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
         <source>(unreadable call)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.undo" datatype="html">
+        <source>Undo</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.view" datatype="html">
         <source>Assistant</source>
@@ -2453,6 +2633,9 @@
       <trans-unit id="pd.wb.dock.layout.fit.undo" datatype="html">
         <source>Undo</source>
       </trans-unit>
+      <trans-unit id="pd.wb.dock.notice.action" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
       <trans-unit id="pd.wb.dock.overflow.many" datatype="html">
         <source><x id="count"/> more tabs</source>
       </trans-unit>
@@ -2527,9 +2710,6 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.panelTab.close" datatype="html">
         <source>Close (Delete)</source>
-      </trans-unit>
-      <trans-unit id="pd.wb.dock.panelTab.menu" datatype="html">
-        <source>Panel menu (Shift+F10)</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.perspective-1" datatype="html">
         <source>Switch to perspective 1</source>
@@ -2648,8 +2828,23 @@
       <trans-unit id="pd.wb.palette.empty" datatype="html">
         <source>Nothing matches</source>
       </trans-unit>
+      <trans-unit id="pd.wb.palette.empty-in" datatype="html">
+        <source>Nothing in <x id="source"/> matches “<x id="query"/>”</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.empty-query" datatype="html">
+        <source>No command matches “<x id="query"/>”</source>
+      </trans-unit>
       <trans-unit id="pd.wb.palette.failed" datatype="html">
         <source>The search failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.common" datatype="html">
+        <source>Frequently used</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.other" datatype="html">
+        <source>Other commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.recent" datatype="html">
+        <source>Recently used</source>
       </trans-unit>
       <trans-unit id="pd.wb.palette.input" datatype="html">
         <source>Type a command, or a prefix to search</source>

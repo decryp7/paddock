@@ -1,0 +1,20 @@
+[package]
+name = "paddock-plugin-api"
+version = "0.1.0"
+description = "What an out-of-process plugin links (ADR 0001): the platform protocol 2.0 (PlatformRequest, HostCall), the Plugin trait and its Contributions (tools with checked schemas, settings, views, MCP tools), the Extension mechanism for an app's own contract, version rules with refusal texts that say who must update, host files, output files and serve()."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+paddock-ipc = { workspace = true }
+paddock-settings = { workspace = true }
+paddock-plugin-package = { workspace = true }
+paddock-view = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+postcard = { version = "1", default-features = false, features = ["use-std"] }

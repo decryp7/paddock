@@ -214,6 +214,18 @@ describe('NotificationsStore', () => {
     await expect(new MemoryNotificationCentre().postNotice({ severity: 'info', title: '  ' })).rejects.toThrow('title');
   });
 
+  it('keeps a notice with a window-local action in this window, with the action as its button', async () => {
+    const { centre } = notifyBed();
+    const store = TestBed.inject(NotificationsStore);
+    await settle();
+    await store.post({ level: 'info', message: 'Layout adjusted', kind: 'pd.wb.dock.layout-fit', action: { type: 'pd.wb.dock.notice' } });
+    await store.post({ level: 'info', message: 'Layout adjusted', kind: 'pd.wb.dock.layout-fit', action: { type: 'pd.wb.dock.notice', n: 2 } });
+    expect(store.local().map((n) => [n.cause, n.count, n.primary])).toEqual([['ui:pd.wb.dock.layout-fit:Layout adjusted', 2, { type: 'pd.wb.dock.notice', n: 2 }]]);
+    expect((await centre.list()).notices).toEqual([]);
+    store.postLocal({ level: 'info', message: 'Layout adjusted', kind: 'pd.wb.dock.layout-fit' });
+    expect(store.local()[0]?.primary).toEqual({ type: 'pd.wb.dock.notice', n: 2 });
+  });
+
   it('merges the notices it keeps by kind and text, with a count, and lists them', async () => {
     const { clock } = notifyBed();
     const store = TestBed.inject(NotificationsStore);

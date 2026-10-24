@@ -1,3 +1,4 @@
+import { demoAccent } from './app/params';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { inTauri } from '@decryp7/paddock-ui/ipc';
 import { provideAppearance } from '@decryp7/paddock-ui/shell';
@@ -22,7 +23,7 @@ export function bootDialogWindow(route: DialogRoute): Promise<unknown> {
     dialogWindowConfig({
       dialogs: [],
       providers: [
-        provideAppearance({ accent: 'graphite' }),
+        provideAppearance({ accent: demoAccent() }),
         provideStartupBackend(() => (ipc ? new TauriStartupBackend(ipc) : new MockStartupBackend())),
         provideStartupContract(),
         provideDialogUiSync(panels ? tauriPanelsIo(panels) : new InPageDesktop().window(route.label)),

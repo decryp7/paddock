@@ -12,6 +12,8 @@ describe('PanelTab', () => {
     expect(tab.element.textContent).toContain('Renamed');
     const x = tab.element.querySelector<HTMLElement>('.pd-dock-tab-close')!;
     expect(x.getAttribute('aria-hidden')).toBe('true');
+    expect(x.querySelector('svg')!.getAttribute('width')).toBe('14');
+    expect(tab.element.querySelector('.pd-dock-tab-menu')).toBeNull();
     x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     x.click();
     expect(close).toHaveBeenCalledOnce();
