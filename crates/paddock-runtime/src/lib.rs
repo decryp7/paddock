@@ -5,7 +5,7 @@
 //!   size and SHA-256. Parsed once into typed values; anything wrong refuses the whole catalogue with a reason.
 //! * [`RuntimeStore`]: the runtime's folder in the app data folder. [`RuntimeStore::install`] runs as one job with
 //!   phases on their own scales: the download through `paddock-download` (hashed while written, resumable), `unpack`
-//!   (bytes of the expanded size), `self-test` and `install`. A release is used only after its self-test passed; the
+//!   through `paddock-archive` (zip, tar, tar.gz, tar.xz; bytes of the expanded size), `self-test` and `install`. A release is used only after its self-test passed; the
 //!   one in use stays until then and is kept afterwards for [`RuntimeStore::rollback`]. A release that fails its
 //!   self-test, or that the app later finds broken ([`RuntimeStore::quarantine`]), is moved aside and never used again.
 //! * [`RuntimeKind`]: what differs per runtime: where the executable is inside the archive and how to test it.
@@ -24,19 +24,18 @@ mod catalogue;
 mod error;
 mod platform;
 mod store;
-mod unpack;
 
 pub use catalogue::{
     ArchiveKind, Catalogue, FORMAT, MAX_ARCHIVE_BYTES, MAX_CATALOGUE_BYTES, MAX_PLATFORMS, Pinned,
     is_folder_name,
 };
 pub use error::RuntimeError;
+pub use paddock_archive::Options as ArchiveOptions;
 pub use platform::{Arch, OsKind, Platform};
 pub use store::{
     DEFAULT_KEEP_QUARANTINED, Installed, MARKER, QuarantineRecord, RuntimeKind, RuntimeStore,
     STATE_FILE, Status,
 };
-pub use unpack::{UnpackLimits, unpack_zip};
 
 /// Result of this crate.
 pub type Result<T> = std::result::Result<T, RuntimeError>;

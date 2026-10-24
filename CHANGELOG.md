@@ -11,7 +11,7 @@ Conventional Commits; one semver tag for the whole repo.
   memory cap, the DevTools client that knows when the user closed a window, pages (snapshot, wait until readable, capture),
   both apps' readiness and challenge rules, discovery that gives tests only `CHROMIUM_TEST_PATH`, the pinned Chrome for Testing
   runtime and a fake browser for tests. `paddock-runtime` installs pinned runtimes (Chromium now, FFmpeg and llama.cpp later)
-  from a checked catalogue as one job (download hashed while written, unpack, self-test, install), keeps the previous release
+  from a checked catalogue as one job (download hashed while written, unpack through `paddock-archive`, self-test, install), keeps the previous release
   for rollback and quarantines a release that fails.
 - `@decryp7/paddock-ui/workbench/dock` (plan X50 W2a, W2b): the workbench dock over dockview (optional peer, loaded on first use): `<pd-dock />`,
   `WorkbenchDock` from `provideWorkbenchDock` (`showView`, `closeView`, `openPanels`, `activePanel`, perspectives, named layouts, `verdict`/`onWindowPlan`

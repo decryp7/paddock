@@ -349,7 +349,9 @@ mod tests {
         assert_eq!(installed(&store), Some(b));
     }
 
+    #[cfg(unix)]
     struct Serve(Vec<u8>);
+    #[cfg(unix)]
     impl paddock_download::Transport for Serve {
         fn get(
             &self,

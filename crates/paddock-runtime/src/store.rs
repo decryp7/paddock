@@ -1,6 +1,6 @@
 use crate::catalogue::{Pinned, is_folder_name};
-use crate::unpack::{UnpackLimits, unpack_zip};
 use crate::{Result, RuntimeError};
+use paddock_archive::{ArchiveError, Links, Options};
 use paddock_download::{Downloader, Integrity, Request, phases};
 use paddock_env::{AppDirs, VersionedFile};
 use paddock_jobs::time::{Clock, SystemClock};
@@ -103,7 +103,7 @@ pub struct RuntimeStore {
     name: String,
     state: VersionedFile<State>,
     keep_quarantined: usize,
-    limits: UnpackLimits,
+    archive: Options,
     clock: Arc<dyn Clock>,
     busy: Mutex<()>,
 }
@@ -114,6 +114,23 @@ impl std::fmt::Debug for RuntimeStore {
             .field("root", &self.root)
             .field("name", &self.name)
             .finish_non_exhaustive()
+    }
+}
+
+/// How runtime archives are unpacked: `paddock-archive`'s limits, links kept inside the tree (macOS frameworks link
+/// `Versions/Current`), permissions from the archive.
+fn default_archive_options() -> Options {
+    Options {
+        links: Links::Keep,
+        ..Options::default()
+    }
+}
+
+/// A cancel stays a cancel; everything else says what is wrong with the archive.
+fn archive_error(e: ArchiveError) -> RuntimeError {
+    match e {
+        ArchiveError::Cancelled(r) => RuntimeError::Cancelled(r),
+        e => RuntimeError::Archive(e.to_string()),
     }
 }
 
@@ -172,7 +189,7 @@ impl RuntimeStore {
             root,
             name: name.to_string(),
             keep_quarantined: DEFAULT_KEEP_QUARANTINED,
-            limits: UnpackLimits::default(),
+            archive: default_archive_options(),
             clock: Arc::new(SystemClock),
             busy: Mutex::new(()),
         })
@@ -190,10 +207,10 @@ impl RuntimeStore {
         self
     }
 
-    /// Bounds for unpacking archives.
+    /// How archives are unpacked (limits, links, permissions); see `paddock_archive::Options`.
     #[must_use]
-    pub fn with_limits(mut self, limits: UnpackLimits) -> Self {
-        self.limits = limits;
+    pub fn with_archive_options(mut self, options: Options) -> Self {
+        self.archive = options;
         self
     }
 
@@ -411,7 +428,7 @@ impl RuntimeStore {
         staging: &Path,
         sha256: &str,
     ) -> Result<Installed> {
-        unpack_zip(archive, staging, &self.limits, ctx)?;
+        paddock_archive::extract(archive, staging, &self.archive, ctx).map_err(archive_error)?;
         let rel = kind.locate(staging).ok_or(RuntimeError::NoExecutable)?;
         let rel_text = slashed(&rel).ok_or(RuntimeError::NoExecutable)?;
         let exe = staging.join(&rel);
@@ -668,6 +685,12 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         assert!(remove_dir(&file).is_err(), "a file is not a folder");
         assert!(remove_dir(&d.path().join("none")).is_ok());
+        let cancelled = archive_error(ArchiveError::Cancelled(paddock_jobs::CancelReason::User));
+        assert!(matches!(cancelled, RuntimeError::Cancelled(_)));
+        assert!(matches!(
+            archive_error(ArchiveError::Duplicate("a".into())),
+            RuntimeError::Archive(_)
+        ));
     }
 
     #[test]

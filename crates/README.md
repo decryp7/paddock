@@ -118,7 +118,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-panels` | pop-out panel windows, drag ghost, UI-state forwarding (X50 W3) | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `paddock-chromium` | the one Chromium driver: discovery (tests only `CHROMIUM_TEST_PATH`), one command-line builder with the start page last, `Sandbox::decide`, supervised launch with a time limit on an injected clock and a memory cap, DevTools client, pages, readiness and challenge rules, AI cue, the pinned Chrome for Testing runtime, a fake browser for tests (plan X14) | yes (Debrief, Spotter; Sighter later); built |
-| `paddock-runtime` | pinned runtimes (Chromium, FFmpeg, llama.cpp): a TOML catalogue per runtime (per-platform URL, size, SHA-256), a versioned store that installs through `paddock-download` as one job (download, unpack, self-test, install), keeps the previous release for rollback and quarantines a release that fails (plan X14) | yes (Debrief: Chromium, FFmpeg, llama.cpp; Spotter: Chromium; Pitwall: llama.cpp); built |
+| `paddock-runtime` | pinned runtimes (Chromium, FFmpeg, llama.cpp): a TOML catalogue per runtime (per-platform URL, size, SHA-256), a versioned store that installs through `paddock-download` and `paddock-archive` as one job (download, unpack, self-test, install), keeps the previous release for rollback and quarantines a release that fails (plan X14) | yes (Debrief: Chromium, FFmpeg, llama.cpp; Spotter: Chromium; Pitwall: llama.cpp); built |
 
 ## `paddock-jobs` Tauri adapter (plan S9)
 
@@ -1117,18 +1117,18 @@ let exe = store.active().map(|i| i.executable);                     // the relea
 
 - Catalogue (`format = 1`, `name`, `version`, `source`, `license`, `[[platform]]` with `key` = `<windows|macos|linux>-<x86_64|
   aarch64>`, `url` (https, or http to the loopback for tests), `size`, `sha256`): unknown keys, a name or version that is not a
-  folder name, a size of 0 or over 4 GiB, a bad checksum, a platform twice and an archive that is not a `.zip` refuse it whole.
+  folder name, a size of 0 or over 4 GiB, a bad checksum, a platform twice and an archive that is not a zip or tar
+  (`.zip`, `.tar`, `.tar.gz`/`.tgz`, `.tar.xz`) refuse it whole.
 - `RuntimeKind` says what differs: `locate(root)` (the program inside the unpacked tree) and `self_test(exe, version)` (bounded,
   checks the version). `install` is one job: the download's phases (hashed while written, resumable from `downloads/`), then
-  `unpack` (bytes of the expanded size; paths and links that leave the folder, more than 100,000 entries or 4 GiB, a damaged
-  entry are refused before or while writing; set-user-id bits dropped), `self-test`, `install` (uncancellable rename).
+  `unpack` through `paddock-archive` (its limits and guards; links kept inside the tree; `with_archive_options` to change
+  them), `self-test`, `install` (uncancellable rename).
   Cancel works up to the swap and keeps the partial download.
 - The release in use stays until the new one passed; it becomes `previous` for `rollback(kind)` (which re-tests it); older
   releases are removed. A release that fails its self-test, and one the app reports with `quarantine(version, reason)`, moves
   to `.quarantine/` (the newest three kept, listed by `quarantined()` for diagnostics); the previous release takes over.
 - `state.json` is a `paddock_env::VersionedFile`; a lost or damaged one falls back to the newest complete folder on disk
   (each release folder has its `runtime.json` marker). One install at a time per store (`.lock`, across processes: `Busy`).
-- Only `.zip` archives today (Chrome for Testing; FFmpeg and llama.cpp for Windows and macOS). Tar archives are a gap.
 
 ## `paddock-chromium` (plan X14)
 

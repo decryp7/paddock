@@ -3417,12 +3417,15 @@ dependencies = [
 name = "paddock-runtime"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "log",
+ "paddock-archive",
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
  "serde",
  "serde_json",
+ "tar",
  "tempfile",
  "toml 0.9.12+spec-1.1.0",
  "zip",
