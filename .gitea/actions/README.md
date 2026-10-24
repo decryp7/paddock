@@ -23,6 +23,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `macos-verify` | `codesign --verify --deep --strict` on the .app and the DMG, sidecars with `--self-test` (rule 23) | `macos-verify-bundle.sh` copies |
 | `install-test-browser` | the pinned Chrome for Testing (SHA-256 checked), `<APP>_REQUIRE_TEST_BROWSER=1` | Debrief's `install-test-browser.mjs` |
 | `licences` | `cargo deny`, `npm audit`, commit messages on pull requests | the `licences` job in five workflows |
+| `sidecar-self-test` | rule 23 on Linux and Windows bundles: every sidecar starts with `--self-test` (`paddock-sidecar self-test`); a .deb is unpacked, never installed | the shell demo's release job |
 | `conformance` | `paddock-conformance` with the Paddock checkout, summary in the job | new |
 | `publish-release` | release notes with the First launch block, `latest.json`, the Gitea release | the release job's steps |
 | `host-cleanup` | stray processes, temp folders and build outputs on a host runner | Pitwall `macos-cleanup.sh` |

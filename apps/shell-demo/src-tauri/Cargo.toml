@@ -35,6 +35,7 @@ paddock-commands = { path = "../../../crates/paddock-commands", features = ["tau
 paddock-dialogs = { path = "../../../crates/paddock-dialogs", features = ["tauri"] }
 paddock-diag = { path = "../../../crates/paddock-diag", features = ["tauri"] }
 paddock-env = { path = "../../../crates/paddock-env" }
+paddock-files = { path = "../../../crates/paddock-files" }
 paddock-log = { path = "../../../crates/paddock-log" }
 paddock-health = { path = "../../../crates/paddock-health", features = ["tauri", "os-notify"] }
 tauri-plugin-notification = "2.7"

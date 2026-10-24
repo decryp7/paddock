@@ -35,7 +35,7 @@ describe('shell-demo dialogs', () => {
         providers: dialogBaseProviders,
         baseCommands: DIALOG_BASE_COMMANDS,
         answers: { window_ready: { recovered: null, ui: null } },
-        inputs: { 'sd.rename': { current: 'Demo' }, 'pd.channels.secret': { channelId: 'slack', label: 'Slack', kind: 'token' } },
+        inputs: { 'sd.rename': { current: 'Demo' }, 'pd.channels.secret': { channelId: 'slack', label: 'Slack', kind: 'token' }, 'pd.channels.remove': { channelId: 'slack', name: 'Slack' } },
       });
       expect(report.sent).toContain('window_ready');
       if (def.id === 'sd.inspector') expect(report.sent).toContain('demo_status');
