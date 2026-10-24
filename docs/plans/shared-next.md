@@ -422,7 +422,7 @@ gets one mechanism and one check:
   `clock.rs`/`time.rs` ports (Spotter `spotter-engine`, Dyno `dyno-plugin-host`, Debrief `debrief-agent`) and back-off
   loops (Pitwall `backoff.rs`, Dyno `supervision.rs`, Debrief `debrief-ipc/supervisor.rs`, Pitcrew `restart.rs`, which
   keeps its crash-loop cooldown on top of `Backoff`).
-- Check **C30** (proposed for `@decryp7/paddock-conformance`): in Rust test code (`tests/`, `#[cfg(test)]` modules,
+- Check **C30** (built, warning level, `conformance/src/checks/C30-wall-clock.mjs`; the text below is the original proposal): in Rust test code (`tests/`, `#[cfg(test)]` modules,
   `src/**/tests.rs`) flag an assertion whose operand is `elapsed()`, `Instant::now()` arithmetic or
   `SystemTime::now()` compared with a `Duration` (`assert!(t.elapsed() < ..)`, `assert!(.. <= Duration::..)` on a measured
   value), and `thread::sleep` used to wait for another thread's effect; in TypeScript specs `performance.now()`/`Date.now()`
