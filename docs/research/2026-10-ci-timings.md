@@ -34,7 +34,7 @@ comments is replaced, so this text survives.
 | `rust format + clippy` | 2m20s to 3m40s; cache restore 7s and save 6s |
 | Per-job setup (checkout, toolchain, apt, setup-node) | about 20s in Debrief; 1 to 2 min in Pitwall and Pitcrew |
 | Queue, first-wave jobs | median 4 to 5s on every runner; p90 4m10s (d-gtr9, d7-nas), 6m55s (Mac mini), 7m14s (Windows VM) |
-| Slower runner | `d7-nas` is 1.5x slower than `d-gtr9` for the same job (median over 13 job names, up to 2.4x); an e2e shard there took 38m versus 27m |
+| Slower runner | `d7-nas` is 1.5x slower than `d-gtr9` for the same job (median over 13 job names, up to 2.4x); an e2e shard 2 there took 37m versus 24m |
 
 ## Checking the estimates in 2026-10-ci-speed.md
 
@@ -48,7 +48,7 @@ comments is replaced, so this text survives.
 | Build the UI once, "1 to 3 min per shard" (option 3) | One Angular build is about 25s (the whole `ng build` family is 53 to 78s in the frontend job); the shard `Install` step is 23s. The shard's build time is inside the 20 to 30 min test step | **Corrected: about 0.5 to 1 min per shard, not 1 to 3.** Worth doing only as a side effect. |
 | Coverage adds "20 to 40 %" to the unit-test step (option 7) | Vitest is 2m25s in a 4m10s job that finishes 26 minutes before e2e; the coverage cost itself cannot be separated from these logs | **Not measurable here; no wall-clock effect** while e2e is the pole (runner-minutes only). |
 | nextest archive pays off "only if the run phase exceeds about 6 min" (option 6) | nextest run is 2m30s (3670 tests, 221 binaries) | **Confirmed: skip it.** |
-| Queue time "invisible" (option 5) | Median queue is 4 to 5s; the tail is the issue: p90 4 to 7 min, worst on the Mac mini and the Windows VM (single host runners). `d7-nas` takes about 12% of Linux jobs and is 1.5x slower, so unlucky placement alone adds 8 to 11 min to an e2e shard | **Corrected: capacity is not a median problem; the slow runner and the host runners cause the tail.** |
+| Queue time "invisible" (option 5) | Median queue is 4 to 5s; the tail is the issue: p90 4 to 7 min, worst on the Mac mini and the Windows VM (single host runners). `d7-nas` takes about 19% of Linux jobs and is 1.5x slower, so unlucky placement alone adds about 13 min to an e2e shard | **Corrected: capacity is not a median problem; the slow runner and the host runners cause the tail.** |
 | "Many pushes skip half the jobs" (option 4) | 58 of 88 Debrief build runs in the window were cancelled and 22 failed; only 8 completed green | **Strengthened: most CI minutes are spent on runs that are cancelled or failing, which supports path filtering and the "fix locally first" rules more than any compile speed-up.** |
 | sccache is absent | Confirmed: no `sccache` or `RUSTC_WRAPPER` in the step names or logs | **Confirmed.** |
 
