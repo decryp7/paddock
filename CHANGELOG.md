@@ -12,7 +12,7 @@ Conventional Commits; one semver tag for the whole repo.
   `resolveTokens` and `definedAccents`, the contrast and colour-vision targets of `test:tokens` as pure functions an app runs on its
   own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C31: an
   e2e spec runs axe, every dialog of the contract file is covered, warnings for a missing keyboard flow or accent test. The shell
-  demo's `shell-demo-a11y.spec.ts` runs it all.
+  demo's `shell-demo-a11y.spec.ts` runs it all. `ShellDialogs.loaded()` now waits for the dialog shell itself (a window still on the splash passed it).
 - `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
   It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
   actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
@@ -178,6 +178,12 @@ Conventional Commits; one semver tag for the whole repo.
   wears an app's colour; held to the same token tests as Pacenotes and Sighter.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
+
+### Fixed
+- The About, Updates and What's New contents were unstyled: their stylesheet still used the old class names (`.btn`, `.muted`, ...)
+  while the templates use the `pd-` ones, so the legal-text buttons failed colour contrast in the light theme (found by the new
+  axe check over every dialog window). The shell demo's dialog buttons set white text instead of `--pd-on-accent` and failed
+  contrast in the dark theme.
 
 ### Changed
 - Breaking (plan X20): `paddock-jobs`, `paddock-log` and `paddock-health` share one `Clock` (`paddock_jobs::time`). The old
