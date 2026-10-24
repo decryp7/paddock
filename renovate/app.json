@@ -1,0 +1,42 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "The Renovate preset every Paddock app extends: `local>decryp7/paddock//renovate/app` (plan X27). One weekly PR for ordinary updates, security fixes at any time, the decryp7 crates and packages in one PR per Paddock release, shared CI actions pinned by tag.",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "schedule": ["before 6am on monday"],
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
+  "vulnerabilityAlerts": { "enabled": true, "groupName": null, "schedule": ["at any time"] },
+  "ignorePaths": ["**/node_modules/**"],
+  "packageRules": [
+    {
+      "description": "One weekly PR for every non-security update; security fixes come as their own PRs at any time",
+      "matchPackageNames": ["*"],
+      "groupName": "weekly dependency updates",
+      "groupSlug": "weekly"
+    },
+    {
+      "description": "Paddock crates and packages (registry decryp7, scope @decryp7) move together: one PR per Paddock release (ADR 0012 section 8)",
+      "matchPackageNames": ["/^paddock-/", "/^@decryp7\\//"],
+      "groupName": "paddock release",
+      "groupSlug": "paddock",
+      "schedule": ["at any time"]
+    },
+    {
+      "description": "Paddock's shared CI actions and workflows are pinned by release tag, not by digest (plan D7)",
+      "matchPackageNames": ["decryp7/paddock"],
+      "matchManagers": ["github-actions"],
+      "pinDigests": false,
+      "groupName": "paddock release",
+      "groupSlug": "paddock"
+    },
+    {
+      "description": "Gitea Actions only supports v3 of the artifact actions",
+      "matchPackageNames": ["actions/upload-artifact", "actions/download-artifact"],
+      "allowedVersions": "<4"
+    },
+    {
+      "description": "Node follows app/.nvmrc, which CI and the host runners must match; bump it by hand",
+      "matchPackageNames": ["node"],
+      "enabled": false
+    }
+  ]
+}

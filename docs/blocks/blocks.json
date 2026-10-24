@@ -1,0 +1,23 @@
+{
+  "$comment": "The shared doc blocks (plan X43). `name` is the block id in the marker, `file` its source here (`rules` is derived from ../rules.md), `heading` the line that starts the section in an app's file; whole-file blocks have no heading. Synced into apps by `paddock-conformance sync` and checked by C23.",
+  "blocks": [
+    { "name": "rules", "source": "rules", "heading": "## Paddock rules (binding)" },
+    { "name": "design-principles", "file": "design-principles.md", "heading": "## Design principles" },
+    { "name": "where-logic-lives", "file": "where-logic-lives.md", "heading": "## Where logic lives" },
+    { "name": "working-in-parallel", "file": "working-in-parallel.md", "heading": "## Working in parallel (agents)" },
+    { "name": "style", "file": "style.md", "heading": "## Style" },
+    { "name": "working-practices", "file": "working-practices.md", "heading": "## Working practices" },
+    { "name": "suite-lessons", "file": "suite-lessons.md", "whole": true },
+    { "name": "releasing", "file": "releasing.md", "heading": "## Releasing from a tag" },
+    { "name": "first-launch", "file": "first-launch.md", "heading": "### First launch" },
+    { "name": "macos-notes", "file": "macos-notes.md", "heading": "## macOS notes" },
+    { "name": "linux-notes", "file": "linux-notes.md", "heading": "## Linux notes" }
+  ],
+  "defaultTargets": {
+    "AGENTS.md": ["rules", "design-principles", "where-logic-lives", "working-in-parallel", "style", "working-practices"],
+    "docs/suite-lessons.md": ["suite-lessons"],
+    "docs/releasing.md": ["releasing", "first-launch"]
+  },
+  "optionalTargets": ["docs/suite-lessons.md", "docs/releasing.md", "docs/macos.md", "docs/linux.md"],
+  "readmeHeadings": ["## Install", "## Use", "## Architecture", "## Develop", "## Releasing", "## Licence"]
+}

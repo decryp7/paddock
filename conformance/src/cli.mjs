@@ -4,12 +4,15 @@ import { checks } from './checks/index.mjs';
 import { runHermetic } from './hermetic.mjs';
 import { formatText, writeOutputs } from './report.mjs';
 import { runChecks } from './runner.mjs';
+import { ownPaddock } from './sync/paddock-root.mjs';
+import { syncMain } from './sync/main.mjs';
 
 const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C04,C06] [--json] [--out file] [--summary file]
                            [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
                            [--preflight vX.Y.Z [--api url --repo owner/name]]
        paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
        paddock-conformance commit-lint --file <path> | --range <rev-range>
+       paddock-conformance sync --app <name> [--root <dir>] [--paddock <dir>] [--write]   # C28 baseline files and C23 doc blocks
        paddock-conformance list`;
 
 const VALUE = new Set(['app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'allow-home']);
@@ -21,7 +24,7 @@ export function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) throw new Error(`unexpected argument: ${a}`);
     const k = a.slice(2);
-    if (k === 'json' || k === 'keep') o[k] = true;
+    if (k === 'json' || k === 'keep' || k === 'write') o[k] = true;
     else if (VALUE.has(k)) {
       if (argv[i + 1] === undefined) throw new Error(`--${k} needs a value`);
       o[k] = argv[++i];
@@ -42,6 +45,7 @@ export async function main(argv, { log = console.log, err = console.error, env =
       for (const c of checks) log(`${c.id}  rule ${c.rule}  ${c.title}`);
       return 0;
     }
+    if (cmd === 'sync') return syncMain(parseArgs(rest), { log, err });
     if (cmd === 'commit-lint') return commitLintMain(rest, process.cwd(), err);
     if (cmd === 'run') {
       const dash = rest.indexOf('--');
@@ -60,7 +64,7 @@ export async function main(argv, { log = console.log, err = console.error, env =
       options: {
         bundle: o.bundle && resolve(o.bundle),
         artifacts: o.artifacts && resolve(o.artifacts),
-        paddock: o.paddock && resolve(o.paddock),
+        paddock: o.paddock ? resolve(o.paddock) : ownPaddock(),
         version: o.version,
         preflight: o.preflight,
         api: o.api,

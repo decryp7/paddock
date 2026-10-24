@@ -26,12 +26,26 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C14 | tests run hermetically (`run --`); workflows that run tests without it are warned | |
 | C15 | no test or script uses the installed Chrome; CI requires the test browser | |
 | C16 | no spec or mock hard-codes the current app version | |
-| C23 | commit messages (no Co-Authored-By, no AI attribution); `commit-lint` CLI | a git checkout |
+| C23 | commit messages (no Co-Authored-By, no AI attribution); `commit-lint` CLI. With `--paddock`: the shared doc blocks of `AGENTS.md` (rules and the common sections), `docs/suite-lessons.md`, `docs/releasing.md` equal `docs/blocks` | a git checkout; `--paddock` for the blocks |
+| C28 | the repo baseline (`.editorconfig`, `rustfmt.toml`, licences, `deny.toml` tables, `cliff.toml`, `lefthook.yml`, Renovate preset, tsconfig, Cargo profiles, ...) equals `templates/repo` | `--paddock` |
+
+## Sync (X27, X43)
+
+```sh
+paddock-conformance sync --app pitcrew [--root <app>] [--paddock <paddock checkout>] [--write]
+```
+
+Shows what differs from Paddock's `templates/repo` (C28) and `docs/blocks` (C23); `--write` repairs it. A doc block sits
+between `<!-- paddock:block NAME rev=XXXXXXXX -->` and `<!-- /paddock:block NAME -->`; the section an app had under the
+same heading is replaced the first time, text outside the markers is never touched. The `rules` block is derived from
+`docs/rules.md`. Change the text in Paddock first. Not every app section moves: put what is specific to the app in its
+own sections ("Design principles in Pitcrew").
 
 ## Configuration
 
 `paddock.conformance.json` (optional): `app`, `appDir`, `tauriDir`, `workflowsDir`, `sidecars` (`[{ "name": "x-worker", "args": ["--self-test"] }]`),
-`nonGates` (job ids the release job need not wait for), `commitRange`.
+`nonGates` (job ids the release job need not wait for), `commitRange`, `appName` (display name for templates; default the id with a capital),
+`docBlocks` (`{ "AGENTS.md": ["rules", ...] }` replaces the default targets), `baselineSkip` (template paths this app does not take; prefer a waiver).
 
 `paddock.waivers.toml`:
 

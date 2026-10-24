@@ -1,0 +1,8 @@
+{
+  "name": "@decryp7/paddock-tsconfig",
+  "version": "0.1.0",
+  "description": "The TypeScript compiler options every Paddock Angular app shares (strict, no unchecked index access, strict templates).",
+  "license": "MIT OR Apache-2.0",
+  "files": ["angular.json", "base.json"],
+  "exports": { "./angular.json": "./angular.json", "./base.json": "./base.json" }
+}
