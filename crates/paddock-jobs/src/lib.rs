@@ -7,6 +7,7 @@
 //!   with its own scale ([`Unit`], known or unknown total).
 //! * [`Reporter`] throttles and coalesces updates; [`JobRegistry`] and [`JobContext`] own ids, cancel tokens and terminal states.
 //! * [`JobPool`] runs job bodies on a bounded worker pool so command handlers return at once ([`assert_nonblocking`] tests that).
+//! * [`journal`] is the activity journal (a bounded, persisted log of what the app did, with undo states).
 //! * [`schedule`] is the family's schedules (every N, times of day, cron; zones, DST, catch-up) and pause windows.
 //! * [`time`] is the family's clock port ([`Clock`], [`SystemClock`], [`FakeClock`]), deadlines and restart back-off.
 //! * [`CancelToken`] is checked cooperatively; [`par_walk`], [`par_map_ordered`], [`pipeline_ordered`] and [`HashingWriter`] honour it
@@ -17,6 +18,7 @@ mod error;
 mod eta;
 mod hash;
 mod job;
+pub mod journal;
 mod map;
 mod model;
 mod pipeline;

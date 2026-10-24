@@ -315,3 +315,43 @@ describe('PdExplorer', () => {
     expect(element.textContent).toContain('Nothing to explore.');
   });
 });
+
+describe('PdExplorer changes', () => {
+  it('reloads a section when the value it depends on changes', async () => {
+    const { signal } = await import('@angular/core');
+    const selected = signal('a');
+    let asked = 0;
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: provideShellTesting<{ sel: () => string }>({
+        context: () => Promise.resolve(() => ({ sel: () => selected() })),
+        providers: [
+          ExplorerStore,
+          provideWorkbenchContributions<{ sel: () => string }>({
+            explorerProviders: [
+              defineExplorerProvider<{ sel: () => string }>({
+                id: 'wd.outline',
+                title: msg('wd.outline', 'Outline'),
+                order: 1,
+                changes: (ctx) => ctx.sel(),
+                roots: (ctx) => {
+                  asked++;
+                  return Promise.resolve({ nodes: [file(`sym-of-${ctx.sel()}`)] });
+                },
+              }),
+            ],
+          }),
+        ],
+      }),
+    });
+    await TestBed.inject(ShellContextHost).load();
+    const { fixture, element } = await render(PdExplorer);
+    await settle(fixture);
+    expect(element.querySelector('[data-node-id="sym-of-a"]')).not.toBeNull();
+    selected.set('b');
+    await settle(fixture);
+    await settle(fixture);
+    expect(element.querySelector('[data-node-id="sym-of-b"]')).not.toBeNull();
+    expect(asked).toBe(2);
+  });
+});
