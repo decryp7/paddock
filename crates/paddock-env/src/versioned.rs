@@ -306,14 +306,17 @@ impl<T: Serialize + DeserializeOwned + Default> VersionedFile<T> {
 
     fn read(&self, path: &Path) -> std::result::Result<Option<Vec<u8>>, Read> {
         use std::io::Read as _;
-        // Windows refuses to open a folder as a file ("access denied"), so say what is wrong before trying.
-        if std::fs::metadata(path).is_ok_and(|m| m.is_dir()) {
-            return Err(Read::Io("it is not a file".into()));
-        }
         let file = match std::fs::File::open(path) {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(Read::Io(e.to_string())),
+            // Windows refuses to open a folder as a file ("access denied"); say what is wrong instead.
+            Err(e) => {
+                return Err(Read::Io(if path.is_dir() {
+                    "it is not a file".into()
+                } else {
+                    e.to_string()
+                }));
+            }
         };
         if file.metadata().is_ok_and(|m| !m.is_file()) {
             return Err(Read::Io("it is not a file".into()));
