@@ -9,6 +9,9 @@ export const NOTIFICATIONS_EVENT = 'paddock://notifications';
 /** Open this message (its OS notification was clicked); the payload is a `NoticeId`. */
 export const NOTIFICATIONS_OPEN_EVENT = 'paddock://notifications-open';
 
+/** Run this action of a message (a button of its OS notification that only a window can run); the payload is a `NoticeActionEvent`. */
+export const NOTIFICATIONS_ACTION_EVENT = 'paddock://notifications-action';
+
 /** The notification cause of a service's outage. */
 export const healthCause = (service: string): string => `health:${service}`;
 
@@ -136,6 +139,16 @@ posted: Notice | null,
  * event). It is read before the lists, so a snapshot holds at least the changes up to it.
  */
 revision: number, notices: Array<Notice>, unread: number, };
+
+export type NoticeActionEvent = { 
+/**
+ * The message the button belongs to.
+ */
+id: NoticeId, 
+/**
+ * The action, as the message offered it.
+ */
+action: NoticeAction, };
 
 export type RestoredNotices = { snapshot: NoticesSnapshot, warning: string | null, };
 

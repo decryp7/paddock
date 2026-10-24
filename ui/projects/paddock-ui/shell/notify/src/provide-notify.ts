@@ -14,6 +14,7 @@ import { NotificationsBackend, ServiceHealthBackend } from './backends';
 import { NOTIFICATION_SOURCES, type NotificationSource } from './notification-host.model';
 import { PdNotificationHost } from './notification-host';
 import { NoticeActions } from './notice-actions';
+import { OsActionRunner } from './os-action-runner';
 import { NOTICE_ACTION_HANDLERS, type NoticeActionHandler } from './notify-config';
 import { NotificationsSource } from './notifications-source';
 import { NotificationsStore } from './notifications.store';
@@ -70,6 +71,7 @@ export function provideShellNotify(options: ShellNotifyOptions): EnvironmentProv
     ServiceHealthStore,
     NotificationsStore,
     NoticeActions,
+    OsActionRunner,
     ...provideNotificationSource(NotificationsSource),
   ];
   if (options.ports !== false) providers.push({ provide: SHELL_PORTS, useFactory: (): ShellPorts => ({ ...warnPorts(), notify: notifyPort() }) });
@@ -79,6 +81,7 @@ export function provideShellNotify(options: ShellNotifyOptions): EnvironmentProv
     provideAppInitializer(() => {
       inject(ServiceHealthStore);
       inject(NotificationsStore);
+      inject(OsActionRunner);
       if (!mount) return;
       const host = document.createElement('pd-notification-host');
       document.body.append(host);

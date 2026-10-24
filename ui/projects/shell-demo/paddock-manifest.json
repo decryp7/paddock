@@ -263,12 +263,14 @@
     "pd.appearance",
     "pd.logging",
     "pd.login",
+    "pd.notifications",
     "sd.general",
     "sd.storage"
   ],
   "settingsForms": [
     "pd.appearance",
     "pd.logging",
+    "pd.notifications",
     "sd.general",
     "sd.storage"
   ],
@@ -415,6 +417,7 @@
     "pd.diag.title": "Report a problem",
     "pd.settings.appearance": "Appearance",
     "pd.settings.logging": "Logging",
+    "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",
     "pd.settings.service": "Background service",
     "pd.settings.title": "Settings",

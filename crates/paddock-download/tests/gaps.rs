@@ -9,7 +9,7 @@ use paddock_download::{
     Sha256Digest, phases,
 };
 use paddock_jobs::{
-    CancelReason, CancelToken, EventSink, JobRegistry, JobSnapshot, JobState, ManualClock,
+    CancelReason, CancelToken, EventSink, FakeClock, JobRegistry, JobSnapshot, JobState,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -449,7 +449,7 @@ fn a_panicking_event_sink_does_not_stop_the_download_and_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let req = Request::new(&server.url("/f"), dir.path().join("f.bin"), pinned(&data)).unwrap();
     let sink = Arc::new(Panicky(AtomicU64::new(0)));
-    let jobs = JobRegistry::with_clock(sink.clone(), Arc::new(ManualClock::new()), 0);
+    let jobs = JobRegistry::with_clock(sink.clone(), Arc::new(FakeClock::new()), 0);
     let ctx = jobs.register("download", "Downloading", None);
     let got = downloader().download(&ctx, &req).unwrap();
     assert_eq!(std::fs::read(&got.path).unwrap(), data);
@@ -469,4 +469,44 @@ fn a_healthy_sink_reports_no_panics() {
     let req = Request::new(&server.url("/f"), dir.path().join("f.bin"), pinned(&data)).unwrap();
     let (ctx, _) = job();
     assert_eq!(downloader().download(&ctx, &req).unwrap().sink_panics, 0);
+}
+
+#[test]
+fn a_fetch_takes_a_bounded_number_of_headers_and_a_timeout() {
+    let mut fetch = Fetch::new().timeout(Duration::from_secs(5));
+    let mut refused = None;
+    for i in 0..1000 {
+        match fetch.header(&format!("X-Extra-{i}"), "v") {
+            Ok(next) => fetch = next,
+            Err(e) => {
+                refused = Some(e);
+                break;
+            }
+        }
+    }
+    assert!(matches!(refused, Some(DownloadError::InvalidRequest(m)) if m.contains("at most")));
+}
+
+#[test]
+fn get_bytes_tries_again_when_the_body_is_cut_and_gives_up_when_nothing_answers() {
+    let d = downloader();
+    // The first answer promises 5000 bytes and delivers 100: another attempt.
+    let cut = Server::start(|_, n| match n {
+        0 => Resp::new(200, blob(5000)).cut(100),
+        _ => Resp::new(200, blob(5000)),
+    });
+    assert_eq!(
+        d.get_bytes(&cut.url("/"), &Fetch::new()).unwrap().len(),
+        5000
+    );
+    assert_eq!(cut.log().len(), 2);
+    // Nothing listens on the port: the connection failure is retried, then reported by host.
+    let closed = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}/", listener.local_addr().unwrap())
+    };
+    assert!(matches!(
+        d.get_bytes(&closed, &Fetch::new()),
+        Err(DownloadError::Network { .. })
+    ));
 }

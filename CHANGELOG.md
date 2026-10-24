@@ -30,6 +30,31 @@ Conventional Commits; one semver tag for the whole repo.
   `on_start`, repair, install, uninstall, the registered version in `service-<label>.json`, a cross-copy lock,
   `RepairTracker` progress), `ServiceStatus::health` for `paddock-health`, the `pd.login` launch-at-login section, the
   exe-changed restart (`watch`), the login-shell `PATH` for a supervised program (`supervised`) and the shared verbs.
+- `paddock-pitwall` (ADR 0004, plan workbench section 15): the one Pitwall client, extracted from Debrief 1.1's engine and checked
+  against Pitwall's router. Discovery (`discovery.json` from `paddock-env` folders, Local then Roaming on Windows, else port 11435),
+  the key in `paddock-secrets`, pairing with the user's consent on a background thread, a typed `Client` (health, select, models,
+  jobs, tokens, tasks, embeddings in batches, chat whole or streamed, cancel within a read slice, provenance from `X-Pitwall-*`,
+  capability checks with Pitwall's reasons), retries with back-off and `Retry-After` that never repeat a stream after its first delta,
+  `PitwallError` with `user_message`/`next_step`, `AiState` and `NeedsAiView` for the shared needs-AI component, the Automatic /
+  Pitwall / Built-in choice with `run_or_fallback` (never a silent mix), health reporting whose Repair does not depend on Pitwall, the
+  bounded loopback HTTP transport (also for Debrief's llama-server client, X16 note) and a fake Pitwall (`testing` feature) with a
+  contract test and an optional check against Pitwall's source.
+- `paddock_jobs::time` (plan X20): one clock for the family. `Clock` (monotonic and wall readings, a cancellable `wait`),
+  `SystemClock`, `FakeClock` (moves only with `advance`; `wait_for_waiters` lets a test advance once the work is blocked on
+  it), `Deadline`, and `Backoff`/`BackoffPolicy`/`Retry` (Pitwall's restart policy; `retry_forever` for reconnecting
+  clients). `CancelToken::with_deadline_on(clock, limit)`; `JobRegistry::register_with_deadline` now measures the limit on
+  the registry's clock, so a fake clock runs a job's time limit out without sleeping.
+- OS notifications (plan X8): `paddock-health` `notify::os` and `tauri::os`/`tauri::native` (feature `os-notify`), the four
+  adapters (Debrief, Spotter, Pitcrew, Dyno) as one. One policy (`OsSettings`: level off/alerts/all, quiet hours across
+  midnight with an optional critical bypass, cool-down and burst limits), `screen` and `user_sees` pure, `RateLimiter` per
+  cause key on the injected clock, `OsNotifier` over a `Toaster` port (`PluginToaster` over `tauri-plugin-notification`,
+  `FakeToaster` for tests), toasts with up to three labelled buttons, and `route` for clicks: open the message, repair in the
+  shell, the app's handler (`Setup::on_notice_action`), or `paddock://notifications-action` to the window
+  (`NOTIFICATIONS_ACTION_EVENT`, `NotificationsBackend.onAction`, `NotificationsStore.runFromOs`). `Setup::os_notifier`
+  installs it, with a quiet-hours digest ("N notifications held during quiet hours" once when they end, rate-limited,
+  `Setup::os_digest_every`); `paddock-shell` adds the `pd.notifications` settings page (`Builder::os_notifications`) and the `os-notify`
+  feature. The shell demo shows the Notifications settings page and runs the notifier (the real plugin installed, a fake
+  toaster in tests); `OS_NOTIFICATIONS_CONTRIBUTIONS`, `NOTIFICATIONS_SECTION_FIXTURE` and `OsActionRunner` are the UI side.
 - `paddock-diag` and `@decryp7/paddock-ui/shell/diagnostics` (plan X2, decision D9): Report a problem, the three designs of Debrief,
   Dyno and Pitcrew as one. A diagnostics zip of the app's log (newest part, read from the end), system facts, settings (secrets
   masked) and crash marker, plus the sections an app adds; one `Redactor` (secrets from Pitcrew and Debrief, personal data from Dyno,
@@ -136,6 +161,11 @@ Conventional Commits; one semver tag for the whole repo.
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
 ### Changed
+- Breaking (plan X20): `paddock-jobs`, `paddock-log` and `paddock-health` share one `Clock` (`paddock_jobs::time`). The old
+  `ManualClock`s are gone: use `FakeClock` (`new()`, `at_wall(..)`, `at_wall_ms(..)`, `advance(Duration)`/`advance_ms(u64)`).
+  `paddock-health`'s epoch reading is `Clock::wall_ms` (was `now_ms`); `paddock-log`'s UTC reading is `paddock_log::now_utc(&clock)`
+  (was `Clock::now`); `paddock_health::clock` is removed (the types are at the crate root). `SystemClock` is a unit struct
+  everywhere (`SystemClock::new()` is gone).
 - Breaking, `paddock-download`: `HttpConfig::proxy` is a `ProxyMode` (was `Option<String>`, and the environment was never read;
   now the system's proxy is used unless `ProxyMode::Direct`); `Get` has a `headers` field and `Transport` implementations
   must send them; `DownloadError::NotEnoughSpace` has a `path` field and its message changed; `Downloaded` has a

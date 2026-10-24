@@ -476,6 +476,9 @@
       <trans-unit id="pd.notifications.action-failed" datatype="html">
         <source>The action failed.</source>
       </trans-unit>
+      <trans-unit id="pd.notifications.action-gone" datatype="html">
+        <source>That notification is no longer listed.</source>
+      </trans-unit>
       <trans-unit id="pd.notifications.action-unknown" datatype="html">
         <source>This window cannot do “<x id="action"/>”.</source>
       </trans-unit>
@@ -751,6 +754,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.no-match" datatype="html">
         <source>No settings match “<x id="query"/>”.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.notifications" datatype="html">
+        <source>Notifications</source>
       </trans-unit>
       <trans-unit id="pd.settings.open" datatype="html">
         <source>Settings…</source>

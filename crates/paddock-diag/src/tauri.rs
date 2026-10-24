@@ -233,7 +233,7 @@ impl Diagnostics {
                 &self.dirs,
                 &self.sections,
                 &self.redactor,
-                self.clock.now(),
+                paddock_log::now_utc(&*self.clock),
             );
             let token = format!("r{}", self.next.fetch_add(1, Ordering::Relaxed));
             Cached { token, collected }
@@ -351,7 +351,7 @@ fn start_save<R: Runtime>(
         active.job = Some(ctx.id());
         ctx
     };
-    let suggested = suggested_name(&state.app, state.clock.now());
+    let suggested = suggested_name(&state.app, paddock_log::now_utc(&*state.clock));
     let (app, state, label) = (app.clone(), state.clone(), label.to_string());
     // The save blocks on the native dialog, so it runs on the blocking pool, never on the IPC or main thread.
     ::tauri::async_runtime::spawn_blocking(move || {

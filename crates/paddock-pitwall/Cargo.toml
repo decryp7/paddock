@@ -1,0 +1,28 @@
+[package]
+name = "paddock-pitwall"
+version = "0.1.0"
+description = "The one Pitwall client for every Paddock app: discovery of the local Pitwall, pairing and the key in the credential store, typed chat (streamed, cancellable), embeddings, tasks, tokens and jobs over loopback HTTP, retries, the Auto/Pitwall/Built-in choice with its fallback hook, the AI state apps render, health reporting and a fake Pitwall for contract tests."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+# `paddock_pitwall::testing`: a fake Pitwall on an ephemeral loopback port that mirrors Pitwall's routes (contract tests of
+# this crate and of the apps that use it). Never needed in a release build.
+testing = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+paddock-secrets = { workspace = true }
+paddock-health = { workspace = true }
+paddock-env = { workspace = true }
+paddock-proc = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "contract"
+required-features = ["testing"]

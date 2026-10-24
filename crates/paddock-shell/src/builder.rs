@@ -159,6 +159,18 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
+    /// The "Notifications" settings page (`pd.notifications`): the user's level, quiet hours and limits for OS
+    /// notifications, applied to `settings`, which the app's `OsNotifier` reads. Wire the notifier in
+    /// [`Builder::health_setup`] with `setup.os_notifier(...)` over the same `settings`.
+    pub fn os_notifications(
+        mut self,
+        settings: paddock_health::notify::os::SharedOsSettings,
+    ) -> Self {
+        self.sections
+            .push(crate::notifications::notifications_section(settings));
+        self
+    }
+
     /// The start-up contract and watchdog (default: `Startup::builder().build()`).
     pub fn startup(mut self, startup: Startup<R>) -> Self {
         self.startup = Some(startup);

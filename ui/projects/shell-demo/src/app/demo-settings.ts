@@ -4,6 +4,7 @@ import {
   type MemorySettingsOptions,
   type SettingsChanges,
   type SettingsOverview,
+  NOTIFICATIONS_SECTION_FIXTURE,
   SETTINGS_OVERVIEW_FIXTURE,
   SETTINGS_PROBLEM_FIXTURE,
   TauriSettingsBackend,
@@ -53,7 +54,7 @@ class SharedMemorySettingsBackend extends MemorySettingsBackend {
   }
 
   private overviewNow(): { id: string; values: Record<string, unknown> }[] {
-    return ['pd.appearance', 'sd.general', 'sd.storage', 'pd.logging', 'pd.login'].map((id) => ({ id, values: this.values(id) ?? {} }));
+    return ['pd.appearance', 'sd.general', 'sd.storage', 'pd.notifications', 'pd.logging', 'pd.login'].map((id) => ({ id, values: this.values(id) ?? {} }));
   }
 }
 
@@ -75,8 +76,8 @@ function read(): Record<string, SettingsChanges> {
 export class DemoSettingsEngine {
   private readonly damaged = typeof location !== 'undefined' && new URLSearchParams(location.search).get('settings') === 'damaged';
   readonly backend = new SharedMemorySettingsBackend(
-    // The shell's Logging and Start at login sections (`paddock-diag`, `paddock-service`, written by Rust into their fixtures) beside the sections of the settings fixture.
-    { ...SETTINGS_OVERVIEW_FIXTURE, sections: [...SETTINGS_OVERVIEW_FIXTURE.sections, LOGGING_SECTION_FIXTURE, LOGIN_SECTION_FIXTURE] },
+    // The shell's Notifications, Logging and Start at login sections (written by Rust into their fixtures) beside the sections of the settings fixture.
+    { ...SETTINGS_OVERVIEW_FIXTURE, sections: [...SETTINGS_OVERVIEW_FIXTURE.sections, NOTIFICATIONS_SECTION_FIXTURE, LOGGING_SECTION_FIXTURE, LOGIN_SECTION_FIXTURE] },
     { problem: this.damaged ? SETTINGS_PROBLEM_FIXTURE : null },
   );
 

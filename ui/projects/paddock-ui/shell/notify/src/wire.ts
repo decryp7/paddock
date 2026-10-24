@@ -2,6 +2,7 @@ import type {
   Cause,
   Notice,
   NoticeAction,
+  NoticeActionEvent,
   NoticeSeverity,
   NoticesEvent,
   NoticesSnapshot,
@@ -123,6 +124,14 @@ export function parseNoticesSnapshot(v: unknown): NoticesSnapshot | null {
   const unread = num(v['unread']);
   const revision = num(v['revision']);
   return notices && unread !== null && revision !== null ? { revision, notices, unread } : null;
+}
+
+/** A `NoticeActionEvent` (`paddock://notifications-action`: a button of an OS notification only a window can run), or null. */
+export function parseNoticeActionEvent(v: unknown): NoticeActionEvent | null {
+  if (!isRec(v)) return null;
+  const id = num(v['id']);
+  const action = parseAction(v['action']);
+  return id !== null && action ? { id, action } : null;
 }
 
 /** A `NoticesEvent` (`paddock://notifications`), or null. */

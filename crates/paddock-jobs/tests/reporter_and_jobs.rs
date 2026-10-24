@@ -4,7 +4,7 @@ use paddock_jobs::*;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn reporter(sink: Arc<dyn EventSink>, clock: &ManualClock) -> Reporter {
+fn reporter(sink: Arc<dyn EventSink>, clock: &FakeClock) -> Reporter {
     Reporter::with_clock(
         JobId(1),
         JobKind::new("scan"),
@@ -19,7 +19,7 @@ fn reporter(sink: Arc<dyn EventSink>, clock: &ManualClock) -> Reporter {
 #[test]
 fn first_event_is_queued_and_phases_go_out_at_once() {
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink.clone(), &clock);
     assert_eq!(sink.all()[0].state, JobState::Queued);
     r.start();
@@ -44,14 +44,14 @@ fn first_event_is_queued_and_phases_go_out_at_once() {
 #[test]
 fn updates_are_throttled_coalesced_and_flushed() {
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink.clone(), &clock);
     r.begin_phase(Phase::discovering("walk", "Finding"));
     let base = sink.all().len();
     r.add(1); // within the interval of the phase event: suppressed
     r.add(1);
     assert_eq!(sink.all().len(), base);
-    clock.advance(100);
+    clock.advance_ms(100);
     r.add(1);
     assert_eq!(sink.all().len(), base + 1);
     let last = sink.all().pop().unwrap();
@@ -87,7 +87,7 @@ fn updates_are_throttled_coalesced_and_flushed() {
 #[test]
 fn set_total_switches_from_indeterminate() {
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink.clone(), &clock);
     r.set_total(5); // not in a phase: ignored
     let n = sink.all().len();
@@ -104,17 +104,17 @@ fn set_total_switches_from_indeterminate() {
 #[test]
 fn eta_appears_only_with_known_total_and_enough_data() {
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink.clone(), &clock);
     r.begin_phase(Phase::items("p", "P", 1000));
     for _ in 0..4 {
-        clock.advance(1000);
+        clock.advance_ms(1000);
         r.add(100);
     }
     assert!(r.snapshot().eta_ms.is_some());
     assert!(sink.all().last().unwrap().eta_ms.is_some());
     r.begin_phase(Phase::discovering("q", "Q"));
-    clock.advance(5000);
+    clock.advance_ms(5000);
     r.add(10);
     assert_eq!(sink.all().last().unwrap().eta_ms, None);
 }
@@ -122,7 +122,7 @@ fn eta_appears_only_with_known_total_and_enough_data() {
 #[test]
 fn terminal_state_is_final_and_sets_no_cancel() {
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink.clone(), &clock);
     assert!(!r.finish(JobState::Done), "queued cannot be done");
     assert!(!r.finish(JobState::Queued), "not terminal");
@@ -144,7 +144,7 @@ fn terminal_state_is_final_and_sets_no_cancel() {
 #[test]
 fn finishing_a_running_phase_keeps_count() {
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink.clone(), &clock);
     r.begin_phase(Phase::items("x", "X", 9));
     r.add(4);
@@ -156,7 +156,7 @@ fn finishing_a_running_phase_keeps_count() {
 #[test]
 fn uncancellable_guard_declares_and_restores() {
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink.clone(), &clock);
     r.start();
     {
@@ -179,7 +179,7 @@ fn uncancellable_guard_declares_and_restores() {
 
 #[test]
 fn a_panicking_sink_never_breaks_the_job() {
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(Arc::new(Panicky), &clock);
     r.start();
     r.begin_phase(Phase::items("x", "X", 1));
@@ -189,7 +189,7 @@ fn a_panicking_sink_never_breaks_the_job() {
 
 #[test]
 fn sink_panics_are_counted_so_an_owner_can_surface_them() {
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(Arc::new(Panicky), &clock);
     let first = r.sink_panics(); // the first snapshot, emitted while the reporter was built
     r.start();
@@ -208,7 +208,7 @@ fn sink_panics_are_counted_so_an_owner_can_surface_them() {
 #[test]
 fn poisoned_state_recovers() {
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink.clone(), &clock);
     let r2 = r.clone();
     // Panic while the sink holds the lock is contained, so poison it the hard way: a sink that panics is caught; a second thread
@@ -230,7 +230,7 @@ fn counters() {
     Counter::add(&(), 3);
     assert_eq!(a.load(Ordering::Relaxed), 3);
     let sink = Collect::new();
-    let clock = ManualClock::new();
+    let clock = FakeClock::new();
     let r = reporter(sink, &clock);
     r.begin_phase(Phase::items("x", "X", 9));
     Counter::add(&r, 2);
@@ -298,7 +298,7 @@ fn run_maps_outcomes_and_emits_one_terminal() {
 
 #[test]
 fn registry_cancel_semantics() {
-    let reg = JobRegistry::with_clock(Collect::new(), Arc::new(ManualClock::new()), 100);
+    let reg = JobRegistry::with_clock(Collect::new(), Arc::new(FakeClock::new()), 100);
     assert!(!reg.cancel(JobId(99)));
     let queued = reg.register("a", "A", None);
     assert!(reg.cancel(queued.id()));
@@ -326,8 +326,7 @@ fn registry_cancel_semantics() {
 #[test]
 fn deadline_job_cancels_itself() {
     let reg = JobRegistry::new(Collect::new());
-    let j = reg.register_with_deadline("a", "A", None, Duration::from_millis(0));
-    std::thread::sleep(Duration::from_millis(3));
+    let j = reg.register_with_deadline("a", "A", None, Duration::ZERO);
     assert!(matches!(
         j.run::<()>(|c| c.check()),
         Err(JobError::Cancelled(CancelReason::Deadline))
@@ -337,7 +336,7 @@ fn deadline_job_cancels_itself() {
 #[test]
 fn many_threads_share_one_reporter() {
     let sink = Collect::new();
-    let clock = Arc::new(SystemClock::new());
+    let clock = Arc::new(SystemClock);
     let r = Reporter::with_clock(
         JobId(1),
         JobKind::new("k"),

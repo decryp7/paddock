@@ -208,7 +208,10 @@ fn the_contracts_and_manifest_agree_with_the_plugin_and_the_apps_table() {
             paddock_shell_demo::agent::HEALTH_ID
         ]
     );
-    assert_eq!(builder.section_ids(), ["sd.general", "sd.storage"]);
+    assert_eq!(
+        builder.section_ids(),
+        ["pd.notifications", "sd.general", "sd.storage"]
+    );
 }
 
 #[test]
