@@ -16,6 +16,10 @@ paddock-jobs = { workspace = true }
 paddock-proc = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 paddock-testkit = { workspace = true }

@@ -1,0 +1,25 @@
+# Fuzz target for paddock-archive's readers. Its own workspace, outside the crates' one; run with
+# `cargo +nightly fuzz run archive` from `crates/paddock-archive`.
+[package]
+name = "paddock-archive-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+paddock-archive = { path = ".." }
+tempfile = "3"
+
+[[bin]]
+name = "archive"
+path = "fuzz_targets/archive.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

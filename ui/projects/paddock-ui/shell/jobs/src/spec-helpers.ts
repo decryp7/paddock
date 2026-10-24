@@ -1,29 +1,15 @@
 // Test helpers of the jobs specs (not exported from the entry point).
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { FakeClock } from '@decryp7/paddock-ui/shell/testing';
 import type { SuJobPhase, SuJobSnapshot } from '@decryp7/paddock-ui';
 import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import { MemoryJobsBackend, type JobsBackend } from './jobs-backend';
-import { JOBS_CLOCK, type JobsClock } from './jobs-config';
+import { JOBS_CLOCK } from './jobs-config';
 import { provideShellJobs } from './provide-jobs';
 
-/** A clock moved by hand; `advance` fires every tick that is due (once per call, enough for these specs). */
-export class FakeClock implements JobsClock {
-  time = 1_000;
-  readonly timers = new Set<{ ms: number; tick: () => void }>();
-  now(): number {
-    return this.time;
-  }
-  every(ms: number, tick: () => void): () => void {
-    const t = { ms, tick };
-    this.timers.add(t);
-    return () => void this.timers.delete(t);
-  }
-  advance(ms: number): void {
-    this.time += ms;
-    for (const t of [...this.timers]) t.tick();
-  }
-}
+/** The shell's fake clock (`@decryp7/paddock-ui/shell/testing`): the same semantics as `paddock_jobs::time::FakeClock`. */
+export { FakeClock };
 
 /** A snapshot with plausible defaults. */
 export function snap(id: number, seq: number, state: SuJobSnapshot['state'] = 'running', extra: Record<string, unknown> = {}): SuJobSnapshot {
@@ -57,7 +43,7 @@ export interface JobsBed {
 /** TestBed with the window's jobs over a memory backend, a fake clock and captured notices. */
 export function jobsBed(options: { backend?: JobsBackend; stillWorkingAfterMs?: number; extra?: unknown[] } = {}): JobsBed {
   const backend = new MemoryJobsBackend();
-  const clock = new FakeClock();
+  const clock = new FakeClock(1_000);
   const notices: ShellNotice[] = [];
   TestBed.configureTestingModule({
     providers: [
