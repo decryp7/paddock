@@ -1,5 +1,5 @@
 name: setup-rust
-description: Rust toolchain with components and targets, sccache when the runner has it, and the Tauri Linux libraries on request.
+description: Rust toolchain with components and targets, sccache (installed, checksum-verified, when the runner has none) on the shared Redis backend, and the Tauri Linux libraries on request.
 inputs:
   toolchain:
     description: Toolchain channel or version.
@@ -13,8 +13,11 @@ inputs:
   tauri-linux-deps:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
+  sccache-backend:
+    description: "auto (Redis when an endpoint is set, else local disk), redis (the endpoint is required) or local (sccache's disk, e.g. for a runner whose disk beats the network)."
+    default: auto
   sccache-redis-endpoint:
-    description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Linux jobs only; empty means sccache's local disk."
+    description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Used on every OS; empty means sccache's local disk."
     default: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
   sccache-redis-db:
     description: "Redis database number for sccache. The shared server gives sccache database 5 (docs/dev-setup.md); never another number."
@@ -38,25 +41,66 @@ runs:
         rustup default "$TOOLCHAIN"
         rustc --version
         cargo --version
+    - name: Install sccache
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Present on the runner (the garage image, the host runners): use it. Otherwise a pinned release, checksum-verified.
+        if command -v sccache >/dev/null 2>&1; then exit 0; fi
+        VERSION=0.18.0
+        case "$RUNNER_OS-$(uname -m)" in
+          Linux-x86_64)            T=x86_64-unknown-linux-musl;  EXT=tar.gz; SUM=45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89 ;;
+          Linux-aarch64|Linux-arm64) T=aarch64-unknown-linux-musl; EXT=tar.gz; SUM=2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a ;;
+          macOS-arm64)             T=aarch64-apple-darwin;       EXT=tar.gz; SUM=308184519b646f5125289e8515b36f6ca65a13a041923994aebe702348674e8e ;;
+          Windows-x86_64)          T=x86_64-pc-windows-msvc;     EXT=zip;    SUM=8965c74d5e8a225244f741e18ad2f3f504f48228dc1bac948fc22761a348363d ;;
+          *) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."; exit 0 ;;
+        esac
+        DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
+        BIN=sccache; [ "$RUNNER_OS" = "Windows" ] && BIN=sccache.exe
+        if [ ! -x "$DEST/$BIN" ]; then
+          TMP=$(mktemp -d)
+          NAME="sccache-v$VERSION-$T"
+          curl -fsSL --retry 3 -o "$TMP/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+          if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$TMP/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$TMP/$NAME.$EXT" | cut -d' ' -f1); fi
+          [ "$GOT" = "$SUM" ] || { echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"; exit 1; }
+          if [ "$EXT" = zip ]; then
+            if command -v unzip >/dev/null 2>&1; then unzip -q "$TMP/$NAME.$EXT" -d "$TMP"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$TMP/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$TMP")'"; fi
+          else
+            tar -xzf "$TMP/$NAME.$EXT" -C "$TMP"
+          fi
+          mkdir -p "$DEST"
+          cp "$TMP/$NAME/$BIN" "$DEST/$BIN"
+          chmod +x "$DEST/$BIN"
+          rm -rf "$TMP"
+        fi
+        echo "$DEST" >> "$GITHUB_PATH"
     - name: sccache
       shell: bash
       env:
+        BACKEND: ${{ inputs.sccache-backend }}
         REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
         REDIS_DB: ${{ inputs.sccache-redis-db }}
       run: |
-        # A shared compile cache when the runner image has sccache (the garage image and the host runners do); otherwise plain rustc.
+        set -euo pipefail
+        # The Install step added the pinned copy to PATH for later steps only; this step finds it by its folder.
+        PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.18.0"
+        if [ -d "$PINNED" ]; then PATH="$PINNED:$PATH"; fi
         if ! command -v sccache >/dev/null 2>&1; then
-          echo "::notice::sccache is not installed on this runner; building without the shared compile cache."
+          echo "::warning::sccache is not available on this runner; building without the shared compile cache."
           exit 0
         fi
+        case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis or local (got '$BACKEND')"; exit 1 ;; esac
         {
           echo "RUSTC_WRAPPER=sccache"
           # Cached builds are not incremental; an unreachable cache must slow a build down, never fail it.
           echo "CARGO_INCREMENTAL=0"
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
         } >> "$GITHUB_ENV"
-        # Only Linux jobs use the shared server (same network as the server); macOS and Windows keep sccache's local disk.
-        if [ "$RUNNER_OS" = "Linux" ] && [ -n "$REDIS_ENDPOINT" ]; then
+        if [ "$BACKEND" = redis ] && [ -z "$REDIS_ENDPOINT" ]; then
+          echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
+        fi
+        # Every OS uses the shared server when asked (the cache keys include compiler and target); local disk is the fallback.
+        if [ "$BACKEND" != local ] && [ -n "$REDIS_ENDPOINT" ]; then
           echo "SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" >> "$GITHUB_ENV"
           echo "SCCACHE_REDIS_DB=${REDIS_DB:-5}" >> "$GITHUB_ENV"
           echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
