@@ -236,7 +236,7 @@ test('chart: four named charts, a loading and an error one, are drawn on canvase
   const twin = await page.locator(`#${await donut.getAttribute('aria-describedby')}`).innerText();
   expect(twin).toContain('Logs: 42 GB (48%)');
   // Every chart has a visible title: metric, unit and window.
-  await expect(charts.first().getByTestId('chart-title')).toHaveText('Requests per hour (req)');
+  await expect(charts.first().getByTestId('chart-title')).toHaveText('Request rate (req/h)');
   await expect(page.getByTestId('chart-loading')).toBeVisible();
   await expect(page.getByTestId('chart-error')).toContainText('could not be loaded');
 });

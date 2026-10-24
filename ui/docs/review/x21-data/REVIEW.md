@@ -326,3 +326,116 @@ open stay at 100%. Update the guide's "40% at rest" line, and add a token contra
 **Not yet approved.** The three original blockers are fixed, and density, menus, stacked bars, titles and state
 coverage are now at the family standard. Fix N1 and N2 (each is small and well located), then N3–N7, and re-shoot the
 sheet. N1 affects every table in the family that shows paths, so it should be fixed first.
+
+---
+
+# Review 3 (re-review after the review-2 fixes)
+
+Reviewer: a third independent agent (rule 22), 2026-10-25. I did not build these parts or do reviews 1–2. Read-only: no
+code changed. Inputs: `contact-sheet.png` and the 34 per-part PNGs at commit `0fe2d36` (merged as `487b228`), the
+updated `docs/design-guide.md` (§4 palette scope, §7 tables), and `css/tokens.css` for the token values. Measurements are
+from the PNG pixels (1 CSS px = 2 device px). Contrast is WCAG 2.x; CVD is Machado 2009 at severity 1.0, ΔE76 in CIELAB,
+on the token hex values (the rendered donut slices match the tokens).
+
+**Counts: 0 P1, 1 P2, 9 P3 (new).** Both review-2 P1s and all five review-2 P2s are fixed in the pixels. One new P2: the
+resting "…" drops below 3:1 on a selected row, which is the one rule the new token exists to keep.
+
+## Verdicts on Review 2
+
+| # | Verdict | Evidence in the pixels |
+|---|---|---|
+| N1 middle ellipsis (P1) | **Fixed** | `*-table-rest`, `-hover`, `-menu`, `-focus-row`, `-selected`: every Location head is "/Users/alex/Library/Application Support/" (40 chars, rows 0–9) or "…Support" (39 chars, rows 10–13, whose tail is one char longer). Spread 1 char, within ±2. The head no longer collapses: no "…/plugin-4.bin" anywhere. The cut is stable when hover/focus actions appear (Journal and Archive rows keep the same head as their neighbours). `*-table-virtual` / `-collapsed`: "/data/records/24/entry.bin" is shown in full; nothing with room is cut. |
+| N2 donut at 320 px (P1) | **Fixed** | `*-charts-320`: card spans x 32–510 device px; ring 158–385 (inside, 63 px clear on the left). Ring y 1612–1839; legend starts at 1890, below the ring, no overlap. Same geometry in both themes. The wide frame also stacks (the card is ~330 CSS px, under the 400 px break). |
+| N3 centre total (P2) | **Fixed** | "88 GB" is drawn. Its bounding-box centre is (270.5, 1724.5) device px against a ring centre of (271.5, 1725.5): within 1 device px. See R3-P3-1 for the wrap. |
+| N4 sort hint (P2) | **Fixed** | `*-table-focus-header`: an unsorted, focused "Kind" shows a two-way ⌃⌄ glyph in `--pd-text-subtle` (#5F6775, 5.1:1 on the header). The active sort is a single chevron in `--pd-text` (#14171C, 16:1; ⌃ ascending in `-hover`/`-menu`, ⌄ descending in `-selected`). The two can no longer be confused. The focus ring now has inline padding around the label (review-2 P3-7 fixed). |
+| N5 states (P2) | **Fixed** | No count while loading, empty or in error. Column starts are identical across rest/loading/empty/error at the same width: Kind 507, Version 719, Size end 1086, Location 1110 (display px). Skeleton bars in Size are end-aligned (review-2 P3-6 fixed). See R3-P3-4 for the filter box. |
+| N6 short-field error (P2) | **Fixed** | `*-forms`: Port's control is ~8rem, "Enter 65535 or less." is one line, the glyph sits on the first line. |
+| N7 charts-320 frame (P2) | **Fixed** | The frame is an element shot: section heading, all four charts, loading and error, nothing clipped. |
+| P3-1 chart error layout | Partly | Now centred, glyph + one-line message, but Retry floats ~75 CSS px below the message (R3-P3-3). |
+| P3-2 title wording | Fixed (nit) | Unit in parentheses everywhere. "Requests per hour (req)" still repeats itself; "Requests per hour" is enough. No window ("last 24 h") in any title. |
+| P3-3 percentages | Fixed | 48 + 31 + 16 + 5 = 100. |
+| P3-4 separators | Fixed | "5,000 rows", "1,250". |
+| P3-5 legend inset | Fixed | The stacked legend's swatch starts 4.5 CSS px right of the title, 1 px from the y-axis labels' left edge (was 7 px left). |
+| P3-6 skeleton | Fixed | |
+| P3-7 header ring | Fixed | |
+| P3-8 disabled field | Fixed | Surface-2 fill and hairline border in light. In dark the fill is close to the card (see R3-P3-8). |
+| P3-9 gallery padding | Fixed | Filter box and count sit inside the frame with clear padding. |
+| Dark 1↔6 / slot 6 #7A70FF | **Fixed** | 4.78:1 on #15171B. Slot 6's minimum ΔE against every other dark slot: protan 36.6, deutan 34.3, tritan 25.6 (all vs slot 1). Light slot 6 #494FDB: protan 25.1, deutan 23.5. |
+| Adjacent pairs ≥ 20, p/d/t | **Fixed** | Order-adjacent minimum, dark: protan 47.0 (3↔4), deutan 25.7 (3↔4), tritan 28.1 (7↔8). Light: protan 36.7 (2↔3), deutan 29.8 (3↔4), tritan 23.5 (7↔8). Donut ring (1→2→6→5→1), every pair ≥ 70 in both themes under every type. |
+| "…" at rest | **Fixed** | Sampled darkest dot pixel on a plain row: #878D98 on #FFFFFF = **3.34:1** light, #6E747F on #15171B = **3.82:1** dark. Matches `--pd-text-subtle` at 75% over surface-1. |
+
+## The two deviations from review 2
+
+**"…" at 75% instead of 65%: accept.** The implementer is right and review 2 was wrong: 65% of #5F6775 over white is
+#979CA5, **2.76:1**, which fails the 3:1 the recommendation was meant to reach. 75% gives 3.34:1 light and 3.82:1 dark,
+and in the pixels the dots still read clearly as secondary next to the 7.5:1 cell text and the 100% hovered button. The
+guide line (§7) states the value and the reason. The only gap is that the mix is computed against surface-1, so it does
+not hold on tinted rows: see R3-P2-1.
+
+**ΔE ≥ 20 for adjacent pairs + slot 6 only (first five ≥ 14 pairwise): accept, with one guide gap.** Review 2 itself
+observed that no 8-colour palette passes all 28 pairs, and the numbers bear the implementer out: first-five pairwise
+minimum is protan 14.4 (1↔4), deutan 16.5 (2↔5), tritan 15.2 (1↔3) in dark, and 17.9 / 15.2 / 14.1 in light. Raising
+these to 20 would cost lightness/hue separation elsewhere. The scope paragraph is clear and is enforced by
+`tokens.spec.ts` and `ring.spec.ts`. The remaining gap is a chart with exactly **four** series: §8/rule 10 asks for direct
+labels only up to 3 series and §4 asks for a non-colour key only from 5, so a 4-line chart may rely on slots 1 and 4 at
+ΔE 14.4 under protan, which is weak for 1.5 px lines. See R3-P3-6.
+
+## New P2
+
+### R3-P2-1: The resting "…" falls below 3:1 on a selected row (`light-table-selected`)
+`--pd-row-action-rest` is `color-mix(--pd-text-subtle 75%, --pd-surface-1)`, a fixed colour. On the selected row's accent
+tint (#DFE8F9) it measures **2.71:1** in light (dark: 3.11:1 on #1F293B, just passing). The selected row is exactly where a
+user goes next to act, and the guide line written in this round promises "3:1 or better". *Fix:* show the "…" at 100%
+`--pd-text-subtle` (or the hover treatment) on selected rows, as on hovered and focused rows, or mix against the row's
+own background. Extend the token contrast test to the selected tint and the group band (surface-2) in both themes.
+
+## New P3
+
+1. **Centre total wraps to two lines.** "88" and "GB" stack inside a ring with room for one line (both widths, both
+   themes). It reads as two values. Put it on one line, or make the number the hero and the unit smaller beneath it,
+   by intent rather than by wrapping (a fixed `width`/`overflow: 'none'` on the graphic text, or a rich-text style).
+2. **Chart loading looks like an empty chart.** `*-charts` and `*-charts-320`: the loading card is four faint hairlines
+   and nothing else; at a glance it is a chart with no data. The table's loading state (skeleton bars) is unmistakable.
+   Use a skeleton plot (a few muted bars or a muted line shape) or a small "Loading…" label; the empty state must look
+   different from loading.
+3. **Chart error: Retry is detached.** The message is centred at about a third of the plot, and Retry sits ~75 CSS px
+   below it, near the bottom. Group them (Retry 8–12 px under the message, the pair centred vertically), or use the
+   table's one-line pattern when the width allows.
+4. **The filter box disappears while loading, empty and in error.** The toolbar changes shape when data arrives (the
+   filter appears and pushes nothing, but the bar jumps from "Columns only" to "Filter … Columns"). Keep the filter visible
+   and disabled while loading; hiding it when the table is empty is fine.
+5. **Path truncation keeps the head and drops the part that differs.** Every Location row shows the same
+   "/Users/alex/Library/Application Support/" and the file name; the `<kind>` folder, which tells rows apart, is the part
+   cut. The middle ellipsis is working as specified (rule 18), so this is a refinement: cut at path-segment boundaries
+   and prefer to keep trailing segments (`…/Debrief/plugins/viewer/plugin-1.bin`) when the shared head is long. Worth a
+   design-guide note so every app's path column behaves the same.
+6. **Guide gap at 4 series.** Rule 10 ("direct labels for <= 3 series") and §4 ("5 or more keyed without colour") leave
+   4-series charts on colour alone. Lower the §4 threshold to **4**, which covers dark 1↔4 (protan 14.4). One-line
+   guide change plus the matching chart-wrapper default.
+7. **Light slot 1↔6 under tritan is 11.7.** Both blues; not adjacent and within the documented scope (slot 6's rule is
+   protan/deutan only), and tritanopia is rare, so no change is required. Record the number in the guide's table so the
+   next palette pass sees it.
+8. **Dark disabled field is faint.** In `dark-forms` the Workspace fill is barely different from the card; the hairline
+   carries it. Acceptable; a touch more lift on the dark surface-2 for inputs would match the light version's clarity.
+9. **Sheet hygiene.** (a) The "Grouped rows in a 5,000-row virtual viewport" frame shows the Columns button with a filled
+   background while every other frame shows it ghost: either a stray hover/focus in the capture or a style difference;
+   make it consistent. (b) The caption "Focused row (2 px ring) and a hovered header showing the sort chevron" does not
+   match the frame (no hovered header is visible). (c) Demo data: "Record 0001" lives at `/data/records/0/` and is 0 KiB;
+   align numbering so the demo does not look like an off-by-one. (d) Design guide §4 line "adjacent pairs delta-E >= 20
+   under deuteranopia/protanopia" now sits directly above the fuller scope paragraph that adds tritanopia; merge them.
+
+## What is good (keep)
+
+- Paths: the fix is the right one (the cell measures the room it is given), stable through hover, focus and selection.
+- Sorting: the hint/active distinction (two-way subtle vs one-way strong) is now textbook, in both alignments.
+- Donut: one layout source for ring, total and legend; it centres to the pixel at both widths, and shares sum to 100.
+- States: loading, empty (with a next step), and error keep the columns still and drop the count; table error is the
+  model for the family.
+- Palette: the scope paragraph turns an impossible rule into an enforced one, and the ring order keeps every
+  slice boundary above ΔE 70 under every CVD type.
+- Forms: short control, full-width message, glyph on the first line, error before hint, disabled reads as read-only.
+
+## Verdict
+**Approved**, on the condition that R3-P2-1 is fixed with its contrast test (a measured number in the test is enough; it
+needs no new sheet review). The P3s can follow in normal work; R3-P3-2 (chart loading vs empty) and R3-P3-6 (4-series
+guide gap) are the ones I would take before the chart wrapper is adopted by a second app.

@@ -93,6 +93,12 @@ describe('chart options', () => {
     expect(o['series'][0].showSymbol).toBe(true);
   });
 
+  it('isolates a series on hover from four series on, because colour alone does not tell four lines apart', () => {
+    const many = (n: number) => opt({ kind: 'line', x: ['a', 'b'], series: Array.from({ length: n }, (_, i) => ({ name: `S${i}`, values: [1, 2] })) });
+    expect(many(3)['series'][0].emphasis).toBeUndefined();
+    expect(many(4)['series'].every((s: any) => s.emphasis?.focus === 'series')).toBe(true);
+  });
+
   it('uses the accent for a lone series (the same blue in every chart) and the palette for several', () => {
     expect(opt(base)['series'][0].color).toBe('#5b9bff');
     const two = opt({ ...base, series: [{ name: 'A', values: [1, 2, 3] }, { name: 'B', values: [1, 2, 3] }] });
@@ -135,7 +141,10 @@ describe('chart options', () => {
     expect(o['legend']).toMatchObject({ show: true, orient: 'vertical', data: ['Disk', 'Memory', 'Cache'] });
     expect(o['legend'].formatter('Disk')).toBe('Disk  60 GB  60%');
     expect(o['legend'].formatter('Nope')).toBe('Nope');
-    expect(o['graphic'][0].style.text).toBe('100\nGB');
+    expect(o['graphic'][0].style.text).toBe('100 GB');
+    // One line, smaller when the total is long, so it stays inside the hole of the ring.
+    expect(o['graphic'][0].style.font).toContain('16px');
+    expect(opt({ kind: 'donut', x: ['A'], series: [{ name: 'S', values: [1234567] }], unit: 'req' })['graphic'][0].style.font).toContain('13px');
     expect(o['series'][0]).toMatchObject({ type: 'pie' });
     expect(o['series'][0].data.map((d: any) => [d.name, d.value])).toEqual([['Disk', 60], ['Memory', 30], ['Cache', 10]]);
     expect(o['tooltip'].formatter({ name: 'Disk', value: 60, color: '#60aeeb' })).toContain('60%');
