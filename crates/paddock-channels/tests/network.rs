@@ -1,11 +1,14 @@
 //! The real adapters against in-process servers on the loopback interface: the HTTP poster and the SMTP sender.
-#![cfg(all(feature = "http", feature = "smtp"))]
+#![cfg(feature = "smtp")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 mod common;
 use common::*;
 use paddock_channels::*;
 use paddock_download::{Header, ProxyMode, ProxyRules, ProxyServer, TransportErrorKind as K};
+use paddock_jobs::time::SystemClock;
+use paddock_net::{Egress, Reach, SystemLookup, UreqWire};
 use paddock_secrets::Secret;
+use std::sync::Arc;
 use std::time::Duration;
 
 fn request(port: u16) -> PostRequest {
@@ -20,8 +23,19 @@ fn request(port: u16) -> PostRequest {
     }
 }
 
-fn poster() -> UreqPoster {
-    UreqPoster::new(ProxyMode::Direct).unwrap()
+fn egress(mode: ProxyMode) -> Arc<Egress> {
+    let policy = channel_policy(Reach::Loopback);
+    let wire = Arc::new(UreqWire::new(&policy, mode).unwrap());
+    Arc::new(Egress::new(
+        policy,
+        wire,
+        Arc::new(SystemLookup),
+        Arc::new(SystemClock),
+    ))
+}
+
+fn poster() -> EgressPoster {
+    EgressPoster::new(egress(ProxyMode::Direct))
 }
 
 #[test]
@@ -92,17 +106,35 @@ fn a_bad_address_is_invalid_and_a_bad_proxy_is_reported_without_its_login() {
     let proxy = ProxyServer::parse("http://proxy.invalid:3128")
         .unwrap()
         .with_credentials("user", "s3cret");
-    let p = UreqPoster::new(ProxyMode::Rules(ProxyRules::all(proxy))).unwrap();
+    let p = EgressPoster::new(egress(ProxyMode::Rules(ProxyRules::all(proxy))));
     let e = p.post(&request(9)).unwrap_err();
     assert!(matches!(e.kind, K::Proxy | K::Connect), "{e}");
     assert!(!e.to_string().contains("s3cret"));
+}
+
+#[test]
+fn the_outbound_policy_applies_https_only_and_offline() {
+    let e = egress(ProxyMode::Direct);
+    let p = EgressPoster::new(e.clone());
+    let mut req = request(1);
+    req.url = "http://hooks.example.org/in".into();
+    let err = p.post(&req).unwrap_err();
+    assert_eq!(err.kind, K::Invalid);
+    assert!(err.message.contains("https"), "{err}");
+    e.set_offline(true);
+    let err = p.post(&request(1)).unwrap_err();
+    assert!(err.message.contains("offline"), "{err}");
+    let public = EgressPoster::new(Arc::new(Egress::new(
+        channel_policy(Reach::Public),
+        Arc::new(UreqWire::new(&channel_policy(Reach::Public), ProxyMode::Direct).unwrap()),
+        Arc::new(SystemLookup),
+        Arc::new(SystemClock),
+    )));
+    let err = public.post(&request(1)).unwrap_err();
     assert!(
-        UreqPoster::new(ProxyMode::explicit("http://p.example.org:8080").unwrap())
-            .unwrap()
-            .reload_proxy()
-            .is_ok()
+        err.message.contains("https"),
+        "plain http to this computer needs the loopback reach: {err}"
     );
-    assert!(poster().reload_proxy().is_ok());
 }
 
 type Check = fn(&SendError) -> bool;

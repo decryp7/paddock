@@ -128,6 +128,7 @@ fn bad_settings_name_what_to_fix() {
         fails(&with(c))
     };
     assert!(url("ftp://a.example.org").contains("must start with https://"));
+    assert!(url("http://hooks.example.org/x").contains("plain http is only for this computer"));
     assert!(url("https://").contains("valid host"));
     assert!(url("https://:80/x").contains("valid host"));
     assert!(url("https://a b/x").contains("valid host"));
@@ -178,6 +179,31 @@ fn parts(t: &mut Transport) -> Parts<'_> {
 }
 
 #[test]
+fn plain_http_is_valid_only_for_this_computer() {
+    for url in [
+        "http://localhost:8080/hook",
+        "http://127.0.0.1/x",
+        "http://[::1]:9/x",
+        "http://app.localhost/x",
+        "https://hooks.example.org/x",
+    ] {
+        let mut c = webhook("w", false);
+        c.transport = Transport::Webhook {
+            url: url.into(),
+            auth: false,
+        };
+        assert_eq!(with(c).validate(), Ok(()), "{url}");
+    }
+    let mut c = ntfy("n", false);
+    c.transport = Transport::Ntfy {
+        server: "http://ntfy.example.org".into(),
+        topic: "t".into(),
+        auth: false,
+    };
+    assert!(fails(&with(c)).contains("plain http"));
+}
+
+#[test]
 fn bad_mail_settings_name_what_to_fix() {
     let mail = |f: &dyn Fn(&mut Transport)| {
         let mut c = email("m", Some("bot"));
@@ -218,13 +244,10 @@ fn secrets_are_named_by_channel_and_need_no_entry_when_unused() {
     let n = webhook("w1", true).secret_name().unwrap();
     assert_eq!(
         (n.scope(), n.key(), n.account().as_str()),
-        ("channel:w1", "token", "channel:w1:token")
+        ("channel:w1", "secret", "channel:w1:secret")
     );
-    assert_eq!(ntfy("n", true).secret_name().unwrap().key(), "token");
-    assert_eq!(
-        email("m", Some("bot")).secret_name().unwrap().key(),
-        "password"
-    );
+    assert_eq!(ntfy("n", true).secret_name().unwrap().key(), "secret");
+    assert_eq!(email("m", Some("bot")).secret_name(), secret_name_of("m"));
     assert!(webhook("w", false).secret_name().is_none());
     assert!(
         email("m", None).secret_name().is_none(),

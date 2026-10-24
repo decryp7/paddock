@@ -18,6 +18,7 @@ members = [
     "paddock-log",
     "paddock-menu",
     "paddock-names",
+    "paddock-net",
     "paddock-packs",
     "paddock-pitwall",
     "paddock-proc",
@@ -53,6 +54,7 @@ paddock-jobs = { path = "paddock-jobs", version = "0.1.0", registry = "decryp7" 
 paddock-log = { path = "paddock-log", version = "0.1.0", registry = "decryp7" }
 paddock-names = { path = "paddock-names", version = "0.1.0", registry = "decryp7" }
 paddock-menu = { path = "paddock-menu", version = "0.1.0", registry = "decryp7" }
+paddock-net = { path = "paddock-net", version = "0.1.0", registry = "decryp7" }
 paddock-packs = { path = "paddock-packs", version = "0.1.0", registry = "decryp7" }
 paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }

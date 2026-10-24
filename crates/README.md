@@ -103,6 +103,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
 | `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
+| `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
@@ -715,22 +716,30 @@ let counters = Catalogue::text(vec![Entry::new(path, "Bytes Received/sec").field
 Where the apps send alerts, from Pitcrew's `notify-channels` and Spotter's `mail.rs`:
 
 ```rust
-use paddock_channels::{Dispatcher, Message, Severity, Settings, UreqPoster, LettreSender};
-use paddock_download::ProxyMode;
+use paddock_channels::{Dispatcher, EgressPoster, LettreSender, Message, Severity, Settings, channel_policy};
 use paddock_jobs::{CancelToken, time::SystemClock};
+use paddock_net::{Egress, Reach};
 
+let egress = app_egress;                                 // paddock-net Egress built with channel_policy(Reach::Lan)
 settings.validate()?;                                    // on Save: the message says what to fix; at most 8 channels
-let d = Dispatcher::new(settings, secrets, Arc::new(UreqPoster::new(ProxyMode::System)?), Arc::new(LettreSender), Arc::new(SystemClock));
+let d = Dispatcher::new(settings, secrets, Arc::new(EgressPoster::new(egress)), Arc::new(LettreSender), Arc::new(SystemClock));
 let msg = Message::new("diskLow", Severity::Error, "Disk low", "C: has 2 GB left", "runner-1");
 let deliveries = d.dispatch(&msg, &cancel);              // blocks: run it in a job; one Delivery per channel, in order
 let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // "Send test" before Save; d.test(id, ..) after
 ```
 
-- Settings hold no secret: a webhook or ntfy channel with `auth` uses the token `Name("channel:<id>", "token")`, an e-mail
-  channel with a `username` uses `Name("channel:<id>", "password")` (`ChannelConfig::secret_name`); an old Pitcrew
+- Settings hold no secret: a webhook or ntfy channel with `auth` uses the token `Name("channel:<id>", "secret")`, and so does an e-mail
+  channel with a `username` (its password; `ChannelConfig::secret_name`, `secret_name_of(id)`); an old Pitcrew
   entry moves with `paddock_secrets::rename_entry`. `forget_secret` removes it when the channel is deleted.
 - Bounded: title one line of at most 200 characters, body at most 64 KiB (cut on a character boundary with a marker), at most 8
   channels, 10 recipients, 64 events a channel, 8 KiB a header; the answer's body is never read.
+- Settings page engine (`ChannelsControl`, feature `tauri` for the commands `channels_get`, `channels_save`, `channels_set_secret`,
+  `channels_clear_secret`, `channels_test` and the `paddock://channels` event): settings in a `SettingsStore` (`FileSettings` over
+  `paddock-env`), `save` validates and then deletes the secrets of removed channels, `set_secret` is called only by the secret dialog's
+  window, `test` returns an id at once and reports a `ChannelsEvent::Test` (one test per channel, four at once). UI:
+  `@decryp7/paddock-ui/shell/channels`.
+- Network: `EgressPoster` over `paddock-net` (https only, plain http to this computer with `Reach::Loopback`, offline mode,
+  connection reuse, no redirects, the answer's body never read).
 - Retries: transient failures only (no connection, timeout, HTTP 408/425/429/5xx, a 4xx mail reply), at most 3 attempts by default
   (`RetryPolicy`, 5 at most), waits from `paddock_jobs::time::Backoff` (2 s doubling to 30 s), a server's `Retry-After` honoured up
   to that cap, every wait cancellable and on the injected `Clock` (tests use `FakeClock`). A bad configuration, a missing secret,
@@ -782,6 +791,37 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 - Tests start real processes through the `paddock-ipc-test-child` binary and leave none behind; nothing sleeps or measures
   time (gates, channels, a `FakeClock` for the back-off). `fuzz/` holds the frame-codec fuzz target
   (`cargo +nightly fuzz run frame`).
+
+## `paddock-net` (plan X16)
+
+Every outbound request goes through one `Egress`:
+
+```rust
+use paddock_net::{Egress, Policy, Reach, Request, SystemLookup, UreqWire};
+use paddock_download::ProxyMode;
+
+let policy = Policy::default().reach(Reach::Public).allow_hosts(&["api.example.org", "*.cdn.example.org"]).min_gap(Duration::from_secs(1));
+let wire = Arc::new(UreqWire::new(&policy, ProxyMode::System)?);          // one connection pool per proxy and reach
+let egress = Arc::new(Egress::new(policy, wire, Arc::new(SystemLookup), Arc::new(SystemClock)));
+let resp = egress.send(&Request::get(url).if_none_match(&etag)?, &cancel)?; // resp.not_modified(), resp.etag(), resp.body (capped)
+egress.set_offline(true);                                                  // every later request: NetError::Offline, no lookup, no socket
+let transport = egress.download_transport();                               // the same policy under paddock_download::Downloader
+```
+
+- Before **every hop** (a redirect is a new request): no login in the URL; https (plain http only for `localhost`, `127.x`,
+  `::1` when the reach is `Loopback`); the host on the allow-list; **every** address of the name within the reach (one bad
+  address refuses the name, as a DNS-rebinding answer would be); `169.254.169.254` and all link-local, unspecified and
+  multicast addresses are never reachable. The wire applies the reach again to the addresses the socket connects to.
+- A redirect never goes farther than where the request started (a public start cannot reach the LAN or this computer), never
+  goes from https to http, drops `Authorization`, `Cookie` and `Proxy-Authorization` when the host changes, and a 301/302/303
+  after a POST becomes a GET. The wire never follows one.
+- Caps: answer body (8 MiB, `max_body`), request body (1 MiB), redirects (5, at most 10), headers (32, 8 KiB each).
+  `stream` returns the unread body for downloads (no whole-request limit; `body_timeout` between chunks).
+- Politeness: `min_gap` between two requests to one host on the injected clock, cancellable. `Retry-After` is read with
+  `Response::retry_after`; retrying is the caller's (`paddock-channels`, the downloader).
+- Tests use `FakeWire` (scripted, records, counts sockets) and `StaticLookup`; the real wire is tested against a loopback server.
+- Name checks resolve through the system resolver before each hop; behind a proxy that resolves names itself (internal-only
+  names), pass a `Lookup` that answers from the proxy's policy instead.
 
 ## `paddock-env` (plan X7)
 

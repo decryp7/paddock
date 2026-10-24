@@ -2916,14 +2916,17 @@ name = "paddock-channels"
 version = "0.1.0"
 dependencies = [
  "lettre",
+ "paddock-commands",
  "paddock-download",
+ "paddock-env",
  "paddock-jobs",
+ "paddock-net",
  "paddock-secrets",
  "proptest",
- "rustls",
  "serde",
  "serde_json",
- "ureq",
+ "tauri",
+ "tempfile",
 ]
 
 [[package]]
@@ -3080,6 +3083,18 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "paddock-net"
+version = "0.1.0"
+dependencies = [
+ "paddock-download",
+ "paddock-jobs",
+ "proptest",
+ "rustls",
+ "ureq",
+ "url",
 ]
 
 [[package]]
