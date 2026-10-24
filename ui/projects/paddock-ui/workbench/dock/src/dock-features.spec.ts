@@ -130,6 +130,10 @@ describe('auto-hide', () => {
     tab.click();
     await settle(rendered.fixture);
     expect(rendered.one('[data-testid="pd-dock-flyout"]').dataset['panelId']).toBe('a.side');
+    // The strip tab names the panel: the slide-out header does not repeat it (the region still carries the name).
+    const head = rendered.one('.pd-dock-ah-head');
+    expect(head.textContent?.trim()).toBe('');
+    expect(rendered.one('[data-testid="pd-dock-flyout"]').getAttribute('aria-label')).toBe(tab.textContent?.trim());
     expect(dock.isVisible('a.side')).toBe(true);
     dock.slideIn('a.side');
     await settle(rendered.fixture);
@@ -252,6 +256,9 @@ describe('panel menu, switcher and keys', () => {
     dock.openPanelMenu('a.two', null, { x: 5, y: 5 });
     await settle(rendered.fixture);
     const items = rendered.all<HTMLButtonElement>('[data-testid="pd-dock-menu"] button');
+    // The shared menu look (ui/projects/paddock-ui/scss/_controls.scss), not a dock copy.
+    expect(rendered.one('[data-testid="pd-dock-menu"]').classList.contains('pd-popmenu')).toBe(true);
+    expect(items.every((b) => b.classList.contains('pd-popmenu__item') && b.querySelector('.pd-popmenu__label') !== null)).toBe(true);
     expect(items.map((b) => b.textContent)).toContain('Close');
     items.find((b) => b.textContent === 'Close')?.click();
     await settle(rendered.fixture);
