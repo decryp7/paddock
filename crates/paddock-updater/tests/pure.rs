@@ -143,7 +143,11 @@ fn network_and_download_errors_are_classified_once() {
         ),
         (DownloadError::DiskFull, UpdateErrorKind::DiskFull),
         (
-            DownloadError::NotEnoughSpace { needed: 9, free: 1, path: std::path::PathBuf::from("/data") },
+            DownloadError::NotEnoughSpace {
+                needed: 9,
+                free: 1,
+                path: std::path::PathBuf::from("/data"),
+            },
             UpdateErrorKind::DiskFull,
         ),
         (
