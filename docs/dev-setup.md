@@ -109,6 +109,9 @@ another database number. sccache's keys include the compiler and target, so one 
   `cargo test -p <crate> --test it pool::`. A test that changes something process-wide (environment variables, the panic
   hook, the global allocator, a measured resident size) either serialises that change with a lock or runs in a child
   process of its own (re-running its own test binary with `--exact`), because `cargo test` runs all modules in one process.
+- **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
+  `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
+  step and the workspace-hack dependency.
 
 ## Parallel work (people and agents)
 

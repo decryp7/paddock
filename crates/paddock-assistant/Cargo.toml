@@ -23,6 +23,8 @@ paddock-commands = { workspace = true, optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
+# The never-panics test of the parsers (conformance check C36).
+paddock-testkit = { workspace = true }
 tempfile = "3"
 paddock-pitwall = { workspace = true, features = ["testing"] }
 paddock-secrets = { workspace = true }
