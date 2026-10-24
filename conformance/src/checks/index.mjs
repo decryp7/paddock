@@ -12,6 +12,7 @@ import C24 from './C24-reviewed-images.mjs';
 import C28 from './C28-baseline.mjs';
 import C29 from './C29-window-weight.mjs';
 import C30 from './C30-wall-clock.mjs';
+import C31 from './C31-adr-numbers.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31];

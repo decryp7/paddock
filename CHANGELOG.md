@@ -10,6 +10,16 @@ Conventional Commits; one semver tag for the whole repo.
   included), `Table` (text, CSV, JSON; bounded cells), `Progress` (throttled, de-duplicated phase lines on stderr, injected time)
   and `StopFlag`, `Help` and `version_line`, `CommonFlags`, `parse_time`, `parse_size`, `format_size`. `paddock_service::Verb`
   describes itself for `--help`, rejects extra arguments with a hint and decides `status`'s exit code.
+- Paddock runs its own conformance checks in CI (C06, C14, C15, C16, C29, C30, C31; the app-only ones are skipped with reasons in
+  `ci.yml`); C24 runs non-blocking until the `docs/images` review lands. New check C31: ADR numbers are unique. The waiver of a
+  Rust test sleep (C30) must give a reason: `// conformance: hang-guard — <why>`.
+- Tests no longer sleep to wait for other threads: `paddock-jobs` `tests/parallel.rs` and `tests/pool.rs` (gates, a barrier and
+  event waits) and `paddock-window`'s exit-watchdog test (the process end is a channel event).
+- `paddock-names` search index and `names_search` (plan X18 follow-up): the catalogue keeps hash maps for the exact, joined and alias
+  rungs and an inverted index of words (prefix by range, inside-a-word by scan, typos by letter-bag and edit distance), so a
+  search over 250,000 names takes about 20 ms (was 500 ms; `cargo bench -p paddock-names` fails over 50 ms). `search_scan` ranks every
+  entry and a property test checks that both give the same answer. `NamesService` + `NamesSearchRequest`/`NamesSearchReply`
+  are the engine side of the palette's `names_search` command (arguments validated in Rust, catalogue swapped whole).
 - Conformance check C24 (rule 22): every image under `docs/screenshots` matches its `hashes.json` entry and has a `REVIEWED.md` row
   (image, SHA-256, reviewer, date) with the current hash; `docs/images` needs the row. A regenerated image that changed fails until
   it is reviewed again.

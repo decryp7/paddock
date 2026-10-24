@@ -56,12 +56,14 @@ fn concurrency_is_bounded_by_the_pool() {
     let reg = JobRegistry::new(Collect::new());
     let pool = JobPool::new(Workers::new(2));
     let (running, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    // Jobs meet in pairs at a barrier: two run at once for certain, and the peak shows whether a third ever did.
+    let pair = Arc::new(std::sync::Barrier::new(2));
     let handles: Vec<_> = (0..8)
         .map(|_| {
-            let (r, p) = (running.clone(), peak.clone());
+            let (r, p, pair) = (running.clone(), peak.clone(), pair.clone());
             pool.spawn_job(reg.register("k", "K", None), move |_| {
                 p.fetch_max(r.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
-                std::thread::sleep(Duration::from_millis(10));
+                pair.wait();
                 r.fetch_sub(1, Ordering::SeqCst);
                 Ok(())
             })

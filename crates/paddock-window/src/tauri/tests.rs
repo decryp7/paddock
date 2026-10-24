@@ -676,8 +676,16 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
         .step_limit(Duration::from_millis(200));
     let (release, stuck) = std::sync::mpsc::channel::<()>();
     let stuck = Mutex::new(stuck);
+    // The process end is announced on a channel, so the test waits for the event, not for a poll.
+    let (ended_tx, ended) = std::sync::mpsc::channel::<i32>();
+    let (q, e) = (quits.clone(), quits.clone());
     let app = app_with(
-        windows(config, &quits)
+        Windows::builder(config)
+            .exit_app(move |_, code| q.lock().unwrap().push(format!("exit {code}")))
+            .end_process(move |code| {
+                e.lock().unwrap().push(format!("end {code}"));
+                let _ = ended_tx.send(code);
+            })
             .teardown("jobs", move |_| s.lock().unwrap().push("jobs".into()))
             .teardown("stuck", move |_| {
                 let _ = stuck.lock().unwrap().recv_timeout(Duration::from_secs(5));
@@ -692,14 +700,12 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
     assert!(!exit_requested(h, Some(3)), "an explicit exit");
     assert!(state(&app).quitting());
     // The windows never close: the watchdog tears down and ends the process with the code, once.
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while !quits.lock().unwrap().iter().any(|c| c == "end 3") {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the watchdog ended the exit"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    // The watchdog's end is the event; the limit only stops a hung test.
+    assert_eq!(
+        ended.recv_timeout(Duration::from_secs(60)),
+        Ok(3),
+        "the watchdog ended the exit"
+    );
     assert!(
         started.elapsed() < Duration::from_secs(5),
         "bounded by the step limits"
