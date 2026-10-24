@@ -10,6 +10,12 @@ Conventional Commits; one semver tag for the whole repo.
   (every word in any order, other fields ranked below the name). `Catalogue::new` / `text` / `with_vocabulary`, `Entry`,
   `search` -> `Search { matches (how, why), clarify }`, `Style::{Path, Text}`. Pure and bounded; property tests for
   never-panic, determinism and self-lookup.
+- `paddock-channels` (plan X17): outbound notification channels (webhook, ntfy, e-mail) from Pitcrew's `notify-channels` and
+  Spotter's `mail.rs`. `Settings` with `validate`, secrets through `paddock-secrets` (`channel:<id>`), bounded `Message`s,
+  `Dispatcher` (parallel channels, retries with `paddock_jobs::time` back-off and `Retry-After`, cancel, panics contained,
+  `test` / `test_with` for the settings page), ports `HttpPoster` (`UreqPoster` over `paddock-download`'s agent, proxy and OS
+  certificates) and `MailSender` (`LettreSender`), `FakePoster` / `FakeMail`. `paddock_download::ureq_agent` is new: the one
+  place the TLS and proxy set-up of a ureq agent lives.
 - `paddock-ipc` (plan X13, ADR 0001 step 1): the family's one IPC from `debrief-ipc` and `dyno-ipc` (with Pitcrew's service
   pipe SDDL). Postcard frames with a skip of oversized frames (one call fails, not the link), private endpoints, the token +
   pid + protocol-version handshake, a thread-based peer (calls both ways, streams with credits, cancel, pushes, busy, typed
