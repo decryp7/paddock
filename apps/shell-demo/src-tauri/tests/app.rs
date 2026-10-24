@@ -9,7 +9,7 @@ use paddock_health::ServiceSpec;
 use paddock_shell::{AppIdentity, PLUGIN_NAME};
 use paddock_shell_demo::engine::{self, DemoJob, Engine};
 use paddock_shell_demo::{
-    APP_ID, APP_NAME, COMMANDS, MANIFEST, Place, VERSION, invoke_handler, shell,
+    APP_ID, APP_NAME, COMMANDS, MANIFEST, Place, VERSION, invoke_handler, shell, shell_with_log,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -302,6 +302,55 @@ fn the_app_starts_with_its_identity_sections_and_updates() {
     assert_eq!(legal, ["licence-mit", "licence-apache"]);
     // Nothing of the app's was written outside the test's folder: settings and messages are in memory.
     assert!(!dir.path().join("config/settings.json").exists());
+}
+
+#[test]
+fn the_logging_section_is_the_apps_log_and_the_level_applies_at_once() {
+    use paddock_env::{AppId, MapVars, Os};
+    use paddock_log::{LogConfig, LogLevel, Logging};
+    let dir = tempfile::tempdir().unwrap();
+    let id = AppId::new(APP_ID, APP_NAME).unwrap();
+    let vars = MapVars::new().with(&id.home_var(), dir.path());
+    let dirs = paddock_env::AppDirs::resolve(&id, Os::current(), &vars, None, true).unwrap();
+    let config = LogConfig::new(&id, "app", VERSION)
+        .with_log_dir(dirs.logs())
+        .with_stdout(false)
+        .with_panic_hook(false);
+    Logging::new(config).scoped(|handle| {
+        let app = mock_builder()
+            .plugin(
+                shell_with_log::<MockRuntime>(
+                    Place::Test {
+                        dir: dir.path().to_path_buf(),
+                    },
+                    Some(handle.clone()),
+                )
+                .build(),
+            )
+            .invoke_handler(invoke_handler())
+            .build(context())
+            .unwrap();
+        let main = window(&app, "main");
+        let overview = call(&main, true, "settings_overview", json!({})).unwrap();
+        let logging = overview["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == "pd.logging")
+            .unwrap();
+        assert_eq!(logging["values"]["level"], "info");
+        let set = call(
+            &main,
+            true,
+            "settings_set",
+            json!({ "section": "pd.logging", "values": { "level": "warn" } }),
+        )
+        .unwrap();
+        assert_eq!(set["applied"], true, "{set}");
+        assert_eq!(handle.level(), LogLevel::Warn);
+        // The report is made from the app's own folders, in the test's folder only.
+        assert!(!dir.path().join("config/settings.json").exists());
+    });
 }
 
 #[test]

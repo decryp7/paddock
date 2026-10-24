@@ -28,15 +28,20 @@ tauri-build = { version = "2.7", features = [] }
 # The shell crates from this repository (path dependencies). An app outside the repository names them from the
 # `decryp7` registry instead (crates/README.md, "Consuming the crates"); scripts/new-app.mjs rewrites these lines.
 [dependencies]
-paddock-shell = { path = "../../../crates/paddock-shell", features = ["tray"] }
+paddock-shell = { path = "../../../crates/paddock-shell", features = ["tray", "native-dialogs"] }
 paddock-commands = { path = "../../../crates/paddock-commands", features = ["tauri"] }
 paddock-dialogs = { path = "../../../crates/paddock-dialogs", features = ["tauri"] }
+paddock-diag = { path = "../../../crates/paddock-diag", features = ["tauri"] }
+paddock-env = { path = "../../../crates/paddock-env" }
+paddock-log = { path = "../../../crates/paddock-log" }
 paddock-health = { path = "../../../crates/paddock-health", features = ["tauri"] }
 paddock-jobs = { path = "../../../crates/paddock-jobs", features = ["tauri"] }
 paddock-settings = { path = "../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../crates/paddock-updater", features = ["tauri"] }
 paddock-window = { path = "../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
+# Report a problem asks where to save through the native save dialog (the shell's `native-dialogs` feature).
+tauri-plugin-dialog = "2.8"
 # The tray icon's images are PNG (template images on macOS).
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 serde = { version = "1", features = ["derive"] }

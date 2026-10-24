@@ -44,6 +44,8 @@ const NO_CONTRACTS: &str = r#"{"version":1,"base":[],"dialogs":{}}"#;
 
 type BoxError = Box<dyn Error + Send + Sync>;
 type Part<R, T> = Box<dyn FnOnce(&AppHandle<R>) -> T + Send>;
+type DiagSetup<R> =
+    Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
 
@@ -55,7 +57,7 @@ pub struct Builder<R: Runtime> {
     services: Vec<ServiceSpec>,
     health_setup: Option<HealthAdjust<R>>,
     settings: Option<Part<R, Settings>>,
-    diagnostics: Option<Part<R, paddock_diag::tauri::Setup>>,
+    diagnostics: Option<DiagSetup<R>>,
     sections: Vec<Arc<dyn Configurable>>,
     startup: Option<Startup<R>>,
     updater: Option<Part<R, UpdatesBuilder>>,
@@ -124,12 +126,12 @@ impl<R: Runtime> Builder<R> {
     }
 
     /// Report a problem and the log's Settings: the app's sections, redaction rules and log handle
-    /// (`paddock_diag::tauri::Setup::new(app_info, dirs).log(handle)`). The shell registers the `pd.logging` settings section
+    /// (`Ok(paddock_diag::tauri::Setup::new(app_info, dirs).log(handle))`; an error fails the app's start naming this part). The shell registers the `pd.logging` settings section
     /// on the log handle, and the Report a Problem dialog and the webview's log command work from then on. Where the user saves
     /// the report is asked natively with the `native-dialogs` feature.
     pub fn diagnostics(
         mut self,
-        f: impl FnOnce(&AppHandle<R>) -> paddock_diag::tauri::Setup + Send + 'static,
+        f: impl FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send + 'static,
     ) -> Self {
         self.diagnostics = Some(Box::new(f));
         self
@@ -320,7 +322,8 @@ impl<R: Runtime> Builder<R> {
 
         if let Some(f) = self.diagnostics {
             let native = native_picker(app);
-            let diagnostics = paddock_diag::tauri::install(app, f(app), native);
+            let setup = f(app).map_err(|e| named("Report a problem", e))?;
+            let diagnostics = paddock_diag::tauri::install(app, setup, native);
             if let Some(handle) = diagnostics.log_handle() {
                 settings
                     .register(paddock_diag::logging::logging_section(handle))

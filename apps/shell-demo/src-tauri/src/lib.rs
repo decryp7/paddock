@@ -16,12 +16,16 @@ pub mod engine;
 pub mod sections;
 pub mod tray;
 
+use paddock_diag::AppInfo;
+use paddock_diag::tauri::Setup;
+use paddock_env::{AppDirs, AppId, MapVars, Os};
+use paddock_log::{LogConfig, LogHandle, Logging};
 use paddock_shell::{AppIdentity, Builder};
 use paddock_updater::tauri::UpdatesBuilder;
 use paddock_window::tauri::{FixedPrefs, WindowConfig, Windows};
 use paddock_window::{OnClose, OpenFilesIn};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::{Manager, Runtime};
 
@@ -72,8 +76,52 @@ impl Place {
     }
 }
 
+/// The app's log, installed once at start by [`run`]; Report a Problem reports it and the Logging section tunes its level.
+static LOG: OnceLock<LogHandle> = OnceLock::new();
+
+/// The app's folders: the user's (installed) or `dir` (a test's, through the `SHELL_DEMO_HOME` override).
+fn dirs(
+    test_dir: Option<&std::path::Path>,
+) -> Result<AppDirs, Box<dyn std::error::Error + Send + Sync>> {
+    let id = AppId::new(APP_ID, APP_NAME)?;
+    Ok(match test_dir {
+        Some(dir) => AppDirs::resolve(
+            &id,
+            Os::current(),
+            &MapVars::new().with(&id.home_var(), dir),
+            None,
+            true,
+        )?,
+        None => AppDirs::for_app(&id)?,
+    })
+}
+
+/// Starts the app's log in the user's log folder at the level and limits saved in the settings (the level changes later
+/// without a restart, from the Logging page). A log that cannot start is only noted: the app runs without one.
+fn install_log() {
+    let started = dirs(None).map_err(|e| e.to_string()).and_then(|dirs| {
+        let id = AppId::new(APP_ID, APP_NAME).map_err(|e| e.to_string())?;
+        let saved = paddock_diag::logging::stored(&dirs.config().join(paddock_settings::FILE_NAME));
+        let config = LogConfig::new(&id, "app", VERSION)
+            .with_dirs(&dirs)
+            .with_settings(saved);
+        Logging::new(config).install().map_err(|e| e.to_string())
+    });
+    match started {
+        Ok(handle) => {
+            let _ = LOG.set(handle);
+        }
+        Err(why) => eprintln!("{APP_NAME}: the log could not start ({why})"),
+    }
+}
+
 /// The shell plugin with every part of the demo.
 pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
+    shell_with_log(place, LOG.get().cloned())
+}
+
+/// As [`shell`] with the log to report and tune (a test passes a scoped one).
+pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Builder<R> {
     let tick = place.tick();
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
@@ -90,6 +138,23 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
         Place::Test { dir } => Some(dir.clone()),
     };
     let updates_dir = test_dir.clone();
+    let report_dir = test_dir.clone();
+    // Report a problem (plan X2) and the Logging section: the app's folders and log, the shell's built-in sections.
+    builder = builder.diagnostics(move |_| {
+        let setup = Setup::new(
+            AppInfo::new(
+                APP_ID,
+                APP_NAME,
+                VERSION,
+                option_env!("SHELL_DEMO_COMMIT").unwrap_or(""),
+            ),
+            dirs(report_dir.as_deref())?,
+        );
+        Ok(match log {
+            Some(handle) => setup.log(handle),
+            None => setup,
+        })
+    });
     builder = builder.updater(move |_| updater(updates_dir));
     builder = builder.windows(move |app| windows(app, test_dir.is_none()));
     match place {
@@ -157,6 +222,7 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
 
 /// The app: the shell plugin, the demo's guarded commands, the tray and the main window.
 pub fn run() {
+    install_log();
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
     let shell = shell::<tauri::Wry>(Place::Installed).setup(move |app| {
@@ -165,6 +231,8 @@ pub fn run() {
         Ok(())
     });
     let result = tauri::Builder::default()
+        // The native save dialog of Report a Problem (the shell's `native-dialogs`).
+        .plugin(tauri_plugin_dialog::init())
         .plugin(shell.build())
         .invoke_handler(invoke_handler())
         .on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated)

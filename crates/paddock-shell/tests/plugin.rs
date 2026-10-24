@@ -434,7 +434,10 @@ fn diagnostics_put_the_logging_section_on_the_log_and_the_report_commands_in_dia
             .in_memory()
             .native_menu(false)
             .diagnostics(move |_| {
-                Setup::new(AppInfo::new("demo", "Shell Demo", "1.2.3", ""), dirs).log(for_setup)
+                Ok(
+                    Setup::new(AppInfo::new("demo", "Shell Demo", "1.2.3", ""), dirs)
+                        .log(for_setup),
+                )
             }));
         let main = window(&app, "main");
         let overview = invoke(&main, "settings_overview", json!({})).unwrap();

@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -97,6 +97,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
+| `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background service install/control per OS | yes |
 | `paddock-proc` | child processes with timeouts, caps, kill-tree | yes |
 | `paddock-window` | native window feel, tray, single instance | yes |
@@ -623,3 +624,42 @@ paddock_log::log_from_webview(window, level, message);               // the webv
   (`CrashMarker`, in `AppDirs::data()`); the next start reads it (plan X3) and clears it.
 - `spawn_child_capture(name, stderr)` logs a child's output line by line (4 KiB per line, `Child` + `child:<name>`).
 - Tests use `Logging::scoped`, a temp folder and `ManualClock`; no sleeps.
+
+## `paddock-diag` (plan X2)
+
+Report a problem, from Debrief's `activity/report` (the best of the three: manifest, sections, a zip the user reviews), Dyno's
+`diagnostics.rs` (personal data removed, every file previewed with its size) and Pitcrew's `redact.rs` (secrets). Decision D9:
+**nothing is sent**; the user saves the zip after seeing every file.
+
+```rust
+use paddock_diag::{AppInfo, Collected, Redactor, builtin};
+
+let app = AppInfo::new("spotter", "Spotter", env!("CARGO_PKG_VERSION"), commit);
+let redactor = Redactor::for_machine(&ProcessVars);                      // this machine's user, home folder and name, plus the defaults
+let collected = Collected::collect(&app, &dirs, &builtin::all(), &redactor, Utc::now());
+let report = collected.assemble("the timeline stays empty");             // description.txt + manifest.json
+let preview = report.preview();                                          // the list the dialog shows: name, kind, size, summary
+report.save(&path_the_user_chose, &cancel, &progress)?;                   // zip built in memory, then replaces the file atomically
+```
+
+- `Redactor`: `redact_secrets` (Pitcrew's patterns + Debrief's detectors: tokens, passwords, keys, JWTs, URL credentials, Luhn-checked
+  card numbers), `Personal` (Dyno: user names, home folders, profile paths, machine name, e-mail and IP addresses) and
+  `paddock-log`'s field rules (secret keys masked, file contents replaced by a size). A CLEF log line is parsed and each string
+  property redacted, so a replacement never breaks a line. Apps add `with_pattern` (limited like user regexes: 500 characters,
+  256 KiB compiled, 32 patterns) and `with_field_rules` (the same rules as in their log).
+- `Section`s are the app's contributions; they return `Content` (text, JSON or log lines), never bytes, so every file is redacted.
+  Built-ins: `SystemInfo`, `Settings` (the settings file, secrets masked), `Crash` (the marker), `Logs` (the newest part, read from the
+  end of each file: a 1 GB log costs a seek). A section that panics, a bad or repeated name, too many files or bytes
+  (`Limits`) become notes in the manifest and the preview, never a failure.
+- The preview and the zip are built from the same file list. `save` checks the destination (`validate_destination`: absolute, `.zip`,
+  existing folder), builds the zip in memory, checks the cancel token every 256 KiB, and replaces the destination atomically: a
+  cancel or an error leaves no partial file.
+- `logging`: the `pd.logging` settings section ("Diagnostics > Logging": level, MB per day, files kept) over `LogSettings`; the level is
+  applied with `LogHandle::set_level`, the two limits need a restart; `logging::stored` reads the saved values before the log exists.
+- `tauri` feature: `Setup` (sections, redactor, `LogHandle`), `install`, and the commands `diagnostics_preview` (collects on the blocking
+  pool, reuses the collection while the user types), `diagnostics_save` (returns at once; a native save dialog asks where, then a
+  job writes the zip, with Cancel from the first moment; the outcome is the `paddock://diagnostics` event), `diagnostics_cancel`, and
+  `log_from_webview` (the webview's lines with their `Window`). The path is chosen only by the user (the `dialog` feature adds the
+  native picker; the shell enables it with `native-dialogs`). The shell registers all of it from `Builder::diagnostics`.
+- The crate has no network dependency (a test checks its manifest; `cargo tree` shows none). Tests use temp folders, a fake picker and
+  Tauri's mock runtime; no sleeps.
