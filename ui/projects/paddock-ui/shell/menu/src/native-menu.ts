@@ -1,4 +1,5 @@
 import {
+  computed,
   DestroyRef,
   effect,
   EnvironmentProviders,
@@ -13,6 +14,7 @@ import {
   untracked,
 } from '@angular/core';
 import { SHELL_IDLE, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { MENU_EVENT, MENU_SET_COMMAND, type MenuApplied, type NativeMenuEntry, type NativeMenuModel } from '../generated/menu';
 import { AppMenu } from './app-menu';
 import { Keymap } from './keymap';
@@ -75,21 +77,22 @@ export const NATIVE_MENU_SCHEDULE = new InjectionToken<NativeMenuSchedule>('PADD
 });
 
 /**
- * Opens when the app is ready: by default once the app's part of the context has loaded (or failed to; until then
- * `when`, `enabled` and `checked` cannot be asked, so the menus are not final). The load is started when the window is
- * idle. The start-up contract or the app may provide its own ready signal. The native menu bar is then built once instead
- * of once per feature that registers during the start.
+ * Opens when the app is ready: by default once the window reported ready (`windowReady`, the start-up contract: nothing
+ * is sent to Rust before) and the app's part of the context has loaded (or failed to; until then `when`, `enabled` and
+ * `checked` cannot be asked, so the menus are not final). The load is started when the window is idle. The app may
+ * provide its own gate. The native menu bar is then built once instead of once per feature that registers during the start.
  */
 export const NATIVE_MENU_GATE = new InjectionToken<Signal<boolean>>('PADDOCK_NATIVE_MENU_GATE', {
   providedIn: 'root',
   factory: () => {
     const host = inject(ShellContextHost);
-    const open = signal(host.context() !== null);
-    if (!open()) {
-      const settle = () => open.set(true);
+    const ready = windowReady();
+    const loaded = signal(host.context() !== null);
+    if (!loaded()) {
+      const settle = () => loaded.set(true);
       inject(SHELL_IDLE)(() => void host.load().then(settle, settle));
     }
-    return open.asReadonly();
+    return computed(() => ready() && loaded());
   },
 });
 

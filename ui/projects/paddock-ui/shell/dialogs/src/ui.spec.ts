@@ -6,7 +6,7 @@ import { loadDialogBounds, rememberDialogBounds } from './bounds';
 import { dialogWindowConfig, mountDialogWindowHost, openDialogPort, provideDialogs } from './bootstrap';
 import { DeniedCommands } from './denied';
 import { DialogHost } from './dialog-host';
-import { DialogShell } from './dialog-shell';
+import { DialogShell, REFIT_DEBOUNCE_MS } from './dialog-shell';
 import { DialogService } from './dialog.service';
 import { InPageDialogBackend, raise, type InPageDialog } from './in-page';
 import { DIALOG_IO } from './io';
@@ -548,9 +548,18 @@ describe('window layout details', () => {
       expect(first).toBeGreaterThan(0);
       const body = (fixture.nativeElement as HTMLElement).querySelector('main')!;
       const rect = vi.spyOn(body.lastElementChild as HTMLElement, 'getBoundingClientRect').mockReturnValue({ bottom: 900 } as DOMRect);
-      observers.forEach((o) => o());
-      // The re-fit runs on the next frame.
-      await new Promise<void>((r) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 0)));
+      // The re-fit runs once the content kept its size for the debounce.
+      vi.useFakeTimers();
+      try {
+        observers.forEach((o) => o());
+        await vi.advanceTimersByTimeAsync(REFIT_DEBOUNCE_MS - 1);
+        expect(io.fitted.length).toBe(first);
+        await vi.advanceTimersByTimeAsync(1);
+        // The checks the fit itself set off (the shell's Close check after a DOM change) run too.
+        await vi.runOnlyPendingTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
       await settle(1);
       expect(io.fitted.at(-1)).toBeGreaterThan(900);
       rect.mockRestore();

@@ -140,6 +140,7 @@ export interface MemoryPost {
 export class MemoryNotificationCentre extends NotificationsBackend {
   private notices: Notice[] = [];
   private nextId = 0;
+  private revision = 0;
   private readonly listeners = new Set<(e: NoticesEvent) => void>();
   private readonly openers = new Set<(id: number) => void>();
 
@@ -208,10 +209,12 @@ export class MemoryNotificationCentre extends NotificationsBackend {
 
   private current(): NoticesSnapshot {
     const notices = [...this.notices].sort((a, b) => b.at - a.at || b.id - a.id);
-    return { notices, unread: notices.filter((n) => !n.read).length };
+    return { revision: this.revision, notices, unread: notices.filter((n) => !n.read).length };
   }
 
+  /** Every change raises the revision, as `paddock-health`'s centre does. */
   private emit(posted: Notice | null): void {
+    this.revision++;
     const e: NoticesEvent = { posted, ...this.current() };
     for (const l of [...this.listeners]) l(e);
   }

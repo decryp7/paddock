@@ -121,7 +121,8 @@ export function parseNoticesSnapshot(v: unknown): NoticesSnapshot | null {
   if (!isRec(v)) return null;
   const notices = parseNotices(v['notices']);
   const unread = num(v['unread']);
-  return notices && unread !== null ? { notices, unread } : null;
+  const revision = num(v['revision']);
+  return notices && unread !== null && revision !== null ? { revision, notices, unread } : null;
 }
 
 /** A `NoticesEvent` (`paddock://notifications`), or null. */

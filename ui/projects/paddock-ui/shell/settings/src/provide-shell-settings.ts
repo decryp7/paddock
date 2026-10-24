@@ -11,7 +11,7 @@ export interface ShellSettingsOptions {
   readonly backend: () => SettingsBackend;
   /**
    * The window's look lives in the Appearance settings (default true): `provideAppearance` then takes its backend from
-   * here (`APPEARANCE_SOURCE`). With `gate` (in an injection context: `() => inject(PAGES_WINDOW_READY).asReadonly()`)
+   * here (`APPEARANCE_SOURCE`). With `gate` (in an injection context: `windowReady` from `shell/startup`)
    * nothing is asked of the engine before the window is ready. `false` leaves the look to the app.
    */
   readonly appearance?: boolean | { readonly gate: () => Signal<boolean> };

@@ -18,6 +18,8 @@ interface StaticImport {
   /** Value bindings (type-only ones left out); `*` for a namespace, `default` for a default import. */
   readonly values: readonly string[];
   readonly sideEffect: boolean;
+  /** `import type` / `export type`: erased, it never links the module. */
+  readonly typeOnly: boolean;
   readonly line: number;
 }
 
@@ -35,12 +37,12 @@ export function staticImports(source: string): StaticImport[] {
   for (let m = re.exec(code); m; m = re.exec(code)) {
     const line = code.slice(0, m.index).split('\n').length;
     if (m[7] !== undefined) {
-      out.push({ specifier: m[7], values: [], sideEffect: true, line });
+      out.push({ specifier: m[7], values: [], sideEffect: true, typeOnly: false, line });
       continue;
     }
     const clause = (m[3] ?? '').trim();
     if (m[1] === 'export' && !/^(\*|\{)/.test(clause)) continue;
-    out.push({ specifier: m[5] ?? '', values: m[2] !== undefined ? [] : valueBindings(clause), sideEffect: false, line });
+    out.push({ specifier: m[5] ?? '', values: m[2] !== undefined ? [] : valueBindings(clause), sideEffect: false, typeOnly: m[2] !== undefined, line });
   }
   return out;
 }
@@ -78,6 +80,46 @@ export function assertRegistrationsLazy(files: Readonly<Record<string, string>>,
     .filter(([path]) => isRegistrationFile(path))
     .flatMap(([path, source]) => checkRegistrationSource(path, source, allow));
   if (problems.length) throw new Error(`Eager registration files (${problems.length}):\n- ${problems.join('\n- ')}`);
+}
+
+/** The relative modules a source loads with `import('./x')` (as written). */
+export function dynamicImports(source: string): string[] {
+  return [...stripComments(source).matchAll(/\bimport\s*\(\s*(['"])(\.{1,2}\/[^'"\n]+)\1\s*\)/g)].map((m) => m[2] as string);
+}
+
+/** `spec` (relative, without extension) resolved against the folder of `from`, as a `.ts` path. */
+function resolveRelative(from: string, spec: string): string {
+  const parts = from.split('/').slice(0, -1);
+  for (const seg of spec.split('/')) {
+    if (seg === '..') parts.pop();
+    else if (seg !== '.') parts.push(seg);
+  }
+  const path = parts.join('/');
+  return path.endsWith('.ts') ? path : `${path}.ts`;
+}
+
+/**
+ * Lazy chunks stay lazy (plan S16): a module that the entry's own code loads with `import()` (a status item's or a
+ * page's component) is a chunk of its own only while the entry's public API does not link it. A value re-export of it,
+ * or an `export { type X }` (which keeps the module linked), pulls it into the first paint of every window that
+ * imports the entry; `export type { X }` does not. `files` maps the entry's paths (its `public-api.ts` among them,
+ * all under one root) to their sources.
+ */
+export function lazyExportProblems(files: Readonly<Record<string, string>>): string[] {
+  const out: string[] = [];
+  const lazy = new Set<string>();
+  for (const [path, source] of Object.entries(files)) for (const spec of dynamicImports(source)) lazy.add(resolveRelative(path, spec));
+  for (const [path, source] of Object.entries(files)) {
+    if (!path.endsWith('public-api.ts')) continue;
+    for (const imp of staticImports(source)) {
+      if (!imp.specifier.startsWith('.') || imp.typeOnly) continue;
+      const target = resolveRelative(path, imp.specifier);
+      if (!lazy.has(target)) continue;
+      const what = imp.values.length ? imp.values.join(', ') : 'types';
+      out.push(`${path}:${imp.line}: re-exports ${what} from ${imp.specifier}, which is loaded with import(); export its class with \`export type { … }\` and its helpers from another file, or it loads with every window`);
+    }
+  }
+  return out;
 }
 
 function valueBindings(clause: string): string[] {

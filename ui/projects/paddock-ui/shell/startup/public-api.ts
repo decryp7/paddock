@@ -27,7 +27,7 @@ export {
   MOCK_CHECKPOINT_KEY,
   type StartupIpc,
 } from './src/backend';
-export { AFTER_READY, reportReady, answerPings, provideStartupContract, type ReadySender, type StartupContractOptions } from './src/contract';
+export { AFTER_READY, WindowReady, windowReady, reportReady, answerPings, provideStartupContract, type ReadySender, type StartupContractOptions } from './src/contract';
 export {
   WindowRecovery,
   UI_CHECKPOINT,

@@ -16,10 +16,9 @@ import {
 } from '@angular/core';
 import { loadPart, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import { DIALOG_REF, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
-import { fieldText, matchesQuery, settingsNav, type SettingsNavItem } from './settings-model';
+import { fieldText, matchesQuery, settingsNav, type SettingsNavItem, SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { PdSettingsSection, PdSettingsSectionPage, SETTINGS_PAGE } from './settings-section';
 import { SettingsDrafts } from './settings-drafts';
-import { SettingsStore } from './settings.store';
 
 /** The settings pages a Settings window lists (the app's `settingsPages` contributions plus the shell's). */
 export const SETTINGS_WINDOW_PAGES = new InjectionToken<readonly SettingsPageDef[]>('PADDOCK_SETTINGS_WINDOW_PAGES', {
@@ -274,8 +273,9 @@ export class PdSettingsWindow implements DialogContent {
     loader: async ({ params }) => {
       const item = this.items().find((i) => i.id === params);
       if (!item) return null;
-      const page: SettingsPageDef = item.page ?? { id: item.id, group: 'advanced', title: { id: 'pd.settings.section', text: item.title }, order: 0, load: () => Promise.resolve(PdSettingsSectionPage) };
-      const part = await loadPart(page, this.environment, `settings page ${page.id}`);
+      const page: SettingsPageDef = item.page ?? { id: item.id, group: 'advanced', title: { id: 'pd.settings.section', text: item.title }, order: 0 };
+      // A page without a component of its own is its section in the generic form.
+      const part = await loadPart({ load: page.load ?? (() => Promise.resolve(PdSettingsSectionPage)), providers: page.providers }, this.environment, `settings page ${page.id}`);
       this.replaceEnvironment(part.injector);
       return {
         component: part.component as Type<unknown>,

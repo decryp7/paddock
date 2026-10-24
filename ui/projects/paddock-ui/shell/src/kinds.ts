@@ -139,7 +139,7 @@ export const SETTINGS_PAGES = defineContributionKind<SettingsPageDef>({
       !['application', 'features', 'advanced'].includes(s.group) && `group must be application, features or advanced`,
       s.icon !== undefined && iconProblem(s.icon),
       numberProblem('order', s.order, 0, 100_000),
-      loaderProblem(s.load),
+      optionalLoader(s.load, 'load'),
       optionalLoader(s.providers, 'providers'),
     ),
 });

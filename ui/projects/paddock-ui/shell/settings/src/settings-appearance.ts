@@ -76,7 +76,7 @@ export interface SettingsAppearanceOptions {
   readonly settings?: () => SettingsBackend;
   /** The copy the next start paints with (default `BrowserAppearanceBackend` without a channel). */
   readonly copy?: () => AppearanceBackend;
-  /** Start talking to the engine once this holds (`() => inject(PAGES_WINDOW_READY).asReadonly()`): start-up sends nothing else. */
+  /** Start talking to the engine once this holds (`windowReady` from `shell/startup`): start-up sends nothing else. */
   readonly gate?: () => Signal<boolean>;
   /** `overview` (default) or `events` (a dialog window whose contract has no settings command). */
   readonly read?: AppearanceRead;

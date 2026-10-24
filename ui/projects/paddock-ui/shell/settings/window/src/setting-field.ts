@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
 import type { FormValueControl, ValidationError } from '@angular/forms/signals';
-import type { SettingField, SettingValue } from '../generated/settings';
-import { displayValue, editUnit, parseList, parseNumber, rangeHint, sameValue } from './settings-model';
+import { type SettingField, type SettingValue, displayValue, editUnit, parseList, parseNumber, rangeHint, sameValue } from '@decryp7/paddock-ui/shell/settings';
 
 let nextId = 0;
 

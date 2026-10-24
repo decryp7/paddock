@@ -26,7 +26,6 @@ export function provideUiCheckpoint(factory: () => UiCheckpoint): Provider {
 
 /** Quiet period before a changed UI state is checkpointed. */
 export const CHECKPOINT_MS = 1000;
-const CHECKPOINT_TICK_MS = 100;
 
 /** The notification kind of the recovery notice. */
 export const RECOVERY_NOTICE_KIND = 'pd.startup.recovered';
@@ -54,7 +53,6 @@ export class WindowRecovery {
   private readonly injector = inject(Injector);
   private checkpointing = false;
   private pending: string | undefined;
-  private quietSince = 0;
   private stopTimer: (() => void) | null = null;
 
   constructor() {
@@ -99,20 +97,18 @@ export class WindowRecovery {
     );
   }
 
-  /** Debounce: the latest snapshot is sent once it has not changed for `CHECKPOINT_MS` (a check every 100 ms while one is pending). */
+  /** Debounce: the latest snapshot is sent once it has not changed for `CHECKPOINT_MS`. */
   private schedule(snapshot: string): void {
     this.pending = snapshot;
-    this.quietSince = Date.now();
-    if (this.stopTimer) return;
-    const handle = setInterval(() => {
-      if (Date.now() - this.quietSince < CHECKPOINT_MS) return;
+    this.stopTimer?.();
+    const handle = setTimeout(() => {
+      this.stopTimer = null;
       const ui = this.pending as string;
       this.pending = undefined;
-      this.stopTimer?.();
       void this.backend.checkpointUi(JSON.parse(ui)).catch(() => undefined);
-    }, CHECKPOINT_TICK_MS);
+    }, CHECKPOINT_MS);
     this.stopTimer = () => {
-      clearInterval(handle);
+      clearTimeout(handle);
       this.stopTimer = null;
     };
   }

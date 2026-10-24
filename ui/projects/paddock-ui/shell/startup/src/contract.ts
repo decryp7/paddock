@@ -1,4 +1,16 @@
-import { afterNextRender, DestroyRef, EnvironmentProviders, inject, InjectionToken, Injector, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
+import {
+  afterNextRender,
+  DestroyRef,
+  EnvironmentProviders,
+  inject,
+  Injectable,
+  InjectionToken,
+  Injector,
+  makeEnvironmentProviders,
+  provideAppInitializer,
+  signal,
+  type Signal,
+} from '@angular/core';
 import type { ReadyReply } from '../generated/startup';
 import { StartupBackend } from './backend';
 import { stopBootErrorForwarding } from './boot-errors';
@@ -15,6 +27,26 @@ import { retryUntilAnswered, STARTUP_RETRY, type RetryOptions } from './retry';
 
 /** What the window does with the ready reply (or null when none came). Default: `WindowRecovery.afterReady`. */
 export const AFTER_READY = new InjectionToken<(reply: ReadyReply | null) => void>('PADDOCK_AFTER_READY');
+
+/**
+ * Whether this window has reported ready and handled the reply (or found none): set by the start-up contract (plan
+ * §13). What may only talk to the engine after ready (the native menu bar, the Appearance follower) waits for it.
+ */
+@Injectable({ providedIn: 'root' })
+export class WindowReady {
+  private readonly state = signal(false);
+  readonly ready: Signal<boolean> = this.state.asReadonly();
+
+  /** The ready reply was handled. Called by `provideStartupContract` (and by tests that play it). */
+  markReady(): void {
+    this.state.set(true);
+  }
+}
+
+/** This window's ready signal, as a gate: `provideShellSettings({ appearance: { gate: windowReady } })`. In an injection context. */
+export function windowReady(): Signal<boolean> {
+  return inject(WindowReady).ready;
+}
 
 /** Sends `window_ready`. */
 export type ReadySender = () => Promise<ReadyReply>;
@@ -68,7 +100,16 @@ export function provideStartupContract(options: StartupContractOptions = {}): En
       afterNextRender(
         () => {
           const backend = injector.get(StartupBackend);
-          const after = injector.get(AFTER_READY, null) ?? ((reply: ReadyReply | null) => void injector.get(WindowRecovery).afterReady(reply));
+          const handle = injector.get(AFTER_READY, null) ?? ((reply: ReadyReply | null) => void injector.get(WindowRecovery).afterReady(reply));
+          const after = (reply: ReadyReply | null) => {
+            try {
+              handle(reply);
+            } catch (e) {
+              // The window started all the same: it answers pings and counts as ready.
+              console.warn('[paddock-startup] the ready reply could not be handled', e);
+            }
+            injector.get(WindowReady).markReady();
+          };
           void reportReady(() => backend.reportReady(), after, options.retry).then(() => answerPings(backend, injector.get(DestroyRef)));
         },
         { injector },

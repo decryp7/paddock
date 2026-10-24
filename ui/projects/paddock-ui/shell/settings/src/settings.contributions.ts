@@ -9,14 +9,13 @@ export const SETTINGS_DIALOG_ID = 'pd.settings';
 /** The commands the Settings window calls: its dialog contract lists exactly these. */
 export const SETTINGS_DIALOG_COMMANDS = ['settings_overview', 'settings_reset', 'settings_set'] as const;
 
-/** The shell's own settings pages (each shows the Rust section of the same id). */
+/** The shell's own settings pages (each shows the Rust section of the same id in the Settings window's generic form). */
 export const SHELL_SETTINGS_PAGES: readonly SettingsPageDef[] = [
   defineSettingsPage({
     id: 'pd.appearance',
     group: 'application',
     title: msg('pd.settings.appearance', 'Appearance'),
     order: 50,
-    load: () => import('./settings-section').then((m) => m.PdSettingsSectionPage),
   }),
 ];
 

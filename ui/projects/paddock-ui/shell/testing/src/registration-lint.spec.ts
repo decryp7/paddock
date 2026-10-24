@@ -1,4 +1,4 @@
-import { assertRegistrationsLazy, checkRegistrationSource, isRegistrationFile, staticImports } from './registration-lint';
+import { assertRegistrationsLazy, checkRegistrationSource, dynamicImports, isRegistrationFile, lazyExportProblems, staticImports } from './registration-lint';
 
 const FILE = 'src/app/models/models.contributions.ts';
 const check = (source: string, allow?: readonly string[]) => checkRegistrationSource(FILE, source, allow);
@@ -85,8 +85,42 @@ describe('checkRegistrationSource (lazy by construction)', () => {
 
   it('lists static imports with their value bindings', () => {
     expect(staticImports(`import Def, { a, type B, c as d } from 'm';\nimport type { T } from 't';`)).toEqual([
-      { specifier: 'm', values: ['default', 'a', 'd'], sideEffect: false, line: 1 },
-      { specifier: 't', values: [], sideEffect: false, line: 2 },
+      { specifier: 'm', values: ['default', 'a', 'd'], sideEffect: false, typeOnly: false, line: 1 },
+      { specifier: 't', values: [], sideEffect: false, typeOnly: true, line: 2 },
     ]);
+  });
+});
+
+describe('lazyExportProblems (plan S16)', () => {
+  const contributions = [
+    "export const C = { statusItems: [defineStatusItem({ id: 'x', load: () => import('./jobs-status').then((m) => m.PdJobsStatus) })],",
+    "  pages: [definePage({ id: 'p', load: () => import( './pages/page' ).then((m) => m.Page) })] };",
+    "// import('./commented-out')",
+  ].join('\n');
+  const entry = (api: string) => ({ 'shell/jobs/public-api.ts': api, 'shell/jobs/src/jobs.contributions.ts': contributions });
+
+  it('finds the relative modules a source loads with import()', () => {
+    expect(dynamicImports(contributions)).toEqual(['./jobs-status', './pages/page']);
+    expect(dynamicImports("import('@decryp7/paddock-ui/shell/settings/window')")).toEqual([]);
+  });
+
+  it('passes when a lazily loaded component is exported as a type only', () => {
+    expect(lazyExportProblems(entry("export type { PdJobsStatus } from './src/jobs-status';\nexport { JobsStore } from './src/jobs.store';"))).toEqual([]);
+  });
+
+  it('fails on a value re-export, an inline type re-export and a star re-export of a lazy module', () => {
+    const found = lazyExportProblems(
+      entry(
+        [
+          "export { PdJobsStatus, jobsStatusText } from './src/jobs-status';",
+          "export { type PdJobsStatus } from './src/jobs-status';",
+          "export * from './src/pages/page';",
+        ].join('\n'),
+      ),
+    );
+    expect(found).toHaveLength(3);
+    expect(found[0]).toMatch(/^shell\/jobs\/public-api\.ts:1: re-exports PdJobsStatus, jobsStatusText from \.\/src\/jobs-status, which is loaded with import\(\)/);
+    expect(found[1]).toContain(':2: re-exports types from ./src/jobs-status');
+    expect(found[2]).toContain(':3: re-exports * from ./src/pages/page');
   });
 });

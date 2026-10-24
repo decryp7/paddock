@@ -119,13 +119,23 @@ tertiary: NoticeAction | null, link: NoticeLink,
  */
 cause: string, scope: NoticeScope, };
 
-export type NoticesSnapshot = { notices: Array<Notice>, unread: number, };
+export type NoticesSnapshot = { 
+/**
+ * Grows with every change of any list; a window keeps the newest (an answer to `notifications_list` can cross an
+ * event). It is read before the lists, so a snapshot holds at least the changes up to it.
+ */
+revision: number, notices: Array<Notice>, unread: number, };
 
 export type NoticesEvent = { 
 /**
  * The message just posted or merged (the UI previews it as a toast); none for a quiet one or another change.
  */
-posted: Notice | null, notices: Array<Notice>, unread: number, };
+posted: Notice | null, 
+/**
+ * Grows with every change of any list; a window keeps the newest (an answer to `notifications_list` can cross an
+ * event). It is read before the lists, so a snapshot holds at least the changes up to it.
+ */
+revision: number, notices: Array<Notice>, unread: number, };
 
 export type RestoredNotices = { snapshot: NoticesSnapshot, warning: string | null, };
 

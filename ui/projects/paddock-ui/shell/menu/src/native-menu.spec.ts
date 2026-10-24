@@ -1,5 +1,6 @@
 import { provideZonelessChangeDetection, signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { WindowReady } from '@decryp7/paddock-ui/shell/startup';
 import { provideShellContext, SHELL_IDLE, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { MENU_EVENT, type NativeMenuModel } from '../generated/menu';
 import { AppMenu } from './app-menu';
@@ -121,8 +122,10 @@ describe('NativeMenuBridge', () => {
     expect(sent).toEqual([]);
   });
 
-  it('opens the default gate once the app context has loaded or failed to, and at once without one', async () => {
+  it('opens the default gate once the window is ready and the app context has loaded or failed to (at once without one)', async () => {
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    expect(TestBed.inject(NATIVE_MENU_GATE)(), 'not before the window reported ready').toBe(false);
+    TestBed.inject(WindowReady).markReady();
     expect(TestBed.inject(NATIVE_MENU_GATE)()).toBe(true);
     for (const load of [() => Promise.resolve(() => ({})), () => Promise.reject(new Error('chunk failed'))]) {
       TestBed.resetTestingModule();
@@ -135,6 +138,7 @@ describe('NativeMenuBridge', () => {
         ],
       });
       const gate = TestBed.inject(NATIVE_MENU_GATE);
+      TestBed.inject(WindowReady).markReady();
       expect(gate()).toBe(false);
       idle();
       await flush();

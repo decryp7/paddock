@@ -204,6 +204,7 @@ fn the_events_are_spelled_like_the_ui() {
     };
     let v = serde_json::to_value(&event).unwrap();
     assert_eq!(v["unread"], 1);
+    assert_eq!(v["revision"], 1);
     assert_eq!(v["notices"].as_array().unwrap().len(), 1);
     assert_eq!(v["posted"]["count"], 1);
     let restored = serde_json::to_value(RestoredNotices {
@@ -213,7 +214,7 @@ fn the_events_are_spelled_like_the_ui() {
     .unwrap();
     assert_eq!(
         restored,
-        json!({"snapshot": {"notices": [], "unread": 0}, "warning": "w"})
+        json!({"snapshot": {"revision": 1, "notices": [], "unread": 0}, "warning": "w"})
     );
 }
 
@@ -231,4 +232,61 @@ fn a_poisoned_centre_keeps_working() {
     c.note_shown(NoticeId(1), None);
     assert_eq!(c.snapshot("main").notices.len(), 1);
     assert!(c.take_pending().is_some());
+}
+
+#[test]
+fn every_change_of_any_list_raises_the_revision_and_nothing_else_does() {
+    let clock = Arc::new(ManualClock::default());
+    let c = NotificationCentre::new(None, clock.clone());
+    let rev = |c: &NotificationCentre| c.snapshot("main").revision;
+    assert_eq!(rev(&c), 0);
+    let first = c.post(Some("main"), alert(1)).notice;
+    assert_eq!(rev(&c), 1, "a project post");
+    let app = NewNotice::new(
+        "update:2.0",
+        "update",
+        NoticeSeverity::Info,
+        "Version 2.0",
+        NoticeScope::App,
+    );
+    c.post(None, app);
+    assert_eq!(rev(&c), 2, "an app post");
+    // A once message posted again changes nothing.
+    let once = NewNotice::new(
+        "tip:1",
+        "tip",
+        NoticeSeverity::Info,
+        "A tip",
+        NoticeScope::App,
+    )
+    .once();
+    c.post(None, once.clone());
+    let before = rev(&c);
+    c.post(None, once);
+    assert_eq!(rev(&c), before, "an unchanged post");
+    assert!(c.mark_read("main", first.id));
+    assert_eq!(rev(&c), before + 1, "marked read (project list)");
+    assert!(!c.mark_read("main", NoticeId(999)));
+    assert!(!c.dismiss("main", NoticeId(999)));
+    assert!(!c.resolve("nothing:here"));
+    assert_eq!(rev(&c), before + 1, "nothing found, nothing changed");
+    assert!(c.mark_all_read("main") > 0);
+    assert_eq!(rev(&c), before + 2);
+    assert_eq!(c.mark_all_read("main"), 0);
+    assert_eq!(rev(&c), before + 2, "nothing unread");
+    assert!(c.resolve("live:spike:WEB01"));
+    assert_eq!(rev(&c), before + 3, "resolved in a project list");
+    assert!(c.resolve("update:2.0"));
+    assert_eq!(rev(&c), before + 4, "resolved in the app list");
+    let tip = c.snapshot("main").notices[0].id;
+    assert!(c.dismiss("main", tip));
+    assert_eq!(rev(&c), before + 5, "dismissed (app list)");
+    assert!(c.restore("w-2", None).is_none());
+    assert_eq!(rev(&c), before + 6, "restored");
+    c.forget_window("w-2");
+    assert_eq!(rev(&c), before + 7, "forgotten");
+    c.forget_window("w-9");
+    assert_eq!(rev(&c), before + 7, "an unknown window");
+    // Every window reads the same counter.
+    assert_eq!(c.snapshot("w-3").revision, before + 7);
 }

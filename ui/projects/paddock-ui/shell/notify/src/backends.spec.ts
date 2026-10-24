@@ -43,9 +43,9 @@ describe('TauriServiceHealthBackend', () => {
 
 describe('TauriNotificationsBackend', () => {
   it('calls the commands, parses events and opens', async () => {
-    const { ipc, calls, emit } = fakeIpc({ notifications_list: { notices: [], unread: 0 }, notifications_mark_read: true, notifications_mark_all_read: 2, notifications_dismiss: false });
+    const { ipc, calls, emit } = fakeIpc({ notifications_list: { revision: 0, notices: [], unread: 0 }, notifications_mark_read: true, notifications_mark_all_read: 2, notifications_dismiss: false });
     const b = new TauriNotificationsBackend(ipc);
-    await expect(b.list()).resolves.toEqual({ notices: [], unread: 0 });
+    await expect(b.list()).resolves.toEqual({ revision: 0, notices: [], unread: 0 });
     await expect(b.markRead(4)).resolves.toBe(true);
     await expect(b.markAllRead()).resolves.toBe(2);
     await expect(b.dismiss(4)).resolves.toBe(false);
@@ -55,7 +55,7 @@ describe('TauriNotificationsBackend', () => {
     const opened: number[] = [];
     await b.listen((e) => events.push(e));
     await b.onOpen((id) => opened.push(id));
-    emit('paddock://notifications', { notices: [], unread: 0, posted: null });
+    emit('paddock://notifications', { revision: 1, notices: [], unread: 0, posted: null });
     emit('paddock://notifications', 'junk');
     emit('paddock://notifications-open', 7);
     emit('paddock://notifications-open', 'seven');

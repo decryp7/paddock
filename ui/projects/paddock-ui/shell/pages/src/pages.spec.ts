@@ -15,12 +15,12 @@ import {
 import { MemoryJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
 import { Keymap, NATIVE_MENU_GATE, RESERVED_KEYS } from '@decryp7/paddock-ui/shell/menu';
 import { MemoryNotificationCentre, MemoryServiceHealth, NotificationsStore } from '@decryp7/paddock-ui/shell/notify';
-import { AFTER_READY, MockStartupBackend, UI_CHECKPOINT } from '@decryp7/paddock-ui/shell/startup';
+import { MockStartupBackend, UI_CHECKPOINT, WindowReady } from '@decryp7/paddock-ui/shell/startup';
 import { PdShellFrame } from './frame';
 import { PdPageHost } from './page-host';
 import { badgeText, PAGE_DATA, pageOfSnapshot, pageOrder, pagePath, ShellPages } from './pages';
 import { loadCollapsed, PAGES_FRAME_KEY, PAGES_FRAME_STORAGE, PagesFrameStore, saveCollapsed, type PagesFrameStorage } from './pages-frame.store';
-import { PAGES_WINDOW_READY, pagesRoutes, PagesTitleStrategy, provideShellPages, type ShellPagesOptions } from './provide-pages';
+import { pagesRoutes, PagesTitleStrategy, provideShellPages, type ShellPagesOptions } from './provide-pages';
 import { PdPagesSidebar } from './sidebar';
 import { sidebarFit, sidebarMode, sidebarSizes, SIDEBAR_SIZES } from './sidebar-plan';
 
@@ -478,9 +478,9 @@ describe('pd-shell-frame with provideShellPages', () => {
   it('the native menu bar waits for ready; the recovery and checkpoint are wired', async () => {
     await boot({ startup: { backend: () => new MockStartupBackend(), checkpoint: () => ({ capture: () => ({}), restore: () => undefined }) } });
     await settle();
-    expect(TestBed.inject(PAGES_WINDOW_READY)()).toBe(true);
-    expect(TestBed.inject(NATIVE_MENU_GATE)()).toBe(true);
-    TestBed.inject(AFTER_READY)(null);
+    expect(TestBed.inject(WindowReady).ready()).toBe(true);
+    // The gate's default: ready, and the app context loaded (when idle).
+    await vi.waitFor(() => expect(TestBed.inject(NATIVE_MENU_GATE)()).toBe(true));
     expect(TestBed.inject(UI_CHECKPOINT, null)).not.toBeNull();
   });
 

@@ -1,4 +1,4 @@
-import { inject, InjectionToken, Injector } from '@angular/core';
+import { inject, InjectionToken, Injector, type InputSignalWithTransform } from '@angular/core';
 import { ContributionRegistry, type DialogDef } from '@decryp7/paddock-ui/shell';
 
 /** What a dialog's content injects to answer: closing it resolves the opener's promise with the result. */
@@ -22,6 +22,16 @@ export interface DialogContent {
 
 /** What the opener's promise of dialog `D` resolves to. */
 export type DialogResultOf<D> = D extends DialogDef<string, infer R, string> ? R : unknown;
+
+/** The inputs a content component takes, from its `input()` signals: `{ current?: string }` for `current = input('')`. */
+export type DialogInputsOf<C> = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly [K in keyof C as C[K] extends InputSignalWithTransform<any, any> ? K : never]?: C[K] extends InputSignalWithTransform<any, infer W> ? W : never;
+};
+
+/** What `open` takes as inputs for dialog `D`: its component's inputs when its `load` names the component, else any plain record. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type DialogInputsOfDef<D> = D extends DialogDef<string, any, string, infer C> ? (unknown extends C ? Readonly<Record<string, unknown>> : DialogInputsOf<C>) : Readonly<Record<string, unknown>>;
 
 /** Finds a dialog's definition by id: the window's contribution registry, or the list a dialog window was booted with. */
 export type DialogLookup = (id: string) => DialogDef | undefined;

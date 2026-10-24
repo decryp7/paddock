@@ -16,7 +16,7 @@ export interface ShellAboutOptions {
   readonly main?: boolean;
   /**
    * The main window's start-up work waits for this (in an injection context): the window's ready signal, so nothing reaches
-   * the IPC before the start-up contract's reply (`() => inject(PAGES_WINDOW_READY)` on the pages frame). Default: ready.
+   * the IPC before the start-up contract's reply (`windowReady` from `shell/startup`). Default: ready.
    */
   readonly ready?: () => Signal<boolean>;
 }

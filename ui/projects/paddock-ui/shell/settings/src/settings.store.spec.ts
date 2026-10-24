@@ -2,9 +2,9 @@ import { TestBed } from '@angular/core/testing';
 import { SETTINGS_OVERVIEW_FIXTURE } from '../generated/settings-fixtures';
 import type { SetResult, SettingsChanged, SettingsOverview } from '../generated/settings';
 import { MemorySettingsBackend, SettingsBackend, type SettingsChanges, type Unlisten } from './settings-backend';
-import { SettingsDrafts } from './settings-drafts';
+import { SettingsDrafts } from '../window/src/settings-drafts';
 import { SettingsStore } from './settings.store';
-import { settingsBed, settle } from './spec-helpers';
+import { settingsBed, settle } from '../window/src/spec-helpers';
 
 /** A backend that fails on demand. */
 class FlakyBackend extends SettingsBackend {

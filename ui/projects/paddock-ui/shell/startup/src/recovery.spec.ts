@@ -109,7 +109,7 @@ describe('WindowRecovery', () => {
     TestBed.tick();
     await vi.advanceTimersByTimeAsync(CHECKPOINT_MS - 1);
     expect(checkpoints, 'not before a quiet second').toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(101);
+    await vi.advanceTimersByTimeAsync(1);
     expect(checkpoints.at(-1)).toEqual({ note: 'ab' });
     expect(checkpoints).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(CHECKPOINT_MS * 5);

@@ -23,6 +23,16 @@ Conventional Commits; one semver tag for the whole repo.
   in localStorage, as the Rust engine is.
 - The in-app menu bar (Windows, Linux, the browser) has no app menu: the title bar already names the app, so its entries
   (Settings…, About, Quit) are at the end of File (`foldAppMenu`); the macOS menu bar keeps the app menu.
+- The "no UI timeout" lint (`uiTimeoutProblems`) flags only timers that give up on work: `Promise.race` against a
+  timer, `AbortSignal.timeout`, `...timeout` helpers, and a `setTimeout`/`setInterval` whose callback rejects, aborts,
+  cancels, fails or throws; debounce, retry and tick timers are allowed (plan §12). The dialog shell's close check and
+  refit are debounced again (30 and 60 ms), `retryUntilAnswered` schedules each attempt with `setTimeout`, and the UI
+  checkpoint is a plain `setTimeout` debounce. The dialog shell's start and debounces are pending tasks, so the
+  boot-every-dialog harness waits on `whenStable` (its `maxRounds` is now `maxTurns`, only for a window that never
+  settles).
+- `buildManifest` states a dialog's `minSize` as the contract file does (`dialogMinSize`: the kind's floor, a side left
+  out filled from `DIALOG_MIN`); `DIALOG_MIN` and `VIEWER_MIN` now live in the shell core.
+- The Playwright config takes its ports through `e2ePort` (CI sets `PW_PORT` and `SHELL_DEMO_PORT`).
 - Pages frame, review round 3: status items sit at equal distances (4 px gap, 4 px item padding; the service chip
   keeps 5 px of margin for its visible edge) and the chip looks pressed while its details are open. `shell-demo`: the
   status item says the table's exceptions ("1 offline · 1 updating", the full count in its name and tooltip), and the
@@ -101,6 +111,27 @@ Conventional Commits; one semver tag for the whole repo.
   one owner: `SettingsAppearanceBackend` / `settingsAppearanceBackend({ local, gate })` in `/shell/settings` keeps theme
   and density in the engine's Appearance section (contrast, motion and the pack in the window), and the demo passes
   `appearance: false` to `provideShellSettings`.
+- Test kit (plan S16, ADR 0012 §7). `@decryp7/paddock-e2e` (no longer a scaffold): `test` and `expect` with the
+  fixtures `app` (page objects for the frame, sidebar, status bar, notifications, jobs, menus, dialogs and Settings) and
+  `pageErrors`, and a worker check that refuses the installed Chrome or Edge (`assertChromeForTesting` for the config,
+  `PADDOCK_E2E_CHROME` for a pinned binary, rule 7); `e2ePort` (required on CI); `axeViolations` and `THEMES`; layout
+  scenarios (`LAYOUT_WIDTHS`, `expectNoHorizontalScroll`); `installTauriFake` (replies by command, held until
+  released, recorded calls, events, a played Mac); `captureStable` screenshots of a settled frame; `readVersion` (the app version from its single source, rule 6); the retried-test
+  reporter (`@decryp7/paddock-e2e/retried-reporter`); `dialogContracts`. `shell-demo`'s e2e uses only the kit.
+  `shell/testing`: `provideShellTesting` (zoneless, shell core, `RecordingShellPorts`, `ManualIdle`, contributions,
+  context, `windowReady` set), `ManualClock`, `settle` and `render` on `whenStable` (rule 38), `lazyExportProblems`;
+  the static source checks (lazy registration files, lazy exports of every entry point, no UI timeout, the splash) run
+  in `reference-sources.spec.ts` instead of the e2e, with S15's one-writer-of-the-look and catalog coverage checks.
+- `shell/settings/window`: the Settings window, its section form and field control and `settingsWindowProviders`, split
+  from `shell/settings` so a main window loads none of it (and no `@angular/forms`); a settings page without `load` is
+  its Rust section in the window's generic form. The status items' components are exported as types only (their words
+  from pure files), so they stay chunks of their own. `shell-demo` loads 559.5 kB of JavaScript before first paint
+  in its main window instead of 676.2 kB, and 448.8 kB instead of 561.4 kB in a dialog window.
+- `windowReady` (`shell/startup`): set once the window's ready reply was handled; `NATIVE_MENU_GATE` defaults to it
+  (with the app context), so `shell/pages` no longer wraps `AFTER_READY` and `PAGES_WINDOW_READY` is gone.
+- `DialogService.open(def, { inputs })` types the inputs from the content component's `input()` signals
+  (`DialogInputsOf`); `defineDialog` keeps the component type of its `load`.
+- `paddock-health`: `NoticesSnapshot.revision` (also on every `NoticesEvent`), raised by every change of any list.
 - Settings (plan S10, rule 21, ADR 0012; ported from Debrief's settings schema, `config_store.rs` and `settings.rs`):
   crate `paddock-settings` 0.1.0 with the section schema (nine field kinds, schema check at registration), validation
   in Rust (`validate`, `sanitize`, `ValidValues::decode`), the versioned `settings.json` (missing, damaged, newer or
@@ -297,6 +328,11 @@ Conventional Commits; one semver tag for the whole repo.
   as Debrief does.
 - `@decryp7/paddock-ui` is published to the Gitea npm registry by the tag workflow (`.npmrc` with the `@decryp7` registry and
   `"@decryp7/paddock-ui": "^0.1.0"`) instead of a release-asset tarball; releases carry notes only.
+
+### Fixed
+- Notifications: a notice posted while a window's first `notifications_list` was in flight vanished from the centre
+  (the toast showed, the older list overwrote it); the store keeps the newest revision, like the jobs and health
+  stores. The shell demo's ordering workaround is gone.
 
 ## 0.1.0 - 2026-10-22
 

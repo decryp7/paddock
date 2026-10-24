@@ -36,9 +36,9 @@ describe('notices', () => {
   it('reads a notice, a list and an event', () => {
     expect(parseNotice(notice)).toEqual(notice);
     expect(parseNotice({ ...notice, link: undefined, code: undefined })?.link).toEqual({ window: null, jobId: null, path: null });
-    expect(parseNoticesSnapshot({ notices: [notice], unread: 1 })).toEqual({ notices: [notice], unread: 1 });
-    expect(parseNoticesEvent({ notices: [notice], unread: 1, posted: notice })).toEqual({ posted: notice, notices: [notice], unread: 1 });
-    expect(parseNoticesEvent({ notices: [], unread: 0 })).toEqual({ posted: null, notices: [], unread: 0 });
+    expect(parseNoticesSnapshot({ revision: 4, notices: [notice], unread: 1 })).toEqual({ revision: 4, notices: [notice], unread: 1 });
+    expect(parseNoticesEvent({ revision: 5, notices: [notice], unread: 1, posted: notice })).toEqual({ posted: notice, revision: 5, notices: [notice], unread: 1 });
+    expect(parseNoticesEvent({ revision: 0, notices: [], unread: 0 })).toEqual({ posted: null, revision: 0, notices: [], unread: 0 });
   });
 
   it.each([
@@ -58,8 +58,10 @@ describe('notices', () => {
     expect(parseNoticesSnapshot(null)).toBeNull();
     expect(parseNoticesSnapshot({ notices: 'x', unread: 0 })).toBeNull();
     expect(parseNoticesSnapshot({ notices: [{}], unread: 0 })).toBeNull();
-    expect(parseNoticesSnapshot({ notices: [], unread: 'x' })).toBeNull();
-    expect(parseNoticesEvent({ notices: [], unread: 0, posted: { id: 1 } })).toBeNull();
+    expect(parseNoticesSnapshot({ revision: 0, notices: [], unread: 'x' })).toBeNull();
+    // Without a revision a list cannot be ordered against the events: refused.
+    expect(parseNoticesSnapshot({ notices: [], unread: 0 })).toBeNull();
+    expect(parseNoticesEvent({ revision: 0, notices: [], unread: 0, posted: { id: 1 } })).toBeNull();
     expect(parseNoticesEvent(null)).toBeNull();
   });
 });

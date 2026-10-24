@@ -52,6 +52,8 @@ export {
   type DialogRef,
   type DialogContent,
   type DialogResultOf,
+  type DialogInputsOf,
+  type DialogInputsOfDef,
   type DialogLookup,
   type DialogShowRequest,
   type DialogSession,

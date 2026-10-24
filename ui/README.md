@@ -98,23 +98,27 @@ so a manager app never bundles the workbench:
 | Entry point | Content | Plan |
 |---|---|---|
 | `@decryp7/paddock-ui/shell` | contributions, `ShellContext`, frame parts, widgets | S2, S14 |
-| `/shell/jobs` | jobs over the `paddock-jobs` adapter: `JobsBackend` (Tauri, memory), `JobsStore`, `pd-jobs-list`, `pd-jobs-status`, `JobFollow`, `provideShellJobs`, `JOBS_CONTRIBUTIONS` | S9 |
-| `/shell/notify` | notifications and service health over the `paddock-health` adapter: backends (Tauri, memory), `ServiceHealthStore`, `NotificationsStore`, `pd-notification-host`, `pd-service-status`, `pd-notifications-status`, `pd-waiting-for`, `provideShellNotify` | S4 |
+| `/shell/jobs` | jobs over the `paddock-jobs` adapter: `JobsBackend` (Tauri, memory), `JobsStore`, `pd-jobs-list`, `pd-jobs-status` (a lazy chunk: exported as a type), `JobFollow`, `provideShellJobs`, `JOBS_CONTRIBUTIONS` | S9 |
+| `/shell/notify` | notifications and service health over the `paddock-health` adapter: backends (Tauri, memory), `ServiceHealthStore`, `NotificationsStore`, `pd-notification-host`, `pd-service-status` and `pd-notifications-status` (lazy chunks: exported as types), `pd-waiting-for`, `provideShellNotify` | S4 |
 | `/shell/store` | shared SignalStore features: `withRequestStatus` (rule 30) | S4 |
 | `/shell/menu` | menus and keys: `defineSubmenu`, the menu model, `AppMenu`, `pd-menu-bar`, `pd-context-menu`, `Keymap` with user overrides, `NativeMenuBridge` over `paddock-menu` | S13 |
 | `@decryp7/paddock-ui/shell` (theme) | theme packs (`defineTheme`, `provideThemes`, `themeProblems`), the window's appearance (`provideAppearance`, `AppearanceStore`, `applyStoredAppearance`, browser and IPC backends), colour maths | S15 |
 | `/shell/i18n` | `initI18n`, `LanguageStore`, locale, plural and number helpers; the shell's XLIFF catalog and pseudo-locale in `i18n/`; the `paddock-i18n` bin | S15 |
 | `/shell/pages` | the pages frame of the manager apps: `provideShellPages`, `pd-shell-frame`, the sidebar of contributed pages (expanded, rail or over the page by `planLayout`), routed lazy pages with their own providers, `ShellPages` | S14 |
-| `/shell/settings` | settings over the `paddock-settings` adapter: `SettingsBackend` (Tauri, memory), `SettingsStore`, `SettingsDrafts` (Signal Forms), `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `settingsWindowProviders`, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
-| `/shell/startup`, `/shell/dialogs`, `/shell/about`, `/shell/testing` | one shell part each | S5-S16 |
+| `/shell/settings` | settings over the `paddock-settings` adapter, what a main window imports: `SettingsBackend` (Tauri, memory), `SettingsStore`, the model, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
+| `/shell/settings/window` | the Settings window, loaded only by it: `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `SettingsDrafts` (Signal Forms), `settingsWindowProviders` | S10, S16 |
+| `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
+| `/shell/startup`, `/shell/dialogs`, `/shell/about` | one shell part each | S5-S11 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
 `projects/paddock-ui/<entry>/` with an `ng-package.json` and a `public-api.ts`; specs next to the code run with `npm test`.
 A new entry point needs only those two files (the publish dry run fails if the built package does not export one).
 `projects/shell-demo` is the shell's reference app (mock backend): every shell change shows up there first, with its e2e in
-`e2e/shell-demo.spec.ts`. `@decryp7/paddock-e2e` (`projects/paddock-e2e`, plain Node, versioned with this package) gets the
-Playwright helpers in S16.
+`e2e/shell-demo*.spec.ts`, which use only `@decryp7/paddock-e2e` (`projects/paddock-e2e`, plain Node, versioned with this
+package; see its README): `test` with the Chrome for Testing guard, page objects, axe, layout scenarios, the fake Tauri
+IPC, settled screenshots and the retried-test reporter. Lazy chunks stay lazy: a module a contribution loads with
+`import()` is never re-exported as a value by its entry point (`lazyExportProblems`, run over every entry point).
 
 ### Pages frame (`/shell/pages`, plan S14)
 
@@ -249,8 +253,10 @@ providers: [
   item: "2 running: Reading", "Still working"; opens the list in an in-app popover, Escape and outside click close it).
 - `JobFollow.run(start, destroyRef)` / `follow(id, destroyRef)`: a dialog waits for its job; closing it stops waiting only.
 - `MemoryJobsBackend` plays the engine in the browser build and tests; `parseJobSnapshot` checks every payload at the edge.
-- Nothing times out a job (rule 12): `uiTimeoutProblems(path, source)` is the grep check the shell demo's e2e runs over every
-  shell and reference-app source (delayed `setTimeout`, `AbortSignal.timeout`, `Promise.race`, `...timeout...(` helpers).
+- Nothing times out a job (rule 12): `uiTimeoutProblems(path, source)` is the check `shell/testing`'s reference-sources spec
+  runs over every shell and reference-app source: a timer that gives up on work (`Promise.race` against a timer,
+  `AbortSignal.timeout`, `...timeout...(` helpers, a `setTimeout`/`setInterval` whose callback rejects, aborts, cancels or
+  fails). Debounce, retry and tick timers are fine (plan §12).
 - `@ngrx/signals` (^22) is an optional peer dependency, needed by the shell entry points that hold stores.
 
 ### Notifications and service health (`@decryp7/paddock-ui/shell/notify`, plan S4)
@@ -300,18 +306,18 @@ export const SETTINGS_DIALOG = defineDialog({
   id: 'pd.settings', kind: 'tool', title: msg('pd.settings.title', 'Settings'), width: 880, height: 620,
   commands: ['settings_overview', 'settings_reset', 'settings_set'],                  // SETTINGS_DIALOG_COMMANDS
   providers: () => import('./settings-window.providers').then((m) => m.SETTINGS_WINDOW),
-  load: () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsWindow),
+  load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
 export const APP_SETTINGS_PAGES = [
-  defineSettingsPage({ id: 'pw.models', group: 'features', title: msg('pw.settings.models', 'Models'), order: 100,
-    load: () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsSectionPage) }),   // or a page of its own
+  // Without `load` the page is its Rust section in the generic form; `load` names a page of its own.
+  defineSettingsPage({ id: 'pw.models', group: 'features', title: msg('pw.settings.models', 'Models'), order: 100 }),
 ];
-// settings-window.providers.ts: what the Settings window boots with (rule 34)
+// settings-window.providers.ts: what the Settings window boots with (rule 34); imports shell/settings/window
 export const SETTINGS_WINDOW = settingsWindowProviders({ backend: () => new TauriSettingsBackend(ipc), pages: APP_SETTINGS_PAGES });
 // main window
 provideContributions(SETTINGS_CONTRIBUTIONS),          // Settings… (Mod+,) in the app menu, the shell's Appearance page
 provideContributions({ settingsPages: APP_SETTINGS_PAGES, dialogs: [SETTINGS_DIALOG] }),
-provideShellSettings({ backend: () => new TauriSettingsBackend(ipc) }),   // OPEN_SETTINGS for notices; follows Appearance
+provideShellSettings({ backend: () => new TauriSettingsBackend(ipc), appearance: { gate: windowReady } }),   // OPEN_SETTINGS; follows Appearance once ready
 ```
 
 - A page's id is the id of its Rust section; `PdSettingsSectionPage` (or `<pd-settings-section section="...">` inside a
@@ -330,7 +336,7 @@ provideShellSettings({ backend: () => new TauriSettingsBackend(ipc) }),   // OPE
 - Generated in `shell/settings/generated/`: `settings.ts` (wire types, `SETTINGS_EVENT`, `APPEARANCE_SECTION`, limits),
   `settings-commands.ts` (`SETTINGS_COMMANDS`) and `settings-fixtures.ts` (an overview with every field kind, a refusal, a
   change and a start-up problem, written by Rust; the shell demo's in-memory engine serves them).
-- Needs `@angular/forms` (^22, an optional peer dependency).
+- `/shell/settings/window` needs `@angular/forms` (^22, an optional peer dependency); a main window never loads it.
 
 ### Dialogs (`/shell/dialogs`, plan S6)
 
@@ -348,7 +354,8 @@ export const RENAME_DIALOG = defineDialog({
 
 - Main window: `provideDialogs({ io: () => tauriDialogIo({ invoke, listen, emitTo }) })` (without `io` dialogs open in the
   page), `<pd-dialog-host />` in the root template, `openDialog: openDialogPort()` in `SHELL_PORTS`. Open with
-  `inject(DialogService).open(RENAME_DIALOG, { inputs: { current } }).closed` (resolves to `string | undefined`).
+  `inject(DialogService).open(RENAME_DIALOG, { inputs: { current } }).closed` (resolves to `string | undefined`; the inputs
+  are typed from the content component's `input()`s).
 - Content: inject `DIALOG_REF` and call `close(result)`; inputs set the component's `input()`s; `dialogCanClose()` may
   keep it open; mark a Close/Cancel with `data-dialog-close` (else the shell adds one) and the default with `data-default`.
 - Dialog window: in `main.ts`, `parseDialogRoute(location.hash)`; for a dialog route `mountDialogWindowHost()` and

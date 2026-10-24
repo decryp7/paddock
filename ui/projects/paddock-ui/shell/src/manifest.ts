@@ -11,7 +11,7 @@ import type {
   SettingsPageDef,
   StatusItemDef,
 } from './define';
-import { DIALOG_KINDS } from './define';
+import { DIALOG_KINDS, dialogMinSize } from './define';
 import { normalizeKey, toAccelerator } from './keys';
 import { isMessage, type Message } from './message';
 
@@ -148,7 +148,7 @@ export function buildManifest(source: ManifestSource): PaddockManifest {
             modality: d.modality,
             instanced: d.instanced === true,
             requiredChoice: d.requiredChoice === true,
-            minSize: d.minWidth !== undefined || d.minHeight !== undefined ? { width: d.minWidth ?? 0, height: d.minHeight ?? 0 } : null,
+            minSize: dialogMinSize(d),
             commands: [...new Set(d.commands)].sort(byString),
           } satisfies ManifestDialog,
         ]),

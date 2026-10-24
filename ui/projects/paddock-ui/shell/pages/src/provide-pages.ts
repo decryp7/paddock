@@ -1,4 +1,4 @@
-import { EnvironmentProviders, inject, Injectable, InjectionToken, Injector, makeEnvironmentProviders, signal, type Provider, type Type, type WritableSignal } from '@angular/core';
+import { EnvironmentProviders, inject, Injectable, Injector, makeEnvironmentProviders, type Provider, type Type } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { provideRouter, ROUTES, TitleStrategy, withHashLocation, type RouterStateSnapshot, type Route, type Routes } from '@angular/router';
 import {
@@ -16,17 +16,7 @@ import { openDialogPort, provideDialogs, type DialogsOptions } from '@decryp7/pa
 import { JOBS_CONTRIBUTIONS, provideShellJobs, type ShellJobsOptions } from '@decryp7/paddock-ui/shell/jobs';
 import { provideKeyboardShortcuts, provideMenus, provideNativeMenu, RESERVED_KEYS, type NativeMenuPort, type ReservedKey } from '@decryp7/paddock-ui/shell/menu';
 import { NOTIFY_CONTRIBUTIONS, notifyPort, provideShellNotify, type ShellNotifyOptions } from '@decryp7/paddock-ui/shell/notify';
-import {
-  AFTER_READY,
-  provideStartupBackend,
-  provideStartupContract,
-  provideUiCheckpoint,
-  WindowRecovery,
-  type ReadyReply,
-  type RetryOptions,
-  type StartupBackend,
-  type UiCheckpoint,
-} from '@decryp7/paddock-ui/shell/startup';
+import { provideStartupBackend, provideStartupContract, provideUiCheckpoint, type RetryOptions, type StartupBackend, type UiCheckpoint } from '@decryp7/paddock-ui/shell/startup';
 import { PdPageHost } from './page-host';
 import { PAGE_DATA, PAGES_CONFIG, pageOrder, pagePath, ShellPages, type PagesConfig } from './pages';
 import { PAGES_SIDEBAR_SIZES } from './pages-frame.store';
@@ -63,9 +53,6 @@ export interface ShellPagesOptions {
   /** Keys the app handles itself, reserved besides the frame's F6 and Shift+F6. */
   readonly reservedKeys?: readonly ReservedKey[];
 }
-
-/** Whether this window has reported ready (the native menu bar is built after it). */
-export const PAGES_WINDOW_READY = new InjectionToken<WritableSignal<boolean>>('PADDOCK_PAGES_WINDOW_READY', { providedIn: 'root', factory: () => signal(false) });
 
 /** Window titles: "Models – Pitwall"; the app's name alone on a route without a title. */
 @Injectable()
@@ -142,22 +129,12 @@ export function provideShellPages(options: ShellPagesOptions): EnvironmentProvid
     provideMenus({ appName: options.appName }),
     provideKeyboardShortcuts(),
     { provide: RESERVED_KEYS, useValue: Object.freeze([...REGION_KEYS, ...(options.reservedKeys ?? [])]) },
-    provideNativeMenu({ ...(options.nativeMenu ? { port: options.nativeMenu } : {}), gate: () => inject(PAGES_WINDOW_READY).asReadonly() }),
+    // Built once the window reported ready (the gate's default: `windowReady` and the app context).
+    provideNativeMenu(options.nativeMenu ? { port: options.nativeMenu } : {}),
     provideShellNotify({ ...options.notify, ports: false, mountHost: false }),
     provideStartupBackend(options.startup.backend),
     provideStartupContract(options.startup.retry ? { retry: options.startup.retry } : {}),
     ...(options.startup.checkpoint ? [provideUiCheckpoint(options.startup.checkpoint)] : []),
-    {
-      provide: AFTER_READY,
-      useFactory: () => {
-        const recovery = inject(WindowRecovery);
-        const ready = inject(PAGES_WINDOW_READY);
-        return (reply: ReadyReply | null) => {
-          void recovery.afterReady(reply);
-          ready.set(true);
-        };
-      },
-    },
     provideDialogs(options.dialogs ?? {}),
     {
       provide: SHELL_PORTS,

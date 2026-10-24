@@ -6,14 +6,12 @@ import {
   type SettingsOverview,
   SETTINGS_OVERVIEW_FIXTURE,
   SETTINGS_PROBLEM_FIXTURE,
-  settingsWindowProviders,
   TauriSettingsBackend,
   type SettingsBackend,
   type SetResult,
 } from '@decryp7/paddock-ui/shell/settings';
 import { DemoHealthEngine } from './demo-health';
 import { tauriIpc } from './demo-ipc';
-import { DEMO_SETTINGS_PAGES } from './demo.contributions';
 
 /** Where the browser build keeps the stand-in engine's values, and the channel its windows share. */
 const STORE_KEY = 'sd.settings';
@@ -94,6 +92,3 @@ export function demoSettingsBackend(): SettingsBackend {
   const ipc = tauriIpc();
   return ipc ? new TauriSettingsBackend(ipc) : inject(DemoSettingsEngine).backend;
 }
-
-/** The Settings window's providers (its dialog's `providers`): loaded with it, never in the main window's first paint. */
-export const DEMO_SETTINGS_WINDOW = settingsWindowProviders({ backend: demoSettingsBackend, pages: DEMO_SETTINGS_PAGES });

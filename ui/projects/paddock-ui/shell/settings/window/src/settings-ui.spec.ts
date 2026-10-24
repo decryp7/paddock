@@ -15,13 +15,19 @@ import {
 import { DIALOG_REF, DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { assertContributionsValid } from '@decryp7/paddock-ui/shell/testing';
-import { SETTINGS_OVERVIEW_FIXTURE, SETTINGS_PROBLEM_FIXTURE } from '../generated/settings-fixtures';
-import { appearanceFromSettings, appearanceToSettings } from './appearance';
-import { MemorySettingsBackend } from './settings-backend';
-import { SETTINGS_CONTRIBUTIONS, SETTINGS_DIALOG_ID, SHELL_SETTINGS_PAGES } from './settings.contributions';
+import {
+  appearanceFromSettings,
+  appearanceToSettings,
+  MemorySettingsBackend,
+  provideShellSettings,
+  SETTINGS_CONTRIBUTIONS,
+  SETTINGS_DIALOG_ID,
+  SETTINGS_OVERVIEW_FIXTURE,
+  SETTINGS_PROBLEM_FIXTURE,
+  SHELL_SETTINGS_PAGES,
+} from '@decryp7/paddock-ui/shell/settings';
 import { PdSettingsSectionPage } from './settings-section';
 import { PdSettingsWindow } from './settings-window';
-import { provideShellSettings } from './provide-shell-settings';
 import { settingsBed, settle, SPEC_PAGES } from './spec-helpers';
 
 interface Bed {
@@ -316,12 +322,12 @@ describe('SETTINGS_CONTRIBUTIONS and provideShellSettings', () => {
     return opened;
   }
 
-  it('passes the contributions lint and loads the shell’s Appearance page lazily', async () => {
+  it('passes the contributions lint; the shell’s Appearance page names no component (the window’s generic form shows it)', async () => {
     bed();
     expect(() => assertContributionsValid(TestBed.inject(Injector))).not.toThrow();
     const registry = TestBed.inject(ContributionRegistry);
     expect(registry.has('keybindings', 'window:Mod+,:pd.settings.open')).toBe(true);
-    expect(await SHELL_SETTINGS_PAGES[0]!.load()).toBe(PdSettingsSectionPage);
+    expect(SHELL_SETTINGS_PAGES[0]!.load).toBeUndefined();
   });
 
   it('opens the Settings window from the command and at a page from a notice', async () => {

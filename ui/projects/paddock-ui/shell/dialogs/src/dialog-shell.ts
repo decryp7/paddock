@@ -7,6 +7,7 @@ import {
   EnvironmentInjector,
   inject,
   Injector,
+  PendingTasks,
   signal,
   viewChild,
   ViewContainerRef,
@@ -20,29 +21,45 @@ import { contentInjector, errorText, isRecord, mountContent } from './mount';
 import { DIALOG_ROUTE } from './route';
 import { DIALOG_LOOKUP, type DialogContent, type DialogRef } from './types';
 
+/** How long the content must be still before the shell checks again for its own Close (a burst of DOM changes is one check). */
+export const CLOSE_CHECK_DEBOUNCE_MS = 30;
+
+/** How long the content must keep its size before the window is fitted again (a burst of resizes is one fit). */
+export const REFIT_DEBOUNCE_MS = 60;
+
 /**
- * Runs `work` once on the next frame however often it is asked for until then (a burst of DOM changes or resizes is
- * one check), with no delay of its own: the UI holds no timers on work (rule 12). Returns the asker and a cancel.
+ * Runs `work` once `ms` after the last ask (a debounce: a burst of DOM changes or resizes is one run). A plain timer
+ * on UI work, not on a job: nothing is given up on (rule 12). `track` marks a pending run (Angular's `PendingTasks`,
+ * so `whenStable` waits for it); it returns the function that ends the mark. Returns the asker and a cancel.
  */
-export function coalesced(work: () => void): { readonly ask: () => void; readonly cancel: () => void } {
-  let pending: number | ReturnType<typeof setTimeout> | null = null;
-  const raf = typeof requestAnimationFrame === 'function';
-  const run = () => {
-    pending = null;
-    work();
+export function debounced(work: () => void, ms: number, track?: () => () => void): { readonly ask: () => void; readonly cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let untrack: (() => void) | null = null;
+  const settle = () => {
+    timer = undefined;
+    untrack?.();
+    untrack = null;
+  };
+  const cancel = () => {
+    clearTimeout(timer);
+    settle();
   };
   return {
     ask: () => {
-      if (pending === null) pending = raf ? requestAnimationFrame(run) : setTimeout(run, 0);
+      clearTimeout(timer);
+      untrack ??= track?.() ?? null;
+      timer = setTimeout(() => {
+        try {
+          work();
+        } finally {
+          settle();
+        }
+      }, ms);
     },
-    cancel: () => {
-      if (pending === null) return;
-      if (raf) cancelAnimationFrame(pending as number);
-      else clearTimeout(pending);
-      pending = null;
-    },
+    cancel,
   };
 }
+
 /** The body's padding when the computed style cannot be read. */
 const BODY_PADDING_PX = 16;
 
@@ -111,6 +128,8 @@ export class DialogShell {
   private readonly environment = inject(EnvironmentInjector);
   private readonly injector = inject(Injector);
   private readonly destroyRef = inject(DestroyRef);
+  /** The start and the debounced checks are pending tasks: `whenStable` (tests, the boot harness) waits for them. */
+  private readonly pending = inject(PendingTasks);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>('body');
   private readonly host = viewChild.required('host', { read: ViewContainerRef });
   protected readonly id = this.route?.id ?? '';
@@ -133,6 +152,7 @@ export class DialogShell {
   readonly ref: DialogRef = { closed: new Promise(() => undefined), close: (result) => void this.close(result) };
 
   constructor() {
+    const started = this.pending.add();
     let off: (() => void) | null = null;
     let gone = false;
     this.io.listen(DIALOG_EVENTS.closeRequested, () => void this.dismiss()).then(
@@ -147,8 +167,9 @@ export class DialogShell {
     afterNextRender(() => {
       this.body().nativeElement.focus();
       this.watchForCloseAction();
-      void this.start();
+      void this.start().finally(started);
     });
+    this.destroyRef.onDestroy(started);
   }
 
   private async start(): Promise<void> {
@@ -194,7 +215,7 @@ export class DialogShell {
   private watchForCloseAction(): void {
     this.check();
     if (typeof MutationObserver === 'undefined') return;
-    const recheck = coalesced(() => this.check());
+    const recheck = debounced(() => this.check(), CLOSE_CHECK_DEBOUNCE_MS, () => this.pending.add());
     const observer = new MutationObserver(recheck.ask);
     observer.observe(this.body().nativeElement, { childList: true, subtree: true, characterData: true });
     this.destroyRef.onDestroy(() => {
@@ -205,7 +226,7 @@ export class DialogShell {
 
   /**
    * Fits the window to what its content needs: once after the first layout and the fonts (fitting before them and again
-   * after made the window jump), and again when the content grows (once per frame). Only grows: a window never shrinks under a
+   * after made the window jump), and again when the content grows (debounced). Only grows: a window never shrinks under a
    * reader. Rust bounds the height by the dialog's floor and its monitor.
    */
   private fitToContent(): void {
@@ -216,7 +237,7 @@ export class DialogShell {
       last = needed;
       void this.io.fitHeight(needed).catch(() => undefined);
     };
-    const refit = coalesced(fit);
+    const refit = debounced(fit, REFIT_DEBOUNCE_MS, () => this.pending.add());
     const schedule = refit.ask;
     this.refit = schedule;
     afterNextRender(

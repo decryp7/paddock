@@ -3,19 +3,19 @@ import type { DialogDef } from '@decryp7/paddock-ui/shell';
 import { InPageDialogBackend } from './in-page';
 import { instanceKey } from './kind';
 import { ModalGate } from './modal-gate';
-import { DIALOG_LOOKUP, DialogPresenter, type DialogRef, type DialogResultOf, type DialogSession } from './types';
+import { DIALOG_LOOKUP, DialogPresenter, type DialogInputsOfDef, type DialogRef, type DialogResultOf, type DialogSession } from './types';
 
-/** How to open a dialog. */
-export interface DialogOpenOptions {
+/** How to open a dialog; `I` is typed from the content component's `input()`s when the definition is passed. */
+export interface DialogOpenOptions<I = Readonly<Record<string, unknown>>> {
   /** Plain data (it crosses to the dialog's window): each key sets the content component's input of that name. */
-  readonly inputs?: Readonly<Record<string, unknown>>;
+  readonly inputs?: I;
   /** The window title and accessible name; defaults to the dialog's declared title. */
   readonly title?: string;
 }
 
 /** Any defined dialog, whatever its id and result. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyDialogDef = DialogDef<string, any, string>;
+export type AnyDialogDef = DialogDef<string, any, string, any>;
 
 /**
  * Opens contributed dialogs (ADR 0009): as OS windows on the desktop, in the page in the browser build; the calls are
@@ -33,9 +33,9 @@ export class DialogService {
   /** A modal dialog is open over this window. */
   readonly blocked = this.gate.blocked;
 
-  open<D extends AnyDialogDef>(dialog: D, options?: DialogOpenOptions): DialogRef<DialogResultOf<D>>;
+  open<D extends AnyDialogDef>(dialog: D, options?: DialogOpenOptions<DialogInputsOfDef<D>>): DialogRef<DialogResultOf<D>>;
   open<R = unknown>(id: string, options?: DialogOpenOptions): DialogRef<R>;
-  open(dialog: AnyDialogDef | string, options: DialogOpenOptions = {}): DialogRef<unknown> {
+  open(dialog: AnyDialogDef | string, options: DialogOpenOptions<object> = {}): DialogRef<unknown> {
     const id = typeof dialog === 'string' ? dialog : dialog.id;
     // The registered definition is the contract (it is what Rust's copy was generated from), not the caller's object.
     const def = this.lookup(id);
@@ -43,7 +43,7 @@ export class DialogService {
       console.warn(`[paddock-dialogs] no dialog ${JSON.stringify(id)} is registered in this window`);
       return { closed: Promise.resolve(undefined), close: () => undefined };
     }
-    const inputs = options.inputs ?? {};
+    const inputs = (options.inputs ?? {}) as Readonly<Record<string, unknown>>;
     const instance = def.instanced ? instanceKey(inputs) : undefined;
     const key = instance ? `${def.id}#${instance}` : def.id;
     const single = this.presenter.windowed || def.modality === 'modeless';

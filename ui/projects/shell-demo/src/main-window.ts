@@ -1,10 +1,10 @@
-import { inject, provideEnvironmentInitializer } from '@angular/core';
+import { inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideContributions, provideShellContext } from '@decryp7/paddock-ui/shell';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
-import { PAGES_WINDOW_READY, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
+import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
-import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend } from '@decryp7/paddock-ui/shell/startup';
+import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS } from './app/demo.contributions';
 import { demoAboutBackend, demoUpdatesBackend } from './app/demo-about';
@@ -16,7 +16,7 @@ import { DemoJobsEngine } from './app/demo-jobs';
 import { DemoNote } from './app/demo-note';
 import { provideDemoAppearance } from './app/demo-appearance';
 import { LANGUAGE_CONFIG, LocalStorageLanguageStorage, PSEUDO_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
-import { DemoSettingsEngine, demoSettingsBackend } from './app/demo-settings';
+import { demoSettingsBackend } from './app/demo-settings';
 import { ShellDemo } from './app/shell-demo';
 
 // Every shell entry point resolves from this app (the reference consumer, ADR 0012 §7): type-only imports, so the build
@@ -41,20 +41,18 @@ export function bootMainWindow(): Promise<unknown> {
           reload: () => location.reload(),
         },
       },
-      // Plays paddock-settings' start-up in the browser build: the settings are read (and a damaged file reported) before
-      // any window reads its notifications, as `paddock_settings::tauri::manage` does in the app's setup.
-      ...(ipc ? [] : [provideEnvironmentInitializer(() => void inject(DemoSettingsEngine))]),
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
       // About, Updates and What's New (plan S11): the Help menu's items; the main window announces a found update and
       // opens What's New once after an update.
       provideContributions(SHELL_ABOUT_CONTRIBUTIONS),
-      provideShellAbout({ about: demoAboutBackend, updates: demoUpdatesBackend, main: true, ready: () => inject(PAGES_WINDOW_READY) }),
+      provideShellAbout({ about: demoAboutBackend, updates: demoUpdatesBackend, main: true, ready: windowReady }),
       // Settings (plan S10): Settings… (Mod+,) and the shell's Appearance page, Open Settings for notices and repairs, and
       // the Appearance settings as the source of the window's look, read once the window is ready (start-up sends only
       // the contract's calls).
       provideContributions(SETTINGS_CONTRIBUTIONS),
-      // The window's look: its appearance store (the one writer) over the Appearance settings (the one source).
-      provideShellSettings({ backend: demoSettingsBackend, appearance: { gate: () => inject(PAGES_WINDOW_READY).asReadonly() } }),
+      // The window's look: its appearance store (the one writer) over the Appearance settings (the one source), read
+      // once the window reported ready (start-up sends only the contract's calls).
+      provideShellSettings({ backend: demoSettingsBackend, appearance: { gate: windowReady } }),
       provideSubmenus<DemoContext>(...DEMO_SUBMENUS),
       // The app's part of the context is a lazy chunk, loaded when the window is idle (plan §9).
       provideShellContext<DemoContext>(() => import('./app/demo-context').then((m) => m.demoContext)),

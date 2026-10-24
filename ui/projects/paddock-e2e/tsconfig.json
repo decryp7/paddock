@@ -3,13 +3,22 @@
   "compilerOptions": {
     "outDir": "../../dist/paddock-e2e",
     "rootDir": "src",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
+    "module": "es2022",
+    "moduleResolution": "bundler",
     "declaration": true,
     "importHelpers": false,
     "noEmit": false,
-    "types": []
+    "types": [
+      "node"
+    ],
+    "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["**/*.spec.ts"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.spec.ts",
+    "**/*.test.ts"
+  ]
 }

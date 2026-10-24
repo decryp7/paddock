@@ -23,7 +23,6 @@ export {
   pagesRoutes,
   pageRoute,
   PagesTitleStrategy,
-  PAGES_WINDOW_READY,
   type ShellPagesOptions,
 } from './src/provide-pages';
 export {

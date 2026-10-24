@@ -1,11 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // The shell demo in the generated pseudo-locale (plan S15, ADR 0012 §6): accented, longer, bracketed (⟦…⟧) text. A smoke
 // test of runtime translation loading and the guard against unmarked English in every part the shell draws: the menu
 // bar and its menus, the status items and their popovers, toasts, the service chip, the job card and dialogs. The demo's
-// own page text is app content and outside the check; its contributions (commands, menus, dialog titles) are in.
+// own page text is app content and outside the check; its contributions (commands, menus, dialog titles) are in. That
+// every catalog message is in the pseudo-locale file is checked in shell/testing's reference-sources spec.
 
 const PSEUDO = /⟦[^⟧]*⟧/;
 /** Text that is never translated: the app's name, key names and glyphs. */
@@ -162,7 +161,7 @@ test.describe('pseudo-locale (plan S15)', () => {
     expect(await unmarkedEnglish(page.locator('pd-service-status'), '.svc > strong, .hint, code')).toEqual([]);
   });
 
-  test('a dialog in the page and a dialog window: the shell’s chrome and the contributed title are pseudo text', async ({ page }) => {
+  test('a dialog in the page and a dialog window: the shell’s chrome and the contributed title are pseudo text', async ({ app, page }) => {
     await page.goto('/#/dialogs');
     await page.locator('[data-dialog-open="sd.about"]').click();
     const dialog = page.getByRole('dialog');
@@ -172,10 +171,9 @@ test.describe('pseudo-locale (plan S15)', () => {
     await dialog.getByTestId('dialog-close').click();
 
     // A dialog window (the desktop build's OS window, opened by URL in the browser build): the shell's own Close.
-    const input = encodeURIComponent('{}');
-    await page.goto(`/#/dialog?id=sd.about&host=main&label=d-main-1&title=About&dialogInput=${input}`);
+    await app.dialogs.openWindow('sd.about', {}, { title: 'About' });
     await expect(page.locator('html')).toHaveAttribute('lang', 'en-XA');
-    const shell = page.locator('pd-dialog-shell');
+    const shell = app.dialogs.shell;
     await expect(shell.getByTestId('dialog-loading')).toHaveCount(0);
     const foot = shell.getByTestId('dialog-shell-foot');
     if (await foot.count()) expect(await unmarkedEnglish(foot)).toEqual([]);
@@ -190,16 +188,6 @@ test.describe('pseudo-locale (plan S15)', () => {
     // Engine-written texts (section titles and descriptions, field labels, hints, option labels) carry English until the
     // engine's messages get codes (ADR 0012 §6); the shell's own words around them must be translated.
     expect(await unmarkedEnglish(win, '.nav .item, .title, .desc, .label, .hint, .help, option, select, .status, [data-testid=settings-problem]')).toEqual([]);
-  });
-
-  test('every message of the shell catalog is in the demo’s pseudo-locale file (paddock-i18n merge)', () => {
-    const catalog = readFileSync(join(__dirname, '..', 'projects', 'paddock-ui', 'i18n', 'messages.pd.xlf'), 'utf8');
-    const ids = [...catalog.matchAll(/<trans-unit id="([^"]+)"/g)].map((m) => m[1]);
-    const loaded = JSON.parse(readFileSync(join(__dirname, '..', 'projects', 'shell-demo', 'src', 'locale', 'messages.en-XA.json'), 'utf8')) as {
-      translations: Record<string, string>;
-    };
-    expect(ids.length).toBeGreaterThan(50);
-    expect(ids.filter((id) => !(id in loaded.translations))).toEqual([]);
   });
 });
 

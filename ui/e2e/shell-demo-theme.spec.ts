@@ -1,10 +1,8 @@
-import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { axeViolations, captureStable, expect, test, type Page } from '@decryp7/paddock-e2e';
 
 // Theme switching (plan S15): system / dark / light, high contrast and reduced motion, the same in every window of the
-// app (here: tabs and a dialog window of one origin, through the BroadcastChannel backend), kept across a reload.
+// app (here: tabs and a dialog window of one origin, through the BroadcastChannel backend), kept across a reload. That
+// only the appearance store writes the look (rule 40) is checked in shell/testing's reference-sources spec.
 
 const html = (page: Page) => page.locator('html');
 const token = (page: Page, name: string) => page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name);
@@ -47,12 +45,12 @@ test('system follows the OS; dark and light are fixed; the choice is kept across
   await expect.poll(() => token(page, '--pd-bg')).toBe('#0e0f12');
 });
 
-test('a theme change in one window is shown in the others at once, a dialog window included', async ({ context, page }) => {
+test('a theme change in one window is shown in the others at once, a dialog window included', async ({ app, context, page }) => {
   await open(page);
   const other = await context.newPage();
   await open(other);
   const dialog = await context.newPage();
-  await dialog.goto(`/#/dialog?id=sd.about&host=main&label=d-main-1&title=About&dialogInput=${encodeURIComponent('{}')}`);
+  await dialog.goto(app.dialogs.url('sd.about', {}, { title: 'About' }));
   await expect(dialog.locator('pd-dialog-shell')).toHaveAttribute('data-kind', 'viewer');
   await choose(page, 'Theme: light');
   await expect(html(other)).toHaveAttribute('data-theme', 'light');
@@ -81,8 +79,7 @@ test('high contrast: hairlines become control borders, popovers lose their shado
     await expect(html(page)).toHaveAttribute('data-theme', scheme);
     // Two frames: the new scheme's styles are applied everywhere before axe reads colours.
     await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`), theme).toEqual([]);
+    expect(await axeViolations(page), theme).toEqual([]);
   }
   // Off again: the menu toggle sets "standard", which also overrides the OS preference.
   await choose(page, 'High contrast');
@@ -136,22 +133,6 @@ test('reduced motion: the menu toggle and the OS setting shorten every duration 
   await expect.poll(() => token(page, '--pd-duration-large')).toBe('100ms');
 });
 
-test('one writer of the look (rule 40): only the appearance store puts the appearance on <html>', () => {
-  const ui = join(__dirname, '..');
-  const files = (dir: string): string[] =>
-    readdirSync(dir).flatMap((n) => {
-      const p = join(dir, n);
-      return statSync(p).isDirectory() ? (n === 'node_modules' ? [] : files(p)) : n.endsWith('.ts') && !n.endsWith('.spec.ts') ? [p] : [];
-    });
-  // The store applies the look (`applyAppearanceTo`); `applyStoredAppearance` paints the stored copy before Angular starts.
-  const allowed = ['shell/src/theme/appearance.store.ts', 'shell/src/theme/provide-appearance.ts'];
-  const writer = /applyPaddockAppearance\(|setAttribute\(\s*['"]data-(theme|density|contrast|motion|accent|pack)['"]/;
-  const found = [...files(join(ui, 'projects', 'paddock-ui', 'shell')), ...files(join(ui, 'projects', 'shell-demo', 'src'))]
-    .filter((f) => writer.test(readFileSync(f, 'utf8')))
-    .map((f) => f.slice(join(ui, 'projects', 'paddock-ui').length + 1));
-  expect(found.sort()).toEqual(allowed);
-});
-
 test('the macOS-less menu bar names the app once: in the title bar, its menu entries under File', async ({ page }) => {
   await open(page);
   await expect(page.getByRole('menubar').getByRole('menuitem')).toHaveText(['File', 'View', 'Help']);
@@ -187,7 +168,7 @@ test('a View-menu change and a Settings change in another window never revert ea
 
 test.describe('screenshots (independent review)', () => {
   test.skip(!process.env['SCREENSHOTS'], 'set SCREENSHOTS=1 to rewrite docs/screenshots');
-  const root = join(__dirname, '..', 'docs', 'screenshots', 'shell-demo');
+  const shot = (name: string) => `${__dirname}/../docs/screenshots/shell-demo/${name}.png`;
 
   /** Chooses the look through the demo's commands: the main window keeps theme and density in the engine's settings. */
   async function look(page: Page, theme: 'dark' | 'light', contrast: 'standard' | 'more'): Promise<void> {
@@ -212,8 +193,7 @@ test.describe('screenshots (independent review)', () => {
       await page.locator('button.cmd[data-command="sd.job.start"]').click();
       await page.locator('button.cmd[data-command="sd.engine.break"]').click();
       await page.getByTestId('service-health-chip').click();
-      mkdirSync(root, { recursive: true });
-      await page.screenshot({ path: join(root, `theme-${name}.png`), fullPage: false });
+      await captureStable(page, shot(`theme-${name}`));
     });
   }
 
@@ -226,7 +206,6 @@ test.describe('screenshots (independent review)', () => {
     // The View menu (after File).
     await page.getByRole('menubar').getByRole('menuitem').nth(1).click();
     await page.getByRole('menu').first().locator('[aria-haspopup]').first().click();
-    mkdirSync(root, { recursive: true });
-    await page.screenshot({ path: join(root, 'theme-pseudo-locale-dark.png'), fullPage: false });
+    await captureStable(page, shot('theme-pseudo-locale-dark'));
   });
 });

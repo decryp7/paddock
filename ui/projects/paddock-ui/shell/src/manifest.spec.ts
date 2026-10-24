@@ -2,6 +2,9 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
   buildManifest,
+  DIALOG_MIN,
+  dialogMinSize,
+  VIEWER_MIN,
   ContributionRegistry,
   defineCommand,
   defineDialog,
@@ -78,8 +81,9 @@ describe('paddock-manifest.json', () => {
     ]);
     expect([m.pages, m.statusItems, m.settingsPages, m.healthServices]).toEqual([['sd.models'], ['sd.serving'], ['sd.engines'], ['sd.engine']]);
     expect(m.dialogs).toEqual({
-      'sd.about': { kind: 'viewer', modality: 'modeless', instanced: true, requiredChoice: false, minSize: null, commands: ['plugin:paddock-shell|about_*'] },
-      'sd.create': { kind: 'form', modality: 'modal', instanced: false, requiredChoice: false, minSize: { width: 400, height: 0 }, commands: ['apps_create', 'apps_list'] },
+      // The minimum is the kind's floor (a viewer's 680x560); a side left out is the least a dialog can be (plan §13).
+      'sd.about': { kind: 'viewer', modality: 'modeless', instanced: true, requiredChoice: false, minSize: { width: 680, height: 560 }, commands: ['plugin:paddock-shell|about_*'] },
+      'sd.create': { kind: 'form', modality: 'modal', instanced: false, requiredChoice: false, minSize: { width: 400, height: 200 }, commands: ['apps_create', 'apps_list'] },
     });
     expect(Object.keys(m.dialogs)).toEqual(['sd.about', 'sd.create']);
     expect(m.notificationKinds).toEqual({ 'sd.update': { actions: ['install', 'later'] } });
@@ -146,5 +150,15 @@ describe('paddock-manifest.json', () => {
     expect(manifestDrift(m, serializeManifest(old as PaddockManifest))).toEqual(['pages: added sd.models; removed sd.legacy', 'dialogs: entries changed']);
     expect(manifestDrift(m, JSON.stringify(m))).toEqual(['formatting differs (regenerate the file)']);
     expect(manifestDrift(m, 'nope')[0]).toMatch(/^checked-in manifest is invalid: not JSON/);
+  });
+});
+
+describe('dialogMinSize', () => {
+  it('raises the declared minimum to the kind’s floor and fills a side left out from DIALOG_MIN', () => {
+    expect(dialogMinSize({ kind: 'decision' })).toBeNull();
+    expect(dialogMinSize({ kind: 'tool', minWidth: 500 })).toEqual({ width: 500, height: DIALOG_MIN.height });
+    expect(dialogMinSize({ kind: 'form', minHeight: 100 })).toEqual(DIALOG_MIN);
+    expect(dialogMinSize({ kind: 'viewer' })).toEqual(VIEWER_MIN);
+    expect(dialogMinSize({ kind: 'viewer', minWidth: 900, minHeight: 100 })).toEqual({ width: 900, height: VIEWER_MIN.height });
   });
 });
