@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Fixed
+- UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
+  injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell
+  demo's menu bar test expects Edit (undo, X44); the channels retry test steps the demo engine by hand (`?channels-step=manual`)
+  instead of racing its 400 ms timer; the dock's "attach before dockview has loaded" spec forgets the module itself instead of
+  relying on a fresh worker.
+
 ### Changed
 - X21 review 2 (`ui/docs/review/x21-data/REVIEW.md`): `pd-middle-text` measures the room it is given (`flex: 1 1 0`), so paths are cut
   only as far as needed and grow back when the table widens; the donut lays out by the card's own width (list under the ring below
