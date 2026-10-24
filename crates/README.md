@@ -760,9 +760,23 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   `Verb` is the shared first argument (`install`, `uninstall`, `status`, `stop`, `print-unit`, `print-plist`, `--service`).
 - **Launch at login.** `login::launch_at_login_section` (`pd.login`, one switch, off by default) and
   `apply_launch_at_login` (the app's own `Autostart` and the service together, each tried, one message).
-- Not here: the Windows SCM host (the `--service` dispatcher that starts the program in the user's session, Pitwall's
-  `service/windows.rs` and Pitcrew's `win_session.rs`), the Tauri commands and the Settings > Service page (with X19), and
-  Task Scheduler entries (no app uses them).
+- **The Windows service host (X4b).** `scm_host::supervise` is the `--service` supervisor over a `Sessions` port: the
+  logged-on user's session (connected before disconnected, console first, never session 0; Remote Desktop users are
+  found), the program started there with the user's token and environment plus the supervised variable, restarted after
+  a pause, moved when the session changes, stopped gracefully (its `stop` verb, a grace period, then ended).
+  `native::run_as_service(spec, exe)` is the SCM dispatcher and the Win32 side. Pitcrew's pipe SDDL is the app ↔ service
+  link and stays with `paddock-ipc` (X13).
+- **In the app** (`tauri` feature, `control::ServiceControl`): `service_status`, `service_repair`, `service_install`,
+  `open_login_items` and the `paddock://service` event (`ServiceUpdate { status, error }`); requests run on their own
+  thread, status answers from the last look while a repair holds the manager, the health entry is kept current and is
+  the health registry's Repair (`RepairAction::OpenLoginItems` where macOS has the switch), start-up checks at 3 s then
+  every minute. `paddock_shell::Builder::service(|app| Ok(ServicePart::new(Setup::new(manager).health("agent"))))`
+  wires it and the `pd.login` "Start at login" section (only a change by the user acts). The UI is
+  `@decryp7/paddock-ui/shell/service` (Settings > Background service).
+- **The shell demo's agent** (`apps/shell-demo/src-tauri/src/agent.rs`, binary `shell-demo-agent`): a heartbeat-only
+  per-user agent, bundled with its generated plist and NSIS hooks, so the page, the health entry and
+  `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
+- Not here: Task Scheduler entries (no app uses them).
 
 ## `paddock-diag` (plan X2)
 

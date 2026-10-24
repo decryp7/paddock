@@ -612,3 +612,59 @@ fn the_tray_shows_what_needs_attention_and_repairs_it_through_the_shell() {
     assert_eq!(denied["code"], "denied", "{denied}");
     call(&main, true, "job_cancel", json!({ "id": id })).unwrap();
 }
+
+/// The files the bundle ships for the agent are generated from its spec (plan X4): the launch agent in
+/// `Contents/Library/LaunchAgents` and the NSIS hooks. A stale one fails; `PADDOCK_WRITE_TS=1` rewrites them.
+#[test]
+fn the_agents_bundled_plist_and_installer_hooks_are_generated_from_its_spec() {
+    use paddock_shell_demo::agent;
+    let plist = app_dir().join(format!("macos/{}.plist", agent::LABEL));
+    sync_generated(&plist, &agent::bundled_plist(), WriteMode::from_env()).unwrap();
+    sync_generated(
+        &app_dir().join("windows/installer-hooks.nsh"),
+        &agent::nsis_hooks(),
+        WriteMode::from_env(),
+    )
+    .unwrap();
+    let mac: Value = serde_json::from_str(
+        &std::fs::read_to_string(app_dir().join("tauri.macos.conf.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        mac["bundle"]["macOS"]["files"][format!("Library/LaunchAgents/{}.plist", agent::LABEL)],
+        format!("macos/{}.plist", agent::LABEL)
+    );
+    let win: Value = serde_json::from_str(
+        &std::fs::read_to_string(app_dir().join("tauri.windows.conf.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        win["bundle"]["windows"]["nsis"]["installerHooks"],
+        "windows/installer-hooks.nsh"
+    );
+}
+
+/// The agent in the app: its health entry, the Background service page's commands and the Start at login section, all
+/// over the recording fake in tests (nothing is registered with the OS).
+#[test]
+fn the_agent_is_a_service_of_the_app_with_its_health_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app(dir.path());
+    let main = window(&app, "main");
+    let status = call(&main, true, "service_status", json!({})).unwrap();
+    assert_eq!(status["condition"], "notInstalled", "{status}");
+    let health = call(&main, true, "health_snapshot", json!({})).unwrap();
+    assert_eq!(
+        service(&health, paddock_shell_demo::agent::HEALTH_ID)["repair"],
+        "install",
+        "{health}"
+    );
+    let overview = call(&main, true, "settings_overview", json!({})).unwrap();
+    assert!(
+        overview["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "pd.login")
+    );
+}

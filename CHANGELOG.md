@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-service` in the app (plan X4b): the Windows service host (`--service`: the program in the user's session,
+  restarted, moved with the session, stopped gracefully) behind a `Sessions` port; `ServiceControl` and the `tauri`
+  adapter (`service_status`, `service_repair`, `service_install`, `open_login_items`, the `paddock://service` event, the
+  health entry and its Repair, start-up checks); `paddock_shell::Builder::service` with the `pd.login` "Start at login"
+  section; `RepairAction::OpenLoginItems` in `paddock-health`; the shell demo's sample agent (`shell-demo-agent`, its
+  generated plist and NSIS hooks) and `scripts/shell-demo/smoke-service-update.sh` (C21, disposable Macs only).
 - `paddock-service` (plan X4, decision D4, rule 24, catalogue R03/R05): background services and login items. One
   `ServiceSpec` rendered (pure, golden-tested) as the bundled launchd plist for `SMAppService` or a plist file, the systemd
   user or system unit, the Windows `Run` value, the Windows service as `sc.exe` calls and the NSIS installer hooks (they
