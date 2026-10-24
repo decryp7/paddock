@@ -70,10 +70,19 @@ impl Engine for FakeEngine {
     fn start<'a>(&'a self, l: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move {
             self.attempts.fetch_add(1, Ordering::SeqCst);
-            let taken = self
-                .port_taken
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                .is_ok();
+            let taken = loop {
+                let n = self.port_taken.load(Ordering::SeqCst);
+                if n == 0 {
+                    break false;
+                }
+                if self
+                    .port_taken
+                    .compare_exchange(n, n - 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    break true;
+                }
+            };
             if taken {
                 return Err(EngineError::Start("bind: Address already in use (os error 98)".into()));
             }
