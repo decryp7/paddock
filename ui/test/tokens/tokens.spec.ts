@@ -31,6 +31,20 @@ const ratio = (v: Vars, fg: string, bg: string): number => contrast(col(v, fg), 
 describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
   const v = resolve(rules, scheme, 'debrief', mode);
 
+  it('the resting "..." button of a table row is 3:1 on a plain row, and the full subtle text is 3:1 on the selected tint and on surface-2', () => {
+    const mix = (a: Rgba, b: Rgba, k: number): Rgba => ({ r: a.r * k + b.r * (1 - k), g: a.g * k + b.g * (1 - k), b: a.b * k + b.b * (1 - k), a: 1 });
+    const [subtle, s1, s2, accent] = [col(v, '--pd-text-subtle'), col(v, '--pd-surface-1'), col(v, '--pd-surface-2'), col(v, '--pd-accent')];
+    // --pd-row-action-rest: subtle at 75 % mixed into surface-1; a selected row (the accent tint, about 14 %) shows the full subtle text instead.
+    const rest = mix(subtle, s1, 0.75);
+    expect(contrast(rest, s1)).toBeGreaterThanOrEqual(3);
+    // Rows that sit on surface-2 (the group band, hover) show the button in the text colour, never in the rest mix.
+    expect(contrast(rest, s2), 'rest on surface-2 (information only)').toBeGreaterThan(2.5);
+    const selected = mix(accent, s1, 0.14);
+    expect(contrast(subtle, selected), 'full subtle on the selected tint').toBeGreaterThanOrEqual(3);
+    expect(contrast(subtle, s2), 'full subtle on surface-2').toBeGreaterThanOrEqual(3);
+    expect(v['--pd-row-action-rest'] ?? '').toContain('75%');
+  });
+
   it.each(SURFACES)('text on %s is AAA (7:1)', (s) => {
     expect(contrast(col(v, '--pd-text'), col(v, s))).toBeGreaterThanOrEqual(7);
   });
@@ -142,6 +156,16 @@ describe.each(SCHEMES)('chart palette under colour-vision deficiency, %s', (sche
       for (let j = i + 1; j < sim.length; j++) {
         expect(deltaE(sim[i] as Rgba, sim[j] as Rgba), `${i + 1} vs ${j + 1} under ${kind}`).toBeGreaterThanOrEqual(14);
       }
+  });
+
+  // Slot 6 is the one the review found too close to slot 1 (both blues); it keeps clear of every other slot. Other weak pairs exist
+  // in any 8-colour palette (1 and 4, 2 and 5): that is why a chart with 5 or more series must also be keyed without colour.
+  it.each(['protanopia', 'deuteranopia'] as Cvd[])('slot 6 is >= 20 apart from every other slot under %s', (kind) => {
+    const sim = palette.map((c) => simulate(c, kind));
+    for (let i = 0; i < sim.length; i++) {
+      if (i === 5) continue;
+      expect(deltaE(sim[i] as Rgba, sim[5] as Rgba), `${i + 1} vs 6 under ${kind}`).toBeGreaterThanOrEqual(20);
+    }
   });
 
   it('normal vision: every pair of the 8 colours is >= 20 apart', () => {

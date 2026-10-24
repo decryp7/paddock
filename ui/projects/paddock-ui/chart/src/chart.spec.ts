@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { FakeECharts } from '@decryp7/paddock-ui/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_ECHARTS, PdChart, fakeEchartsLoader, reducedMotion } from './chart';
+import { donutNarrowHeight } from './options';
 import type { PdChartSpec } from './options';
 
 const SPEC: PdChartSpec = { kind: 'bar', x: ['A', 'B'], series: [{ name: 'Jobs', values: [2, 5] }], unit: 'jobs' };
@@ -56,13 +57,42 @@ describe('pd-chart', () => {
 
   it('draws the label and the unit as the visible title, unless the card around it has one', async () => {
     const { f } = await setup();
-    expect(f.nativeElement.querySelector('[data-testid=chart-title]')?.textContent).toBe('Jobs per day, jobs');
+    expect(f.nativeElement.querySelector('[data-testid=chart-title]')?.textContent).toBe('Jobs per day (jobs)');
     f.componentInstance.spec.set({ ...SPEC, unit: undefined });
     await settle(f);
     expect(f.nativeElement.querySelector('[data-testid=chart-title]')?.textContent).toBe('Jobs per day');
     f.componentInstance.title.set(false);
     await settle(f);
     expect(f.nativeElement.querySelector('[data-testid=chart-title]')).toBeNull();
+  });
+
+  it('puts a donut’s list under the ring and makes the card taller when the box is narrower than 400 px', async () => {
+    const resizes: ((e: unknown[]) => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: (e: unknown[]) => void) {
+          resizes.push(cb);
+        }
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    const { f, fake } = await setup();
+    f.componentInstance.spec.set({ kind: 'donut', x: ['A', 'B', 'C', 'D'], series: [{ name: 'S', values: [4, 3, 2, 1] }], unit: 'GB' });
+    await settle(f);
+    const wide = fake.instances[0]!.lastOption as Record<string, any>;
+    expect(wide['legend'].top).toBe('middle');
+    resizes.forEach((r) => r([{ contentRect: { width: 320 } }]));
+    await settle(f);
+    const narrow = fake.instances[0]!.lastOption as Record<string, any>;
+    expect(narrow['legend']).toMatchObject({ left: 'center', bottom: 4 });
+    // The ring and the total share one centre, and the ring sits inside the card.
+    expect(narrow['series'][0].center).toEqual([narrow['graphic'][0].x, narrow['graphic'][0].y]);
+    expect(narrow['series'][0].center[0]).toBe(160);
+    expect(f.nativeElement.querySelector('pd-chart').style.height).toBe(`${30 + donutNarrowHeight(4)}px`);
+    vi.unstubAllGlobals();
   });
 
   it('shows ghosted axes while loading and the error with Retry, and measures the chart again when it comes back', async () => {
@@ -131,7 +161,7 @@ describe('pd-chart', () => {
       },
     );
     const { f, fake } = await setup();
-    resizes.forEach((r) => r());
+    resizes.forEach((r) => (r as unknown as (e: unknown[]) => void)([]));
     expect(fake.instances[0]!.resized).toBe(1);
     f.destroy();
     expect(fake.instances[0]!.disposed).toBe(true);

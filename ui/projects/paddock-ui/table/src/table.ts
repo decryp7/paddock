@@ -69,6 +69,8 @@ function readDensity(): number {
   return Number.parseInt(getComputedStyle(document.documentElement).getPropertyValue('--pd-row-height'), 10) || 32;
 }
 
+const NO_ACTIONS = (): readonly PdRowAction[] => [];
+
 /** Above this many lines the rows are drawn by a virtual scroll viewport (`virtual="auto"`). */
 export const PD_TABLE_VIRTUAL_FROM = 100;
 
@@ -100,10 +102,12 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
       @if (filterable()) {
         <label class="pd-filter">
           <pd-glyph name="search" [size]="14" />
-          <input class="pd-filter-input" type="search" autocomplete="off" [attr.aria-label]="t.filter" [placeholder]="t.filter" [value]="query()" (input)="query.set($any($event.target).value)" />
+          <input class="pd-filter-input" type="search" autocomplete="off" [attr.aria-label]="t.filter" [placeholder]="t.filter" [value]="query()" [disabled]="state() !== 'ready' || !rows().length" (input)="query.set($any($event.target).value)" />
         </label>
       }
-      <span class="pd-count" aria-live="polite" data-testid="table-count">{{ countText() }}</span>
+      @if (countText(); as count) {
+        <span class="pd-count" aria-live="polite" data-testid="table-count">{{ count }}</span>
+      }
       @if (state() === 'loading') {
         <span class="pd-sr" role="status">{{ t.loading }}</span>
       }
@@ -122,7 +126,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
             @if (c.sortable !== false) {
               <button type="button" class="pd-sort" [class.pd-sorted]="sort()?.key === c.key" (click)="sortBy(c.key)" [attr.aria-label]="sortLabel(c)">
                 <span class="pd-th-text">{{ c.header }}</span>
-                <pd-glyph class="pd-sort-icon" [name]="sort()?.key === c.key && sort()?.direction === 'asc' ? 'chevron-up' : 'chevron-down'" [size]="14" />
+                <pd-glyph class="pd-sort-icon" [name]="sort()?.key !== c.key ? 'sort' : sort()?.direction === 'asc' ? 'chevron-up' : 'chevron-down'" [size]="14" />
               </button>
             } @else {
               <span class="pd-th-text">{{ c.header }}</span>
@@ -139,7 +143,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
             @for (n of [0, 1, 2, 3, 4]; track n) {
               <div role="row" class="pd-row pd-skeleton">
                 @for (c of columns2(); track c.key) {
-                  <div role="gridcell" class="pd-cell"><span class="pd-skel" [style.width.%]="40 + ((n * 17 + c.key.length * 11) % 50)"></span></div>
+                  <div role="gridcell" class="pd-cell"><span class="pd-skel" [class.pd-skel-end]="c.align === 'end'" [style.width.%]="40 + ((n * 17 + c.key.length * 11) % 50)"></span></div>
                 }
                 @if (actionWidth()) { <div role="gridcell" class="pd-cell"></div> }
               </div>
@@ -193,7 +197,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
               <pd-glyph [name]="item.collapsed ? 'chevron-right' : 'chevron-down'" [size]="14" />
             </button>
             <span class="pd-group-name">{{ item.label || t.none }}</span>
-            <span class="pd-group-count">{{ item.count }}</span>
+            <span class="pd-group-count">{{ formatCount(item.count) }}</span>
           </div>
         </div>
       } @else {
@@ -284,7 +288,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-spacer { flex: 1; }
     .pd-tool { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
     .pd-tool:hover { background: var(--pd-hover); color: var(--pd-text); }
-    .pd-tool:focus-visible, .pd-sort:focus-visible, .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-tool:focus-visible, .pd-sort:focus-visible, .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
     /* A narrow table keeps the filter and an icon-only Columns button; the count goes (the grid says how many rows it has). */
     @container (max-width: 400px) { .pd-tool-text, .pd-count { display: none; } .pd-tool { padding: 0 var(--pd-space-2); } }
     .pd-grid { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
@@ -292,7 +296,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-header { position: sticky; top: 0; z-index: var(--pd-z-sticky); height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
     .pd-th { display: flex; min-width: 0; }
     .pd-th.pd-end, .pd-cell.pd-end { justify-content: flex-end; text-align: end; }
-    .pd-sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: var(--pd-radius-tag); }
+    .pd-sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; padding: 0 4px; margin-inline: -4px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: var(--pd-radius-tag); }
     .pd-th.pd-end .pd-sort { flex-direction: row-reverse; }
     .pd-sort:hover { color: var(--pd-text); }
     /* The sort affordance: a quiet chevron on hover and focus, solid once the column is the sort. */
@@ -321,9 +325,13 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-icon-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); }
     .pd-icon-btn:disabled { opacity: 0.4; cursor: default; }
     .pd-inline { opacity: 0; }
-    /* Kept at 40 % at rest so touch and keyboard users can always find it (UI patterns, rule 2). */
-    .pd-more { opacity: 0.4; }
-    .pd-row:hover .pd-inline, .pd-row:focus-within .pd-inline, .pd-row:hover .pd-more, .pd-row:focus-within .pd-more, .pd-more[aria-expanded='true'] { opacity: 1; }
+    /* Always visible in its own resting colour (3:1, SC 1.4.11), so touch and keyboard users can find it (UI patterns, rule 2). */
+    .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
+    .pd-row:hover .pd-inline, .pd-row:focus-within .pd-inline { opacity: 1; }
+    .pd-row:hover .pd-more, .pd-row:focus-within .pd-more, .pd-more[aria-expanded='true'] { color: var(--pd-text); }
+    /* On the selected row's tint the rest colour (mixed against the plain surface) is not 3:1: use the full subtle text there. */
+    .pd-row.pd-selected .pd-more { color: var(--pd-text-subtle); }
+    .pd-row.pd-selected:hover .pd-more, .pd-row.pd-selected:focus-within .pd-more, .pd-row.pd-selected .pd-more[aria-expanded='true'] { color: var(--pd-text); }
     @media (hover: none) { .pd-inline { opacity: 0.6; } }
     .pd-empty { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); margin: 0; padding: var(--pd-space-6, 32px) var(--pd-space-3); color: var(--pd-text-muted); text-align: center; font-size: var(--pd-text-body); }
     .pd-msg-row { display: block; }
@@ -333,6 +341,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-retry { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
     .pd-retry:hover { background: var(--pd-hover); }
     .pd-skeleton { pointer-events: none; }
+    .pd-skel-end { margin-inline-start: auto; }
     .pd-skel { display: block; height: 10px; border-radius: 3px; background: var(--pd-hover); animation: pd-pulse 1.4s ease-in-out infinite; }
     @keyframes pd-pulse { 50% { opacity: 0.5; } }
     :root[data-motion='reduce'] .pd-skel { animation: none; }
@@ -349,7 +358,7 @@ export class PdTable<T> {
   /** The grid's accessible name. */
   readonly label = input.required<string>();
   /** Actions of a row; none means a row without a menu. */
-  readonly rowActions = input<(row: T) => readonly PdRowAction[]>(() => []);
+  readonly rowActions = input<(row: T) => readonly PdRowAction[]>(NO_ACTIONS);
   /** Shows the filter field. */
   readonly filterable = input(true);
   /** Row height in pixels: 24, 32 or 36, the family's densities (UI guide §3); default: the density the page is in (Standard 32). */
@@ -411,6 +420,8 @@ export class PdTable<T> {
   protected readonly narrow = computed(() => this.width() < 480);
   private readonly rowActionLists = computed(() => {
     const actions = this.rowActions();
+    // No rows to ask (loading, empty, error): an app that declares row actions keeps the track, so the columns do not jump when data arrives.
+    if (actions !== NO_ACTIONS && (this.state() !== 'ready' || !this.rows().length)) return { any: true, inline: 2 };
     let any = false;
     let inline = 0;
     for (const row of this.rows()) {
@@ -438,9 +449,12 @@ export class PdTable<T> {
   });
   protected readonly isVirtual = computed(() => (this.virtual() === 'auto' ? this.items().length > PD_TABLE_VIRTUAL_FROM : this.virtual()));
   protected readonly bodyHeight = computed(() => Math.min(this.items().length * this.rowPx(), this.maxHeight()));
+  /** "N rows" (thousands separated by the locale), "M of N rows" when filtered; empty while loading or when there are no rows (nothing to count). */
   protected readonly countText = computed(() => {
-    const [shown, total] = [this.ordered().length, this.rows().length];
-    return shown === total ? $localize`:@@pd.table.count:${total} rows` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
+    if (this.state() !== 'ready' || !this.rows().length) return '';
+    const n = new Intl.NumberFormat();
+    const [shown, total] = [n.format(this.ordered().length), n.format(this.rows().length)];
+    return this.ordered().length === this.rows().length ? $localize`:@@pd.table.count:${total} rows` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
   });
 
   constructor() {
@@ -470,6 +484,9 @@ export class PdTable<T> {
   }
   protected menuOf(row: T): readonly PdRowAction[] {
     return menuActions(this.actionsOf(row));
+  }
+  protected formatCount(n: number): string {
+    return new Intl.NumberFormat().format(n);
   }
   protected hasIcon(items: readonly PdRowAction[]): boolean {
     return items.some((a) => !!a.icon);

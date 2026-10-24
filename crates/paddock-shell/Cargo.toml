@@ -36,8 +36,10 @@ paddock-jobs = { workspace = true, features = ["tauri"] }
 paddock-env = { workspace = true }
 paddock-menu = { workspace = true, features = ["tauri"] }
 paddock-pitwall = { workspace = true }
+paddock-siblings = { workspace = true }
 paddock-packs = { workspace = true, features = ["tauri"] }
 paddock-channels = { workspace = true, features = ["tauri"] }
+paddock-mcp = { workspace = true, features = ["tauri"] }
 paddock-service = { workspace = true, features = ["tauri"] }
 paddock-settings = { workspace = true, features = ["tauri"] }
 paddock-startup = { workspace = true, features = ["tauri"] }
@@ -60,6 +62,7 @@ paddock-dialogs = { workspace = true, features = ["tauri", "mock-runtime"] }
 paddock-log = { workspace = true }
 # The Pitwall step is tested against the fake Pitwall on an ephemeral loopback port.
 paddock-pitwall = { workspace = true, features = ["testing"] }
+paddock-siblings = { workspace = true, features = ["testing"] }
 paddock-secrets = { workspace = true }
 # The permission sets are resolved through Tauri's own ACL in the tests.
 tauri-utils = "2.10"

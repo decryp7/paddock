@@ -172,6 +172,48 @@ test('table: the keyboard focus in a menu is a 2 px ring with 3:1 contrast, and 
   await page.keyboard.press('Escape');
 });
 
+test('table: paths are shortened only as far as the room needs, and grow back when the table widens', async ({ page }) => {
+  await open(page, 'dark', 1280);
+  const paths = page.locator('[data-testid="table-virtual"] pd-middle-text');
+  await expect(paths.first()).toBeVisible();
+  // A 28-character path in a column hundreds of pixels wide is never cut.
+  const cut = await paths.evaluateAll((els) => els.filter((e) => e.textContent !== e.getAttribute('title')).length);
+  expect(cut).toBe(0);
+  // Narrow the page until the column is short, then widen it again: the full path comes back.
+  const small = page.locator('[data-testid="table-small"] pd-middle-text').first();
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect.poll(async () => (await small.textContent()) !== (await small.getAttribute('title'))).toBe(true);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await expect.poll(async () => (await small.textContent()) === (await small.getAttribute('title'))).toBe(true);
+});
+
+test('table: loading and empty say no count, and the columns do not move when rows arrive', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('[data-testid="box-loading"] [data-testid="table-count"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="box-empty"] [data-testid="table-count"]')).toHaveCount(0);
+  const left = (id: string) => page.locator(`[data-testid="${id}"]`).getByRole('columnheader', { name: 'Size (KiB)' }).evaluate((e) => Math.round(e.getBoundingClientRect().left - (e.closest('.pd-grid') as HTMLElement).getBoundingClientRect().left));
+  const loaded = await left('box-selected');
+  for (const id of ['box-loading', 'box-empty', 'box-error']) expect(await left(id), id).toBe(loaded);
+});
+
+test('table: the sortable hint is a two-way glyph, never the one a descending sort uses', async ({ page }) => {
+  await open(page);
+  const grid = page.locator('[data-testid="box-selected"]');
+  const desc = await grid.getByRole('columnheader', { name: 'Size (KiB)' }).locator('.pd-sort-icon path').first().getAttribute('d');
+  const hint = await grid.getByRole('columnheader', { name: 'Kind' }).locator('.pd-sort-icon path').first().getAttribute('d');
+  expect(hint).not.toBe(desc);
+  expect(hint).toContain('M8 9l4-4 4 4');
+});
+
+test('table: the resting "..." button is visible in its own colour, not faded', async ({ page }) => {
+  await open(page);
+  const more = page.locator('[data-testid="table-small"] [role=row][data-index]').nth(3).getByRole('button', { name: 'More actions' });
+  await expect(more).toHaveCSS('opacity', '1');
+  const colour = await more.evaluate((e) => getComputedStyle(e).color);
+  const text = await more.evaluate((e) => getComputedStyle(e.closest('.pd-row')!).color);
+  expect(colour).not.toBe(text);
+});
+
 test('table: selected row, descending sort, empty, loading and error states are drawn', async ({ page }) => {
   await open(page);
   const selected = page.locator('[data-testid="box-selected"]');
@@ -194,9 +236,50 @@ test('chart: four named charts, a loading and an error one, are drawn on canvase
   const twin = await page.locator(`#${await donut.getAttribute('aria-describedby')}`).innerText();
   expect(twin).toContain('Logs: 42 GB (48%)');
   // Every chart has a visible title: metric, unit and window.
-  await expect(charts.first().getByTestId('chart-title')).toHaveText('Requests per hour, req');
+  await expect(charts.first().getByTestId('chart-title')).toHaveText('Request rate (req/h)');
   await expect(page.getByTestId('chart-loading')).toBeVisible();
   await expect(page.getByTestId('chart-error')).toContainText('could not be loaded');
+});
+
+/** Whether the canvas has any pixel in the box (CSS px, centre cx cy, half sizes) that differs from the card's background. */
+async function inked(canvas: import('@playwright/test').Locator, cx: number, cy: number, hw: number, hh: number): Promise<boolean> {
+  return canvas.evaluate(
+    (c, a) => {
+      const canvasEl = c as HTMLCanvasElement;
+      const k = canvasEl.width / canvasEl.getBoundingClientRect().width;
+      const ctx = canvasEl.getContext('2d')!;
+      const d = ctx.getImageData(Math.round((a.cx - a.hw) * k), Math.round((a.cy - a.hh) * k), Math.round(a.hw * 2 * k), Math.round(a.hh * 2 * k)).data;
+      const [r, g, b] = [d[0]!, d[1]!, d[2]!];
+      for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i]! - r) + Math.abs(d[i + 1]! - g) + Math.abs(d[i + 2]! - b) > 60 && d[i + 3]! > 0) return true;
+      return false;
+    },
+    { cx, cy, hw, hh },
+  );
+}
+
+test('chart: the donut total is drawn in the middle of the ring, wide, narrow and at 320 px, and the ring stays inside the card', async ({ page }) => {
+  for (const width of [1800, 1280, 320]) {
+    await open(page, 'dark', width);
+    const card = page.getByRole('img', { name: 'Disk use by kind' }).locator('xpath=ancestor::pd-chart');
+    await card.locator('canvas').waitFor();
+    await page.waitForTimeout(700);
+    const canvas = card.locator('canvas');
+    const box = (await canvas.boundingBox())!;
+    // The layout follows the card's own width (three cards in a row are narrow at 1280).
+    const narrow = box.width < 400;
+    const radius = narrow ? 58 : Math.max(40, Math.min(Math.floor(box.height / 2) - 10, 90));
+    const cx = narrow ? Math.floor(box.width / 2) : radius + 16;
+    const cy = narrow ? radius + 12 : Math.floor(box.height / 2);
+    expect(await inked(canvas, cx, cy, 16, 10), `total at ${width}`).toBe(true);
+    // The ring has air on both sides inside the card (nothing drawn in the outer 4 px columns).
+    expect(await inked(canvas, 2, cy, 2, 20), `left edge at ${width}`).toBe(false);
+    expect(await inked(canvas, box.width - 2, cy, 2, 20), `right edge at ${width}`).toBe(false);
+    if (narrow) {
+      // The list is under the ring: its first row starts below the ring's bottom.
+      expect(await inked(canvas, box.width / 2, cy + radius + 22, 40, 6)).toBe(true);
+      expect(box.height).toBeGreaterThan(cy + radius + 4 * 20);
+    }
+  }
 });
 
 test('chart: switching the theme draws the charts again with the new colours', async ({ page }) => {
@@ -224,6 +307,9 @@ test('forms: the error shows after the field was left, with the 14 px alert icon
   await forms.getByLabel('Port').fill('70000');
   await forms.getByRole('button', { name: 'Save' }).click();
   await expect(forms.getByTestId('field-error')).toContainText('Enter 65535 or less.');
+  // The short field narrows the control only: its error stays on one line.
+  expect((await forms.getByTestId('field-error').boundingBox())!.height).toBeLessThan(24);
+  expect((await forms.getByLabel('Port').boundingBox())!.width).toBeLessThanOrEqual(130);
   await expect(forms.getByTestId('forms-status')).toHaveText('Not saved');
   await forms.getByLabel('Port').fill('8080');
   await forms.getByRole('button', { name: 'Save' }).click();

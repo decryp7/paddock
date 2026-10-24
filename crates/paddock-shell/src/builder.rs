@@ -61,6 +61,10 @@ type ChannelsSetup<R> = Box<
         ) -> Result<Arc<paddock_channels::ChannelsControl>, BoxError>
         + Send,
 >;
+type McpSetup<R> = Box<
+    dyn FnOnce(&AppHandle<R>, paddock_mcp::Emit) -> Result<Arc<paddock_mcp::McpControl>, BoxError>
+        + Send,
+>;
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
@@ -79,6 +83,7 @@ pub struct Builder<R: Runtime> {
     files: Option<FilesSetup<R>>,
     packs: Option<PacksSetup<R>>,
     channels: Option<ChannelsSetup<R>>,
+    mcp: Option<McpSetup<R>>,
     sections: Vec<Arc<dyn Configurable>>,
     startup: Option<Startup<R>>,
     updater: Option<Part<R, UpdatesBuilder>>,
@@ -105,6 +110,7 @@ impl<R: Runtime> Builder<R> {
             files: None,
             packs: None,
             channels: None,
+            mcp: None,
             sections: Vec::new(),
             startup: None,
             updater: None,
@@ -224,6 +230,23 @@ impl<R: Runtime> Builder<R> {
         + 'static,
     ) -> Self {
         self.channels = Some(Box::new(f));
+        self
+    }
+
+    /// The app's AI access settings (plan X22, ADR 0007): the closure builds the `McpControl` (the MCP `Server` with its tools and
+    /// the audit sink from `McpControl::announcing_sink`, the settings store, the secrets, the key store) around the event sender
+    /// it is given. The shell manages it (`mcp_get`, `mcp_save`, `mcp_issue_key`, `mcp_revoke_key`, `mcp_audit`,
+    /// `mcp_audit_clear` and the `paddock://mcp` event); only the key dialog's window may issue a key.
+    pub fn mcp(
+        mut self,
+        f: impl FnOnce(
+            &AppHandle<R>,
+            paddock_mcp::Emit,
+        ) -> Result<Arc<paddock_mcp::McpControl>, BoxError>
+        + Send
+        + 'static,
+    ) -> Self {
+        self.mcp = Some(Box::new(f));
         self
     }
 
@@ -372,6 +395,7 @@ impl<R: Runtime> Builder<R> {
                 &paddock_channels::COMMANDS,
                 paddock_channels::tauri::invoke_handler(),
             )
+            .route(&paddock_mcp::COMMANDS, paddock_mcp::tauri::invoke_handler())
             .route(
                 &paddock_jobs::tauri::COMMANDS,
                 paddock_jobs::tauri::invoke_handler(),
@@ -500,6 +524,11 @@ impl<R: Runtime> Builder<R> {
         if let Some(f) = self.channels {
             paddock_channels::tauri::install(app, |emit| f(app, emit))
                 .map_err(|e| named("the notification channels", e))?;
+        }
+
+        if let Some(f) = self.mcp {
+            paddock_mcp::tauri::install(app, |emit| f(app, emit))
+                .map_err(|e| named("the AI access settings", e))?;
         }
 
         let dialogs = Dialogs::from_json(self.contracts.as_deref().unwrap_or(NO_CONTRACTS))

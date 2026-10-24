@@ -4,7 +4,28 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Fixed
+- UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
+  injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell
+  demo's menu bar test expects Edit (undo, X44); the channels retry test steps the demo engine by hand (`?channels-step=manual`)
+  instead of racing its 400 ms timer; the dock's "attach before dockview has loaded" spec forgets the module itself instead of
+  relying on a fresh worker.
+
 ### Changed
+- X21 review 3: the resting "..." button shows the full subtle text on a selected row (the rest mix was 2.71:1 on the tint; the
+  token test now covers the selected tint and surface-2); paths are cut at segment boundaries and keep their trailing segments
+  (`…/Debrief/plugins/viewer/plugin-1.bin`); the donut total is one line; chart loading shows muted bars and a label (never an empty
+  chart); chart error groups message and Retry; the filter stays (disabled) while loading; from 4 series on `pd-chart` isolates a series on
+  hover and the guide asks for a non-colour key; dark disabled fields get more lift.
+
+- X21 review 2 (`ui/docs/review/x21-data/REVIEW.md`): `pd-middle-text` measures the room it is given (`flex: 1 1 0`), so paths are cut
+  only as far as needed and grow back when the table widens; the donut lays out by the card's own width (list under the ring below
+  400 px, the card grows to hold it), the total in its middle is drawn at the ring's centre (a tree-shaken loader needs
+  ECharts' `GraphicComponent`), shares add up to 100, a two-way sort hint, no count while loading or empty and a stable action
+  track, locale-formatted counts, titles as "Label (unit)", short fields narrow the control only, disabled fields read as
+  read-only. Design guide: dark palette slot 6 is #7A70FF (slot 6 is at least 20 from every other slot under protan and deutan),
+  the scope of the CVD rule is written down, and the row "..." button rests in `--pd-row-action-rest` (subtle text at 75%, 3:1) instead of 40% opacity.
+
 - X21 data parts after the independent review (`ui/docs/review/x21-data/REVIEW.md`): `pd-table` keeps its primary column at 128 px
   or more (optional columns drop out from the right as the table narrows; the action column is sized to what the rows can show;
   compact toolbar), rows are 32 px by default (24/32/36 by density) under a 28 px header, a quiet sort chevron shows on hover and
@@ -19,6 +40,18 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-mcp` follow-ups (plan X22): `notifications/cancelled` stops the running call (its token is cancelled, it gets no answer);
+  the tool calls of one connection run concurrently up to `Limits::max_concurrent_calls` (default 4) and are answered in any order,
+  while everything else stays in order; `McpControl` and the Tauri adapter (feature `tauri`: `mcp_get`, `mcp_save`, `mcp_issue_key`
+  for the key dialog's window only, `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear`, the `paddock://mcp` event) with the settings
+  in a versioned file, the client keys persisted through `paddock-secrets`, the audit log announced to every window;
+  `paddock_shell::Builder::mcp`. The UI side is `@decryp7/paddock-ui/shell/mcp` (Settings > AI access (MCP), the key and revoke dialogs,
+  the audit viewer).
+- Set-up checklist, no app wiring (plan X19 follow-up). `paddock_health::notify::os::Toaster` gains `request_permission` and
+  `open_system_settings`; `PluginToaster` implements them (the plugin's `request_permission`; macOS `open
+  x-apple.systempreferences:com.apple.Notifications-Settings.extension`, Windows `ms-settings:notifications`, GNOME
+  `gnome-control-center notifications`, otherwise the words say where to look), so `ToasterAccess` needs no closures. `LinkPort::new(link,
+  app_id)` starts Pitwall through `paddock-siblings` (`Handoff::Open`); not installed and too old come back as the step's words.
 - First-run set-up checklist (plan X19). `paddock_shell::setup` (`Builder::first_run`): the steps in order with their own checks
   (`SetupItem`), the user's answers (skipped, shown) in `setup.json` through `paddock-env`, actions run on a worker with the
   outcome on `paddock://setup`, and the commands `setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish`. The shell
@@ -456,6 +489,14 @@ Conventional Commits; one semver tag for the whole repo.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
+- `@decryp7/paddock-ui/shell/mcp` (plan X22, ADR 0007): Settings > AI access (MCP). `McpBackend` (Tauri over `mcp_get`, `mcp_save`, `mcp_issue_key`,
+  `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear` and the `paddock://mcp` event; in-memory with the engine's refusals), the per-window `McpStore`,
+  `defineMcpSettingsPage`/`defineMcpKeyDialog`/`defineMcpRevokeDialog`, `provideShellMcp`/`provideMcpBackend`. The page `PdMcpPage` (`/shell/mcp/page`): the
+  master switch (off by default), a switch per read-only tool, a separate off-by-default "Allow" with a warning per action tool, the clients' keys with
+  Revoke, and the shared audit viewer `PdMcpAudit` (the family's `pd-table`: time, client, tool, result, size, duration, redacted arguments; Clear). The key
+  is issued in the key dialog's window (`/shell/mcp/dialog`, a modal credential form, `mcp_issue_key` for that window only) and shown once with Copy; it is in
+  no store, event, log or URL. Shell demo: the page and both dialogs (`?mcp=calls|error`), Vitest specs and a Chromium spec with axe at 320 px.
+
 ### Fixed
 - The About, Updates and What's New contents were unstyled: their stylesheet still used the old class names (`.btn`, `.muted`, ...)
   while the templates use the `pd-` ones, so the legal-text buttons failed colour contrast in the light theme (found by the new
@@ -492,6 +533,11 @@ Conventional Commits; one semver tag for the whole repo.
   ...'s launch agent". `SMAppService.status` is NotFound until the app registers once; that now reads as "not installed" and
   Install registers (a real failure comes from `register`, with macOS's reason in the message). `parse_job` reads only the job's
   own level of `launchctl print`, so macOS 26's coalition blocks (`state = active`) no longer make a running agent "refused".
+- The Linux guest of `tools/macos-vm-smoke.sh` runs for real: lingering gives `tart exec` a `systemd --user` session, the
+  update smoke checks the app's own status, and `--then` runs the new desktop smoke (`scripts/shell-demo/smoke-desktop-linux.sh`:
+  Xvfb, stalonetray, dunst; the tray icon is embedded, a notification reaches the server when the agent stops, Quit in the tray
+  menu exits 0 with nothing left). `scripts/shell-demo/build-linux-arm64.sh` builds N and N+1 in one throw-away container; the
+  `service-smoke` workflow runs both guests. The shell demo's Cargo.lock lists `paddock-cli`.
 - The service smoke builds N+1 with the agent's version bumped too (it reported the old version for ever), installs to
   /Applications as a user does, and checks the app's own status is "running" after install and after the update.
 
