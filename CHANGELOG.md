@@ -5,6 +5,10 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-env` (plan X7, decision D3): folders and state files. `AppDirs` (data, config, cache, logs, runtime per OS from an
+  injectable environment; `<ID>_HOME` override in debug builds only; portable mode; Windows is Local, the old Roaming folder
+  is named for the one-time move) and `VersionedFile<T>` (atomic write with fsync and `.bak`, migration chain, a damaged file
+  is kept as `.corrupt-<time>` and defaults or the valid backup load, a newer version is refused and left untouched).
 - `paddock-secrets` (plan X5, decision D6): the credential store the five apps copied. A `Secrets` port, a `Secret` that never
   prints and is zeroized, the keyring adapter (`keyring` feature, refused in tests unless `PADDOCK_SECRETS_REAL=1`),
   `MemorySecrets`, an opt-in owner-only file fallback (0600), one naming scheme and `rename_entry` for old entries.

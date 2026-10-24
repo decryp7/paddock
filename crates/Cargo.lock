@@ -2719,6 +2719,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-env"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-health"
 version = "0.1.0"
 dependencies = [

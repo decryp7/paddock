@@ -95,7 +95,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
-| `paddock-env` | per-OS data/config dirs, portable mode | yes |
+| `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-service` | background service install/control per OS | yes |
 | `paddock-proc` | child processes with timeouts, caps, kill-tree | yes |
 | `paddock-window` | native window feel, tray, single instance | yes |
@@ -569,3 +569,29 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   when an app's tests set `PADDOCK_SECRETS_FORBID_REAL=1` (put it in the app's test environment), so a test that reaches the
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
+
+## `paddock-env` (plan X7)
+
+Folders per OS and versioned state files, the code every app wrote its own copy of:
+
+```rust
+use paddock_env::{AppDirs, AppId, Problem, VersionedFile};
+
+let app = AppId::new("spotter", "Spotter")?;              // id: Linux folders and SPOTTER_HOME; name: macOS/Windows folders
+let dirs = AppDirs::for_app(&app)?;                       // data(), config(), cache(), logs(), runtime(); dirs.ensure()?
+let file = VersionedFile::<Prefs>::new(dirs.config().join("prefs.json"), 2).with_migration(1, v1_to_v2);
+let loaded = file.load();                                 // never fails: value + Option<Problem> to report once
+file.save(&loaded.value)?;                                // atomic; refused when the file is from a newer version
+```
+
+- Folders: macOS `~/Library/{Application Support,Caches,Logs}/<Name>`; Windows `%LOCALAPPDATA%\<Name>` for everything (decision
+  D3; `legacy_roaming_data()` names the old `%APPDATA%\<Name>` for the one-time move); Linux XDG (`$XDG_*_HOME/<id>`, logs
+  under the state folder, runtime in `$XDG_RUNTIME_DIR`). The full table is on `AppDirs`.
+- `<ID>_HOME=<root>` puts every folder under `<root>/{data,config,cache,logs,run}`; honoured in debug builds only
+  (`for_app` passes `cfg!(debug_assertions)`), ignored in release. A `portable.flag` beside the executable puts them under
+  `<exe folder>/<id>-data`. Tests resolve with `AppDirs::resolve(app, os, &MapVars, exe_dir, allow_override)` and a temp folder.
+- `VersionedFile`: JSON object with a top-level `version` (missing = 1). Missing gives defaults; damaged gives the valid `.bak`
+  or defaults, with the file kept as `<name>.corrupt-<time>` (newest 5); newer is untouched, defaults, saves refused with a
+  clear error; older runs the `with_migration(from, step)` chain once, writes the new format and keeps `<name>.v<from>.bak`.
+  Saves write a temporary file, fsync, rename; the previous good file becomes `.bak` (a damaged one never replaces it).
+  `write_atomic` is the same replace for non-JSON files.
