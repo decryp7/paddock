@@ -63,27 +63,27 @@ export class PdStatusMeasure {
   selector: 'pd-status-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdPartOutlet, PdStatusMeasure, PdIcon],
-  host: { '[class.all]': 'showAll()', '[class.compact]': 'compact()' },
+  host: { '[class.pd-all]': 'showAll()', '[class.pd-compact]': 'compact()' },
   providers: [{ provide: STATUS_COMPACT, useFactory: () => inject(PdStatusBar).compact }],
   template: `
-    <div class="side start">
+    <div class="pd-side pd-start">
       @for (item of start(); track item.id) {
-        <div class="item" [pdStatusMeasure]="item.id" [attr.data-status-item]="item.id" [class.hidden]="hidden().has(item.id)" [attr.inert]="hidden().has(item.id) ? '' : null">
+        <div class="pd-item" [pdStatusMeasure]="item.id" [attr.data-status-item]="item.id" [class.pd-hidden]="hidden().has(item.id)" [attr.inert]="hidden().has(item.id) ? '' : null">
           <pd-part-outlet [part]="item" [label]="item.title.text" />
         </div>
       }
     </div>
-    <div class="side end">
+    <div class="pd-side pd-end">
       @for (item of end(); track item.id) {
-        <div class="item" [pdStatusMeasure]="item.id" [attr.data-status-item]="item.id" [class.hidden]="hidden().has(item.id)" [attr.inert]="hidden().has(item.id) ? '' : null">
+        <div class="pd-item" [pdStatusMeasure]="item.id" [attr.data-status-item]="item.id" [class.pd-hidden]="hidden().has(item.id)" [attr.inert]="hidden().has(item.id) ? '' : null">
           <pd-part-outlet [part]="item" [label]="item.title.text" />
         </div>
       }
       @if (hidden().size || showAll()) {
-        <button type="button" class="more" data-testid="status-more" [attr.aria-expanded]="showAll()" [attr.aria-label]="moreLabel()" [title]="moreLabel()" (click)="showAll.set(!showAll())">
+        <button type="button" class="pd-more" data-testid="status-more" [attr.aria-expanded]="showAll()" [attr.aria-label]="moreLabel()" [title]="moreLabel()" (click)="showAll.set(!showAll())">
           <pd-icon name="pd:more" />
           @if (!showAll()) {
-            <span class="more-count" aria-hidden="true">{{ hidden().size }}</span>
+            <span class="pd-more-count" aria-hidden="true">{{ hidden().size }}</span>
           }
         </button>
       }
@@ -91,16 +91,16 @@ export class PdStatusMeasure {
   `,
   styles: `
     :host { position: relative; display: flex; align-items: center; justify-content: space-between; gap: ${GAP}px; min-width: 0; min-height: var(--pd-statusbar-height); padding: 0 var(--pd-space-2); font-size: var(--pd-text-caption); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
-    .side { display: flex; align-items: center; gap: ${GAP}px; min-width: 0; }
-    .end { justify-content: flex-end; margin-inline-start: auto; }
-    .item { display: inline-flex; align-items: center; min-width: 0; flex: none; max-width: 100%; }
-    .item.hidden { position: absolute; visibility: hidden; pointer-events: none; inset-inline-start: 0; }
-    :host(.all) { flex-wrap: wrap; padding-block: var(--pd-space-1); }
-    :host(.all) .side { flex-wrap: wrap; }
-    .more { display: inline-flex; align-items: center; justify-content: center; gap: 2px; flex: none; min-width: 24px; height: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); font-variant-numeric: tabular-nums; cursor: pointer; }
-    .more:hover, .more[aria-expanded='true'] { border-color: var(--pd-border-control); color: var(--pd-text); }
-    .more-count { min-width: 8px; }
-    .more:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
+    .pd-side { display: flex; align-items: center; gap: ${GAP}px; min-width: 0; }
+    .pd-end { justify-content: flex-end; margin-inline-start: auto; }
+    .pd-item { display: inline-flex; align-items: center; min-width: 0; flex: none; max-width: 100%; }
+    .pd-item.pd-hidden { position: absolute; visibility: hidden; pointer-events: none; inset-inline-start: 0; }
+    :host(.pd-all) { flex-wrap: wrap; padding-block: var(--pd-space-1); }
+    :host(.pd-all) .pd-side { flex-wrap: wrap; }
+    .pd-more { display: inline-flex; align-items: center; justify-content: center; gap: 2px; flex: none; min-width: 24px; height: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); font-variant-numeric: tabular-nums; cursor: pointer; }
+    .pd-more:hover, .pd-more[aria-expanded='true'] { border-color: var(--pd-border-control); color: var(--pd-text); }
+    .pd-more-count { min-width: 8px; }
+    .pd-more:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
   `,
 })
 export class PdStatusBar {

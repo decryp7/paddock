@@ -131,9 +131,9 @@ abstract class MenuView {
   template:
     `
     @if (app.mode === 'in-app') {
-      <div cdkMenuBar class="bar" [attr.aria-label]="t.bar">
+      <div cdkMenuBar class="pd-bar" [attr.aria-label]="t.bar">
         @for (menu of app.menus(); track menu.id) {
-          <button type="button" cdkMenuItem pdMenuTrigger class="top" [cdkMenuTriggerFor]="list" [cdkMenuTriggerData]="{ $implicit: [menu.id], label: menu.label }">{{ menu.label }}</button>
+          <button type="button" cdkMenuItem pdMenuTrigger class="pd-top" [cdkMenuTriggerFor]="list" [cdkMenuTriggerData]="{ $implicit: [menu.id], label: menu.label }">{{ menu.label }}</button>
         }
       </div>
     }
@@ -141,10 +141,10 @@ abstract class MenuView {
   styles:
     `
     :host { display: block; min-width: 0; }
-    .bar { display: flex; flex-wrap: wrap; gap: 2px; }
-    .top { min-height: 28px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; font: inherit; }
-    .top:hover, .top:focus-visible, .top[aria-expanded='true'] { background: var(--pd-hover); color: var(--pd-text); outline: none; }
-    .top:focus-visible { box-shadow: inset 0 0 0 2px var(--pd-focus-ring); }
+    .pd-bar { display: flex; flex-wrap: wrap; gap: 2px; }
+    .pd-top { min-height: 28px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; font: inherit; }
+    .pd-top:hover, .pd-top:focus-visible, .pd-top[aria-expanded='true'] { background: var(--pd-hover); color: var(--pd-text); outline: none; }
+    .pd-top:focus-visible { box-shadow: inset 0 0 0 2px var(--pd-focus-ring); }
   ` + MENU_STYLES,
 })
 export class PdMenuBar extends MenuView {
@@ -167,11 +167,11 @@ export class PdMenuBar extends MenuView {
   imports: [CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, PdMenuTriggerGuard],
   template:
     `
-    <div class="area" [cdkContextMenuTriggerFor]="list" [cdkContextMenuDisabled]="empty()" [cdkContextMenuTriggerData]="{ $implicit: [menu()], label: label() }">
+    <div class="pd-area" [cdkContextMenuTriggerFor]="list" [cdkContextMenuDisabled]="empty()" [cdkContextMenuTriggerData]="{ $implicit: [menu()], label: label() }">
       <ng-content />
     </div>
   ` + LIST,
-  styles: `:host { display: block; } .area { display: contents; }` + MENU_STYLES,
+  styles: `:host { display: block; } .pd-area { display: contents; }` + MENU_STYLES,
 })
 export class PdContextMenu extends MenuView {
   /** The menu id whose items this context menu shows. */

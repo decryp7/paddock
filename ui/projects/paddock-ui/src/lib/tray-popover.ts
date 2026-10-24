@@ -20,9 +20,9 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
     '(keydown.escape)': 'dismissed.emit()',
   },
   template: `
-    <header class="header"><ng-content select="[slot=header]" /></header>
-    <div class="content"><ng-content /></div>
-    <footer class="footer"><ng-content select="[slot=footer]" /></footer>
+    <header class="pd-header"><ng-content select="[slot=header]" /></header>
+    <div class="pd-content"><ng-content /></div>
+    <footer class="pd-footer"><ng-content select="[slot=footer]" /></footer>
   `,
   styles: `
     :host {
@@ -44,10 +44,10 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
     :host(.pd-tray--linux) { border-radius: var(--pd-radius-popover); }
     /* The OS material (vibrancy, Acrylic) shows through; the solid colour is the designed fallback. */
     :host(.pd-tray--translucent) { background: color-mix(in srgb, var(--pd-surface-3) 72%, transparent); }
-    .header { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); }
-    .header:empty, .footer:empty { display: none; }
-    .content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 var(--pd-space-4) var(--pd-space-3); }
-    .footer { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-4); border-top: 1px solid var(--pd-hairline); }
+    .pd-header { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); }
+    .pd-header:empty, .pd-footer:empty { display: none; }
+    .pd-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 var(--pd-space-4) var(--pd-space-3); }
+    .pd-footer { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-4); border-top: 1px solid var(--pd-hairline); }
     @keyframes pd-tray-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { :host { animation: none; } }
   `,

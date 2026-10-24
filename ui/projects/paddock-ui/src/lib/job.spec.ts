@@ -24,12 +24,12 @@ describe('formatters', () => {
     expect(formatCount(NaN)).toBe('0');
   });
   it('formats sizes', () => {
-    expect(formatBytes(0)).toBe('0 B');
-    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(0)).toBe('0 bytes');
+    expect(formatBytes(512)).toBe('512 bytes');
     expect(formatBytes(4.2 * 1024 * 1024)).toBe('4.2 MB');
     expect(formatBytes(118 * 1024 * 1024)).toBe('118 MB');
-    expect(formatBytes(5 * 1024 ** 5)).toBe('5120 TB');
-    expect(formatBytes(NaN)).toBe('0 B');
+    expect(formatBytes(5 * 1024 ** 5)).toBe('5 PB');
+    expect(formatBytes(NaN)).toBe('0 bytes');
   });
   it('formats time left', () => {
     expect(formatEta(null)).toBe('');
@@ -102,7 +102,7 @@ describe('SuJob', () => {
   it('renders an indeterminate bar with the growing count and an accessible name', () => {
     const el = render(discovering).nativeElement as HTMLElement;
     const bar = el.querySelector('[role=progressbar]')!;
-    expect(bar.classList.contains('indeterminate')).toBe(true);
+    expect(bar.classList.contains('pd-indeterminate')).toBe(true);
     expect(bar.hasAttribute('aria-valuenow')).toBe(false);
     expect(bar.getAttribute('aria-valuetext')).toBe('12,345 so far');
     expect(bar.getAttribute('aria-label')).toBe('Import logs: Finding files');
@@ -119,7 +119,7 @@ describe('SuJob', () => {
     f.componentRef.setInput('elapsedMs', 14_000);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.detail svg.warn')).not.toBeNull();
+    expect(el.querySelector('.pd-detail svg.pd-warn')).not.toBeNull();
     expect(text(el)).toContain('14 s elapsed');
   });
   it('formats elapsed time', () => {
@@ -143,12 +143,12 @@ describe('SuJob', () => {
     const f = render(download);
     let got = -1;
     f.componentInstance.cancel.subscribe((id) => (got = id));
-    (f.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button.cancel')!.click();
+    (f.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button.pd-cancel')!.click();
     expect(got).toBe(7);
   });
   it('a disabled Cancel shows the reason as text', () => {
     const el = render(running({ id: 'a', label: 'Saving', unit: 'items', done: 0 }, { cancellable: false, notCancellableReason: 'Writing the database' })).nativeElement as HTMLElement;
-    expect(el.querySelector<HTMLButtonElement>('button.cancel')!.disabled).toBe(true);
+    expect(el.querySelector<HTMLButtonElement>('button.pd-cancel')!.disabled).toBe(true);
     expect(text(el)).toContain('Writing the database');
   });
   it('terminal jobs have no bar and no Cancel; failure shows its message', () => {
@@ -168,6 +168,6 @@ describe('SuJob', () => {
   it('queued job renders without a bar but with Cancel', () => {
     const el = render({ ...base, state: 'queued' } as SuJobSnapshot).nativeElement as HTMLElement;
     expect(el.querySelector('[role=progressbar]')).toBeNull();
-    expect(el.querySelector('button.cancel')).not.toBeNull();
+    expect(el.querySelector('button.pd-cancel')).not.toBeNull();
   });
 });

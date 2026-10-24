@@ -51,6 +51,7 @@ export {
   type EditUnit,
   type SettingsNavItem,
   type SettingsNavGroup,
+  type SettingsNavSubgroup,
 } from './src/settings-model';
 export { SettingsStore, type SettingsStoreType, type Refusal } from './src/settings.store';
 export { appearanceFromSettings, appearanceToSettings } from './src/appearance';

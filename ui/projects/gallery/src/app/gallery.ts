@@ -27,6 +27,9 @@ import {
   type SuDensity,
   type SuTheme,
 } from '@decryp7/paddock-ui';
+import { PdPathText } from '@decryp7/paddock-ui';
+import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdSelect } from '@decryp7/paddock-ui/select';
 
 echarts.use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, CanvasRenderer]);
 
@@ -42,7 +45,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 @Component({
   selector: 'gal-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover],
+  imports: [SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, PdPathText, PdSelect],
   template: `
     <main class="gal-page">
       <header class="gal-bar">
@@ -116,7 +119,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
       <section class="gal-section" data-testid="empty-state" aria-labelledby="h-empty">
         <h2 id="h-empty">Empty state</h2>
         <div class="gal-box">
-          <pd-empty-state heading="No runners yet" description="Register a runner and its jobs appear here with a live timer.">
+          <pd-empty-state heading="No runners yet" icon="folder" description="Register a runner and its jobs appear here with a live timer.">
             <button slot="action" type="button" class="gal-btn gal-btn--primary">Register runner</button>
           </pd-empty-state>
         </div>
@@ -186,6 +189,54 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         </div>
       </section>
 
+
+      <section class="gal-section" data-testid="icons" aria-labelledby="h-icons">
+        <h2 id="h-icons">Icons (pd:)</h2>
+        <p>One 24 px grid, round caps and joins, currentColor. Shown at 16 px (the UI size, 1.5 px on screen) and 24 px.</p>
+        <ul class="gal-icons">
+          @for (n of iconNames; track n) {
+            <li class="gal-icon">
+              <span class="gal-icon-pair"><pd-glyph [name]="n" [size]="16" /><pd-glyph [name]="n" [size]="24" /></span>
+              <span class="gal-icon-name">{{ n }}</span>
+            </li>
+          }
+        </ul>
+      </section>
+
+      <section class="gal-section" data-testid="controls" aria-labelledby="h-controls">
+        <h2 id="h-controls">Controls</h2>
+        <div class="gal-row">
+          <button type="button" class="pd-btn pd-btn--primary"><pd-glyph name="plus" /> Add runner</button>
+          <button type="button" class="pd-btn"><pd-glyph name="refresh" /> Refresh</button>
+          <button type="button" class="pd-btn pd-btn--ghost">Cancel</button>
+          <button type="button" class="pd-btn pd-btn--danger"><pd-glyph name="trash" /> Delete</button>
+          <button type="button" class="pd-btn pd-btn--sm">Compact</button>
+          <button type="button" class="pd-btn pd-btn--icon pd-btn--ghost" aria-label="More"><pd-glyph name="more" /></button>
+          <button type="button" class="pd-btn" disabled>Disabled</button>
+        </div>
+        <div class="gal-row">
+          <div class="pd-field"><label for="g-name">Name</label><input id="g-name" class="pd-input" value="builder-01" /><span class="pd-field__hint">Shown in the sidebar.</span></div>
+          <div class="pd-field"><label for="g-bad">Port</label><input id="g-bad" class="pd-input" value="99999" aria-invalid="true" /><span class="pd-field__error">Use a port from 1 to 65535.</span></div>
+          <div class="pd-field"><label for="g-native">Native select</label><select id="g-native" class="pd-select"><option>Standard</option><option>Compact</option></select></div>
+          <div class="pd-field"><label for="g-themed">Themed select</label><pd-select inputId="g-themed" [options]="selectOptions" [value]="selected()" (valueChange)="selected.set($event)" /></div>
+          <label class="pd-check"><input type="checkbox" checked /> Start with the system</label>
+        </div>
+        <div class="gal-row">
+          <div class="pd-chips"><span class="pd-chip">linux <button type="button" aria-label="Remove linux"><pd-glyph name="close" [size]="12" /></button></span><span class="pd-chip">x64</span></div>
+          <div class="pd-segmented" role="group" aria-label="View"><button type="button" aria-pressed="true">List</button><button type="button" aria-pressed="false">Grid</button></div>
+          <div class="pd-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">General</button><button type="button" role="tab" aria-selected="false">Network</button></div>
+          <span>Press <kbd class="pd-kbd">Ctrl</kbd> <kbd class="pd-kbd">K</kbd></span>
+        </div>
+      </section>
+
+      <section class="gal-section" data-testid="path-text" aria-labelledby="h-path">
+        <h2 id="h-path">Path text</h2>
+        <div class="gal-row">
+          <div class="gal-box gal-path"><pd-path-text value="/Users/lin/Library/Application Support/Builder/logs/builder.service.log" [copy]="true" /></div>
+          <div class="gal-box gal-path gal-path--narrow"><pd-path-text value="C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log" /></div>
+        </div>
+      </section>
+
       <section class="gal-section" data-testid="chart-theme" aria-labelledby="h-chart">
         <h2 id="h-chart">ECharts theme</h2>
         <div class="gal-box"><div #chart class="gal-chart" role="img" aria-label="CPU and memory, last 16 samples, with events"></div></div>
@@ -212,6 +263,13 @@ export class Gallery {
     { id: 5, kind: 'export', title: 'Export events', state: 'done', seq: 9, elapsedMs: 3000, cancellable: false },
     { id: 6, kind: 'export', title: 'Export events', state: 'failed', message: 'The disk is full. Free some space and retry.', seq: 9, elapsedMs: 3000, cancellable: false },
   ];
+  protected readonly iconNames = Object.keys(PD_ICON_PATHS);
+  protected readonly selectOptions = [
+    { value: 'standard', label: 'Standard' },
+    { value: 'compact', label: 'Compact' },
+    { value: 'comfortable', label: 'Comfortable' },
+  ];
+  protected readonly selected = signal('compact');
   protected readonly cpu = CPU;
   protected readonly mem = MEM;
   protected readonly net = NET;

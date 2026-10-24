@@ -70,9 +70,8 @@ test('the dialog lays out at a narrow width without a horizontal scroll', async 
 test('the Logging settings page shows the level and takes a change', async ({ app, page }) => {
   await app.settings.open({ page: 'pd.logging' });
   await expect(app.settings.nav.locator('[aria-current="page"]')).toHaveText('Logging');
-  const level = app.settings.field('level').getByRole('combobox', { name: 'Detail' });
-  await expect(level).toHaveValue('info');
-  await level.selectOption('debug');
+  await expect(app.settings.field('level').getByRole('combobox', { name: 'Detail' })).toContainText('Normal');
+  await app.settings.choose('level', 'Detailed (for support cases)');
   await expect(app.settings.saved('Detail saved.')).toBeVisible();
   await expect(app.settings.field('maxFileMb')).toContainText('Needs restart');
   await expect(app.settings.field('keepFiles')).toContainText('days');

@@ -53,10 +53,10 @@ interface LoadedPage {
   imports: [NgComponentOutlet, PdSettingsSection],
   host: { class: 'pd-settings-window' },
   template: `
-    <div class="top">
+    <div class="pd-top">
       <input
         #search
-        class="search"
+        class="pd-search"
         type="search"
         [placeholder]="t.search"
         [attr.aria-label]="t.search"
@@ -65,127 +65,134 @@ interface LoadedPage {
         (input)="store.setQuery($any($event.target).value)"
         (keydown.escape)="clearSearch($event)"
       />
-      <label class="advanced">
+      <label class="pd-advanced">
         <input type="checkbox" role="switch" [checked]="store.showAdvanced()" (change)="store.setShowAdvanced($any($event.target).checked)" />
         {{ t.showAdvanced }}
       </label>
     </div>
 
     @if (store.problem(); as p) {
-      <div class="banner warn" role="status" data-testid="settings-problem">{{ p.message }}</div>
+      <div class="pd-banner pd-warn" role="status" data-testid="settings-problem">{{ p.message }}</div>
     }
     @if (store.restartPending()) {
-      <div class="banner restart" role="status" data-testid="settings-restart">
+      <div class="pd-banner pd-restart" role="status" data-testid="settings-restart">
         <span>{{ restartText() }}</span>
         @if (restart) {
-          <button type="button" class="btn primary" (click)="restart()">{{ t.restartNow }}</button>
+          <button type="button" class="pd-btn pd-primary" (click)="restart()">{{ t.restartNow }}</button>
         }
       </div>
     }
     @if (asking()) {
-      <div class="banner warn" role="alertdialog" aria-labelledby="pd-settings-unsaved" data-testid="settings-unsaved">
+      <div class="pd-banner pd-warn" role="alertdialog" aria-labelledby="pd-settings-unsaved" data-testid="settings-unsaved">
         <span id="pd-settings-unsaved">{{ unsavedText() }}</span>
-        <button type="button" class="btn" (click)="discardAndClose()">{{ t.discard }}</button>
-        <button type="button" class="btn primary" (click)="keepEditing()">{{ t.keepEditing }}</button>
+        <button type="button" class="pd-btn" (click)="discardAndClose()">{{ t.discard }}</button>
+        <button type="button" class="pd-btn pd-primary" (click)="keepEditing()">{{ t.keepEditing }}</button>
       </div>
     }
     @if (store.actionError(); as e) {
-      <div class="banner err" role="alert">
+      <div class="pd-banner pd-err" role="alert">
         <span>{{ e }}</span>
-        <button type="button" class="btn" (click)="store.dismissNotice()">{{ t.dismiss }}</button>
+        <button type="button" class="pd-btn" (click)="store.dismissNotice()">{{ t.dismiss }}</button>
       </div>
     }
 
-    <div class="main">
-      <nav class="nav" [attr.aria-label]="t.pages" (keydown)="navKey($event)">
+    <div class="pd-main">
+      <nav class="pd-nav" [attr.aria-label]="t.pages" (keydown)="navKey($event)">
         @for (g of nav(); track g.id) {
-          <h2 class="group" [id]="'pd-settings-group-' + g.id">{{ g.title }}</h2>
-          <ul class="items" [attr.aria-labelledby]="'pd-settings-group-' + g.id">
-            @for (item of g.items; track item.id) {
-              <li>
-                <button type="button" class="item" [attr.aria-current]="current()?.id === item.id && !searching() ? 'page' : null" [attr.data-page]="item.id" (click)="select(item.id)">
-                  <span class="name">{{ item.title }}</span>
-                  @if (unsaved().includes(item.id)) {
-                    <span class="dot" role="img" [attr.aria-label]="t.unsaved" [title]="t.unsaved"></span>
-                  }
-                </button>
-              </li>
+          <h2 class="pd-group" [id]="'pd-settings-group-' + g.id">{{ g.title }}</h2>
+          @for (sub of g.subgroups; track $index) {
+            @if (sub.title) {
+              <h3 class="pd-subgroup" [id]="'pd-settings-group-' + g.id + '-' + $index">{{ sub.title }}</h3>
             }
-          </ul>
+            <ul class="pd-items" [attr.aria-labelledby]="'pd-settings-group-' + g.id + (sub.title ? '-' + $index : '')">
+              @for (item of sub.items; track item.id) {
+                <li>
+                  <button type="button" class="pd-item" [attr.aria-current]="current()?.id === item.id && !searching() ? 'page' : null" [attr.data-page]="item.id" (click)="select(item.id)">
+                    <span class="pd-name">{{ item.title }}</span>
+                    @if (unsaved().includes(item.id)) {
+                      <span class="pd-dot" role="img" [attr.aria-label]="t.unsaved" [title]="t.unsaved"></span>
+                    }
+                  </button>
+                </li>
+              }
+            </ul>
+          }
         }
       </nav>
 
-      <section class="content" [attr.aria-label]="searching() ? t.results : (current()?.title ?? t.settings)" data-testid="settings-content">
+      <section class="pd-content" [attr.aria-label]="searching() ? t.results : (current()?.title ?? t.settings)" data-testid="settings-content">
         @if (store.requestError(); as e) {
-          <div class="banner err" role="alert">
+          <div class="pd-banner pd-err" role="alert">
             <span>{{ loadFailed(e) }}</span>
-            <button type="button" class="btn" (click)="store.load()">{{ t.retry }}</button>
+            <button type="button" class="pd-btn" (click)="store.load()">{{ t.retry }}</button>
           </div>
         } @else if (!store.isLoaded() && !store.overview()) {
-          <p class="muted" role="status">{{ t.loadingSettings }}</p>
+          <p class="pd-muted" role="status">{{ t.loadingSettings }}</p>
         } @else if (searching()) {
           @for (hit of hits(); track hit.id) {
             @if (hit.keys) {
               <pd-settings-section [section]="hit.id" [keys]="hit.keys" />
             } @else {
-              <p class="page-hit"><button type="button" class="link" (click)="select(hit.id)">{{ hit.title }}</button></p>
+              <p class="pd-page-hit"><button type="button" class="pd-link" (click)="select(hit.id)">{{ hit.title }}</button></p>
             }
           } @empty {
-            <p class="muted" role="status">{{ noMatch(store.query()) }}</p>
+            <p class="pd-muted" role="status">{{ noMatch(store.query()) }}</p>
           }
         } @else if (loaded.error()) {
-          <div class="banner err" role="alert">
+          <div class="pd-banner pd-err" role="alert">
             <span>{{ t.pageFailed }}</span>
-            <button type="button" class="btn" (click)="loaded.reload()">{{ t.retry }}</button>
+            <button type="button" class="pd-btn" (click)="loaded.reload()">{{ t.retry }}</button>
           </div>
         } @else if (loaded.value(); as p) {
           <ng-container *ngComponentOutlet="p.component; injector: p.injector; environmentInjector: p.environment" />
         } @else {
-          <p class="muted" role="status">{{ t.loading }}</p>
+          <p class="pd-muted" role="status">{{ t.loading }}</p>
         }
       </section>
     </div>
 
-    <div class="foot">
-      <span class="status" role="status" aria-live="polite">{{ store.notice() ?? '' }}</span>
-      <span class="spacer"></span>
-      <button type="button" class="btn" data-dialog-close (click)="close()">{{ t.close }}</button>
+    <div class="pd-foot">
+      <span class="pd-status" role="status" aria-live="polite">{{ store.notice() ?? '' }}</span>
+      <span class="pd-spacer"></span>
+      <button type="button" class="pd-btn" data-dialog-close (click)="close()">{{ t.close }}</button>
     </div>
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); height: 100%; min-height: 0; container-type: inline-size; }
-    .top { display: flex; align-items: center; gap: var(--pd-space-3); flex-wrap: wrap; }
-    .search { flex: 1 1 12rem; min-width: 0; min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-    .advanced { display: inline-flex; align-items: center; gap: var(--pd-space-1); color: var(--pd-text-muted); white-space: nowrap; }
-    .advanced input { accent-color: var(--pd-accent); }
-    .banner { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; padding: var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text); }
-    .banner > span { flex: 1 1 12rem; min-width: 0; }
-    .banner.warn { border-color: var(--pd-warning, var(--pd-border-control)); }
-    .banner.err { border-color: var(--pd-danger-text, var(--pd-border-control)); }
-    .banner.restart { border-color: var(--pd-accent); }
-    .main { flex: 1; min-height: 0; display: flex; gap: var(--pd-space-4); }
-    .nav { flex: none; width: 13rem; overflow: auto; border-inline-end: 1px solid var(--pd-hairline); padding-inline-end: var(--pd-space-2); }
-    .group { margin: var(--pd-space-3) 0 var(--pd-space-1); padding: 0 var(--pd-space-2); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); }
-    .group:first-child { margin-top: 0; }
-    .items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-    .item { display: flex; align-items: center; gap: var(--pd-space-1); width: 100%; min-height: 30px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; text-align: start; cursor: pointer; }
-    .item:hover { background: var(--pd-surface-2); }
-    .item[aria-current='page'] { background: var(--pd-surface-2); box-shadow: inset 2px 0 0 var(--pd-accent); font-weight: var(--pd-weight-medium); }
-    .item:focus-visible, .btn:focus-visible, .link:focus-visible, .search:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
-    .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-accent); }
-    .content { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--pd-space-4); padding-inline-end: var(--pd-space-1); }
-    .muted { color: var(--pd-text-muted); }
-    .page-hit { margin: 0; }
-    .link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }
-    .btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .btn.primary { background: var(--pd-accent); border-color: var(--pd-accent); color: var(--pd-on-accent, #fff); }
-    .foot { display: flex; align-items: center; gap: var(--pd-space-2); padding-top: var(--pd-space-2); border-top: 1px solid var(--pd-hairline); }
-    .status { min-width: 0; color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .spacer { flex: 1; }
+    .pd-top { display: flex; align-items: center; gap: var(--pd-space-3); flex-wrap: wrap; }
+    .pd-search { flex: 1 1 12rem; min-width: 0; min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
+    .pd-advanced { display: inline-flex; align-items: center; gap: var(--pd-space-1); color: var(--pd-text-muted); white-space: nowrap; }
+    .pd-advanced input { accent-color: var(--pd-accent); }
+    .pd-banner { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; padding: var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text); }
+    .pd-banner > span { flex: 1 1 12rem; min-width: 0; }
+    .pd-banner.pd-warn { border-color: var(--pd-warning, var(--pd-border-control)); }
+    .pd-banner.pd-err { border-color: var(--pd-danger-text, var(--pd-border-control)); }
+    .pd-banner.pd-restart { border-color: var(--pd-accent); }
+    .pd-main { flex: 1; min-height: 0; display: flex; gap: var(--pd-space-4); }
+    .pd-nav { flex: none; width: 13rem; overflow: auto; border-inline-end: 1px solid var(--pd-hairline); padding-inline-end: var(--pd-space-2); }
+    .pd-group { margin: var(--pd-space-3) 0 var(--pd-space-1); padding: 0 var(--pd-space-2); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); }
+    .pd-group:first-child { margin-top: 0; }
+    .pd-subgroup { margin: var(--pd-space-2) 0 var(--pd-space-1); padding: 0 var(--pd-space-2); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); color: var(--pd-text-subtle); }
+    .pd-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+    .pd-item { display: flex; align-items: center; gap: var(--pd-space-1); width: 100%; min-height: 30px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; text-align: start; cursor: pointer; }
+    .pd-item:hover { background: var(--pd-surface-2); }
+    .pd-item[aria-current='page'] { background: var(--pd-surface-2); box-shadow: inset 2px 0 0 var(--pd-accent); font-weight: var(--pd-weight-medium); }
+    .pd-item:focus-visible, .pd-btn:focus-visible, .pd-link:focus-visible, .pd-search:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
+    .pd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-accent); }
+    .pd-content { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--pd-space-4); padding-inline-end: var(--pd-space-1); }
+    .pd-content > * { flex: none; }
+    .pd-muted { color: var(--pd-text-muted); }
+    .pd-page-hit { margin: 0; }
+    .pd-link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }
+    .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-btn.pd-primary { background: var(--pd-accent); border-color: var(--pd-accent); color: var(--pd-on-accent, #fff); }
+    .pd-foot { display: flex; align-items: center; gap: var(--pd-space-2); padding-top: var(--pd-space-2); border-top: 1px solid var(--pd-hairline); }
+    .pd-status { min-width: 0; color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-spacer { flex: 1; }
     @container (max-width: 560px) {
-      .main { flex-direction: column; }
-      .nav { width: auto; max-height: 40%; border-inline-end: 0; border-bottom: 1px solid var(--pd-hairline); padding: 0 0 var(--pd-space-2); }
+      .pd-main { flex-direction: column; }
+      .pd-nav { width: auto; max-height: 40%; border-inline-end: 0; border-bottom: 1px solid var(--pd-hairline); padding: 0 0 var(--pd-space-2); }
     }
   `,
 })
@@ -312,7 +319,7 @@ export class PdSettingsWindow implements DialogContent {
   /** Up/Down, Home/End move between the navigation's pages. */
   protected navKey(e: KeyboardEvent): void {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
-    const buttons = [...this.host.nativeElement.querySelectorAll<HTMLButtonElement>('.nav .item')];
+    const buttons = [...this.host.nativeElement.querySelectorAll<HTMLButtonElement>('.pd-nav .pd-item')];
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
     const last = buttons.length - 1;
     const next = e.key === 'Home' ? 0 : e.key === 'End' ? last : e.key === 'ArrowDown' ? Math.min(last, at + 1) : Math.max(0, at - 1);

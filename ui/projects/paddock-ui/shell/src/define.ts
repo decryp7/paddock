@@ -105,6 +105,11 @@ export interface SettingsPageDef<T extends object = object> extends Omit<LazyPar
   /** Also the id of the settings section in Rust (`paddock-settings`), checked through the manifest. */
   readonly id: string;
   readonly group: SettingsGroup;
+  /**
+   * A heading inside the group (a sub-group in the navigation, "Network" among the Features pages): pages with the same
+   * sub-group sit together under it, in page order; pages without one come first, under the group heading alone.
+   */
+  readonly subgroup?: Message;
   readonly title: Message;
   readonly icon?: string;
   readonly order: number;

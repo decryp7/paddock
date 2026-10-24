@@ -22,6 +22,8 @@ export interface DialogIo {
   requestClose(label: string): Promise<void>;
   /** `dialog_fit_height`: sizes this dialog window to `content` px of content (Rust bounds it); the width stays. */
   fitHeight(content: number): Promise<void>;
+  /** Sets this dialog window's title bar text (a title the content knows only at run time). Optional: a window system without it keeps the title it was opened with. */
+  setTitle?(title: string): Promise<void>;
 }
 
 /** What `tauriDialogIo` needs of `@tauri-apps/api` (the app passes it in, so the package does not depend on Tauri). */
@@ -32,6 +34,11 @@ export interface TauriBridge {
   listen(event: string, handler: (event: { payload: unknown }) => void): Promise<Unlisten>;
   /** `emitTo` from `@tauri-apps/api/event`. */
   emitTo(target: string, event: string, payload?: unknown): Promise<void>;
+  /**
+   * `getCurrentWebviewWindow().setTitle` (needs the `core:window:allow-set-title` permission in the dialog windows'
+   * capability). Optional: without it a runtime title changes the page's title and heading but not the OS title bar.
+   */
+  setWindowTitle?(title: string): Promise<void>;
 }
 
 /** The dialog layer over Tauri: the four `paddock_dialogs::tauri` commands and its events. */
@@ -43,6 +50,7 @@ export function tauriDialogIo(tauri: TauriBridge): DialogIo {
     listen: (event, handler) => tauri.listen(event, (e) => handler(e.payload)),
     requestClose: (label) => tauri.emitTo(label, DIALOG_EVENTS.closeRequested, null),
     fitHeight: (content) => tauri.invoke<void>('dialog_fit_height', { content }),
+    ...(tauri.setWindowTitle ? { setTitle: (title: string) => tauri.setWindowTitle!(title) } : {}),
   };
 }
 
@@ -87,6 +95,9 @@ export function browserDialogIo(loc: Pick<Location, 'hash'> = location): DialogI
     },
     listen: async () => () => undefined,
     requestClose: async () => undefined,
+    setTitle: async (title) => {
+      document.title = title;
+    },
     fitHeight: async (px) => {
       const data = document.documentElement.dataset;
       data['fittedHeight'] = String(px);

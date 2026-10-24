@@ -14,9 +14,9 @@ import { DIAGNOSTICS_STYLES } from './styles';
   selector: 'pd-report-problem-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <p class="lede">{{ t.lede }}</p>
+    <p class="pd-diag__lede">{{ t.lede }}</p>
 
-    <div class="field">
+    <div class="pd-diag__field">
       <label for="pd-diag-description">{{ t.describe }}</label>
       <textarea
         id="pd-diag-description"
@@ -28,38 +28,38 @@ import { DIAGNOSTICS_STYLES } from './styles';
         (input)="onInput($event)"
         (change)="store.commitDescription()"
       ></textarea>
-      <p id="pd-diag-hint" class="muted">{{ t.hint }}</p>
+      <p id="pd-diag-hint" class="pd-diag__muted">{{ t.hint }}</p>
     </div>
 
-    <section aria-labelledby="pd-diag-files-title" class="field">
+    <section aria-labelledby="pd-diag-files-title" class="pd-diag__field">
       <h3 id="pd-diag-files-title">{{ t.contains }}</h3>
       @if (store.files().length > 0) {
-        <div class="scroller" tabindex="0" [attr.aria-label]="t.contains">
+        <div class="pd-diag__scroller" tabindex="0" [attr.aria-label]="t.contains">
           <table data-testid="diag-files">
             <thead>
               <tr>
                 <th scope="col">{{ t.file }}</th>
-                <th scope="col" class="what">{{ t.what }}</th>
-                <th scope="col" class="num">{{ t.size }}</th>
+                <th scope="col" class="pd-diag__what">{{ t.what }}</th>
+                <th scope="col" class="pd-diag__num">{{ t.size }}</th>
               </tr>
             </thead>
             <tbody>
               @for (f of store.files(); track f.name) {
                 <tr>
                   <th scope="row" [title]="f.name">{{ shortName(f.name) }}</th>
-                  <td class="what">{{ f.summary }}</td>
-                  <td class="num">{{ size(f.bytes) }}</td>
+                  <td class="pd-diag__what">{{ f.summary }}</td>
+                  <td class="pd-diag__num">{{ size(f.bytes) }}</td>
                 </tr>
               }
             </tbody>
           </table>
         </div>
-        <p class="muted" data-testid="diag-total">{{ total() }}</p>
+        <p class="pd-diag__muted" data-testid="diag-total">{{ total() }}</p>
         @if (store.removed().length > 0) {
           <p data-testid="diag-removed">{{ removedText() }}</p>
         }
         @if (store.notes().length > 0) {
-          <ul class="muted" data-testid="diag-notes" [attr.aria-label]="t.notes">
+          <ul class="pd-diag__muted" data-testid="diag-notes" [attr.aria-label]="t.notes">
             @for (n of store.notes(); track $index) {
               <li>{{ n }}</li>
             }
@@ -67,51 +67,51 @@ import { DIAGNOSTICS_STYLES } from './styles';
         }
       }
       @if (store.requestError(); as problem) {
-        <div class="notice danger" role="alert" data-testid="diag-error">
-          <span class="title">{{ t.noPreview }}</span>
-          <span class="detail">{{ problem }}</span>
-          <span class="row"><button type="button" class="btn" (click)="store.load()">{{ t.retry }}</button></span>
+        <div class="pd-diag__notice pd-diag__notice--danger" role="alert" data-testid="diag-error">
+          <span class="pd-diag__title">{{ t.noPreview }}</span>
+          <span class="pd-diag__detail">{{ problem }}</span>
+          <span class="pd-diag__row"><button type="button" class="pd-diag__btn" (click)="store.load()">{{ t.retry }}</button></span>
         </div>
       } @else if (store.isLoading()) {
-        <p class="muted" role="status" data-testid="diag-loading">{{ t.collecting }}</p>
+        <p class="pd-diag__muted" role="status" data-testid="diag-loading">{{ t.collecting }}</p>
       }
     </section>
 
     @switch (store.saveState().kind) {
       @case ('saving') {
-        <div class="notice" role="status" data-testid="diag-saving">
-          <span class="title">{{ t.saving }}</span>
+        <div class="pd-diag__notice" role="status" data-testid="diag-saving">
+          <span class="pd-diag__title">{{ t.saving }}</span>
           <progress [attr.aria-label]="t.saving"></progress>
-          <span class="row"><button type="button" class="btn" (click)="store.cancel()">{{ t.cancelSave }}</button></span>
+          <span class="pd-diag__row"><button type="button" class="pd-diag__btn" (click)="store.cancel()">{{ t.cancelSave }}</button></span>
         </div>
       }
       @case ('saved') {
-        <div class="notice" role="status" data-testid="diag-saved">
-          <span class="title">{{ t.saved }}</span>
-          <span class="path" [title]="savedPath()" data-testid="diag-saved-path">{{ savedPathShort() }}</span>
-          <span class="detail">{{ savedDetail() }}</span>
-          <span class="muted">{{ t.attach }}</span>
+        <div class="pd-diag__notice" role="status" data-testid="diag-saved">
+          <span class="pd-diag__title">{{ t.saved }}</span>
+          <span class="pd-diag__path" [title]="savedPath()" data-testid="diag-saved-path">{{ savedPathShort() }}</span>
+          <span class="pd-diag__detail">{{ savedDetail() }}</span>
+          <span class="pd-diag__muted">{{ t.attach }}</span>
         </div>
       }
       @case ('dismissed') {
-        <p class="muted" role="status" data-testid="diag-dismissed">{{ t.dismissed }}</p>
+        <p class="pd-diag__muted" role="status" data-testid="diag-dismissed">{{ t.dismissed }}</p>
       }
       @case ('cancelled') {
-        <p class="muted" role="status" data-testid="diag-cancelled">{{ t.cancelled }}</p>
+        <p class="pd-diag__muted" role="status" data-testid="diag-cancelled">{{ t.cancelled }}</p>
       }
       @case ('failed') {
-        <div class="notice danger" role="alert" data-testid="diag-save-error">
-          <span class="title">{{ t.notSaved }}</span>
-          <span class="detail">{{ saveError() }}</span>
+        <div class="pd-diag__notice pd-diag__notice--danger" role="alert" data-testid="diag-save-error">
+          <span class="pd-diag__title">{{ t.notSaved }}</span>
+          <span class="pd-diag__detail">{{ saveError() }}</span>
         </div>
       }
     }
 
-    <div class="actions">
+    <div class="pd-diag__actions">
       @if (savedResult(); as saved) {
-        <button type="button" class="btn primary" data-default data-testid="diag-done" (click)="ref.close(saved)">{{ t.done }}</button>
+        <button type="button" class="pd-diag__btn pd-diag__btn--primary" data-default data-testid="diag-done" (click)="ref.close(saved)">{{ t.done }}</button>
       } @else {
-        <button type="button" class="btn primary" data-default data-testid="diag-save" [disabled]="!store.isLoaded() || store.saving()" (click)="save()">{{ t.save }}</button>
+        <button type="button" class="pd-diag__btn pd-diag__btn--primary" data-default data-testid="diag-save" [disabled]="!store.isLoaded() || store.saving()" (click)="save()">{{ t.save }}</button>
       }
     </div>
   `,

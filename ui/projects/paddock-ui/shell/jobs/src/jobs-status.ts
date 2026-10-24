@@ -16,45 +16,45 @@ let nextId = 0;
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdJobsList],
   host: {
-    '[class.open]': 'open()',
-    '[class.below]': 'placement() === "below"',
+    '[class.pd-open]': 'open()',
+    '[class.pd-below]': 'placement() === "below"',
     '(document:keydown.escape)': 'close(true)',
     '(document:pointerdown)': 'outside($event)',
   },
   template: `
-    <button type="button" class="pill" [class.busy]="store.activeCount() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId"
+    <button type="button" class="pd-pill" [class.pd-busy]="store.activeCount() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId"
       [attr.aria-label]="compact() ? text() : null" [attr.title]="detail() || text()" [attr.data-stalled]="stalled() || null" (click)="toggle()">
-      <span class="dot" [class.ring]="percent() !== null" [style.--pd-jobs-progress]="percent() ?? 0" aria-hidden="true">
+      <span class="pd-dot" [class.pd-ring]="percent() !== null" [style.--pd-jobs-progress]="percent() ?? 0" aria-hidden="true">
         @if (store.activeCount() === 0) {
           <svg viewBox="0 0 16 16" width="14" height="14"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" /></svg>
         }
       </span>
-      <span class="text">{{ compact() ? compactText() : text() }}@if (!compact() && progress()) {<span class="progress"> · {{ progress() }}</span>}</span>
+      <span class="pd-text">{{ compact() ? compactText() : text() }}@if (!compact() && progress()) {<span class="pd-progress"> · {{ progress() }}</span>}</span>
     </button>
     @if (open()) {
-      <div class="popover" role="region" [attr.aria-label]="t.popover" [id]="panelId">
+      <div class="pd-popover" role="region" [attr.aria-label]="t.popover" [id]="panelId">
         <pd-jobs-list />
       </div>
     }
   `,
   styles: `
     :host { position: relative; display: inline-flex; min-width: 0; }
-    .pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
-    .pill:hover, :host(.open) .pill { border-color: var(--pd-border-control); }
-    .pill:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
-    .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .pd-pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
+    .pd-pill:hover, :host(.pd-open) .pd-pill { border-color: var(--pd-border-control); }
+    .pd-pill:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
+    .pd-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
     /* Idle: the jobs glyph (a list), quiet; running: a spinner, or a ring filled to the lead's share on a known scale. */
-    .dot { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--pd-text-muted); opacity: 0.6; }
-    .dot svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
-    .progress { color: var(--pd-text-muted); }
+    .pd-dot { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--pd-text-muted); opacity: 0.6; }
+    .pd-dot svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+    .pd-progress { color: var(--pd-text-muted); }
     /* Running: a neutral spinner (accent is for action and selection, design guide §4). */
     /* A full faint track with a quarter arc: a spinner, never a letter (static at 45 degrees without motion). */
-    .busy .dot { width: 10px; height: 10px; opacity: 1; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--pd-text-muted) 35%, transparent); border-top-color: var(--pd-text); transform: rotate(45deg); animation: pd-jobs-spin 0.9s linear infinite; }
-    .busy .dot.ring { border: 0; transform: none; animation: none; background: conic-gradient(var(--pd-text) calc(var(--pd-jobs-progress) * 1%), color-mix(in srgb, var(--pd-text-muted) 35%, transparent) 0); -webkit-mask: radial-gradient(circle, transparent 2.5px, #000 3px); mask: radial-gradient(circle, transparent 2.5px, #000 3px); }
+    .pd-busy .pd-dot { width: 10px; height: 10px; opacity: 1; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--pd-text-muted) 35%, transparent); border-top-color: var(--pd-text); transform: rotate(45deg); animation: pd-jobs-spin 0.9s linear infinite; }
+    .pd-busy .pd-dot.pd-ring { border: 0; transform: none; animation: none; background: conic-gradient(var(--pd-text) calc(var(--pd-jobs-progress) * 1%), color-mix(in srgb, var(--pd-text-muted) 35%, transparent) 0); -webkit-mask: radial-gradient(circle, transparent 2.5px, #000 3px); mask: radial-gradient(circle, transparent 2.5px, #000 3px); }
     @keyframes pd-jobs-spin { to { transform: rotate(405deg); } }
-    @media (prefers-reduced-motion: reduce) { .busy .dot { animation: none; } }
-    .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: 10; width: min(360px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-2); }
-    :host(.below) .popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
+    @media (prefers-reduced-motion: reduce) { .pd-busy .pd-dot { animation: none; } }
+    .pd-popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: 10; width: min(360px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-2); }
+    :host(.pd-below) .pd-popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
   `,
 })
 export class PdJobsStatus {
@@ -105,7 +105,7 @@ export class PdJobsStatus {
   protected close(refocus: boolean): void {
     if (!this.open()) return;
     this.open.set(false);
-    if (refocus) this.host.nativeElement.querySelector<HTMLButtonElement>('.pill')?.focus();
+    if (refocus) this.host.nativeElement.querySelector<HTMLButtonElement>('.pd-pill')?.focus();
   }
 
   protected outside(e: Event): void {

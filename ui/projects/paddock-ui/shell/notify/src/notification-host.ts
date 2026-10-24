@@ -25,10 +25,10 @@ interface Timer {
   selector: 'pd-notification-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="stack" role="region" [attr.aria-label]="t.toasts" aria-live="polite">
+    <div class="pd-stack" role="region" [attr.aria-label]="t.toasts" aria-live="polite">
       @for (n of items(); track n.cause) {
         <div
-          class="toast"
+          class="pd-toast"
           data-testid="notification"
           [attr.data-severity]="n.severity"
           [attr.data-cause]="n.cause"
@@ -38,30 +38,30 @@ interface Timer {
           (mouseleave)="leave(n, $event)"
           (focusout)="leave(n, $event)"
         >
-          <div class="head">
-            <span class="mark" aria-hidden="true"></span>
-            <strong class="title">{{ n.title }}@if ((n.count ?? 1) > 1) {<span class="count" data-testid="notification-count"> (×{{ n.count }})</span>}</strong>
+          <div class="pd-head">
+            <span class="pd-mark" aria-hidden="true"></span>
+            <strong class="pd-title">{{ n.title }}@if ((n.count ?? 1) > 1) {<span class="pd-count" data-testid="notification-count"> (×{{ n.count }})</span>}</strong>
           </div>
           @if (n.body) {
-            <div class="body">{{ n.body }}</div>
+            <div class="pd-body">{{ n.body }}</div>
           }
           @if (n.actions?.length || n.details) {
-            <div class="actions">
+            <div class="pd-actions">
               @for (a of n.actions; track $index) {
-                <button type="button" class="btn" [class.primary]="a.kind === 'primary'" [class.ghost]="a.kind === 'ghost'" [attr.data-testid]="'notification-action-' + (a.id ?? $index)" (click)="run(n, a)">{{ a.label }}</button>
+                <button type="button" class="pd-btn" [class.pd-primary]="a.kind === 'primary'" [class.pd-ghost]="a.kind === 'ghost'" [attr.data-testid]="'notification-action-' + (a.id ?? $index)" (click)="run(n, a)">{{ a.label }}</button>
               }
               @if (n.details) {
-                <button type="button" class="btn ghost" [attr.aria-expanded]="isOpen(n)" data-testid="notification-details-toggle" (click)="toggle(n)">{{ t.details }}</button>
+                <button type="button" class="pd-btn pd-ghost" [attr.aria-expanded]="isOpen(n)" data-testid="notification-details-toggle" (click)="toggle(n)">{{ t.details }}</button>
               }
             </div>
           }
           @if (n.details && isOpen(n)) {
-            <code class="details" data-testid="notification-details">{{ n.details }}</code>
+            <code class="pd-details" data-testid="notification-details">{{ n.details }}</code>
           }
           @if (failed()[n.cause]; as why) {
-            <div class="body err" role="alert">{{ why }}</div>
+            <div class="pd-body pd-err" role="alert">{{ why }}</div>
           }
-          <button type="button" class="x" [attr.aria-label]="t.dismissToast" data-testid="notification-dismiss" (click)="n.dismiss()">
+          <button type="button" class="pd-x" [attr.aria-label]="t.dismissToast" data-testid="notification-dismiss" (click)="n.dismiss()">
             <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
           </button>
         </div>
@@ -70,28 +70,28 @@ interface Timer {
   `,
   styles: `
     :host { position: fixed; right: var(--pd-space-4); bottom: calc(var(--pd-statusbar-height, 28px) + var(--pd-space-2)); z-index: var(--pd-z-toast); pointer-events: none; }
-    .stack { display: flex; flex-direction: column; gap: var(--pd-space-2); align-items: flex-end; }
-    .toast { pointer-events: auto; position: relative; width: 380px; max-width: calc(100vw - 2 * var(--pd-space-4)); box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-8) var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-info); border-radius: var(--pd-radius-popover); background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-2); display: flex; flex-direction: column; gap: var(--pd-space-1); font-size: var(--pd-text-body); }
-    .toast[data-severity='success'] { border-inline-start-color: var(--pd-success); }
-    .toast[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
-    .toast[data-severity='error'], .toast[data-severity='critical'] { border-inline-start-color: var(--pd-danger); }
-    .head { display: flex; align-items: center; gap: var(--pd-space-2); min-width: 0; }
-    .mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-info); }
-    [data-severity='success'] .mark { background: var(--pd-success); }
-    [data-severity='warning'] .mark { background: var(--pd-warning); border-radius: 1px; transform: rotate(45deg); }
-    [data-severity='error'] .mark, [data-severity='critical'] .mark { background: var(--pd-danger); border-radius: 1px; }
-    .title { overflow-wrap: anywhere; font-weight: var(--pd-weight-semibold); }
-    .count { color: var(--pd-text-muted); font-weight: var(--pd-weight-regular); font-size: var(--pd-text-caption); }
-    .body { color: var(--pd-text-muted); line-height: var(--pd-lh-body); overflow-wrap: anywhere; user-select: text; }
-    .err { color: var(--pd-danger); }
-    .actions { display: flex; gap: var(--pd-space-1); flex-wrap: wrap; }
-    .btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .btn.primary { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
-    .btn.ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
-    .btn:focus-visible, .x:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .details { display: block; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pd-text-muted); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); user-select: text; }
-    .x { position: absolute; top: var(--pd-space-1); right: var(--pd-space-1); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
-    .x:hover { background: var(--pd-hover); color: var(--pd-text); }
+    .pd-stack { display: flex; flex-direction: column; gap: var(--pd-space-2); align-items: flex-end; }
+    .pd-toast { pointer-events: auto; position: relative; width: 380px; max-width: calc(100vw - 2 * var(--pd-space-4)); box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-8) var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-info); border-radius: var(--pd-radius-popover); background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-2); display: flex; flex-direction: column; gap: var(--pd-space-1); font-size: var(--pd-text-body); }
+    .pd-toast[data-severity='success'] { border-inline-start-color: var(--pd-success); }
+    .pd-toast[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
+    .pd-toast[data-severity='error'], .pd-toast[data-severity='critical'] { border-inline-start-color: var(--pd-danger); }
+    .pd-head { display: flex; align-items: center; gap: var(--pd-space-2); min-width: 0; }
+    .pd-mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-info); }
+    [data-severity='success'] .pd-mark { background: var(--pd-success); }
+    [data-severity='warning'] .pd-mark { background: var(--pd-warning); border-radius: 1px; transform: rotate(45deg); }
+    [data-severity='error'] .pd-mark, [data-severity='critical'] .pd-mark { background: var(--pd-danger); border-radius: 1px; }
+    .pd-title { overflow-wrap: anywhere; font-weight: var(--pd-weight-semibold); }
+    .pd-count { color: var(--pd-text-muted); font-weight: var(--pd-weight-regular); font-size: var(--pd-text-caption); }
+    .pd-body { color: var(--pd-text-muted); line-height: var(--pd-lh-body); overflow-wrap: anywhere; user-select: text; }
+    .pd-err { color: var(--pd-danger); }
+    .pd-actions { display: flex; gap: var(--pd-space-1); flex-wrap: wrap; }
+    .pd-btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-btn.pd-primary { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
+    .pd-btn.pd-ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
+    .pd-btn:focus-visible, .pd-x:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-details { display: block; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pd-text-muted); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); user-select: text; }
+    .pd-x { position: absolute; top: var(--pd-space-1); right: var(--pd-space-1); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
+    .pd-x:hover { background: var(--pd-hover); color: var(--pd-text); }
   `,
 })
 export class PdNotificationHost {
