@@ -7,6 +7,8 @@ export class FakeDialogIo implements DialogIo {
   readonly closeRequests: string[] = [];
   /** The results the dialog closed with, in order (`undefined`: dismissed). */
   readonly closedWith: unknown[] = [];
+  /** The titles the dialog set at run time, in order. */
+  readonly titles: string[] = [];
   /** The heights the dialog asked its window to fit. */
   readonly fitted: number[] = [];
   private readonly handlers = new Map<string, Set<(p: unknown) => void>>();
@@ -40,6 +42,9 @@ export class FakeDialogIo implements DialogIo {
   }
   async requestClose(label: string): Promise<void> {
     this.closeRequests.push(label);
+  }
+  async setTitle(title: string): Promise<void> {
+    this.titles.push(title);
   }
   async fitHeight(px: number): Promise<void> {
     this.fitted.push(px);

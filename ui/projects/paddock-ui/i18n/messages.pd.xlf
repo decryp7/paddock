@@ -575,6 +575,9 @@
       <trans-unit id="pd.settings.section.reset" datatype="html">
         <source>Reset section</source>
       </trans-unit>
+      <trans-unit id="pd.settings.section.show-them" datatype="html">
+        <source>Show them</source>
+      </trans-unit>
       <trans-unit id="pd.settings.section.unavailable" datatype="html">
         <source>These settings are not available in this app.</source>
       </trans-unit>

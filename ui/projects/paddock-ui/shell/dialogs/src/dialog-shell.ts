@@ -149,7 +149,7 @@ export class DialogShell {
   protected readonly denied = inject(DeniedCommands).last;
 
   /** What the content injects as `DIALOG_REF`: closing answers the opener and ends this window. */
-  readonly ref: DialogRef = { closed: new Promise(() => undefined), close: (result) => void this.close(result) };
+  readonly ref: DialogRef = { closed: new Promise(() => undefined), close: (result) => void this.close(result), setTitle: (title) => this.setTitle(title) };
 
   constructor() {
     const started = this.pending.add();
@@ -191,6 +191,15 @@ export class DialogShell {
     } catch (e) {
       this.fail(e);
     }
+  }
+
+  /** A title the content knows only now: the heading, the page title and (where the window system can) the OS title bar. */
+  private setTitle(title: string): void {
+    const text = title.trim();
+    if (!text) return;
+    this.title.set(text);
+    if (typeof document !== 'undefined') document.title = text;
+    this.io.setTitle?.(text).catch(() => undefined);
   }
 
   private fail(e: unknown): void {

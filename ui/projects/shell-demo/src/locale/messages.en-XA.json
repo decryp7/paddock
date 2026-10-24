@@ -192,6 +192,7 @@
     "pd.settings.section.hidden.one": "⟦1 ááðṽááñçééð šéţţîîñĝ îîš ĥîîððéñ.⟧",
     "pd.settings.section.hidden.other": "⟦{$count} ááðṽááñçééð šéţţîîñĝš ááŕéé ĥîððééñ.⟧",
     "pd.settings.section.reset": "⟦Ŕééšééţ šééçţîööñ⟧",
+    "pd.settings.section.show-them": "⟦Šĥööŵ ţĥééɱ⟧",
     "pd.settings.section.unavailable": "⟦Ţĥééšéé šééţţîñĝš ááŕéé ñööţ áṽááîîļááƀļé îîñ ţĥîîš ááþþ.⟧",
     "pd.settings.show-advanced": "⟦Šĥööŵ ááðṽááñçéð⟧",
     "pd.settings.store.load-failed": "⟦Ţĥéé šééţţîîñĝš çöûûļð ñööţ ƀéé ļöááðééð.⟧",

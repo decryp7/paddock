@@ -27,6 +27,19 @@ describe('chip text', () => {
     expect(chipCompactText([{ label: 'a', state: 'down' }, { label: 'b', state: 'degraded' }])).toBe('2 services');
     expect(chipCompactText([])).toBe('Unknown');
   });
+
+  it("keeps the app's casing: only a label with the article is capitalised, and only when its first word has no capital of its own", () => {
+    expect(shortName('the S3 bucket')).toBe('S3 bucket');
+    expect(shortName('the iPhone link')).toBe('iPhone link');
+    expect(shortName('llama.cpp server')).toBe('llama.cpp server');
+    expect(shortName('Pitwall server')).toBe('Pitwall server');
+    expect(shortName('The log store')).toBe('Log store');
+    expect(chipText([{ label: 'iPhone link', state: 'degraded' }])).toBe('iPhone link: limited');
+    expect(chipText([{ label: 'llama.cpp', state: 'down' }])).toBe('llama.cpp: stopped');
+    // The compact word starts the text: a plain lower-case one takes a capital, a name keeps its own.
+    expect(chipCompactText([{ label: 'the iPhone link', state: 'down' }])).toBe('link stopped'.replace('link', 'Link'));
+    expect(chipCompactText([{ label: 'the sync iPhone', state: 'down' }])).toBe('iPhone stopped');
+  });
 });
 
 describe('pd-service-status', () => {
@@ -382,6 +395,25 @@ describe('the notification centre', () => {
 });
 
 describe('pd-notifications-status', () => {
+  it('draws the count in the danger colour while an error is unread, and neutral otherwise', async () => {
+    const { centre } = notifyBed();
+    const f = TestBed.createComponent(PdNotificationsStatus);
+    await settle();
+    const el: HTMLElement = f.nativeElement;
+    document.body.append(el);
+    centre.post({ cause: 'a', source: 'job', severity: 'info', title: 'A' });
+    await f.whenStable();
+    expect(one(el, '.pd-count').classList.contains('pd-error')).toBe(false);
+    const bad = centre.post({ cause: 'b', source: 'job', severity: 'error', title: 'B' });
+    await f.whenStable();
+    expect(one(el, '.pd-count').classList.contains('pd-error')).toBe(true);
+    expect(one(el, '.pd-count').textContent).toBe('2');
+    await centre.markRead(bad.id);
+    await f.whenStable();
+    expect(one(el, '.pd-count').classList.contains('pd-error')).toBe(false);
+    el.remove();
+  });
+
   it('shows the unread count, toggles the centre and opens by itself for a focused message', async () => {
     const { centre } = notifyBed();
     const f = TestBed.createComponent(PdNotificationsStatus);
