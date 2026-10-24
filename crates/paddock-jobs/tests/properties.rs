@@ -98,10 +98,10 @@ proptest! {
     #[test]
     fn reporter_survives_any_call_sequence(ops in proptest::collection::vec(0u8..9, 0..80), advance in proptest::collection::vec(0u64..300, 80)) {
         let sink = Collect::new();
-        let clock = ManualClock::new();
+        let clock = FakeClock::new();
         let r = Reporter::with_clock(JobId(1), JobKind::new("k"), "T", None, sink.clone(), Arc::new(clock.clone()), 100);
         for (i, op) in ops.iter().enumerate() {
-            clock.advance(advance[i]);
+            clock.advance_ms(advance[i]);
             match op {
                 0 => r.start(),
                 1 => r.begin_phase(Phase::items("p", "P", 10)),

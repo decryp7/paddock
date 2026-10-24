@@ -8,8 +8,8 @@ use paddock_jobs::tauri::{
     COMMANDS, CommandError, EVENT, Jobs, handler, handler_with_grants, manage, route,
 };
 use paddock_jobs::{
-    CancelReason, EventSink, HANDLER_BUDGET_MS, JobError, JobId, JobKind, JobPool, JobRegistry,
-    JobSnapshot, JobState, ManualClock, Phase, Reporter, Workers, assert_nonblocking,
+    CancelReason, EventSink, FakeClock, HANDLER_BUDGET_MS, JobError, JobId, JobKind, JobPool,
+    JobRegistry, JobSnapshot, JobState, Phase, Reporter, Workers, assert_nonblocking,
 };
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -322,7 +322,7 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
         }
     }
     let keep = Arc::new(Keep(Mutex::new(Vec::new())));
-    let clock = Arc::new(ManualClock::new());
+    let clock = Arc::new(FakeClock::new());
     let reporter = |id: u64, kind: &str, title: &str, subject: Option<&str>| {
         Reporter::with_clock(
             JobId(id),
@@ -337,7 +337,7 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
     let queued = reporter(1, "import", "Importing logs", Some("3 folders"));
     let finding = reporter(2, "import", "Importing logs", None);
     finding.begin_phase(Phase::discovering("find", "Finding files"));
-    clock.advance(1_200);
+    clock.advance_ms(1_200);
     finding.add(12_345);
     let download = reporter(3, "download", "Downloading the model", Some("model.gguf"));
     download.begin_phase(Phase::bytes(
@@ -346,7 +346,7 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
         Some(118 * 1024 * 1024),
     ));
     for _ in 0..10 {
-        clock.advance(500);
+        clock.advance_ms(500);
         download.add(4 * 1024 * 1024);
     }
     let writing = reporter(4, "save", "Saving the project", None);

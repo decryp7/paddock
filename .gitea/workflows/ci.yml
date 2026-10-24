@@ -277,6 +277,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-service --all-targets --all-features -- -D warnings && cargo test -p paddock-service --all-features
 
+      - name: paddock-pitwall
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-pitwall --all-targets --all-features -- -D warnings && cargo test -p paddock-pitwall --all-features
+
       - name: paddock-secrets
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-secrets --all-targets --all-features -- -D warnings && cargo test -p paddock-secrets --all-features && cargo test -p paddock-secrets

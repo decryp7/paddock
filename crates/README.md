@@ -88,10 +88,10 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
-| `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
+| `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008); `time`: the family's clock port, fake clock, deadlines, restart back-off (plan X20) | yes (all five apps); built |
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
-| `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
+| `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
@@ -132,6 +132,30 @@ tauri::Builder::default()
 - Generated TypeScript in `ui/projects/paddock-ui/shell/jobs/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs
   --features tauri --test tauri generated`): `jobs-commands.ts` (`JOBS_COMMANDS`, `JobsCommand`) and `jobs-fixtures.ts`
   (one snapshot of every shape, written by the real reporter, decoded by the UI's specs).
+
+## `paddock_jobs::time` (plan X20)
+
+One clock for the family (Rule 40 fix for tests that asserted wall-clock limits, lessons "Tests that measure the wall
+clock fail under load"). `paddock-log` and `paddock-health` re-export these types; apps delete their `clock.rs`/`time.rs`
+ports and back-off loops (see the plan's X20 row).
+
+```rust
+use paddock_jobs::time::{Backoff, BackoffPolicy, Clock, Deadline, FakeClock, Retry, SystemClock};
+let clock: Arc<dyn Clock> = Arc::new(SystemClock);              // FakeClock in tests
+let token = CancelToken::with_deadline_on(clock.clone(), limit); // or JobRegistry::register_with_deadline (registry's clock)
+clock.wait(Duration::from_secs(1), &token)?;                     // Err(Cancelled) at once on cancel or deadline
+let mut b = Backoff::new(BackoffPolicy::default());               // 1 s doubling to 60 s, reset after 5 healthy min, give up >5 in 10 min
+match b.failed(clock.monotonic()) { Retry::After(d) => clock.wait(d, &token)?, Retry::GiveUp => report() }
+```
+
+- `Clock`: `monotonic()` (never backwards; the only reading for durations, deadlines and back-off), `wall()` (calendar
+  time for stamps and file names; may jump), `wait(d, &CancelToken)`; provided `now_ms`, `wall_ms`, `sleep`.
+- `FakeClock`: both readings move only with `advance`/`advance_ms` (`set_wall` moves the wall alone); waits block until
+  the clock reaches their end. A test starts the work, `wait_for_waiters(n, guard)` until it is blocked on the clock,
+  advances and asserts the outcome; the guard is a hang guard, never a timing assertion.
+- `Deadline::after(clock, limit)`: `passed()`, `remaining()`; a limit too large to represent never passes.
+- `Backoff` is a pure state machine over monotonic readings (`healthy(now)`, `failed(now) -> Retry`, `reset()`);
+  `BackoffPolicy::retry_forever` for a reconnecting client.
 
 ## `paddock-commands` (plan S1)
 
@@ -199,7 +223,7 @@ The shell's files live in `ui/projects/paddock-ui/shell/generated/` and in the e
 | `commands.ts` | the wire types (ts-rs): `CommandKind`, `WindowClass`, `CommandInfo`, `RefusalCode`, `CommandRefusal` | `paddock-commands` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated`) |
 | `shell-commands.ts` | `SHELL_COMMANDS` and `ShellCommand`, every command of the shell plugin | `paddock-shell` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-shell --lib generated`) |
 | `shell.ts` | `SHELL_PLUGIN`, `SHELL_VERSION` and the `shell_version` reply (`VersionReply`, `AppIdentity`) | `paddock-shell` (same test) |
-| `notify/generated/health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications, window notices and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
+| `notify/generated/health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`, `NOTIFICATIONS_ACTION_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications, window notices and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
 | `notify/generated/health-commands.ts` | `HEALTH_COMMANDS` and `HealthCommand`, the health and notification commands | `paddock-health` (same test) |
 
 An app writes its own file the same way into its UI (for example `src/app/core/generated/app-commands.ts`); dialog
@@ -286,6 +310,42 @@ health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.
   the shell's own are `health`, `repairService` and `openSettings`. App messages are saved debounced and atomically in a
   versioned file (missing, damaged or newer: empty, logged); a window's project messages are saved by the app with its
   project (`notifications_record` / `notifications_restore`). A dialog or pop-out sees its host window's list.
+- OS notifications (plan X8, `notify::os`; the Tauri side in `tauri::os`, the plugin adapter in `tauri::native` behind
+  feature `os-notify`): one policy for every app, merged from Debrief's `notify.rs` (level, "only when the user cannot see
+  it", rate limiter), Spotter's `toast.rs` (buttons, click-through, a validated payload) and `QuietHours`; Pitcrew's and
+  Dyno's plain toasts had nothing to add (Dyno's sustain and cool-down decide whether an alarm *exists* and stay in
+  `dyno-core`).
+
+  ```rust
+  let settings = SharedOsSettings::default();              // the user's level, quiet hours, limits (Settings: pd.notifications)
+  let notifier = OsNotifier::new(settings.clone(), Arc::new(PluginToaster::new(app.clone())))
+      .with_labels(ActionLabels::default().label("viewJob", "View job"));
+  paddock_shell::Builder::new(identity)
+      .os_notifications(settings)                          // the "Notifications" settings page over the same handle
+      .health_setup(move |_, s| s.os_notifier(Arc::new(notifier)).on_notice_action("viewJob", |app, notice, action| open_job(app, action)))
+  ```
+
+  - Policy (`screen`, pure): the level (`off`, `alerts` = warning and above, `all`), then "the window the message belongs
+    to is in front" (`user_sees` over focused and visible windows; an app-wide message is seen in any), then quiet hours
+    (local time, across midnight; a critical failure still notifies unless the user turns that off), then the limits.
+    A held-back message is still in the centre; only the toast waits.
+  - Limits (`RateLimiter`, epoch ms from the injected `Clock`): one toast per cause key per cool-down (30 s) and a burst
+    (5 in 5 minutes) over all causes, both clamped to ranges; bounded to 512 causes; a clock that goes backwards forgets
+    instead of muting; a toast the OS refused is taken back (`Reservation`), so a failure costs no quota.
+  - Buttons: a toast has up to three, one per labelled action of the message (`ActionLabels`; the shell's `repairService`
+    and `openSettings` are built in). A click reports the message id and the slot; the action is read from the centre's
+    message again, never from the OS payload (`route`): the toast opens the message (and marks it read), Repair runs
+    `Health::repair` in the shell (rule 19), an app handler (`on_notice_action`) runs on the OS callback thread, anything
+    else goes to the window as `paddock://notifications-action` (`NoticeActionEvent`; the UI runs it like the centre's own
+    button). Where an OS reports no clicks the old fallback stays: the app gaining the focus within 2 minutes opens the
+    last toast's message; a reported click supersedes it.
+  - Quiet-hours digest: causes held back by quiet hours are counted (distinct, at most 512); when quiet hours are over
+    `OsNotifier::pending_digest` says how many and `tauri::poll_digest` posts one quiet message ("N notifications held
+    during quiet hours", cause `os:quiet-digest`, merged across nights) and one toast, rate-limited like any other cause. A
+    user who is looking at the window gets the message in the centre only. `Setup::os_digest_every(d)` polls on a thread that
+    ends with the app (quiet hours end by the clock, not an event); a window gaining the focus polls too.
+  - Tests never post a notification: `FakeToaster` records toasts, plays clicks and permission answers (public, for the
+    apps' wiring tests); `FixedOffset` stands for the user's zone, `ManualClock` for time.
 
 ## `paddock-startup` (plan S7 and §11)
 
@@ -669,7 +729,7 @@ paddock_log::log_from_webview(window, level, message);               // the webv
 - Panics: the hook writes a Fatal entry (thread, location, bounded backtrace, span fields) and `crash-<process>.json`
   (`CrashMarker`, in `AppDirs::data()`); the next start reads it (plan X3) and clears it.
 - `spawn_child_capture(name, stderr)` logs a child's output line by line (4 KiB per line, `Child` + `child:<name>`).
-- Tests use `Logging::scoped`, a temp folder and `ManualClock`; no sleeps.
+- Tests use `Logging::scoped`, a temp folder and `FakeClock` (`paddock_jobs::time`, re-exported; `now_utc` reads it as UTC); no sleeps.
 
 ## `paddock-proc` (plan X6)
 
@@ -816,3 +876,49 @@ report.save(&path_the_user_chose, &cancel, &progress)?;                   // zip
   native picker; the shell enables it with `native-dialogs`). The shell registers all of it from `Builder::diagnostics`.
 - The crate has no network dependency (a test checks its manifest; `cargo tree` shows none). Tests use temp folders, a fake picker and
   Tauri's mock runtime; no sleeps.
+
+## `paddock-pitwall` (ADR 0004, plan section 15)
+
+The one Pitwall client, extracted from Debrief 1.1's `debrief_ai::engine::pitwall` and checked against Pitwall's own router
+(`crates/pitwall-server/src/http.rs`). Blocking and bounded: apps call it on a worker thread (rule 10). Loopback only
+(`127.0.0.1`, any other host is unrepresentable); no TLS, no cloud.
+
+```rust
+use paddock_pitwall::*;
+
+let app = AppIdentity::new("debrief", "Debrief")?;
+let link = Link::new(LinkConfig::new(app, Locator::system(), secrets /* Arc<dyn paddock_secrets::Secrets> */));
+link.set_listener(Arc::new(|e| /* LinkEvent::Changed | Paired { use_for_app } */ {}));
+let view = link.probe();                                  // discovery, health, key, a model; never pairs by itself
+link.connect(true)?;                                      // the user chose "Use Pitwall": shows view.pairing.code, polls in the background
+let reply = link.chat_with(ChatRequest::new(ModelSel::Auto(Caps::chat(8192)), msgs), &mut |delta| show(delta))?;
+let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> NeedsAiView for <pd-needs-ai>
+```
+
+- `discovery`: `Locator::system()` reads `discovery.json` (16 KiB, strict, `baseUrl` must be `http://127.0.0.1:<port>` with a port of 1024 or more, pid alive)
+  from the folders of `paddock-env` for `pitwall` (Local first and the old Roaming folder second on Windows, D3), else tries port
+  11435. `PITWALL_HOME` names the data folder itself. Tests use `Locator::in_dir`.
+- `keys`: `KeyVault` over `paddock_secrets::Secrets` (service = the app, account `Pitwall:API key`); `adopt_legacy` moves Debrief 1.1's
+  entry; a 401 with a key deletes it (`KeyRevoked`), without one is `NeedsPairing`.
+- `Client`: `health`, `begin_pairing` / `poll_pairing`, `select`, `models`, `model_ids`, `ensure_capability` (a model that cannot see
+  is `Unsupported` locally, with Pitwall's reason), `jobs` / `cancel_job`, `count_tokens` / `truncate`, `task`, `embed` (batches of 64),
+  `chat` / `chat_with` / `chat_stream` (an iterator; dropping it cancels). Every reply carries `Provenance` (`X-Pitwall-Model`,
+  `-Engine`, `-Chosen-By`, `-Cold-Start-Ms`, `-Cache`, `-Alias`, `-Job-Id`). `CallOptions`: priority (`Interactive`, `Background`,
+  `Batch`), cache policy, `CancelToken` (acts within a 50 ms read slice, even while Pitwall is silent), per-phase `Timeouts`
+  (connect 2 s, first byte 120 s, idle 60 s for chat) and a whole-call deadline.
+- `retry`: pure table (250 ms to 8 s, jitter, `Retry-After`; 4 attempts, 8 for batch); connect errors, `503` and `429` with
+  `Retry-After` only; a stream is never retried after its first delta; probes (`health`, pairing poll) never retry.
+- `PitwallError`: typed, each with `user_message(app)` and `next_step()` (`StartPitwall | InstallPitwall | Pair | InstallModel | Wait |
+  UpdateApp | UpdatePitwall | ChangePermissions | None`).
+- `AiState` / `NeedsAiView` (serialisable, camelCase): `Disabled | NotInstalled | NotRunning | Incompatible | NeedsPairing | Paused |
+  NoSuitableModel | Unavailable | Ready`, with the actions that fix each.
+- `engine`: `EngineChoice` (Automatic, Pitwall, Built-in), the pure `select`, `Session` (setting, "use the built-in engine for this
+  session", AI off) and `run_or_fallback` (one engine per request, never a silent mix: `Routed::Unavailable(NeedsAiView)`).
+- `health`: `service_spec` and `report`: Pitwall is `Degraded`, never `Down`, only when the setting wants it, and its Repair is
+  `UseFallback` (or `OpenSettings` for an app without an engine) so it never depends on Pitwall (rule 19).
+- `loopback`: the bounded, cancellable `127.0.0.1` HTTP/1.1 transport itself (header, line and body limits, chunked, injection-proof
+  headers), reusable for other local servers: Debrief's llama-server client (`debrief-ai-worker/src/http.rs`) moves onto it.
+- `testing` (feature `testing`): `FakePitwall`, an in-process fake with exactly the routes of `PITWALL_ROUTES`, Pitwall's answer and
+  error shapes, scripted pairing, failures with `Retry-After`, held and dying streams. It waits on conditions, never on the clock.
+  `tests/contract.rs` runs the client against it; with `PADDOCK_PITWALL_HTTP_RS=<pitwall>/crates/pitwall-server/src/http.rs` it also
+  checks that Pitwall's router still has every route (Pitwall's CI should set it).

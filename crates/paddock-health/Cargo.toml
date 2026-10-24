@@ -10,13 +10,20 @@ publish = ["decryp7"]
 [features]
 # The Tauri adapter (`paddock_health::tauri`: events, commands and their table); the core never depends on Tauri.
 tauri = ["dep:tauri", "paddock-commands/tauri"]
+# The OS notification adapter over `tauri-plugin-notification` (`paddock_health::tauri::native::PluginToaster`); the app registers the plugin.
+os-notify = ["tauri", "dep:tauri-plugin-notification"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = { version = "0.4", features = ["kv"] }
+# The family's clock port (`paddock_jobs::time`).
+paddock-jobs = { workspace = true }
+# Local time of day for quiet hours (`notify::os::SystemLocalTime`).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri = { workspace = true, optional = true }
 paddock-commands = { workspace = true, optional = true }
+tauri-plugin-notification = { version = "2.7", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

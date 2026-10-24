@@ -349,3 +349,14 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
 - Redaction cost grows with the input, so bound the input first: a section that handed over 100 MB was cut to the 4 MB
   limit only after every byte had been through the regexes (debug builds took 20 s for five such files). `Collected`
   cuts the content to the file limit before redacting and takes smaller `Limits` in tests.
+
+## Tests that measure the wall clock fail under load (Debrief 1.1.1, 2026-10-25)
+- Debrief's 1.1.1 release run failed on three tests that asserted wall-clock limits: a cancel seen within 578 ms, a chat
+  cancel under 700 ms, and a "grandchild is gone" check polled for a fixed time. Each passed on an idle machine and failed
+  on a loaded CI runner; each earlier instance had been fixed by raising its limit, and the next one appeared. Rule 40:
+  time is a dependency. Code that waits, times out, throttles or retries takes a `paddock_jobs::time::Clock`; tests pass a
+  `FakeClock`, wait until the work is blocked on it (`wait_for_waiters`) and advance it, so they assert outcomes and
+  order, never durations. Promptness is counted in work (items after the cancel, `CANCEL_CHECK_ITEMS`), not in
+  milliseconds; "gone" is waited for on an event (exit status, a closed pipe), not polled against a stopwatch. A real
+  wall-clock limit in a test is only a hang guard (seconds to minutes, failing with a message), never the assertion. The
+  conformance check C30 (plan shared-next, "Wall-clock assertions") flags the pattern.

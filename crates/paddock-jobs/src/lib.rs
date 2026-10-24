@@ -7,11 +7,11 @@
 //!   with its own scale ([`Unit`], known or unknown total).
 //! * [`Reporter`] throttles and coalesces updates; [`JobRegistry`] and [`JobContext`] own ids, cancel tokens and terminal states.
 //! * [`JobPool`] runs job bodies on a bounded worker pool so command handlers return at once ([`assert_nonblocking`] tests that).
+//! * [`time`] is the family's clock port ([`Clock`], [`SystemClock`], [`FakeClock`]), deadlines and restart back-off.
 //! * [`CancelToken`] is checked cooperatively; [`par_walk`], [`par_map_ordered`], [`pipeline_ordered`] and [`HashingWriter`] honour it
 //!   within [`CANCEL_CHECK_ITEMS`] items or [`CHUNK`] bytes.
 
 mod cancel;
-mod clock;
 mod error;
 mod eta;
 mod hash;
@@ -23,11 +23,11 @@ mod pool;
 mod reporter;
 #[cfg(feature = "tauri")]
 pub mod tauri;
+pub mod time;
 mod walk;
 mod workers;
 
 pub use cancel::{CancelReason, CancelToken, Cancelled};
-pub use clock::{Clock, ManualClock, SystemClock};
 pub use error::JobError;
 pub use eta::EtaEstimator;
 pub use hash::{CHUNK, HashingWriter, copy_hashed, hex};
@@ -41,6 +41,7 @@ pub use pool::{
     HANDLER_BUDGET_MS, JobHandle, JobPool, Offload, PoolClosed, SlowHandler, assert_nonblocking,
 };
 pub use reporter::{Counter, DEFAULT_MIN_INTERVAL_MS, EventSink, Reporter, UncancellableGuard};
+pub use time::{Clock, FakeClock, SystemClock};
 pub use walk::{
     Decision, EntryKind, Filter, SymlinkPolicy, WalkEntry, WalkIssue, WalkOptions, WalkResult,
     par_walk,

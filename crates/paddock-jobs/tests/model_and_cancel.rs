@@ -139,8 +139,7 @@ fn cancel_token_first_reason_wins_and_shares_state() {
 
 #[test]
 fn cancel_token_deadline_fires() {
-    let t = CancelToken::with_deadline(Duration::from_millis(0));
-    std::thread::sleep(Duration::from_millis(2));
+    let t = CancelToken::with_deadline(Duration::ZERO);
     assert_eq!(t.reason(), Some(CancelReason::Deadline));
     let far = CancelToken::with_deadline(Duration::from_secs(3600));
     assert!(!far.is_cancelled());
@@ -181,11 +180,11 @@ fn workers_are_bounded() {
 
 #[test]
 fn clocks() {
-    let c = ManualClock::new();
+    let c = FakeClock::new();
     assert_eq!(c.now_ms(), 0);
-    c.advance(5);
+    c.advance_ms(5);
     assert_eq!(c.clone().now_ms(), 5);
-    let s = SystemClock::default();
+    let s = SystemClock;
     let a = s.now_ms();
     assert!(s.now_ms() >= a);
 }
