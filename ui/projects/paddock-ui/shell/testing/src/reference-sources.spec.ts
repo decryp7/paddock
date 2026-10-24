@@ -47,7 +47,7 @@ describe('shell and shell-demo sources', () => {
     expect(files.length).toBeGreaterThanOrEqual(4);
     // The service part's entry point and its generated wire module are named "service" but hold no service: the entry point
     // exports the page's definition and constants (the page, store and backend are chunks or tree-shaken), the module only types.
-    const allow = ['@decryp7/paddock-ui/shell/service', '../generated/service'];
+    const allow = ['@decryp7/paddock-ui/shell/service', '../generated/service', '@decryp7/paddock-ui/shell/channels', '../generated/channels'];
     expect(files.flatMap((f) => checkRegistrationSource(f, fs.readFileSync(f, 'utf8'), allow))).toEqual([]);
   });
 

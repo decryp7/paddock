@@ -56,6 +56,294 @@
       <trans-unit id="pd.category.help" datatype="html">
         <source>Help</source>
       </trans-unit>
+      <trans-unit id="pd.channels.add" datatype="html">
+        <source>Add channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.add-title" datatype="html">
+        <source>New channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.change-password" datatype="html">
+        <source>Change password…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.change-token" datatype="html">
+        <source>Change token…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.clear-failed" datatype="html">
+        <source>The secret could not be removed.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-events" datatype="html">
+        <source>Events</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-name" datatype="html">
+        <source>Name</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-state" datatype="html">
+        <source>State</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-type" datatype="html">
+        <source>Type</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.delivered" datatype="html">
+        <source>Delivered</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.delivered-after" datatype="html">
+        <source>Delivered after <x id="attempts"/> attempts</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.edit-aria" datatype="html">
+        <source>Edit <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.edit-title" datatype="html">
+        <source>Edit channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.empty-text" datatype="html">
+        <source>Add a channel to hear about disk space, failed jobs and other events away from the app.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.empty-title" datatype="html">
+        <source>No notification channels yet</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.enabled" datatype="html">
+        <source>On</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.events-hint" datatype="html">
+        <source>Names of the events this channel hears of, separated by commas or new lines, for example diskLow.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.events-more" datatype="html">
+        <source><x id="first"/> and <x id="more"/> more</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-auth" datatype="html">
+        <source>This channel needs a token</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-enabled" datatype="html">
+        <source>Send notifications on this channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-events" datatype="html">
+        <source>Events</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-from" datatype="html">
+        <source>Sender</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-host" datatype="html">
+        <source>Mail server</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-name" datatype="html">
+        <source>Name</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-port" datatype="html">
+        <source>Port</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-security" datatype="html">
+        <source>Connection security</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-server" datatype="html">
+        <source>ntfy server</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-severity" datatype="html">
+        <source>Minimum severity</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-to" datatype="html">
+        <source>Recipients</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-topic" datatype="html">
+        <source>Topic</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-type" datatype="html">
+        <source>Type</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-url" datatype="html">
+        <source>Web address</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-username" datatype="html">
+        <source>User name</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.from" datatype="html">
+        <source>Enter the sender as name@domain.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.host" datatype="html">
+        <source>Enter the mail server.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.name" datatype="html">
+        <source>Give the channel a name.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.port" datatype="html">
+        <source>Enter a port between 1 and 65535.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.server" datatype="html">
+        <source>Enter the ntfy server, starting with https://.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.to" datatype="html">
+        <source>Enter at least one recipient as name@domain.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.topic" datatype="html">
+        <source>Enter the topic to publish to.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.url" datatype="html">
+        <source>Enter the web address to post to, starting with https://.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.lede" datatype="html">
+        <source>Where the app tells you about things that need attention, even when its window is closed: a web address it posts to, an ntfy topic, or an email.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.limit" datatype="html">
+        <source>You have the most channels you can keep (<x id="max"/>). Remove one to add another.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.load-failed" datatype="html">
+        <source>The notification channels could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.load-failed-title" datatype="html">
+        <source>The notification channels could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.loading" datatype="html">
+        <source>Reading the notification channels…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.no-events" datatype="html">
+        <source>No events chosen</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.no-password" datatype="html">
+        <source>No password</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.no-token" datatype="html">
+        <source>No token</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.password" datatype="html">
+        <source>Password</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.paused" datatype="html">
+        <source>Off</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove" datatype="html">
+        <source>Remove</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-aria" datatype="html">
+        <source>Remove <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-secret" datatype="html">
+        <source>Remove secret</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.save" datatype="html">
+        <source>Save</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.save-failed" datatype="html">
+        <source>The channels could not be saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.save-failed-title" datatype="html">
+        <source>The channel was not saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret-missing" datatype="html">
+        <source>No secret yet</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret-stored" datatype="html">
+        <source>Secret stored</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.failed" datatype="html">
+        <source>The engine could not store the secret.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.hide" datatype="html">
+        <source>Hide what you typed</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.hide-short" datatype="html">
+        <source>Hide</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.lede-password" datatype="html">
+        <source>The password for <x id="channel"/> is kept by the app's engine, not in the settings file. It is never shown again.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.lede-token" datatype="html">
+        <source>The token for <x id="channel"/> is kept by the app's engine, not in the settings file. It is never shown again.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.password" datatype="html">
+        <source>Password</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.save" datatype="html">
+        <source>Save</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.show" datatype="html">
+        <source>Show what you typed</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.show-short" datatype="html">
+        <source>Show</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.title" datatype="html">
+        <source>Channel secret</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.title-password" datatype="html">
+        <source>Password for <x id="channel"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.title-token" datatype="html">
+        <source>Token for <x id="channel"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.token" datatype="html">
+        <source>Token</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.security.implicit" datatype="html">
+        <source>TLS (implicit)</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.security.none" datatype="html">
+        <source>None (not encrypted)</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.security.starttls" datatype="html">
+        <source>STARTTLS</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.send-test" datatype="html">
+        <source>Send test</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.set-password" datatype="html">
+        <source>Set password…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.set-token" datatype="html">
+        <source>Set token…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.severity.error" datatype="html">
+        <source>Errors only</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.severity.info" datatype="html">
+        <source>Info and above</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.severity.warning" datatype="html">
+        <source>Warnings and errors</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.still-working" datatype="html">
+        <source>Still working… a test can take a minute; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.test-aria" datatype="html">
+        <source>Send a test to <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.test-failed" datatype="html">
+        <source>The test did not get through.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.test-refused" datatype="html">
+        <source>The test could not be started.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.title" datatype="html">
+        <source>Notification channels</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.to-hint" datatype="html">
+        <source>Separate addresses with commas or new lines (at most <x id="max"/>).</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.token" datatype="html">
+        <source>Token</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.type.email" datatype="html">
+        <source>Email</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.type.ntfy" datatype="html">
+        <source>ntfy</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.type.webhook" datatype="html">
+        <source>Webhook</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.username-hint" datatype="html">
+        <source>Leave empty if the server needs no login. With a user name, the password is kept by the engine.</source>
+      </trans-unit>
       <trans-unit id="pd.copyMenu.copy" datatype="html">
         <source>Copy</source>
       </trans-unit>
@@ -247,6 +535,30 @@
       </trans-unit>
       <trans-unit id="pd.format.unit.s" datatype="html">
         <source>s</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.email" datatype="html">
+        <source>Enter a valid email address.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.invalid" datatype="html">
+        <source>This value is not valid.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.max" datatype="html">
+        <source>Enter <x id="max"/> or less.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.maxLength" datatype="html">
+        <source>Use at most <x id="max"/> characters.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.min" datatype="html">
+        <source>Enter <x id="min"/> or more.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.minLength" datatype="html">
+        <source>Use at least <x id="min"/> characters.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.pattern" datatype="html">
+        <source>This is not in the expected format.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.required" datatype="html">
+        <source>This is required.</source>
       </trans-unit>
       <trans-unit id="pd.health.chip.compact.many" datatype="html">
         <source><x id="count"/> services</source>
@@ -569,6 +881,69 @@
       <trans-unit id="pd.notifications.unread-mark" datatype="html">
         <source>, unread</source>
       </trans-unit>
+      <trans-unit id="pd.packs.builtin" datatype="html">
+        <source>Built in</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.ignored" datatype="html">
+        <source>Keys that were ignored</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.in-use" datatype="html">
+        <source>Packs in use</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.lede" datatype="html">
+        <source>Lists the app knows are small files you can add to or change. A change is picked up by itself; a file the app cannot use is left out and named here.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.loading" datatype="html">
+        <source>Listing the packs…</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.no-status" datatype="html">
+        <source>The packs could not be listed.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.no-status-title" datatype="html">
+        <source>The packs could not be listed.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.none" datatype="html">
+        <source>This app has no packs.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.refused" datatype="html">
+        <source>Packs left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload" datatype="html">
+        <source>Reload</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload-failed" datatype="html">
+        <source>The packs could not be reloaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload-failed-title" datatype="html">
+        <source>The packs could not be reloaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reloading" datatype="html">
+        <source>Reading the packs…</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.left-out" datatype="html">
+        <source><x id="count"/> packs left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.notes" datatype="html">
+        <source>Loaded, some keys ignored</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.ok" datatype="html">
+        <source>All loaded</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.one-left-out" datatype="html">
+        <source>One pack left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.still-working" datatype="html">
+        <source>Still working. Nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.title" datatype="html">
+        <source>Knowledge packs</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.user" datatype="html">
+        <source>Yours</source>
+      </trans-unit>
       <trans-unit id="pd.pages.link-with-badge" datatype="html">
         <source><x id="page"/>, <x id="badge"/></source>
       </trans-unit>
@@ -761,6 +1136,9 @@
       <trans-unit id="pd.settings.appearance" datatype="html">
         <source>Appearance</source>
       </trans-unit>
+      <trans-unit id="pd.settings.channels" datatype="html">
+        <source>Notification channels</source>
+      </trans-unit>
       <trans-unit id="pd.settings.check.max-items" datatype="html">
         <source>At most <x id="count"/> items.</source>
       </trans-unit>
@@ -847,6 +1225,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.open" datatype="html">
         <source>Settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.packs" datatype="html">
+        <source>Knowledge packs</source>
       </trans-unit>
       <trans-unit id="pd.settings.page-failed" datatype="html">
         <source>This page could not be opened.</source>
@@ -1009,6 +1390,36 @@
       </trans-unit>
       <trans-unit id="pd.startup.session-restored" datatype="html">
         <source>Your last session was restored.</source>
+      </trans-unit>
+      <trans-unit id="pd.table.actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.table.columns" datatype="html">
+        <source>Columns</source>
+      </trans-unit>
+      <trans-unit id="pd.table.count" datatype="html">
+        <source><x id="PH"/> rows</source>
+      </trans-unit>
+      <trans-unit id="pd.table.countOf" datatype="html">
+        <source><x id="PH"/> of <x id="PH_1"/> rows</source>
+      </trans-unit>
+      <trans-unit id="pd.table.empty" datatype="html">
+        <source>Nothing to show yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.table.filter" datatype="html">
+        <source>Filter</source>
+      </trans-unit>
+      <trans-unit id="pd.table.more" datatype="html">
+        <source>More actions</source>
+      </trans-unit>
+      <trans-unit id="pd.table.noMatch" datatype="html">
+        <source>No rows match the filter.</source>
+      </trans-unit>
+      <trans-unit id="pd.table.none" datatype="html">
+        <source>None</source>
+      </trans-unit>
+      <trans-unit id="pd.table.sortBy" datatype="html">
+        <source>Sort by <x id="PH"/></source>
       </trans-unit>
       <trans-unit id="pd.ui.elapsed.hours" datatype="html">
         <source><x id="hours"/> h</source>

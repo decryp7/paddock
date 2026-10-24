@@ -68,7 +68,8 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
-          cargo test
+          cargo nextest run --workspace --config-file ../../../crates/.config/nextest.toml --profile ci
+          cargo test --workspace --doc
           cargo deny check
 
   bundle:
