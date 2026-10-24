@@ -39,6 +39,7 @@ paddock-pitwall = { workspace = true }
 paddock-siblings = { workspace = true }
 paddock-packs = { workspace = true, features = ["tauri"] }
 paddock-channels = { workspace = true, features = ["tauri"] }
+paddock-mcp = { workspace = true, features = ["tauri"] }
 paddock-service = { workspace = true, features = ["tauri"] }
 paddock-settings = { workspace = true, features = ["tauri"] }
 paddock-storage = { workspace = true, features = ["tauri"] }
