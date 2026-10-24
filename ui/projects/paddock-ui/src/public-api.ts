@@ -10,6 +10,7 @@ export {
   formatBytes,
   formatCount,
   formatEta,
+  formatElapsed,
   jobView,
   type SuJobPhase,
   type SuJobSnapshot,

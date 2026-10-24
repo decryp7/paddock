@@ -28,7 +28,7 @@ export function notificationsStatusText(unread: number): string {
     <button type="button" class="pill" data-testid="notifications-status" [class.unread]="store.unread() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="label()" (click)="toggle()">
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11L4 11ZM6.5 14h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
       @if (store.unread() > 0) {
-        <span class="count" aria-hidden="true">{{ store.unread() }}</span>
+        <span class="count" [class.error]="unreadError()" aria-hidden="true">{{ store.unread() }}</span>
       }
     </button>
     @if (open()) {
@@ -43,7 +43,8 @@ export function notificationsStatusText(unread: number): string {
     .pill.unread { color: var(--pd-text); }
     .pill:hover, :host(.open) .pill { border-color: var(--pd-border-control); }
     .pill:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .count { min-width: 16px; padding: 0 4px; border-radius: var(--pd-radius-pill); background: var(--pd-accent-fill); color: var(--pd-on-accent); font-variant-numeric: tabular-nums; font-weight: var(--pd-weight-semibold); line-height: 16px; text-align: center; }
+    .count { min-width: 16px; padding: 0 4px; border-radius: var(--pd-radius-pill); background: var(--pd-surface-3); box-shadow: inset 0 0 0 1px var(--pd-border-strong); color: var(--pd-text); font-variant-numeric: tabular-nums; font-weight: var(--pd-weight-medium); line-height: 16px; text-align: center; }
+    .count.error { background: var(--pd-danger-tint); box-shadow: none; color: var(--pd-danger); }
     .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: var(--pd-z-overlay); width: min(400px, calc(100vw - 32px)); max-height: min(520px, 70vh); overflow: auto; box-sizing: border-box; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); }
     :host(.below) .popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
   `,
@@ -55,6 +56,8 @@ export class PdNotificationsStatus {
   readonly placement = input<'above' | 'below'>('above');
   protected readonly panelId = `pd-notifications-popover-${++nextId}`;
   protected readonly label = computed(() => notificationsStatusText(this.store.unread()));
+  /** An error is among the unread messages: the count is drawn in danger (counts are neutral otherwise; design guide §8). */
+  protected readonly unreadError = computed(() => this.store.all().some((n) => !n.read && n.severity === 'error'));
   /** Opens when a message is to be shown (`focus` set); the user toggles it otherwise. */
   protected readonly open = linkedSignal<number | null, boolean>({
     source: () => this.store.focus(),

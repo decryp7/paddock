@@ -162,20 +162,20 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
     defineMenuItem({ menu: 'sd.greetings', command: 'sd.greet', group: 'demo', order: 100 }),
     defineMenuItem({ menu: 'sd.greetings', command: 'sd.reset', group: 'demo', order: 200 }),
   ],
-  // The pages of the frame (plan S14): each a lazy chunk; Activity brings providers of its own, Lab has a condition.
+  // The pages of the frame (plan S14): each a lazy chunk; Runners brings providers of its own, Lab has a condition.
   pages: [
     definePage({ id: 'sd.home', title: msg('sd.page.home', 'Overview'), icon: 'pd:home', order: 100, load: () => import('./pages/overview-page').then((m) => m.OverviewPage) }),
+    definePage<DemoContext>({
+      id: 'sd.runners',
+      title: msg('sd.page.runners', 'Runners'),
+      icon: 'sd:runner',
+      order: 150,
+      badge: (ctx) => ctx.attention(),
+      providers: () => import('./pages/runners.providers').then((m) => m.RUNNERS_PROVIDERS),
+      load: () => import('./pages/runners-page').then((m) => m.RunnersPage),
+    }),
     definePage({ id: 'sd.dialogs', title: msg('sd.page.dialogs', 'Dialogs'), icon: 'pd:window', order: 200, load: () => import('./pages/dialogs-page').then((m) => m.DialogsPage) }),
     definePage({ id: 'sd.keys', title: msg('sd.page.keys', 'Keyboard'), icon: 'pd:keyboard', order: 300, load: () => import('./pages/keys-page').then((m) => m.KeysPage) }),
-    definePage<DemoContext>({
-      id: 'sd.activity',
-      title: msg('sd.page.activity', 'Activity'),
-      icon: 'pd:activity',
-      order: 400,
-      badge: (ctx) => ctx.greetings(),
-      providers: () => import('./pages/activity.providers').then((m) => m.ACTIVITY_PROVIDERS),
-      load: () => import('./pages/activity-page').then((m) => m.ActivityPage),
-    }),
     definePage<DemoContext>({
       id: 'sd.lab',
       title: msg('sd.page.lab', 'Lab'),
@@ -187,7 +187,7 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
     definePage({ id: 'sd.about', title: msg('sd.page.about', 'About'), icon: 'pd:info', order: 100, section: 'bottom', load: () => import('./pages/about-page').then((m) => m.AboutPage) }),
   ],
   statusItems: [
-    defineStatusItem({ id: 'sd.greetings', title: msg('sd.status.greetings', 'Greetings'), side: 'start', priority: 50, load: () => import('./greetings-status').then((m) => m.GreetingsStatus) }),
+    defineStatusItem({ id: 'sd.runners', title: msg('sd.status.runners', 'Runners online'), side: 'start', priority: 50, load: () => import('./runners-status').then((m) => m.RunnersStatus) }),
   ],
   settingsPages: [defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100, load: placeholder })],
   // One dialog of each kind (ADR 0009), plus a modal form and a required choice. Contracts: dialog-contracts.json.

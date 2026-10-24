@@ -1,5 +1,7 @@
 import {
   afterNextRender,
+  InjectionToken,
+  type Signal,
   ChangeDetectionStrategy,
   Component,
   computed,
@@ -16,11 +18,17 @@ import type { StatusItemDef } from '../define';
 import { ContributionRegistry } from '../registry';
 import { PdIcon } from './icon';
 import { PdPartOutlet } from './part-outlet';
-import { planStatusBar } from './status-layout';
+import { planStatusBar, statusWidth } from './status-layout';
 
 /** The gap between items and the overflow button's width (px), as in the styles below. */
 const GAP = 8;
-const MORE = 28;
+const MORE = 44;
+
+/**
+ * Whether the status bar shows its items in their compact form (the full form does not fit): a status item injects it
+ * and drops its text to an icon, a word or a count, with the full text kept in its tooltip and accessible name.
+ */
+export const STATUS_COMPACT = new InjectionToken<Signal<boolean>>('PADDOCK_STATUS_COMPACT');
 
 /** Highest priority first; ties by id (deterministic). */
 function byPriority(a: StatusItemDef, b: StatusItemDef): number {
@@ -49,7 +57,8 @@ export class PdStatusMeasure {
   selector: 'pd-status-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdPartOutlet, PdStatusMeasure, PdIcon],
-  host: { '[class.all]': 'showAll()' },
+  host: { '[class.all]': 'showAll()', '[class.compact]': 'compact()' },
+  providers: [{ provide: STATUS_COMPACT, useFactory: () => inject(PdStatusBar).compact }],
   template: `
     <div class="side start">
       @for (item of start(); track item.id) {
@@ -67,6 +76,9 @@ export class PdStatusMeasure {
       @if (hidden().size || showAll()) {
         <button type="button" class="more" data-testid="status-more" [attr.aria-expanded]="showAll()" [attr.aria-label]="moreLabel()" [title]="moreLabel()" (click)="showAll.set(!showAll())">
           <pd-icon name="pd:more" />
+          @if (!showAll()) {
+            <span class="more-count" aria-hidden="true">{{ hidden().size }}</span>
+          }
         </button>
       }
     </div>
@@ -79,8 +91,9 @@ export class PdStatusMeasure {
     .item.hidden { position: absolute; visibility: hidden; pointer-events: none; inset-inline-start: 0; }
     :host(.all) { flex-wrap: wrap; padding-block: var(--pd-space-1); }
     :host(.all) .side { flex-wrap: wrap; }
-    .more { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 20px; padding: 0; border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
+    .more { display: inline-flex; align-items: center; justify-content: center; gap: 2px; flex: none; min-width: 24px; height: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); font-variant-numeric: tabular-nums; cursor: pointer; }
     .more:hover, .more[aria-expanded='true'] { border-color: var(--pd-border-control); color: var(--pd-text); }
+    .more-count { min-width: 8px; }
     .more:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
   `,
 })
@@ -88,7 +101,9 @@ export class PdStatusBar {
   private readonly registry = inject(ContributionRegistry);
   private readonly host = inject(ShellContextHost);
   private readonly el = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
-  private readonly widths = signal<Readonly<Record<string, number>>>({});
+  /** Measured widths of each item in its full and its compact form. */
+  private readonly fullWidths = signal<Readonly<Record<string, number>>>({});
+  private readonly compactWidths = signal<Readonly<Record<string, number>>>({});
   private readonly available = signal(Number.POSITIVE_INFINITY);
   private readonly observer: ResizeObserver | null = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => this.measured(entries)) : null;
   private readonly ids = new Map<Element, string>();
@@ -104,15 +119,24 @@ export class PdStatusBar {
   protected readonly start = computed(() => this.items().filter((i) => i.side === 'start'));
   protected readonly end = computed(() => this.items().filter((i) => i.side !== 'start'));
 
-  /** The ids hidden for want of room (none while every item is shown on request). */
+  /** The items' full form does not fit (as last measured): they show their compact form, before any is hidden. */
+  readonly compact = computed(() => {
+    if (this.showAll()) return false;
+    const full = this.fullWidths();
+    return statusWidth(this.items().map((i) => ({ width: full[i.id] ?? 0 })), GAP) > this.available();
+  });
+
+  /** The ids hidden for want of room (none while every item is shown on request); pinned items are never hidden. */
   readonly hidden = computed(() => {
     if (this.showAll()) return new Set<string>();
-    const widths = this.widths();
-    const slots = this.items().map((i) => ({ id: i.id, priority: i.priority, width: widths[i.id] ?? 0 }));
+    const full = this.fullWidths();
+    const small = this.compactWidths();
+    const compact = this.compact();
+    const slots = this.items().map((i) => ({ id: i.id, priority: i.priority, pinned: i.pinned === true, width: (compact ? small[i.id] : undefined) ?? full[i.id] ?? 0 }));
     return new Set(planStatusBar(slots, this.available(), GAP, MORE).hidden);
   });
 
-  protected readonly moreLabel = computed(() => (this.showAll() ? 'Show fewer status items' : `Show all status items (${this.hidden().size} hidden)`));
+  protected readonly moreLabel = computed(() => (this.showAll() ? 'Show fewer status items' : `More status (${this.hidden().size})`));
 
   constructor() {
     afterNextRender(() => this.observer?.observe(this.el));
@@ -131,6 +155,7 @@ export class PdStatusBar {
   }
 
   private measured(entries: readonly ResizeObserverEntry[]): void {
+    const target = this.compact() ? this.compactWidths : this.fullWidths;
     let widths: Record<string, number> | null = null;
     for (const entry of entries) {
       if (entry.target === this.el) {
@@ -142,10 +167,10 @@ export class PdStatusBar {
       const id = this.ids.get(entry.target);
       if (id === undefined) continue;
       const width = Math.ceil((entry.target as HTMLElement).getBoundingClientRect().width);
-      if (this.widths()[id] === width) continue;
-      widths ??= { ...this.widths() };
+      if (target()[id] === width) continue;
+      widths ??= { ...target() };
       widths[id] = width;
     }
-    if (widths) this.widths.set(widths);
+    if (widths) target.set(widths);
   }
 }

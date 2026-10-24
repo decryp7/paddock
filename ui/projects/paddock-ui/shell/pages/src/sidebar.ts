@@ -47,14 +47,16 @@ import { ShellPages } from './pages';
     .item { position: relative; display: flex; align-items: center; gap: var(--pd-space-2); height: 32px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); text-decoration: none; white-space: nowrap; transition: background var(--pd-duration-micro) var(--pd-ease-move), color var(--pd-duration-micro) var(--pd-ease-move); }
     .item:hover { background: var(--pd-hover); color: var(--pd-text); text-decoration: none; }
     .item:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
-    .item.active { background: var(--pd-accent-tint); color: var(--pd-text); }
+    /* One selection style in every mode (design guide §4): 14 % accent tint, accent icon, 600 label, 2 px accent bar. */
+    .item.active { background: var(--pd-accent-tint); color: var(--pd-text); font-weight: var(--pd-weight-semibold); box-shadow: inset 2px 0 0 var(--pd-accent); }
     .item.active .icon { color: var(--pd-accent); }
     .icon { width: 20px; height: 20px; color: inherit; }
     .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .badge { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--pd-radius-pill); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-caption); line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
     :host(.rail) .item { justify-content: center; padding: 0; }
     :host(.rail) .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    :host(.rail) .badge { position: absolute; top: 1px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; font-size: 10px; line-height: 12px; }
+    /* In the rail the count sits off the icon's top-right corner, ringed in the sidebar's colour so it never covers a stroke. */
+    :host(.rail) .badge { position: absolute; top: 0; left: calc(50% + 6px); min-width: 16px; height: 16px; padding: 0 4px; border: 0; box-shadow: 0 0 0 2px var(--pd-surface-1), inset 0 0 0 1px var(--pd-border-strong); font-size: 10px; line-height: 16px; }
     @media (prefers-reduced-motion: reduce) { .item { transition: none; } }
   `,
 })
@@ -66,7 +68,7 @@ export class PdPagesSidebar {
   /** A page link was chosen (the frame closes a sidebar that is open over the page). */
   readonly navigated = output<void>();
 
-  /** A rail link's name: the page and its badge ("Activity, 3"). */
+  /** A rail link's name: the page and its badge ("Runners, 1"). */
   protected label(title: string, id: string): string {
     const badge = this.pages.badges()[id];
     return badge ? `${title}, ${badge}` : title;

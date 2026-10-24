@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, linkedSignal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, linkedSignal, signal } from '@angular/core';
+import { STATUS_COMPACT } from '@decryp7/paddock-ui/shell';
 import { repairLabel } from './notice-actions';
 import { OPEN_SETTINGS, RAISE_CAP } from './notify-config';
 import { ServiceHealthStore } from './service-health.store';
@@ -33,6 +34,16 @@ export function chipText(problems: readonly Pick<ServiceHealth, 'label' | 'state
   return `${problems.length} services need attention`;
 }
 
+/** The chip's compact form (a narrow status bar): the state alone, or the count; the full text is its name and tooltip. */
+export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' | 'state'>[]): string {
+  const p = problems[0];
+  if (problems.length === 1 && p) {
+    const word = stateWord(p.state);
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }
+  return problems.length ? `${problems.length} services` : 'Unknown';
+}
+
 /**
  * The one place a service outage is stated (ADR 0010, Debrief ADR 0055): a status-bar chip that appears when a service is
  * not working (a count when several) and opens the plain message, the next step, the technical details and the Repair
@@ -51,9 +62,9 @@ export function chipText(problems: readonly Pick<ServiceHealth, 'label' | 'state
   },
   template: `
     @if (problems().length || unknown()) {
-      <button type="button" class="chip" data-testid="service-health-chip" [class.repairing]="allRepairing()" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" (click)="open.set(!open())">
+      <button type="button" class="chip" data-testid="service-health-chip" [class.repairing]="allRepairing()" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="compact() ? text() : null" [attr.title]="text()" (click)="open.set(!open())">
         <span class="mark" aria-hidden="true"></span>
-        <span class="text">{{ text() }}</span>
+        <span class="text">{{ compact() ? compactText() : text() }}</span>
       </button>
       @if (open()) {
         <div class="popover" role="region" aria-label="Services" [id]="panelId" data-testid="service-health-details">
@@ -98,10 +109,11 @@ export function chipText(problems: readonly Pick<ServiceHealth, 'label' | 'state
   `,
   styles: `
     :host { position: relative; display: inline-flex; min-width: 0; }
-    .chip { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-danger); border-radius: var(--pd-radius-pill); background: var(--pd-danger-tint); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); cursor: pointer; }
-    .chip.repairing { border-color: var(--pd-border-control); background: transparent; }
+    .chip { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 20px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-pill); background: var(--pd-danger-tint); color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .chip:hover { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 6%); }
+    .chip.repairing { background: var(--pd-surface-2); }
     .chip:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .mark { flex: none; width: 8px; height: 8px; border-radius: 1px; background: var(--pd-danger); }
+    .mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-danger); }
     .repairing .mark { background: var(--pd-text-muted); border-radius: 50%; }
     .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: var(--pd-z-overlay); display: flex; flex-direction: column; gap: var(--pd-space-3); width: min(380px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; box-sizing: border-box; padding: var(--pd-space-3); background: var(--pd-surface-3); color: var(--pd-text); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); font-size: var(--pd-text-body); }
@@ -144,6 +156,9 @@ export class PdServiceStatus {
   });
   protected readonly allRepairing = computed(() => this.problems().length > 0 && this.problems().every((p) => p.state === 'repairing'));
   protected readonly text = computed(() => (this.problems().length ? chipText(this.problems()) : 'Services: unknown'));
+  /** The status bar is narrow: the chip shows its compact form. */
+  protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);
+  protected readonly compactText = computed(() => chipCompactText(this.problems()));
   protected readonly label = repairLabel;
   protected readonly shortName = shortName;
 

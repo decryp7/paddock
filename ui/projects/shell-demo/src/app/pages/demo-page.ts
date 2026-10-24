@@ -18,12 +18,13 @@ import type { DemoContext } from '../demo-context';
     <ng-content />
   `,
   styles: `
-    :host { container: sd-page / inline-size; display: flex; flex-direction: column; gap: var(--pd-space-6); width: 100%; max-width: var(--pd-content-max); margin: 0 auto; padding: var(--pd-space-6); }
+    :host { display: flex; flex-direction: column; gap: var(--pd-space-6); width: 100%; max-width: var(--pd-content-max); margin: 0 auto; padding: var(--pd-space-6); }
     :host(.compact) { gap: var(--pd-space-3); padding-block: var(--pd-space-3); }
     .head { display: flex; flex-direction: column; gap: var(--pd-space-1); }
     h1 { margin: 0; font-size: var(--pd-text-title); }
     .subtitle { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
-    @container sd-page (max-width: 480px) { :host { padding: var(--pd-space-4); } }
+    /* A 16 px gutter in a narrow page area (the frame's pd-page container). */
+    @container pd-page (max-width: 480px) { :host { padding: var(--pd-space-4); gap: var(--pd-space-4); } }
   `,
 })
 export class DemoPage {

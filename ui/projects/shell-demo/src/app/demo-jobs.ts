@@ -49,7 +49,7 @@ export class DemoJobsEngine implements OnDestroy {
 
   /** A job whose step reports nothing for a long time: the UI shows "Still working" and never gives up on it. */
   startQuiet(): number {
-    return this.start('Waiting for the device', null, [{ phase: { id: 'wait', label: 'Waiting for the device', unit: 'items', total: null }, ticks: null }]);
+    return this.start('Update runner', 'build-mac-2', [{ phase: { id: 'wait', label: 'Waiting for the device', unit: 'items', total: null }, ticks: null }]);
   }
 
   ngOnDestroy(): void {

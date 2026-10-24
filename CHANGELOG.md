@@ -4,6 +4,21 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Changed
+- Pages frame after its design review (`ui/docs/screenshots/shell-demo/REVIEW.md`): the status bar shrinks its items to
+  their compact form first (`STATUS_COMPACT`: the service chip says only the state, jobs only the count) and hides only
+  unpinned items behind a counted "More status (n)" button (24 px, text-muted); `defineStatusItem({ pinned })` keeps
+  the service chip and the bell; one selection style in every sidebar mode (accent tint, accent icon, 600, 2 px bar);
+  the rail badge sits off the icon with a ring; the sidebar over the page is modal (scrim over the page and the status
+  bar, both inert); a stable toggle glyph and a truncating app name; a 40 px title bar (design guide §2) with 78 px for
+  the window buttons in the macOS app, whose menus are native only; pages lay out by `@container pd-page` (16 px gutter
+  when narrow). The service chip is a borderless danger tint at 12/500; the unread count is neutral (danger only for
+  an unread error); the running jobs item shows a neutral spinner. `pd-job`: the phase is muted, a stalled step says so
+  with an icon in warning, the fill is the accent on surface-2 (3:1), an unknown total without motion is a striped track
+  and counts its elapsed time (`formatElapsed`, `elapsedMs` from `pd-jobs-list`). `shell-demo` shows a Runners page with
+  sample fleet data, page-scoped state and a "3 of 4 runners online" status item; screenshots re-shot with health
+  popover, keyboard focus and macOS frames.
+
 ### Added
 - Crate `paddock-window` 0.1.0 (plan S12, ADR 0012): top-level windows in the shell's label scheme (`main`, `w-<n>`;
   open, list, reveal, titles, the close setting with quit / keep running in the tray / ask, hide or destroy), remembered

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, signal } from '@angular/core';
 import { formatCount } from '@decryp7/paddock-ui';
+import { STATUS_COMPACT } from '@decryp7/paddock-ui/shell';
 import { PdJobsList } from './jobs-list';
 import { JobsStore } from './jobs.store';
 
@@ -28,9 +29,10 @@ export function jobsStatusText(active: number, phase: string | null, stalled: bo
     '(document:pointerdown)': 'outside($event)',
   },
   template: `
-    <button type="button" class="pill" [class.busy]="store.activeCount() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" (click)="toggle()">
+    <button type="button" class="pill" [class.busy]="store.activeCount() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId"
+      [attr.aria-label]="compact() ? text() : null" [attr.title]="text()" (click)="toggle()">
       <span class="dot" aria-hidden="true"></span>
-      <span class="text">{{ text() }}</span>
+      <span class="text">{{ compact() ? compactText() : text() }}</span>
     </button>
     @if (open()) {
       <div class="popover" role="region" aria-label="Jobs" [id]="panelId">
@@ -45,7 +47,10 @@ export function jobsStatusText(active: number, phase: string | null, stalled: bo
     .pill:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--pd-text-muted); }
-    .busy .dot { border-color: var(--pd-accent); background: var(--pd-accent); }
+    /* Running: a neutral spinner (accent is for action and selection, design guide §4). */
+    .busy .dot { width: 10px; height: 10px; border: 1.5px solid var(--pd-border-strong); border-top-color: var(--pd-text-muted); animation: pd-jobs-spin 0.9s linear infinite; }
+    @keyframes pd-jobs-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .busy .dot { animation: none; border-color: var(--pd-text-muted); border-right-color: transparent; } }
     .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: 10; width: min(360px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-2); }
     :host(.below) .popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
   `,
@@ -57,6 +62,10 @@ export class PdJobsStatus {
   readonly placement = input<'above' | 'below'>('above');
   protected readonly open = signal(false);
   protected readonly panelId = `pd-jobs-popover-${++nextId}`;
+
+  /** The status bar is narrow: the item shows the running count only. */
+  protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);
+  protected readonly compactText = computed(() => (this.store.activeCount() ? formatCount(this.store.activeCount()) : 'Jobs'));
 
   protected readonly text = computed(() => {
     const lead = this.store.lead();

@@ -18,6 +18,23 @@ async function open(page: Page, hash = ''): Promise<void> {
   await expect(h1(page)).toBeVisible();
 }
 
+/** The macOS desktop app, played in the browser: a Mac platform and a fake Tauri IPC that answers every call. */
+async function asMacApp(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+    let cb = 1;
+    w['__TAURI_INTERNALS__'] = {
+      transformCallback: (f: unknown) => {
+        const id = cb++;
+        w[`_${id}`] = f;
+        return id;
+      },
+      invoke: (cmd: string) => Promise.resolve(cmd === 'window_ready' ? { recovered: null, ui: null } : cmd === 'plugin:event|listen' ? cb++ : null),
+    };
+  });
+}
+
 async function axe(page: Page): Promise<string[]> {
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
   return results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);
@@ -30,14 +47,14 @@ test.describe('pages frame (plan S14)', () => {
     await open(page);
     await expect(page).toHaveURL(/#\/home$/);
     await expect(h1(page)).toHaveText('Overview');
-    await expect(page).toHaveTitle('Overview – Shell demo');
+    await expect(page).toHaveTitle('Overview – Paddock demo');
     await expect(sidebar(page).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
-    await expect(sidebar(page).getByRole('link')).toHaveText(['Overview', 'Dialogs', 'Keyboard', 'Activity', 'About']);
+    await expect(sidebar(page).getByRole('link')).toHaveText([/^Overview$/, /^Runners/, /^Dialogs$/, /^Keyboard$/, /^About$/]);
 
     await sidebar(page).getByRole('link', { name: 'Keyboard' }).click();
     await expect(h1(page)).toHaveText('Keyboard');
     await expect(page).toHaveURL(/#\/keys$/);
-    await expect(page).toHaveTitle('Keyboard – Shell demo');
+    await expect(page).toHaveTitle('Keyboard – Paddock demo');
     await expect(sidebar(page).getByRole('link', { name: 'Keyboard' })).toHaveAttribute('aria-current', 'page');
     // Focus moves to the page, so a screen reader starts there.
     await expect(page.locator('#pd-main')).toBeFocused();
@@ -57,15 +74,17 @@ test.describe('pages frame (plan S14)', () => {
     await page.waitForLoadState('networkidle');
     const scripts: string[] = [];
     page.on('request', (r) => r.resourceType() === 'script' && scripts.push(r.url()));
-    await sidebar(page).getByRole('link', { name: 'Activity' }).click();
-    await expect(page.getByTestId('activity-visit')).toHaveText(/^Visit \d+ of this page$/);
-    const first = Number((await page.getByTestId('activity-visit').textContent())?.match(/\d+/)?.[0]);
+    await sidebar(page).getByRole('link', { name: /^Runners/ }).click();
+    const host = page.locator('sd-runners-page');
+    await expect(host).toHaveAttribute('data-visit', /^\d+$/);
+    const first = Number(await host.getAttribute('data-visit'));
+    await expect(page.getByRole('table').getByRole('row')).toHaveCount(5);
     // The page's component and its providers were fetched only now.
     expect(scripts.length).toBeGreaterThan(0);
     await expect(page.getByRole('heading', { name: 'No jobs' })).toBeVisible();
     await sidebar(page).getByRole('link', { name: 'Overview' }).click();
-    await sidebar(page).getByRole('link', { name: 'Activity' }).click();
-    await expect(page.getByTestId('activity-visit')).toHaveText(`Visit ${first + 1} of this page`);
+    await sidebar(page).getByRole('link', { name: /^Runners/ }).click();
+    await expect(host).toHaveAttribute('data-visit', String(first + 1));
   });
 
   test('a page with a condition comes and goes with it; badges follow the context', async ({ page }) => {
@@ -73,14 +92,14 @@ test.describe('pages frame (plan S14)', () => {
     await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
     const lab = sidebar(page).getByRole('link', { name: 'Lab' });
     await expect(lab).toHaveCount(0);
-    await expect(sidebar(page).getByTestId('page-badge')).toHaveCount(0);
+    // The Runners badge: the offline runner needs the user.
+    await expect(sidebar(page).getByTestId('page-badge')).toHaveText(['1']);
     // Not offered: its address goes to the first page.
     await page.goto('/#/lab');
     await expect(h1(page)).toHaveText('Overview');
 
     await page.getByRole('button', { name: 'Say hello' }).click();
     await page.getByRole('button', { name: 'Say hello' }).click();
-    await expect(sidebar(page).getByRole('link', { name: /^Activity/ }).getByTestId('page-badge')).toHaveText('2');
     await lab.click();
     await expect(h1(page)).toHaveText('Lab');
     // The condition turns false while it is shown: the first page takes over.
@@ -94,7 +113,7 @@ test.describe('pages frame (plan S14)', () => {
     await open(page);
     const bar = statusBar(page);
     await expect(bar.locator('.start [data-status-item]')).toHaveCount(1);
-    await expect(bar.getByTestId('greetings-status')).toHaveText('Greetings: 0');
+    await expect(bar.getByTestId('runners-status')).toHaveText('3 of 4 runners online');
     await expect(bar.locator('.end [data-status-item]')).toHaveCount(3);
     await expect(bar.locator('.end [data-status-item]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset['statusItem']))).resolves.toEqual([
       'pd.health',
@@ -105,26 +124,40 @@ test.describe('pages frame (plan S14)', () => {
     await expect(bar.getByTestId('notifications-status')).toBeVisible();
     await page.getByRole('button', { name: 'Break the demo engine' }).click();
     await expect(bar.getByTestId('service-health-chip')).toHaveText('Demo engine: stopped');
-    await page.getByRole('button', { name: 'Say hello' }).click();
-    await expect(bar.getByTestId('greetings-status')).toHaveText('Greetings: 1');
   });
 
-  test('a narrow status bar hides the lowest priority first and shows all on request', async ({ page }) => {
+  test('a narrow status bar shrinks items first, keeps the bell and the chip, then hides the lowest and counts them', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     await open(page);
     await page.getByRole('button', { name: 'Break the demo engine' }).click();
     await page.getByRole('button', { name: 'Start quiet job' }).click();
+    await page.getByRole('button', { name: 'Notify three times' }).click();
     const bar = statusBar(page);
-    await expect(bar.getByTestId('service-health-chip')).toBeVisible();
-    await expect(bar.getByTestId('greetings-status')).toBeHidden();
+    // Compact forms: the chip says the state, the jobs item the count; the full text is their name and tooltip.
+    const chip = bar.getByTestId('service-health-chip');
+    await expect(chip).toHaveText('Stopped');
+    await expect(chip).toHaveAttribute('aria-label', 'Demo engine: stopped');
+    await expect(bar.getByRole('button', { name: '1 running: Waiting for the device' })).toHaveText('1');
+    // The bell and its count are pinned.
+    await expect(bar.getByTestId('notifications-status')).toBeVisible();
+    await expect(bar.getByTestId('notifications-status')).toContainText('1');
+    await expect(bar.getByTestId('runners-status')).toBeHidden();
     const more = bar.getByTestId('status-more');
-    await expect(more).toHaveAttribute('aria-label', /^Show all status items \(\d+ hidden\)$/);
+    await expect(more).toHaveAttribute('aria-label', 'More status (1)');
+    await expect(more).toHaveText('1');
+    const box = await more.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(24);
     await more.click();
     await expect(more).toHaveAttribute('aria-expanded', 'true');
-    await expect(bar.getByTestId('greetings-status')).toBeVisible();
+    await expect(bar.getByTestId('runners-status')).toBeVisible();
+    await expect(chip).toHaveText('Demo engine: stopped');
     expect(await overflow(page)).toBeLessThanOrEqual(0);
     await more.click();
-    await expect(bar.getByTestId('greetings-status')).toBeHidden();
+    await expect(bar.getByTestId('runners-status')).toBeHidden();
+    // Wide again: the full forms come back.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(chip).toHaveText('Demo engine: stopped');
+    await expect(bar.getByTestId('runners-status')).toBeVisible();
   });
 
   test('the sidebar is expanded, a rail or over the page by the layout plan; the user’s collapse is kept', async ({ page }) => {
@@ -171,7 +204,7 @@ test.describe('pages frame (plan S14)', () => {
   for (const width of [320, 360, 400, 640, 775, 776, 1024]) {
     test(`no horizontal scroll at ${width} px on any page (rule 18)`, async ({ page }) => {
       await page.setViewportSize({ width, height: 700 });
-      for (const hash of ['#/home', '#/dialogs', '#/keys', '#/activity', '#/about']) {
+      for (const hash of ['#/home', '#/dialogs', '#/keys', '#/runners', '#/about']) {
         await open(page, hash);
         expect(await overflow(page), `${hash} at ${width}`).toBeLessThanOrEqual(0);
         const box = await page.locator('#pd-main').boundingBox();
@@ -199,9 +232,46 @@ test.describe('pages frame (plan S14)', () => {
     // The arrow keys move between the pages.
     await sidebar(page).getByRole('link', { name: 'Overview' }).focus();
     await page.keyboard.press('ArrowDown');
-    await expect(sidebar(page).getByRole('link', { name: 'Dialogs' })).toBeFocused();
+    await expect(sidebar(page).getByRole('link', { name: /^Runners/ })).toBeFocused();
     await page.keyboard.press('End');
     await expect(sidebar(page).getByRole('link', { name: 'About' })).toBeFocused();
+  });
+
+  test('the macOS app has its menus in the native menu bar only, and keeps clear of the window buttons', async ({ page }) => {
+    await asMacApp(page);
+    await open(page);
+    await expect(page.getByRole('menubar', { name: 'Application menu' })).toHaveCount(0);
+    const inset = await page.locator('pd-title-bar').evaluate((el) => getComputedStyle(el).paddingLeft);
+    expect(parseFloat(inset)).toBeGreaterThanOrEqual(78);
+  });
+
+  test('the browser build has the in-app menu bar', async ({ page }) => {
+    await open(page);
+    await expect(page.getByRole('menubar', { name: 'Application menu' })).toBeVisible();
+  });
+
+  test('the toggle keeps its glyph and the app name stays (truncated, with a tooltip) when narrow', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await open(page);
+    await expect(page.getByTestId('app-name')).toBeVisible();
+    await expect(page.getByTestId('app-name')).toHaveAttribute('title', 'Paddock demo');
+    const glyph = () => toggle(page).locator('pd-icon').evaluate((el) => el.innerHTML);
+    const narrow = await glyph();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect.poll(() => frameMode(page)).toBe('expanded');
+    expect(await glyph()).toBe(narrow);
+  });
+
+  test('over the page the sidebar is modal: the scrim covers the status bar, which is inert', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await open(page);
+    await toggle(page).click();
+    const scrim = await page.getByTestId('sidebar-scrim').boundingBox();
+    expect(scrim && scrim.y + scrim.height).toBe(640);
+    await expect(statusBar(page)).toHaveAttribute('inert', '');
+    await expect(page.locator('#pd-main')).toHaveAttribute('inert', '');
+    await page.keyboard.press('Escape');
+    await expect(statusBar(page)).not.toHaveAttribute('inert', '');
   });
 
   test('a skip link leads to the page', async ({ page }) => {
@@ -245,6 +315,23 @@ test.describe('pages frame screenshots', () => {
   test.use({ deviceScaleFactor: 2 });
   const root = join(__dirname, '..', 'docs', 'screenshots', 'shell-demo');
 
+  /** The Runners page with a running job and the search index down; the toasts have timed out. */
+  async function scene(page: Page, colorScheme: 'dark' | 'light', width: number, height: number): Promise<void> {
+    mkdirSync(root, { recursive: true });
+    await page.clock.install();
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+    await page.setViewportSize({ width, height });
+    await open(page);
+    await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+    await page.getByRole('button', { name: 'Start quiet job' }).click();
+    await page.getByRole('button', { name: 'Break the search index' }).click();
+    await page.getByRole('button', { name: 'Notify three times' }).click();
+    await page.evaluate(() => (location.hash = '#/runners'));
+    await expect(page.locator('sd-runners-page')).toBeVisible();
+    await page.clock.runFor(14_000);
+    await page.mouse.move(width / 2, height - 60);
+  }
+
   for (const colorScheme of ['dark', 'light'] as const) {
     for (const [name, width, height] of [
       ['wide', 1440, 900],
@@ -252,22 +339,7 @@ test.describe('pages frame screenshots', () => {
       ['narrow', 320, 640],
     ] as const) {
       test(`${name} ${colorScheme}`, async ({ page }) => {
-        mkdirSync(root, { recursive: true });
-        await page.clock.install();
-        await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
-        await page.setViewportSize({ width, height });
-        await open(page);
-        await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
-        await page.getByRole('button', { name: 'Say hello' }).click();
-        await page.getByRole('button', { name: 'Say hello' }).click();
-        await page.getByRole('button', { name: 'Start quiet job' }).click();
-        await page.getByRole('button', { name: 'Break the search index' }).click();
-        // The greetings' toasts time out; the quiet job keeps running.
-        await page.clock.runFor(10_000);
-        await page.evaluate(() => (location.hash = '#/activity'));
-        await expect(page.getByTestId('activity-visit')).toBeVisible();
-        if (name === 'narrow') await expect.poll(() => frameMode(page)).toBe('overlay');
-        await page.mouse.move(0, height - 1);
+        await scene(page, colorScheme, width, height);
         await page.screenshot({ path: join(root, `pages-${name}-${colorScheme}.png`) });
         if (name !== 'wide') {
           await toggle(page).click();
@@ -276,5 +348,37 @@ test.describe('pages frame screenshots', () => {
         }
       });
     }
+
+    test(`health popover ${colorScheme}`, async ({ page }) => {
+      await scene(page, colorScheme, 1440, 900);
+      await statusBar(page).getByTestId('service-health-chip').click();
+      await expect(page.getByRole('region', { name: 'Services' })).toBeVisible();
+      await page.screenshot({ path: join(root, `pages-health-${colorScheme}.png`) });
+    });
+
+    test(`keyboard focus ${colorScheme}`, async ({ page }) => {
+      await scene(page, colorScheme, 1440, 900);
+      // Keyboard focus on the current page link (F6 to the sidebar), then on the toggle and on "…" when narrow.
+      await page.keyboard.press('F6');
+      await page.keyboard.press('F6');
+      await page.keyboard.press('ArrowDown');
+      await page.screenshot({ path: join(root, `pages-focus-nav-${colorScheme}.png`) });
+      await page.setViewportSize({ width: 320, height: 640 });
+      await expect.poll(() => frameMode(page)).toBe('overlay');
+      await page.keyboard.press('Shift+F6');
+      await page.keyboard.press('Shift+F6');
+      await page.keyboard.press('Shift+F6');
+      await page.screenshot({ path: join(root, `pages-focus-toggle-${colorScheme}.png`) });
+      await statusBar(page).getByTestId('status-more').focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      await page.screenshot({ path: join(root, `pages-focus-more-${colorScheme}.png`) });
+    });
+
+    test(`macOS app ${colorScheme}`, async ({ page }) => {
+      await asMacApp(page);
+      await scene(page, colorScheme, 1440, 900);
+      await page.screenshot({ path: join(root, `pages-macos-${colorScheme}.png`) });
+    });
   }
 });

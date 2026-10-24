@@ -70,7 +70,7 @@ export {
 } from './src/notification-host.model';
 export { NotificationsSource } from './src/notifications-source';
 export { PdNotificationHost } from './src/notification-host';
-export { PdServiceStatus, chipText, shortName, stateWord } from './src/service-status';
+export { PdServiceStatus, chipText, chipCompactText, shortName, stateWord } from './src/service-status';
 export { PdWaitingFor, PdServiceError } from './src/waiting-for';
 export { PdNotificationsPanel, titleWithCount, noticeTime } from './src/notifications-panel';
 export { PdNotificationsStatus, notificationsStatusText } from './src/notifications-status';

@@ -81,6 +81,11 @@ export interface StatusItemDef<T extends object = object> extends LazyPart {
   readonly side: 'start' | 'end';
   /** Higher stays visible longer when the bar is narrow (0..1000). */
   readonly priority: number;
+  /**
+   * Never hidden for want of room (it shrinks to its compact form instead): an item that carries attention, such as the
+   * notifications' unread count or the service chip (plan S14 review).
+   */
+  readonly pinned?: boolean;
   readonly when?: Live<T, boolean>;
 }
 

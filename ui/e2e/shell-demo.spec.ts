@@ -242,7 +242,7 @@ test.describe('menus and keys (plan S13)', () => {
     // A key pressed while recording runs nothing.
     await page.keyboard.press('ControlOrMeta+Alt+G');
     await expect(page.getByTestId('shortcut-message')).toHaveText(`Say hello is now ${mac ? '⌥⌘G' : 'Ctrl+Alt+G'}.`);
-    await expect(page.getByTestId('greetings-status')).toHaveText('Greetings: 0');
+    await expect(toasts(page).getByText(/Hello from the shell demo/)).toHaveCount(0);
     // The menu shows the new key.
     await expect((await openMenu(page, 'Help')).getByRole('menuitem', { name: 'Say hello' })).toContainText(mac ? '⌥⌘G' : 'Ctrl+Alt+G');
     await page.keyboard.press('Escape');
@@ -255,10 +255,10 @@ test.describe('menus and keys (plan S13)', () => {
     await expect(row('sd.greet')).toBeVisible();
     await page.keyboard.press('ControlOrMeta+Shift+H');
     await page.keyboard.press('ControlOrMeta+Alt+G');
-    await expect(page.getByTestId('greetings-status')).toHaveText('Greetings: 1');
+    await expect(toasts(page).getByText('Hello from the shell demo (1)')).toBeVisible();
     await row('sd.greet').getByRole('button', { name: 'Reset key' }).click();
     await page.keyboard.press('ControlOrMeta+Shift+H');
-    await expect(page.getByTestId('greetings-status')).toHaveText('Greetings: 2');
+    await expect(toasts(page).getByText('Hello from the shell demo (2)')).toBeVisible();
   });
 
   test('the greetings count has a context menu from the same model', async ({ page }) => {

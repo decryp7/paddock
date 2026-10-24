@@ -147,10 +147,14 @@ bootstrapApplication(App, {
   "Models – Pitwall". `ShellCore.showPage(id)` navigates.
 - **Sidebar** 216 px, a 56 px icon rail, or over the page with a scrim, decided by `planLayout` (now in the root entry,
   ADR 0011) from the frame's width: expanded from 776 px, rail from 400 px (`sidebar` option to change the sizes). The
-  title bar's button collapses it (kept per machine), or opens it over the page; Escape, the scrim or a page closes it.
-- **Status bar** (`pd-status-bar`, root entry): contributed status items, `start` and `end`, highest priority first; when
-  narrow the lowest are hidden and "Show all status items" wraps the bar. The frame contributes the service chip and the
-  notifications (S4) and, with `jobs`, the jobs item (S9).
+  title bar's button collapses it (kept per machine), or opens it over the page as a modal (scrim over the page and the
+  status bar, both inert); Escape, the scrim or a page closes it. The title bar is 40 px; on macOS in Tauri the menus
+  are native only and the title bar keeps 78 px for the window buttons. Pages lay out by `@container pd-page`.
+- **Status bar** (`pd-status-bar`, root entry): contributed status items, `start` and `end`, highest priority first. When
+  the full forms do not fit, every item gets its compact form first (`STATUS_COMPACT`: the chip says only the state,
+  jobs only the count, the full text in the tooltip and name); then the lowest unpinned items are hidden behind a
+  counted "More status (n)" button that wraps the bar. `pinned` items (the service chip and the bell) are never hidden.
+  The frame contributes the service chip and the notifications (S4) and, with `jobs`, the jobs item (S9).
 - **Keys**: F6 / Shift+F6 cycle title bar, sidebar, page and status bar (reserved, so a user binding cannot take them);
   arrow keys, Home and End move between pages; "Skip to page" link. Slots: `[slot=title-end]`, `[slot=sidebar]`.
 - The frame places `pd-notification-host` and `pd-dialog-host` itself; do not mount them again.

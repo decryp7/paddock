@@ -8,8 +8,8 @@ import type { LazyPart } from '../lazy';
 import { iconLetter, PdIcon, PdShellIcon, provideShellIcon, SHELL_ICON_PATHS } from './icon';
 import { PdPartOutlet } from './part-outlet';
 import { cycleRegions, regionIndex, regionKey, regionsOf, regionTarget, REGION_ATTR, shown } from './regions';
-import { PdStatusBar } from './status-bar';
-import { planStatusBar } from './status-layout';
+import { PdStatusBar, STATUS_COMPACT } from './status-bar';
+import { planStatusBar, statusWidth } from './status-layout';
 import { PdTitleBar } from './title-bar';
 
 async function settle(): Promise<void> {
@@ -155,9 +155,15 @@ describe('planStatusBar', () => {
     expect(planStatusBar(items, 290, 8, 28).hidden).toEqual(['greet', 'bell']);
   });
 
-  it('always keeps the highest priority, even when it alone is too wide', () => {
-    expect(planStatusBar(items, 10, 8, 28)).toEqual({ shown: ['health'], hidden: ['greet', 'bell', 'jobs'] });
+  it('never hides a pinned item; any other may go when there is no room', () => {
+    const pinned = items.map((i) => (i.id === 'bell' || i.id === 'health' ? { ...i, pinned: true } : i));
+    expect(planStatusBar(pinned, 10, 8, 28)).toEqual({ shown: ['health', 'bell'], hidden: ['greet', 'jobs'] });
+    // 128 + 38 pinned leave 164 of 330; without greet, jobs (108) fits beside the button's 28.
+    expect(planStatusBar(pinned, 330, 8, 28)).toEqual({ shown: ['health', 'jobs', 'bell'], hidden: ['greet'] });
+    expect(planStatusBar(pinned, 300, 8, 28).hidden).toEqual(['greet', 'jobs']);
+    expect(planStatusBar(items, 10, 8, 28)).toEqual({ shown: [], hidden: ['greet', 'bell', 'jobs', 'health'] });
     expect(planStatusBar([{ id: 'x', priority: 1, width: -5 }], -1, 0, 0).shown).toEqual(['x']);
+    expect(statusWidth([{ width: 10 }, { width: -3 }], 8)).toBe(26);
   });
 });
 
@@ -303,8 +309,10 @@ describe('pd-part-outlet', () => {
   });
 });
 
-@Component({ selector: 'status-a', template: `Alpha`, changeDetection: ChangeDetectionStrategy.OnPush })
-class StatusA {}
+@Component({ selector: 'status-a', template: `{{ compact() ? 'A' : 'Alpha' }}`, changeDetection: ChangeDetectionStrategy.OnPush })
+class StatusA {
+  protected readonly compact = inject(STATUS_COMPACT);
+}
 
 describe('pd-status-bar', () => {
   const item = (id: string, side: 'start' | 'end', priority: number, extra: Partial<StatusItemDef<{ show: () => boolean }>> = {}) =>
@@ -368,11 +376,14 @@ describe('pd-status-bar', () => {
     observer.fire([document.createElement('div'), items[0] as HTMLElement]);
     await fixture.whenStable();
     const hidden = () => [...el.querySelectorAll<HTMLElement>('[data-status-item].hidden')].map((e) => e.dataset['statusItem']);
-    // 260 px less 16 px padding fit three items of 68 px.
+    // The full forms (6 x 68 px) do not fit 260 px: the items turn compact; until measured so, the full widths plan.
+    expect(el.classList).toContain('compact');
+    expect(el.querySelector('[data-status-item="t.jobs"]')?.textContent?.trim()).toBe('A');
     expect(hidden()).toEqual(['t.greet', 't.tie', 't.cond']);
     expect(el.querySelector('[data-status-item="t.greet"]')?.hasAttribute('inert')).toBe(true);
     const more = el.querySelector<HTMLButtonElement>('[data-testid="status-more"]') as HTMLButtonElement;
-    expect(more.getAttribute('aria-label')).toBe('Show all status items (3 hidden)');
+    expect(more.getAttribute('aria-label')).toBe('More status (3)');
+    expect(more.textContent?.trim()).toBe('3');
     expect(more.getAttribute('aria-expanded')).toBe('false');
     more.click();
     await fixture.whenStable();
@@ -382,6 +393,17 @@ describe('pd-status-bar', () => {
     more.click();
     await fixture.whenStable();
     expect(hidden()).toHaveLength(3);
+    // Measured compact (36 px each, 44 with the gap; 260 px, jsdom has no padding): the two lowest give way.
+    for (const i of items) i.getBoundingClientRect = () => ({ width: 36 }) as DOMRect;
+    observer.fire(items);
+    await fixture.whenStable();
+    expect(hidden()).toEqual(['t.greet', 't.cond']);
+    // Wide enough for the full forms again: nothing compact, nothing hidden.
+    Object.defineProperty(el, 'clientWidth', { value: 600, configurable: true });
+    observer.fire([el]);
+    await fixture.whenStable();
+    expect(el.classList).not.toContain('compact');
+    expect(hidden()).toEqual([]);
     fixture.destroy();
     expect(observer.targets.size).toBe(0);
   });

@@ -3,7 +3,7 @@ import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyR
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { cycleRegions, PdIcon, PdStatusBar, PdTitleBar, regionKey, regionTarget } from '@decryp7/paddock-ui/shell';
 import { DialogHost } from '@decryp7/paddock-ui/shell/dialogs';
-import { PdMenuBar } from '@decryp7/paddock-ui/shell/menu';
+import { MENU_MODE, PdMenuBar } from '@decryp7/paddock-ui/shell/menu';
 import { PdNotificationHost } from '@decryp7/paddock-ui/shell/notify';
 import { PagesFrameStore } from './pages-frame.store';
 import { PAGES_CONFIG } from './pages';
@@ -26,6 +26,7 @@ import { PdPagesSidebar } from './sidebar';
   host: {
     '[attr.data-sidebar]': 'store.mode()',
     '[class.drawer-open]': 'store.drawer()',
+    '[class.native-menu]': 'menuMode === "native"',
     '(document:keydown)': 'onKey($event)',
   },
   template: `
@@ -34,7 +35,7 @@ import { PdPagesSidebar } from './sidebar';
       <pd-title-bar [appName]="config.appName">
         <button type="button" slot="lead" class="toggle" data-testid="sidebar-toggle" [attr.aria-label]="toggleLabel()" [attr.title]="toggleLabel()"
           [attr.aria-expanded]="store.labelled()" aria-controls="pd-pages-nav" (click)="toggle()">
-          <pd-icon [name]="store.mode() === 'overlay' ? 'pd:menu' : 'pd:sidebar'" />
+          <pd-icon name="pd:sidebar" />
         </button>
         <pd-menu-bar />
         <ng-container ngProjectAs="[slot=end]"><ng-content select="[slot=title-end]" /></ng-container>
@@ -49,18 +50,18 @@ import { PdPagesSidebar } from './sidebar';
       @if (store.drawer()) {
         <div class="scrim" data-testid="sidebar-scrim" aria-hidden="true" (click)="closeDrawer(false)"></div>
       }
-      <main id="pd-main" class="page" tabindex="-1" data-pd-region="main">
+      <main id="pd-main" class="page" tabindex="-1" data-pd-region="main" [attr.inert]="store.drawer() ? '' : null">
         <router-outlet />
       </main>
     </div>
-    <footer class="status" aria-label="Status bar" data-pd-region="status" tabindex="-1">
+    <footer class="status" aria-label="Status bar" data-pd-region="status" tabindex="-1" [attr.inert]="store.drawer() ? '' : null">
       <pd-status-bar />
     </footer>
     <pd-notification-host />
     <pd-dialog-host />
   `,
   styles: `
-    :host { container: pd-frame / inline-size; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; background: var(--pd-bg); color: var(--pd-text); }
+    :host { --pd-titlebar-height: 40px; container: pd-frame / inline-size; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; background: var(--pd-bg); color: var(--pd-text); }
     .title { min-width: 0; background: var(--pd-surface-1); border-bottom: 1px solid var(--pd-hairline); outline: none; }
     .toggle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
     .toggle:hover { background: var(--pd-hover); color: var(--pd-text); }
@@ -70,10 +71,16 @@ import { PdPagesSidebar } from './sidebar';
     :host([data-sidebar='overlay']) .body { grid-template-columns: minmax(0, 1fr); }
     .sidebar { min-height: 0; min-width: 0; background: var(--pd-surface-1); border-inline-end: 1px solid var(--pd-hairline); outline: none; }
     .sidebar[hidden] { display: none; }
-    .sidebar.drawer { position: absolute; inset-block: 0; inset-inline-start: 0; z-index: var(--pd-z-overlay); width: min(var(--pd-sidebar-width), calc(100% - var(--pd-space-8))); box-shadow: var(--pd-shadow-3); border-inline-end-color: var(--pd-border-strong); animation: pd-drawer-in var(--pd-duration) var(--pd-ease-enter); }
-    .scrim { position: absolute; inset: 0; z-index: calc(var(--pd-z-overlay) - 1); background: var(--pd-scrim); animation: pd-fade-in var(--pd-duration) var(--pd-ease-enter); }
+        /*
+     * Over the page the sidebar is modal: it and its scrim cover everything below the title bar (the page and the status
+     * bar, which are inert meanwhile); Escape, the scrim or a page closes it. The title bar stays live for its button.
+     */
+    .sidebar.drawer { position: fixed; top: var(--pd-titlebar-height); bottom: 0; inset-inline-start: 0; z-index: var(--pd-z-overlay); width: min(var(--pd-sidebar-width), calc(100vw - var(--pd-space-8))); box-shadow: var(--pd-shadow-3); border-inline-end-color: var(--pd-border-strong); animation: pd-drawer-in var(--pd-duration) var(--pd-ease-enter); }
+    .scrim { position: fixed; top: var(--pd-titlebar-height); inset-inline: 0; bottom: 0; z-index: calc(var(--pd-z-overlay) - 1); background: var(--pd-scrim); animation: pd-fade-in var(--pd-duration) var(--pd-ease-enter); }
     :host([data-sidebar='overlay']) .page { grid-column: 1; }
-    .page { grid-row: 1; grid-column: 2; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; outline: none; scrollbar-gutter: stable; background: var(--pd-bg); }
+    /* Pages lay out by container queries on the page area (container pd-page), not the window. */
+    :host(.native-menu) { --pd-titlebar-inset-start: 78px; }
+    .page { container: pd-page / inline-size; grid-row: 1; grid-column: 2; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; outline: none; scrollbar-gutter: stable; background: var(--pd-bg); }
     .status { min-width: 0; overflow-x: clip; background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); outline: none; }
     .title:focus-visible, .sidebar:focus-visible, .page:focus-visible, .status:focus-visible { box-shadow: inset 0 0 0 2px var(--pd-focus-ring); }
     .skip { position: fixed; inset-inline-start: var(--pd-space-3); top: -48px; z-index: var(--pd-z-toast); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-accent-fill); color: var(--pd-on-accent); font-weight: var(--pd-weight-medium); }
@@ -86,6 +93,8 @@ import { PdPagesSidebar } from './sidebar';
 export class PdShellFrame {
   protected readonly store = inject(PagesFrameStore);
   protected readonly config = inject(PAGES_CONFIG);
+  /** The macOS app has its menus in the native menu bar: the title bar keeps clear of the window buttons (78 px). */
+  protected readonly menuMode = inject(MENU_MODE);
   private readonly el = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly doc = inject(DOCUMENT);
   private readonly injector = inject(Injector);

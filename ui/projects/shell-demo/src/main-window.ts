@@ -37,7 +37,7 @@ export function bootMainWindow(): Promise<unknown> {
       // start-up contract keeping the note across a recovery reload, and dialogs in the page (the desktop build passes
       // `dialogs: { io: () => tauriDialogIo(bridge) }`).
       provideShellPages({
-        appName: 'Shell demo',
+        appName: 'Paddock demo',
         icon: DemoIcon,
         notify: { health: () => inject(DemoHealthEngine).health, notifications: () => inject(DemoHealthEngine).centre },
         jobs: { backend: () => inject(DemoJobsEngine).backend, stillWorkingAfterMs: 1_500 },
