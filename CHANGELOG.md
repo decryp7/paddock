@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,
+  `problems` against the command table, kind size policy), `Grant` for the `paddock-commands` guard, pure placement on
+  the parent's monitor (mixed DPI, negative coordinates, remembered offset, never the primary display as default),
+  `Dialogs` bookkeeping with close-request and required-choice rules, and the Tauri adapter (window creation by kind
+  with title-bar buttons disabled, modality, close requests forwarded, `page_unresponsive`, fit-height grow rules, the
+  four `dialog_*` commands); generated `shell/generated/dialogs.ts`.
 - Crate `paddock-commands` 0.1.0 (plan S1, ADR 0012): `command_table!` (kind, window classes, request limit, validated at
   compile time, optional invoke-handler macro), the shell's window label scheme, the pure `check` with the
   `DialogGrant` hook for per-dialog contracts, the Tauri `Guard` (refuses and logs before arguments are parsed),
