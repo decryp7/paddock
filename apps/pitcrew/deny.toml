@@ -42,4 +42,4 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-registry = ["https://github.com/rust-lang/crates.io-index", "sparse+https://dev.decryptology.net/api/packages/decryp7/cargo/"]

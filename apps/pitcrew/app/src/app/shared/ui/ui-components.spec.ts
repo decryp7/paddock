@@ -1,10 +1,10 @@
-import { Dialog } from '@angular/cdk/dialog';
+import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { CommandError, UpdatePhase } from '../../core/api.types';
-import { appProviders, flush, makeMock, settle, text } from '../../../testing/test-helpers';
+import { appProviders, makeMock, settle, text } from '../../../testing/test-helpers';
 import { BrandLogo } from './brand-logo';
-import { confirmAction } from './confirm-dialog';
+import { ConfirmDialog, confirmAction } from './confirm-dialog';
 import { EmptyState } from './empty-state';
 import { LoadState } from './load-state';
 import { ServiceStore } from '../../state/service.store';
@@ -271,32 +271,46 @@ describe('UpdateProgress', () => {
   });
 });
 
-describe('confirmAction', () => {
+describe('confirmation dialog', () => {
   beforeEach(() => configure());
-  afterEach(() => TestBed.inject(Dialog).closeAll());
 
-  async function open(danger: boolean) {
-    const result = confirmAction(TestBed.inject(Dialog), { title: 'Remove x?', body: 'It goes away.', confirm: 'Remove it', danger });
-    await flush(10);
-    return result;
+  function mount(danger: boolean) {
+    const close = vi.fn();
+    TestBed.configureTestingModule({ providers: [{ provide: DIALOG_REF, useValue: { close } }] });
+    const f = TestBed.createComponent(ConfirmDialog);
+    f.componentRef.setInput('title', 'Remove x?');
+    f.componentRef.setInput('body', 'It goes away.');
+    f.componentRef.setInput('confirm', 'Remove it');
+    f.componentRef.setInput('danger', danger);
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    const button = (label: string) => Array.from(el.querySelectorAll('.btn')).find((b) => text(b) === label) as HTMLButtonElement;
+    return { el, close, button };
   }
-  const button = (label: string) => Array.from(document.querySelectorAll('.btn')).find((b) => text(b) === label) as HTMLButtonElement;
 
-  it('resolves true on confirm and shows title and body', async () => {
-    const result = open(true);
-    await flush(20);
-    expect(text(document.querySelector('#confirm-title'))).toBe('Remove x?');
-    expect(text(document.querySelector('.cdk-overlay-container'))).toContain('It goes away.');
+  it('shows title and body, and closes with true on confirm (the default key)', () => {
+    const { el, close, button } = mount(true);
+    expect(text(el.querySelector('#confirm-title'))).toBe('Remove x?');
+    expect(text(el)).toContain('It goes away.');
     expect(button('Remove it').classList.contains('danger')).toBe(true);
+    expect(button('Remove it').hasAttribute('data-default')).toBe(true);
     button('Remove it').click();
-    expect(await result).toBe(true);
+    expect(close).toHaveBeenCalledWith(true);
   });
 
-  it('resolves false on cancel and uses the primary style when not dangerous', async () => {
-    const result = open(false);
-    await flush(20);
+  it('cancels with no result and uses the primary style when not dangerous', () => {
+    const { close, button } = mount(false);
     expect(button('Remove it').classList.contains('primary')).toBe(true);
+    expect(button('Cancel').hasAttribute('data-dialog-close')).toBe(true);
     button('Cancel').click();
-    expect(await result).toBe(false);
+    expect(close).toHaveBeenCalledWith();
+  });
+
+  it('opens as a window of its own; only a confirmed choice is true', async () => {
+    const openDialog = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(undefined);
+    const data = { title: 'Remove x?', body: 'b', confirm: 'Remove it' };
+    expect(await confirmAction({ openDialog }, data)).toBe(true);
+    expect(openDialog).toHaveBeenCalledWith('pc.confirm', data);
+    expect(await confirmAction({ openDialog }, data)).toBe(false);
   });
 });

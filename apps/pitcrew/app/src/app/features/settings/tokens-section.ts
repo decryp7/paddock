@@ -3,7 +3,7 @@ import { MatIcon } from '@angular/material/icon';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { SettingsStore } from '../../state/settings.store';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 
 interface ServerRow {
   url: string;
@@ -105,7 +105,7 @@ interface ServerRow {
 export class TokensSection {
   private readonly settings = inject(SettingsStore);
   private readonly backend = inject(BACKEND);
-  private readonly toasts = inject(ToastStore);
+  private readonly toasts = inject(Notify);
 
   protected readonly store = 'Windows Credential Manager / macOS Keychain';
   protected readonly extra = signal<string[]>([]);

@@ -1,7 +1,7 @@
-import { DialogRef } from '@angular/cdk/dialog';
+import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
-import { ToastStore } from '../../state/toast.store';
+import { NoticeLog } from '../../../testing/test-helpers';
 import { appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 import { RegisterWizard, stepErrors, toRequest, type RegisterDraft } from './register-wizard';
 
@@ -68,7 +68,7 @@ describe('RegisterWizard', () => {
 
   function mount(options: Parameters<typeof makeMock>[0] = {}) {
     mock = makeMock(options);
-    TestBed.configureTestingModule({ providers: [...appProviders(mock), { provide: DialogRef, useValue: ref }] });
+    TestBed.configureTestingModule({ providers: [...appProviders(mock), { provide: DIALOG_REF, useValue: ref }] });
     const f = TestBed.createComponent(RegisterWizard);
     f.detectChanges();
     return { f, el: f.nativeElement as HTMLElement };
@@ -156,7 +156,7 @@ describe('RegisterWizard', () => {
     submit(el);
     await settle(f);
     expect(register).toHaveBeenCalledWith(expect.objectContaining({ runner: 'new-runner', serverUrl: 'https://git.example.com', displayName: 'Shown', labels: ['windows', 'x64'], rememberToken: true }));
-    expect(TestBed.inject(ToastStore).toasts().at(-1)?.title).toBe('Registered new-runner');
+    expect(TestBed.inject(NoticeLog).notices.at(-1)?.message).toContain('Registered new-runner');
     expect(ref.close).toHaveBeenCalledWith(true);
   });
 
@@ -230,13 +230,14 @@ describe('RegisterWizard', () => {
     expect((byText(el, 'button', 'Register') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('closes with Cancel and the X, and names the Keychain on macOS', async () => {
+  it('closes with Cancel (the window’s Escape key) and names the Keychain on macOS', async () => {
     const { el } = mount({ platform: 'macos' });
     expect(text(el)).toContain('macOS Keychain');
-    byText<HTMLButtonElement>(el, 'button', 'Cancel')!.click();
-    (el.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click();
-    expect(ref.close).toHaveBeenCalledTimes(2);
-    expect(ref.close).toHaveBeenCalledWith(false);
+    const cancel = byText<HTMLButtonElement>(el, 'button', 'Cancel')!;
+    expect(cancel.hasAttribute('data-dialog-close')).toBe(true);
+    cancel.click();
+    expect(ref.close).toHaveBeenCalledTimes(1);
+    expect(ref.close).toHaveBeenCalledWith();
     await flush();
   });
 });

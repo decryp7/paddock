@@ -5,7 +5,7 @@ import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { idle, pending, settle, type Loadable } from './loadable';
 import { StatusStore } from './status.store';
-import { ToastStore } from './toast.store';
+import { Notify } from './notify';
 
 interface SettingsState {
   settings: Loadable<SettingsReply>;
@@ -21,7 +21,7 @@ export const SettingsStore = signalStore(
     readOnly: computed(() => settings().value?.readOnly ?? false),
     problems: computed(() => settings().value?.problems ?? []),
   })),
-  withMethods((store, backend = inject(BACKEND), toasts = inject(ToastStore), status = inject(StatusStore)) => {
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Notify), status = inject(StatusStore)) => {
     const load = async () => {
       patchState(store, { settings: pending(store.settings()) });
       patchState(store, { settings: await settle(store.settings(), () => backend.settings()) });

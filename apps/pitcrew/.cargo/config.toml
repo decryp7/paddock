@@ -1,0 +1,4 @@
+# The Gitea cargo registry of the Paddock crates (crates/README.md in the Paddock repository, "Consuming the crates"). Reading
+# needs no token.
+[registries.decryp7]
+index = "sparse+https://dev.decryptology.net/api/packages/decryp7/cargo/"

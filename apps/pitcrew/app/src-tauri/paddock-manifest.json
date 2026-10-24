@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "commands": [
+    {
+      "id": "pc.diagnostics",
+      "title": "pc.diagnostics"
+    },
+    {
+      "id": "pc.register",
+      "title": "pc.register"
+    },
+    {
+      "id": "pd.about.open",
+      "title": "pd.about.open"
+    },
+    {
+      "id": "pd.settings.open",
+      "title": "pd.settings.open"
+    },
+    {
+      "id": "pd.updates.open",
+      "title": "pd.updates.open"
+    },
+    {
+      "id": "pd.whats-new.open",
+      "title": "pd.whats-new.open"
+    }
+  ],
+  "keybindings": [
+    {
+      "command": "pd.settings.open",
+      "key": "Mod+,",
+      "accelerator": "CmdOrCtrl+,",
+      "scope": "window"
+    },
+    {
+      "command": "pc.register",
+      "key": "Mod+Shift+N",
+      "accelerator": "CmdOrCtrl+Shift+N",
+      "scope": "window"
+    }
+  ],
+  "menus": [
+    {
+      "menu": "app",
+      "command": "pd.settings.open",
+      "group": "settings",
+      "order": 100,
+      "accelerator": "CmdOrCtrl+,"
+    },
+    {
+      "menu": "file",
+      "command": "pc.register",
+      "group": "runners",
+      "order": 100,
+      "accelerator": "CmdOrCtrl+Shift+N"
+    },
+    {
+      "menu": "file",
+      "command": "pc.diagnostics",
+      "group": "runners",
+      "order": 200,
+      "accelerator": null
+    },
+    {
+      "menu": "help",
+      "command": "pd.whats-new.open",
+      "group": "about",
+      "order": 100,
+      "accelerator": null
+    },
+    {
+      "menu": "help",
+      "command": "pd.updates.open",
+      "group": "about",
+      "order": 200,
+      "accelerator": null
+    },
+    {
+      "menu": "help",
+      "command": "pd.about.open",
+      "group": "about",
+      "order": 300,
+      "accelerator": null
+    }
+  ],
+  "pages": [
+    "pc.activity",
+    "pc.dashboard",
+    "pc.insights",
+    "pc.logs",
+    "pc.runners",
+    "pc.storage",
+    "pc.updates"
+  ],
+  "statusItems": [
+    "pc.runners"
+  ],
+  "settingsPages": [
+    "pc.channels",
+    "pc.defaults",
+    "pc.diagnostics",
+    "pc.general",
+    "pc.service",
+    "pc.tokens",
+    "pd.appearance"
+  ],
+  "settingsForms": [
+    "pd.appearance"
+  ],
+  "dialogs": {
+    "pc.config-diff": {
+      "kind": "form",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": []
+    },
+    "pc.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": []
+    },
+    "pc.register": {
+      "kind": "form",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": [
+        "connection_state",
+        "platform_name",
+        "register_runner",
+        "runner_status"
+      ]
+    },
+    "pc.stop-process": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": []
+    },
+    "pd.about": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": [
+        "about_info",
+        "about_legal"
+      ]
+    },
+    "pd.settings": {
+      "kind": "tool",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": [
+        "channel_secret_clear",
+        "channel_secret_present",
+        "channel_secret_set",
+        "channel_test",
+        "channels_get",
+        "channels_save",
+        "clear_api_token",
+        "connection_state",
+        "dialog_open",
+        "export_diagnostics",
+        "get_autostart",
+        "get_settings",
+        "has_api_token",
+        "install_service",
+        "open_login_items",
+        "open_url",
+        "platform_name",
+        "repair_service",
+        "runner_status",
+        "save_settings",
+        "service_install_state",
+        "set_api_token",
+        "set_autostart",
+        "settings_overview",
+        "settings_reset",
+        "settings_set",
+        "uninstall_service"
+      ]
+    },
+    "pd.updates": {
+      "kind": "tool",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": [
+        "updates_cancel",
+        "updates_check",
+        "updates_download",
+        "updates_install_on_quit",
+        "updates_restart",
+        "updates_set_preferences",
+        "updates_status"
+      ]
+    },
+    "pd.whats-new": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": [
+        "about_whats_new"
+      ]
+    }
+  },
+  "healthServices": [
+    "pc.service"
+  ],
+  "notificationKinds": {
+    "pd.updates.available": {
+      "actions": []
+    }
+  },
+  "messages": {
+    "pc.category.runners": "Runners",
+    "pc.diagnostics": "Export diagnostics",
+    "pc.dialog.config-diff": "Review configuration changes",
+    "pc.dialog.confirm": "Please confirm",
+    "pc.dialog.register": "Register a runner",
+    "pc.dialog.stop-process": "Stop process",
+    "pc.health.service": "the Pitcrew service",
+    "pc.page.activity": "Activity",
+    "pc.page.dashboard": "Dashboard",
+    "pc.page.insights": "Insights",
+    "pc.page.logs": "Logs",
+    "pc.page.runners": "Runners",
+    "pc.page.storage": "Storage",
+    "pc.page.updates": "Updates",
+    "pc.register": "Register a runner…",
+    "pc.settings.channels": "Notification channels",
+    "pc.settings.defaults": "Defaults",
+    "pc.settings.diagnostics": "Diagnostics",
+    "pc.settings.general": "General",
+    "pc.settings.service": "Service",
+    "pc.settings.tokens": "Gitea tokens",
+    "pc.status.runners": "Runners",
+    "pd.about.open": "About",
+    "pd.about.title": "About",
+    "pd.category.app": "Application",
+    "pd.category.help": "Help",
+    "pd.settings.appearance": "Appearance",
+    "pd.settings.open": "Settings…",
+    "pd.settings.title": "Settings",
+    "pd.updates.notification.available": "Update available",
+    "pd.updates.open": "Check for Updates…",
+    "pd.updates.title": "Updates",
+    "pd.whats-new.open": "What’s New",
+    "pd.whats-new.title": "What’s New"
+  }
+}

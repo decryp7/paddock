@@ -134,9 +134,8 @@ fn connection<R: Runtime>(app: &AppHandle<R>, c: ConnectionState) {
         return;
     }
     latest.set_connection(c.clone());
-    let connected = matches!(c, ConnectionState::Connected { .. });
-    let runners = latest.status().map(|s| s.runners).unwrap_or_default();
-    crate::tray::update(app, if connected { &runners } else { &[] }, connected);
+    paddock_window::tauri::refresh_tray(app);
+    crate::health::report(app, &c);
     emit(app, BackendEvent::Connection { connection: c });
 }
 
@@ -186,11 +185,12 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
                                 ServiceEvent::Status { runners, service } => {
                                     let status = StatusReply { runners, service };
                                     let key = menu_key(&status);
+                                    a.state::<Latest>().set_status(status.clone());
                                     if key != last_menu {
                                         last_menu = key;
-                                        crate::tray::update(&a, &status.runners, true);
+                                        // The tray model reads `Latest`; it redraws only when the menu really changed.
+                                        paddock_window::tauri::refresh_tray(&a);
                                     }
-                                    a.state::<Latest>().set_status(status.clone());
                                     emit(&a, BackendEvent::Status { status });
                                 }
                                 ServiceEvent::Notification { notification } => {

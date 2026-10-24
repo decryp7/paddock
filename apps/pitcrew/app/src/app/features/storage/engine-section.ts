@@ -1,10 +1,10 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { MatIcon } from '@angular/material/icon';
 import type { EngineUse, PruneKind } from '../../core/api.types';
 import { formatBytes, formatCount, plural, share } from '../../shared/format';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 import { confirmAction } from '../../shared/ui/confirm-dialog';
 import { LoadState } from '../../shared/ui/load-state';
 import { EngineStore, PRUNE_KINDS } from './engine.store';
@@ -203,8 +203,8 @@ import { ENGINE_NAMES, PRUNE_LABELS, countOf, errorSentence, middleEllipsis } fr
 })
 export class EngineSection {
   protected readonly store = inject(EngineStore);
-  private readonly dialog = inject(Dialog);
-  private readonly toasts = inject(ToastStore);
+  private readonly ports = inject(SHELL_PORTS);
+  private readonly toasts = inject(Notify);
 
   protected readonly kinds = PRUNE_KINDS;
   protected readonly labels = PRUNE_LABELS;
@@ -296,7 +296,7 @@ export class EngineSection {
     const p = this.store.currentPreview();
     if (!p || !this.store.canPrune()) return;
     const what = p.items.map((i) => `${countOf(i.kind, i.count)} (${PRUNE_LABELS[i.kind].label.toLowerCase()})`).join(', ');
-    const ok = await confirmAction(this.dialog, {
+    const ok = await confirmAction(this.ports, {
       title: `Remove ${formatBytes(p.totalBytes)} from ${this.engineName()}?`,
       body: `This removes ${what}. It cannot be undone.${this.store.selection().kinds.includes('volumes') ? ' Volumes hold data: unused volumes are deleted with what is in them.' : ''}`,
       confirm: 'Prune now',

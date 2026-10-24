@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "shell-main",
+  "description": "Top-level windows (main, w-<n>): the shell's main set, Tauri's events, and dragging the window by its title bar (data-tauri-drag-region; the macOS window has an overlay title bar) with double-click to zoom. Every Pitcrew command is an app command behind the guard; no other plugin command is granted to the webview.",
+  "windows": ["main", "w-*"],
+  "permissions": ["core:event:default", "paddock-shell:main", "core:window:allow-start-dragging", "core:window:allow-internal-toggle-maximize"]
+}

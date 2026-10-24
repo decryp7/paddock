@@ -6,7 +6,7 @@ import { ClockService } from '../../core/clock.service';
 import { toCommandError } from '../../core/command-error';
 import { idle, pending, settle, type Loadable } from '../../state/loadable';
 import { StatusStore } from '../../state/status.store';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 
 /** How often the Processes tab asks for a fresh list while it is visible. */
 export const PROCESS_POLL_MS = 5_000;
@@ -24,7 +24,7 @@ interface ProcessesState {
 export const ProcessesStore = signalStore(
   withState<ProcessesState>({ runner: null, list: idle<ProcessList>(), busy: null, actionError: null }),
   withProps(() => ({ _poll: { id: null as ReturnType<typeof setInterval> | null } })),
-  withMethods((store, backend = inject(BACKEND), clock = inject(ClockService), toasts = inject(ToastStore), status = inject(StatusStore)) => {
+  withMethods((store, backend = inject(BACKEND), clock = inject(ClockService), toasts = inject(Notify), status = inject(StatusStore)) => {
     const load = async (runner: string, silent = false): Promise<void> => {
       const same = store.runner() === runner;
       if (!silent || !same) patchState(store, { runner, list: pending(same ? store.list() : undefined), ...(same ? {} : { actionError: null }) });

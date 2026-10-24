@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
 import { StatusStore } from '../../state/status.store';
-import { appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
+import { NoticeLog, appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
 import { UpdatesPage } from './updates-page';
 
 describe('UpdatesPage', () => {
@@ -114,17 +114,15 @@ describe('UpdatesPage', () => {
     const act = vi.spyOn(store, 'act');
     const n = (f.componentInstance as unknown as { updatable(): { name: string }[] }).updatable().map((r) => r.name);
     expect(n.length).toBeGreaterThan(1);
+    const log = TestBed.inject(NoticeLog);
     byText(el, 'button.primary', 'Update all')!.click();
     await settle(f, 2);
-    const dialog = document.querySelector('pc-confirm-dialog')!;
-    for (const name of n) expect(text(dialog)).toContain(name);
-    byText(dialog, 'button', 'Cancel')!.click();
-    await settle(f, 2);
+    expect(log.dialogs.at(-1)?.id).toBe('pc.confirm');
+    for (const name of n) expect(JSON.stringify(log.dialogs.at(-1)?.inputs)).toContain(name);
     expect(act).not.toHaveBeenCalled();
 
+    log.answerNext(true);
     byText(el, 'button.primary', 'Update all')!.click();
-    await settle(f, 2);
-    byText(document.querySelector('pc-confirm-dialog')!, 'button.primary', 'Update')!.click();
     await settle(f, 4);
     expect(act.mock.calls.map((c) => c[0])).toEqual(n);
     expect(act.mock.calls.every((c) => c[1] === 'applyUpdate')).toBe(true);
@@ -136,7 +134,7 @@ describe('UpdatesPage', () => {
     vi.spyOn(f.componentInstance as unknown as { updatable(): unknown[] }, 'updatable').mockReturnValue([{ name: only, updateTarget: '5.3.0' }]);
     const act = vi.spyOn(store, 'act');
     await (f.componentInstance as unknown as { updateAll(): Promise<void> }).updateAll();
-    expect(document.querySelector('pc-confirm-dialog')).toBeNull();
+    expect(TestBed.inject(NoticeLog).dialogs).toHaveLength(0);
     expect(act).toHaveBeenCalledWith(only, 'applyUpdate');
   });
 

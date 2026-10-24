@@ -31,7 +31,13 @@
                 "input": "public"
               }
             ],
-            "styles": ["src/styles.scss"]
+            "styles": [
+              "node_modules/@decryp7/paddock-ui/css/paddock.css",
+              "src/styles.scss"
+            ],
+            "polyfills": [
+              "@angular/localize/init"
+            ]
           },
           "configurations": {
             "production": {
@@ -83,15 +89,27 @@
             "tsConfig": "tsconfig.spec.json",
             "buildTarget": "::development",
             "runner": "vitest",
-            "coverageReporters": ["text-summary", "lcov"],
-            "coverageExclude": ["src/**/*.spec.ts", "src/main.ts", "src/test-setup.ts"],
-            "setupFiles": ["src/test-setup.ts"]
+            "coverageReporters": [
+              "text-summary",
+              "lcov"
+            ],
+            "coverageExclude": [
+              "src/**/*.spec.ts",
+              "src/main.ts",
+              "src/test-setup.ts"
+            ],
+            "setupFiles": [
+              "src/test-setup.ts"
+            ]
           }
         },
         "lint": {
           "builder": "@angular-eslint/builder:lint",
           "options": {
-            "lintFilePatterns": ["src/**/*.ts", "src/**/*.html"],
+            "lintFilePatterns": [
+              "src/**/*.ts",
+              "src/**/*.html"
+            ],
             "maxWarnings": 0
           }
         }

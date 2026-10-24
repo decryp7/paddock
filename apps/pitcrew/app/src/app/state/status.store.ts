@@ -6,7 +6,7 @@ import { toCommandError } from '../core/command-error';
 import { PreferencesService } from '../core/preferences.service';
 import { formatBytes, plural } from '../shared/format';
 import { notificationIcon, severityTone } from '../shared/labels';
-import { ToastStore } from './toast.store';
+import { Notify } from './notify';
 
 /** What the user can ask a runner to do. */
 export type RunnerCommand = 'start' | 'stop' | 'restart' | 'drain' | 'resume' | 'checkUpdate' | 'applyUpdate' | 'cancelUpdate';
@@ -55,7 +55,7 @@ export const StatusStore = signalStore(
       return null;
     }),
   })),
-  withMethods((store, backend = inject(BACKEND), toasts = inject(ToastStore), prefs = inject(PreferencesService)) => {
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Notify), prefs = inject(PreferencesService)) => {
     const load = async (): Promise<void> => {
       patchState(store, { loading: true });
       try {

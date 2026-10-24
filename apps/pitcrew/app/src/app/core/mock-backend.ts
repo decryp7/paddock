@@ -12,8 +12,6 @@ import type {
   PruneResult,
   PrunePreview,
   PruneSelection,
-  AppUpdateInfo,
-  AppUpdateStatus,
   BackendEvent,
   CleanupReport,
   CommandError,
@@ -71,6 +69,9 @@ import {
 import { fingerprint, labelText, previewOf, sampleConfigText, viewOf } from './mock/mock-runner-config';
 import { demoProcesses, keepMs } from './mock/mock-processes';
 import { demoCache, demoCachePlan, demoEngineReport, demoInsights, demoPrunePreview, emptyChannels } from './mock/mock-ops';
+import type { SuJobState } from '@decryp7/paddock-ui';
+import type { MemoryJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
+import { toCommandError } from './command-error';
 
 /** Which world the mock shows. */
 export type MockScenario = 'demo' | 'empty' | 'unavailable' | 'notInstalled' | 'mismatch';
@@ -87,6 +88,8 @@ export interface MockOptions {
   serverDown?: boolean;
   /** macOS: launchd refuses the service after an update (the "could not start" state with Repair). */
   startFailed?: boolean;
+  /** Where long work shows up as jobs (the browser build's stand-in for `paddock://jobs`); without it nothing is reported. */
+  jobs?: MemoryJobsBackend;
 }
 
 const FLOW: Exclude<RunnerSnapshot['updatePhase']['phase'], 'idle' | 'rollingBack'>[] = [
@@ -111,6 +114,7 @@ function fail(code: CommandError['code'], message: string): CommandError {
 export class MockBackend implements PitcrewBackend {
   private readonly scenario: MockScenario;
   private readonly latency: number;
+  private readonly jobs: MemoryJobsBackend | null;
   private readonly simulate: boolean;
   private readonly platformName: Platform;
   private readonly now: () => number;
@@ -136,6 +140,7 @@ export class MockBackend implements PitcrewBackend {
   constructor(options: MockOptions = {}) {
     this.scenario = options.scenario ?? 'demo';
     this.latency = options.latencyMs ?? 0;
+    this.jobs = options.jobs ?? null;
     this.simulate = options.simulate ?? false;
     this.platformName = options.platform ?? 'browser';
     this.now = options.now ?? Date.now;
@@ -420,7 +425,11 @@ export class MockBackend implements PitcrewBackend {
     return structuredClone({ scan, preview: cleanupPreview(scan), lastCleanup: lastCleanup(now), policy: conf?.cleanup ?? this.config.defaults.cleanup });
   }
 
-  async cleanDisk(runner: string): Promise<CleanupReport> {
+  cleanDisk(runner: string): Promise<CleanupReport> {
+    return this.job('pitcrew.clean-disk', 'Cleaning up the disk', runner, () => this.cleanDiskWork(runner));
+  }
+
+  private async cleanDiskWork(runner: string): Promise<CleanupReport> {
     await this.delay(this.latency * 6);
     const r = this.find(runner);
     const preview = cleanupPreview(diskScan(r, this.now()));
@@ -567,7 +576,11 @@ export class MockBackend implements PitcrewBackend {
     return demoPrunePreview(selection);
   }
 
-  async pruneEngine(selection: PruneSelection): Promise<PruneResult> {
+  pruneEngine(selection: PruneSelection): Promise<PruneResult> {
+    return this.job('pitcrew.engine-prune', 'Pruning the container engine', null, () => this.pruneEngineWork(selection));
+  }
+
+  private async pruneEngineWork(selection: PruneSelection): Promise<PruneResult> {
     await this.delay();
     this.ensureService();
     if (selection.kinds.length === 0) throw fail('badRequest', 'choose what to prune');
@@ -592,7 +605,11 @@ export class MockBackend implements PitcrewBackend {
     return demoCachePlan(await this.cacheReport(runner), limits, this.now());
   }
 
-  async cleanCache(runner: string, limits: CacheLimits): Promise<CacheCleaned> {
+  cleanCache(runner: string, limits: CacheLimits): Promise<CacheCleaned> {
+    return this.job('pitcrew.cache-clean', 'Trimming the Actions cache', runner, () => this.cleanCacheWork(runner, limits));
+  }
+
+  private async cleanCacheWork(runner: string, limits: CacheLimits): Promise<CacheCleaned> {
     await this.delay();
     if (this.find(runner).currentJob) throw fail('busy', 'a job is running; Pitcrew will not remove anything while a runner works. Try again when it is idle, or drain the runner first');
     const plan = await this.previewCacheClean(runner, limits);
@@ -698,7 +715,11 @@ export class MockBackend implements PitcrewBackend {
     this.pushStatus();
   }
 
-  async register(request: RegisterRequest): Promise<void> {
+  register(request: RegisterRequest): Promise<void> {
+    return this.job('pitcrew.register-runner', 'Registering the runner', request.runner, () => this.registerWork(request));
+  }
+
+  private async registerWork(request: RegisterRequest): Promise<void> {
     await this.delay(this.latency * 8);
     if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(request.runner)) throw fail('badRequest', 'The name may only use a–z, 0–9 and "-" (at most 32 characters).');
     if (!/^https?:\/\//.test(request.serverUrl)) throw fail('badRequest', 'The server URL must start with https://.');
@@ -785,22 +806,31 @@ export class MockBackend implements PitcrewBackend {
     this.emit({ kind: 'connection', connection: this.connection() });
   }
 
+  // ---- jobs ------------------------------------------------------------------------------------------------------
+
+  private nextJob = 1;
+
+  /** Runs long work the way the engine does: a job that reports its start and its end (and a phase) to the Jobs list. */
+  private async job<T>(kind: string, title: string, subject: string | null, work: () => Promise<T>): Promise<T> {
+    const jobs = this.jobs;
+    if (!jobs) return work();
+    const id = this.nextJob++;
+    const started = this.now();
+    let seq = 0;
+    const snap = (state: SuJobState, cancellable = true): void =>
+      jobs.emit({ id, kind, title, subject, seq: seq++, elapsedMs: this.now() - started, cancellable, ...state });
+    snap({ state: 'running', phase: { id: 'service', label: 'Waiting for the service', unit: 'items', done: 0 } });
+    try {
+      const result = await work();
+      snap({ state: 'done' }, false);
+      return result;
+    } catch (e) {
+      snap({ state: 'failed', message: toCommandError(e).message }, false);
+      throw e;
+    }
+  }
+
   // ---- the app -----------------------------------------------------------------------------------------------------
-
-  async appUpdateStatus(): Promise<AppUpdateStatus> {
-    await this.delay();
-    return { available: false, reason: 'Updates are not available in this build (it has no update key).', currentVersion: '0.1.0' };
-  }
-
-  async checkAppUpdate(): Promise<AppUpdateInfo | null> {
-    await this.delay();
-    throw fail('notImplemented', 'Updates are not available in this build (it has no update key).');
-  }
-
-  async installAppUpdate(): Promise<void> {
-    await this.delay();
-    throw fail('notImplemented', 'Updates are not available in this build (it has no update key).');
-  }
 
   async autostart(): Promise<boolean> {
     await this.delay();

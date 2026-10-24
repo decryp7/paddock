@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
 import { ClockService } from '../../core/clock.service';
-import { RegisterLauncher } from '../../layout/register-launcher';
+import { RegisterLauncher } from '../../shell/register-launcher';
 import type { RunnerSnapshot } from '../../core/api.types';
 import { formatBytes, formatDuration, formatElapsed } from '../../shared/format';
 import { RunnerActions } from '../../shared/runner-actions';

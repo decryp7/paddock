@@ -5,13 +5,13 @@ import { MockBackend } from '../core/mock-backend';
 import { PreferencesService } from '../core/preferences.service';
 import { flush, makeMock } from '../../testing/test-helpers';
 import { StatusStore } from './status.store';
-import { ToastStore } from './toast.store';
+import { NoticeLog, recordShell } from '../../testing/test-helpers';
 
 function setup(mock = makeMock()) {
   localStorage.clear();
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
+  TestBed.configureTestingModule({ providers: [...recordShell(), { provide: BACKEND, useValue: mock }] });
   const store = TestBed.inject(StatusStore);
-  return { mock, store, toasts: TestBed.inject(ToastStore) };
+  return { mock, store, toasts: TestBed.inject(NoticeLog) };
 }
 
 const note = (over: Partial<PitcrewNotification> = {}): PitcrewNotification => ({
@@ -98,8 +98,9 @@ describe('StatusStore', () => {
     s.store.onEvent({ kind: 'notification', notification: note({ title: 'one' }) });
     s.store.onEvent({ kind: 'notification', notification: note({ kind: 'diskLow', severity: 'error', title: 'two' }) });
     expect(s.store.notifications().map((n) => n.title)).toEqual(['two', 'one']);
-    expect(s.toasts.toasts().map((t) => t.title)).toEqual(['one']);
-    expect(s.toasts.toasts()[0]).toMatchObject({ tone: 'warning', icon: 'alert' });
+    expect(s.toasts.notices).toHaveLength(1);
+    expect(s.toasts.notices[0]?.message).toContain('one');
+    expect(s.toasts.notices[0]).toMatchObject({ level: 'warning' });
     for (let i = 0; i < 120; i++) s.store.onEvent({ kind: 'notification', notification: note({ title: `n${i}` }) });
     expect(s.store.notifications()).toHaveLength(100);
     s.store.clearNotifications();
@@ -128,7 +129,7 @@ describe('StatusStore', () => {
     expect(s.store.inFlight()['ui-tests']).toBe('drain');
     expect(await p).toBe(true);
     expect(s.store.inFlight()['ui-tests']).toBeUndefined();
-    expect(s.toasts.toasts().at(-1)?.title).toBe('Draining ui-tests');
+    expect(s.toasts.notices.at(-1)?.message).toContain('Draining ui-tests');
     expect(s.store.runner('ui-tests')?.status).toBe('paused');
   });
 
@@ -137,9 +138,10 @@ describe('StatusStore', () => {
     mock = s.mock;
     await flush();
     expect(await s.store.act('ui-tests', 'start')).toBe(false);
-    const t = s.toasts.toasts().at(-1)!;
-    expect(t).toMatchObject({ tone: 'danger', title: 'ui-tests: that did not work' });
-    expect(t.body).toContain('already running');
+    const t = s.toasts.notices.at(-1)!;
+    expect(t.level).toBe('error');
+    expect(t.message).toContain('ui-tests: that did not work');
+    expect(t.message).toContain('already running');
   });
 
   it('skips, pins and unpins versions', async () => {
@@ -147,11 +149,11 @@ describe('StatusStore', () => {
     mock = s.mock;
     await flush();
     expect(await s.store.skipVersion('ui-tests', '5.3.0')).toBe(true);
-    expect(s.toasts.toasts().at(-1)?.title).toBe('ui-tests will skip 5.3.0');
+    expect(s.toasts.notices.at(-1)?.message).toContain('ui-tests will skip 5.3.0');
     expect(await s.store.pinVersion('ui-tests', '5.2.0')).toBe(true);
-    expect(s.toasts.toasts().at(-1)?.title).toBe('ui-tests is pinned to 5.2.0');
+    expect(s.toasts.notices.at(-1)?.message).toContain('ui-tests is pinned to 5.2.0');
     expect(await s.store.pinVersion('ui-tests', null)).toBe(true);
-    expect(s.toasts.toasts().at(-1)?.title).toBe('ui-tests follows the latest release again');
+    expect(s.toasts.notices.at(-1)?.message).toContain('ui-tests follows the latest release again');
     expect(await s.store.pinVersion('ui-tests', 'bad')).toBe(false);
   });
 
@@ -161,14 +163,15 @@ describe('StatusStore', () => {
     await flush();
     const report = await s.store.clean('docker-lab');
     expect(report?.trigger).toBe('manual');
-    const t = s.toasts.toasts().at(-1)!;
-    expect(t.title).toContain('on docker-lab');
-    expect(t.tone).toBe('warning');
-    expect(t.body).toContain('could not be deleted');
+    const t = s.toasts.notices.at(-1)!;
+    expect(t.message).toContain('on docker-lab');
+    expect(t.level).toBe('warning');
+    expect(t.message).toContain('could not be deleted');
     expect(await s.store.clean('nope')).toBeNull();
     vi.spyOn(mock, 'cleanDisk').mockResolvedValueOnce({ trigger: 'manual', at: 1, freedBytes: 0, deleted: 2, failures: [] });
     await s.store.clean('ui-tests');
-    expect(s.toasts.toasts().at(-1)).toMatchObject({ tone: 'success', body: '2 items deleted.' });
+    expect(s.toasts.notices.at(-1)).toMatchObject({ level: 'success' });
+    expect(s.toasts.notices.at(-1)?.message).toContain('2 items deleted.');
   });
 
   it('removes a runner and reloads', async () => {

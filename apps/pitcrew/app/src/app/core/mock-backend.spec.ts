@@ -386,9 +386,6 @@ describe('MockBackend settings and runners', () => {
   });
 
   it('handles the app-level calls', async () => {
-    expect((await mock.appUpdateStatus()).available).toBe(false);
-    expect((await rejection(mock.checkAppUpdate())).code).toBe('notImplemented');
-    expect((await rejection(mock.installAppUpdate())).code).toBe('notImplemented');
     expect(await mock.autostart()).toBe(true);
     await mock.setAutostart(false);
     expect(await mock.autostart()).toBe(false);

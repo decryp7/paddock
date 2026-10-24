@@ -1,11 +1,10 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import type { RunnerSnapshot } from '../core/api.types';
 import { MockBackend } from '../core/mock-backend';
 import { StatusStore } from '../state/status.store';
-import { appProviders, flush, makeMock, settle, text } from '../../testing/test-helpers';
+import { NoticeLog, appProviders, flush, makeMock, settle, text } from '../../testing/test-helpers';
 import { RunnerActions } from './runner-actions';
 
 describe('RunnerActions', () => {
@@ -18,7 +17,6 @@ describe('RunnerActions', () => {
     runners = (await mock.status()).runners;
   });
   afterEach(() => {
-    TestBed.inject(Dialog).closeAll();
     mock.dispose();
   });
 
@@ -92,11 +90,11 @@ describe('RunnerActions', () => {
   it('removes a runner after confirmation and goes back to the list', async () => {
     const m = await open('legacy-ci', { allowRemove: true, small: true });
     const nav = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const log = TestBed.inject(NoticeLog);
+    log.answerNext(true);
     m.item('Remove…')!.click();
     await flush(20);
-    expect(text(document.querySelector('#confirm-title'))).toBe('Remove legacy-ci?');
-    (Array.from(document.querySelectorAll('.btn')).find((b) => text(b) === 'Remove runner') as HTMLButtonElement).click();
-    await flush(20);
+    expect(log.dialogs.at(-1)).toMatchObject({ id: 'pc.confirm', inputs: { title: 'Remove legacy-ci?', confirm: 'Remove runner' } });
     expect(TestBed.inject(StatusStore).runners().map((r) => r.name)).not.toContain('legacy-ci');
     expect(nav).toHaveBeenCalledWith(['/runners']);
   });
@@ -106,8 +104,7 @@ describe('RunnerActions', () => {
     const remove = vi.spyOn(mock, 'removeRunner');
     m.item('Remove…')!.click();
     await flush(20);
-    (Array.from(document.querySelectorAll('.btn')).find((b) => text(b) === 'Cancel') as HTMLButtonElement).click();
-    await flush(20);
+    expect(TestBed.inject(NoticeLog).dialogs).toHaveLength(1);
     expect(remove).not.toHaveBeenCalled();
   });
 

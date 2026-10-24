@@ -14,8 +14,6 @@ import type {
   PruneResult,
   PrunePreview,
   PruneSelection,
-  AppUpdateInfo,
-  AppUpdateStatus,
   BackendEvent,
   CleanupReport,
   Config,
@@ -38,7 +36,6 @@ import type {
   Version,
 } from './api.types';
 import type { Platform, PitcrewBackend } from './backend';
-import { timeoutFor, withTimeout } from './call-timeout';
 import { toCommandError } from './command-error';
 
 /** Calls one Tauri command (`invoke`, or a fake in tests). */
@@ -58,9 +55,6 @@ export const NAVIGATE_EVENT = 'pitcrew://navigate';
  * The real backend: the Tauri commands of `app/src-tauri/src/commands.rs`. Argument keys are camelCase; Tauri maps
  * them to the commands' snake_case parameters. Every rejection becomes a typed `CommandError`.
  */
-/** How long start-up waits for the shell to name the platform. */
-export const PLATFORM_WAIT_MS = 1000;
-
 /** The platform the webview's user agent names (only for the window chrome until the shell answers). */
 export function platformFromUserAgent(ua: string): Platform {
   if (/Windows/i.test(ua)) return 'windows';
@@ -78,20 +72,18 @@ export class TauriBackend implements PitcrewBackend {
   ) {}
 
   /**
-   * Asks the shell for the platform at start-up (the interface's `platform()` is synchronous). Start-up waits for it
-   * at most {@link PLATFORM_WAIT_MS}: in a window that was just created the first IPC call can stay unanswered, and
-   * an app initializer that never resolves leaves the window blank for good. Until the shell answers, the platform
-   * comes from the user agent (it only picks the window chrome); a late answer still replaces it.
+   * Asks the shell for the platform at start-up (the interface's `platform()` is synchronous). The window never waits
+   * for the answer (the start-up contract reports ready on its own, rule 12): until it comes, the platform is the user
+   * agent's guess, which only picks the window chrome.
    */
-  async init(waitMs = PLATFORM_WAIT_MS): Promise<void> {
+  async init(): Promise<void> {
     this.platformName = platformFromUserAgent(globalThis.navigator?.userAgent ?? '');
-    const asked = this.call<Platform>('platform_name').then(
+    void this.call<Platform>('platform_name').then(
       (p) => {
         this.platformName = p;
       },
       () => undefined, // Window chrome falls back to the user agent's guess; nothing else depends on it.
     );
-    await Promise.race([asked, new Promise<void>((resolve) => setTimeout(resolve, waitMs))]);
   }
 
   platform(): Platform {
@@ -201,7 +193,7 @@ export class TauriBackend implements PitcrewBackend {
     return this.run('runner_disk', { runner });
   }
   cleanDisk(runner: string): Promise<CleanupReport> {
-    return this.run('clean_disk', { runner });
+    return this.job('clean_disk', { runner });
   }
   runDetails(runner: string): Promise<RunDetails | null> {
     return this.run('run_details', { runner });
@@ -236,7 +228,7 @@ export class TauriBackend implements PitcrewBackend {
     return this.run('engine_prune_preview', { selection });
   }
   pruneEngine(selection: PruneSelection): Promise<PruneResult> {
-    return this.run('engine_prune', { selection });
+    return this.job('engine_prune', { selection });
   }
   cacheReport(runner: string): Promise<CacheInfo> {
     return this.run('cache_report', { runner });
@@ -245,7 +237,7 @@ export class TauriBackend implements PitcrewBackend {
     return this.run('cache_preview', { runner, limits });
   }
   cleanCache(runner: string, limits: CacheLimits): Promise<CacheCleaned> {
-    return this.run('cache_clean', { runner, limits });
+    return this.job('cache_clean', { runner, limits });
   }
   debriefStatus(): Promise<DebriefStatus> {
     return this.run('debrief_status');
@@ -285,7 +277,7 @@ export class TauriBackend implements PitcrewBackend {
     return this.run('remove_runner', { runner });
   }
   register(request: RegisterRequest): Promise<void> {
-    return this.run('register_runner', { request });
+    return this.job<void>('register_runner', { request });
   }
 
   hasApiToken(serverUrl: string): Promise<boolean> {
@@ -314,15 +306,6 @@ export class TauriBackend implements PitcrewBackend {
     return this.run('open_login_items');
   }
 
-  appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.run('app_update_status');
-  }
-  checkAppUpdate(): Promise<AppUpdateInfo | null> {
-    return this.run('check_app_update');
-  }
-  installAppUpdate(): Promise<void> {
-    return this.run('install_app_update');
-  }
   autostart(): Promise<boolean> {
     return this.run('get_autostart');
   }
@@ -345,9 +328,52 @@ export class TauriBackend implements PitcrewBackend {
 
   private async run<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     try {
-      return await withTimeout(args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args), timeoutFor(cmd));
+      return await (args === undefined ? this.call<T>(cmd) : this.call<T>(cmd, args));
     } catch (e) {
       throw toCommandError(e);
     }
   }
+
+  /**
+   * Long work is a job (rule 10-12): the command registers it and answers with its id at once; its progress and Cancel are
+   * the shell's Jobs list. This waits for the job's end on `paddock://jobs` and reads its result. It never gives up on the
+   * job (no timeout); a cancelled or failed job rejects with the reason.
+   */
+  private async job<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+    const ended = new Map<number, JobEnd>();
+    let waiting: { id: number; resolve: (end: JobEnd) => void } | null = null;
+    const unlisten = await this.listenTo<unknown>(JOBS_EVENT, (e) => {
+      const end = jobEnd(e.payload);
+      if (!end) return;
+      ended.set(end.id, end);
+      if (waiting?.id === end.id) waiting.resolve(end);
+    });
+    try {
+      const id = await this.run<number>(cmd, args);
+      const end = ended.get(id) ?? (await new Promise<JobEnd>((resolve) => (waiting = { id, resolve })));
+      if (end.state === 'failed') throw toCommandError({ code: 'internal', message: end.message });
+      if (end.state === 'cancelled') throw toCommandError({ code: 'cancelled', message: 'Cancelled.' });
+      return (await this.run<T | null>('job_result', { id })) as T;
+    } catch (e) {
+      throw toCommandError(e);
+    } finally {
+      unlisten();
+    }
+  }
+}
+
+/** The event every job snapshot arrives on (the shell's `paddock://jobs`). */
+export const JOBS_EVENT = 'paddock://jobs';
+
+/** How a job ended, from its last snapshot. */
+export type JobEnd = { id: number; state: 'done' } | { id: number; state: 'failed'; message: string } | { id: number; state: 'cancelled' };
+
+/** A terminal job snapshot of the event, or `null` for anything else (the payload is parsed, never trusted). */
+export function jobEnd(payload: unknown): JobEnd | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const p = payload as { id?: unknown; state?: unknown; message?: unknown };
+  if (typeof p.id !== 'number') return null;
+  if (p.state === 'done' || p.state === 'cancelled') return { id: p.id, state: p.state };
+  if (p.state === 'failed') return { id: p.id, state: 'failed', message: typeof p.message === 'string' ? p.message : 'The work failed.' };
+  return null;
 }

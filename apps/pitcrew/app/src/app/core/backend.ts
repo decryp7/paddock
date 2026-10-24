@@ -13,8 +13,6 @@ import type {
   PruneResult,
   PrunePreview,
   PruneSelection,
-  AppUpdateInfo,
-  AppUpdateStatus,
   BackendEvent,
   Config,
   CleanupReport,
@@ -147,11 +145,7 @@ export interface PitcrewBackend {
   /** macOS: opens System Settings ▸ General ▸ Login Items. Pitcrew never switches the item itself. */
   openLoginItems(): Promise<void>;
 
-  // The app itself.
-  appUpdateStatus(): Promise<AppUpdateStatus>;
-  checkAppUpdate(): Promise<AppUpdateInfo | null>;
-  /** Downloads, verifies and installs the update, then restarts Pitcrew. */
-  installAppUpdate(): Promise<void>;
+  // The app itself (updates, About and What's New are the shell's).
   autostart(): Promise<boolean>;
   setAutostart(enabled: boolean): Promise<void>;
   /** Writes the redacted diagnostics bundle and returns its path. */

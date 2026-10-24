@@ -1,5 +1,5 @@
 import type { BackendEvent, Config, RegisterRequest, RunnerConfig } from './api.types';
-import { EVENT_NAME, platformFromUserAgent, TauriBackend, type CommandCall, type EventListen } from './tauri-backend';
+import { EVENT_NAME, jobEnd, platformFromUserAgent, TauriBackend, type CommandCall, type EventListen } from './tauri-backend';
 
 function setup(result: unknown = undefined) {
   const call = vi.fn(async () => result);
@@ -25,7 +25,6 @@ describe('TauriBackend commands', () => {
     ['searchLogs', (b) => b.searchLogs('r', 'q', 10), 'search_logs', { runner: 'r', query: 'q', limit: 10 }],
     ['metrics', (b) => b.metrics(null, 24), 'machine_metrics', { runner: null, rangeHours: 24 }],
     ['disk', (b) => b.disk('r'), 'runner_disk', { runner: 'r' }],
-    ['cleanDisk', (b) => b.cleanDisk('r'), 'clean_disk', { runner: 'r' }],
     ['runDetails', (b) => b.runDetails('r'), 'run_details', { runner: 'r' }],
     ['runnerConfig', (b) => b.runnerConfig('r'), 'runner_config_get', { runner: 'r' }],
     ['previewRunnerConfig', (b) => b.previewRunnerConfig('r', { mode: 'raw', text: 'a' }), 'runner_config_preview', { runner: 'r', edit: { mode: 'raw', text: 'a' } }],
@@ -35,10 +34,8 @@ describe('TauriBackend commands', () => {
     ['keepProcess', (b) => b.keepProcess('r', 7, 5, { amount: 1, unit: 'hours' }), 'runner_process_keep', { runner: 'r', pid: 7, startedAt: 5, extra: { amount: 1, unit: 'hours' } }],
     ['engineReport', (b) => b.engineReport(), 'engine_report', undefined],
     ['previewEnginePrune', (b) => b.previewEnginePrune({ kinds: ['volumes'], olderThanDays: 0 }), 'engine_prune_preview', { selection: { kinds: ['volumes'], olderThanDays: 0 } }],
-    ['pruneEngine', (b) => b.pruneEngine({ kinds: ['volumes'], olderThanDays: 0 }), 'engine_prune', { selection: { kinds: ['volumes'], olderThanDays: 0 } }],
     ['cacheReport', (b) => b.cacheReport('r'), 'cache_report', { runner: 'r' }],
     ['previewCacheClean', (b) => b.previewCacheClean('r', { maxMb: 1, maxAgeDays: 0 }), 'cache_preview', { runner: 'r', limits: { maxMb: 1, maxAgeDays: 0 } }],
-    ['cleanCache', (b) => b.cleanCache('r', { maxMb: 1, maxAgeDays: 0 }), 'cache_clean', { runner: 'r', limits: { maxMb: 1, maxAgeDays: 0 } }],
     ['debriefStatus', (b) => b.debriefStatus(), 'debrief_status', undefined],
     ['openInDebrief', (b) => b.openInDebrief('r', 'run 1', 1, 2), 'open_in_debrief', { runner: 'r', label: 'run 1', startedAt: 1, finishedAt: 2 }],
     ['channels', (b) => b.channels(), 'channels_get', undefined],
@@ -51,7 +48,6 @@ describe('TauriBackend commands', () => {
     ['saveSettings', (b) => b.saveSettings({ schema_version: 1 } as Config), 'save_settings', { config: { schema_version: 1 } }],
     ['addRunner', (b) => b.addRunner({ name: 'x' } as RunnerConfig), 'add_runner', { runner: { name: 'x' } }],
     ['removeRunner', (b) => b.removeRunner('r'), 'remove_runner', { runner: 'r' }],
-    ['register', (b) => b.register({ runner: 'x' } as RegisterRequest), 'register_runner', { request: { runner: 'x' } }],
     ['hasApiToken', (b) => b.hasApiToken('https://g'), 'has_api_token', { serverUrl: 'https://g' }],
     ['setApiToken', (b) => b.setApiToken('https://g', 't'), 'set_api_token', { serverUrl: 'https://g', token: 't' }],
     ['clearApiToken', (b) => b.clearApiToken('https://g'), 'clear_api_token', { serverUrl: 'https://g' }],
@@ -60,9 +56,6 @@ describe('TauriBackend commands', () => {
     ['uninstallService', (b) => b.uninstallService(), 'uninstall_service', undefined],
     ['repairService', (b) => b.repairService(), 'repair_service', undefined],
     ['openLoginItems', (b) => b.openLoginItems(), 'open_login_items', undefined],
-    ['appUpdateStatus', (b) => b.appUpdateStatus(), 'app_update_status', undefined],
-    ['checkAppUpdate', (b) => b.checkAppUpdate(), 'check_app_update', undefined],
-    ['installAppUpdate', (b) => b.installAppUpdate(), 'install_app_update', undefined],
     ['autostart', (b) => b.autostart(), 'get_autostart', undefined],
     ['setAutostart', (b) => b.setAutostart(true), 'set_autostart', { enabled: true }],
     ['exportDiagnostics', (b) => b.exportDiagnostics(), 'export_diagnostics', undefined],
@@ -115,11 +108,11 @@ describe('TauriBackend platform', () => {
     expect(backend.platform()).toBe(platformFromUserAgent(navigator.userAgent));
   });
 
-  it('never blocks start-up when the shell does not answer at all (a blank window otherwise)', async () => {
+  it('never waits for the shell at start-up (a blank window otherwise), and a late answer still counts', async () => {
     let answer: (p: string) => void = () => undefined;
     const call = vi.fn(() => new Promise((resolve) => (answer = resolve)));
     const backend = new TauriBackend(call as unknown as CommandCall, vi.fn() as unknown as EventListen);
-    await backend.init(20);
+    await backend.init();
     expect(backend.platform()).toBe(platformFromUserAgent(navigator.userAgent));
     answer('linux');
     await Promise.resolve();
@@ -246,5 +239,77 @@ describe('TauriBackend.navigations', () => {
     });
     expect(() => new TauriBackend(vi.fn() as unknown as CommandCall, failing as unknown as EventListen).navigations(() => undefined)()).not.toThrow();
     await flush();
+  });
+});
+
+describe('TauriBackend jobs (long work never times out, rule 12)', () => {
+  /** A backend whose job command answers with `id`, and a way to send job snapshots as the shell does. */
+  function jobSetup(id: number, result: unknown) {
+    const handlers: ((e: { payload: unknown }) => void)[] = [];
+    const unlisten = vi.fn();
+    const listen = vi.fn(async (_event: string, h: (e: { payload: unknown }) => void) => {
+      handlers.push(h);
+      return unlisten;
+    });
+    const call = vi.fn(async (cmd: string) => (cmd === 'job_result' ? result : id));
+    const backend = new TauriBackend(call as unknown as CommandCall, listen as unknown as EventListen);
+    const send = (payload: unknown) => handlers.forEach((h) => h({ payload }));
+    return { backend, call, listen, send, unlisten };
+  }
+  const flush = () => new Promise((r) => setTimeout(r));
+
+  const jobs: [string, (b: TauriBackend) => Promise<unknown>, string, Record<string, unknown>][] = [
+    ['cleanDisk', (b) => b.cleanDisk('r'), 'clean_disk', { runner: 'r' }],
+    ['pruneEngine', (b) => b.pruneEngine({ kinds: ['volumes'], olderThanDays: 0 }), 'engine_prune', { selection: { kinds: ['volumes'], olderThanDays: 0 } }],
+    ['cleanCache', (b) => b.cleanCache('r', { maxMb: 1, maxAgeDays: 0 }), 'cache_clean', { runner: 'r', limits: { maxMb: 1, maxAgeDays: 0 } }],
+    ['register', (b) => b.register({ runner: 'x' } as RegisterRequest), 'register_runner', { request: { runner: 'x' } }],
+  ];
+
+  it.each(jobs)('%s starts a job, waits for its end and reads its result', async (_name, fn, cmd, args) => {
+    const { backend, call, send, unlisten } = jobSetup(7, 'the result');
+    const done = fn(backend);
+    await flush();
+    expect(call).toHaveBeenCalledWith(cmd, args);
+    // Other jobs and progress do not end it.
+    send({ id: 8, state: 'done' });
+    send({ id: 7, state: 'running', phase: null });
+    await flush();
+    let settled = false;
+    void done.then(() => (settled = true));
+    await flush();
+    expect(settled).toBe(false);
+    send({ id: 7, state: 'done' });
+    expect(await done).toBe('the result');
+    expect(call).toHaveBeenCalledWith('job_result', { id: 7 });
+    expect(unlisten).toHaveBeenCalled();
+  });
+
+  it('keeps a job that ended before its id arrived', async () => {
+    const { backend, send } = jobSetup(3, 'r');
+    const handlersReady = flush();
+    const done = backend.cleanDisk('r');
+    await handlersReady;
+    send({ id: 3, state: 'done' });
+    expect(await done).toBe('r');
+  });
+
+  it('rejects with the reason when the job failed or was cancelled', async () => {
+    const failed = jobSetup(1, null);
+    const a = failed.backend.cleanDisk('r');
+    await flush();
+    failed.send({ id: 1, state: 'failed', message: 'the disk is gone' });
+    await expect(a).rejects.toEqual({ code: 'internal', message: 'the disk is gone' });
+    const cancelled = jobSetup(2, null);
+    const b = cancelled.backend.cleanDisk('r');
+    await flush();
+    cancelled.send({ id: 2, state: 'cancelled', reason: 'user' });
+    await expect(b).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
+  it('parses job payloads, never trusting them', () => {
+    expect(jobEnd(null)).toBeNull();
+    expect(jobEnd({ id: 'x', state: 'done' })).toBeNull();
+    expect(jobEnd({ id: 1, state: 'running' })).toBeNull();
+    expect(jobEnd({ id: 1, state: 'failed' })).toEqual({ id: 1, state: 'failed', message: 'The work failed.' });
   });
 });

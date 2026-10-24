@@ -1,7 +1,6 @@
 import { TestBed } from '@angular/core/testing';
-import { timeoutError } from '../../core/call-timeout';
 import { MockBackend } from '../../core/mock-backend';
-import { RegisterLauncher } from '../../layout/register-launcher';
+import { RegisterLauncher } from '../../shell/register-launcher';
 import { appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
 import { DashboardPage } from './dashboard-page';
 
@@ -144,17 +143,18 @@ describe('DashboardPage', () => {
     expect(el.querySelector('pc-machine-tiles')).not.toBeNull();
   });
 
-  it('shows a timed-out request as an inline error with Retry instead of skeletons forever', async () => {
+  it('shows a failed request as an inline error with Retry instead of skeletons forever', async () => {
     configure();
-    vi.spyOn(mock, 'activity').mockRejectedValue(timeoutError(15_000));
+    vi.spyOn(mock, 'activity').mockRejectedValue({ code: 'serviceUnavailable', message: 'The service is not running.' });
     const { f, el } = await mount();
     expect(text(el)).toContain('Activity could not be loaded');
-    expect(text(el)).toContain('did not answer within 15 seconds');
+    expect(text(el)).toContain('The service is not running.');
     vi.mocked(mock.activity).mockRestore();
     byText<HTMLButtonElement>(el, 'pc-load-state button', 'Retry')!.click();
     await settle(f, 6);
     expect(text(el)).not.toContain('Activity could not be loaded');
   });
+
 
   it('refreshes on a timer while visible', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });

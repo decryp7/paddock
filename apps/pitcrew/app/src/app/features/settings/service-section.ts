@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { MatIcon } from '@angular/material/icon';
-import { Dialog } from '@angular/cdk/dialog';
 import { ClockService } from '../../core/clock.service';
 import { formatDuration } from '../../shared/format';
 import { confirmAction } from '../../shared/ui/confirm-dialog';
@@ -88,7 +88,7 @@ export class ServiceSection {
   protected readonly service = inject(ServiceStore);
   protected readonly status = inject(StatusStore);
   private readonly clock = inject(ClockService);
-  private readonly dialog = inject(Dialog);
+  private readonly ports = inject(SHELL_PORTS);
 
   protected readonly isMac = computed(() => this.service.registration().value?.platform === 'macos');
   protected readonly up = computed(() => {
@@ -101,7 +101,7 @@ export class ServiceSection {
   }
 
   protected async uninstall(): Promise<void> {
-    const ok = await confirmAction(this.dialog, {
+    const ok = await confirmAction(this.ports, {
       title: 'Uninstall the Pitcrew service?',
       body: 'The runners stop after their current jobs and are no longer restarted or updated. Their folders, registrations and pitcrew.toml stay on disk; installing the service again picks them up.',
       confirm: 'Uninstall service',

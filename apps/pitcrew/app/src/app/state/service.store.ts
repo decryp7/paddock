@@ -5,7 +5,7 @@ import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { idle, pending, settle, type Loadable } from './loadable';
 import { StatusStore } from './status.store';
-import { ToastStore } from './toast.store';
+import { Notify } from './notify';
 
 /** How often the state is read again while the repair works. */
 export const REPAIR_POLL_MS = 3000;
@@ -30,7 +30,7 @@ export const ServiceStore = signalStore(
       return s !== null && s.platform === 'macos' && !s.disabledInLoginItems && !s.running && s.repair?.state !== 'working';
     }),
   })),
-  withMethods((store, backend = inject(BACKEND), status = inject(StatusStore), toasts = inject(ToastStore)) => {
+  withMethods((store, backend = inject(BACKEND), status = inject(StatusStore), toasts = inject(Notify)) => {
     let poll: ReturnType<typeof setTimeout> | null = null;
     let downChecks = 0;
     const isDownOnMac = (): boolean => {

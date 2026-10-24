@@ -187,14 +187,3 @@
   --danger-soft: color-mix(in srgb, var(--danger) 14%, var(--surface));
   --neutral-soft: color-mix(in srgb, var(--neutral) 14%, var(--surface));
 }
-
-/* Windows 11 Mica: the webview is transparent, so the window chrome lets Mica through while panes stay opaque. */
-:root[data-effects='mica'] {
-  --canvas: transparent;
-  --sidebar-bg: color-mix(in srgb, var(--surface-3) 35%, transparent);
-}
-
-/* macOS: the hidden title bar leaves the traffic lights over the top-left corner of the sidebar. */
-:root[data-platform='macos'] {
-  --titlebar-inset: 28px;
-}
