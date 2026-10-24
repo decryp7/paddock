@@ -2998,6 +2998,7 @@ dependencies = [
  "paddock-commands",
  "paddock-env",
  "paddock-proc",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
@@ -3012,6 +3013,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-jobs",
+ "paddock-proc",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3092,6 +3094,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-pitwall"
+version = "0.1.0"
+dependencies = [
+ "paddock-env",
+ "paddock-health",
+ "paddock-proc",
+ "paddock-secrets",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
@@ -3150,18 +3165,22 @@ dependencies = [
 name = "paddock-shell"
 version = "0.2.0"
 dependencies = [
+ "log",
  "paddock-channels",
  "paddock-commands",
  "paddock-diag",
  "paddock-dialogs",
  "paddock-download",
+ "paddock-env",
  "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-menu",
  "paddock-packs",
+ "paddock-pitwall",
  "paddock-service",
  "paddock-settings",
+ "paddock-siblings",
  "paddock-startup",
  "paddock-storage",
  "paddock-updater",
@@ -3207,6 +3226,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-siblings"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-window",
+ "paddock-workspace-hack",
+ "serde",
+]
+
+[[package]]
 name = "paddock-startup"
 version = "0.1.0"
 dependencies = [
@@ -3234,6 +3265,15 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+]
+
+[[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "tempfile",
 ]
 
 [[package]]
@@ -4300,7 +4340,9 @@ version = "0.1.0"
 dependencies = [
  "log",
  "paddock-env",
+ "paddock-proc",
  "paddock-service",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "tempfile",

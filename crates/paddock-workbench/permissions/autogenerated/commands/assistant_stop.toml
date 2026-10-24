@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-assistant-stop"
+description = "Enables the assistant_stop command without any pre-configured scope."
+commands.allow = ["assistant_stop"]
+
+[[permission]]
+identifier = "deny-assistant-stop"
+description = "Denies the assistant_stop command without any pre-configured scope."
+commands.deny = ["assistant_stop"]

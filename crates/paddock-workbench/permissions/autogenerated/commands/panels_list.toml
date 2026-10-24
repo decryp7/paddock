@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-panels-list"
+description = "Enables the panels_list command without any pre-configured scope."
+commands.allow = ["panels_list"]
+
+[[permission]]
+identifier = "deny-panels-list"
+description = "Denies the panels_list command without any pre-configured scope."
+commands.deny = ["panels_list"]

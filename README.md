@@ -69,6 +69,7 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 | Release practices | [`docs/lessons.md`](docs/lessons.md), [`CHANGELOG.md`](CHANGELOG.md) | tag workflow, signed updates, `latest.json`, the release script | follow the lessons |
 | Rust crates | [`crates/`](crates/README.md) | shared Rust code. Planned: `paddock-mcp` (MCP servers across the family, ADR 0007), the plugin platform (host, IPC and API, extracted from Debrief's ADR 0017 model), `paddock-pitwall` (the Pitwall client) and `paddock-testplan` (the `.sighterplan` format) | git dependency on a tag |
 | Paddock Shell Demo | [`apps/shell-demo/`](apps/shell-demo/README.md) | the shell demo as an installable app on the `paddock-shell` plugin, to check the shared UI on every OS; the starter of new apps (`node scripts/new-app.mjs <id> "<Name>"`) | installers from a `shell-demo-v*` tag |
+| Paddock Workbench Demo | [`apps/workbench-demo/`](apps/workbench-demo/README.md) | the workbench demo (dock, pop-out panels, assistant on Pitwall) as an installable app on the `paddock-shell` and `paddock-workbench` plugins; the starter of new IDE-style apps | installers from a `workbench-demo-v*` tag |
 | Rules | [`docs/rules.md`](docs/rules.md) | the binding rules for every app and agent | follow them; each app's AGENTS.md carries them |
 | Lessons | [`docs/lessons.md`](docs/lessons.md) | what building Debrief and Pitcrew taught | read before starting an app |
 
@@ -132,7 +133,8 @@ entry point with what the tag would publish, and uploads nothing.
 
 Paddock Shell Demo has its own tags, `shell-demo-v<version>` (its version is `apps/shell-demo/src-tauri/Cargo.toml`'s):
 `.gitea/workflows/shell-demo-release.yml` builds its installers and creates its release. A `v*` tag never builds it, and
-its tag never publishes the packages.
+its tag never publishes the packages. Paddock Workbench Demo likewise: `workbench-demo-v<version>`,
+`.gitea/workflows/workbench-demo-release.yml`.
 
 ## Licence
 

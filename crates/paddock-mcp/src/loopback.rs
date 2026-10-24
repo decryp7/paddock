@@ -156,12 +156,8 @@ pub fn serve_loopback(
                 if let Ok(read_half) = stream.try_clone() {
                     let mut reader = BufReader::new(read_half);
                     if let Some(client) = handshake(&mut stream, &mut reader, keys.as_ref()) {
-                        let _ = serve_lines(
-                            &server,
-                            &mut Session::new(&client),
-                            &mut reader,
-                            &mut stream,
-                        );
+                        let _ =
+                            serve_lines(&server, &Session::new(&client), &mut reader, &mut stream);
                     }
                 }
                 // The accept loop keeps a second handle to the socket, so closing this one is not enough to end the connection.

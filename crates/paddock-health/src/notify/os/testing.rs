@@ -11,6 +11,8 @@ pub struct FakeToaster {
     sink: Mutex<Option<ClickSink>>,
     failing: Mutex<Option<String>>,
     permission: Mutex<Option<Permission>>,
+    after_request: Mutex<Option<Permission>>,
+    settings_opened: Mutex<u32>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -31,6 +33,16 @@ impl FakeToaster {
     /// What `permission` answers.
     pub fn set_permission(&self, permission: Permission) {
         *lock(&self.permission) = Some(permission);
+    }
+
+    /// What the permission becomes once `request_permission` is called.
+    pub fn set_permission_after_request(&self, permission: Permission) {
+        *lock(&self.after_request) = Some(permission);
+    }
+
+    /// How often the system's notification settings were opened.
+    pub fn settings_opened(&self) -> u32 {
+        *lock(&self.settings_opened)
     }
 
     /// Plays a click from the OS. False when nobody subscribed.
@@ -55,5 +67,17 @@ impl Toaster for FakeToaster {
 
     fn permission(&self) -> Permission {
         lock(&self.permission).unwrap_or(Permission::Unknown)
+    }
+
+    fn request_permission(&self) -> Permission {
+        if let Some(p) = *lock(&self.after_request) {
+            *lock(&self.permission) = Some(p);
+        }
+        self.permission()
+    }
+
+    fn open_system_settings(&self) -> Result<(), ToastError> {
+        *lock(&self.settings_opened) += 1;
+        Ok(())
     }
 }

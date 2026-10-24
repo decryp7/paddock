@@ -89,6 +89,19 @@ pub trait Toaster: Send + Sync {
     fn permission(&self) -> Permission {
         Permission::Unknown
     }
+
+    /// Asks the OS for permission (it may show its prompt once) and answers what it allows now. The default reads the
+    /// permission again: systems that ask only at the first toast have nothing to request.
+    fn request_permission(&self) -> Permission {
+        self.permission()
+    }
+
+    /// Opens the system's notification settings, where a refusal is undone (the app cannot switch it on for the user).
+    fn open_system_settings(&self) -> Result<(), ToastError> {
+        Err(ToastError(
+            "Open your system's notification settings and allow notifications for this app.".into(),
+        ))
+    }
 }
 
 /// What offering a message did.

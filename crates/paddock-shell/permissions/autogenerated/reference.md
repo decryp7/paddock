@@ -1396,6 +1396,136 @@ Denies the settings_set command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-setup-act`
+
+</td>
+<td>
+
+Enables the setup_act command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-setup-act`
+
+</td>
+<td>
+
+Denies the setup_act command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-setup-finish`
+
+</td>
+<td>
+
+Enables the setup_finish command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-setup-finish`
+
+</td>
+<td>
+
+Denies the setup_finish command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-setup-repair`
+
+</td>
+<td>
+
+Enables the setup_repair command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-setup-repair`
+
+</td>
+<td>
+
+Denies the setup_repair command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-setup-skip`
+
+</td>
+<td>
+
+Enables the setup_skip command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-setup-skip`
+
+</td>
+<td>
+
+Denies the setup_skip command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-setup-state`
+
+</td>
+<td>
+
+Enables the setup_state command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-setup-state`
+
+</td>
+<td>
+
+Denies the setup_state command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-shell-version`
 
 </td>
