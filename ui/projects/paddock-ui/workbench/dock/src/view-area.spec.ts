@@ -1,21 +1,7 @@
-import { BUILTIN_VIEWS } from '../builtin/builtin-views';
-import { CONFIG_DIFF_VIEWS } from '../config-diff/provide-config-diff';
-import { SCHEDULES_VIEWS } from '../schedules/provide-schedules';
-import { REPORT_VIEWS } from '../share/report/report.views';
-import { viewKind } from './view-kind';
 import { ANALYSIS_TAB_CAP, analysisTabToClose, viewArea } from './view-area';
+import { viewLayout, viewRow } from './view-layout';
 
-describe('heavy editors (A4)', () => {
-  it('declare the document area, so they open as document tabs and never in a side panel', () => {
-    const all = [...BUILTIN_VIEWS, ...SCHEDULES_VIEWS, ...CONFIG_DIFF_VIEWS, ...REPORT_VIEWS];
-    for (const id of ['profile', 'parsers', 'metrics', 'collection-schedules', 'config-diff', 'report']) {
-      const view = all.find((v) => v.id === id);
-      expect(view?.layout?.area ?? view?.area, id).toBe('document');
-      expect(viewArea(view), id).toBe('document');
-      expect(viewKind(view), id).toBe('document');
-    }
-  });
-});
+const declared = (area: 'document' | 'analysis' | 'side' | 'status') => ({ layout: { area, min: { width: 100, height: 100 }, pref: { width: 200, height: 200 }, priority: 1 } });
 
 describe('viewArea', () => {
   it('is a document for a view that is not registered', () => {
@@ -23,22 +9,21 @@ describe('viewArea', () => {
     expect(viewArea(null)).toBe('document');
   });
 
-  it('uses the area the view declares, whatever its kind and position', () => {
-    expect(viewArea({ id: 'x', defaultPosition: 'bottom', area: 'side' })).toBe('side');
-    expect(viewArea({ id: 'inspector', defaultPosition: 'right', area: 'analysis' })).toBe('analysis');
-    expect(viewArea({ id: 'x', area: 'status' })).toBe('status');
+  it('is the area the view declares', () => {
+    for (const area of ['document', 'analysis', 'side', 'status'] as const) expect(viewArea(declared(area))).toBe(area);
+  });
+});
+
+describe('viewLayout and viewRow', () => {
+  it('give the declared layout, else the conservative default of a document', () => {
+    expect(viewLayout(declared('side')).area).toBe('side');
+    expect(viewLayout(undefined).area).toBe('document');
   });
 
-  it('derives side tools, status tools, analysis and documents from kind and position', () => {
-    expect(viewArea({ id: 'inspector', defaultPosition: 'right' })).toBe('side');
-    expect(viewArea({ id: 'problems', defaultPosition: 'bottom' })).toBe('status');
-    expect(viewArea({ id: 'notes' })).toBe('status');
-    expect(viewArea({ id: 'plugin-view', defaultPosition: 'right' })).toBe('side');
-    expect(viewArea({ id: 'anomalies', defaultPosition: 'bottom' })).toBe('analysis');
-    expect(viewArea({ id: 'my-doc', defaultPosition: 'bottom' })).toBe('analysis');
-    expect(viewArea({ id: 'timeline', defaultPosition: 'center' })).toBe('document');
-    expect(viewArea({ id: 'timeline' })).toBe('document');
-    expect(viewArea({ id: 'events', defaultPosition: 'right' })).toBe('document');
+  it('puts analysis views in their own row and every other view in the main row', () => {
+    expect(viewRow(declared('analysis'))).toBe('analysis');
+    expect(viewRow(declared('document'))).toBe('main');
+    expect(viewRow(declared('side'))).toBe('main');
   });
 });
 

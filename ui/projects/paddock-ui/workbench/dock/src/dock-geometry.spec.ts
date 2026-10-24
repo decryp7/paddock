@@ -12,7 +12,7 @@ import {
   Rect,
   resolveGuideDrop,
 } from './dock-geometry';
-import { at } from '../../testing/must';
+import { at } from './must.spec-helper';
 
 const r = (x: number, y: number, width: number, height: number): Rect => ({ x, y, width, height });
 const ALL = new Set(['center', 'left', 'right', 'top', 'bottom']);

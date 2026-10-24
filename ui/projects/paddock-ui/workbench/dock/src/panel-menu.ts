@@ -56,7 +56,7 @@ export function panelMenu(f: PanelFacts): PanelMenuItem[] {
     items.push({ action: 'autoHide', label: $localize`:@@pd.wb.dock.panelMenu.autoHide:Auto hide` });
   }
   items.push({ action: f.pinnedTab ? 'unpinTab' : 'pinTab', label: f.pinnedTab ? $localize`:@@pd.wb.dock.panelMenu.unpinTab:Unpin tab` : $localize`:@@pd.wb.dock.panelMenu.pinTab:Pin tab` });
-  items.push({ action: 'close', label: $localize`:Menu item@@pd.wb.dock.panelMenu.close:Close`, disabled: f.closable === false });
+  items.push({ action: 'close', label: $localize`:Menu item@@pd.wb.dock.panelMenu.close:Close`, ...(f.closable === false ? { disabled: true } : {}) });
   if (f.kind === 'document') {
     items.push(
       { action: 'closeOthers', label: $localize`:@@pd.wb.dock.panelMenu.closeOthers:Close all but this`, disabled: !f.hasSiblings },

@@ -1,5 +1,5 @@
 import { AutoHideItem, AutoHideState, autoHideReduce, clampSize, EMPTY_AUTO_HIDE, itemsOn, MAX_FLYOUT, MIN_FLYOUT, sanitizeAutoHide, AUTO_HIDE_SIDES, chooseSide, isAutoHideSide, sanitizeSides } from './auto-hide';
-import { at } from '../../testing/must';
+import { at } from './must.spec-helper';
 
 const item = (id: string, side: AutoHideItem['side'] = 'left', size = 300): AutoHideItem => ({
   id,

@@ -1,20 +1,19 @@
 import { EMPTY_EXTRAS, SavedLayout, toEnvelope } from './layout-store';
 import {
   cleanLayoutName,
-  LocalStorageNamedLayoutStore,
   MAX_LAYOUT_NAME,
   MAX_NAMED_LAYOUTS,
   moveLayout,
   NamedLayout,
   NamedLayouts,
-  NamedLayoutStore,
   parseNamedLayouts,
   removeLayout,
   renameLayout,
   serializeNamedLayouts,
   upsertLayout,
 } from './named-layouts';
-import { at } from '../../testing/must';
+import { at } from './must.spec-helper';
+import { type DockLayoutStore, InMemoryDockLayoutStore } from './dock-store';
 
 const grid = { grid: { root: { type: 'leaf', data: { views: [], id: '1' } }, height: 1, width: 1, orientation: 'HORIZONTAL' }, panels: {} } as never;
 const saved = (): SavedLayout => ({ layout: grid, extras: { ...EMPTY_EXTRAS } });
@@ -149,99 +148,78 @@ describe('parseNamedLayouts', () => {
 
   it('round-trips through serialize', () => {
     const list = [{ ...nl('a', 10), saved: { layout: grid, extras: { ...EMPTY_EXTRAS, pinnedTabs: ['p'] } } }, nl('b', 20)];
-    expect(parseNamedLayouts(JSON.parse(serializeNamedLayouts(list)))).toEqual(list);
-  });
-});
-
-describe('LocalStorageNamedLayoutStore', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    localStorage.clear();
-  });
-
-  it('saves and loads through localStorage under its key', () => {
-    const store = new LocalStorageNamedLayoutStore('test.layouts');
-    expect(store.load()).toEqual([]);
-    store.save([nl('a', 3)]);
-    expect(localStorage.getItem('test.layouts')).toBeTruthy();
-    expect(new LocalStorageNamedLayoutStore('test.layouts').load()).toEqual([nl('a', 3)]);
-  });
-
-  it('loads an empty list from corrupt JSON or foreign data', () => {
-    localStorage.setItem('k', '{not json');
-    expect(new LocalStorageNamedLayoutStore('k').load()).toEqual([]);
-    localStorage.setItem('k', '{"version":9,"layouts":[]}');
-    expect(new LocalStorageNamedLayoutStore('k').load()).toEqual([]);
-  });
-
-  it('never throws when storage does', () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('denied');
-    });
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('full');
-    });
-    const store = new LocalStorageNamedLayoutStore('k');
-    expect(store.load()).toEqual([]);
-    expect(() => store.save([nl('a')])).not.toThrow();
+    expect(parseNamedLayouts(JSON.parse(JSON.stringify(serializeNamedLayouts(list))))).toEqual(list);
   });
 });
 
 describe('NamedLayouts', () => {
-  class FakeStore implements NamedLayoutStore {
-    saves: NamedLayout[][] = [];
-    constructor(public initial: NamedLayout[] = []) {}
-    load() {
-      return this.initial;
-    }
-    save(list: readonly NamedLayout[]) {
-      this.saves.push([...list]);
-    }
-  }
+  const KEY = 'wb.layouts';
+  const make = async (initial: NamedLayout[] = [], store = new InMemoryDockLayoutStore()) => {
+    if (initial.length) await store.save(KEY, serializeNamedLayouts(initial));
+    const layouts = new NamedLayouts(store, KEY);
+    await layouts.ready;
+    return { layouts, store };
+  };
+  const stored = async (store: InMemoryDockLayoutStore) => parseNamedLayouts(await store.load(KEY));
 
-  it('starts from the stored list', () => {
-    expect(names(new NamedLayouts(new FakeStore([nl('a')])).list())).toEqual(['a']);
+  it('starts from the stored list', async () => {
+    expect(names((await make([nl('a')])).layouts.list())).toEqual(['a']);
   });
 
-  it('saves under the cleaned name and persists', () => {
-    const store = new FakeStore();
-    const layouts = new NamedLayouts(store);
+  it('starts empty from corrupt or foreign data and from a store that fails', async () => {
+    const store = new InMemoryDockLayoutStore();
+    store.entries.set(KEY, '{"version":9,"layouts":[]}');
+    expect((await make([], store)).layouts.list()).toEqual([]);
+    const failing: DockLayoutStore = { load: () => Promise.reject(new Error('away')), save: () => Promise.reject(new Error('away')) };
+    const layouts = new NamedLayouts(failing, KEY);
+    await layouts.ready;
+    expect(layouts.list()).toEqual([]);
+    expect(layouts.save('a', saved(), 1)).toBe('a');
+  });
+
+  it('keeps a layout saved before the stored list was read', async () => {
+    const store = new InMemoryDockLayoutStore();
+    await store.save(KEY, serializeNamedLayouts([nl('old')]));
+    const layouts = new NamedLayouts(store, KEY);
+    layouts.save('new', saved(), 3);
+    await layouts.ready;
+    expect(names(layouts.list())).toEqual(['old', 'new']);
+  });
+
+  it('saves under the cleaned name and persists', async () => {
+    const { layouts, store } = await make();
     expect(layouts.save('  Debug\n', saved(), 42)).toBe('Debug');
     expect(layouts.list()[0]).toMatchObject({ name: 'Debug', savedAt: 42 });
-    expect(names(at(store.saves, 0))).toEqual(['Debug']);
+    expect(names(await stored(store))).toEqual(['Debug']);
   });
 
-  it('refuses an empty name without touching the store', () => {
-    const store = new FakeStore();
-    const layouts = new NamedLayouts(store);
+  it('refuses an empty name without touching the store', async () => {
+    const { layouts, store } = await make();
     expect(layouts.save('  ', saved())).toBeNull();
     expect(layouts.list()).toEqual([]);
-    expect(store.saves).toEqual([]);
+    expect(store.entries.size).toBe(0);
   });
 
-  it('saving the same name again replaces it', () => {
-    const layouts = new NamedLayouts(new FakeStore());
+  it('saving the same name again replaces it', async () => {
+    const { layouts } = await make();
     layouts.save('a', saved(), 1);
     layouts.save('A', saved(), 2);
     expect(layouts.list().map((l) => [l.name, l.savedAt])).toEqual([['A', 2]]);
   });
 
-  it('renames, reporting whether anything changed', () => {
-    const store = new FakeStore([nl('a'), nl('b')]);
-    const layouts = new NamedLayouts(store);
+  it('renames, reporting whether anything changed', async () => {
+    const { layouts, store } = await make([nl('a'), nl('b')]);
     expect(layouts.rename('a', 'c')).toBe(true);
     expect(names(layouts.list())).toEqual(['c', 'b']);
-    expect(store.saves).toHaveLength(1);
+    expect(names(await stored(store))).toEqual(['c', 'b']);
     expect(layouts.rename('c', 'b')).toBe(false);
     expect(layouts.rename('c', ' ')).toBe(false);
     expect(layouts.rename('c', 'c')).toBe(false);
     expect(layouts.rename('zzz', 'q')).toBe(false);
-    expect(store.saves).toHaveLength(1);
   });
 
-  it('moves, removes, finds and indexes layouts', () => {
-    const store = new FakeStore([nl('a'), nl('b'), nl('c')]);
-    const layouts = new NamedLayouts(store);
+  it('moves, removes, finds and indexes layouts', async () => {
+    const { layouts, store } = await make([nl('a'), nl('b'), nl('c')]);
     layouts.move('c', -1);
     expect(names(layouts.list())).toEqual(['a', 'c', 'b']);
     expect(layouts.at(1)?.name).toBe('a');
@@ -252,6 +230,6 @@ describe('NamedLayouts', () => {
     expect(layouts.find('zzz')).toBeUndefined();
     layouts.remove('a');
     expect(names(layouts.list())).toEqual(['c', 'b']);
-    expect(names(at(store.saves, store.saves.length - 1))).toEqual(['c', 'b']);
+    expect(names(await stored(store))).toEqual(['c', 'b']);
   });
 });
