@@ -9,6 +9,7 @@ publish = ["decryp7"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 proptest = "1"

@@ -5,7 +5,7 @@
 //! Windows: also embeds the Common Controls v6 manifest into this crate's test binaries. With `native-dialogs` they can
 //! link `tauri-plugin-dialog`, which imports `TaskDialogIndirect` (Common Controls v6 only); Tauri embeds that manifest
 //! into an app binary only, so without it a test binary does not load (STATUS_ENTRYPOINT_NOT_FOUND). Dependents are not
-//! affected. Checked on every OS by `paddock-startup/tests/common_controls_manifest.rs`.
+//! affected. Checked on every OS by `paddock-startup/tests/it/common_controls_manifest.rs`.
 
 include!("src/command_names.rs");
 

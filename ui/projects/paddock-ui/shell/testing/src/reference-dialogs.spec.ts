@@ -4,6 +4,7 @@ import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from '../../../../shell-dem
 import { APP_COMMANDS } from '../../../../shell-demo/src/app/generated/app-commands';
 import { assertDialogBoots, dialogTableProblems } from './dialog-harness';
 import { SHELL_COMMANDS, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { CHANNELS_COMMANDS } from '@decryp7/paddock-ui/shell/channels';
 
 // The shell demo's dialogs (one per kind) through the boot-every-dialog harness, its contract file and its command table:
 // what every app runs over its own registry (ADR 0009 §4).
@@ -34,7 +35,7 @@ describe('shell-demo dialogs', () => {
         providers: dialogBaseProviders,
         baseCommands: DIALOG_BASE_COMMANDS,
         answers: { window_ready: { recovered: null, ui: null } },
-        inputs: { 'sd.rename': { current: 'Demo' } },
+        inputs: { 'sd.rename': { current: 'Demo' }, 'pd.channels.secret': { channelId: 'slack', label: 'Slack', kind: 'token' } },
       });
       expect(report.sent).toContain('window_ready');
       if (def.id === 'sd.inspector') expect(report.sent).toContain('demo_status');
@@ -45,7 +46,7 @@ describe('shell-demo dialogs', () => {
 
   it('declares only commands of its table that dialogs may call', () => {
     // The app's own table and the shell plugin's (every shell crate's commands, plan S17).
-    expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...SHELL_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
+    expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...SHELL_COMMANDS, ...CHANNELS_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
   });
 
   // Regenerate with PADDOCK_WRITE_CONTRACTS=1 npx ng test paddock-ui --watch=false --include=**/reference-dialogs.spec.ts

@@ -141,7 +141,8 @@ describe('pd-notification-host', () => {
     await f.whenStable();
     clock.advance(900);
     expect(dismiss).not.toHaveBeenCalled();
-    clock.advance(100);
+    // The host looks every 250 ms: its next look after the new ttl ran out (at 1900) is at 2000.
+    clock.advance(200);
     expect(dismiss).toHaveBeenCalled();
   });
 
@@ -178,7 +179,7 @@ describe('pd-notification-host', () => {
     await f.whenStable();
     clock.advance(TOAST_MS * 2);
     expect(dismiss).not.toHaveBeenCalled();
-    expect(clock.timers.size).toBe(0);
+    expect(clock.ticking).toBe(0);
     // A toast that turns into an error stops timing out.
     list.set([n('k', { dismiss })]);
     await f.whenStable();

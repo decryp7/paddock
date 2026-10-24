@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "outDir": "../../out-tsc/workbench-demo", "types": ["@angular/localize"] },
+  "include": ["src/**/*.ts"],
+  "exclude": ["**/*.spec.ts"]
+}

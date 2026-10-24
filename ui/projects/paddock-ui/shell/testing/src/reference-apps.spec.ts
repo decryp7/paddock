@@ -87,7 +87,7 @@ interface NodeFs {
 }
 const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
 const env = (name: string): string | undefined => (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env[name];
-/** Rust's copy of the main window's contributions (`paddock_shell::manifest::check` reads it in `crates/paddock-shell/tests/demo.rs`). */
+/** Rust's copy of the main window's contributions (`paddock_shell::manifest::check` reads it in `crates/paddock-shell/tests/it/shell_demo.rs`). */
 const MANIFEST = 'projects/shell-demo/paddock-manifest.json';
 
 describe('shell-demo manifest', () => {
