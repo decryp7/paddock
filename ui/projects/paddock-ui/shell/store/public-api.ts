@@ -1,6 +1,13 @@
 /**
- * `@decryp7/paddock-ui/shell/store`: Shared SignalStore features: `withRequestStatus` (rule 30) and the store helpers of the shell (plan S4).
- *
- * Scaffold (plan S0): exports arrive with the work package.
+ * `@decryp7/paddock-ui/shell/store`: the shared SignalStore features of the shell and the apps (plan S4): `withRequestStatus`
+ * (rule 30: one `idle | loading | loaded | { error }` union per store, never separate flags) and its state helpers.
  */
-export {};
+export {
+  withRequestStatus,
+  setLoading,
+  setLoaded,
+  setError,
+  errorMessage,
+  type RequestStatus,
+  type RequestStatusState,
+} from './src/request-status';

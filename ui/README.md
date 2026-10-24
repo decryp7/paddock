@@ -96,8 +96,10 @@ so a manager app never bundles the workbench:
 |---|---|---|
 | `@decryp7/paddock-ui/shell` | contributions, `ShellContext`, frame parts, widgets | S2, S14 |
 | `/shell/jobs` | jobs over the `paddock-jobs` adapter: `JobsBackend` (Tauri, memory), `JobsStore`, `pd-jobs-list`, `pd-jobs-status`, `JobFollow`, `provideShellJobs`, `JOBS_CONTRIBUTIONS` | S9 |
+| `/shell/notify` | notifications and service health over the `paddock-health` adapter: backends (Tauri, memory), `ServiceHealthStore`, `NotificationsStore`, `pd-notification-host`, `pd-service-status`, `pd-notifications-status`, `pd-waiting-for`, `provideShellNotify` | S4 |
+| `/shell/store` | shared SignalStore features: `withRequestStatus` (rule 30) | S4 |
 | `/shell/menu` | menus and keys: `defineSubmenu`, the menu model, `AppMenu`, `pd-menu-bar`, `pd-context-menu`, `Keymap` with user overrides, `NativeMenuBridge` over `paddock-menu` | S13 |
-| `/shell/startup`, `/shell/notify`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/pages`, `/shell/i18n`, `/shell/store`, `/shell/testing` | one shell part each | S4-S16 |
+| `/shell/startup`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/pages`, `/shell/i18n`, `/shell/testing` | one shell part each | S5-S16 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -194,6 +196,70 @@ providers: [
 - Nothing times out a job (rule 12): `uiTimeoutProblems(path, source)` is the grep check the shell demo's e2e runs over every
   shell and reference-app source (delayed `setTimeout`, `AbortSignal.timeout`, `Promise.race`, `...timeout...(` helpers).
 - `@ngrx/signals` (^22) is an optional peer dependency, needed by the shell entry points that hold stores.
+
+### Notifications and service health (`@decryp7/paddock-ui/shell/notify`, plan S4)
+
+Per window (rule 34), with the app's IPC passed in:
+
+```ts
+import { NOTIFY_CONTRIBUTIONS, provideShellNotify, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
+
+const ipc = { invoke, listen: (event, cb) => listen(event, (e) => cb(e.payload)) };
+providers: [
+  provideContributions(NOTIFY_CONTRIBUTIONS), // status items `pd.health` (the chip) and `pd.notifications` (the centre), lazy
+  provideShellNotify({
+    health: () => new TauriServiceHealthBackend(ipc),
+    notifications: () => new TauriNotificationsBackend(ipc),
+    // mountHost: false when the frame places <pd-notification-host> itself; ports: false when the window provides its own
+    // SHELL_PORTS (use `notify: notifyPort()` there).
+  }),
+  { provide: OPEN_SETTINGS, useValue: (section) => ... }, // optional: the `openSettings` repair and notice action
+  provideNoticeAction({ type: 'installUpdate', label: () => 'Install', run: (a) => ... }), // the app's notice buttons
+]
+```
+
+- One display rule (`visibleNotifications`): one toast per cause (a repeat updates it in place with `(×N)`), at most
+  three, and never a `health:<service>` cause: the chip states outages. Errors and critical failures stay until
+  dismissed or resolved; the rest go after 8 s, held while the pointer or focus is on them. The host owns the time
+  (`NOTIFY_CLOCK`, a port); sources (`provideNotificationSource`) only post, update and resolve.
+- `SHELL_PORTS.notify` (every `ShellNotice`, e.g. a failed command or a finished job) becomes a toast and a message in
+  the centre for the session, merged by kind and text.
+- `ServiceHealthStore`: the newest snapshot (by `revision`); `isServing(service)` is false until the first snapshot.
+  `pd-service-status` appears when a service is not working, opens the cause, the next step, technical details and the
+  Repair button (served by the shell, never by the service), and offers Try again when the state could not be read.
+- Panels show `<pd-service-error summary="…" service="engine" (retry)="load()">`: while the service is down it is
+  `<pd-waiting-for>` ("Waiting for the engine", "See what happened" opens the chip), and it emits `retry` once when the
+  service is back.
+- The wire types mirror `shell/generated/health.ts` (ng-packagr cannot import across entry points); a type-level spec
+  fails `npm test` when they drift.
+### Dialogs (`/shell/dialogs`, plan S6)
+
+Dialogs are real OS windows (ADR 0009, rule 17). Declare each with `defineDialog` in a registration file; the kind decides
+modality, size, keys and buttons:
+
+```ts
+export const RENAME_DIALOG = defineDialog({
+  id: 'pw.rename', kind: 'form', modality: 'modal', title: msg('pw.dialog.rename', 'Rename'), width: 440,
+  result: type<string>(), commands: ['app_rename'],                           // what its window may call
+  providers: () => import('./rename.providers').then((m) => m.RENAME_PROVIDERS), // its own providers only
+  load: () => import('./rename-dialog').then((m) => m.RenameDialog),
+});
+```
+
+- Main window: `provideDialogs({ io: () => tauriDialogIo({ invoke, listen, emitTo }) })` (without `io` dialogs open in the
+  page), `<pd-dialog-host />` in the root template, `openDialog: openDialogPort()` in `SHELL_PORTS`. Open with
+  `inject(DialogService).open(RENAME_DIALOG, { inputs: { current } }).closed` (resolves to `string | undefined`).
+- Content: inject `DIALOG_REF` and call `close(result)`; inputs set the component's `input()`s; `dialogCanClose()` may
+  keep it open; mark a Close/Cancel with `data-dialog-close` (else the shell adds one) and the default with `data-default`.
+- Dialog window: in `main.ts`, `parseDialogRoute(location.hash)`; for a dialog route `mountDialogWindowHost()` and
+  `bootstrapApplication(DialogShell, dialogWindowConfig({ dialogs, providers: dialogBase(), io, route }))`.
+- Contracts: a spec writes `serializeDialogContracts(dialogContractFile(dialogs, { base }))` to `src-tauri/dialog-contracts.json`
+  and compares it on every run; Rust reads it with `paddock_dialogs::Dialogs::from_json`.
+- Checks every app runs (`shell/testing`): `assertDialogBoots(def, { dialogs, providers: dialogBase(), inputs })` per dialog
+  (missing provider, empty or failed body, undeclared command sent at start, Close/Escape per kind, fit per kind),
+  `dialogTableProblems(dialogs, APP_COMMANDS, base)`, and `npx paddock-check-dialog-commands --config paddock-dialog-commands.json`
+  (what a click could send, in both directions; see the header of `bin/paddock-check-dialog-commands.mjs`). The shell
+  demo runs all three (`npm run check:dialogs`).
 
 ## Tokens
 

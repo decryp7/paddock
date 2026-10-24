@@ -1,12 +1,14 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { SuEmptyState } from '@decryp7/paddock-ui';
-import { CommandService, ContributionRegistry, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { CommandService, ContributionRegistry, ShellContextHost, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { DialogHost, DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { PdJobsStatus } from '@decryp7/paddock-ui/shell/jobs';
 import { PdContextMenu, PdMenuBar } from '@decryp7/paddock-ui/shell/menu';
 import { DemoShortcuts } from './demo-shortcuts';
 import type { DemoContext } from './demo-context';
+import { PdNotificationsStatus, PdServiceStatus } from '@decryp7/paddock-ui/shell/notify';
+import { EnginePanel } from './engine-panel';
 import { DemoNote } from './demo-note';
-import { DemoNotices } from './demo-notices';
 
 /** One part of the shell and the work package of docs/plans/workbench.md that brings it to this app. */
 interface ShellPart {
@@ -36,13 +38,13 @@ const PARTS: readonly ShellPart[] = [
 @Component({
   selector: 'sd-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState, PdJobsStatus, PdMenuBar, PdContextMenu, DemoShortcuts],
+  imports: [SuEmptyState, PdJobsStatus, PdServiceStatus, PdNotificationsStatus, EnginePanel, DialogHost, PdMenuBar, PdContextMenu, DemoShortcuts],
   template: `
     <!-- The title bar region the pages frame (plan S14) will own: the in-app menu bar (hidden in the macOS app). -->
     <header class="title-bar">
       <pd-menu-bar />
     </header>
-    <main class="page">
+    <main class="page" [class.compact]="compact()">
       <h1>Paddock shell demo</h1>
       <pd-empty-state
         heading="The shell arrives here part by part"
@@ -58,13 +60,6 @@ const PARTS: readonly ShellPart[] = [
             </button>
           }
         </div>
-        <pd-context-menu menu="sd.notices" label="Notice actions">
-          <ul class="notices" aria-live="polite" aria-label="Notices" [class.compact]="compact()">
-            @for (notice of notices(); track notice.n) {
-              <li [class.error]="notice.level === 'error'">{{ notice.message }}</li>
-            }
-          </ul>
-        </pd-context-menu>
         <table class="kinds">
           <caption>Registered contributions</caption>
           <thead>
@@ -79,9 +74,13 @@ const PARTS: readonly ShellPart[] = [
       </section>
       <section class="menus" aria-labelledby="sd-menus">
         <h2 id="sd-menus">Menus and keys</h2>
-        <p class="context">The menu bar above and the notices' context menu come from the contributions; the keys below can be changed and are kept.</p>
+        <p class="context">The menu bar above and the greetings' context menu come from the contributions; the keys below can be changed and are kept.</p>
+        <pd-context-menu menu="sd.greetings" label="Greeting actions">
+          <p class="greetings" data-testid="greetings">Greetings: {{ greetings() }}</p>
+        </pd-context-menu>
         <sd-shortcuts />
       </section>
+      <sd-engine-panel />
       <section class="startup" aria-labelledby="sd-startup">
         <h2 id="sd-startup">Start-up contract</h2>
         <p class="context">The window reports ready after its first paint and answers liveness pings; this note is kept if the shell reloads the window to recover it.</p>
@@ -89,6 +88,18 @@ const PARTS: readonly ShellPart[] = [
           <span>Note</span>
           <input #noteField type="text" data-testid="demo-note" [value]="note()" (input)="note.set(noteField.value)" />
         </label>
+      </section>
+      <section class="dialogs" aria-labelledby="sd-dialogs">
+        <h2 id="sd-dialogs">Dialogs</h2>
+        <p class="context">One of each kind. In the desktop build each is an OS window; in the browser build they open in the page.</p>
+        <div class="commands" role="group" aria-label="Open a dialog">
+          @for (d of dialogs; track d.id) {
+            <button type="button" class="cmd" [attr.data-dialog-open]="d.id" (click)="openDialog(d)">
+              {{ d.title.text }} <span class="kind">({{ d.kind }}{{ d.requiredChoice ? ', required choice' : '' }})</span>
+            </button>
+          }
+        </div>
+        <p class="context" aria-live="polite" data-testid="dialog-answer">{{ answer() }}</p>
       </section>
       <table class="parts">
         <caption>Shell parts</caption>
@@ -102,14 +113,17 @@ const PARTS: readonly ShellPart[] = [
         </tbody>
       </table>
     </main>
-    <!-- The status bar the pages frame (plan S14) will own; the jobs status item opens the Jobs list (plan S9). -->
+    <!-- The status bar the pages frame (plan S14) will own: the service chip (S4), the jobs (S9) and the notifications (S4). -->
     <footer class="status-bar" aria-label="Status bar">
+      <pd-service-status />
       <pd-jobs-status />
+      <pd-notifications-status />
     </footer>
+    <pd-dialog-host />
   `,
   styles: `
     :host { display: flex; flex-direction: column; min-height: 100vh; }
-    .status-bar { position: sticky; bottom: 0; display: flex; justify-content: flex-end; min-width: 0; margin-top: auto; padding: var(--pd-space-1) var(--pd-space-4); background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); }
+    .status-bar { position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; min-width: 0; margin-top: auto; padding: var(--pd-space-1) var(--pd-space-4); background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); }
     .page { width: 100%; max-width: var(--pd-content-max); margin: 0 auto; padding: var(--pd-space-6) var(--pd-space-4); display: flex; flex-direction: column; gap: var(--pd-space-4); }
     h1 { margin: 0; font-size: var(--pd-text-title); }
     .parts { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); }
@@ -123,15 +137,16 @@ const PARTS: readonly ShellPart[] = [
     .commands { display: flex; flex-wrap: wrap; gap: var(--pd-space-2); }
     .cmd { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); }
     .cmd:disabled { color: var(--pd-text-subtle); }
-    .notices { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--pd-space-1); min-height: 1lh; }
-    .notices li { overflow-wrap: anywhere; }
-    .notices li.error { color: var(--pd-danger); }
+    .dialogs { display: flex; flex-direction: column; gap: var(--pd-space-3); }
+    .dialogs h2 { margin: 0; font-size: var(--pd-text-subtitle); }
+    .kind { color: var(--pd-text-muted); font-weight: var(--pd-weight-regular, 400); }
     .kinds { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); }
     .kinds caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }
     .kinds th, .kinds td { text-align: start; padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); }
     .kinds th { color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); }
     .title-bar { display: flex; align-items: center; min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); background: var(--pd-surface-1); border-bottom: 1px solid var(--pd-hairline); }
-    .notices.compact { gap: 0; font-size: var(--pd-text-caption); }
+    .page.compact { gap: var(--pd-space-2); padding-block: var(--pd-space-3); }
+    .greetings { margin: 0; padding: var(--pd-space-2); border: 1px dashed var(--pd-border-control); border-radius: var(--pd-radius-control); }
     .menus { display: flex; flex-direction: column; gap: var(--pd-space-2); }
     .menus h2 { margin: 0; font-size: var(--pd-text-subtitle); }
     .startup { display: flex; flex-direction: column; gap: var(--pd-space-2); }
@@ -145,13 +160,22 @@ export class ShellDemo {
   protected readonly commands = inject(CommandService);
   private readonly registry = inject(ContributionRegistry);
   private readonly host = inject(ShellContextHost);
-  protected readonly notices = inject(DemoNotices).notices;
   protected readonly note = inject(DemoNote).note;
   protected readonly available = this.commands.available;
   protected readonly contextLoaded = computed(() => this.host.context() !== null);
-  /** The View > Compact notices toggle, read through the app context (its state is not in the first-paint bundle). */
+  /** The View > Compact layout toggle and the greetings count, read through the app context (not in the first-paint bundle). */
   protected readonly compact = computed(() => (this.host.context() as Partial<DemoContext> | null)?.compact?.() ?? false);
+  protected readonly greetings = computed(() => (this.host.context() as Partial<DemoContext> | null)?.greetings?.() ?? 0);
   protected readonly kinds = this.registry.kinds.map((k) => ({ name: k.name, count: this.registry.items(k.name).length }));
+
+  private readonly dialogService = inject(DialogService);
+  protected readonly dialogs = this.registry.dialogs();
+  protected readonly answer = signal('No dialog answered yet.');
+
+  protected openDialog(d: DialogDef): void {
+    const inputs = d.id === 'sd.rename' ? { current: 'Shell demo' } : {};
+    void this.dialogService.open(d.id, { inputs }).closed.then((r) => this.answer.set(`${d.title.text}: ${r === undefined ? 'dismissed' : JSON.stringify(r)}`));
+  }
 
   protected run(id: string): void {
     void this.commands.run(id);

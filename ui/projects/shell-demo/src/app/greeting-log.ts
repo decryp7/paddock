@@ -18,7 +18,7 @@ export class GreetingLog {
     this.count.set(0);
   }
 
-  /** A view option for the menus' check marks (plan S13): the notices list drawn compact. */
+  /** A view option for the menus' check marks (plan S13): the page laid out compact. */
   private readonly compactList = signal(false);
   readonly compact = this.compactList.asReadonly();
 
