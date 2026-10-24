@@ -48,9 +48,7 @@ pub struct TestStarted {
 #[::tauri::command]
 pub async fn channels_get(state: Managed<'_>) -> Result<ChannelsView, ChannelsError> {
     let control = state.inner().clone();
-    ::tauri::async_runtime::spawn_blocking(move || control.get())
-        .await
-        .unwrap_or_else(|_| Err(failed()))
+    blocking(move || control.get()).await
 }
 
 /// Validates and saves the settings.
@@ -60,9 +58,7 @@ pub async fn channels_save(
     settings: Settings,
 ) -> Result<ChannelsView, ChannelsError> {
     let control = state.inner().clone();
-    ::tauri::async_runtime::spawn_blocking(move || control.save(settings))
-        .await
-        .unwrap_or_else(|_| Err(failed()))
+    blocking(move || control.save(settings)).await
 }
 
 /// Stores a channel's token or password; called by the secret dialog's window only.
@@ -73,18 +69,14 @@ pub async fn channels_set_secret(
     value: String,
 ) -> Result<(), ChannelsError> {
     let control = state.inner().clone();
-    ::tauri::async_runtime::spawn_blocking(move || control.set_secret(&id, &value))
-        .await
-        .unwrap_or_else(|_| Err(failed()))
+    blocking(move || control.set_secret(&id, &value)).await
 }
 
 /// Removes a channel's token or password.
 #[::tauri::command]
 pub async fn channels_clear_secret(state: Managed<'_>, id: String) -> Result<(), ChannelsError> {
     let control = state.inner().clone();
-    ::tauri::async_runtime::spawn_blocking(move || control.clear_secret(&id))
-        .await
-        .unwrap_or_else(|_| Err(failed()))
+    blocking(move || control.clear_secret(&id)).await
 }
 
 /// Starts a test send; returns at once, the outcome arrives as an event.
@@ -94,6 +86,15 @@ pub async fn channels_test(
     channel: ChannelConfig,
 ) -> Result<TestStarted, ChannelsError> {
     state.test(channel).map(|test_id| TestStarted { test_id })
+}
+
+/// Runs quick, bounded work (a file, the credential store) off the IPC thread.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, ChannelsError> + Send + 'static,
+) -> Result<T, ChannelsError> {
+    ::tauri::async_runtime::spawn_blocking(work)
+        .await
+        .unwrap_or_else(|_| Err(failed()))
 }
 
 pub(crate) fn failed() -> ChannelsError {

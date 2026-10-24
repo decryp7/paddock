@@ -824,6 +824,27 @@ fn downloads_go_through_the_same_policy() {
 }
 
 #[test]
+fn a_body_that_breaks_is_a_timeout_or_a_connect_error_and_the_system_resolver_works() {
+    for (kind, retry_timeout) in [
+        (std::io::ErrorKind::TimedOut, true),
+        (std::io::ErrorKind::ConnectionReset, false),
+    ] {
+        let r = rig(
+            Policy::default(),
+            FakeWire::new().then(Reply::ok(b"partial").failing_body(kind)),
+        );
+        let e = get(&r, "https://api.example.org/").unwrap_err();
+        assert_eq!(matches!(e, NetError::Timeout(_)), retry_timeout, "{e:?}");
+        assert!(e.retryable());
+    }
+    let found = SystemLookup.lookup("localhost", 80).unwrap();
+    assert!(found.iter().any(std::net::IpAddr::is_loopback));
+    assert!(SystemLookup.lookup("no-such-host.invalid", 80).is_err());
+    let post = Request::post("https://api.example.org/", vec![1]);
+    assert!(format!("{post:?}").starts_with("Request(POST "));
+}
+
+#[test]
 fn reach_classes_and_orders() {
     use std::net::IpAddr;
     assert!(Reach::Public < Reach::Lan && Reach::Lan < Reach::Loopback);
@@ -853,7 +874,7 @@ fn reach_classes_and_orders() {
             &["10.0.0.1".parse().unwrap(), "127.0.0.1".parse().unwrap()],
             Reach::Loopback
         ),
-        Ok(Class::Loopback)
+        Ok(Reach::Loopback)
     );
 }
 

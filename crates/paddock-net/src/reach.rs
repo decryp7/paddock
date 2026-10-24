@@ -127,12 +127,12 @@ impl fmt::Display for Refusal {
 impl std::error::Error for Refusal {}
 
 /// The policy for the addresses of one name: at least one, and **all** of them within `reach` (a name that points at a
-/// forbidden address even once is refused, as a DNS-rebinding answer would be). Returns the farthest class found.
-pub fn vet(addrs: &[IpAddr], reach: Reach) -> Result<Class, Refusal> {
+/// forbidden address even once is refused, as a DNS-rebinding answer would be). Returns the reach the farthest of them needs.
+pub fn vet(addrs: &[IpAddr], reach: Reach) -> Result<Reach, Refusal> {
     if addrs.is_empty() {
         return Err(Refusal::NoAddress);
     }
-    let mut farthest = Class::Public;
+    let mut farthest = Reach::Public;
     for a in addrs {
         let c = classify(*a);
         if c == Class::Never {
@@ -141,18 +141,7 @@ pub fn vet(addrs: &[IpAddr], reach: Reach) -> Result<Class, Refusal> {
         if !reach.allows(c) {
             return Err(Refusal::TooFar(c));
         }
-        if rank(c) > rank(farthest) {
-            farthest = c;
-        }
+        farthest = farthest.max(Reach::needed_for(c).unwrap_or(Reach::Public));
     }
     Ok(farthest)
-}
-
-fn rank(c: Class) -> u8 {
-    match c {
-        Class::Public => 0,
-        Class::Lan => 1,
-        Class::Loopback => 2,
-        Class::Never => 3,
-    }
 }

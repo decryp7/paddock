@@ -228,3 +228,67 @@ fn classify(e: ureq::Error, host: &str) -> NetError {
         _ => NetError::Invalid(format!("The request to {host} cannot be sent.")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ureq::Timeout;
+
+    fn io(kind: std::io::ErrorKind) -> ureq::Error {
+        ureq::Error::Io(std::io::Error::new(kind, "x"))
+    }
+
+    #[test]
+    fn library_errors_become_the_right_net_error() {
+        let h = "host.example.org";
+        let cases: Vec<(ureq::Error, NetError)> = vec![
+            (
+                ureq::Error::Timeout(Timeout::Global),
+                NetError::Timeout(h.into()),
+            ),
+            (
+                io(std::io::ErrorKind::TimedOut),
+                NetError::Timeout(h.into()),
+            ),
+            (
+                io(std::io::ErrorKind::ConnectionRefused),
+                NetError::Connect(h.into()),
+            ),
+            (
+                ureq::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    rustls::Error::HandshakeNotComplete,
+                )),
+                NetError::Tls(h.into()),
+            ),
+            (
+                ureq::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    Refusal::Never,
+                )),
+                NetError::Refused {
+                    host: h.into(),
+                    why: Refusal::Never,
+                },
+            ),
+            (ureq::Error::HostNotFound, NetError::Connect(h.into())),
+            (ureq::Error::ConnectionFailed, NetError::Connect(h.into())),
+            (ureq::Error::Tls("x"), NetError::Tls(h.into())),
+            (
+                ureq::Error::Rustls(rustls::Error::HandshakeNotComplete),
+                NetError::Tls(h.into()),
+            ),
+            (
+                ureq::Error::BadUri("x".into()),
+                NetError::Invalid(format!("The request to {h} cannot be sent.")),
+            ),
+        ];
+        for (error, want) in cases {
+            assert_eq!(classify(error, h), want);
+        }
+        assert!(matches!(
+            classify(ureq::Error::InvalidProxyUrl, h),
+            NetError::Proxy(_)
+        ));
+    }
+}

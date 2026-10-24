@@ -2,7 +2,7 @@
 
 use crate::error::NetError;
 use crate::policy::Policy;
-use crate::reach::{self, Class, Reach, Refusal};
+use crate::reach::{self, Reach, Refusal};
 use crate::request::{Method, Request, Response, header_of};
 use crate::wire::{Lookup, Wire, WireRequest};
 use paddock_download::{Get, Header, Headers, TransportError, TransportErrorKind};
@@ -142,7 +142,8 @@ impl Egress {
         let mut body = request.body.clone();
         let mut headers = request.headers.clone();
         let mut limit = self.policy.reach;
-        for hop in 0..=self.policy.max_redirects {
+        let mut hop = 0;
+        loop {
             if self.is_offline() {
                 return Err(NetError::Offline);
             }
@@ -152,7 +153,7 @@ impl Egress {
             let class = self.check(&url, limit)?;
             if hop == 0 {
                 // A redirect may never go farther than where the request started.
-                limit = limit.min(Reach::needed_for(class).unwrap_or(Reach::Public));
+                limit = limit.min(class);
             }
             self.pace(&url, cancel)?;
             let wire_request = WireRequest {
@@ -204,12 +205,12 @@ impl Egress {
                 headers.retain(|h| !h.name.eq_ignore_ascii_case("content-type"));
             }
             url = next;
+            hop += 1;
         }
-        Err(NetError::TooManyRedirects)
     }
 
-    /// The checks before a hop: scheme, login, allow-list, and the reach of every address. Returns the farthest class found.
-    fn check(&self, url: &Url, limit: Reach) -> Result<Class, NetError> {
+    /// The checks before a hop: scheme, login, allow-list, and the reach of every address. Returns the reach the farthest address needs.
+    fn check(&self, url: &Url, limit: Reach) -> Result<Reach, NetError> {
         let shown_url = shown(url.as_str());
         let host = url
             .host()
