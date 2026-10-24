@@ -11,6 +11,7 @@ use paddock_service::control::{Request, ServiceControl};
 use paddock_service::login::LAUNCH_AT_LOGIN;
 use paddock_service::status::{Condition, ServiceStatus};
 use paddock_settings::Settings;
+use paddock_siblings::{Handoff, Outcome, Siblings};
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -224,10 +225,9 @@ pub trait NotificationAccess: Send + Sync {
     }
 }
 
-/// [`NotificationAccess`] over the OS notifier's [`Toaster`](paddock_health::notify::os::Toaster): `permission` is its
-/// `permission`. Asking and opening the system settings are the app's closures (the real ones need the notification plugin
-/// and the platform's settings URL); without them asking reads the permission again (the OS prompts at the first toast)
-/// and the repair says where to look.
+/// [`NotificationAccess`] over the OS notifier's [`Toaster`](paddock_health::notify::os::Toaster): the permission, the
+/// request (the plugin's `request_permission`) and opening the system's notification settings (macOS, Windows and GNOME)
+/// are the toaster's own, so an app wires nothing. The closures replace one of them (an app with a platform page of its own).
 pub struct ToasterAccess {
     toaster: Arc<dyn paddock_health::notify::os::Toaster>,
     request: Option<Box<dyn Fn() -> Permission + Send + Sync>>,
@@ -244,14 +244,14 @@ impl ToasterAccess {
         }
     }
 
-    /// How the app asks the OS for permission (the plugin's `request_permission`).
+    /// Replaces how the app asks the OS for permission.
     #[must_use]
     pub fn request_with(mut self, f: impl Fn() -> Permission + Send + Sync + 'static) -> Self {
         self.request = Some(Box::new(f));
         self
     }
 
-    /// How the app opens the system's notification settings.
+    /// Replaces how the app opens the system's notification settings.
     #[must_use]
     pub fn open_settings_with(
         mut self,
@@ -269,16 +269,13 @@ impl NotificationAccess for ToasterAccess {
     fn request(&self) -> Permission {
         match &self.request {
             Some(f) => f(),
-            None => self.toaster.permission(),
+            None => self.toaster.request_permission(),
         }
     }
     fn open_system_settings(&self) -> Result<(), String> {
         match &self.open {
             Some(f) => f(),
-            None => Err(
-                "Open your system's notification settings and allow notifications for this app."
-                    .into(),
-            ),
+            None => self.toaster.open_system_settings().map_err(|e| e.0),
         }
     }
 }
@@ -359,22 +356,51 @@ pub trait PitwallPort: Send + Sync {
     fn start(&self) -> Result<(), String>;
 }
 
-/// [`PitwallPort`] over the app's [`Link`], with the app's way to start Pitwall.
+/// [`PitwallPort`] over the app's [`Link`]. Starting Pitwall opens its app through `paddock-siblings` (a typed `Open`
+/// hand-off), so an app wires nothing; "Pitwall is not installed" and "needs an update" come back as the step's words.
 pub struct LinkPort {
     link: Arc<Link>,
     starter: Box<dyn Fn() -> Result<(), String> + Send + Sync>,
 }
 
+/// Opens Pitwall's app through `siblings`; its plain answers (not installed, needs an update) are the error text.
+pub fn start_pitwall(siblings: &Siblings) -> Result<(), String> {
+    match siblings.open("pitwall", &Handoff::Open) {
+        Ok(Outcome::Opened { .. }) => Ok(()),
+        Ok(Outcome::NotInstalled { message } | Outcome::NeedsUpdate { message }) => Err(message),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 impl LinkPort {
-    /// The port over `link`; `starter` opens Pitwall (without one, the step says to open it by hand).
-    pub fn new(link: Arc<Link>) -> LinkPort {
-        LinkPort {
-            link,
-            starter: Box::new(|| Err("Open Pitwall to start it, then come back here.".into())),
+    /// The port over `link` for the app `app_id` (its id in the family: `debrief`, `spotter`…); Pitwall is started with
+    /// the real machine's siblings. An app outside the family gets a step that says to open Pitwall by hand.
+    pub fn new(link: Arc<Link>, app_id: &str) -> LinkPort {
+        match Siblings::native(app_id) {
+            Ok(s) => LinkPort::with_siblings(link, Arc::new(s)),
+            Err(e) => {
+                let why = e.to_string();
+                LinkPort {
+                    link,
+                    starter: Box::new(move || {
+                        Err(format!(
+                            "{why} Open Pitwall to start it, then come back here."
+                        ))
+                    }),
+                }
+            }
         }
     }
 
-    /// How the app starts Pitwall.
+    /// The port over `link` that starts Pitwall through `siblings`.
+    pub fn with_siblings(link: Arc<Link>, siblings: Arc<Siblings>) -> LinkPort {
+        LinkPort {
+            link,
+            starter: Box::new(move || start_pitwall(&siblings)),
+        }
+    }
+
+    /// Replaces how the app starts Pitwall.
     #[must_use]
     pub fn starter(mut self, f: impl Fn() -> Result<(), String> + Send + Sync + 'static) -> Self {
         self.starter = Box::new(f);
