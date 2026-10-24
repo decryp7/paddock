@@ -15,6 +15,7 @@ import {
 import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
+import { defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
@@ -89,8 +90,23 @@ export const SETTINGS_DIALOG = defineDialog({
   title: msg('pd.settings.title', 'Settings'),
   width: 880,
   height: 620,
-  // The settings commands, and the Background service page's (it asks and repairs the service from this window).
-  commands: ['settings_overview', 'settings_reset', 'settings_set', 'service_status', 'service_repair', 'service_install', 'open_login_items'],
+  // The settings commands, the Background service page's (it asks and repairs the service from this window) and the
+  // Notification channels page's (the secret is set in the secret dialog's window, not here).
+  commands: [
+    'settings_overview',
+    'settings_reset',
+    'settings_set',
+    'service_status',
+    'service_repair',
+    'service_install',
+    'open_login_items',
+    'channels_get',
+    'channels_save',
+    'channels_clear_secret',
+    'channels_test',
+    // The channels page opens the secret dialog (a dialog may open another; the window then lists `dialog_open`).
+    'dialog_open',
+  ],
   providers: () => import('./demo-settings-window').then((m) => m.DEMO_SETTINGS_WINDOW),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
@@ -101,9 +117,22 @@ export const SERVICE_PAGE = defineServiceSettingsPage({
   load: () => import('@decryp7/paddock-ui/shell/service/page').then((m) => m.PdServicePage),
 });
 
+/** Settings > Notification channels (plan X17): a table of channels with an inline editor; its providers load with the page. */
+export const CHANNELS_PAGE = defineChannelsSettingsPage({
+  providers: () => import('./channels.providers').then((m) => m.CHANNELS_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/channels/page').then((m) => m.PdChannelsPage),
+});
+
+/** The secret dialog of a channel (a modal form opened from the page): the one window that sets a token or password. */
+export const CHANNELS_SECRET_DIALOG = defineChannelsSecretDialog({
+  providers: () => import('./channels.providers').then((m) => m.CHANNELS_SECRET_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/channels/dialog').then((m) => m.PdChannelSecretDialog),
+});
+
 /** The demo's settings pages: those without a component of their own show the Rust section of the same id in the shell's generic form. */
 export const DEMO_SETTINGS_PAGES = [
   SERVICE_PAGE,
+  CHANNELS_PAGE,
   defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
   defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100 }),
 ] as const;
@@ -114,7 +143,7 @@ export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import(
 /** Report a problem (plan X2): a decision that shows every file with its size before saving; its window boots the demo's diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);
