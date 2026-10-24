@@ -16,6 +16,8 @@
     "build:e2e": "node scripts/build-e2e.mjs",
     "shell-demo": "npm run build:css && ng serve shell-demo --port 4301",
     "shell-demo:build": "npm run build:css && ng build shell-demo",
+    "workbench-demo": "npm run build:css && ng serve workbench-demo --port 4302",
+    "workbench-demo:build": "npm run build:css && ng build workbench-demo",
     "test:scripts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test ../scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs projects/paddock-e2e/src/*.test.ts",
     "i18n": "node projects/paddock-ui/bin/paddock-i18n.mjs build",
     "i18n:check": "node projects/paddock-ui/bin/paddock-i18n.mjs build --check",

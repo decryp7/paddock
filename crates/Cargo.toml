@@ -34,6 +34,7 @@ members = [
     "paddock-testkit",
     "paddock-updater",
     "paddock-window",
+    "paddock-workbench",
     "paddock-workspace-hack",
 ]
 
@@ -83,6 +84,7 @@ paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "dec
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.1.0", registry = "decryp7" }
+paddock-workbench = { path = "paddock-workbench", version = "0.1.0", registry = "decryp7" }
 
 # Debug info for development and test builds (docs/dev-setup.md, "Build profiles"): line tables are enough for backtraces
 # with file and line, and dependencies get none, which makes the objects smaller and linking faster. A debugger session

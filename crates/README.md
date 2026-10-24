@@ -422,6 +422,25 @@ let startup = Startup::builder().safe_mode(restart_in_safe_mode).lifecycle(life)
   `app/src/app/lifecycle/` (`lifecycle-banners.ts`, `lifecycle.service.ts` safe-mode and crash parts, `session.service.ts`
   checkpoint part). Debrief keeps the project-file format of its sessions: its `UiCheckpoint.capture()` returns the content.
 
+## `paddock-workbench` (plan X50 W2a, W7)
+
+The Rust side of the workbench (ADR 0013 §3). Today: the dock's layout store. The workbench Tauri plugin (pop-out panels
+of `paddock-panels` and the assistant of `paddock-assistant` folded behind one guard) joins it in W7.
+
+```rust
+app.manage(paddock_workbench::tauri::Layouts::open(dirs.config()));     // <config>/workbench-layout.json
+// in a table: paddock_workbench::COMMANDS (layout_get [MAIN | POPOUT], layout_set [MAIN]); handler: tauri::invoke_handler()
+```
+
+- `layout::LayoutStore`: a `paddock-env` `VersionedFile` (format 1). Keys `[a-z0-9._:-]{1,64}`, values JSON objects of at
+  most 1 MiB, at most 128 keys and 8 MiB in all; a damaged file gives an empty store and one `Problem` (logged), a newer
+  file is left alone and saves are refused (the change stays in memory for the run). The UI owns the content (the dock's
+  versioned envelope, parsed at its edge).
+- Commands answer the one envelope of `paddock_commands::CommandError` (boxed): `invalid` with `field` for a bad key or a
+  value that is not an object, `limit` for too large or full, `io` for a refused write; file I/O runs on the blocking pool.
+- Tests: the store in temporary folders (damaged, newer, out-of-bound files), the commands behind the guard on Tauri's
+  mock runtime (a pop-out reads but cannot write, a dialog cannot read).
+
 ## `paddock-window` (plan S12)
 
 Top-level windows, single instance and deep links, the bounded quit, native feel and the tray (ADR 0012 §3), ported
