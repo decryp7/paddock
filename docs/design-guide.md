@@ -172,7 +172,7 @@ Order matters: adjacent series differ in hue AND lightness. Assign by series ide
 | 3 | bluish green | #3DD39D | #087D51 |
 | 4 | reddish purple | #D68CC2 | #B04C95 |
 | 5 | vermilion | #F07D3A | #BE3108 |
-| 6 | periwinkle | #8FA3FF | #4C5BD4 |
+| 6 | periwinkle | #8FA3FF | #494FDB |
 | 7 | yellow | #E8DC5A | #816A1D |
 | 8 | grey | #A2ACB1 | #6F737D |
 Sequential ramp (one hue, 6 steps, for heatmaps): from surface-2 to accent-500 in OKLCH lightness steps (dark: light

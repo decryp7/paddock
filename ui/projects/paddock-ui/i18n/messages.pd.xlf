@@ -344,6 +344,18 @@
       <trans-unit id="pd.channels.username-hint" datatype="html">
         <source>Leave empty if the server needs no login. With a user name, the password is kept by the engine.</source>
       </trans-unit>
+      <trans-unit id="pd.chart.error" datatype="html">
+        <source>The chart could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.chart.loading" datatype="html">
+        <source>Loading chart</source>
+      </trans-unit>
+      <trans-unit id="pd.chart.other" datatype="html">
+        <source>Other</source>
+      </trans-unit>
+      <trans-unit id="pd.chart.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
       <trans-unit id="pd.copyMenu.copy" datatype="html">
         <source>Copy</source>
       </trans-unit>
@@ -1340,8 +1352,14 @@
       <trans-unit id="pd.table.empty" datatype="html">
         <source>Nothing to show yet.</source>
       </trans-unit>
+      <trans-unit id="pd.table.error" datatype="html">
+        <source>The rows could not be loaded.</source>
+      </trans-unit>
       <trans-unit id="pd.table.filter" datatype="html">
         <source>Filter</source>
+      </trans-unit>
+      <trans-unit id="pd.table.loading" datatype="html">
+        <source>Loading rows</source>
       </trans-unit>
       <trans-unit id="pd.table.more" datatype="html">
         <source>More actions</source>
@@ -1351,6 +1369,9 @@
       </trans-unit>
       <trans-unit id="pd.table.none" datatype="html">
         <source>None</source>
+      </trans-unit>
+      <trans-unit id="pd.table.retry" datatype="html">
+        <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.table.sortBy" datatype="html">
         <source>Sort by <x id="PH"/></source>
