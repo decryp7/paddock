@@ -16,6 +16,7 @@ import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
 import { defineChannelsRemoveDialog, defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
+import { defineMcpKeyDialog, defineMcpRevokeDialog, defineMcpSettingsPage } from '@decryp7/paddock-ui/shell/mcp';
 import { defineLanguageSettingsPage } from '@decryp7/paddock-ui/shell/i18n/settings';
 import { defineStorageConfirmDialog, defineStorageSettingsPage } from '@decryp7/paddock-ui/shell/storage';
 import { definePacksSettingsPage } from '@decryp7/paddock-ui/shell/packs';
@@ -120,6 +121,12 @@ export const SETTINGS_DIALOG = defineDialog({
     'storage_clear',
     'storage_cancel',
     'storage_reveal',
+    // The AI access page's (MCP_SETTINGS_COMMANDS; the key is issued in the key dialog's window, not here).
+    'mcp_get',
+    'mcp_save',
+    'mcp_revoke_key',
+    'mcp_audit',
+    'mcp_audit_clear',
     // The channels page opens the secret dialog (a dialog may open another; the window then lists `dialog_open`).
     'dialog_open',
     'app_relaunch',
@@ -168,6 +175,23 @@ export const STORAGE_CONFIRM_DIALOG = defineStorageConfirmDialog({
   load: () => import('@decryp7/paddock-ui/shell/storage/dialog').then((m) => m.PdStorageConfirmDialog),
 });
 
+/** Settings > AI access (MCP) (plan X22, ADR 0007): the switch, the tools, the clients' keys and the activity log; its providers load with the page. */
+export const MCP_PAGE = defineMcpSettingsPage({
+  providers: () => import('./mcp.providers').then((m) => m.MCP_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/mcp/page').then((m) => m.PdMcpPage),
+});
+
+/** The key dialog (a modal form opened from the page): the one window that issues a client key and shows it once. */
+export const MCP_KEY_DIALOG = defineMcpKeyDialog({
+  providers: () => import('./mcp.providers').then((m) => m.MCP_KEY_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/mcp/dialog').then((m) => m.PdMcpKeyDialog),
+});
+
+/** The revoke confirmation of a key (a modal decision, one window per key): it calls nothing. */
+export const MCP_REVOKE_DIALOG = defineMcpRevokeDialog({
+  load: () => import('@decryp7/paddock-ui/shell/mcp/dialog').then((m) => m.PdMcpRevokeDialog),
+});
+
 /**
  * The first-run set-up checklist (plan X19): a modeless window (the main window opens it once on a first run) and the same
  * checklist as Settings > Set-up. The providers load with them.
@@ -189,6 +213,7 @@ export const DEMO_SETTINGS_PAGES = [
   SERVICE_PAGE,
   SETUP.page,
   CHANNELS_PAGE,
+  MCP_PAGE,
   PACKS_PAGE,
   STORAGE_PAGE,
   defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
@@ -201,7 +226,7 @@ export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import(
 /** Report a problem (plan X2): a decision that shows every file with its size before saving; its window boots the demo's diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, STORAGE_CONFIRM_DIALOG, SETUP.dialog] as const;
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);

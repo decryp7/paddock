@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-mcp-issue-key"
+description = "Enables the mcp_issue_key command without any pre-configured scope."
+commands.allow = ["mcp_issue_key"]
+
+[[permission]]
+identifier = "deny-mcp-issue-key"
+description = "Denies the mcp_issue_key command without any pre-configured scope."
+commands.deny = ["mcp_issue_key"]
