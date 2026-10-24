@@ -5,6 +5,13 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-packs` Tauri adapter and `@decryp7/paddock-ui/shell/packs` (plan X15/X23): `paddock_packs::tauri` (`Setup`, `install`; commands `packs_status` and
+  `packs_reload`; the `paddock://packs` event on every real change; a `paddock-health` entry that goes down with the first refused pack and whose Repair
+  (Retry) reloads), `paddock_packs::view` (`kind`, `KindView`, `PacksView`: the pack type erased for the UI), `paddock_shell::Builder::packs`, and the
+  Settings > Knowledge packs page (`PdPacksPage`: the packs in use with built-in or yours, each refused pack named with what to fix, ignored keys, Reload as the
+  primary button when a pack is refused, "Still working", an inline error with Retry; file names shortened in the middle). `PacksBackend` (Tauri and in-memory),
+  `PacksStore`, generated wire types and command names. The shell demo has the page (`?packs=problems|notes|clean`) and a sample kind with a watched
+  `packs/` folder.
 - `paddock-watch` (plan X23): `Debouncer` on the shared `Clock`, the `ChangeSource` port (`FakeSource`, `NotifySource` behind the
   `notify` feature) with `spawn`, and Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`). `paddock-packs` now watches through it.
 - `paddock-packs` (plan X15, decision D11): knowledge packs for all apps. `PackKind` (serde type, format number, the app's own

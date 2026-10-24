@@ -15,6 +15,7 @@
 pub use shell_demo_agent as agent;
 pub mod commands;
 pub mod engine;
+pub mod packs;
 pub mod sections;
 pub mod tray;
 
@@ -217,6 +218,9 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
             Some(_) => setup.checks(Duration::ZERO, Duration::ZERO, 0),
         }))
     });
+    let packs_dir = test_dir.clone();
+    // The sample knowledge packs (plan X15/X23): the Knowledge packs page and the hot reload of the user's packs folder.
+    builder = builder.packs(move |app| Ok(packs::setup(app, &dirs(packs_dir.as_deref())?)));
     let report_dir = test_dir.clone();
     // Report a problem (plan X2) and the Logging section: the app's folders and log, the shell's built-in sections.
     builder = builder.diagnostics(move |_| {

@@ -694,6 +694,58 @@ Denies the open_login_items command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-packs-reload`
+
+</td>
+<td>
+
+Enables the packs_reload command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-packs-reload`
+
+</td>
+<td>
+
+Denies the packs_reload command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-packs-status`
+
+</td>
+<td>
+
+Enables the packs_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-packs-status`
+
+</td>
+<td>
+
+Denies the packs_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-recovery-restore`
 
 </td>

@@ -265,6 +265,7 @@
     "pd.logging",
     "pd.login",
     "pd.notifications",
+    "pd.packs",
     "sd.general",
     "sd.storage"
   ],
@@ -311,6 +312,8 @@
       "minSize": null,
       "commands": [
         "open_login_items",
+        "packs_reload",
+        "packs_status",
         "service_install",
         "service_repair",
         "service_status",
@@ -420,6 +423,7 @@
     "pd.settings.logging": "Logging",
     "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",
+    "pd.settings.packs": "Knowledge packs",
     "pd.settings.service": "Background service",
     "pd.settings.title": "Settings",
     "pd.updates.notification.available": "Update available",

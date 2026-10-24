@@ -2975,14 +2975,20 @@ dependencies = [
 name = "paddock-packs"
 version = "0.1.0"
 dependencies = [
+ "log",
+ "paddock-commands",
  "paddock-env",
+ "paddock-health",
  "paddock-jobs",
  "paddock-watch",
  "regex",
  "serde",
  "serde_ignored",
+ "serde_json",
+ "tauri",
  "tempfile",
  "toml 0.9.12+spec-1.1.0",
+ "ts-rs",
 ]
 
 [[package]]
@@ -3071,6 +3077,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-menu",
+ "paddock-packs",
  "paddock-service",
  "paddock-settings",
  "paddock-startup",

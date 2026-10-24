@@ -747,6 +747,11 @@ let snapshot = store.current();                                             // A
 - `user_regex`: `compile`, `compile_with`, `compile_set`; `RegexLimits::DEFAULT` (Debrief: 8 MiB) and `STRICT` (Spotter: 1 MiB);
   typed `RegexError` (`TooLong`, `TooComplex`, `Invalid`) whose messages say what to fix.
 - `Snapshot::health()` gives the one line (`Ok`, `Notes`, `Degraded`) for the `packs` health or notification entry.
+- `tauri` feature: `paddock_packs::tauri::{Setup, install}` over `view::kind(id, label, store)` (the pack type erased); `Builder::packs(|app|
+  Ok(Setup::new().kind(...).health("packs")))` in `paddock-shell`. Commands `packs_status` (every window) and `packs_reload` (main windows and the
+  Settings dialog), the `paddock://packs` event to every window on a real change, and the health entry: down with the first refused pack and `Retry`
+  as its repair (a reload, served by the shell, never by a pack: rule 19), ok when none is. The UI is `@decryp7/paddock-ui/shell/packs` (Settings >
+  Knowledge packs).
 
 ## `paddock-watch` (plan X23)
 
