@@ -5,6 +5,148 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-chromium` and `paddock-runtime` (plan X14). `paddock-chromium` is the one Chromium driver, merged from Debrief's
+  `chromium-driver` and Spotter's `spotter-render`: one command-line builder with the start page always last, `Sandbox::decide`
+  (root plus an explicit opt-in only), launch as a `paddock-proc` supervised tree with a time limit on an injected clock and a
+  memory cap, the DevTools client that knows when the user closed a window, pages (snapshot, wait until readable, capture),
+  both apps' readiness and challenge rules, discovery that gives tests only `CHROMIUM_TEST_PATH`, the pinned Chrome for Testing
+  runtime and a fake browser for tests. `paddock-runtime` installs pinned runtimes (Chromium now, FFmpeg and llama.cpp later)
+  from a checked catalogue as one job (download hashed while written, unpack through `paddock-archive`, self-test, install), keeps the previous release
+  for rollback and quarantines a release that fails.
+- `@decryp7/paddock-ui/live`: `streamCall` and `tauriChannelFactory` for commands that stream to their caller over a per-call
+  channel (ordered delivery, nothing after the call settled, failure, handler error, last-message marker, abort). `paddock-metrics`:
+  `folder_size` does not cross volumes (`other_volumes`) and reads a folder entry by entry, so a cancel or the time limit is seen
+  between reads. CI: a step for `paddock-net`; `paddock-archive` and `paddock-net` take the workspace hack.
+- `paddock-mcp` (plan X22, ADR 0007): the local-only MCP server. `Server` with `ToolDef`/`ResourceDef` registration, `Policy` (off by
+  default, read-only tools, actions only by name), schema validation, result caps, cursors, time limits with cancel, panic
+  containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers
+  only, bounded lines, connection cap), `client` request builders and the shared MCP types for Pitwall; a contract test of the
+  2025-06-18 message shapes.
+- `paddock-proc` (plan X54): every `Supervised` child on Windows runs in a job object of its own with kill-on-close (and
+  die-on-unhandled-exception), so the child and every helper it started end when the value is dropped or the app exits or
+  crashes, also helpers that left its process tree; `Supervised::in_job`. `paddock-ipc`'s launcher gets it through
+  `Supervised` (`Child::in_job`). Windows refusing a job degrades to the tree kill.
+- `paddock_jobs::schedule` and the shared schedule editors (plan X33). `Schedule` (every N seconds, days at times of day, cron with five or
+  six fields) in the computer's or a chosen IANA zone with daylight saving (a time inside the spring gap runs once, shifted; a repeated
+  time runs once), `next_check` (jitter, back-off after failures, a per-source minimum interval), `preview` (the words, the next runs and
+  warnings for the editor), `due` with a `CatchUp` policy (`Skip`, `Once`, `All { max }`) for runs missed while the machine slept, and
+  `PauseWindows` (pause windows and quiet hours: spans of local time on chosen days that may cross midnight; `holds`, `resume_at`,
+  `next_open`). Time is always passed in (`UnixMs::from_clock`), so every case is a `FakeClock` test. Spotter's `schedule.rs` and
+  `calendar.rs` are the base; Debrief's agent timers and Pitcrew's `pause.rs` become adopters. UI: `@decryp7/paddock-ui/schedule` with
+  `pd-schedule-editor` (Every / At times / Cron over the engine's preview, warnings and problems) and `pd-pause-editor`, and a
+  Schedules page in the shell demo. New dependencies of `paddock-jobs`: `jiff` (bundled tz database) and `croner`.
+- The shared CI image (plan X53, `ci-image/`): `paddock-ci` on top of garage with cargo-hakari, cargo-machete, libduckdb, a pinned Chrome for
+  Testing and sccache 0.18.0, every download checksum-verified, a verifying last build step and manifest, a manual `ci-image` workflow that
+  pushes it from CI. `ci.yml` runs its Linux jobs in it and no longer installs Node, browsers or hakari/machete per job; `setup-rust` skips the
+  toolchain install inside it.
+- `paddock-testplan` (ADR 0005, plan X52): `.sighterplan` / `.sighterresult` as TOML. `parse_plan` / `parse_result` (4 MiB, 5,000 cases, 200 steps, 4 KiB
+  strings, unknown keys named by line, newer majors refused), typed ids and the closed `Step` enum, `Plan::to_toml` (canonical) and `Plan::hash`,
+  secrets by reference (`SecretRef`, `Resolver`, `Redactor`, `SecretRedactor`, `lint`), `RunResult::to_toml` with redaction, `Coverage::from`,
+  `diff`, `junit::write`; property tests and a fuzz target.
+- `@decryp7/paddock-ui/workbench/dock` (plan X50 W2a, W2b): the workbench dock over dockview (optional peer, loaded on first use): `<pd-dock />`,
+  `WorkbenchDock` from `provideWorkbenchDock` (`showView`, `closeView`, `openPanels`, `activePanel`, perspectives, named layouts, `verdict`/`onWindowPlan`
+  for the Explorer column, checkpoint), `planLayout` adapter with grow-back and a "layout adjusted" notice with Undo, auto-hide edges, floating groups,
+  drop guides, pop-out through `PANEL_WINDOWS`, Ctrl+Tab switcher, `pd.wb.dock.*` commands and keys, and a `DockLayoutStore` port (memory, localStorage, IPC).
+- `paddock-panels` (plan X50 W3): pop-out panel windows. Validated panel ids (`<view>` / `<view>#<key>`), placement on any display
+  clamped to its work area (mixed scales), remembered place per view, at most 12 per host, closing a host closes its pop-outs,
+  dock-back events (`paddock://panels`), the drag ghost window (never left behind), and UI-state forwarding only between the windows
+  of one host (512 KiB, rate-limited, dialogs get display state only); commands `panel_*`, `panels_list`, `ui_sync_publish`,
+  `drag_ghost_*`; generated TypeScript in `workbench/panels/generated`.
+- `paddock-assistant` and `@decryp7/paddock-ui/workbench/assistant` (plan X50 W6): the assistant over Pitwall: `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for tools that write, a bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, `assistant_*` commands and the `paddock://assistant` event, and the `pd-assistant` chat pane with its store, safe markdown renderer, context chips, conversation list and tool-approval prompt.
+- `paddock-workbench` (plan X50 W2a/W7): the dock's layout store, a bounded `paddock-env` versioned file in the config folder,
+  served by `layout_get` [MAIN | POPOUT] and `layout_set` [MAIN] with the `CommandError` envelope.
+- `@decryp7/paddock-ui/workbench/palette` (plan X50 W5): `<pd-command-palette>` and `PaletteStore`: the palette's own commands
+  and "Open <view>" entries (`>`, recent and common first, word-start, inner and initials matching, "did you mean"), contributed
+  providers by prefix (debounced, `AbortSignal` aborted on the next keystroke or close, late answers dropped, capped at 50,
+  inline error with Retry), `namesPaletteProvider` over an engine's `names_search` (X18), Mod+Shift+P and Mod+P.
+- `@decryp7/paddock-ui/workbench/explorer` and `/workbench/frame` (plan X50 W4): `<pd-explorer>` (one section per Explorer
+  provider: lazy, paged with "Show more", cancellable on collapse, middle-truncated names, context menu on right-click and
+  Shift+F10, drag data, empty state with a command, errors with Retry) and `<pd-workbench>` with `provideShellWorkbench`:
+  title and menu bar, activity bar (badges in the accessible name, fly-outs, overflow into More, pinned bottom items),
+  the Explorer side bar sized by the user and closed and reopened by the layout plan in a narrow window, the stage slot for
+  the dock, status bar, palette, notifications, dialogs, F6 regions, the Jobs view and "Toggle side bar" (Mod+B).
+- `ui/projects/workbench-demo`: the workbench reference app on mock backends (views with layouts and instances, Explorer
+  sections, palette providers including `@` over a names search, perspectives, shared state, assistant context, jobs).
+- `@decryp7/paddock-ui/workbench` core (plan X50 W1, ADR 0013 §2): the workbench's contribution kinds in the shell's one registry
+  (`defineView` with a required `ViewLayout`, `defineActivityItem`, `defineExplorerProvider` (lazy, paged, cancellable),
+  `definePaletteProvider` (one prefix each, `AbortSignal`, capped), `definePerspective`, `defineSharedState`, `defineAssistantContext`),
+  `provideWorkbenchContributions`, the typed `WorkbenchRegistry` (offered views by `when`, instances as `<view>#<key>` panel ids,
+  palette provider by prefix), `VIEW_PANEL` and the `WORKBENCH_PORTS` the frame provides. The shell's `assertContributionsValid`
+  checks every kind: a view without a layout or with `min > pref`, targets naming missing views, commands or Explorer sections,
+  palette prefix conflicts, perspectives naming missing views.
+- Wall-clock limits on the injected clock everywhere (rule 40, follow-up of X20/X13): `CancelToken::on_cancel` (waits are
+  event-driven), `FakeClock::{waits_started, wait_for_started}`; `paddock-ipc` `PeerOptions::clock`, `Host::with_clock`,
+  `Authenticator`, `Client::connect_on`, per-client handshake threads, `ServerConfig::{max_connections, max_handshakes,
+  handshake_timeout, clock}`, `Subscriptions`, `Peer::id`, the Windows discovery-file owner check; `paddock-download`
+  `HostCaps::{with_clock, clock, held}`; `paddock-window` `WindowConfig::clock` and `teardown_step_on`; `paddock-health`'s
+  debounced writer on the centre's clock; `paddock-proc` `Supervised::terminate` returns `Terminated`; `JobPool::hold`.
+  UI: `FakeClock` in `@decryp7/paddock-ui/shell/testing` (wall and monotonic readings, `every`, `after`, `setWall`).
+- `paddock-live` and `@decryp7/paddock-ui/live` (plan X29): the live feed. `Hub<S: LiveState>` (state, sequence numbers, bounded
+  subscriber queues with latest-wins merging and snapshot resynchronisation of slow consumers), `Frame` (snapshot, delta, link),
+  `run` (a `Source` kept connected with `Backoff` on the shared `Clock`, announcing the `Link`), `Channel`, and the `tauri` adapter
+  (`paddock://live/<channel>` events, `live_snapshot`). UI: `withLiveFeed` (SignalStore feature: fold, gap resync, link, request
+  status), `foldFrame` / `parseFrame`, `tauriLiveTransport` / `MemoryLiveTransport`, bounded list helpers and `Debouncer`; a
+  Rust-generated conversation fixture keeps the TypeScript fold equal to Rust's.
+- `paddock-packs` Tauri adapter and `@decryp7/paddock-ui/shell/packs` (plan X15/X23): `paddock_packs::tauri` (`Setup`, `install`; commands `packs_status` and
+  `packs_reload`; the `paddock://packs` event on every real change; a `paddock-health` entry that goes down with the first refused pack and whose Repair
+  (Retry) reloads), `paddock_packs::view` (`kind`, `KindView`, `PacksView`: the pack type erased for the UI), `paddock_shell::Builder::packs`, and the
+  Settings > Knowledge packs page (`PdPacksPage`: the packs in use with built-in or yours, each refused pack named with what to fix, ignored keys, Reload as the
+  primary button when a pack is refused, "Still working", an inline error with Retry; file names shortened in the middle). `PacksBackend` (Tauri and in-memory),
+  `PacksStore`, generated wire types and command names. The shell demo has the page (`?packs=problems|notes|clean`) and a sample kind with a watched
+  `packs/` folder.
+- `paddock-watch` (plan X23): `Debouncer` on the shared `Clock`, the `ChangeSource` port (`FakeSource`, `NotifySource` behind the
+  `notify` feature) with `spawn`, and Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`). `paddock-packs` now watches through it.
+- `paddock-net` (plan X16): the outbound HTTP policy. `Egress` (`send`, `stream`, `set_offline`, `download_transport`), `Policy`
+  (reach, redirects, caps, timeouts, allow-list, per-host gap), `Reach`/`Class` classification, `Wire`/`Lookup` ports with `UreqWire`
+  (paddock-download's TLS and proxy, the address guard on the connecting addresses, one pool per proxy and reach), `FakeWire`,
+  `StaticLookup`. A redirect to 169.254.169.254, to the LAN or to this computer from a public start is refused; offline refuses
+  before any lookup or socket. `paddock_download::ureq_config` exposes the shared agent configuration.
+- `paddock-channels` now sends over `paddock-net` (`EgressPoster`, `channel_policy`; `UreqPoster` is gone), keeps one secret per
+  channel (`channel:<id>:secret`), allows plain http only to this computer, and has the settings-page engine `ChannelsControl`
+  with the `tauri` adapter (commands and the `paddock://channels` event).
+- `@decryp7/paddock-ui/shell/channels` (plan X17, UI half): Settings > Notification channels. `ChannelsBackend` (Tauri adapter and an
+  in-memory engine with the engine's validation, secrets in a map and test outcomes `succeed`, `rejected`, `unreachable`,
+  `missingSecret`, `hang`), `ChannelsStore` (the engine's refusal of a save shown as it is, a per-channel test state that is
+  never timed out, removal clears the secret), and `PdChannelsPage` in `shell/channels/page` (a table with Edit, Send test and
+  Remove on each row, one Add channel, an inline editor on Signal Forms, "Still working" and the engine's advice inline).
+  The token or password is typed in the modal `pd.channels.secret` dialog (`PdChannelSecretDialog` in `shell/channels/dialog`)
+  and goes from that window straight to the engine, never through a store, event, log or URL. The shell demo registers both.
+- `paddock-build` (plan X34): the Tauri build step in one call (the Windows manifest in every binary, sidecar placeholders, rerun
+  triggers; the manifest is shared, the shell demo gains it); `paddock_proc::self_test` (the `--self-test` of a sidecar);
+  `paddock-sidecar` in `@decryp7/paddock-conformance` (`build` and `self-test` for every app's sidecars; the shell demo's
+  `agent/sidecar.mjs` is now three lines over it, and `new-app` carries that).
+- Conformance checks C34 (sidecars declared for the bundle check and implementing `--self-test`), C34 (every `untimed` call of a
+  `withCallTimeout` policy is a declared job-starting or user-waiting command, rule 12; C35) and C36 (parser crates have a fuzz target or a
+  never-panics test; warning).
+- Reusable workflows `app-fuzz.yml`, `app-mutants.yml` and `app-never-panics.yml` (plan X41, from Debrief's fuzz.yml and mutants.yml);
+  never-panics tests with `paddock_testkit::{corpus, never_panics}` for the release manifest and the launchctl report parsers.
+- Accessibility checks (plan X49). `@decryp7/paddock-e2e`: `axeInThemes`, `axeTargets` (a list of windows by name), `axeEveryDialog`
+  (axe over the window of every dialog in the app's `dialog-contracts.json`, both themes, so a new dialog is covered the moment it is
+  declared; an empty list is an error), and the keyboard-only helpers `tabWalk`, `expectTabOrder` (no trap, no stop without a focus
+  indicator), `expectReachableByKeyboard` and `expectEscapeReturnsFocus`. `@decryp7/paddock-ui/shell`: `accentProblems`, `cssRules`,
+  `resolveTokens` and `definedAccents`, the contrast and colour-vision targets of `test:tokens` as pure functions an app runs on its
+  own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C33: an
+  e2e spec runs axe, every dialog of the contract file is covered, warnings for a missing keyboard flow or accent test. The shell
+  demo's `shell-demo-a11y.spec.ts` runs it all. `ShellDialogs.loaded()` now waits for the dialog shell itself (a window still on the splash passed it).
+- `@decryp7/paddock-ui` data parts (plan X21): `/table` (`pd-table`: sortable columns with `aria-sort`, filter, column menu, optional
+  group rows, CDK virtual scroll above 100 lines, one tab stop with arrow/Home/End/Page keys, Enter opens, Shift+F10 and right-click
+  open the row menu, up to two hover icon actions plus a "..." button and the same list in the menu with destructive items last,
+  columns that drop out by the table's own width so nothing scrolls sideways at 320 px, middle ellipsis for paths); `/chart`
+  (`pd-chart` over ECharts loaded lazily through `PD_ECHARTS`, theme and palette from the tokens and re-read on a theme change,
+  accessible name and text twin, `chartOption` for line, area, bar, stacked bar and donut, escaped tooltips, works with the test
+  kit's `FakeECharts` through `fakeEchartsLoader`); `/forms` (`pd-field` and `pdFieldControl` for Signal Forms: label, hint and one error
+  with the alert icon at 14 px, when errors show, words for the built-in kinds). Based on Pitwall's and Spotter's `row-nav`/`row-menu`,
+  Pitcrew's, Pitwall's and Spotter's chart options and the settings window's field. Gallery sections, Playwright specs (gallery and
+  shell-demo; the demo's Runners page now uses `pd-table`) and a contact sheet at `ui/docs/review/x21-data/` for the independent
+  review (not approved yet).
+- `paddock-archive` (plan X24): safe unpacking of zip, tar, tar.gz and tar.xz. Limits on entries, file size, total size, expansion
+  ratio, depth and path length, checked while writing; `..`, absolute paths, drive letters, device names and case-only duplicates
+  refused; `Links` (refuse, skip, copy, keep-relative), `Layout` (keep, strip, flat), a name filter, file modes; all-or-nothing
+  `extract` through a staging folder that is swapped in; `extract_job` for a `paddock-jobs` job with phases and Cancel; `sweep_stale`;
+  a fuzz target.
+- `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
+  macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
+  deleted, one at a time, with disk and load checks (rule 7).
 - `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
   dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
   volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.
@@ -260,7 +402,16 @@ Conventional Commits; one semver tag for the whole repo.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
+### Fixed
+- The About, Updates and What's New contents were unstyled: their stylesheet still used the old class names (`.btn`, `.muted`, ...)
+  while the templates use the `pd-` ones, so the legal-text buttons failed colour contrast in the light theme (found by the new
+  axe check over every dialog window). The shell demo's dialog buttons set white text instead of `--pd-on-accent` and failed
+  contrast in the dark theme.
+
 ### Changed
+- Breaking (rule 40): `paddock_jobs::assert_nonblocking(&pool, handler)` holds the pool instead of measuring a budget
+  (`Blocked`, `BLOCKED_AFTER`; `HANDLER_BUDGET_MS` and `SlowHandler` are gone); `HostCaps::back_off(host, wait)` takes a
+  duration on the caps' clock; `shell/testing`'s `ManualClock` is now `FakeClock` (ticks fire as often as they fall due).
 - Breaking (plan X20): `paddock-jobs`, `paddock-log` and `paddock-health` share one `Clock` (`paddock_jobs::time`). The old
   `ManualClock`s are gone: use `FakeClock` (`new()`, `at_wall(..)`, `at_wall_ms(..)`, `advance(Duration)`/`advance_ms(u64)`).
   `paddock-health`'s epoch reading is `Clock::wall_ms` (was `now_ms`); `paddock-log`'s UTC reading is `paddock_log::now_utc(&clock)`
@@ -281,6 +432,14 @@ Conventional Commits; one semver tag for the whole repo.
 - Sentence case for the shell's About items: "Check for updates…", "What’s new" (and "What’s new in <version>").
 - The shell demo's product name is "Paddock Shell Demo"; its Rust side is the app (`apps/shell-demo/src-tauri` writes
   `app-commands.ts`); `paddock-shell`'s `tests/demo.rs` keeps only the plugin's checks over the demo's files.
+
+### Fixed
+- `paddock-service` (C21 VM smoke): the first Install of a bundled macOS agent failed on every fresh Mac with "macOS cannot find
+  ...'s launch agent". `SMAppService.status` is NotFound until the app registers once; that now reads as "not installed" and
+  Install registers (a real failure comes from `register`, with macOS's reason in the message). `parse_job` reads only the job's
+  own level of `launchctl print`, so macOS 26's coalition blocks (`state = active`) no longer make a running agent "refused".
+- The service smoke builds N+1 with the agent's version bumped too (it reported the old version for ever), installs to
+  /Applications as a user does, and checks the app's own status is "running" after install and after the update.
 
 ## 0.2.0 - 2026-10-24 (the first shell release)
 

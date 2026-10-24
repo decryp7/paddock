@@ -102,7 +102,8 @@ pub enum AppServiceStatus {
     NotRegistered,
     /// Registered, but the user has to allow it in Login Items (or switched it off there).
     RequiresApproval,
-    /// macOS cannot find the launch agent (the app is not where it can be registered from).
+    /// Background Task Management has no record of the agent: the app never registered it (the normal state of a fresh
+    /// install on macOS 13 to 26), or it is not where it can be registered from. Only `register` tells the two apart.
     NotFound,
 }
 

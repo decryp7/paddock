@@ -35,7 +35,8 @@ jobs:
         run: |
           cargo fmt --all --check
           cargo clippy --workspace --all-targets --all-features -- -D warnings
-          cargo test --workspace --all-features
+          cargo nextest run --workspace --all-features --profile ci
+          cargo test --workspace --all-features --doc
           cargo deny check
 
       - name: UI (install, tokens, specs, script tests)
@@ -65,6 +66,11 @@ jobs:
       - name: Install
         working-directory: ui
         run: npm ci
+
+      # publish.mjs publishes each crate with `cargo hakari publish` (without the workspace-hack dependency).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hakari
 
       - name: Publish the crates and npm packages, create the release
         env:

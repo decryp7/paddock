@@ -1,0 +1,25 @@
+# cargo-nextest settings for the crates workspace. Locally: `cargo nextest run --workspace --all-features` (the default
+# profile); CI: `--profile ci`. nextest does not run doc tests: `cargo test --doc` runs them.
+#
+# Each crate's integration tests are one binary, `it` (tests/it/main.rs, one module per former tests/<name>.rs): a
+# former binary is a test-name prefix, `cargo nextest run -p paddock-jobs -E 'test(/^pool::/)'`.
+
+[profile.default]
+# One test per core but one (rules.md 13), so a full run leaves the machine usable.
+test-threads = -1
+# A test still running after 30 s is reported as SLOW (and again every 30 s); one still running after five minutes is
+# stopped instead of letting a hang stall the run.
+slow-timeout = { period = "30s", terminate-after = 10 }
+
+# CI (.gitea/workflows/ci.yml, publish.yml): every failure reported, no retries (rules.md 5: a flaky test is fixed, not
+# retried), a JUnit report.
+[profile.ci]
+fail-fast = false
+retries = 0
+failure-output = "immediate-final"
+# A CI job has its runner to itself.
+test-threads = "num-cpus"
+
+[profile.ci.junit]
+# Written to <target>/nextest/ci/junit.xml.
+path = "junit.xml"

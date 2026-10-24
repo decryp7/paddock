@@ -55,10 +55,13 @@ export function indexPath(name) {
   return `${n.slice(0, 2)}/${n.slice(2, 4)}/${n}`;
 }
 
+/** cargo-hakari's crate (crates/.config/hakari.toml): never published; `cargo hakari publish` drops the dependency on it. */
+export const WORKSPACE_HACK = 'paddock-workspace-hack';
+
 /** The workspace's crates from `cargo metadata --no-deps`, with their dependencies on each other (dev-dependencies excluded: cargo strips path-only ones). */
 export function workspaceCrates(metadata) {
   const members = new Set(metadata.workspace_members);
-  const pkgs = metadata.packages.filter((p) => members.has(p.id));
+  const pkgs = metadata.packages.filter((p) => members.has(p.id) && p.name !== WORKSPACE_HACK);
   const names = new Set(pkgs.map((p) => p.name));
   return pkgs
     .map((p) => ({
@@ -159,11 +162,11 @@ export function tagProblems(env, version) {
   return problems;
 }
 
-/** Workspace crates that have no clippy and test step in ci.yml's per-crate job. */
+/** Workspace crates that have no clippy and test (nextest) step in ci.yml's per-crate job. */
 export function crateStepsMissing(ciYaml, names) {
   return names.filter((n) => {
     const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return !new RegExp(`cargo clippy -p ${esc} [^\\n]*--all-features`).test(ciYaml) || !new RegExp(`cargo test -p ${esc} --all-features`).test(ciYaml);
+    return !new RegExp(`cargo clippy -p ${esc} [^\\n]*--all-features`).test(ciYaml) || !new RegExp(`cargo nextest run -p ${esc} --all-features`).test(ciYaml);
   });
 }
 
@@ -264,7 +267,9 @@ function listNpm(p) {
 }
 
 function publishCrate(c, token) {
-  const res = spawnSync('cargo', ['publish', '-p', c.name, '--registry', REGISTRY_NAME, '--locked'], {
+  // `cargo hakari publish` removes the dependency on the workspace-hack crate for the upload and puts it back. That edits a
+  // manifest, so `--locked` cannot be passed here: main() checks the lock file before anything is published.
+  const res = spawnSync('cargo', ['hakari', 'publish', '-p', c.name, '--', '--registry', REGISTRY_NAME], {
     cwd: crates,
     encoding: 'utf8',
     env: { ...process.env, CARGO_REGISTRIES_DECRYP7_TOKEN: token },
@@ -316,6 +321,8 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const env = process.env;
 
+  // The lock file is current (publishCrate cannot pass --locked): cargo metadata fails when it would have to change it.
+  if (opts.publish) capture('cargo', ['metadata', '--format-version', '1', '--locked'], crates);
   const metadata = JSON.parse(capture('cargo', ['metadata', '--format-version', '1', '--no-deps'], crates));
   const crateList = publishOrder(workspaceCrates(metadata));
   const packages = npmPackages(join(ui, 'projects'), join(ui, 'dist'));

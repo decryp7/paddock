@@ -20,10 +20,25 @@ pub struct JobReport {
     pub has_lwcr: bool,
 }
 
-/// Reads the report of `launchctl print` (catalogue R03).
+/// Reads the report of `launchctl print` (catalogue R03). Only the job's own keys count: nested blocks (`arguments`,
+/// `environment`, and on macOS 26 the resource and jetsam coalitions with their own `state = active`) are skipped.
 pub fn parse_job(launchctl_print: &str) -> JobReport {
     let mut job = JobReport::default();
+    // 0 before the `<target> = {` header (fakes print bare lines), 1 inside it, more inside a nested block.
+    let mut depth = 0usize;
     for line in launchctl_print.lines().map(str::trim) {
+        if line == "}" {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        let own = depth <= 1;
+        if line.ends_with('{') {
+            depth += 1;
+            continue;
+        }
+        if !own {
+            continue;
+        }
         if line.starts_with("state = ") {
             job.found = true;
             job.running = line == "state = running";
@@ -285,6 +300,25 @@ mod tests {
         let healthy = parse_job(HEALTHY);
         assert!(healthy.found && healthy.running && healthy.has_lwcr && !healthy.stale());
         assert!(!parse_job("").found && !parse_job("").stale());
+    }
+
+    /// The real `launchctl print` of a bundled agent that runs on macOS 26 (trimmed): the job's own `state = running` is
+    /// followed by nested blocks (resource and jetsam coalitions) with their own `state = active`.
+    pub(crate) const RUNNING_MACOS_26: &str = "gui/501/net.decryptology.paddock-shell-demo.agent = {\n\tactive count = 1\n\tpath = (submitted by smd.87)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = running\n\n\tprogram identifier = Contents/MacOS/shell-demo-agent (mode: 2)\n\targuments = {\n\t\tshell-demo-agent\n\t\trun\n\t}\n\n\tpid = 880\n\tlast exit code = (never exited)\n\n\tresource coalition = {\n\t\tID = 903\n\t\ttype = resource\n\t\tstate = active\n\t\tactive count = 1\n\t}\n\n\tjetsam coalition = {\n\t\tID = 904\n\t\ttype = jetsam\n\t\tstate = active\n\t\tactive count = 1\n\t}\n\n\tspawn type = background (5)\n\tjob state = running\n\n\tproperties = partial import | keepalive | runatload | low priority i/o | resolve program | has LWCR | tle system\n}\n";
+
+    #[test]
+    fn a_nested_block_state_is_not_the_jobs_state() {
+        // Regression (C21 VM smoke, macOS 26): the coalitions' `state = active` overwrote the job's `state = running`,
+        // so a healthy agent with a launch constraint read as stale ("refused") and Repair was offered for nothing.
+        let job = parse_job(RUNNING_MACOS_26);
+        assert!(job.found && job.running && job.has_lwcr, "{job:?}");
+        assert!(!job.stale());
+        // A nested block's keys never count, whichever way round.
+        let nested_first = "x = {\n\tthing = {\n\t\tstate = running\n\t\tlast exit code = 78\n\t}\n\tstate = waiting\n}\n";
+        let job = parse_job(nested_first);
+        assert!(job.found && !job.running && !job.exit_config, "{job:?}");
+        // An unbalanced closing brace does not wrap the depth round.
+        assert!(parse_job("}\n}\nstate = running\n").running);
     }
 
     #[test]
