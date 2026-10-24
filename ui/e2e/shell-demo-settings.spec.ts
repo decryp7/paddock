@@ -11,7 +11,7 @@ test.describe('settings (plan S10)', () => {
     await page.getByRole('button', { name: 'Settings…', exact: true }).click();
     const win = app.settings.window;
     await expect(win).toHaveAttribute('aria-modal', 'false');
-    await expect(app.settings.nav.getByRole('button')).toHaveText(['Appearance', 'General', 'Storage', 'Logging']);
+    await expect(app.settings.nav.getByRole('button')).toHaveText(['Appearance', 'Background service', 'General', 'Storage', 'Logging']);
     // The Appearance section is the shell's; its change applies to the main window at once.
     await app.settings.choose('theme', 'Dark', win);
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
@@ -96,6 +96,8 @@ test.describe('settings (plan S10)', () => {
     await expect(page.getByTestId('settings-content').locator('pd-settings-section')).toHaveCount(1);
     // The pages by arrow keys.
     await app.settings.nav.getByRole('button', { name: 'Appearance' }).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(app.settings.nav.getByRole('button', { name: 'Background service' })).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(app.settings.nav.getByRole('button', { name: 'General' })).toBeFocused();
     await page.keyboard.press('End');
