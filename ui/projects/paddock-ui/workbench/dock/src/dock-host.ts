@@ -13,7 +13,8 @@ import {
   viewChild,
   ViewEncapsulation,
 } from '@angular/core';
-import { PdIcon } from '@decryp7/paddock-ui/shell';
+import { PdIcon, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { DOCK_NOTICE_ACTION } from './dock-notice';
 import { AngularContentRenderer } from './angular-panel';
 import { AutoHideItem, itemsOn } from './auto-hide';
 import { Side } from './dock-geometry';
@@ -84,7 +85,8 @@ export const HOVER_HIDE_MS = 300;
           (focusout)="focusOut($event)"
         >
           <header class="pd-dock-ah-head">
-            <span class="pd-dock-ah-title">{{ item.title }}</span>
+            <!-- The strip tab already names the panel: the header repeats nothing (the region's aria-label still does). -->
+            <span class="pd-dock-ah-spacer"></span>
             <button type="button" class="pd-dock-action pd-dock-ah-pin" [attr.aria-label]="pinLabel(item.title)" aria-pressed="true" [attr.title]="pinTitle" (click)="dock.pin(item.id)">
               <pd-icon name="pd:pin" />
             </button>
@@ -96,25 +98,16 @@ export const HOVER_HIDE_MS = 300;
           <div class="pd-dock-ah-grip" aria-hidden="true" (pointerdown)="startResize($event, item)"></div>
         </section>
       }
-      @if (dock.notice(); as notice) {
-        <div class="pd-dock-notice" role="status" data-testid="pd-dock-notice" [attr.data-notice]="notice.key">
-          <span>{{ notice.message }}</span>
-          @if (notice.action; as action) {
-            <button type="button" class="pd-dock-btn" data-testid="pd-dock-notice-action" (click)="runNotice(action.run)">{{ action.label }}</button>
-          }
-          <button type="button" class="pd-dock-btn" (click)="dock.notice.set(null)" i18n="@@pd.wb.dock.host.dismiss">Dismiss</button>
-        </div>
-      }
     </div>
     @if (dock.switcher()) {
       <pd-dock-switcher />
     }
     @if (menus.state(); as menu) {
       <div class="pd-dock-menu-backdrop" (pointerdown)="menus.close()"></div>
-      <ul class="pd-dock-menu" role="menu" data-testid="pd-dock-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" (keydown)="menuKey($event, menu.items)">
+      <ul class="pd-dock-menu pd-popmenu" role="menu" data-testid="pd-dock-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" (keydown)="menuKey($event, menu.items)">
         @for (item of menu.items; track item.label) {
           <li role="none">
-            <button type="button" role="menuitem" [disabled]="item.disabled ?? false" (click)="menus.choose(item)">{{ item.label }}</button>
+            <button type="button" role="menuitem" class="pd-popmenu__item" [disabled]="item.disabled ?? false" (click)="menus.choose(item)"><span class="pd-popmenu__label">{{ item.label }}</span></button>
           </li>
         }
       </ul>
@@ -170,6 +163,21 @@ export class PdDock implements OnDestroy {
 
   constructor() {
     afterNextRender(() => this.dock.attach(this.mount().nativeElement));
+    // The dock's notices go to the shell's notification surface (toast, then the bell), never over a group header
+    // (review P1-3; Debrief ADR 0056 "layout.fit", ADR 0061): posting is a side effect of a new notice.
+    const shell = inject(SHELL_PORTS);
+    effect(() => {
+      const notice = this.dock.notice();
+      if (!notice) return;
+      untracked(() =>
+        shell.notify({
+          level: notice.key === 'popout' ? 'warning' : 'info',
+          message: notice.message,
+          kind: `pd.wb.dock.${notice.key.replace(/[^a-z0-9-]/g, '-')}`,
+          ...(notice.action ? { action: { type: DOCK_NOTICE_ACTION, key: notice.key, label: notice.action.label } } : {}),
+        }),
+      );
+    });
     this.offKeys = this.keys.listen(document);
     // effect-state: moves the keyboard focus into a menu that just opened (a DOM side effect)
     effect(() => {
@@ -251,10 +259,6 @@ export class PdDock implements OnDestroy {
     if (next && !next.closest(KEEP_OPEN)) this.dock.autoHideEvent({ type: 'blur' });
   }
 
-  protected runNotice(run: () => void): void {
-    this.dock.notice.set(null);
-    run();
-  }
 
   /** Arrow keys, Home and End move through the open menu; Escape closes it and gives the focus back. */
   protected menuKey(e: KeyboardEvent, items: readonly DockMenuItem[]): void {

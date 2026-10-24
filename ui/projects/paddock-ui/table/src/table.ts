@@ -125,11 +125,11 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
           <div role="columnheader" class="pd-th" [class.pd-end]="c.align === 'end'" [attr.aria-sort]="ariaSort(c)">
             @if (c.sortable !== false) {
               <button type="button" class="pd-sort" [class.pd-sorted]="sort()?.key === c.key" (click)="sortBy(c.key)" [attr.aria-label]="sortLabel(c)">
-                <span class="pd-th-text">{{ c.header }}</span>
+                <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
                 <pd-glyph class="pd-sort-icon" [name]="sort()?.key !== c.key ? 'sort' : sort()?.direction === 'asc' ? 'chevron-up' : 'chevron-down'" [size]="14" />
               </button>
             } @else {
-              <span class="pd-th-text">{{ c.header }}</span>
+              <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
             }
           </div>
         }

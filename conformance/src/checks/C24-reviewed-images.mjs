@@ -1,4 +1,5 @@
-// C24: every documentation image was reviewed (rule 22), and the review still applies. Under `docs/screenshots` each image
+// C24: every documentation image was reviewed (rule 22), and the review still applies. Under `docs/screenshots` (or the folders
+// named in `screenshotDirs` of paddock.conformance.json, e.g. `ui/docs/screenshots`) each image
 // has an entry in `hashes.json` (written by @decryp7/paddock-e2e's captureDocScreens) equal to the file's SHA-256, and a row in
 // `docs/screenshots/REVIEWED.md` (| image | sha256 | reviewer | date |) whose hash equals the current one: a regenerated image
 // that changed needs a new review. Images under `docs/images` (diagrams) need only the REVIEWED.md row, in `docs/images/REVIEWED.md`.
@@ -6,10 +7,8 @@ import { createHash } from 'node:crypto';
 import { error } from '../finding.mjs';
 
 const IMAGE = /\.(?:png|jpe?g|webp|gif|svg)$/i;
-const ROOTS = [
-  { dir: 'docs/screenshots', hashes: true },
-  { dir: 'docs/images', hashes: false },
-];
+/** The folders checked: the screenshot folders (config `screenshotDirs`, default `docs/screenshots`) and `docs/images`. */
+const roots = (config) => [...(config.screenshotDirs ?? ['docs/screenshots']).map((dir) => ({ dir, hashes: true })), { dir: 'docs/images', hashes: false }];
 
 /** Rows of a REVIEWED.md: Map image -> { hash, reviewer, date, line }. Later rows win; rows that are not 4 cells with a 64-digit hash are ignored. */
 export function parseReviewed(text) {
@@ -29,7 +28,7 @@ export default {
   rule: 22,
   run(ctx) {
     const out = [];
-    for (const { dir, hashes } of ROOTS) {
+    for (const { dir, hashes } of roots(ctx.config)) {
       const images = ctx.files().filter((f) => f.startsWith(`${dir}/`) && IMAGE.test(f)).sort();
       if (!images.length) continue;
       const rel = (f) => f.slice(dir.length + 1);

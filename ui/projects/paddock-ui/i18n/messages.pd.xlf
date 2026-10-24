@@ -2393,11 +2393,29 @@
       <trans-unit id="pd.wb.assistant.allow-hint" datatype="html">
         <source>Lets the assistant propose changes. Each one still asks for your approval.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.answer-failed" datatype="html">
+        <source>The answer failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.answer-ready" datatype="html">
+        <source>Answer ready</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.allow" datatype="html">
         <source>Allow</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.arguments" datatype="html">
+        <source>Arguments</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.decline" datatype="html">
         <source>Decline</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.details" datatype="html">
+        <source>Details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.no-arguments" datatype="html">
+        <source>None</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
+        <source>Tool</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.attached" datatype="html">
         <source>Attached context</source>
@@ -2422,6 +2440,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.delete" datatype="html">
         <source>Delete conversation</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.deleted" datatype="html">
+        <source>Deleted &quot;<x id="title"/>&quot;</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.dismiss" datatype="html">
         <source>Dismiss</source>
@@ -2453,6 +2474,30 @@
       <trans-unit id="pd.wb.assistant.feature" datatype="html">
         <source>The assistant</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.incompatible" datatype="html">
+        <source>Update to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.model" datatype="html">
+        <source>Download a model in Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.not-installed" datatype="html">
+        <source>Install Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.not-running" datatype="html">
+        <source>Start Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.pairing" datatype="html">
+        <source>Connect Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.paused" datatype="html">
+        <source>Resume Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.unavailable" datatype="html">
+        <source>Pitwall is not available right now</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.jump" datatype="html">
+        <source>Jump to latest</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.loading" datatype="html">
         <source>Loading…</source>
       </trans-unit>
@@ -2483,9 +2528,6 @@
       <trans-unit id="pd.wb.assistant.thinking" datatype="html">
         <source>Thinking…</source>
       </trans-unit>
-      <trans-unit id="pd.wb.assistant.title" datatype="html">
-        <source>Assistant</source>
-      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
@@ -2500,6 +2542,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
         <source>(unreadable call)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.undo" datatype="html">
+        <source>Undo</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.view" datatype="html">
         <source>Assistant</source>
@@ -2621,6 +2666,9 @@
       <trans-unit id="pd.wb.dock.layout.fit.undo" datatype="html">
         <source>Undo</source>
       </trans-unit>
+      <trans-unit id="pd.wb.dock.notice.action" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
       <trans-unit id="pd.wb.dock.overflow.many" datatype="html">
         <source><x id="count"/> more tabs</source>
       </trans-unit>
@@ -2695,9 +2743,6 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.panelTab.close" datatype="html">
         <source>Close (Delete)</source>
-      </trans-unit>
-      <trans-unit id="pd.wb.dock.panelTab.menu" datatype="html">
-        <source>Panel menu (Shift+F10)</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.perspective-1" datatype="html">
         <source>Switch to perspective 1</source>
@@ -2816,8 +2861,23 @@
       <trans-unit id="pd.wb.palette.empty" datatype="html">
         <source>Nothing matches</source>
       </trans-unit>
+      <trans-unit id="pd.wb.palette.empty-in" datatype="html">
+        <source>Nothing in <x id="source"/> matches “<x id="query"/>”</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.empty-query" datatype="html">
+        <source>No command matches “<x id="query"/>”</source>
+      </trans-unit>
       <trans-unit id="pd.wb.palette.failed" datatype="html">
         <source>The search failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.common" datatype="html">
+        <source>Frequently used</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.other" datatype="html">
+        <source>Other commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.recent" datatype="html">
+        <source>Recently used</source>
       </trans-unit>
       <trans-unit id="pd.wb.palette.input" datatype="html">
         <source>Type a command, or a prefix to search</source>

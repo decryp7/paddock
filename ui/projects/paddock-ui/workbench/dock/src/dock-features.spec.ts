@@ -1,3 +1,7 @@
+import { NOTICE_ACTION_HANDLERS, type NoticeActionHandler } from '@decryp7/paddock-ui/shell/notify';
+import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
+import type { ShellNotice } from '@decryp7/paddock-ui/shell';
+import { DOCK_NOTICE_ACTION } from './dock-notice';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { msg, CommandService } from '@decryp7/paddock-ui/shell';
@@ -126,6 +130,10 @@ describe('auto-hide', () => {
     tab.click();
     await settle(rendered.fixture);
     expect(rendered.one('[data-testid="pd-dock-flyout"]').dataset['panelId']).toBe('a.side');
+    // The strip tab names the panel: the slide-out header does not repeat it (the region still carries the name).
+    const head = rendered.one('.pd-dock-ah-head');
+    expect(head.textContent?.trim()).toBe('');
+    expect(rendered.one('[data-testid="pd-dock-flyout"]').getAttribute('aria-label')).toBe(tab.textContent?.trim());
     expect(dock.isVisible('a.side')).toBe(true);
     dock.slideIn('a.side');
     await settle(rendered.fixture);
@@ -215,9 +223,11 @@ describe('pop-out windows', () => {
     expect(await dock.popOut('a.one')).toBe(false);
     await settle(rendered.fixture);
     expect(tabIds(rendered.element)).toEqual(['a.one']);
-    expect(rendered.one('[data-testid="pd-dock-notice"]').dataset['notice']).toBe('popout');
+    const posted = shellPorts().notices.at(-1)!;
+    expect(posted).toMatchObject({ level: 'warning', kind: 'pd.wb.dock.popout', action: { type: DOCK_NOTICE_ACTION, key: 'popout', label: 'Retry' } });
+    expect(rendered.element.querySelector('.pd-dock-notice')).toBeNull();
     w.port.result = true;
-    rendered.one<HTMLButtonElement>('[data-testid="pd-dock-notice-action"]').click();
+    await runNoticeButton(posted);
     await settle(rendered.fixture);
     expect(w.port.calls).toHaveLength(2);
   });
@@ -246,6 +256,9 @@ describe('panel menu, switcher and keys', () => {
     dock.openPanelMenu('a.two', null, { x: 5, y: 5 });
     await settle(rendered.fixture);
     const items = rendered.all<HTMLButtonElement>('[data-testid="pd-dock-menu"] button');
+    // The shared menu look (ui/projects/paddock-ui/scss/_controls.scss), not a dock copy.
+    expect(rendered.one('[data-testid="pd-dock-menu"]').classList.contains('pd-popmenu')).toBe(true);
+    expect(items.every((b) => b.classList.contains('pd-popmenu__item') && b.querySelector('.pd-popmenu__label') !== null)).toBe(true);
     expect(items.map((b) => b.textContent)).toContain('Close');
     items.find((b) => b.textContent === 'Close')?.click();
     await settle(rendered.fixture);
@@ -340,9 +353,13 @@ describe('the layout fitted to a window', () => {
     const undo = vi.fn();
     layout.notifyFitted(undo);
     await settle(rendered.fixture);
-    expect(rendered.one('[data-testid="pd-dock-notice"]').textContent).toContain('Layout adjusted to fit this window');
-    rendered.one<HTMLButtonElement>('[data-testid="pd-dock-notice-action"]').click();
+    const posted = shellPorts().notices.at(-1)!;
+    expect(posted).toMatchObject({ level: 'info', message: 'Layout adjusted to fit this window', kind: 'pd.wb.dock.layout-fit', action: { label: 'Undo' } });
+    await runNoticeButton(posted);
     await settle(rendered.fixture);
+    expect(undo).toHaveBeenCalledTimes(1);
+    // The button of a notice that is gone does nothing.
+    await runNoticeButton(posted);
     expect(undo).toHaveBeenCalledTimes(1);
     expect(dock.notice()).toBeNull();
     layout.notifyFitted(undo);
@@ -352,8 +369,8 @@ describe('the layout fitted to a window', () => {
     layout.withdrawFitted();
     expect(dock.notice()?.key).toBe('other');
     await settle(rendered.fixture);
-    rendered.all<HTMLButtonElement>('.pd-dock-notice .pd-dock-btn').at(-1)?.click();
-    expect(dock.notice()).toBeNull();
+    expect(shellPorts().notices.at(-1)).toMatchObject({ kind: 'pd.wb.dock.other', message: 'm' });
+    expect(shellPorts().notices.at(-1)?.action).toBeUndefined();
   });
 });
 
@@ -363,3 +380,11 @@ describe('contributions', () => {
     expect(contributionProblems(TestBed.inject(Injector))).toEqual([]);
   });
 });
+
+/** Presses the button of a posted notice as the notification host would (through the window's handlers). */
+async function runNoticeButton(notice: ShellNotice): Promise<void> {
+  const handlers = TestBed.inject(NOTICE_ACTION_HANDLERS) as unknown as NoticeActionHandler[];
+  const handler = handlers.find((h) => h.type === notice.action?.type)!;
+  expect(handler.label(notice.action as never, {} as never)).toBe(notice.action?.['label']);
+  await handler.run(notice.action as never, {} as never);
+}

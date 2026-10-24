@@ -1,0 +1,26 @@
+[package]
+name = "paddock-plugin-host"
+version = "0.1.0"
+description = "What an app links to run out-of-process plugins (ADR 0001): discovery of installed .paddockplugin packages (verified before every start, a changed binary is a quarantine-grade fault), permission grants with default deny and the pure sandbox mapping, a supervisor per plugin (start through paddock-ipc, restart with back-off, quarantine through paddock-guard), guarded typed proxies for the app's contracts, grant-checked host files, outputs and elevated operations, and status for the UI."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+paddock-env = { workspace = true }
+paddock-guard = { workspace = true }
+paddock-ipc = { workspace = true }
+paddock-jobs = { workspace = true }
+paddock-plugin-api = { workspace = true }
+paddock-plugin-package = { workspace = true }
+paddock-settings = { workspace = true }
+paddock-view = { workspace = true }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+paddock-plugin-test = { workspace = true }
+tempfile = "3"

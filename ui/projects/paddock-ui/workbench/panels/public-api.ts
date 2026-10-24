@@ -10,7 +10,7 @@
  * - Window systems: `tauriPanelsIo(bridge)` and `tauriWindowChrome(window, mac)` for the desktop build, `InPageDesktop` for
  *   the browser build and specs (simulated windows, no OS window opens).
  */
-export { providePanelWindows, providePopoutWindow, provideDialogUiSync, type PopoutWindowOptions } from './src/provide';
+export { providePanelWindows, providePopoutWindow, provideDialogUiSync, mountPopoutWindowHost, type PopoutWindowOptions } from './src/provide';
 export { PanelWindows, PANEL_WINDOWS_OPTIONS, HOST_TITLE_KEY, hostTitleValue, parseDragOver, type PanelWindowsOptions, type PopOutMoved } from './src/panel-windows';
 export { PdPopoutShell, pinDocumentTitle, SYNC_START_TIMEOUT_MS, POPOUT_APP_NAME } from './src/popout-shell';
 export { PdPopoutTitleBar } from './src/popout-title-bar';

@@ -1,0 +1,29 @@
+[package]
+name = "paddock-plugin-package"
+version = "0.1.0"
+description = "The .paddockplugin package of out-of-process plugins (ADR 0001): the manifest model (identity, contributions, permissions, protocol and contract versions) parsed once from manifest.toml with limits, a bounded zip archive with per-target binaries and SHA256SUMS, a detached Ed25519 signature, publisher keys, the trust levels and trust store, and verification of an installed binary. Pure: no process launching, no app state, no domain types."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+# The fuzz targets are their own workspace and are not published.
+exclude = ["fuzz"]
+
+[dependencies]
+paddock-env = { workspace = true }
+# Ed25519 signatures (MIT, no dependencies): the publisher's signature over the package digest.
+ed25519-compact = { version = "2.2", default-features = false, features = ["std"] }
+getrandom = "0.3"
+semver = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+toml = "0.9"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+proptest = "1"
+tempfile = "3"

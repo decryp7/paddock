@@ -312,6 +312,55 @@ fn the_app_starts_with_its_identity_sections_and_updates() {
 }
 
 #[test]
+fn the_ai_access_settings_are_served_and_only_the_key_dialog_issues_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app(dir.path());
+    let main = window(&app, "main");
+    let view = call(&main, true, "mcp_get", json!({})).unwrap();
+    assert_eq!(
+        view["settings"]["enabled"], false,
+        "off until the user turns it on"
+    );
+    let tools: Vec<(&str, bool)> = view["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| (t["name"].as_str().unwrap(), t["action"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(
+        tools,
+        [
+            ("export_report", true),
+            ("job_log", false),
+            ("runner_status", false)
+        ]
+    );
+    let saved = call(
+        &main,
+        true,
+        "mcp_save",
+        json!({"settings": {"enabled": true, "resources": true, "disabledTools": [], "allowedActions": []}}),
+    )
+    .unwrap();
+    let shown: Vec<&str> = saved["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["exposed"] == true)
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        shown,
+        ["job_log", "runner_status"],
+        "an action stays hidden until it is allowed"
+    );
+    assert!(
+        call(&main, true, "mcp_issue_key", json!({"client": "Pitwall"})).is_err(),
+        "a main window cannot issue a key"
+    );
+}
+
+#[test]
 fn the_logging_section_is_the_apps_log_and_the_level_applies_at_once() {
     use paddock_env::{AppId, MapVars, Os};
     use paddock_log::{LogConfig, LogLevel, Logging};
