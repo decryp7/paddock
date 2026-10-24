@@ -304,3 +304,8 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
 - Every app's macOS verify script checks ad-hoc bundles for the hardened-runtime flag, one TeamIdentifier across all
   Mach-Os and a `--version`/self-test of every sidecar started from the built app; three of four apps had no macOS
   bundle check at all, and building the `.app` only when updater keys exist hid that.
+- A stop/cancel token that is one-shot leaves a session unusable after the first Stop (Sighter POC: input stayed
+  locked until a reconnect). Stop ends the run, not the session: give each run its own token and keep the session's
+  input usable afterwards.
+- When an app needs a shared component that isn't published yet, it vendors a copy and marks it (rule 39 debt):
+  Sighter's POC copied paddock-ui's job view. Publish shared parts early (the shell's publish job) so apps never fork.
