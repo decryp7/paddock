@@ -206,3 +206,98 @@ and results, watch list, machine health, smoke tests later), legible in both the
   2026-10-25 02:03 +0800, and every other date in the docs (ADRs, REVIEW.md, REVIEWED.md) is the author's local date. Not
   misleading, but a reader will see a date one day before the commit. Stamp the local date (or the commit date) in the
   generator; no regeneration needed only for this.
+
+## Review 3 (2026-10-25)
+
+Independent re-review under rule 22 (a reviewer who neither drew nor reviewed these images before) of the hero, integrations
+and hand-offs drawings on `docs/image-fixes` at 30d0795. All six PNGs were viewed at full size in both themes, with crops of the
+hero's crossing and junction, the integrations legend and the engine-process group; the SVGs were checked for canvas width and
+type sizes (hero 1600 px, smallest text 16 px = 9.0 px at the ~900 px README width; integrations 1042 px and hand-offs 1059 px,
+smallest text 11 px = 9.5 px) and theme support. Text checked against [ecosystem.md](../ecosystem.md) (status table, contract
+table, alt text), `crates/README.md` and [diagrams/STYLE.md](../../diagrams/STYLE.md). The `?v=` links in README.md and
+ecosystem.md match the first 8 hex of each file's SHA-256.
+
+### Summary
+
+| Image | Verdict | P1 | P2 | P3 |
+|---|---|---|---|---|
+| `paddock-ecosystem.svg`, `-light.png`, `-dark.png` | approve | | | 1 |
+| `paddock-integrations.svg`, `-light.png`, `-dark.png` | approve | | | 5 |
+| `paddock-handoffs.svg`, `-light.png`, `-dark.png` | approve | | | 2 |
+
+9 approved (rows in [REVIEWED.md](REVIEWED.md)), none to fix. New findings: 0 P1, 0 P2, 8 P3. Of the 11 review-2 findings
+(1 P2, 10 P3), 10 are fixed and 1 is partly fixed (empty canvas in the integrations drawing, accepted as the author noted).
+
+### Review-2 findings
+
+| # | Review-2 finding | Verdict |
+|---|---|---|
+| Hero P3 | Job logs pill outside the grid, Smoke tests overhang | **Fixed.** Job logs starts at the card column's left edge, Smoke tests ends inside the right edge. |
+| Hero P3 | Trunk crosses the Pacenotes stub; Issues joins without a mark | **Fixed.** The dotted stub has a clean gap where the trunk crosses; a junction dot where Issues joins Job logs. Reads at a glance. |
+| Hero P3 | "PADDOCK" eyebrow 15 px | **Fixed.** 16 px. |
+| Integrations P2 | Spotter and Dyno drawn as using `paddock-pitwall` today | **Fixed.** Their arrows are dashed, the legend has "Later", the subtitle says "(Spotter and Dyno later)"; agrees with the ecosystem.md row and `crates/README.md`. |
+| Integrations P3 | "after Debrief 1.0.2" | **Fixed.** The node says "first", the MCP row says "Debrief first". |
+| Integrations P3 | A quarter of the canvas empty | **Partly fixed.** Other MCP clients now sit above the MCP servers and the canvas is 1114 px tall; a strip of about 80–100 px under the Pitwall group, left of the MCP column, remains (author-flagged). Acceptable; see P3 below for a cheap way to close it. |
+| Integrations P3 | Engine-process outline same as Outside Paddock | **Fixed** (dotted now), but the dotted outline is nearly invisible; see P3 below. |
+| Hand-offs P3 | Wording differs from the hero | **Fixed.** "Installed software" and "Test plans (MCP)" in both. |
+| Hand-offs P3 | Newer version not in the contract; runners row | **Fixed.** Contract row added; the runners row is gone and the CI row covers it. |
+| Hand-offs P3 | 26 identical grey boxes, Debrief six times | **Fixed.** One fan-in to and one fan-out from Debrief, Dyno and Spotter as fan-outs, an app-accent bar on every box (same accents as the hero). |
+| Footer date | UTC date one day early | **Fixed.** Both footers say 2026-10-25. |
+
+### `paddock-ecosystem.svg`, `-light.png`, `-dark.png` (hero): approve
+
+Professional and finished: a calm grid, a clear hub, every line routed in gutters, one type hierarchy, real icons, a true dark
+peer. Statuses match the status table (Debrief and Pitcrew v1.0.1, Pitwall v1.0.3; Debrief v1.1.1 still unpublished).
+
+- P3: "Newer version" (Spotter → Pacenotes) is now a contract row and is in the hand-offs drawing, but not in the hero, which
+  otherwise shows every app-to-app hand-off. Either add it (it must not cross the Pitwall band, so it needs a gutter route
+  like Job logs) or mention it in the hero's `<desc>` and treat the hand-offs drawing as the complete list. Not
+  misleading; the hand-offs drawing directly below it in ecosystem.md is complete.
+
+### `paddock-integrations.svg`, `-light.png`, `-dark.png` (deployment): approve
+
+Correct against the text: five clients, two of them later, one shared crate built today, one service process on loopback with
+the credential store, llama.cpp as a child process and the tool router as an MCP client; planned pills only on what is not built.
+Polish:
+
+- P3: the "Engine process" outline (#C4C7CD on #F8F9FA, dasharray 1 4) is about 1.6:1 against the group fill with a 20% duty
+  cycle, so at README width it all but disappears, in dark mode completely. Use a 2 3 dot pattern and the edge colour
+  (#565E6B / #A0A7B2) for this one outline, or 1.5 px.
+- P3: two process boundaries, two looks: "Pitwall: one service process" is the solid group outline and the nested "Engine
+  process" is dotted. A reader will take dotted to mean something the solid group is not. Draw both process boundaries the
+  same way (see the kit recommendation below).
+- P3: legend swatches: the "Outside Paddock" dashed swatch ends on a short stub at its right edge (dash phase), so it reads as
+  "[_ _ |"; the "Later" swatch is a single dash and an arrowhead and reads as a minus sign. Size the swatches to a whole number
+  of 6 4 periods and give "Later" at least two dashes (as in the hero's "- - ->").
+- P3: ecosystem.md's alt text for this drawing still says Pacenotes, Debrief, Sighter, Spotter and Dyno "reach Pitwall's local
+  HTTP API through the shared paddock-pitwall client" with no "Spotter and Dyno later"; the picture now says later. Add it.
+- P3: the remaining empty strip under the Pitwall group: the legend (about 1440 px wide in the PNG) could move up into it if it
+  were trimmed to about 1250 px (shorter gaps between entries), saving ~90 px of height. Optional. Dropping the "Library" legend
+  entry is fine: the green node labels itself "[shared Rust crate in each app]" and is the only node of its kind.
+
+**Recommendation for the diagram kit (process boundaries).** STYLE.md today uses dashed for four things: external systems,
+planned nodes (role stroke dashed), OS-process groups, and reply/dependency edges. The family drawings have already moved
+planned to "solid plus pill" and dashed edges to "later", so a dashed process group now collides with both "later" and
+"outside Paddock". Recommend the kit say:
+
+- Edges: solid = works today; dashed 6 4 = later or optional (replies in sequence diagrams keep dashed with an open head,
+  which is unambiguous there).
+- Nodes: external = neutral dashed 6 4; planned = role stroke solid plus the "planned" pill (never dashed).
+- Groups: a machine or logical area = solid 1 px group outline; an OS-process boundary = **dotted** (round caps, 2 3) in the
+  edge colour (#565E6B / #A0A7B2) so it keeps ≥3:1 against the group fill, with the label ending in "process". Every process
+  boundary in a drawing uses it, including an outer service process that contains child processes.
+
+Update STYLE.md rows "Group / boundary" and "Planned" and the Deployment line ("a dashed group per OS process boundary") in the
+same change, and redraw this drawing's Pitwall group to match.
+
+### `paddock-handoffs.svg`, `-light.png`, `-dark.png`: approve
+
+Complete against the contract table (run bundles, job logs, issues, log checks, trace to code, video repro, test plans and
+results, installed software, machine health, newer version, smoke tests later), one arrow grammar, accents consistent with the
+hero, legible in both themes. Polish:
+
+- P3: the three bus boxes (Debrief about 530 px tall, Spotter about 320, Dyno about 255 in the PNG) are empty below their name;
+  STYLE.md asks for nodes as tall as their text. Either put the app's one-line description from the hero in them, or make them
+  narrow labelled buses so the empty grey area disappears.
+- P3: the "planned" pill crowds the name in the Pacenotes boxes (about 13 px between "Pacenotes" and the pill) and sits on a
+  different baseline from it. Put the pill on the name's baseline or widen the gap to 20 px.
