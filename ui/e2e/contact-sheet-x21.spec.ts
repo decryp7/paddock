@@ -35,9 +35,9 @@ test.describe('contact sheet: data parts', () => {
       await open(page, theme);
       const small = page.locator('[data-testid="table-small"]');
       await shoot(page, theme, 'Table at rest (sentence-case headers, tabular numbers, middle-ellipsis paths)', 'table-rest', small);
-      await small.locator('[role=row][data-index]').nth(1).hover();
       await small.getByRole('button', { name: 'Sort by Size (KiB)' }).click();
-      await shoot(page, theme, 'Sorted by size, a hovered row shows its icon actions and the "..." button', 'table-hover', small);
+      await small.locator('[role=row][data-index]').nth(1).hover();
+      await shoot(page, theme, 'Sorted by size; the hovered row is highlighted and shows its icon actions and the "..." button', 'table-hover', small);
       await small.locator('[role=row][data-index]').nth(1).getByRole('button', { name: 'More actions' }).click();
       const menu = page.getByRole('menu');
       await menu.waitFor();
@@ -52,14 +52,48 @@ test.describe('contact sheet: data parts', () => {
       await shoot(page, theme, 'Grouped rows in a 5,000-row virtual viewport', 'table-virtual', page.locator('[data-testid="table-virtual"]'));
     });
 
+    test(`table states ${theme}`, async ({ page }) => {
+      await open(page, theme);
+      const small = page.locator('[data-testid="table-small"]');
+      // Keyboard focus: the row ring and a focused sortable header.
+      await small.locator('[role=row][data-index]').first().focus();
+      await page.keyboard.press('ArrowDown');
+      await shoot(page, theme, 'Focused row (2 px ring) and a hovered header showing the sort chevron', 'table-focus-row', small.locator('.pd-grid'));
+      await small.locator('.pd-sort').nth(1).focus();
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Shift+Tab');
+      await shoot(page, theme, 'Focused sortable header (focus ring, quiet chevron)', 'table-focus-header', small.locator('.pd-header'));
+      // A menu opened from the keyboard, the second item active.
+      await small.locator('[role=row][data-index]').nth(1).focus();
+      await page.keyboard.press('Shift+F10');
+      await page.getByRole('menuitem').first().waitFor();
+      await page.keyboard.press('ArrowDown');
+      const box = (await small.boundingBox())!;
+      const menuBox = (await page.getByRole('menu').boundingBox())!;
+      mkdirSync(OUT, { recursive: true });
+      const file = join(OUT, `${theme}-menu-keyboard.png`);
+      await page.screenshot({ path: file, clip: { x: Math.max(0, menuBox.x - 40), y: menuBox.y - 60, width: menuBox.width + 80, height: menuBox.height + 100 } });
+      shots.push({ theme, title: 'Row menu opened with Shift+F10, the second item keyboard-active (2 px ring)', file });
+      void box;
+      await page.keyboard.press('Escape');
+      await shoot(page, theme, 'Selected row (accent tint, 2 px bar), descending sort', 'table-selected', page.locator('[data-testid="box-selected"]'));
+      await page.locator('[data-testid="table-virtual"] .pd-group').first().click();
+      await shoot(page, theme, 'Collapsed group in the grouped table', 'table-collapsed', page.locator('[data-testid="table-virtual"]'));
+      await shoot(page, theme, 'Empty table with its next step', 'table-empty', page.locator('[data-testid="box-empty"]'));
+      await shoot(page, theme, 'Loading: skeleton rows', 'table-loading', page.locator('[data-testid="box-loading"]'));
+      await shoot(page, theme, 'Error with Retry', 'table-error', page.locator('[data-testid="box-error"]'));
+    });
+
     test(`table at 320 px ${theme}`, async ({ page }) => {
       await open(page, theme, 320);
-      await shoot(page, theme, 'Table at 320 px: low-priority columns drop out, nothing scrolls sideways', 'table-320', page.locator('[data-testid="table-small"]'));
+      await shoot(page, theme, 'Table at 320 px: the name keeps its room, other columns drop out, compact toolbar, nothing scrolls sideways', 'table-320', page.locator('[data-testid="table-small"]'));
+      await page.locator('section[data-testid="chart"] canvas').first().waitFor();
+      await shoot(page, theme, 'Charts at 320 px (titles, unit, donut with labels)', 'charts-320', page.locator('section[data-testid="chart"]'));
     });
 
     test(`chart ${theme}`, async ({ page }) => {
       await open(page, theme);
-      await shoot(page, theme, 'Chart wrapper: line, stacked bar (neutral + danger), area, donut', 'charts', page.locator('section[data-testid="chart"]'));
+      await shoot(page, theme, 'Chart wrapper: titles with units, line, stacked bar (only the top segment rounded), area, donut with total and labelled slices, loading and error', 'charts', page.locator('section[data-testid="chart"]'));
     });
 
     test(`forms ${theme}`, async ({ page }) => {
@@ -68,7 +102,9 @@ test.describe('contact sheet: data parts', () => {
       await forms.getByLabel('Port').fill('70000');
       await forms.getByRole('button', { name: 'Save' }).click();
       await expect(forms.getByTestId('field-error').first()).toBeVisible();
-      await shoot(page, theme, 'Forms: errors after submit, alert icon at 14 px', 'forms', forms);
+      await shoot(page, theme, 'Forms: error replaces the hint right under the control, alert icon at 14 px, short port field, disabled field', 'forms', forms);
+      await forms.getByLabel('Name').focus();
+      await shoot(page, theme, 'Forms: a focused field', 'forms-focus', forms.locator('pd-field').first());
     });
   }
 

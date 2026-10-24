@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-files-recent-grant"
+description = "Enables the files_recent_grant command without any pre-configured scope."
+commands.allow = ["files_recent_grant"]
+
+[[permission]]
+identifier = "deny-files-recent-grant"
+description = "Denies the files_recent_grant command without any pre-configured scope."
+commands.deny = ["files_recent_grant"]
