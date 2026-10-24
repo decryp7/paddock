@@ -274,3 +274,17 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
 - macOS permission grants (Screen Recording, Accessibility) are tied to the code signature, and an ad-hoc re-sign on update
   changes it; verify in the first spike of Sighter and give the user a Repair that opens the right Settings pane (ADR 0010).
 
+
+## External processes and windows (Debrief 1.1, 2026-10-24)
+- "The browser is running" must include the page you drive: on macOS closing Chrome's last window does not quit Chrome,
+  so a process-alive + socket-open check reused a dead session and research never worked again after the user closed
+  the window. Every external process or window an app drives has one owner with an explicit lifecycle
+  (none → launching → ready → closing → gone(reason)), detects exit, disconnect and page/target loss, and the next use
+  starts fresh; a call on a gone resource fails at once with a plain message and Retry, never waits out a timeout.
+- Folder names built from pid + clock collide when two launches start in the same microsecond on macOS; add a counter.
+- Children of a SIGKILLed worker (e.g. llama-server) survive unless they die with their parent; kill the process group
+  or watch for parent death.
+- A webview's page process can be paused (e.g. App Tamer auto-stop) or killed: the window stays blank or dies.
+  Every window reports ready, a watchdog reloads once and then shows a recovery state, and page errors go to the log.
+- Dialogs on multi-display, mixed-scale Macs open on the wrong display or at the wrong size when position/size are
+  absolute or converted with another monitor's scale; place relative to the parent, on the parent's monitor.
