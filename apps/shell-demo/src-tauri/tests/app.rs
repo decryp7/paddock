@@ -200,7 +200,14 @@ fn the_contracts_and_manifest_agree_with_the_plugin_and_the_apps_table() {
         dir: std::env::temp_dir(),
     });
     assert_eq!(builder.problems(Some(MANIFEST)), Vec::<String>::new());
-    assert_eq!(builder.service_ids(), [engine::ENGINE, engine::INDEX]);
+    assert_eq!(
+        builder.service_ids(),
+        [
+            engine::ENGINE,
+            engine::INDEX,
+            paddock_shell_demo::agent::HEALTH_ID
+        ]
+    );
     assert_eq!(builder.section_ids(), ["sd.general", "sd.storage"]);
 }
 
