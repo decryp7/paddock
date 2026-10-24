@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1) and `paddock-dialogs` (S5) built, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3) and `paddock-dialogs` (S5) and `paddock-startup` (S7) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -56,6 +56,34 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
 | `paddock-cli` | shared CLI conventions (`--json`, exit codes, timeouts) | yes |
+
+## `paddock-jobs` Tauri adapter (plan S9)
+
+With the `tauri` feature, `paddock_jobs::tauri` is the jobs part of the shell (ADR 0008 open question 2, ADR 0012 §3):
+
+```rust
+tauri::Builder::default()
+    .setup(|app| {
+        let jobs = paddock_jobs::tauri::manage(app.handle()); // Arc<JobRegistry>; snapshots go out on `paddock://jobs`
+        app.manage(AppState { jobs, pool: JobPool::new(Workers::auto()) });
+        Ok(())
+    })
+    .invoke_handler(paddock_jobs::tauri::route(
+        paddock_jobs::tauri::handler(),                    // or handler_with_grants(lookup): dialogs by their contracts
+        paddock_commands::tauri::Guard::new(&COMMANDS).wrap(handler!()),
+    ))
+```
+
+- `Emit` is the `EventSink` (event `EVENT` = `paddock://jobs`, every snapshot to every webview); `Jobs` is the managed state.
+- `COMMANDS` (a `command_table!`): `jobs_snapshot` (query: every known job, ordered by id) and `job_cancel { id }`
+  (mutation: false for an unknown or ended job). Both are async, return at once and never wait for a job; an app without
+  the state gets `{ code: 'notSetUp', message, retryable: false }`. Starting work stays with the app: its command registers
+  a job, submits it to its `JobPool` and returns the id.
+- `route(jobs, other)` sends the table's commands to the jobs handler and the rest to the app's, so the app keeps one
+  `invoke_handler` until the `paddock-shell` plugin (S17) takes the commands over.
+- Generated TypeScript in `ui/projects/paddock-ui/shell/jobs/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs
+  --features tauri --test tauri generated`): `jobs-commands.ts` (`JOBS_COMMANDS`, `JobsCommand`) and `jobs-fixtures.ts`
+  (one snapshot of every shape, written by the real reporter, decoded by the UI's specs).
 
 ## `paddock-commands` (plan S1)
 
@@ -113,6 +141,8 @@ Entries are sorted by name; an empty table is `{} as const` (name type `never`).
 |---|---|---|
 | `commands.ts` | the wire types (ts-rs): `CommandKind`, `WindowClass`, `CommandInfo`, `RefusalCode`, `CommandRefusal` | `paddock-commands` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated`) |
 | `shell-commands.ts` | `SHELL_COMMANDS` and `ShellCommand`, the shell plugin's command names | `paddock-commands` with an empty table until `paddock-shell` (S17) takes it over with its own table and test |
+| `health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
+| `health-commands.ts` | `HEALTH_COMMANDS` and `HealthCommand`, the health and notification commands | `paddock-health` (same test) |
 
 An app writes its own file the same way into its UI (for example `src/app/core/generated/app-commands.ts`); dialog
 contracts and the contributions core type command names as `AppCommand | ShellCommand`.
@@ -164,6 +194,64 @@ tauri::Builder::default()
 Wire types are generated into `ui/projects/paddock-ui/shell/generated/dialogs.ts` (`DialogKind`, `DialogContract`,
 `DialogContractFile`, `DialogRequest`, `DialogStart`, `DialogResult`, `DialogClosed`, `DialogError`, `DIALOG_EVENTS`,
 `DIALOG_BASE_COMMANDS`; `PADDOCK_WRITE_TS=1 cargo test -p paddock-dialogs --lib generated`).
+## `paddock-health` (plan S3)
+
+Service health and the cause-key notification centre (ADR 0010, ADR 0012 §3), ported from Debrief ADR 0055
+(`health/{model,registry}.rs`, the generic half of `health/hub.rs`, `notification_centre/`), without Debrief's
+services, sources or actions:
+
+```rust
+// The app registers its services; the repair is the shell's code and never goes through the broken service (rule 19).
+let health = paddock_health::tauri::init(app.handle(), paddock_health::tauri::Setup::new(vec![
+    ServiceSpec::new("llm", "the model server").repair(move || supervisor.restart().map_err(|e| Cause::new("...").detail(e))),
+]).notifications_file(data_dir.join("notifications.json")).os_notifications(|app, notice| show_os(app, notice)))?;
+// Supervisors report; the same report again announces nothing.
+health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.").code("llm.stopped"), Some(RepairAction::Restart));
+// Commands behind the shell's guard (S17 lists them in the shell plugin's table).
+.invoke_handler(Guard::new(&paddock_health::tauri::COMMANDS).wrap(paddock_health::tauri::invoke_handler()))
+```
+
+- One failure is one chip and one notification in every window: each real change is one `paddock://service-health`
+  event (a `ServiceHealthSnapshot`) and one message with the cause `health:<id>` (posted on the outage, updated in
+  place, resolved on the recovery), with a `paddock://notifications` event per window. New windows ask with
+  `health_snapshot` and `notifications_list`.
+- `health_repair` returns at once with the service `repairing`, runs the repair on a background thread (a panic is
+  contained) and ends `ok`, or `down` with the repair's cause; `openSettings` repairs are opened by the UI instead.
+- Notifications: sources and action types are the app's strings (`NoticeSource`, `NoticeAction { type, ...args }`);
+  the shell's own are `health`, `repairService` and `openSettings`. App messages are saved debounced and atomically in a
+  versioned file (missing, damaged or newer: empty, logged); a window's project messages are saved by the app with its
+  project (`notifications_record` / `notifications_restore`). A dialog or pop-out sees its host window's list.
+
+## `paddock-startup` (plan S7 and §11)
+
+The start-up contract and the window watchdog (ADR 0012 §3, ported from Debrief ADR 0058), plus the liveness heartbeat
+after start-up. Every window reports `window_ready` once it painted its frame; a window that does not within 10 s is
+reloaded once, then the user is asked natively (Reload / Restart in Safe Mode / Keep Waiting). Once ready, each visible
+window answers a ping every 2 s (`paddock://ping` → `window_pong`); after 5 missed in a row it is marked unresponsive,
+logged, the unresponsive hook lets its dialog be closed by the OS close, and the user is asked (Reload / Keep Waiting); an
+answer clears the mark. A gap of more than 3 s between ticks means the app process itself was paused: the clocks restart.
+A terminated web content process (macOS) is reloaded at most three times a minute; the reloaded page hears why with its
+last UI checkpoint.
+
+```rust
+let startup = paddock_startup::tauri::Startup::builder()
+    .safe_mode(|app, _label| restart_in_safe_mode(app).map_err(|e| e.to_string()))
+    .on_unresponsive(paddock_dialogs::tauri::page_unresponsive)    // a dialog whose page cannot answer may be closed
+    .native_dialogs()                                               // feature `dialog`; the app registers tauri-plugin-dialog
+    .build()?;                                                      // `Config` timings are checked
+paddock_startup::tauri::install(tauri::Builder::default(), startup) // manage + on_page_load + content-process terminate
+    .invoke_handler(Guard::new(&paddock_startup::COMMANDS).wrap(paddock_startup::tauri::handler()))
+```
+
+- The pure core (`Watchdog`, `Checkpoints`, `ready_reply`, `clean_error`, `Prompt`, `Config`) takes the time from the
+  caller and is tested with a fake clock; the ticker thread (started by the first watched page load; never the main
+  thread) only applies the `Action`s, reloading and asking through `run_on_main_thread`.
+- `COMMANDS`: `window_ready`, `window_boot_error` (16 KiB, one bounded line, at most 10 per page load) and `window_pong`
+  for every window class; `ui_checkpoint` (16 MiB, an object) for main windows only. An app with its own table lists
+  `paddock_startup::tauri::window_ready` and the others there instead; `DIALOG_BASE` names the three every dialog
+  contract includes.
+- Generated TypeScript: `ui/projects/paddock-ui/shell/startup/generated/startup.ts` (wire types) and
+  `startup-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-startup --lib generated`).
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.

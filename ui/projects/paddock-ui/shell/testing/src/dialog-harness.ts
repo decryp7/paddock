@@ -26,8 +26,11 @@ type Providers = readonly (Provider | EnvironmentProviders)[];
 export interface DialogHarnessOptions {
   /** Every dialog of the app (the window looks its own up by id, as in the app). */
   readonly dialogs: readonly DialogDef[];
-  /** The app's base set of a dialog window (what its `main.ts` passes to `dialogWindowConfig`). */
-  readonly providers?: Providers;
+  /**
+   * The app's base set of a dialog window (what its `main.ts` passes to `dialogWindowConfig`). A function is called once
+   * the IPC recorder is in place, so providers that pick their backend by the Tauri globals take the IPC path.
+   */
+  readonly providers?: Providers | (() => Providers);
   /** Fixture input per dialog id, for the dialogs that cannot open without any. */
   readonly inputs?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** The app's commands every dialog window may call (the contract file's `base`). */
@@ -92,7 +95,8 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
   io.start = { dialogId: def.id, title: def.title?.text ?? def.id, kind: def.kind, modality: def.modality, requiredChoice: def.requiredChoice === true, input: options.inputs?.[def.id] ?? {} };
   try {
     TestBed.resetTestingModule();
-    const config = dialogWindowConfig({ dialogs: options.dialogs, providers: options.providers, route: { id: def.id, host: 'main', label: 'd-main-1' } });
+    const providers = typeof options.providers === 'function' ? options.providers() : options.providers;
+    const config = dialogWindowConfig({ dialogs: options.dialogs, providers, route: { id: def.id, host: 'main', label: 'd-main-1' } });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), ...config.providers, { provide: DIALOG_IO, useValue: io }] });
     const fixture = TestBed.createComponent(DialogShell);
     const root = fixture.nativeElement as HTMLElement;

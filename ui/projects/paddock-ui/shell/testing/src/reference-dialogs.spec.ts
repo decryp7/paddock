@@ -1,6 +1,7 @@
 import { dialogContractFile, serializeDialogContracts } from '@decryp7/paddock-ui/shell/dialogs';
+import { STARTUP_COMMANDS } from '@decryp7/paddock-ui/shell/startup';
 import { DEMO_DIALOGS } from '../../../../shell-demo/src/app/demo.contributions';
-import { dialogBaseProviders } from '../../../../shell-demo/src/app/dialog-base';
+import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from '../../../../shell-demo/src/app/dialog-base';
 import { APP_COMMANDS } from '../../../../shell-demo/src/app/generated/app-commands';
 import { assertDialogBoots, dialogTableProblems } from './dialog-harness';
 import type { DialogDef } from '@decryp7/paddock-ui/shell';
@@ -28,19 +29,27 @@ describe('shell-demo dialogs', () => {
 
   for (const def of DIALOGS) {
     it(`${def.id} (${def.kind}) boots with only its window's providers`, async () => {
-      const report = await assertDialogBoots(def, { dialogs: DIALOGS, providers: dialogBaseProviders(), inputs: { 'sd.rename': { current: 'Demo' } } });
-      if (def.id === 'sd.inspector') expect(report.sent).toEqual(['demo_status']);
+      const report = await assertDialogBoots(def, {
+        dialogs: DIALOGS,
+        // Called with the IPC recorder in place: the window takes its Tauri backends, as in the desktop build.
+        providers: dialogBaseProviders,
+        baseCommands: DIALOG_BASE_COMMANDS,
+        answers: { window_ready: { recovered: null, ui: null } },
+        inputs: { 'sd.rename': { current: 'Demo' } },
+      });
+      expect(report.sent).toContain('window_ready');
+      if (def.id === 'sd.inspector') expect(report.sent).toContain('demo_status');
     });
   }
 
   it('declares only commands of its table that dialogs may call', () => {
-    expect(dialogTableProblems(DIALOGS, APP_COMMANDS)).toEqual([]);
+    expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...STARTUP_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
   });
 
   // Regenerate with PADDOCK_WRITE_CONTRACTS=1 npx ng test paddock-ui --watch=false --include=**/reference-dialogs.spec.ts
   it('keeps dialog-contracts.json equal to the registry', async () => {
     const fs = await nodeFs();
-    const want = serializeDialogContracts(dialogContractFile(DIALOGS));
+    const want = serializeDialogContracts(dialogContractFile(DIALOGS, { base: DIALOG_BASE_COMMANDS }));
     if (env('PADDOCK_WRITE_CONTRACTS') === '1') fs.writeFileSync(FILE, want);
     expect(fs.readFileSync(FILE, 'utf8')).toBe(want);
   });

@@ -20,8 +20,29 @@ import { contentInjector, errorText, isRecord, mountContent } from './mount';
 import { DIALOG_ROUTE } from './route';
 import { DIALOG_LOOKUP, type DialogContent, type DialogRef } from './types';
 
-/** Re-fits after the content changed size wait this long. */
-const REFIT_DEBOUNCE_MS = 60;
+/**
+ * Runs `work` once on the next frame however often it is asked for until then (a burst of DOM changes or resizes is
+ * one check), with no delay of its own: the UI holds no timers on work (rule 12). Returns the asker and a cancel.
+ */
+export function coalesced(work: () => void): { readonly ask: () => void; readonly cancel: () => void } {
+  let pending: number | ReturnType<typeof setTimeout> | null = null;
+  const raf = typeof requestAnimationFrame === 'function';
+  const run = () => {
+    pending = null;
+    work();
+  };
+  return {
+    ask: () => {
+      if (pending === null) pending = raf ? requestAnimationFrame(run) : setTimeout(run, 0);
+    },
+    cancel: () => {
+      if (pending === null) return;
+      if (raf) cancelAnimationFrame(pending as number);
+      else clearTimeout(pending);
+      pending = null;
+    },
+  };
+}
 /** The body's padding when the computed style cannot be read. */
 const BODY_PADDING_PX = 16;
 
@@ -166,25 +187,21 @@ export class DialogShell {
   private watchForCloseAction(): void {
     this.check();
     if (typeof MutationObserver === 'undefined') return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const observer = new MutationObserver(() => {
-      clearTimeout(timer);
-      timer = setTimeout(() => this.check(), 30);
-    });
+    const recheck = coalesced(() => this.check());
+    const observer = new MutationObserver(recheck.ask);
     observer.observe(this.body().nativeElement, { childList: true, subtree: true, characterData: true });
     this.destroyRef.onDestroy(() => {
       observer.disconnect();
-      clearTimeout(timer);
+      recheck.cancel();
     });
   }
 
   /**
    * Fits the window to what its content needs: once after the first layout and the fonts (fitting before them and again
-   * after made the window jump), and again when the content grows (debounced). Only grows: a window never shrinks under a
+   * after made the window jump), and again when the content grows (once per frame). Only grows: a window never shrinks under a
    * reader. Rust bounds the height by the dialog's floor and its monitor.
    */
   private fitToContent(): void {
-    let timer: ReturnType<typeof setTimeout> | undefined;
     let last = 0;
     const fit = () => {
       const needed = this.neededHeight();
@@ -192,10 +209,8 @@ export class DialogShell {
       last = needed;
       void this.io.fitHeight(needed).catch(() => undefined);
     };
-    const schedule = () => {
-      clearTimeout(timer);
-      timer = setTimeout(fit, REFIT_DEBOUNCE_MS);
-    };
+    const refit = coalesced(fit);
+    const schedule = refit.ask;
     this.refit = schedule;
     afterNextRender(
       () => {
@@ -208,7 +223,7 @@ export class DialogShell {
           observer.observe(content);
           this.destroyRef.onDestroy(() => observer.disconnect());
         }
-        this.destroyRef.onDestroy(() => clearTimeout(timer));
+        this.destroyRef.onDestroy(refit.cancel);
       },
       { injector: this.injector },
     );

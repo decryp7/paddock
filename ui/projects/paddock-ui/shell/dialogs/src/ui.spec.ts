@@ -549,7 +549,9 @@ describe('window layout details', () => {
       const body = (fixture.nativeElement as HTMLElement).querySelector('main')!;
       const rect = vi.spyOn(body.lastElementChild as HTMLElement, 'getBoundingClientRect').mockReturnValue({ bottom: 900 } as DOMRect);
       observers.forEach((o) => o());
-      await new Promise<void>((r) => setTimeout(r, 80));
+      // The re-fit runs on the next frame.
+      await new Promise<void>((r) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 0)));
+      await settle(1);
       expect(io.fitted.at(-1)).toBeGreaterThan(900);
       rect.mockRestore();
       fixture.destroy();

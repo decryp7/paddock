@@ -25,10 +25,14 @@
     "@angular/common": "^22.0.0",
     "@angular/core": "^22.0.0",
     "echarts": "^6.0.0",
+    "@ngrx/signals": "^22.0.0",
     "typescript": ">=5.8"
   },
   "peerDependenciesMeta": {
     "echarts": {
+      "optional": true
+    },
+    "@ngrx/signals": {
       "optional": true
     },
     "typescript": {

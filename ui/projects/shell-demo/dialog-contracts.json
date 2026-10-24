@@ -1,6 +1,9 @@
 {
   "version": 1,
-  "base": [],
+  "base": [
+    "window_pong",
+    "window_ready"
+  ],
   "dialogs": {
     "sd.about": {
       "kind": "viewer",

@@ -1,0 +1,555 @@
+//! The adapter on a real invoke path: a mock Tauri app (`tauri::test`) with the commands behind the shell's guard, a
+//! fake service and several windows.
+
+use super::*;
+use crate::clock::ManualClock;
+use crate::model::{Cause, RepairAction, ServiceState};
+use crate::notify::centre::{NoticeAction, NoticeSeverity};
+use ::tauri::ipc::{CallbackFn, InvokeBody};
+use ::tauri::test::{
+    INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
+};
+use ::tauri::webview::InvokeRequest;
+use ::tauri::{App, Listener, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use paddock_commands::tauri::Guard;
+use serde_json::json;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Mutex, mpsc};
+use std::time::Duration;
+
+/// The dialog `d-main-1` may use the notification commands (its contract, ADR 0009).
+struct NotificationsDialog;
+
+impl paddock_commands::DialogGrant for NotificationsDialog {
+    fn dialog(&self) -> &str {
+        "notifications"
+    }
+    fn allows(&self, command: &str) -> bool {
+        command.starts_with("notifications_")
+    }
+}
+
+fn bare_app() -> App<MockRuntime> {
+    let guard = Guard::new(&COMMANDS)
+        .dialog_grants(|_app, label| (label == "d-main-1").then_some(NotificationsDialog));
+    mock_builder()
+        .invoke_handler(guard.wrap(invoke_handler()))
+        .build(mock_context(noop_assets()))
+        .unwrap()
+}
+
+/// A fake service: a supervisor flag the repair sets again (the repair is the shell's code, not the service's).
+struct FakeService {
+    running: Arc<AtomicBool>,
+    repairs: Arc<AtomicUsize>,
+}
+
+impl FakeService {
+    fn new() -> FakeService {
+        FakeService {
+            running: Arc::new(AtomicBool::new(true)),
+            repairs: Arc::default(),
+        }
+    }
+
+    fn spec(&self) -> ServiceSpec {
+        let (running, repairs) = (self.running.clone(), self.repairs.clone());
+        ServiceSpec::new("engine", "the engine").repair(move || {
+            repairs.fetch_add(1, Ordering::SeqCst);
+            running.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+
+    /// What the supervisor reports when the engine dies.
+    fn died(&self, health: &Health) {
+        self.running.store(false, Ordering::SeqCst);
+        health.down(
+            "engine",
+            Cause::new("The engine stopped.")
+                .hint("Choose Restart.")
+                .code("engine.stopped"),
+            Some(RepairAction::Restart),
+        );
+    }
+}
+
+fn app_with(setup: Setup<MockRuntime>) -> (App<MockRuntime>, Arc<Health>) {
+    let app = bare_app();
+    let health = init(app.handle(), setup).unwrap();
+    (app, health)
+}
+
+fn window(app: &App<MockRuntime>, label: &str) -> WebviewWindow<MockRuntime> {
+    WebviewWindowBuilder::new(app, label, WebviewUrl::default())
+        .build()
+        .unwrap()
+}
+
+fn invoke(w: &WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Result<Value, Value> {
+    let request = InvokeRequest {
+        cmd: cmd.into(),
+        callback: CallbackFn(0),
+        error: CallbackFn(1),
+        url: if cfg!(windows) {
+            "http://tauri.localhost"
+        } else {
+            "tauri://localhost"
+        }
+        .parse()
+        .unwrap(),
+        body: InvokeBody::Json(args),
+        headers: Default::default(),
+        invoke_key: INVOKE_KEY.to_string(),
+    };
+    get_ipc_response(w, request).map(|b| b.deserialize::<Value>().unwrap())
+}
+
+type Heard = Arc<Mutex<Vec<Value>>>;
+
+/// Every payload of `event` the window hears.
+fn hear(w: &WebviewWindow<MockRuntime>, event: &str) -> Heard {
+    let heard: Heard = Arc::default();
+    let h = heard.clone();
+    w.listen(event, move |e| {
+        h.lock()
+            .unwrap()
+            .push(serde_json::from_str(e.payload()).unwrap())
+    });
+    heard
+}
+
+fn take(heard: &Heard) -> Vec<Value> {
+    std::mem::take(&mut *heard.lock().unwrap())
+}
+
+#[test]
+fn one_failure_is_one_chip_and_one_notification_in_two_windows() {
+    crate::tests::capture_logs();
+    let service = FakeService::new();
+    let (app, health) = app_with(Setup::new(vec![service.spec()]));
+    let (main, second) = (window(&app, "main"), window(&app, "w-2"));
+    let windows = [&main, &second];
+    let chips: Vec<Heard> = windows
+        .iter()
+        .map(|w| hear(w, SERVICE_HEALTH_EVENT))
+        .collect();
+    let lists: Vec<Heard> = windows
+        .iter()
+        .map(|w| hear(w, NOTIFICATIONS_EVENT))
+        .collect();
+    // The last thing a recovery does: the second window (last in label order) hears its emptied list.
+    let (back_tx, back_rx) = mpsc::channel();
+    second.listen(NOTIFICATIONS_EVENT, move |e| {
+        let list: Value = serde_json::from_str(e.payload()).unwrap();
+        if list["notices"].as_array().is_some_and(Vec::is_empty) {
+            let _ = back_tx.send(());
+        }
+    });
+
+    // The engine dies; every call that meets it reports the same thing.
+    for _ in 0..3 {
+        service.died(&health);
+    }
+
+    for (chip, list) in chips.iter().zip(&lists) {
+        let chip = take(chip);
+        assert_eq!(chip.len(), 1, "one chip update per window: {chip:?}");
+        assert_eq!(chip[0]["services"][0]["state"], "down");
+        assert_eq!(
+            chip[0]["services"][0]["cause"]["message"],
+            "The engine stopped."
+        );
+        let list = take(list);
+        assert_eq!(list.len(), 1, "one notification event per window: {list:?}");
+        assert_eq!(list[0]["posted"]["count"], 1);
+        assert_eq!(list[0]["unread"], 1);
+    }
+    let ids: Vec<Value> = windows
+        .iter()
+        .map(|w| {
+            let list = invoke(w, "notifications_list", json!({})).unwrap();
+            assert_eq!(list["notices"].as_array().unwrap().len(), 1, "{list}");
+            let n = &list["notices"][0];
+            assert_eq!(n["cause"], "health:engine");
+            assert_eq!(n["severity"], "error");
+            assert_eq!(n["source"], "health");
+            assert_eq!(n["code"], "engine.stopped");
+            assert_eq!(
+                n["primary"],
+                json!({"type": "repairService", "service": "engine"})
+            );
+            n["id"].clone()
+        })
+        .collect();
+    assert_eq!(ids[0], ids[1], "the same notification in both windows");
+    let snap = invoke(&second, "health_snapshot", json!({})).unwrap();
+    assert_eq!(snap["services"][0]["repair"], "restart");
+
+    // Repair from the second window: the shell runs it, the chip goes back to ok and the notification is resolved.
+    let started = invoke(&second, "health_repair", json!({"service": "engine"})).unwrap();
+    assert_eq!(started["services"][0]["state"], "repairing");
+    back_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the repair ends");
+    assert!(service.running.load(Ordering::SeqCst));
+    assert_eq!(service.repairs.load(Ordering::SeqCst), 1);
+    for (chip, list) in chips.iter().zip(&lists) {
+        let states: Vec<Value> = take(chip)
+            .iter()
+            .map(|s| s["services"][0]["state"].clone())
+            .collect();
+        assert_eq!(states, [json!("repairing"), json!("ok")]);
+        let list = take(list);
+        assert_eq!(list.len(), 1, "the resolution, once: {list:?}");
+        assert_eq!(
+            (list[0]["unread"].as_u64(), &list[0]["posted"]),
+            (Some(0), &Value::Null)
+        );
+    }
+    for w in windows {
+        assert!(
+            invoke(w, "notifications_list", json!({})).unwrap()["notices"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    use crate::tests::logged;
+    assert!(logged(log::Level::Info, "Service health changed"));
+    assert!(logged(log::Level::Info, "Repair started"));
+    assert!(logged(log::Level::Info, "Repair finished"));
+}
+
+#[test]
+fn a_degraded_service_updates_its_one_message_in_place() {
+    let (app, health) = app_with(Setup::new(vec![ServiceSpec::new("llm", "the model")]));
+    let main = window(&app, "main");
+    health.down("llm", Cause::new("Stopped."), None);
+    health.set(
+        "llm",
+        ServiceState::Degraded,
+        Some(Cause::new("Slow.")),
+        None,
+    );
+    let list = invoke(&main, "notifications_list", json!({})).unwrap();
+    let n = &list["notices"][0];
+    assert_eq!(
+        (
+            n["count"].as_u64(),
+            n["severity"].as_str(),
+            n["title"].as_str()
+        ),
+        (Some(2), Some("warning"), Some("Slow."))
+    );
+    assert!(n["primary"].is_null(), "nothing repairs it");
+    // A repair that is refused is the command's error.
+    let e = invoke(&main, "health_repair", json!({"service": "llm"})).unwrap_err();
+    assert_eq!(
+        (e["code"].as_str(), e["retryable"].as_bool()),
+        (Some("refused"), Some(false))
+    );
+    assert_eq!(
+        invoke(&main, "health_repair", json!({"service": "nope"})).unwrap_err()["code"],
+        "invalid"
+    );
+    let e = invoke(&main, "health_repair", json!({"service": "x".repeat(100)})).unwrap_err();
+    assert_eq!(e["message"], "that is not a service id");
+}
+
+#[test]
+fn commands_list_mark_dismiss_and_restore_through_ipc_and_dialogs_see_their_host() {
+    let (app, _) = app_with(Setup::new(vec![]).clock(Arc::new(ManualClock::at(1_000))));
+    let main = window(&app, "main");
+    let dialog = window(&app, "d-main-1");
+    let popout = window(&app, "p-main-1");
+    let other = window(&app, "w-2");
+    let page = window(&app, "browser-page");
+    let dialog_heard = hear(&dialog, NOTIFICATIONS_EVENT);
+    let other_heard = hear(&other, NOTIFICATIONS_EVENT);
+    let page_heard = hear(&page, NOTIFICATIONS_EVENT);
+    let alert = || {
+        NewNotice::new(
+            "live:spike",
+            "liveAlert",
+            NoticeSeverity::Error,
+            "ERROR spike",
+            NoticeScope::Project,
+        )
+    };
+    let first = post(app.handle(), Some("p-main-1"), alert(), false).unwrap();
+    assert_eq!(
+        first.link.window.as_deref(),
+        Some("main"),
+        "a pop-out posts into its host's list"
+    );
+    post(app.handle(), Some("main"), alert(), false).unwrap();
+    assert_eq!(
+        take(&dialog_heard).last().unwrap()["posted"]["count"],
+        2,
+        "the toast previews the merged message"
+    );
+    assert!(
+        take(&other_heard).is_empty(),
+        "another window's project message is not this window's"
+    );
+    assert!(
+        take(&page_heard).is_empty(),
+        "a page outside the label scheme hears nothing"
+    );
+    let list = invoke(&dialog, "notifications_list", json!({})).unwrap();
+    assert_eq!(
+        (
+            list["unread"].as_u64(),
+            list["notices"].as_array().unwrap().len()
+        ),
+        (Some(1), 1)
+    );
+    assert!(
+        invoke(&other, "notifications_list", json!({})).unwrap()["notices"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        invoke(
+            &popout,
+            "notifications_mark_read",
+            json!({"id": first.id.0})
+        )
+        .unwrap(),
+        true
+    );
+    assert_eq!(
+        invoke(&main, "notifications_mark_all_read", json!({})).unwrap(),
+        0
+    );
+    let record = invoke(&main, "notifications_record", json!({})).unwrap();
+    assert_eq!(record["notices"][0]["read"], true);
+    let restored = invoke(
+        &main,
+        "notifications_restore",
+        json!({"record": {"version": 7, "notices": []}}),
+    )
+    .unwrap();
+    assert!(restored["warning"].as_str().unwrap().contains("newer"));
+    take(&other_heard);
+    invoke(&main, "notifications_restore", json!({"record": record})).unwrap();
+    assert!(
+        take(&other_heard).is_empty(),
+        "a restore is the window's own"
+    );
+    let id = invoke(&main, "notifications_list", json!({})).unwrap()["notices"][0]["id"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(
+        invoke(&dialog, "notifications_dismiss", json!({"id": id})).unwrap(),
+        true
+    );
+    assert_eq!(
+        invoke(&dialog, "notifications_dismiss", json!({"id": id})).unwrap(),
+        false
+    );
+    assert!(
+        invoke(&main, "notifications_list", json!({})).unwrap()["notices"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    // A quiet message is listed without a toast; a `once` message posted again tells nobody.
+    take(&other_heard);
+    let offer = || {
+        NewNotice::new(
+            "update:2",
+            "update",
+            NoticeSeverity::Info,
+            "Version 2",
+            NoticeScope::App,
+        )
+        .once()
+        .quiet()
+    };
+    post(app.handle(), None, offer(), false).unwrap();
+    let heard = take(&other_heard);
+    assert_eq!((heard.len(), &heard[0]["posted"]), (1, &Value::Null));
+    post(app.handle(), None, offer(), false).unwrap();
+    assert!(take(&other_heard).is_empty());
+    // A closed window's project messages go with it.
+    post(app.handle(), Some("w-2"), alert(), false).unwrap();
+    forget_window(app.handle(), "w-2");
+    assert_eq!(
+        invoke(&other, "notifications_list", json!({})).unwrap()["notices"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "only the app's"
+    );
+    assert!(flush(app.handle()));
+}
+
+#[test]
+fn os_notifications_go_through_the_apps_hook_and_a_click_opens_the_message() {
+    let shown = Arc::new(Mutex::new(Vec::<String>::new()));
+    let s = shown.clone();
+    let (app, health) = app_with(
+        Setup::new(vec![ServiceSpec::new("engine", "the engine")]).os_notifications(
+            move |_app, n| {
+                s.lock().unwrap().push(n.title.clone());
+                n.severity == NoticeSeverity::Error
+            },
+        ),
+    );
+    let main = window(&app, "main");
+    let second = window(&app, "w-2");
+    let opened_main = hear(&main, OPEN_EVENT);
+    let opened_second = hear(&second, OPEN_EVENT);
+    // An outage always asks for an OS notification.
+    health.down("engine", Cause::new("The engine stopped."), None);
+    assert_eq!(*shown.lock().unwrap(), ["The engine stopped."]);
+    on_focus(app.handle(), "w-2");
+    assert_eq!(
+        take(&opened_second).len(),
+        1,
+        "an app message opens in the window that got the focus"
+    );
+    on_focus(app.handle(), "w-2");
+    assert!(take(&opened_second).is_empty(), "once");
+    // A project message opens in its own window.
+    let failed = || {
+        NewNotice::new(
+            "job:export",
+            "job",
+            NoticeSeverity::Error,
+            "Export failed",
+            NoticeScope::Project,
+        )
+    };
+    let n = post(app.handle(), Some("main"), failed(), true).unwrap();
+    on_focus(app.handle(), "w-2");
+    assert_eq!(take(&opened_main), [json!(n.id.0)]);
+    // The hook said it did not show one: a focus is an ordinary focus; and no `os` asks nothing.
+    post(
+        app.handle(),
+        None,
+        NewNotice::new("i", "x", NoticeSeverity::Info, "Info", NoticeScope::App),
+        true,
+    );
+    on_focus(app.handle(), "main");
+    assert!(take(&opened_main).is_empty());
+    post(
+        app.handle(),
+        None,
+        NewNotice::new("j", "x", NoticeSeverity::Error, "Quiet", NoticeScope::App),
+        false,
+    );
+    assert_eq!(shown.lock().unwrap().len(), 3);
+}
+
+#[test]
+fn without_init_producers_are_not_affected_and_commands_say_not_ready() {
+    let app = bare_app();
+    let main = window(&app, "main");
+    let n = NewNotice::new("a", "x", NoticeSeverity::Info, "a", NoticeScope::App);
+    assert!(post(app.handle(), None, n, true).is_none());
+    resolve_cause(app.handle(), "a");
+    on_focus(app.handle(), "main");
+    forget_window(app.handle(), "main");
+    assert!(flush(app.handle()));
+    for (cmd, what) in [
+        ("health_snapshot", "Service health"),
+        ("notifications_list", "The notification centre"),
+    ] {
+        let e = invoke(&main, cmd, json!({})).unwrap_err();
+        assert_eq!(
+            e,
+            json!({"code": "unavailable", "message": format!("{what} is not ready yet"), "retryable": true})
+        );
+    }
+    assert_eq!(
+        invoke(&main, "health_repair", json!({"service": "a"})).unwrap_err()["code"],
+        "unavailable"
+    );
+    for cmd in ["notifications_mark_read", "notifications_dismiss"] {
+        assert!(invoke(&main, cmd, json!({"id": 1})).is_err());
+    }
+    for cmd in [
+        "notifications_mark_all_read",
+        "notifications_record",
+        "notifications_restore",
+    ] {
+        assert!(invoke(&main, cmd, json!({})).is_err());
+    }
+}
+
+#[test]
+fn a_bad_service_list_is_refused_and_the_app_file_is_used() {
+    let app = bare_app();
+    let e = init(
+        app.handle(),
+        Setup::new(vec![ServiceSpec::new("a", "x"), ServiceSpec::new("a", "y")]),
+    );
+    assert!(matches!(e, Err(SpecError::Duplicate(_))));
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("data/notifications.json");
+    let (app, _) = app_with(
+        Setup::new(vec![])
+            .notifications_file(&file)
+            .caps(Caps { app: 1, project: 1 }),
+    );
+    for cause in ["a", "b"] {
+        post(
+            app.handle(),
+            None,
+            NewNotice::new(cause, "x", NoticeSeverity::Info, cause, NoticeScope::App),
+            false,
+        );
+    }
+    assert!(flush(app.handle()));
+    let saved = crate::notify::persist::load_file(&file);
+    assert_eq!(
+        saved.iter().map(|n| n.cause.as_str()).collect::<Vec<_>>(),
+        ["b"],
+        "capped at one"
+    );
+    assert_eq!(NoticeAction::repair_service("a").kind, "repairService");
+}
+
+#[test]
+fn every_command_is_async_and_in_the_table_and_its_names_are_generated() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    paddock_commands::testing::assert_async(&COMMANDS, &[&src]);
+    let regenerate =
+        "PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated";
+    let text = paddock_commands::ts::names_module(
+        &COMMANDS,
+        "HEALTH_COMMANDS",
+        "HealthCommand",
+        regenerate,
+    )
+    .unwrap();
+    crate::tests::sync("health-commands.ts", &text);
+    assert_eq!(
+        COMMANDS.kind_of("notifications_record"),
+        paddock_commands::Kind::Quiet
+    );
+    assert_eq!(
+        COMMANDS.spec("notifications_restore").map(|s| s.limit()),
+        Some(4 * paddock_commands::MIB)
+    );
+}
+
+#[test]
+fn a_failed_send_is_logged_and_nothing_else_happens() {
+    crate::tests::capture_logs();
+    warn_on_err(Ok(()), "never logged");
+    warn_on_err(
+        Err(::tauri::Error::WindowNotFound),
+        "The event could not be sent",
+    );
+    assert!(crate::tests::logged(
+        log::Level::Warn,
+        "The event could not be sent: "
+    ));
+    assert!(!crate::tests::logged(log::Level::Warn, "never logged"));
+}
