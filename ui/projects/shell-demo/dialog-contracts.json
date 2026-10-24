@@ -19,6 +19,22 @@
         "about_legal"
       ]
     },
+    "pd.channels.remove": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": true,
+      "commands": []
+    },
+    "pd.channels.secret": {
+      "kind": "form",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "channels_set_secret"
+      ]
+    },
     "pd.report-problem": {
       "kind": "decision",
       "modality": "modal",
@@ -38,7 +54,14 @@
       "instanced": false,
       "commands": [
         "app_relaunch",
+        "channels_clear_secret",
+        "channels_get",
+        "channels_save",
+        "channels_test",
+        "dialog_open",
         "open_login_items",
+        "packs_reload",
+        "packs_status",
         "service_install",
         "service_repair",
         "service_status",

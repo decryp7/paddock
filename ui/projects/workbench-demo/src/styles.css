@@ -1,0 +1,2 @@
+/* Demo layout only; every colour and size comes from the paddock-ui tokens. */
+html, body { height: 100%; margin: 0; background: var(--pd-bg); color: var(--pd-text); }

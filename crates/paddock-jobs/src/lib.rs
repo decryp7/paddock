@@ -7,6 +7,8 @@
 //!   with its own scale ([`Unit`], known or unknown total).
 //! * [`Reporter`] throttles and coalesces updates; [`JobRegistry`] and [`JobContext`] own ids, cancel tokens and terminal states.
 //! * [`JobPool`] runs job bodies on a bounded worker pool so command handlers return at once ([`assert_nonblocking`] tests that).
+//! * [`journal`] is the activity journal (a bounded, persisted log of what the app did, with undo states).
+//! * [`schedule`] is the family's schedules (every N, times of day, cron; zones, DST, catch-up) and pause windows.
 //! * [`time`] is the family's clock port ([`Clock`], [`SystemClock`], [`FakeClock`]), deadlines and restart back-off.
 //! * [`CancelToken`] is checked cooperatively; [`par_walk`], [`par_map_ordered`], [`pipeline_ordered`] and [`HashingWriter`] honour it
 //!   within [`CANCEL_CHECK_ITEMS`] items or [`CHUNK`] bytes.
@@ -16,18 +18,20 @@ mod error;
 mod eta;
 mod hash;
 mod job;
+pub mod journal;
 mod map;
 mod model;
 mod pipeline;
 mod pool;
 mod reporter;
+pub mod schedule;
 #[cfg(feature = "tauri")]
 pub mod tauri;
 pub mod time;
 mod walk;
 mod workers;
 
-pub use cancel::{CancelReason, CancelToken, Cancelled};
+pub use cancel::{CancelReason, CancelToken, Cancelled, OnCancel};
 pub use error::JobError;
 pub use eta::EtaEstimator;
 pub use hash::{CHUNK, HashingWriter, copy_hashed, hex};
@@ -38,7 +42,8 @@ pub use model::{
 };
 pub use pipeline::pipeline_ordered;
 pub use pool::{
-    HANDLER_BUDGET_MS, JobHandle, JobPool, Offload, PoolClosed, SlowHandler, assert_nonblocking,
+    BLOCKED_AFTER, Blocked, JobHandle, JobPool, Offload, PoolClosed, PoolHold, assert_nonblocking,
+    assert_nonblocking_within,
 };
 pub use reporter::{Counter, DEFAULT_MIN_INTERVAL_MS, EventSink, Reporter, UncancellableGuard};
 pub use time::{Clock, FakeClock, SystemClock};
