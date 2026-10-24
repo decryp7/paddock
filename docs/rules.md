@@ -2,7 +2,7 @@
 
 Binding rules for every Paddock app and for everyone (people and agents) working on them. Each rule comes from a user
 decision or a lesson; the reasons are in [lessons.md](lessons.md). Each app's `AGENTS.md` carries these rules; when a rule
-changes here, the apps' copies are updated when each app is next touched.
+changes here, every app's copy is updated in the same change.
 
 ## Way of working
 1. **One app at a time.** Finish the current app before starting another; parallel agents only within that app.
