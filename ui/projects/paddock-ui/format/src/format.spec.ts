@@ -138,4 +138,13 @@ describe('middle ellipsis', () => {
     expect(head + tail).toBe(long);
     expect(DEFAULT_KEEP_TAIL).toBe(20);
   });
+  it('starts a long name\'s tail at a word, never mid-word (review P2-10)', () => {
+    const win = splitForEllipsis('C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log');
+    expect(win.tail).toBe('2026-10-24.log');
+    expect(win.head + win.tail).toBe('C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log');
+    // No boundary in the kept characters: the last ones, as before.
+    expect(splitForEllipsis(`${'a'.repeat(30)}${'b'.repeat(25)}`).tail).toBe('b'.repeat(20));
+    // A boundary at the very end never empties the tail.
+    expect(splitForEllipsis(`${'a'.repeat(30)}-`).tail.length).toBeGreaterThan(0);
+  });
 });
