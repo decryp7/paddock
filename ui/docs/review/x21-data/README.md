@@ -1,0 +1,1 @@
+Contact sheet of the data parts of paddock-ui (plan X21): table, chart wrapper and forms helpers, light and dark, for the independent review (rules 22 and UI patterns 2, 5, 6, 8, 9, 15). Rewritten by `CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x21`. NOT self-approved: awaiting the independent reviewer.

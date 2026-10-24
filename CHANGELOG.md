@@ -14,6 +14,39 @@ Conventional Commits; one semver tag for the whole repo.
   `packs/` folder.
 - `paddock-watch` (plan X23): `Debouncer` on the shared `Clock`, the `ChangeSource` port (`FakeSource`, `NotifySource` behind the
   `notify` feature) with `spawn`, and Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`). `paddock-packs` now watches through it.
+- `paddock-build` (plan X34): the Tauri build step in one call (the Windows manifest in every binary, sidecar placeholders, rerun
+  triggers; the manifest is shared, the shell demo gains it); `paddock_proc::self_test` (the `--self-test` of a sidecar);
+  `paddock-sidecar` in `@decryp7/paddock-conformance` (`build` and `self-test` for every app's sidecars; the shell demo's
+  `agent/sidecar.mjs` is now three lines over it, and `new-app` carries that).
+- Conformance checks C34 (sidecars declared for the bundle check and implementing `--self-test`), C34 (every `untimed` call of a
+  `withCallTimeout` policy is a declared job-starting or user-waiting command, rule 12; C35) and C36 (parser crates have a fuzz target or a
+  never-panics test; warning).
+- Reusable workflows `app-fuzz.yml`, `app-mutants.yml` and `app-never-panics.yml` (plan X41, from Debrief's fuzz.yml and mutants.yml);
+  never-panics tests with `paddock_testkit::{corpus, never_panics}` for the release manifest and the launchctl report parsers.
+- Accessibility checks (plan X49). `@decryp7/paddock-e2e`: `axeInThemes`, `axeTargets` (a list of windows by name), `axeEveryDialog`
+  (axe over the window of every dialog in the app's `dialog-contracts.json`, both themes, so a new dialog is covered the moment it is
+  declared; an empty list is an error), and the keyboard-only helpers `tabWalk`, `expectTabOrder` (no trap, no stop without a focus
+  indicator), `expectReachableByKeyboard` and `expectEscapeReturnsFocus`. `@decryp7/paddock-ui/shell`: `accentProblems`, `cssRules`,
+  `resolveTokens` and `definedAccents`, the contrast and colour-vision targets of `test:tokens` as pure functions an app runs on its
+  own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C33: an
+  e2e spec runs axe, every dialog of the contract file is covered, warnings for a missing keyboard flow or accent test. The shell
+  demo's `shell-demo-a11y.spec.ts` runs it all. `ShellDialogs.loaded()` now waits for the dialog shell itself (a window still on the splash passed it).
+- `@decryp7/paddock-ui` data parts (plan X21): `/table` (`pd-table`: sortable columns with `aria-sort`, filter, column menu, optional
+  group rows, CDK virtual scroll above 100 lines, one tab stop with arrow/Home/End/Page keys, Enter opens, Shift+F10 and right-click
+  open the row menu, up to two hover icon actions plus a "..." button and the same list in the menu with destructive items last,
+  columns that drop out by the table's own width so nothing scrolls sideways at 320 px, middle ellipsis for paths); `/chart`
+  (`pd-chart` over ECharts loaded lazily through `PD_ECHARTS`, theme and palette from the tokens and re-read on a theme change,
+  accessible name and text twin, `chartOption` for line, area, bar, stacked bar and donut, escaped tooltips, works with the test
+  kit's `FakeECharts` through `fakeEchartsLoader`); `/forms` (`pd-field` and `pdFieldControl` for Signal Forms: label, hint and one error
+  with the alert icon at 14 px, when errors show, words for the built-in kinds). Based on Pitwall's and Spotter's `row-nav`/`row-menu`,
+  Pitcrew's, Pitwall's and Spotter's chart options and the settings window's field. Gallery sections, Playwright specs (gallery and
+  shell-demo; the demo's Runners page now uses `pd-table`) and a contact sheet at `ui/docs/review/x21-data/` for the independent
+  review (not approved yet).
+- `paddock-archive` (plan X24): safe unpacking of zip, tar, tar.gz and tar.xz. Limits on entries, file size, total size, expansion
+  ratio, depth and path length, checked while writing; `..`, absolute paths, drive letters, device names and case-only duplicates
+  refused; `Links` (refuse, skip, copy, keep-relative), `Layout` (keep, strip, flat), a name filter, file modes; all-or-nothing
+  `extract` through a staging folder that is swapped in; `extract_job` for a `paddock-jobs` job with phases and Cancel; `sweep_stale`;
+  a fuzz target.
 - `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
   macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
   deleted, one at a time, with disk and load checks (rule 7).
@@ -271,6 +304,12 @@ Conventional Commits; one semver tag for the whole repo.
   wears an app's colour; held to the same token tests as Pacenotes and Sighter.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
+
+### Fixed
+- The About, Updates and What's New contents were unstyled: their stylesheet still used the old class names (`.btn`, `.muted`, ...)
+  while the templates use the `pd-` ones, so the legal-text buttons failed colour contrast in the light theme (found by the new
+  axe check over every dialog window). The shell demo's dialog buttons set white text instead of `--pd-on-accent` and failed
+  contrast in the dark theme.
 
 ### Changed
 - Breaking (plan X20): `paddock-jobs`, `paddock-log` and `paddock-health` share one `Clock` (`paddock_jobs::time`). The old
