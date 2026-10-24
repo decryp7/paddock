@@ -22,6 +22,12 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
   **ad-hoc signed** (`signingIdentity "-"` in `tauri.macos.conf.json`): `SMAppService` and launch agents refuse a
   linker-signed bundle. It is not notarised: users open it once with right-click > Open. Developer ID signing and
   notarisation are future work.
+  While the build is ad hoc the **hardened runtime is off** (`"hardenedRuntime": false`, Paddock rule 23): ad-hoc code
+  under the hardened runtime enforces library validation and cannot load a library signed by its vendor ("different
+  Team IDs"). When the `APPLE_SIGNING_IDENTITY` secret names a real identity, the CI bundle step passes
+  `{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). `scripts/ci/macos-verify-bundle.sh` fails
+  the build when an ad-hoc Mach-O has the hardened runtime on, when bundled Mach-Os disagree on their TeamIdentifier,
+  or when a sidecar does not start from the built app (`--version`), on the `.app` and on the copy inside the DMG.
 - **Linux:** `Dyno_<version>_amd64.deb` and an AppImage.
 - Every bundle carries the `dyno-agent`, `dyno-helper` and `dyno` (command line, docs/cli.md) sidecars (`externalBin`, built by `app/src-tauri/scripts/sidecar.mjs` with the `dist`
   profile). On macOS the bundle also carries `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`.

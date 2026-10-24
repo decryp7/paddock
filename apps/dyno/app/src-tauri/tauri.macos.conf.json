@@ -36,7 +36,8 @@
       "files": {
         "Library/LaunchAgents/net.decryptology.dyno.agent.plist": "./macos/net.decryptology.dyno.agent.plist"
       },
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     }
   }
 }

@@ -251,7 +251,7 @@ jobs:
         run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
 
       - name: Script tests
-        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-capabilities.test.mjs app/scripts/check-index.test.mjs
+        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-capabilities.test.mjs app/scripts/check-index.test.mjs scripts/ci/*.test.mjs
 
       # Least-privilege capabilities, a CSP without unsafe-eval or remote origins, drag-region permissions for the
       # frameless title bar, macOS private API in both places (docs/suite-lessons.md).
@@ -449,7 +449,7 @@ jobs:
       # Signed updater artifacts (docs/releasing.md): with the signing secrets set, Tauri writes a .sig next to every
       # installer and the public key is built into the app. Without them (forks, pull requests) the app reports
       # "Updates are not available in this build". The macOS bundle is ad-hoc signed (tauri.macos.conf.json,
-      # signingIdentity "-"): SMAppService and launch agents refuse a linker-signed bundle.
+      # signingIdentity "-", hardenedRuntime false): SMAppService and launch agents refuse a linker-signed bundle.
       - name: Build installers
         working-directory: app
         shell: bash
@@ -461,6 +461,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           BUNDLES: ${{ matrix.bundles }}
         run: |
           npm ci
@@ -476,19 +478,29 @@ jobs:
           # The DMG step removes the .app it packed unless the app bundle is requested too; the bundle check and the
           # macOS updater both need it.
           if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
+          # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, Paddock rule 23): ad-hoc code under it
+          # cannot load a vendor-signed library ("different Team IDs"). A real signing identity turns it back on, as
+          # notarization requires.
+          extra=()
+          if [ "$RUNNER_OS" = macOS ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
+            mkdir -p ../target
+            echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
+            extra=(--config ../target/hardened.conf.json)
+          fi
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
             mkdir -p ../target
             # A secret pasted with a trailing newline is not valid base64: strip all whitespace.
             node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY.replace(/\s+/g, "") } } }))' > ../target/updater.conf.json
-            npx tauri build --bundles "$bundles" --config ../target/updater.conf.json -- --profile dist
+            npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
           else
             echo '::warning::No updater signing secrets: this build cannot update itself.'
             unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-            npx tauri build --bundles "$bundles" -- --profile dist
+            npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
 
       # Run paths of the packaged binaries, the macOS seal and the executables a package must carry
-      # (scripts/check-bundle.sh): a layout change cannot silently ship a binary that fails to start.
+      # (scripts/check-bundle.sh; on macOS also scripts/ci/macos-verify-bundle.sh: no hardened runtime while ad hoc, one
+      # TeamIdentifier, every sidecar starts from the built .app and DMG): a layout change cannot ship a binary that fails to start.
       - name: Packaged binaries have sound run paths and seals (Linux, macOS)
         if: runner.os != 'Windows'
         shell: bash
