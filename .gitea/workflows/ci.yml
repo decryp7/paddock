@@ -23,7 +23,7 @@ jobs:
     name: ui (tokens, contrast, components, entry points, publish dry run)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v1
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: ui
@@ -71,7 +71,7 @@ jobs:
     name: reference apps (shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v1
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     strategy:
       fail-fast: false
       matrix:
@@ -100,7 +100,7 @@ jobs:
     name: conformance (checks, release scripts)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v1
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: conformance
@@ -133,7 +133,7 @@ jobs:
     name: tools and shared scripts
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v1
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
 
@@ -148,7 +148,7 @@ jobs:
     name: eslint preset (rules 27 to 39)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v1
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: eslint
@@ -163,10 +163,14 @@ jobs:
     name: crates (fmt, workspace hack, unused deps, coverage, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v1
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: crates
+    env:
+      # The job runs as root in the container, where Chromium refuses to start with its sandbox (the real-browser test of
+      # paddock-chromium); the driver drops the sandbox only for root AND with this opt-in.
+      PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: ./.gitea/actions/setup-rust
@@ -194,7 +198,7 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|cargo-paddock-plugin/src/main\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -212,13 +216,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Linux runs in the paddock-ci image (Rust, Tauri's libraries, Node, Playwright, Chrome for Testing, cargo-nextest baked in); Windows and
     # macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v1' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     defaults:
       run:
         working-directory: crates
         shell: bash
     env:
       CARGO_TERM_COLOR: always
+      # Root in the Linux container: Chromium needs the opt-in to start without its sandbox (ignored when not root).
+      PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -316,10 +322,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-runtime --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-runtime --all-features --profile ci && cargo test -p paddock-runtime --all-features --doc
 
-      # The driver against its fake browser (Unix); the real-browser test runs only where CHROMIUM_TEST_PATH names a
-      # Chrome for Testing build, never an installed browser (rule 7).
+      # The driver against its fake browser (Unix), and against the image's Chrome for Testing on Linux (CHROMIUM_TEST_PATH, the
+      # build chromium.toml pins; never an installed browser, rule 7). There a missing browser fails instead of skipping.
       - name: paddock-chromium
         if: ${{ !cancelled() }}
+        env:
+          PADDOCK_REQUIRE_TEST_BROWSER: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
         run: cargo clippy -p paddock-chromium --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-chromium --all-features --profile ci && cargo test -p paddock-chromium --all-features --doc
 
       - name: paddock-mcp
@@ -432,6 +440,10 @@ jobs:
       - name: paddock-plugin-test
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-plugin-test --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-test --all-features --profile ci && cargo test -p paddock-plugin-test --all-features --doc
+      # The plugin author's tool: its tests run the real cargo on a tiny project and start the test kit's fixture as a process.
+      - name: cargo-paddock-plugin
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p cargo-paddock-plugin --all-targets --all-features -- -D warnings && cargo nextest run -p cargo-paddock-plugin --all-features --profile ci && cargo test -p cargo-paddock-plugin --all-features --doc
       - name: paddock-plugin-package
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-plugin-package --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-package --all-features --profile ci && cargo test -p paddock-plugin-package --all-features --doc
@@ -466,7 +478,7 @@ jobs:
     name: shell demo app (fmt, clippy, tests, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v1
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -503,7 +515,7 @@ jobs:
     name: workbench demo app (fmt, clippy, tests, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -513,10 +525,6 @@ jobs:
         with:
           sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
       - name: The UI the app embeds

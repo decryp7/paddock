@@ -653,3 +653,21 @@ fn a_tool_can_read_a_file_it_was_handed_by_path() {
         json!("")
     );
 }
+
+#[test]
+fn a_plugin_program_is_started_like_the_app_does_and_conforms() {
+    let program = fixture::locate().unwrap();
+    let h = FakeHost::launch(&program, &[]).unwrap();
+    assert_eq!(h.describe().unwrap().id, fixture::ID);
+    assert_eq!(conformance::run(&h), vec![]);
+    assert!(!h.is_closed());
+}
+
+#[test]
+fn a_program_that_cannot_start_or_speaks_another_protocol_is_refused_with_a_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(FakeHost::launch(&dir.path().join("missing"), &[]).is_err());
+    let program = fixture::locate().unwrap();
+    let old = FakeHost::launch(&program, &["--protocol", "1.0"]);
+    assert!(matches!(old, Err(IpcError::Version(_))), "{:?}", old.err());
+}

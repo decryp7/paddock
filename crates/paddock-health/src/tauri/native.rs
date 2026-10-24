@@ -114,10 +114,7 @@ pub fn settings_command(os: &str) -> Option<(&'static str, &'static [&'static st
 pub type Spawn<'a> = dyn Fn(&str, &[&str]) -> Result<(), String> + 'a;
 
 /// Opens the notification settings of `os` through `spawn` (program, arguments).
-pub fn open_settings_with(
-    os: &str,
-    spawn: &Spawn<'_>,
-) -> Result<(), ToastError> {
+pub fn open_settings_with(os: &str, spawn: &Spawn<'_>) -> Result<(), ToastError> {
     let Some((program, args)) = settings_command(os) else {
         return Err(ToastError(
             "Open your system's notification settings and allow notifications for this app.".into(),

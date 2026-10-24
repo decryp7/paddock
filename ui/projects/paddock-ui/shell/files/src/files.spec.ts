@@ -1,11 +1,14 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { CommandError } from '@decryp7/paddock-ui/ipc';
+import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
 import { FILES_DROPPED_EVENT, FILES_RECENT_EVENT, type RecentLists } from '../generated/files';
 import { FILES_COMMANDS, type FilesCommand } from '../generated/files-commands';
 import { FilesBackend, MemoryFilesBackend, TauriFilesBackend, notGranted, type FilesIpc } from './backend';
 import { FilesStore } from './files.store';
 import { provideShellFiles } from './provide-files';
+import { fileIcon } from './file-icon';
+import { baseName, parentPath } from './path-parts';
 import { PdRecentFiles } from './recent-files';
 import { APP_FOLDERS, entriesOf, parseDroppedFiles, parseRecentLists } from './wire';
 
@@ -43,7 +46,7 @@ describe('the wire', () => {
 
   it('names every command of the table', () => {
     expect(Object.keys(FILES_COMMANDS).sort()).toEqual(
-      ['files_open', 'files_open_app_folder', 'files_open_url', 'files_pick', 'files_recent_clear', 'files_recent_grant', 'files_recent_list', 'files_recent_remove', 'files_reveal'].sort(),
+      ['files_open', 'files_open_at_line', 'files_open_app_folder', 'files_open_url', 'files_pick', 'files_recent_clear', 'files_recent_grant', 'files_recent_list', 'files_recent_remove', 'files_reveal'].sort(),
     );
   });
 });
@@ -75,10 +78,11 @@ describe('the Tauri backend', () => {
     await b.clearRecent('files');
     await b.reveal('/a');
     await b.open('/a');
+    await b.openAtLine('/a', 12);
     await b.openAppFolder('logs');
     await b.openUrl('https://example.org');
-    expect(calls.map(([c]) => c)).toEqual(['files_pick', 'files_recent_list', 'files_recent_grant', 'files_recent_remove', 'files_recent_clear', 'files_reveal', 'files_open', 'files_open_app_folder', 'files_open_url']);
-    expect(calls[8]).toEqual(['files_open_url', { url: 'https://example.org' }]);
+    expect(calls.map(([c]) => c)).toEqual(['files_pick', 'files_recent_list', 'files_recent_grant', 'files_recent_remove', 'files_recent_clear', 'files_reveal', 'files_open', 'files_open_at_line', 'files_open_app_folder', 'files_open_url']);
+    expect(calls[9]).toEqual(['files_open_url', { url: 'https://example.org' }]);
   });
 
   it('refuses payloads that are not the contract', async () => {
@@ -120,6 +124,10 @@ describe('the in-memory engine keeps the rules of the Rust side', () => {
     await m.open('/x');
     m.drop('/d');
     await m.reveal('/d');
+    await m.openAtLine('/d', 3);
+    expect(m.edited).toEqual(['/d:3']);
+    for (const bad of [0, 10_000_001, 1.5]) await expect(m.openAtLine('/d', bad)).rejects.toMatchObject({ code: 'invalid', field: 'line' });
+    await expect(m.openAtLine('/never', 1)).rejects.toMatchObject({ code: 'notGranted' });
     expect(await m.regrant('files', '/logs/a.log')).toBe('/logs/a.log');
     await expect(m.regrant('files', '/not/listed')).rejects.toMatchObject({ code: 'notFound' });
     expect(m.revealed).toEqual(['/x', '/d']);
@@ -193,6 +201,8 @@ describe('the store', () => {
     expect(store.failure()).toBeNull();
     expect(await store.reveal('/logs/a.log')).toBe(true);
     expect(await store.open('/logs/a.log')).toBe(true);
+    expect(await store.openAtLine('/logs/a.log', 5)).toBe(true);
+    expect(await store.openAtLine('/logs/a.log', 0)).toBe(false);
     expect(await store.openAppFolder('logs')).toBe(true);
     expect(await store.openUrl('https://example.org')).toBe(true);
     expect(await store.openUrl('file:///x')).toBe(false);
@@ -318,5 +328,67 @@ describe('pd-recent-files', () => {
     expect(el.querySelectorAll('[data-testid="recent-entry"]')).toHaveLength(1);
     expect(el.querySelector('.pd-name')?.textContent).toBe('Alpha');
     for (const b of Array.from(el.querySelectorAll('.pd-icon'))) expect(b.getAttribute('aria-label')).toBeTruthy();
+  });
+});
+
+describe('file-type icons', () => {
+  it('chooses a glyph of the pd: set from the name, never from the file', () => {
+    expect(fileIcon('/logs/a.log')).toBe('file-text');
+    expect(fileIcon('C:\\notes\\README.MD')).toBe('file-text');
+    expect(fileIcon('/x/config.TOML')).toBe('file-code');
+    expect(fileIcon('/x/bundle.debriefz')).toBe('file');
+    expect(fileIcon('/x/a.tar.gz')).toBe('archive');
+    expect(fileIcon('/x/.hidden')).toBe('file');
+    expect(fileIcon('/x/noext')).toBe('file');
+    expect(fileIcon('/x/folder', true)).toBe('folder');
+    for (const name of ['file', 'file-text', 'file-code', 'archive', 'folder']) expect(Object.keys(PD_ICON_PATHS)).toContain(name);
+  });
+
+  it('draws one in each recent row, 16 px, and the folder glyph for a folder', async () => {
+    const m = new MemoryFilesBackend({
+      lists: { lists: [{ id: 'files', entries: [{ path: '/logs/a.log', openedAt: 2 }, { path: '/logs', openedAt: 1, folder: true }, { path: '/x/z.zip', openedAt: 0 }] }] },
+    });
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellFiles({ backend: () => m })] });
+    const fixture = TestBed.createComponent(PdRecentFiles);
+    await fixture.whenStable();
+    await settle();
+    fixture.detectChanges();
+    const icons = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="recent-icon"]'));
+    expect(icons).toHaveLength(3);
+    for (const i of icons) expect(i.querySelector('svg')?.getAttribute('width')).toBe('16');
+    const paths = icons.map((i) => i.querySelector('path')?.getAttribute('d'));
+    expect(paths).toEqual([PD_ICON_PATHS['file-text'], PD_ICON_PATHS.folder, PD_ICON_PATHS.archive]);
+  });
+});
+
+describe('recent entries lead with the name', () => {
+  it('splits a path into its name and its folder, for either separator', () => {
+    expect(baseName('/logs/app/a.log')).toBe('a.log');
+    expect(baseName('C:\\logs\\a.log')).toBe('a.log');
+    expect(baseName('/logs/folder/')).toBe('folder');
+    expect(baseName('/')).toBe('/');
+    expect(parentPath('/logs/app/a.log')).toBe('/logs/app');
+    expect(parentPath('C:\\logs\\a.log')).toBe('C:\\logs');
+    expect(parentPath('/a.log')).toBe('/');
+    expect(parentPath('a.log')).toBe('');
+  });
+
+  it('shows the file name as the title and the folder as a muted second line, with the full path as the tooltip', async () => {
+    const m = new MemoryFilesBackend({ lists: { lists: [{ id: 'files', entries: [{ path: '/logs/app/service-2026.log', openedAt: 1 }, { path: '/work/a.proj', name: 'Alpha', openedAt: 0 }] }] } });
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellFiles({ backend: () => m })] });
+    const fixture = TestBed.createComponent(PdRecentFiles);
+    await fixture.whenStable();
+    await settle();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const rows = Array.from(el.querySelectorAll('[data-testid="recent-entry"]'));
+    expect(rows.map((r) => r.querySelector('.pd-name')?.textContent)).toEqual(['service-2026.log', 'Alpha']);
+    expect(rows[0]?.querySelector('.pd-name')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
+    expect(rows[0]?.querySelector('pd-path-text')?.textContent?.replace(/\s+/g, '')).toContain('/logs/app');
+    expect(rows[0]?.querySelector('[data-testid="path-text"]')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
+    // Reveal has its own glyph, so a folder entry's kind and the action never look the same.
+    const reveal = rows[0]?.querySelector('.pd-icon pd-glyph path')?.getAttribute('d');
+    expect(reveal).toBe(PD_ICON_PATHS.reveal);
+    expect(reveal).not.toBe(PD_ICON_PATHS.folder);
   });
 });

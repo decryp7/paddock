@@ -4,7 +4,7 @@
 use crate::app::AppSpec;
 use crate::probe::FileProbe;
 use paddock_env::Os;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// What the search found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,10 +82,13 @@ fn find_cli(
     probe: &dyn FileProbe,
 ) -> Option<PathBuf> {
     let file = exe(cli, os);
+    // The list is split by the rules of `os`, not of the host: the discovery is computed (and tested) for every OS everywhere.
+    let separator = if os == Os::Windows { ';' } else { ':' };
     let on_path = path
         .into_iter()
-        .flat_map(std::env::split_paths)
-        .map(|d| d.join(&file));
+        .flat_map(move |p| p.split(separator))
+        .filter(|d| !d.is_empty())
+        .map(|d| Path::new(d).join(&file));
     on_path
         .chain(install_candidates(app, cli, os, env))
         .find(|p| probe.is_file(p))

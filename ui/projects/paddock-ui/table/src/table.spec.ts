@@ -39,6 +39,9 @@ const ACTIONS: PdRowAction[] = [
       label="Plugins"
       [rowActions]="actions"
       [groupBy]="groupBy()"
+      [groupSummary]="summary()"
+      [groupMono]="mono()"
+      [countLabel]="countLabel()"
       [virtual]="virtual()"
       [maxHeight]="maxHeight()"
       [state]="state()"
@@ -65,6 +68,9 @@ class Host {
   readonly key = (r: Plugin): string => r.id;
   readonly actions = (r: Plugin): readonly PdRowAction[] => (r.id === 'p3' ? [] : ACTIONS);
   readonly groupBy = signal<string | null>(null);
+  readonly summary = signal<((rows: readonly Plugin[]) => Readonly<Record<string, string>>) | null>(null);
+  readonly mono = signal(false);
+  readonly countLabel = signal<((shown: number, total: number) => string) | null>(null);
   readonly virtual = signal<boolean | 'auto'>('auto');
   readonly maxHeight = signal(480);
   readonly state = signal<'ready' | 'loading' | 'error'>('ready');
@@ -282,6 +288,25 @@ describe('pd-table', () => {
     f.componentInstance.groupBy.set(null);
     await settle(f);
     expect(groups()).toHaveLength(0);
+  });
+
+  it('draws a group row\'s own cells in the columns beneath its heading, names the count in the app\'s noun and sets group names in mono', async () => {
+    const f = await setup();
+    f.componentInstance.groupBy.set('kind');
+    f.componentInstance.mono.set(true);
+    f.componentInstance.countLabel.set((shown, total) => `${shown} of ${total} things`);
+    f.componentInstance.summary.set((rows) => ({ size: `${rows.reduce((n, r) => n + r.size, 0)} total` }));
+    await settle(f);
+    const group = el(f).querySelector<HTMLElement>('.pd-group')!;
+    expect(group.classList.contains('pd-group-grid')).toBe(true);
+    expect(group.querySelector('.pd-group-name')?.classList.contains('pd-mono')).toBe(true);
+    const cells = [...group.querySelectorAll<HTMLElement>('.pd-group-summary')];
+    expect(cells.map((c) => c.textContent?.trim()).filter(Boolean)).toHaveLength(1);
+    expect(cells.some((c) => /total$/.test(c.textContent ?? '') && c.classList.contains('pd-end'))).toBe(true);
+    expect(el(f).textContent).toContain('3 of 3 things');
+    f.componentInstance.summary.set(null);
+    await settle(f);
+    expect(el(f).querySelector('.pd-group-grid')).toBeNull();
   });
 
   it('opens a row’s menu from the keyboard with Shift+F10 or the Menu key', async () => {

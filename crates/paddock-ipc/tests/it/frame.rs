@@ -132,6 +132,34 @@ fn protocol_versions_say_which_side_to_update() {
 }
 
 #[test]
+fn skew_names_the_side_to_update_and_since_finds_the_release() {
+    use paddock_ipc::frame::Skew;
+    let host = ProtocolVersion::new(2, 3);
+    assert_eq!(host.skew(ProtocolVersion::new(2, 3)), None);
+    assert_eq!(
+        host.skew(ProtocolVersion::new(1, 9)),
+        Some(Skew::ChildBehind)
+    );
+    assert_eq!(
+        host.skew(ProtocolVersion::new(2, 4)),
+        Some(Skew::HostBehind)
+    );
+    assert_eq!(
+        host.skew(ProtocolVersion::new(3, 0)),
+        Some(Skew::HostBehind)
+    );
+    let since = [
+        (ProtocolVersion::new(2, 5), "1.6"),
+        (ProtocolVersion::new(2, 4), "1.4"),
+        (ProtocolVersion::new(2, 1), "1.1"),
+    ];
+    let found = |v| ProtocolVersion::introduced_in(since, v);
+    assert_eq!(found(ProtocolVersion::new(2, 4)), Some("1.4"));
+    assert_eq!(found(ProtocolVersion::new(2, 2)), Some("1.4"));
+    assert_eq!(found(ProtocolVersion::new(2, 6)), None);
+}
+
+#[test]
 fn handshake_versions_are_read_from_any_hello() {
     let hello = all().remove(0);
     let body = encode(&hello, limit()).unwrap()[LEN_BYTES..].to_vec();

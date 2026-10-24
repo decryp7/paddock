@@ -12,14 +12,17 @@ import { DemoPage, SECTION_STYLES } from './demo-page';
       <section aria-labelledby="sd-files-open">
         <h2 id="sd-files-open">Open</h2>
         <div class="commands" role="group" aria-labelledby="sd-files-open">
-          <button type="button" class="cmd" data-testid="files-pick" (click)="pick()">Open a file…</button>
+          <button type="button" class="cmd primary" data-testid="files-pick" (click)="pick()">Open a file…</button>
           <button type="button" class="cmd" data-testid="files-folder" (click)="store.openAppFolder('logs')">Show the log folder</button>
           <button type="button" class="cmd" data-testid="files-url" (click)="store.openUrl('https://example.org/docs')">Open the documentation</button>
-          @if (memory) {
+        </div>
+        @if (memory) {
+          <div class="commands demo" role="group" aria-label="Demo controls">
+            <span class="context">Demo controls</span>
             <button type="button" class="cmd" data-testid="files-drop" (click)="memory.drop('/demo/dropped/trace.log')">Simulate a drop</button>
             <button type="button" class="cmd" data-testid="files-forge" (click)="forge()">Try an unchosen path</button>
-          }
-        </div>
+          </div>
+        }
         <p class="context" aria-live="polite" data-testid="files-last">{{ last() }}</p>
         @if (store.dropped().length > 0) {
           <p class="context" data-testid="files-dropped">
@@ -37,7 +40,7 @@ import { DemoPage, SECTION_STYLES } from './demo-page';
       </section>
     </sd-page>
   `,
-  styles: SECTION_STYLES + `.failure { color: var(--pd-danger); }`,
+  styles: SECTION_STYLES + `.failure { color: var(--pd-danger); } .primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); } .primary:hover:not(:disabled) { background: var(--pd-accent-fill); filter: brightness(1.08); } .demo { align-items: center; }`,
 })
 export class FilesPage {
   protected readonly store = inject(FilesStore);
