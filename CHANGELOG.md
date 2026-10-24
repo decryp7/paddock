@@ -9,6 +9,11 @@ Conventional Commits; one semver tag for the whole repo.
   `WorkbenchDock` from `provideWorkbenchDock` (`showView`, `closeView`, `openPanels`, `activePanel`, perspectives, named layouts, `verdict`/`onWindowPlan`
   for the Explorer column, checkpoint), `planLayout` adapter with grow-back and a "layout adjusted" notice with Undo, auto-hide edges, floating groups,
   drop guides, pop-out through `PANEL_WINDOWS`, Ctrl+Tab switcher, `pd.wb.dock.*` commands and keys, and a `DockLayoutStore` port (memory, localStorage, IPC).
+- `paddock-panels` (plan X50 W3): pop-out panel windows. Validated panel ids (`<view>` / `<view>#<key>`), placement on any display
+  clamped to its work area (mixed scales), remembered place per view, at most 12 per host, closing a host closes its pop-outs,
+  dock-back events (`paddock://panels`), the drag ghost window (never left behind), and UI-state forwarding only between the windows
+  of one host (512 KiB, rate-limited, dialogs get display state only); commands `panel_*`, `panels_list`, `ui_sync_publish`,
+  `drag_ghost_*`; generated TypeScript in `workbench/panels/generated`.
 - `paddock-workbench` (plan X50 W2a/W7): the dock's layout store, a bounded `paddock-env` versioned file in the config folder,
   served by `layout_get` [MAIN | POPOUT] and `layout_set` [MAIN] with the `CommandError` envelope.
 - `@decryp7/paddock-ui/workbench/palette` (plan X50 W5): `<pd-command-palette>` and `PaletteStore`: the palette's own commands
