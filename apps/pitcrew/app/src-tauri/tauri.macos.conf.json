@@ -33,7 +33,8 @@
       "files": {
         "Library/LaunchAgents/net.decryptology.pitcrew.service.plist": "./macos/net.decryptology.pitcrew.service.plist"
       },
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     }
   }
 }
