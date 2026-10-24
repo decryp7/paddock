@@ -14,6 +14,11 @@ export class GreetingLog {
     return this.count();
   }
 
+  /** Takes the latest greeting back (the undo of a greeting). */
+  undoGreet(): void {
+    this.count.update((n) => Math.max(0, n - 1));
+  }
+
   reset(): void {
     this.count.set(0);
   }
