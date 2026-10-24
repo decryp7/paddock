@@ -44,8 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3) and `paddock-dialogs` (S5) built, the rest scaffolds, plan S2-S17 |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` built (S1), the `paddock-jobs` adapter (S9), the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3) and `paddock-dialogs` (S5) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
