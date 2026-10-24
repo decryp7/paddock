@@ -9,7 +9,8 @@
 //! - One job at a time: a second request is refused as busy, so two windows cannot clear against each other.
 
 use crate::{
-    ClearRequest, EVENT_NAME, Run, Storage, StorageClearResult, StorageError, StorageUsage,
+    ClearRequest, EVENT_NAME, Run, Storage, StorageClearResult, StorageError, StorageTree,
+    StorageUsage,
 };
 use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -23,6 +24,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub const EVENT: &str = EVENT_NAME;
 /// The job kind of a scan.
 pub const SCAN_KIND: &str = "storage-scan";
+/// The job kind of a size tree.
+pub const TREE_KIND: &str = "storage-tree";
 /// The job kind of a clear.
 pub const CLEAR_KIND: &str = "storage-clear";
 
@@ -40,6 +43,11 @@ pub enum StorageEvent {
     Cleared {
         /// What it did.
         result: StorageClearResult,
+    },
+    /// A size tree finished.
+    Tree {
+        /// The category's tree.
+        tree: StorageTree,
     },
     /// The user cancelled a scan; nothing changed.
     Cancelled,
@@ -113,6 +121,7 @@ type Managed<'a> = State<'a, Arc<StorageState>>;
 enum Work {
     Scan,
     Clear(ClearRequest),
+    Tree(String),
 }
 
 fn start<R: Runtime>(
@@ -128,13 +137,19 @@ fn start<R: Runtime>(
     let (kind, title) = match work {
         Work::Scan => (SCAN_KIND, "Measuring what the app keeps"),
         Work::Clear(_) => (CLEAR_KIND, "Clearing storage"),
+        Work::Tree(_) => (TREE_KIND, "Measuring a folder"),
     };
-    if let Work::Clear(request) = &work {
-        // A refusal reaches the user at once, before any job exists.
-        state
+    // A refusal reaches the user at once, before any job exists.
+    match &work {
+        Work::Clear(request) => state
             .storage
             .validate(request)
-            .map_err(CommandError::from)?;
+            .map_err(CommandError::from)?,
+        Work::Tree(id) => state
+            .storage
+            .validate_tree(id)
+            .map_err(CommandError::from)?,
+        Work::Scan => {}
     }
     let ctx = {
         let mut active = lock(&state.active);
@@ -168,6 +183,10 @@ fn run_work(ctx: &JobContext, state: &StorageState, work: Work) -> StorageEvent 
                 let usage = state.storage.scan(&run).map_err(job_error)?;
                 *lock(&state.last) = Some(usage.clone());
                 outcome = Some(StorageEvent::Usage { usage });
+            }
+            Work::Tree(id) => {
+                let tree = state.storage.tree(id, &run).map_err(job_error)?;
+                outcome = Some(StorageEvent::Tree { tree });
             }
             Work::Clear(request) => {
                 let result = state.storage.clear(request, &run).map_err(job_error)?;
@@ -224,6 +243,17 @@ pub async fn storage_clear<R: Runtime>(
     start(&app, state.inner(), Work::Clear(request))
 }
 
+/// Walks one category's folder into a size tree as a job. Returns at once; the outcome is an event. Refused when the category is
+/// unknown, its folder is missing or outside the app's folders, or another job runs.
+#[::tauri::command]
+pub async fn storage_tree<R: Runtime>(
+    app: AppHandle<R>,
+    state: Managed<'_>,
+    id: String,
+) -> Result<(), CommandError> {
+    start(&app, state.inner(), Work::Tree(id))
+}
+
 /// Cancels the scan or clear in progress; whether there was one.
 #[::tauri::command]
 pub async fn storage_cancel<R: Runtime>(
@@ -259,6 +289,7 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync 
         storage_last,
         storage_scan,
         storage_clear,
+        storage_tree,
         storage_cancel,
         storage_reveal
     ]

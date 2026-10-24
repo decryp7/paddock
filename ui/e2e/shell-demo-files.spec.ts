@@ -20,6 +20,10 @@ test.describe('user files (plan X31)', () => {
     expect(await axeViolations(page)).toEqual([]);
     await expectNoHorizontalScroll(page);
 
+    // A glyph of the pd: set draws each entry's kind, 16 px (a log is a text page; the second path has no known extension).
+    const icon = entries.first().getByTestId('recent-icon').locator('svg');
+    await expect(icon).toHaveAttribute('width', '16');
+    expect(await entries.first().getByTestId('recent-icon').locator('path').getAttribute('d')).toContain('M9 12.5h6');
     await entries.first().locator('.pd-entry').click();
     await expect(page.getByTestId('files-last')).toHaveText('Opened /demo/logs/session-2026-10-24.log');
     expect(pageErrors).toEqual([]);
