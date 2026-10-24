@@ -640,3 +640,11 @@ The items kept back above also go into 0.3.0:
 - X6: Windows job object (X54).
 - Tooling (user approved all, 2026-10-24): `cargo-hakari`, lighter dev debuginfo, `cargo-machete` check;
   measure bun/pnpm vs npm in X53.
+
+## CI speed (research 2026-10-ci-speed.md; user, 2026-10-24)
+
+Into 0.3.0: options 0 (measure per-job timings), 1 (host-local sccache + cargo registry, `setup-rust` action), 2 (bake
+tools, browsers, libduckdb into the CI image), 3 (build the UI once for e2e shards), 4 (path-based plan job; full on
+tags/nightly), 7 (coverage only on main/nightly/tags), 9 (WebKit on main/nightly/tags, third shard) — in X10/X53.
+Option 5 (runner capacity, cache server, tmpfs on the server): **left as is** (user). Not adopted: mold, Cranelift,
+cargo-chef, rust-cache, MinIO sccache; Nx/Turborepo decided in the monorepo ADR.
