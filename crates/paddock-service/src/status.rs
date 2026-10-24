@@ -13,7 +13,8 @@ use serde::Serialize;
 pub const LOGIN_SECTION: &str = "pd.login";
 
 /// How the background service is doing, as a closed set the UI never has to guess from text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Condition {
     /// It answers.
@@ -41,7 +42,8 @@ pub enum Condition {
 }
 
 /// The background service as the UI shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceStatus {
     /// How it is registered.
@@ -224,20 +226,33 @@ impl ServiceStatus {
                 "Press Install to register this copy.",
                 Some(RepairAction::Install),
             ),
-            Condition::SwitchedOff | Condition::NeedsApproval => HealthReport {
-                state: ServiceState::Down,
-                cause: Some(
-                    Cause::new(message)
-                        .hint("Open Settings to switch it on.")
-                        .code(if self.condition == Condition::SwitchedOff {
-                            "service.switchedOff"
-                        } else {
-                            "service.needsApproval"
-                        })
-                        .settings(LOGIN_SECTION),
-                ),
-                repair: Some(RepairAction::OpenSettings),
-            },
+            Condition::SwitchedOff | Condition::NeedsApproval => {
+                let code = if self.condition == Condition::SwitchedOff {
+                    "service.switchedOff"
+                } else {
+                    "service.needsApproval"
+                };
+                // Where the OS has a page for the switch (macOS Login Items) the shell opens it; elsewhere the app's own
+                // launch-at-login section is where it is switched on again.
+                let (hint, repair) = if self.can_open_login_items {
+                    (
+                        "Press Open Login Items… and switch it on there.",
+                        RepairAction::OpenLoginItems,
+                    )
+                } else {
+                    ("Open Settings to switch it on.", RepairAction::OpenSettings)
+                };
+                HealthReport {
+                    state: ServiceState::Down,
+                    cause: Some(
+                        Cause::new(message)
+                            .hint(hint)
+                            .code(code)
+                            .settings(LOGIN_SECTION),
+                    ),
+                    repair: Some(repair),
+                }
+            }
             Condition::Unavailable => HealthReport {
                 state: ServiceState::Down,
                 cause: Some(Cause::new(message).code("service.unavailable")),
@@ -425,6 +440,13 @@ mod tests {
         }
         let off = status(Condition::SwitchedOff).health().cause.unwrap();
         assert_eq!(off.settings.as_deref(), Some(LOGIN_SECTION));
+        for c in [Condition::SwitchedOff, Condition::NeedsApproval] {
+            let mut mac = status(c);
+            mac.can_open_login_items = true;
+            let h = mac.health();
+            assert_eq!(h.repair, Some(RepairAction::OpenLoginItems));
+            assert!(h.cause.unwrap().hint.unwrap().contains("Open Login Items"));
+        }
         let h = status(Condition::Unavailable).health();
         assert_eq!((h.state, h.repair), (ServiceState::Down, None));
         assert_eq!(

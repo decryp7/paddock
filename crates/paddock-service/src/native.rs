@@ -267,3 +267,494 @@ mod win {
         }
     }
 }
+
+#[cfg(windows)]
+pub use scm::run_as_service;
+
+/// The Windows service host's Win32 side: the SCM dispatcher, the sessions and starting the program in one
+/// ([`crate::scm_host`] has the logic and its tests). Adapted from Pitwall's `service/windows.rs`.
+#[cfg(windows)]
+mod scm {
+    use crate::render::windows_quote;
+    use crate::scm_host::{
+        Control, HostEvent, HostTimings, HostedChild, Sessions, Target, UserSession,
+        env_block_with, pick_user_session, supervise,
+    };
+    use crate::spec::ServiceSpec;
+    use crate::verbs::Verb;
+    use std::ffi::{OsString, c_void};
+    use std::path::{Path, PathBuf};
+    use std::sync::OnceLock;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+    use windows::Win32::Security::{
+        DuplicateTokenEx, SECURITY_ATTRIBUTES, SecurityIdentification, TOKEN_ALL_ACCESS,
+        TokenPrimary,
+    };
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
+    use windows::Win32::System::RemoteDesktop::{
+        WTS_CURRENT_SERVER_HANDLE, WTS_SESSION_INFOW, WTSActive, WTSDisconnected,
+        WTSEnumerateSessionsW, WTSFreeMemory, WTSGetActiveConsoleSessionId, WTSQueryUserToken,
+    };
+    use windows::Win32::System::Threading::{
+        CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT,
+        CreateProcessAsUserW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+        InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+        PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, STARTF_USESHOWWINDOW,
+        STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute,
+        WaitForSingleObject,
+    };
+    use windows::core::{PCWSTR, PWSTR};
+    use windows_service::service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    };
+    use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+    use windows_service::{define_windows_service, service_dispatcher};
+
+    const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+    const NO_SESSION: u32 = 0xFFFF_FFFF;
+    /// How long the program's `stop` verb may take.
+    const STOP_VERB_TIMEOUT: Duration = Duration::from_secs(10);
+
+    struct Config {
+        spec: ServiceSpec,
+        exe: PathBuf,
+    }
+
+    static CONFIG: OnceLock<Config> = OnceLock::new();
+
+    define_windows_service!(ffi_service_main, service_main);
+
+    /// Hands this process to the Service Control Manager (the `--service` verb) and returns when the service stopped.
+    /// The program `exe` (normally this executable) is started in the user's session with the spec's arguments and
+    /// supervised variable. The app's log (`paddock-log`) is set up before; the host writes its events there.
+    pub fn run_as_service(spec: &ServiceSpec, exe: PathBuf) -> Result<(), String> {
+        let name = spec.name().to_string();
+        let _ = CONFIG.set(Config {
+            spec: spec.clone(),
+            exe,
+        });
+        service_dispatcher::start(name, ffi_service_main)
+            .map_err(|e| format!("Starting as a Windows service failed: {e}"))
+    }
+
+    fn status(state: ServiceState) -> ServiceStatus {
+        ServiceStatus {
+            service_type: ServiceType::OWN_PROCESS,
+            current_state: state,
+            controls_accepted: if state == ServiceState::Running {
+                ServiceControlAccept::STOP
+                    | ServiceControlAccept::SHUTDOWN
+                    | ServiceControlAccept::SESSION_CHANGE
+            } else {
+                ServiceControlAccept::empty()
+            },
+            exit_code: ServiceExitCode::Win32(0),
+            checkpoint: 0,
+            wait_hint: Duration::from_secs(if state == ServiceState::StopPending {
+                30
+            } else {
+                0
+            }),
+            process_id: None,
+        }
+    }
+
+    fn service_main(_arguments: Vec<OsString>) {
+        let Some(config) = CONFIG.get() else { return };
+        let (tx, rx) = mpsc::channel::<Control>();
+        let handler = move |control| match control {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                let _ = tx.send(Control::Stop);
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::SessionChange(_) => {
+                let _ = tx.send(Control::SessionChange);
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            _ => ServiceControlHandlerResult::NotImplemented,
+        };
+        let handle = match service_control_handler::register(config.spec.name(), handler) {
+            Ok(h) => h,
+            Err(e) => {
+                log::error!(error:% = e; "the service control handler could not be registered");
+                return;
+            }
+        };
+        let _ = handle.set_service_status(status(ServiceState::Running));
+        log::info!("service started");
+        let mut sessions = WtsSessions { config, rx };
+        supervise(
+            &mut sessions,
+            &HostTimings::default(),
+            &mut |e: HostEvent| {
+                log::info!(event:? = e; "service host");
+            },
+        );
+        let _ = handle.set_service_status(status(ServiceState::StopPending));
+        let _ = handle.set_service_status(status(ServiceState::Stopped));
+        log::info!("service stopped");
+    }
+
+    struct WtsSessions {
+        config: &'static Config,
+        rx: mpsc::Receiver<Control>,
+    }
+
+    impl Sessions for WtsSessions {
+        fn target(&mut self) -> Target {
+            user_target()
+        }
+
+        fn start(&mut self, target: Target) -> Result<Box<dyn HostedChild>, String> {
+            let args = self.config.spec.args().to_vec();
+            let env = self.config.spec.supervised_env();
+            match target {
+                Target::Nobody => Err("nobody is logged on".into()),
+                Target::NotSystem => start_plain(&self.config.exe, &args, env)
+                    .map(|c| Box::new(Plain(c, self.config.exe.clone())) as Box<dyn HostedChild>),
+                Target::Session(id) => {
+                    start_in_session(id, &self.config.exe, &args, env).map(|p| {
+                        Box::new(InSession {
+                            process: p,
+                            session: id,
+                            exe: self.config.exe.clone(),
+                            env: env.map(str::to_string),
+                        }) as Box<dyn HostedChild>
+                    })
+                }
+            }
+        }
+
+        fn next_event(&mut self, timeout: Duration) -> Option<Control> {
+            match self.rx.recv_timeout(timeout) {
+                Ok(c) => Some(c),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => Some(Control::Stop),
+            }
+        }
+
+        fn pause(&mut self, how_long: Duration) {
+            std::thread::sleep(how_long);
+        }
+    }
+
+    /// A plain child (the service runs as a user: development).
+    struct Plain(std::process::Child, PathBuf);
+
+    impl HostedChild for Plain {
+        fn session(&self) -> Option<u32> {
+            None
+        }
+        fn exited(&mut self) -> bool {
+            !matches!(self.0.try_wait(), Ok(None))
+        }
+        fn ask_stop(&mut self) -> bool {
+            let mut cmd = paddock_proc::command(&self.1);
+            cmd.arg(Verb::Stop.word());
+            paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(STOP_VERB_TIMEOUT))
+                .is_ok_and(|o| o.success())
+        }
+        fn kill(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn start_plain(
+        exe: &Path,
+        args: &[String],
+        env: Option<&str>,
+    ) -> Result<std::process::Child, String> {
+        let mut cmd = paddock_proc::command(exe);
+        cmd.args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Some(var) = env {
+            cmd.env(var, "1");
+        }
+        cmd.spawn()
+            .map_err(|e| format!("{} could not be started: {e}", exe.display()))
+    }
+
+    /// An owned Win32 handle, closed on drop.
+    struct Owned(HANDLE);
+
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            if !self.0.is_invalid() {
+                // SAFETY: the handle is owned by this value and closed exactly once.
+                unsafe {
+                    let _ = CloseHandle(self.0);
+                }
+            }
+        }
+    }
+
+    // SAFETY: process and token handles may be used and closed from any thread.
+    unsafe impl Send for Owned {}
+
+    fn exited(h: HANDLE) -> bool {
+        // SAFETY: `h` is a valid process handle owned by the caller; a zero timeout only polls.
+        unsafe { WaitForSingleObject(h, 0) == WAIT_OBJECT_0 }
+    }
+
+    struct InSession {
+        process: Owned,
+        session: u32,
+        exe: PathBuf,
+        env: Option<String>,
+    }
+
+    impl HostedChild for InSession {
+        fn session(&self) -> Option<u32> {
+            Some(self.session)
+        }
+        fn exited(&mut self) -> bool {
+            exited(self.process.0)
+        }
+        fn ask_stop(&mut self) -> bool {
+            let args = [Verb::Stop.word().to_string()];
+            let Ok(helper) = start_in_session(self.session, &self.exe, &args, self.env.as_deref())
+            else {
+                return false;
+            };
+            let deadline = Instant::now() + STOP_VERB_TIMEOUT;
+            while !exited(helper.0) {
+                if Instant::now() >= deadline {
+                    // SAFETY: a valid process handle we own; failure (already gone) is ignored.
+                    unsafe {
+                        let _ = TerminateProcess(helper.0, 1);
+                    }
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            true
+        }
+        fn kill(&mut self) {
+            // SAFETY: a valid process handle we own; failure (already gone) is ignored.
+            unsafe {
+                let _ = TerminateProcess(self.process.0, 1);
+            }
+        }
+    }
+
+    /// Where the program should run now (see `scm_host::pick_user_session`).
+    fn user_target() -> Target {
+        // SAFETY: no arguments; returns a session id or 0xFFFFFFFF.
+        let console = unsafe { WTSGetActiveConsoleSessionId() };
+        let console = (console != NO_SESSION).then_some(console);
+        let mut candidates = Vec::new();
+        let mut info: *mut WTS_SESSION_INFOW = std::ptr::null_mut();
+        let mut count = 0u32;
+        // SAFETY: valid out pointers; the array is read below and freed with WTSFreeMemory exactly once.
+        if unsafe {
+            WTSEnumerateSessionsW(Some(WTS_CURRENT_SERVER_HANDLE), 0, 1, &mut info, &mut count)
+        }
+        .is_ok()
+            && !info.is_null()
+        {
+            // SAFETY: WTSEnumerateSessionsW returned `count` entries at `info`.
+            let sessions = unsafe { std::slice::from_raw_parts(info, count as usize) };
+            candidates.extend(
+                sessions
+                    .iter()
+                    .filter(|s| s.State == WTSActive || s.State == WTSDisconnected)
+                    .map(|s| (s.SessionId, s.State == WTSActive)),
+            );
+            // SAFETY: `info` was allocated by WTSEnumerateSessionsW.
+            unsafe { WTSFreeMemory(info.cast()) };
+        } else if let Some(c) = console {
+            candidates.push((c, true));
+        }
+        let mut users = Vec::new();
+        for (id, active) in candidates {
+            let mut token = HANDLE::default();
+            // SAFETY: `token` is a valid out pointer; the handle is closed by `Owned`'s drop.
+            match unsafe { WTSQueryUserToken(id, &mut token) } {
+                Ok(()) => {
+                    drop(Owned(token));
+                    users.push(UserSession { id, active });
+                }
+                Err(e) if e.code().0 & 0xFFFF == ERROR_PRIVILEGE_NOT_HELD => {
+                    return Target::NotSystem;
+                }
+                // No user in this session (the sign-in screen) or it went away meanwhile.
+                Err(_) => {}
+            }
+        }
+        pick_user_session(console, &users).map_or(Target::Nobody, Target::Session)
+    }
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn win_err(what: &str, e: windows::core::Error) -> String {
+        format!("{what} failed: {}", e.message())
+    }
+
+    /// Starts `exe args…` hidden in `session` with that user's token and environment (plus `env=1`); its standard
+    /// handles are `NUL` and it inherits no other handle of the service.
+    fn start_in_session(
+        session: u32,
+        exe: &Path,
+        args: &[String],
+        env: Option<&str>,
+    ) -> Result<Owned, String> {
+        let mut user = HANDLE::default();
+        // SAFETY: valid out pointer; owned below.
+        unsafe { WTSQueryUserToken(session, &mut user) }
+            .map_err(|e| win_err("Getting the logged-on user's token", e))?;
+        let user = Owned(user);
+        let mut primary = HANDLE::default();
+        // SAFETY: `user.0` is a valid token; `primary` is a valid out pointer, owned below.
+        unsafe {
+            DuplicateTokenEx(
+                user.0,
+                TOKEN_ALL_ACCESS,
+                None,
+                SecurityIdentification,
+                TokenPrimary,
+                &mut primary,
+            )
+        }
+        .map_err(|e| win_err("Preparing the user's token", e))?;
+        let primary = Owned(primary);
+
+        let mut block_ptr: *mut c_void = std::ptr::null_mut();
+        // SAFETY: valid out pointer and token; the block is destroyed by the guard below.
+        unsafe { CreateEnvironmentBlock(&mut block_ptr, Some(primary.0), false) }
+            .map_err(|e| win_err("Building the user's environment", e))?;
+        struct EnvGuard(*mut c_void);
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                // SAFETY: created by CreateEnvironmentBlock and destroyed once.
+                unsafe {
+                    let _ = DestroyEnvironmentBlock(self.0);
+                }
+            }
+        }
+        let _env_guard = EnvGuard(block_ptr);
+        // SAFETY: the block is a list of NUL-terminated UTF-16 strings ended by an empty one, as documented; it is read up
+        // to that end only, before it is destroyed.
+        let block = unsafe {
+            let p = block_ptr.cast::<u16>();
+            let mut n = 0usize;
+            while !(*p.add(n) == 0 && *p.add(n + 1) == 0) {
+                n += 1;
+            }
+            std::slice::from_raw_parts(p, n + 1).to_vec()
+        };
+        let mut block = match env {
+            Some(var) => env_block_with(&block, &format!("{var}=1")),
+            None => [block, vec![0]].concat(),
+        };
+
+        let inheritable = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: std::ptr::null_mut(),
+            bInheritHandle: true.into(),
+        };
+        let nul = wide("NUL");
+        // SAFETY: `nul` is NUL-terminated and outlives the call; the handle is owned below.
+        let null_h = unsafe {
+            CreateFileW(
+                PCWSTR(nul.as_ptr()),
+                FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                Some(&inheritable),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                None,
+            )
+        }
+        .map_err(|e| win_err("Opening NUL", e))?;
+        let null_h = Owned(null_h);
+        let handles = [null_h.0];
+
+        let mut size = 0usize;
+        // SAFETY: the first call only computes the size (it fails with ERROR_INSUFFICIENT_BUFFER by design).
+        let _ = unsafe { InitializeProcThreadAttributeList(None, 1, None, &mut size) };
+        let mut list_buf = vec![0u8; size.max(64)];
+        let list = LPPROC_THREAD_ATTRIBUTE_LIST(list_buf.as_mut_ptr().cast());
+        // SAFETY: `list_buf` has the size the first call asked for and outlives the list's use.
+        unsafe { InitializeProcThreadAttributeList(Some(list), 1, None, &mut size) }
+            .map_err(|e| win_err("Preparing the process attributes", e))?;
+        struct ListGuard(LPPROC_THREAD_ATTRIBUTE_LIST);
+        impl Drop for ListGuard {
+            fn drop(&mut self) {
+                // SAFETY: initialised above and deleted once, before its buffer is freed.
+                unsafe { DeleteProcThreadAttributeList(self.0) }
+            }
+        }
+        let _list_guard = ListGuard(list);
+        // SAFETY: `handles` outlives CreateProcessAsUserW below; the size is that of the array.
+        unsafe {
+            UpdateProcThreadAttribute(
+                list,
+                0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+                Some(handles.as_ptr().cast()),
+                std::mem::size_of_val(&handles),
+                None,
+                None,
+            )
+        }
+        .map_err(|e| win_err("Limiting the inherited handles", e))?;
+
+        let mut desktop = wide("winsta0\\default");
+        let mut si = STARTUPINFOEXW::default();
+        si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+        si.StartupInfo.lpDesktop = PWSTR(desktop.as_mut_ptr());
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.StartupInfo.wShowWindow = 0; // SW_HIDE
+        si.StartupInfo.hStdInput = null_h.0;
+        si.StartupInfo.hStdOutput = null_h.0;
+        si.StartupInfo.hStdError = null_h.0;
+        si.lpAttributeList = list;
+
+        let program = exe.display().to_string();
+        let app = wide(&program);
+        let mut line_text = windows_quote(&program);
+        for a in args {
+            line_text.push(' ');
+            line_text.push_str(&windows_quote(a));
+        }
+        let mut line = wide(&line_text);
+        let mut pi = PROCESS_INFORMATION::default();
+        // SAFETY: every pointer refers to a buffer that lives until the call returns; `si` is a STARTUPINFOEXW with
+        // EXTENDED_STARTUPINFO_PRESENT; the command line buffer is mutable as the API requires; the environment block is
+        // UTF-16 (CREATE_UNICODE_ENVIRONMENT).
+        unsafe {
+            CreateProcessAsUserW(
+                Some(primary.0),
+                PCWSTR(app.as_ptr()),
+                Some(PWSTR(line.as_mut_ptr())),
+                None,
+                None,
+                true,
+                CREATE_UNICODE_ENVIRONMENT
+                    | CREATE_NO_WINDOW
+                    | CREATE_NEW_PROCESS_GROUP
+                    | EXTENDED_STARTUPINFO_PRESENT,
+                Some(block.as_mut_ptr().cast()),
+                PCWSTR::null(),
+                &si.StartupInfo,
+                &mut pi,
+            )
+        }
+        .map_err(|e| win_err(&format!("Starting {program} in the user's session"), e))?;
+        drop(Owned(pi.hThread));
+        Ok(Owned(pi.hProcess))
+    }
+}

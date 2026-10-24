@@ -14,7 +14,8 @@ pub const WORKING_MESSAGE: &str = "Repairing the background service… (this can
 pub const SUCCESS_MESSAGE: &str = "The background service is running again.";
 
 /// Where the repair is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RepairState {
     /// Working.
@@ -26,7 +27,8 @@ pub enum RepairState {
 }
 
 /// What the UI shows about the repair.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairNotice {
     /// Where the repair is.
