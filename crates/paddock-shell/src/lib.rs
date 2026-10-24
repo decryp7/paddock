@@ -67,6 +67,7 @@ paddock_commands::command_table! {
         paddock_service::COMMANDS,
         paddock_packs::COMMANDS,
         paddock_channels::COMMANDS,
+        paddock_mcp::COMMANDS,
         paddock_jobs::tauri::COMMANDS,
         paddock_settings::tauri::COMMANDS,
         paddock_updater::COMMANDS,

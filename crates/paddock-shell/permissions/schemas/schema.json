@@ -679,6 +679,78 @@
           "markdownDescription": "Denies the log_from_webview command without any pre-configured scope."
         },
         {
+          "description": "Enables the mcp_audit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mcp-audit",
+          "markdownDescription": "Enables the mcp_audit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mcp_audit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mcp-audit",
+          "markdownDescription": "Denies the mcp_audit command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mcp_audit_clear command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mcp-audit-clear",
+          "markdownDescription": "Enables the mcp_audit_clear command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mcp_audit_clear command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mcp-audit-clear",
+          "markdownDescription": "Denies the mcp_audit_clear command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mcp_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mcp-get",
+          "markdownDescription": "Enables the mcp_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mcp_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mcp-get",
+          "markdownDescription": "Denies the mcp_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mcp_issue_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mcp-issue-key",
+          "markdownDescription": "Enables the mcp_issue_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mcp_issue_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mcp-issue-key",
+          "markdownDescription": "Denies the mcp_issue_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mcp_revoke_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mcp-revoke-key",
+          "markdownDescription": "Enables the mcp_revoke_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mcp_revoke_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mcp-revoke-key",
+          "markdownDescription": "Denies the mcp_revoke_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mcp_save command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mcp-save",
+          "markdownDescription": "Enables the mcp_save command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mcp_save command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mcp-save",
+          "markdownDescription": "Denies the mcp_save command without any pre-configured scope."
+        },
+        {
           "description": "Enables the menu_set command without any pre-configured scope.",
           "type": "string",
           "const": "allow-menu-set",
