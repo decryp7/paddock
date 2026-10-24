@@ -55,6 +55,7 @@ pub trait MailSender: Send + Sync {
 mod real {
     use super::{MailRequest, MailSender};
     use crate::{SendError, config::Security};
+    const SERVER_NAME: &str = "Enter the mail server's name, like smtp.example.org.";
     use lettre::message::Mailbox;
     use lettre::message::header::ContentType;
     use lettre::transport::smtp::authentication::Credentials;
@@ -98,11 +99,8 @@ mod real {
             let tls = match mail.security {
                 Security::None => Tls::None,
                 s => {
-                    let params = TlsParameters::new(host.to_string()).map_err(|_| {
-                        SendError::Invalid(
-                            "Enter the mail server's name, like smtp.example.org.".into(),
-                        )
-                    })?;
+                    let params = TlsParameters::new(host.to_string())
+                        .map_err(|_| SendError::Invalid(SERVER_NAME.into()))?;
                     if s == Security::Implicit {
                         Tls::Wrapper(params)
                     } else {
@@ -137,7 +135,10 @@ mod real {
             chain.push_str(&s.to_string().to_ascii_lowercase());
             source = s.source();
         }
-        if e.is_timeout() || chain.contains("timed out") {
+        if e.is_timeout()
+            || chain.contains("timed out")
+            || chain.contains("temporarily unavailable")
+        {
             return SendError::Timeout(host.to_string());
         }
         if e.is_tls() || chain.contains("tls") || chain.contains("certificate") {

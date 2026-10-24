@@ -3063,19 +3063,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-build"
+version = "0.1.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "tauri-build",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-channels"
 version = "0.1.0"
 dependencies = [
  "lettre",
+ "paddock-commands",
  "paddock-download",
+ "paddock-env",
  "paddock-jobs",
+ "paddock-net",
  "paddock-secrets",
  "paddock-workspace-hack",
  "proptest",
- "rustls",
  "serde",
  "serde_json",
- "ureq",
+ "tauri",
+ "tempfile",
 ]
 
 [[package]]
@@ -3269,6 +3281,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-net"
+version = "0.1.0"
+dependencies = [
+ "paddock-download",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "proptest",
+ "rustls",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "paddock-packs"
 version = "0.1.0"
 dependencies = [
@@ -3334,6 +3359,7 @@ dependencies = [
  "paddock-health",
  "paddock-proc",
  "paddock-settings",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "plist",
  "serde",
@@ -3427,6 +3453,7 @@ dependencies = [
  "paddock-commands",
  "paddock-download",
  "paddock-jobs",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "semver",
  "serde",
