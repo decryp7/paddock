@@ -21,6 +21,7 @@ serde_json = "1"
 log = "0.4"
 # A small synchronous WebSocket client for the DevTools endpoint on 127.0.0.1 (MIT OR Apache-2.0).
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

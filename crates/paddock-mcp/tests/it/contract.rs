@@ -2,7 +2,7 @@
 //! written out here from the specification's JSON Schema (only the parts a server fills in) and checked with the crate's own
 //! validator, so a change to a shape fails here first.
 
-mod common;
+use crate::common;
 
 use common::*;
 use paddock_mcp::schema::validate;
