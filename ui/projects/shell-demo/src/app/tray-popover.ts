@@ -58,7 +58,8 @@ function platform(doc: Document): SuTrayPlatform {
 /**
  * The tray popover (`index.html#/tray`, opened by a left click on the tray icon), the guide's tray pattern: a header with
  * the app's icon, name and one status pill; an attention banner with the same repair as the window's chip while a
- * service is down; the leading job with its phase and value; a footer with Open window, a sample job and a quiet Quit.
+ * service is down (then the popover's one primary); the leading job with its phase and value; a footer with Open window
+ * (the primary when all is well), a sample job and a quiet Quit.
  * It is as tall as its content (`tray_fit_height`); Escape, Open window and Quit close it (`tray_close`).
  */
 @Component({
@@ -83,7 +84,7 @@ function platform(doc: Document): SuTrayPlatform {
           <div class="attention" data-testid="tray-attention">
             <p class="cause">{{ p.cause?.message ?? status() }}</p>
             @if (repairLabel(p); as repairText) {
-              <button type="button" class="btn" (click)="repair(p)">{{ repairText }}</button>
+              <button type="button" class="btn btn--primary" (click)="repair(p)">{{ repairText }}</button>
             }
           </div>
         }
@@ -102,7 +103,8 @@ function platform(doc: Document): SuTrayPlatform {
         }
       </div>
       <div slot="footer" class="actions">
-        <button type="button" class="btn btn--primary" (click)="show()">{{ labels.open }}</button>
+        <!-- One primary per popover: the repair while a service is down, else Open window. -->
+        <button type="button" class="btn" [class.btn--primary]="!problem() || !repairLabel(problem()!)" (click)="show()">{{ labels.open }}</button>
         <button type="button" class="btn btn--ghost" (click)="startJob()">{{ labels.job }}</button>
         <span class="grow"></span>
         <button type="button" class="btn btn--ghost" [attr.title]="labels.quitHint" (click)="quit()">{{ labels.quit }}</button>

@@ -101,7 +101,7 @@ red-orange (hue 18) and not amber, and why it is never used as a status.
 | Spotter | watchful, fresh teal | #2CC4B0 | #0B7A6E | #0E8577 |
 | Pacenotes | route-map olive, steady | #8DA74E | #576D07 | #657C1F |
 | Sighter | optical plum, precise | #C488CF | #884F92 | #975EA2 |
-| Demo apps (`graphite`) | neutral, never an app's colour | #A6A8AD | #4F5764 | #6B7380 |
+| Shell Demo (`graphite`, neutral; demo and harness apps only) | neutral, never an app's colour | #A6A8AD | #4F5764 | light #4F5764 (white text); dark #A6A8AD (text #16181C) |
 
 Pacenotes and Sighter (chosen 2026-10-24; replaces the earlier Sighter lime proposal). With seven accents and four status
 colours the hue wheel is full: under colour-vision deficiency (Machado 2009, severity 1) only two colour dimensions are
@@ -128,7 +128,19 @@ accent-coloured text is never placed directly beside a warning. Existing pairs w
 (tritanopia). Accents never meet in one window, and status always carries its icon and word (rule 8 below). The token
 tests in `paddock-ui` check both new accents: CIEDE2000 >= 15 from every status colour and >= 12 from every other
 accent (normal vision), with the usual contrast targets. `graphite` (2026-10-24) is not an app's: the demo apps
-(Paddock Shell Demo) use it so they never look like the app they demonstrate; the same tests hold for it.
+(Paddock Shell Demo) use it so they never look like the app they demonstrate; the same tests hold for it. A neutral
+mid-grey fill reads as disabled, so its primary is the dark graphite with white text in light (7.3:1) and inverted in
+dark (#A6A8AD fill, #16181C text, 7.5:1), as neutral prominent buttons are; it is the only accent with its own text on
+the fill (`fill-dark`, `on-fill-dark` in the token map). Measured by the token tests (CIEDE2000, normal vision):
+
+| Graphite text vs | success | warning | danger | info | nearest accent |
+|---|---|---|---|---|---|
+| light #4F5764 | 29.4 | 32.5 | 33.5 | 15.2 | Debrief 17.7 |
+| dark #A6A8AD | 28.7 | 29.7 | 28.3 | 17.3 | Sighter 21.2 |
+
+The focus ring (2 px graphite, 2 px offset) is 6.7:1 on the light page and 7.3:1 on white surfaces, 8.1:1 on the dark
+page and 7.5:1 on dark surface 1. Against the control border it is only 1.4-1.5:1 (both are neutrals), which is why
+the ring keeps its 2 px offset: the page colour always sits between the ring and the border.
 
 App icon tiles are their own palette (Spotter: amber tile, teal accent). The tile closest to each new accent that keeps
 the family's smallest OKLab distance (`icons/tools/cvd.mjs`: 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan) was

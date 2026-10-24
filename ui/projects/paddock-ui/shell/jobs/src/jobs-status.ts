@@ -71,7 +71,12 @@ export class PdJobsStatus {
 
   /** The status bar is narrow: the item shows the running count only. */
   protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);
-  protected readonly compactText = computed(() => (this.store.activeCount() ? formatCount(this.store.activeCount()) : $localize`:@@pd.jobs.status.idle:Jobs`));
+  /** Narrow: still a word with the count ("1 job"), never a bare number beside other counts; the full text is its name. */
+  protected readonly compactText = computed(() => {
+    const n = this.store.activeCount();
+    if (!n) return $localize`:@@pd.jobs.status.idle:Jobs`;
+    return n === 1 ? $localize`:@@pd.jobs.status.compact.one:1 job` : $localize`:@@pd.jobs.status.compact.other:${formatCount(n)}:count: jobs`;
+  });
 
   /** The lead job went quiet ("Still working"). */
   protected readonly stalled = computed(() => {

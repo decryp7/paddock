@@ -76,12 +76,19 @@ test('a service failure comes from the engine, and Repair asks the shell plugin'
   expect(await ipc.emit('paddock://service-health', health(2, service('sd.engine', 'the demo engine', 'down', ENGINE_DOWN, 'restart')))).toBeGreaterThan(0);
   await expect(chip).toHaveText('Demo engine: stopped');
   // The engine-bound panel stops showing its data and waits with the chip's cause (a designed state, not stale data).
-  await expect(page.getByTestId('waiting-for-sd.engine')).toContainText('Waiting for the demo engine');
+  await expect(page.getByTestId('waiting-for-sd.engine')).toContainText('Demo engine stopped');
   await expect(page.getByTestId('engine-data')).toHaveCount(0);
+  // Stopped is an offline state, not a loading one: no spinner, and the chip's repair by the same words.
+  const panel = page.getByTestId('waiting-for-sd.engine');
+  await expect(panel).toHaveAttribute('data-kind', 'offline');
+  await expect(panel.getByTestId('waiting-for-repair')).toHaveText('Restart demo engine');
 
   await chip.click();
   await app.notifications.services.getByRole('button', { name: 'Restart' }).click();
   await expect.poll(async () => (await ipc.callsOf('health_repair')).map((c) => c.args)).toEqual([{ service: 'sd.engine' }]);
+  // While the repair runs, the panel says so with a spinner.
+  await ipc.emit('paddock://service-health', health(3, service('sd.engine', 'the demo engine', 'repairing', ENGINE_DOWN, 'restart')));
+  await expect(panel).toHaveAttribute('data-kind', 'repairing');
   await ipc.emit('paddock://service-health', health(4, service('sd.engine', 'the demo engine', 'ok')));
   await expect(chip).toHaveCount(0);
   await expect(page.getByTestId('engine-data')).toBeVisible();

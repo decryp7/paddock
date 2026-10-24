@@ -18,7 +18,10 @@ export function nextEnabled(options: readonly SuSegment[], from: number, dir: 1 
   return -1;
 }
 
-/** 2 to 4 mutually exclusive options (time range, view). A radio group: arrows move and select, Home/End jump. */
+/**
+ * 2 to 4 mutually exclusive options (time range, view). A radio group: arrows move and select, Home/End jump. The chosen
+ * segment is raised (surface-3: white in light, lighter than the track in dark).
+ */
 @Component({
   selector: 'pd-segmented-control',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -46,7 +49,7 @@ export function nextEnabled(options: readonly SuSegment[], from: number, dir: 1 
     :host { display: inline-flex; gap: 2px; padding: 2px; background: var(--pd-surface-2); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); }
     .seg { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: calc(var(--pd-control-height) - 6px); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 0; border-radius: calc(var(--pd-radius-control) - 2px); background: transparent; color: var(--pd-text-muted); font-size: var(--pd-text-body); font-weight: var(--pd-weight-medium); transition: background var(--pd-duration-micro) var(--pd-ease-enter); }
     .seg:hover:not(:disabled):not(.on) { background: var(--pd-hover); color: var(--pd-text); }
-    .seg.on { background: var(--pd-surface-1); color: var(--pd-text); box-shadow: var(--pd-shadow-1), 0 0 0 1px var(--pd-hairline); }
+    .seg.on { background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-1), 0 0 0 1px var(--pd-hairline); }
     .seg:disabled { opacity: 0.5; }
     .count { font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
   `,

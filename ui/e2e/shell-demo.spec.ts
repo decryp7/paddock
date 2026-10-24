@@ -246,7 +246,7 @@ test.describe('notifications and service health (plan S4)', () => {
     // The chip states the outage: no toast for a health cause.
     await expect(n.toastItems).toHaveCount(0);
     // The panel waits calmly instead of showing an error of its own.
-    await expect(page.getByTestId('waiting-for-sd.engine')).toContainText('Waiting for the demo engine');
+    await expect(page.getByTestId('waiting-for-sd.engine')).toContainText('Demo engine stopped');
     await expect(page.getByText('Could not load the engine data.')).toHaveCount(0);
 
     // One message in the centre, count 3.

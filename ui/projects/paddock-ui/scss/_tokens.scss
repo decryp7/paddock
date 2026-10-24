@@ -283,12 +283,28 @@ $accents: (
   'pacenotes': (dark: #8da74e, light: #576d07, fill: #657c1f),
   'sighter': (dark: #c488cf, light: #884f92, fill: #975ea2),
   // Not an app of the family: the neutral accent of the demo apps (Paddock Shell Demo, its silver icon), so a demo never
-  // borrows an app's colour.
-  'graphite': (dark: #a6a8ad, light: #4f5764, fill: #6b7380),
+  // borrows an app's colour. A neutral mid-grey fill reads as disabled, so its primary is dark graphite with white text in
+  // the light scheme and inverted in the dark one (light fill, near-black text), as neutral prominent buttons are.
+  'graphite': (dark: #a6a8ad, light: #4f5764, fill: #4f5764, fill-dark: #a6a8ad, on-fill-dark: #16181c),
 );
 
-@mixin accent-vars($text, $fill) {
+// An accent's fill in the dark scheme, and the text on it there: `fill-dark` / `on-fill-dark` when it has them.
+@function dark-fill($a) {
+  @if map.has-key($a, 'fill-dark') {
+    @return map.get($a, 'fill-dark');
+  }
+  @return map.get($a, 'fill');
+}
+@function dark-on-fill($a) {
+  @if map.has-key($a, 'on-fill-dark') {
+    @return map.get($a, 'on-fill-dark');
+  }
+  @return #ffffff;
+}
+
+@mixin accent-vars($text, $fill, $on: #ffffff) {
   --pd-accent: #{$text};
+  --pd-on-accent: #{$on};
   --pd-accent-fill: #{$fill};
   --pd-accent-fill-hover: color-mix(in srgb, #{$fill} 88%, #000);
   --pd-accent-tint: color-mix(in srgb, #{$text} 14%, transparent);
@@ -316,7 +332,7 @@ $accents: (
 
 @each $name, $a in $accents {
   :root[data-accent='#{$name}'] {
-    @include accent-vars(map.get($a, dark), map.get($a, fill));
+    @include accent-vars(map.get($a, dark), dark-fill($a), dark-on-fill($a));
   }
 
   @media (prefers-color-scheme: light) {
@@ -330,7 +346,7 @@ $accents: (
   }
 
   :root[data-theme='dark'][data-accent='#{$name}'] {
-    @include accent-vars(map.get($a, dark), map.get($a, fill));
+    @include accent-vars(map.get($a, dark), dark-fill($a), dark-on-fill($a));
   }
 }
 

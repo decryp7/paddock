@@ -11,7 +11,7 @@ import { PdServiceStatus } from './service-status';
 import { chipCompactText, chipText, shortName, stateWord } from './service-status-text';
 import { ServiceHealthStore } from './service-health.store';
 import { all, cause, notifyBed, one, settle } from './spec-helpers';
-import { PdServiceError, PdWaitingFor } from './waiting-for';
+import { PdServiceError, PdWaitingFor, waitingKind } from './waiting-for';
 import { ServiceHealthBackend, type Unlisten } from './backends';
 import type { ServiceHealthSnapshot } from './wire.types';
 
@@ -186,6 +186,20 @@ class Panels {
   readonly retries = signal(0);
 }
 
+describe('waitingKind', () => {
+  it('spins only while something is under way; a stopped service is an offline state', () => {
+    expect([null, 'starting', 'ok', 'repairing', 'down', 'degraded', 'quarantined'].map(waitingKind)).toEqual([
+      'waiting',
+      'waiting',
+      'waiting',
+      'repairing',
+      'offline',
+      'offline',
+      'offline',
+    ]);
+  });
+});
+
 describe('pd-service-error and pd-waiting-for', () => {
   it('a panel waits calmly while its service is down and loads again by itself when it is back', async () => {
     const { health } = notifyBed();
@@ -204,8 +218,25 @@ describe('pd-service-error and pd-waiting-for', () => {
     expect(el.textContent).toContain('Waiting for nobody');
     health.fail('store', cause('stopped'));
     await f.whenStable();
-    expect(one(el, '[data-testid=waiting-for-store]').textContent).toContain('Waiting for the log store');
+    // Stopped: the offline state (no spinner) with the chip's repair, never "Waiting" (nothing happens by itself).
+    const panel = one(el, '[data-testid=waiting-for-store]');
+    expect(panel.dataset['kind']).toBe('offline');
+    expect(panel.textContent).toContain('Log store stopped');
+    expect(panel.textContent).toContain('This is unavailable until it works again.');
+    expect(panel.querySelector('.spinner')).toBeNull();
     expect(el.textContent).not.toContain('Could not load events.');
+    const store = TestBed.inject(ServiceHealthStore);
+    const repair = vi.spyOn(store, 'repair').mockResolvedValue(undefined);
+    one(el, '[data-testid=waiting-for-store] [data-testid=waiting-for-repair]').click();
+    expect(one(el, '[data-testid=waiting-for-store] [data-testid=waiting-for-repair]').textContent?.trim()).toBe('Restart log store');
+    expect(repair).toHaveBeenCalledWith('store');
+    repair.mockRestore();
+    // While the repair runs: the spinner, saying so.
+    health.fail('store', cause('stopped'), 'restart', 'repairing');
+    await f.whenStable();
+    expect(one(el, '[data-testid=waiting-for-store]').dataset['kind']).toBe('repairing');
+    expect(one(el, '[data-testid=waiting-for-store]').textContent).toContain('Repairing the log store…');
+    expect(one(el, '[data-testid=waiting-for-store] .spinner')).not.toBeNull();
     one(el, '[data-testid=waiting-for-store] [data-testid=waiting-for-details]').click();
     expect(TestBed.inject(ServiceHealthStore).detailsRequested()).toBe(1);
     health.ok('store');
