@@ -1,0 +1,85 @@
+# Nightly benchmark workflow for a Paddock app (plan X26, rule 16). Copy to the app's `.gitea/workflows/bench.yml` and set the
+# three `APP_*` values and the benchmark command. The benchmark writes `bench/<app>.results.json` (paddock_bench::Results);
+# the budgets live in `bench/budgets.toml`; the previous night's results come from the cache, so a regression beyond
+# `regression_pct` fails even inside the limit. The run is skipped while main is unchanged since the last green night.
+#
+# Pin the paddock actions to a release tag; Renovate bumps it with the crates.
+
+name: bench
+
+on:
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+env:
+  APP_ID: myapp                       # the app's id (results file bench/<id>.results.json)
+  BENCH_COMMAND: cargo test --release -p myapp-core --test bench -- --nocapture
+  PADDOCK_BENCH_VERSION: "0.1"        # the paddock-bench crate (registry decryp7)
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+      - id: plan
+        uses: decryp7/paddock/.gitea/actions/plan@v0.3.0
+
+  bench:
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: decryp7/paddock/.gitea/actions/setup-rust@v0.3.0
+
+      # Last green night's results, for the regression check. Exact key per night, newest restored by prefix.
+      - uses: actions/cache/restore@v4
+        with:
+          path: bench/previous
+          key: bench-previous-${{ github.run_id }}
+          restore-keys: bench-previous-
+
+      - name: Benchmarks
+        run: ${{ env.BENCH_COMMAND }}
+
+      - name: Install paddock-bench
+        run: cargo install paddock-bench --version "${PADDOCK_BENCH_VERSION}" --registry decryp7 --locked
+
+      - name: Check the budgets
+        shell: bash
+        run: |
+          set -o pipefail
+          args=(--budgets bench/budgets.toml --results "bench/${APP_ID}.results.json")
+          [ -f "bench/previous/${APP_ID}.results.json" ] && args+=(--previous "bench/previous/${APP_ID}.results.json")
+          paddock-bench check "${args[@]}" --markdown | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      # Saved only after the budgets held, so a bad night never becomes the baseline.
+      - name: Keep these results as the baseline
+        run: mkdir -p bench/previous && cp "bench/${APP_ID}.results.json" bench/previous/
+      - uses: actions/cache/save@v4
+        with:
+          path: bench/previous
+          key: bench-previous-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: bench-results
+          path: bench/*.results.json
+          if-no-files-found: warn
+
+  nightly-mark:
+    needs: [bench]
+    if: github.event_name == 'schedule' && success()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: decryp7/paddock/.gitea/actions/nightly-mark@v0.3.0
