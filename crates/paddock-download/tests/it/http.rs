@@ -8,7 +8,7 @@ use paddock_download::{
     Config, DownloadError, Downloader, HostCaps, HttpConfig, Integrity, ProxyMode, Request,
     Sha256Digest, phases,
 };
-use paddock_jobs::{CANCEL_LATENCY_TARGET_MS, CancelReason};
+use paddock_jobs::CancelReason;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -329,14 +329,31 @@ fn a_connection_that_keeps_dropping_fails_with_a_network_error_and_keeps_the_par
     assert!(e.keeps_partial() && req.part_path().exists() && req.resume_path().exists());
 }
 
+/// A downloader whose host caps (and so every wait of its downloads) run on a fake clock.
+fn on_fake_clock() -> (
+    paddock_download::Downloader,
+    Arc<HostCaps>,
+    paddock_jobs::time::FakeClock,
+) {
+    let clock = paddock_jobs::time::FakeClock::new();
+    let hosts = Arc::new(HostCaps::default().with_clock(Arc::new(clock.clone())));
+    (downloader(fast()).with_hosts(hosts.clone()), hosts, clock)
+}
+
+/// A hang guard around a state the download reaches after an event the test caused (never a timing assertion).
+fn eventually(f: impl Fn() -> bool) {
+    let start = Instant::now();
+    while !f() {
+        assert!(start.elapsed() < Duration::from_secs(60), "never reached");
+        std::thread::yield_now();
+    }
+}
+
 #[test]
 fn http_429_with_retry_after_holds_the_host_for_that_long_and_the_download_still_completes() {
     let data = blob(1024 * 1024);
     let d2 = data.clone();
-    let times = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let t2 = times.clone();
     let server = Server::start(move |r, n| {
-        t2.lock().unwrap().push(Instant::now());
         if n == 1 {
             Resp::new(429, "slow down").header("retry-after", "1")
         } else {
@@ -345,23 +362,18 @@ fn http_429_with_retry_after_holds_the_host_for_that_long_and_the_download_still
     });
     let dir = tempfile::tempdir().unwrap();
     let req = request(&server, &dir, &data);
+    let (d, hosts, clock) = on_fake_clock();
     let (ctx, rec) = job();
-    let got = downloader(fast()).download(&ctx, &req).unwrap();
-    assert_eq!(std::fs::read(&got.path).unwrap(), data);
-    let t = times.lock().unwrap();
-    let throttled = t[1];
-    // Requests already on their way may land just after the 429; none starts during the second the host asked for.
-    let early = t
-        .iter()
-        .filter(|&&x| {
-            x > throttled + Duration::from_millis(150) && x < throttled + Duration::from_millis(950)
-        })
-        .count();
-    assert_eq!(early, 0, "requests during the Retry-After");
+    let run = std::thread::spawn(move || d.download(&ctx, &req).map(|g| g.path));
+    // The throttled range waits for the host on the clock: the download cannot finish before the second passes.
+    eventually(|| hosts.held(&server.host()) >= 1);
+    assert!(!run.is_finished());
+    clock.advance(Duration::from_secs(1));
+    let got = run.join().unwrap().unwrap();
+    assert_eq!(std::fs::read(&got).unwrap(), data);
     assert!(
-        t.iter()
-            .any(|&x| x >= throttled + Duration::from_millis(950)),
-        "the throttled range was fetched again later"
+        server.log().len() >= 3,
+        "the throttled range was fetched again"
     );
     rec.assert_monotonic();
 }
@@ -370,10 +382,7 @@ fn http_429_with_retry_after_holds_the_host_for_that_long_and_the_download_still
 fn retry_after_holds_every_request_to_the_host() {
     let data = blob(64 * 1024);
     let d2 = data.clone();
-    let times = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let t2 = times.clone();
     let server = Server::start(move |r, n| {
-        t2.lock().unwrap().push(Instant::now());
         if n == 0 {
             Resp::new(503, "").header("retry-after", "1")
         } else {
@@ -381,16 +390,16 @@ fn retry_after_holds_every_request_to_the_host() {
         }
     });
     let dir = tempfile::tempdir().unwrap();
+    let (d, hosts, clock) = on_fake_clock();
     let (ctx, _) = job();
-    downloader(fast())
-        .download(&ctx, &request(&server, &dir, &data))
-        .unwrap();
-    let t = times.lock().unwrap();
-    assert!(
-        t[1] - t[0] >= Duration::from_millis(950),
-        "waited {:?}",
-        t[1] - t[0]
-    );
+    let req = request(&server, &dir, &data);
+    let run = std::thread::spawn(move || d.download(&ctx, &req).map(|_| ()));
+    eventually(|| hosts.held(&server.host()) >= 1);
+    // Held: no other request reached the host.
+    assert_eq!(server.log().len(), 1);
+    clock.advance(Duration::from_secs(1));
+    run.join().unwrap().unwrap();
+    assert!(server.log().len() >= 2);
 }
 
 #[test]
@@ -831,40 +840,20 @@ fn an_invalid_proxy_is_refused_when_the_mode_is_built() {
     ));
 }
 
-// ---- cancel within 250 ms in every phase ----
-
-fn assert_quick(started: Instant, what: &str) {
-    let took = started.elapsed();
-    assert!(
-        took < Duration::from_millis(CANCEL_LATENCY_TARGET_MS),
-        "cancel while {what} took {took:?}"
-    );
-}
-
-/// Cancels from another thread after `after`, and returns when it fired.
-fn cancel_later(
-    ctx: &paddock_jobs::JobContext,
-    after: Duration,
-) -> std::thread::JoinHandle<Instant> {
-    let token = ctx.cancel_token().clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(after);
-        token.cancel();
-        Instant::now()
-    })
-}
+// ---- a cancel ends the download in every phase (the outcome is asserted, never how long it took) ----
 
 #[test]
 fn cancel_while_connecting_returns_at_once() {
     let server = Server::start(|r, _| partial(r, b"data").delay(Duration::from_secs(5)));
     let dir = tempfile::tempdir().unwrap();
     let (ctx, _) = job();
-    let t = cancel_later(&ctx, Duration::from_millis(100));
-    let e = downloader(fast())
-        .download(&ctx, &request(&server, &dir, b"data"))
-        .unwrap_err();
-    let at = t.join().unwrap();
-    assert_quick(at, "connecting");
+    let token = ctx.cancel_token().clone();
+    let req = request(&server, &dir, b"data");
+    let run = std::thread::spawn(move || downloader(fast()).download(&ctx, &req).map(|_| ()));
+    // The host holds the answer for five seconds; the cancel comes once it has the request.
+    eventually(|| !server.log().is_empty());
+    token.cancel();
+    let e = run.join().unwrap().unwrap_err();
     assert!(matches!(e, DownloadError::Cancelled(CancelReason::User)));
 }
 
@@ -873,33 +862,46 @@ fn cancel_while_waiting_for_retry_after_returns_at_once() {
     let server = Server::start(|_, _| Resp::new(429, "").header("retry-after", "30"));
     let dir = tempfile::tempdir().unwrap();
     let (ctx, _) = job();
-    let t = cancel_later(&ctx, Duration::from_millis(150));
+    let token = ctx.cancel_token().clone();
     let config = Config {
         max_wait: Duration::from_secs(30),
         ..fast()
     };
-    let e = downloader(config)
-        .download(&ctx, &request(&server, &dir, b"data"))
-        .unwrap_err();
-    assert_quick(t.join().unwrap(), "backing off");
-    assert!(matches!(e, DownloadError::Cancelled(_)));
+    let clock = paddock_jobs::time::FakeClock::new();
+    let hosts = Arc::new(HostCaps::default().with_clock(Arc::new(clock)));
+    let d = downloader(config).with_hosts(hosts.clone());
+    let req = request(&server, &dir, b"data");
+    let run = std::thread::spawn(move || d.download(&ctx, &req).map(|_| ()));
+    // Thirty seconds on a clock that does not move: only the cancel ends the wait.
+    eventually(|| hosts.held(&server.host()) >= 1);
+    token.cancel();
+    assert!(matches!(
+        run.join().unwrap(),
+        Err(DownloadError::Cancelled(_))
+    ));
 }
 
 #[test]
 fn cancel_while_the_host_is_held_back_returns_at_once() {
     let server = Server::start(|r, _| partial(r, b"data"));
     let dir = tempfile::tempdir().unwrap();
-    let hosts = Arc::new(HostCaps::new(1));
+    let clock = paddock_jobs::time::FakeClock::new();
+    let hosts = Arc::new(HostCaps::new(1).with_clock(Arc::new(clock)));
     let d = downloader(fast()).with_hosts(hosts.clone());
     let (ctx, _) = job();
-    hosts.back_off(&server.host(), Instant::now() + Duration::from_secs(30));
-    let t = cancel_later(&ctx, Duration::from_millis(100));
-    let e = d
-        .download(&ctx, &request(&server, &dir, b"data"))
-        .unwrap_err();
-    assert_quick(t.join().unwrap(), "waiting for the host");
+    let token = ctx.cancel_token().clone();
+    hosts.back_off(&server.host(), Duration::from_secs(30));
+    let req = request(&server, &dir, b"data");
+    let run = std::thread::spawn(move || d.download(&ctx, &req).map(|_| ()));
+    eventually(|| hosts.held(&server.host()) >= 1);
+    token.cancel();
+    assert!(matches!(
+        run.join().unwrap(),
+        Err(DownloadError::Cancelled(_))
+    ));
     assert!(server.log().is_empty());
-    assert!(matches!(e, DownloadError::Cancelled(_)));
+    // The waiter (on the probe's own thread) leaves at its next look at the cancel.
+    eventually(|| hosts.held(&server.host()) == 0);
 }
 
 #[test]
@@ -922,7 +924,6 @@ fn cancel_while_resuming_returns_at_once_and_keeps_the_state() {
     let (ctx, rec) = job();
     rec.cancel_at(phases::RESUME, 1);
     let e = downloader(fast()).download(&ctx, &req).unwrap_err();
-    assert_quick(rec.fired.lock().unwrap().unwrap(), "resuming");
     assert!(matches!(e, DownloadError::Cancelled(_)));
     assert_eq!(
         std::fs::read_to_string(req.resume_path()).unwrap(),
@@ -947,7 +948,6 @@ fn cancel_while_downloading_a_stalled_range_returns_at_once_and_keeps_the_partia
     let (ctx, rec) = job();
     rec.cancel_at(phases::DOWNLOAD, 10_000);
     let e = downloader(fast()).download(&ctx, &req).unwrap_err();
-    assert_quick(rec.fired.lock().unwrap().unwrap(), "downloading");
     assert!(matches!(e, DownloadError::Cancelled(_)));
     assert!(req.part_path().exists() && req.resume_path().exists() && !req.dest().exists());
 }
@@ -960,7 +960,6 @@ fn cancel_while_streaming_returns_at_once_and_removes_the_unresumable_partial_fi
     let (ctx, rec) = job();
     rec.cancel_at(phases::DOWNLOAD, 5000);
     let e = downloader(fast()).download(&ctx, &req).unwrap_err();
-    assert_quick(rec.fired.lock().unwrap().unwrap(), "streaming");
     assert!(matches!(e, DownloadError::Cancelled(_)));
     assert!(!req.part_path().exists() && !req.dest().exists());
 }

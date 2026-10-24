@@ -8,13 +8,12 @@ use paddock_jobs::tauri::{
     COMMANDS, CommandError, EVENT, Jobs, handler, handler_with_grants, manage, route,
 };
 use paddock_jobs::{
-    CancelReason, EventSink, FakeClock, HANDLER_BUDGET_MS, JobError, JobId, JobKind, JobPool,
-    JobRegistry, JobSnapshot, JobState, Phase, Reporter, Workers, assert_nonblocking,
+    CancelReason, EventSink, FakeClock, JobError, JobId, JobKind, JobPool, JobRegistry,
+    JobSnapshot, JobState, Phase, Reporter, Workers, assert_nonblocking,
 };
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
@@ -88,10 +87,6 @@ fn collect_events(app: &App<MockRuntime>) -> Arc<Mutex<Vec<JobSnapshot>>> {
     seen
 }
 
-fn budget() -> Duration {
-    Duration::from_millis(HANDLER_BUDGET_MS)
-}
-
 #[test]
 fn the_event_is_named_by_the_shell_scheme() {
     assert_eq!(EVENT, "paddock://jobs");
@@ -130,7 +125,7 @@ fn a_job_with_phases_reports_through_events_and_is_cancelled_over_ipc() {
         .unwrap();
     entered.recv().unwrap();
 
-    let listed = assert_nonblocking(budget(), || {
+    let listed = assert_nonblocking(&pool, || {
         invoke(&main, "jobs_snapshot", serde_json::json!({}))
     })
     .expect("jobs_snapshot returns at once")
@@ -144,7 +139,7 @@ fn a_job_with_phases_reports_through_events_and_is_cancelled_over_ipc() {
     };
     assert_eq!((p.phase.id.as_str(), p.done), ("read", 512));
 
-    let cancelled = assert_nonblocking(budget(), || {
+    let cancelled = assert_nonblocking(&pool, || {
         invoke(&main, "job_cancel", serde_json::json!({ "id": id.0 }))
     })
     .expect("job_cancel returns at once, before the job has stopped");

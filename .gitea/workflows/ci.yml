@@ -57,6 +57,9 @@ jobs:
       - name: Build the shell demo
         run: npm run shell-demo:build
 
+      - name: Build the workbench demo
+        run: npm run workbench-demo:build
+
       # Lists every npm package, entry point and crate with what a tag would publish; publishes nothing.
       - name: Publish dry run
         run: node ../scripts/publish.mjs --skip-build
@@ -88,6 +91,7 @@ jobs:
         env:
           PW_PORT: ${{ matrix.shard == 1 && '4300' || '4310' }}
           SHELL_DEMO_PORT: ${{ matrix.shard == 1 && '4301' || '4311' }}
+          WORKBENCH_DEMO_PORT: ${{ matrix.shard == 1 && '4302' || '4312' }}
         run: npx playwright test --shard=${{ matrix.shard }}/2
 
   # @decryp7/paddock-conformance (conformance/, plan X9): every check has a good and a bad fixture, the release scripts are
@@ -190,7 +194,7 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -330,6 +334,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-testkit --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-testkit --all-features --profile ci && cargo test -p paddock-testkit --all-features --doc
 
+      # The test-plan formats: properties (parse after write, no panics on any bytes) run with the tests; the fuzz target in
+      # paddock-testplan/fuzz is built by the nightly fuzz job.
+      - name: paddock-testplan
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-testplan --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-testplan --all-features --profile ci && cargo test -p paddock-testplan --all-features --doc
+
       - name: paddock-metrics
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-metrics --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-metrics --all-features --profile ci && cargo test -p paddock-metrics --all-features --doc
@@ -370,6 +380,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-service --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-service --all-features --profile ci && cargo test -p paddock-service --all-features --doc
 
+      - name: paddock-assistant
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-assistant --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-assistant --all-features --profile ci && cargo test -p paddock-assistant --all-features --doc
+
       - name: paddock-pitwall
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-pitwall --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-pitwall --all-features --profile ci && cargo test -p paddock-pitwall --all-features --doc
@@ -378,9 +392,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-secrets --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-secrets --all-features --profile ci && cargo nextest run -p paddock-secrets --profile ci && cargo test -p paddock-secrets --all-features --doc
 
+      - name: paddock-panels
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-panels --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-panels --all-features --profile ci && cargo test -p paddock-panels --all-features --doc
+
       - name: paddock-window
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-window --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-window --all-features --profile ci && cargo test -p paddock-window --all-features --doc
+
+      - name: paddock-workbench
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-workbench --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-workbench --all-features --profile ci && cargo test -p paddock-workbench --all-features --doc
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
