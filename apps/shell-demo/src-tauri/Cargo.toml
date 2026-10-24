@@ -25,7 +25,7 @@ name = "paddock-shell-demo"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = { version = "2.7", features = [] }
+paddock-build = { path = "../../../crates/paddock-build", features = ["tauri-build"] }
 
 # The shell crates from this repository (path dependencies). An app outside the repository names them from the
 # `decryp7` registry instead (crates/README.md, "Consuming the crates"); scripts/new-app.mjs rewrites these lines.

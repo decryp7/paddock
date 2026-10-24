@@ -157,4 +157,5 @@ export {
 } from './src/theme/appearance-backend';
 export { AppearanceStore, APPEARANCE_CONFIG, MATCH_MEDIA, SYSTEM_APPEARANCE, applyAppearanceTo, type AppearanceConfig, type MatchMedia } from './src/theme/appearance.store';
 export { provideAppearance, provideThemes, applyStoredAppearance, APPEARANCE_SOURCE, type AppearanceOptions } from './src/theme/provide-appearance';
+export { cssRules, resolveTokens, definedAccents, accentProblems, type TokenRules, type TokenVars, type TokenScheme, type TokenContrast, type AccentCheckOptions } from './src/theme/token-check';
 export { parseColor, tryParseColor, contrast, luminance, over, simulate, deltaE, deltaE2000, lab, type Rgba, type Cvd } from './src/theme/color';

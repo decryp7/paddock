@@ -127,6 +127,10 @@ jobs:
       #   C07 release preflight and C08 release artifacts: Paddock releases through publish.yml, not an app release job;
       #   C23 commit lint and doc blocks: Paddock's AGENTS.md is the source of the blocks, and its history predates the
       #     100-character subject rule.
+      # C14 (hermetic wrapper), C29, C30 (wall clock) and C36 (parser hardening) report warnings; C15 has a dated waiver (paddock.waivers.toml).
+      - name: Paddock itself (applicable checks)
+        working-directory: .
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C29,C30,C31,C34,C35,C36
       # C24 needs every docs/images file reviewed (docs/images/REVIEWED.md). C14 (hermetic wrapper), C29 and C30 (wall clock) report warnings; C15 has a dated waiver (paddock.waivers.toml).
       - name: Paddock itself (applicable checks)
         working-directory: .
@@ -210,6 +214,7 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
+          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch|paddock-build/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
@@ -360,6 +365,14 @@ jobs:
       - name: paddock-names
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-names --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-names --all-features --profile ci && cargo test -p paddock-names --all-features --doc
+
+      - name: paddock-archive
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-archive --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-archive --all-features --profile ci && cargo test -p paddock-archive --all-features --doc
+
+      - name: paddock-build
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-build --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-build --all-features --profile ci && cargo test -p paddock-build --all-features --doc
 
       - name: paddock-packs
         if: ${{ !cancelled() }}
