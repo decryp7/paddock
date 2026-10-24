@@ -343,3 +343,7 @@ retry and checkpoint debounce then go back to `setTimeout`. A lint must express 
 - Notices posted from a webview (`SHELL_PORTS.notify`) stay window-local because `paddock-health` has no
   `notifications_post` command; add it (validated, bounded, cause-keyed) so the engine stays the single source of truth
   and other windows see them (rule 34).
+- S7 exposes a `windowReady` signal (set when the ready reply is handled) and S13's native-menu gate defaults to it;
+  the demo's AFTER_READY wrapper goes away.
+- `paddock-menu`'s two Tauri menu tests skip on macOS and have never run; run them on Linux locally in Docker (the CI
+  image) before shell/integrate is merged to main, so coverage is confirmed locally first (rule 3).
