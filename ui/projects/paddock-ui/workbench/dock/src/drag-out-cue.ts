@@ -1,6 +1,15 @@
 import { Point, Rect } from './dock-geometry';
 import { TabDropOutcome } from './float-cue';
-import { DragOutPreview } from './panel-windows';
+
+/** The native preview of a tab dragged out of the window (a ghost window following the pointer outside it); none in this build. */
+export interface DragOutPreview {
+  /** Does the ghost show the "new window" preview (false: draw the in-window one)? */
+  readonly native: boolean;
+  /** The pointer is outside the window (show the ghost) or back inside (hide it). */
+  show(outside: boolean): void;
+  /** The drag ended: hides the ghost; where it was (screen px), else null. */
+  finish(): Promise<{ x: number; y: number; width: number; height: number } | null>;
+}
 
 /** What the cue of a dragged tab shows for an outcome: the shell's ghost window, the in-window cue, both or neither. */
 export interface CueMode {

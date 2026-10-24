@@ -124,7 +124,7 @@ export class Perspectives {
     const layout = this.dock.currentLayout();
     if (layout && current) this.remember(current, layout);
     const remembered = this.state.layouts[id];
-    if (!remembered || !this.dock.applyLayout(remembered)) this.show(target);
+    if (!remembered || !this.dock.applySaved(remembered)) this.show(target);
     this.activeId.set(id);
     this.persist({ ...this.state, active: id });
     return true;

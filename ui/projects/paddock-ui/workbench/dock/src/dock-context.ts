@@ -66,6 +66,11 @@ export class DockContext {
     return this.windowsPort;
   }
 
+  /** Whether this panel can move to a window of its own: a pop-out service is there and the view allows it. */
+  canPopOut(id: string): boolean {
+    return this.windowsPort !== null && this.views.find(id)?.popOut !== false;
+  }
+
   kindOf(id: string): ViewKind {
     return viewKind(this.views.find(id));
   }

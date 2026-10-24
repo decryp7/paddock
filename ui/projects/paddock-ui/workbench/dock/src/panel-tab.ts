@@ -29,6 +29,7 @@ export class PanelTab implements ITabRenderer {
   constructor(
     private readonly openMenu: OpenPanelMenu | null = null,
     private readonly drawIcon: DrawTabIcon | null = null,
+    private readonly closable: (id: string) => boolean = () => true,
   ) {
     this.element.className = 'pd-dock-tab';
     this.pin.className = 'pd-dock-tab-pin';
@@ -55,6 +56,7 @@ export class PanelTab implements ITabRenderer {
     this.stopIcon = this.drawIcon?.(params.api.id, this.icon);
     this.label.textContent = params.title;
     this.subscription = params.api.onDidTitleChange((e) => (this.label.textContent = e.title));
+    if (!this.closable(params.api.id)) this.close.remove();
     this.close.addEventListener('click', (e) => {
       e.stopPropagation();
       this.api?.close();

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { DockService } from './dock.service';
+import { WorkbenchDock } from './dock.service';
 import { selected, selectId } from './switcher';
 
 /**
@@ -11,7 +11,7 @@ import { selected, selectId } from './switcher';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (dock.switcher()) {
-      <div class="pd-dock-switcher-backdrop" data-pd-overlay (pointerdown)="dock.cancelSwitch()"></div>
+      <div class="pd-dock-switcher-backdrop"  (pointerdown)="dock.cancelSwitch()"></div>
       <div class="pd-dock-switcher" role="dialog" aria-label="Switch to panel" i18n-aria-label="@@pd.wb.dock.switcher.label" (pointerdown)="$event.stopPropagation()">
         <div class="cols">
           @for (col of columns(); track col.title) {
@@ -44,20 +44,20 @@ import { selected, selectId } from './switcher';
     .pd-dock-switcher-backdrop { position: fixed; inset: 0; z-index: 200; }
     .pd-dock-switcher {
       position: fixed; z-index: 201; inset-inline-start: 50%; top: 22%; transform: translateX(-50%); min-width: 460px; max-width: 80vw;
-      background: var(--tooltip-bg); color: var(--text); border: 1px solid var(--border-3); border-radius: 8px;
-      box-shadow: var(--shadow); padding: 12px 14px;
+      background: var(--pd-surface-3); color: var(--pd-text); border: 1px solid var(--pd-border-strong); border-radius: 8px;
+      box-shadow: var(--pd-shadow-2); padding: 12px 14px;
     }
     .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    h2 { margin: 0 0 6px; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
+    h2 { margin: 0 0 6px; font-size: var(--pd-text-label); font-weight: 600; color: var(--pd-text-muted); }
     ul { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow: auto; }
-    li { padding: 4px 8px; border-radius: 4px; font-size: var(--fs-md); cursor: pointer; }
-    li.on { background: var(--accent); color: var(--accent-ink); }
-    li.none { color: var(--faint); cursor: default; }
-    .hint { margin: 10px 0 0; font-size: var(--fs-xs); color: var(--muted); }
+    li { padding: 4px 8px; border-radius: 4px; font-size: var(--pd-text-body); cursor: pointer; }
+    li.on { background: var(--pd-accent); color: var(--pd-on-accent); }
+    li.none { color: var(--pd-text-subtle); cursor: default; }
+    .hint { margin: 10px 0 0; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
   `,
 })
 export class DockSwitcher {
-  protected readonly dock = inject(DockService);
+  protected readonly dock = inject(WorkbenchDock);
   protected readonly current = computed(() => {
     const s = this.dock.switcher();
     return s ? selected(s) : null;

@@ -1,0 +1,1 @@
+{ "extends": "./tsconfig.json", "compilerOptions": { "noEmit": true, "types": ["@angular/localize"], "skipLibCheck": true }, "files": ["projects/paddock-ui/workbench/dock/public-api.ts"] }

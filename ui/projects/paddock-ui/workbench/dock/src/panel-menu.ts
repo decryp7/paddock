@@ -36,6 +36,10 @@ export interface PanelFacts {
   pinnedTab: boolean;
   /** Pop-out windows are possible (and the limit is not reached). */
   canPopout: boolean;
+  /** A pop-out service exists in this window; without one the Pop out action is left out. Default true. */
+  popOutAvailable?: boolean;
+  /** The view allows closing its panel. Default true. */
+  closable?: boolean;
   /** It already sits in a group with documents. */
   inDocumentWell: boolean;
 }
@@ -44,7 +48,7 @@ export interface PanelFacts {
 export function panelMenu(f: PanelFacts): PanelMenuItem[] {
   const items: PanelMenuItem[] = [
     { action: 'float', label: $localize`:Verb, float a panel inside the window@@pd.wb.dock.panelMenu.float:Float`, disabled: f.floating },
-    { action: 'popout', label: $localize`:@@pd.wb.dock.panelMenu.popOut:Pop out to window`, disabled: !f.canPopout },
+    ...(f.popOutAvailable === false ? [] : [{ action: 'popout' as const, label: $localize`:@@pd.wb.dock.panelMenu.popOut:Pop out to window`, disabled: !f.canPopout }]),
     { action: 'dock', label: $localize`:Verb, dock a panel@@pd.wb.dock.panelMenu.dock:Dock`, disabled: !f.floating },
   ];
   if (f.kind === 'tool') {
@@ -52,7 +56,7 @@ export function panelMenu(f: PanelFacts): PanelMenuItem[] {
     items.push({ action: 'autoHide', label: $localize`:@@pd.wb.dock.panelMenu.autoHide:Auto hide` });
   }
   items.push({ action: f.pinnedTab ? 'unpinTab' : 'pinTab', label: f.pinnedTab ? $localize`:@@pd.wb.dock.panelMenu.unpinTab:Unpin tab` : $localize`:@@pd.wb.dock.panelMenu.pinTab:Pin tab` });
-  items.push({ action: 'close', label: $localize`:Menu item@@pd.wb.dock.panelMenu.close:Close` });
+  items.push({ action: 'close', label: $localize`:Menu item@@pd.wb.dock.panelMenu.close:Close`, disabled: f.closable === false });
   if (f.kind === 'document') {
     items.push(
       { action: 'closeOthers', label: $localize`:@@pd.wb.dock.panelMenu.closeOthers:Close all but this`, disabled: !f.hasSiblings },

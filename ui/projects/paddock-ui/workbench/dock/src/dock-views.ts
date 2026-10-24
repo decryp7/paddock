@@ -24,6 +24,11 @@ export class DockViews {
     return this.registry.availableViews();
   }
 
+  /** Whether the app's context is loaded (before it, views with a `when` are unknown, not hidden). */
+  contextLoaded(): boolean {
+    return this.registry.context() !== null;
+  }
+
   isOffered(id: string): boolean {
     return this.registry.isViewOffered(id);
   }

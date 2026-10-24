@@ -96,7 +96,8 @@ export function nearestSide(rect: Rect, root: Rect): Side {
  * column on the right is at the right edge; a full-width strip at the bottom is at the bottom edge (where
  * `nearestSide` would call it "left", being 0 px from every side it spans).
  */
-export function atEdge(rect: Rect, root: Rect, side: 'right' | 'bottom', tolerance = 2): boolean {
+export function atEdge(rect: Rect, root: Rect, side: 'left' | 'right' | 'bottom', tolerance = 2): boolean {
+  if (side === 'left') return rect.x - root.x <= tolerance && root.x + root.width - (rect.x + rect.width) > tolerance;
   if (side === 'right') return root.x + root.width - (rect.x + rect.width) <= tolerance && rect.x - root.x > tolerance;
   return root.y + root.height - (rect.y + rect.height) <= tolerance && rect.y - root.y > tolerance;
 }
