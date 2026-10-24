@@ -20,7 +20,8 @@ describe('chip text', () => {
     expect(chipText([{ label: 'the log store', state: 'down' }])).toBe('Log store: stopped');
     expect(chipText([{ label: 'a', state: 'down' }, { label: 'b', state: 'degraded' }])).toBe('2 services need attention');
     // The compact form of a narrow status bar.
-    expect(chipCompactText([{ label: 'the log store', state: 'down' }])).toBe('Stopped');
+    expect(chipCompactText([{ label: 'the log store', state: 'down' }])).toBe('Store stopped');
+    expect(chipCompactText([{ label: 'index', state: 'degraded' }])).toBe('Index limited');
     expect(chipCompactText([{ label: 'a', state: 'down' }, { label: 'b', state: 'degraded' }])).toBe('2 services');
     expect(chipCompactText([])).toBe('Unknown');
   });

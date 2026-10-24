@@ -126,6 +126,36 @@ test.describe('pages frame (plan S14)', () => {
     await expect(bar.getByTestId('service-health-chip')).toHaveText('Demo engine: stopped');
   });
 
+  test('narrowing the window never drops the running job from the status bar, whatever has focus (review N1)', async ({ page }) => {
+    await open(page);
+    await page.getByRole('button', { name: 'Break the search index' }).click();
+    await page.getByRole('button', { name: 'Start quiet job' }).click();
+    await expect(statusBar(page).locator('[data-status-item="pd.jobs"]')).toBeVisible();
+    // Watch every frame from before the resize until well after it.
+    await page.evaluate(() => {
+      const w = window as unknown as { __dropped: number; __watch: boolean };
+      w.__dropped = 0;
+      w.__watch = true;
+      const tick = () => {
+        if (document.querySelector('[data-status-item="pd.jobs"]')?.classList.contains('hidden')) w.__dropped++;
+        if (w.__watch) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await page.setViewportSize({ width: 320, height: 640 });
+    await expect.poll(() => frameMode(page)).toBe('overlay');
+    for (let i = 0; i < 4; i++) {
+      await page.keyboard.press('F6');
+      await expect(statusBar(page).locator('[data-status-item="pd.jobs"]')).not.toHaveClass(/hidden/);
+    }
+    const dropped = await page.evaluate(() => {
+      const w = window as unknown as { __dropped: number; __watch: boolean };
+      w.__watch = false;
+      return w.__dropped;
+    });
+    expect(dropped).toBe(0);
+  });
+
   test('a narrow status bar shrinks items first, keeps the bell and the chip, then hides the lowest and counts them', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     await open(page);
@@ -135,9 +165,9 @@ test.describe('pages frame (plan S14)', () => {
     const bar = statusBar(page);
     // Compact forms: the chip says the state, the jobs item the count; the full text is their name and tooltip.
     const chip = bar.getByTestId('service-health-chip');
-    await expect(chip).toHaveText('Stopped');
+    await expect(chip).toHaveText('Engine stopped');
     await expect(chip).toHaveAttribute('aria-label', 'Demo engine: stopped');
-    await expect(bar.getByRole('button', { name: '1 running: Waiting for the device' })).toHaveText('1');
+    await expect(bar.getByRole('button', { name: '1 running: Update runner' })).toHaveText('1');
     // The bell and its count are pinned.
     await expect(bar.getByTestId('notifications-status')).toBeVisible();
     await expect(bar.getByTestId('notifications-status')).toContainText('1');
@@ -315,9 +345,35 @@ test.describe('pages frame screenshots', () => {
   test.use({ deviceScaleFactor: 2 });
   const root = join(__dirname, '..', 'docs', 'screenshots', 'shell-demo');
 
-  /** The Runners page with a running job and the search index down; the toasts have timed out. */
+  /** Waits until the status bar has laid out (no item changes visibility or width over two checks). */
+  async function stableStatusBar(page: Page): Promise<void> {
+    const layout = () =>
+      page.locator('pd-status-bar [data-status-item]').evaluateAll((els) => els.map((e) => `${e.className}:${Math.round(e.getBoundingClientRect().width)}`).join('|'));
+    let last = '';
+    await expect
+      .poll(async () => {
+        const now = await layout();
+        const same = now === last;
+        last = now;
+        return same;
+      })
+      .toBe(true);
+    await expect(statusBar(page).locator('[data-status-item="pd.jobs"]')).not.toHaveClass(/hidden/);
+  }
+
+  /** Presses `key` until focus is on an element matching `selector` (F6 cycles regions from wherever focus is). */
+  async function focusBy(page: Page, key: string, selector: string): Promise<void> {
+    for (let i = 0; i < 6; i++) {
+      if (await page.evaluate((sel) => !!document.activeElement?.matches(sel), selector)) return;
+      await page.keyboard.press(key);
+    }
+    expect(await page.evaluate((sel) => !!document.activeElement?.matches(sel), selector)).toBe(true);
+  }
+
+  /** The Runners page with a running job and the search index down; the toasts have timed out. Developer pages off. */
   async function scene(page: Page, colorScheme: 'dark' | 'light', width: number, height: number): Promise<void> {
     mkdirSync(root, { recursive: true });
+    await page.addInitScript(() => localStorage.setItem('sd.developer', 'off'));
     await page.clock.install();
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
     await page.setViewportSize({ width, height });
@@ -328,8 +384,10 @@ test.describe('pages frame screenshots', () => {
     await page.getByRole('button', { name: 'Notify three times' }).click();
     await page.evaluate(() => (location.hash = '#/runners'));
     await expect(page.locator('sd-runners-page')).toBeVisible();
+    await expect(sidebar(page).getByRole('link', { name: 'Dialogs' })).toHaveCount(0);
     await page.clock.runFor(14_000);
     await page.mouse.move(width / 2, height - 60);
+    await stableStatusBar(page);
   }
 
   for (const colorScheme of ['dark', 'light'] as const) {
@@ -358,20 +416,20 @@ test.describe('pages frame screenshots', () => {
 
     test(`keyboard focus ${colorScheme}`, async ({ page }) => {
       await scene(page, colorScheme, 1440, 900);
-      // Keyboard focus on the current page link (F6 to the sidebar), then on the toggle and on "…" when narrow.
-      await page.keyboard.press('F6');
-      await page.keyboard.press('F6');
-      await page.keyboard.press('ArrowDown');
+      // A focused page link that is also the selected one (F6 to the sidebar), then one that is not.
+      await focusBy(page, 'F6', '[data-page-link]');
+      await expect(sidebar(page).getByRole('link', { name: /^Runners/ })).toBeFocused();
+      await page.screenshot({ path: join(root, `pages-focus-nav-selected-${colorScheme}.png`) });
+      await page.keyboard.press('ArrowUp');
+      await expect(sidebar(page).getByRole('link', { name: 'Overview' })).toBeFocused();
       await page.screenshot({ path: join(root, `pages-focus-nav-${colorScheme}.png`) });
+      // Narrow: the title bar's toggle, then "…" in the status bar (the ring inside the bar).
       await page.setViewportSize({ width: 320, height: 640 });
       await expect.poll(() => frameMode(page)).toBe('overlay');
-      await page.keyboard.press('Shift+F6');
-      await page.keyboard.press('Shift+F6');
-      await page.keyboard.press('Shift+F6');
+      await stableStatusBar(page);
+      await focusBy(page, 'F6', '[data-testid="sidebar-toggle"]');
       await page.screenshot({ path: join(root, `pages-focus-toggle-${colorScheme}.png`) });
-      await statusBar(page).getByTestId('status-more').focus();
-      await page.keyboard.press('Shift+Tab');
-      await page.keyboard.press('Tab');
+      await focusBy(page, 'Shift+Tab', '[data-testid="status-more"]');
       await page.screenshot({ path: join(root, `pages-focus-more-${colorScheme}.png`) });
     });
 

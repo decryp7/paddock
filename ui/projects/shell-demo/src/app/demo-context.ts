@@ -23,6 +23,25 @@ export interface DemoContext {
   breakIndex(): void;
   /** Runners that need the user (the Runners page's badge). */
   readonly attention: () => number;
+  /** Developer mode: the harness pages are offered (on unless local storage `sd.developer` is "off"). */
+  readonly developer: () => boolean;
+}
+
+/** Whether the demo runs in developer mode (a per-machine flag; unreadable storage means on). */
+export function developerMode(storage: Pick<Storage, 'getItem'> | null = safeStorage()): boolean {
+  try {
+    return storage?.getItem('sd.developer') !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function safeStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Built once, in the root injection context, when the shell first needs the context. */
@@ -46,5 +65,9 @@ export const demoContext: AppContextFactory<DemoContext> = () => {
     },
     breakIndex: () => health.breakIndex(),
     attention: () => runners.attention,
+    developer: (() => {
+      const on = developerMode();
+      return () => on;
+    })(),
   };
 };

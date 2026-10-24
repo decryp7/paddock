@@ -372,13 +372,19 @@ describe('pd-status-bar', () => {
     for (const i of items) i.getBoundingClientRect = () => ({ width: 60 }) as DOMRect;
     Object.defineProperty(el, 'clientWidth', { value: 260, configurable: true });
     observer.fire([el, ...items]);
+    // The full forms (6 x 68 px) do not fit 260 px: the items turn compact. Until they are measured so, nothing is hidden
+    // for its full width (regression: the jobs item blinked out for a frame when the window narrowed, review N1).
+    const bar = fixture.componentInstance;
+    expect(bar.compact()).toBe(true);
+    expect([...bar.hidden()]).toEqual([]);
     // Unknown targets and unchanged widths are ignored.
     observer.fire([document.createElement('div'), items[0] as HTMLElement]);
     await fixture.whenStable();
+    await settle();
     const hidden = () => [...el.querySelectorAll<HTMLElement>('[data-status-item].hidden')].map((e) => e.dataset['statusItem']);
-    // The full forms (6 x 68 px) do not fit 260 px: the items turn compact; until measured so, the full widths plan.
     expect(el.classList).toContain('compact');
     expect(el.querySelector('[data-status-item="t.jobs"]')?.textContent?.trim()).toBe('A');
+    // Re-measured in the compact form once rendered (60 px here too): the three lowest give way.
     expect(hidden()).toEqual(['t.greet', 't.tie', 't.cond']);
     expect(el.querySelector('[data-status-item="t.greet"]')?.hasAttribute('inert')).toBe(true);
     const more = el.querySelector<HTMLButtonElement>('[data-testid="status-more"]') as HTMLButtonElement;

@@ -3,7 +3,7 @@ import { PdJobsList } from '@decryp7/paddock-ui/shell/jobs';
 import { DemoPage, SECTION_STYLES } from './demo-page';
 import { RunnersPageState } from './runners.providers';
 
-const STATE_WORD = { online: 'Online', busy: 'Running a job', offline: 'Offline' } as const;
+const STATE_WORD = { online: 'Online', updating: 'Updating', offline: 'Offline' } as const;
 
 /** A manager page: the fleet as a table and the jobs running on it, with page-scoped state from its own providers. */
 @Component({
@@ -49,7 +49,7 @@ const STATE_WORD = { online: 'Online', busy: 'Running a job', offline: 'Offline'
     .state { display: inline-flex; align-items: center; gap: var(--pd-space-1); }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pd-text-muted); }
     .state[data-state='online'] .dot { background: var(--pd-success); }
-    .state[data-state='busy'] .dot { background: var(--pd-info); }
+    .state[data-state='updating'] .dot { background: var(--pd-info); }
     .state[data-state='offline'] { color: var(--pd-text-muted); }
     .state[data-state='offline'] .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--pd-text-muted); }
     .when { color: var(--pd-text-muted); }

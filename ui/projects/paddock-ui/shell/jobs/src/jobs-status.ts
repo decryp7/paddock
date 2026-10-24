@@ -6,12 +6,18 @@ import { JobsStore } from './jobs.store';
 
 let nextId = 0;
 
-/** What the status item says: "Jobs", or how many run and what the first one is doing ("Still working" when it went quiet). */
-export function jobsStatusText(active: number, phase: string | null, stalled: boolean): string {
+/** What the status item says: "Jobs", or how many run and which one leads ("1 running: Update runner"). */
+export function jobsStatusText(active: number, lead: string | null): string {
   if (active === 0) return 'Jobs';
   const count = `${formatCount(active)} running`;
-  const doing = stalled ? 'Still working' : phase;
-  return doing ? `${count}: ${doing}` : count;
+  return lead ? `${count}: ${lead}` : count;
+}
+
+/** The status item's tooltip: the lead job and what it does now ("Still working" when it went quiet); the card owns more. */
+export function jobsStatusDetail(lead: string | null, phase: string | null, stalled: boolean): string {
+  if (!lead) return '';
+  const doing = stalled ? 'still working, this step is taking longer than usual' : phase;
+  return doing ? `${lead}: ${doing}` : lead;
 }
 
 /**
@@ -30,7 +36,7 @@ export function jobsStatusText(active: number, phase: string | null, stalled: bo
   },
   template: `
     <button type="button" class="pill" [class.busy]="store.activeCount() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId"
-      [attr.aria-label]="compact() ? text() : null" [attr.title]="text()" (click)="toggle()">
+      [attr.aria-label]="compact() ? text() : null" [attr.title]="detail() || text()" [attr.data-stalled]="stalled() || null" (click)="toggle()">
       <span class="dot" aria-hidden="true"></span>
       <span class="text">{{ compact() ? compactText() : text() }}</span>
     </button>
@@ -44,13 +50,14 @@ export function jobsStatusText(active: number, phase: string | null, stalled: bo
     :host { position: relative; display: inline-flex; min-width: 0; }
     .pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 24px; padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
     .pill:hover, :host(.open) .pill { border-color: var(--pd-border-control); }
-    .pill:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
+    .pill:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
     .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--pd-text-muted); }
     /* Running: a neutral spinner (accent is for action and selection, design guide §4). */
-    .busy .dot { width: 10px; height: 10px; border: 1.5px solid var(--pd-border-strong); border-top-color: var(--pd-text-muted); animation: pd-jobs-spin 0.9s linear infinite; }
-    @keyframes pd-jobs-spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { .busy .dot { animation: none; border-color: var(--pd-text-muted); border-right-color: transparent; } }
+    /* A full faint track with a quarter arc: a spinner, never a letter (static at 45 degrees without motion). */
+    .busy .dot { width: 10px; height: 10px; border: 2px solid color-mix(in srgb, var(--pd-text-muted) 35%, transparent); border-top-color: var(--pd-text); transform: rotate(45deg); animation: pd-jobs-spin 0.9s linear infinite; }
+    @keyframes pd-jobs-spin { to { transform: rotate(405deg); } }
+    @media (prefers-reduced-motion: reduce) { .busy .dot { animation: none; } }
     .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: 10; width: min(360px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-2); }
     :host(.below) .popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
   `,
@@ -67,10 +74,16 @@ export class PdJobsStatus {
   protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);
   protected readonly compactText = computed(() => (this.store.activeCount() ? formatCount(this.store.activeCount()) : 'Jobs'));
 
-  protected readonly text = computed(() => {
+  /** The lead job went quiet ("Still working"). */
+  protected readonly stalled = computed(() => {
+    const lead = this.store.lead();
+    return lead !== null && this.store.stalledIds().has(lead.id);
+  });
+  protected readonly text = computed(() => jobsStatusText(this.store.activeCount(), this.store.lead()?.title ?? null));
+  protected readonly detail = computed(() => {
     const lead = this.store.lead();
     const phase = lead?.state === 'running' ? (lead.phase?.label ?? 'Starting') : null;
-    return jobsStatusText(this.store.activeCount(), phase, lead !== null && this.store.stalledIds().has(lead.id));
+    return jobsStatusDetail(lead?.title ?? null, phase, this.stalled());
   });
 
   protected toggle(): void {

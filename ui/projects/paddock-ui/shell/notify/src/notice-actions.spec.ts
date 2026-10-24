@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { NoticeActions, repairLabel } from './notice-actions';
+import { NoticeActions, repairButtonLabel, repairLabel } from './notice-actions';
 import { OPEN_SETTINGS } from './notify-config';
 import { notifyBed } from './spec-helpers';
 import type { Notice } from './wire.types';
@@ -17,6 +17,13 @@ describe('NoticeActions', () => {
       'Open Settings…',
       'Use the fallback',
     ]);
+  });
+
+  it('names the chip’s Repair button for its action and service (rule 19)', () => {
+    expect(repairButtonLabel('restart', 'the demo engine')).toBe('Restart demo engine');
+    expect(repairButtonLabel('reset', 'the search index')).toBe('Reset search index');
+    expect(repairButtonLabel('install', 'model runtime')).toBe('Install model runtime');
+    expect(repairButtonLabel('retry', 'the store')).toBe('Try again');
   });
 
   it('opens Settings when the app can, and has no button otherwise', async () => {
