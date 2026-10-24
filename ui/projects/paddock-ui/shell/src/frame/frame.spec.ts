@@ -5,7 +5,8 @@ import { defineStatusItem, type StatusItemDef } from '../define';
 import { provideContributions } from '../provide';
 import { provideShellContext } from '../context';
 import type { LazyPart } from '../lazy';
-import { iconLetter, PdIcon, PdShellIcon, provideShellIcon, SHELL_ICON_PATHS } from './icon';
+import { iconLetter, PdIcon, PdShellIcon, provideShellIcon } from './icon';
+import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
 import { PdPartOutlet } from './part-outlet';
 import { cycleRegions, regionIndex, regionKey, regionsOf, regionTarget, REGION_ATTR, shown } from './regions';
 import { PdStatusBar, STATUS_COMPACT } from './status-bar';
@@ -47,7 +48,7 @@ describe('icons', () => {
     const fixture = TestBed.createComponent(PdShellIcon);
     fixture.componentRef.setInput('name', 'pd:home');
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('path').getAttribute('d')).toBe(SHELL_ICON_PATHS['pd:home']);
+    expect(fixture.nativeElement.querySelector('path').getAttribute('d')).toBe(PD_ICON_PATHS.home);
     fixture.componentRef.setInput('name', 'pw:models');
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('svg')).toBeNull();
