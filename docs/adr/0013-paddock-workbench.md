@@ -1,6 +1,6 @@
 # 13. Paddock workbench: the docked IDE layer on the app shell
 
-- Status: Proposed (2026-10-24)
+- Status: Accepted (2026-10-24; user: the full shell is built first and Pitwall then adopts it; decisions D1–D6 as recommended)
 - Date: 2026-10-24
 - Related: ADR 0012 (the app shell, which this builds on), ADRs 0002 (declarative views), 0004 (`paddock-pitwall`), 0009,
   0010, 0011 (layout by declared constraints); rules 17, 18, 20, 34, 35, 39, 40; Debrief ADRs 0050, 0056, 0057, 0059;

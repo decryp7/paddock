@@ -1,6 +1,6 @@
 # 12. Paddock app shell: one shell for every app
 
-- Status: Proposed (2026-10-24)
+- Status: Accepted (2026-10-24; user: the full shell is built first and Pitwall then adopts it; decisions D1–D6 as recommended)
 - Date: 2026-10-24
 - Related: rules 10-12, 17-19, 21, 27-40; ADRs 0006 (versioning, consumption), 0008 (`paddock-jobs`), 0009 (dialogs),
   0010 (notifications and service health), 0011 (layout); ADR 0013 (the workbench, built on this shell); Debrief ADRs
