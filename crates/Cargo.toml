@@ -7,6 +7,7 @@ resolver = "3"
 exclude = ["paddock-ipc/fuzz"]
 members = [
     "paddock-bench",
+    "paddock-cli",
     "paddock-channels",
     "paddock-commands",
     "paddock-dialogs",
@@ -27,6 +28,7 @@ members = [
     "paddock-settings",
     "paddock-shell",
     "paddock-startup",
+    "paddock-testkit",
     "paddock-updater",
     "paddock-window",
 ]
@@ -43,6 +45,7 @@ tauri = { version = "2.12", default-features = false }
 # The workspace's own crates, for one crate depending on another: `paddock-jobs = { workspace = true }`. The version is
 # the one published to the `decryp7` registry (keep it equal to the crate's `version`); the path is used in the workspace.
 paddock-bench = { path = "paddock-bench", version = "0.1.0", registry = "decryp7" }
+paddock-cli = { path = "paddock-cli", version = "0.1.0", registry = "decryp7" }
 paddock-channels = { path = "paddock-channels", version = "0.1.0", registry = "decryp7" }
 paddock-commands = { path = "paddock-commands", version = "0.1.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "decryp7" }
@@ -63,5 +66,6 @@ paddock-service = { path = "paddock-service", version = "0.1.0", registry = "dec
 paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "decryp7" }
 paddock-shell = { path = "paddock-shell", version = "0.2.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "decryp7" }
+paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.1.0", registry = "decryp7" }

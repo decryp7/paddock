@@ -173,7 +173,7 @@ impl Outcome {
             })
             .collect();
         let s = self.summary();
-        json!({"ok": !self.failed(), "app": self.app, "passed": s.passed, "failed": s.failed, "unbudgeted": s.unbudgeted, "rows": rows})
+        json!({"withinBudget": !self.failed(), "app": self.app, "passed": s.passed, "failed": s.failed, "unbudgeted": s.unbudgeted, "rows": rows})
     }
 }
 
@@ -493,6 +493,23 @@ mod tests {
     }
 
     #[test]
+    fn every_verdict_has_its_own_word() {
+        let all = [
+            Verdict::Pass,
+            Verdict::Tolerated,
+            Verdict::OverBudget,
+            Verdict::Regressed,
+            Verdict::Missing,
+            Verdict::WrongKind,
+            Verdict::Unbudgeted,
+        ];
+        let mut words: Vec<&str> = all.iter().map(|v| v.word()).collect();
+        words.sort();
+        words.dedup();
+        assert_eq!(words.len(), all.len());
+    }
+
+    #[test]
     fn unbudgeted_measurements_alone_do_not_fail() {
         let o = check(&Budgets::default(), &run(&[("a", Kind::Memory, 2.0)]), None);
         assert!(!o.failed());
@@ -529,7 +546,7 @@ mod tests {
             "{md}"
         );
         let j = o.to_json();
-        assert_eq!(j["ok"], false);
+        assert_eq!(j["withinBudget"], false);
         assert_eq!(j["failed"], 1);
         assert_eq!(j["rows"][0]["verdict"], "over-budget");
         assert_eq!(j["rows"][2]["limit"], Value::Null);

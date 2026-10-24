@@ -269,6 +269,9 @@ jobs:
       - name: paddock-bench
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-bench --all-targets --all-features -- -D warnings && cargo test -p paddock-bench --all-features
+      - name: paddock-cli
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-cli --all-targets --all-features -- -D warnings && cargo test -p paddock-cli --all-features
       # The IPC with real child processes (its own test child) and the companion link; the fuzz target is built on Linux.
       - name: paddock-ipc
         if: ${{ !cancelled() }}
@@ -277,6 +280,18 @@ jobs:
       - name: paddock-env
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo test -p paddock-env --all-features
+
+      - name: paddock-testkit
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-testkit --all-targets --all-features -- -D warnings && cargo test -p paddock-testkit --all-features
+
+      - name: paddock-channels
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-channels --all-targets --all-features -- -D warnings && cargo test -p paddock-channels --all-features
+
+      - name: paddock-names
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-names --all-targets --all-features -- -D warnings && cargo test -p paddock-names --all-features
 
       - name: paddock-packs
         if: ${{ !cancelled() }}
