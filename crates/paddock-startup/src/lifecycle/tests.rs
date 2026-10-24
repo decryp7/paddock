@@ -501,6 +501,8 @@ fn pruning_removes_only_dead_pid_folders() {
         std::fs::create_dir_all(inst.join(name)).unwrap();
     }
     std::fs::write(inst.join("a-file"), "x").unwrap();
+    // A file with a pid for a name is not an instance folder: left alone.
+    std::fs::write(inst.join("104"), "x").unwrap();
     // 101 runs (no marker: decided by pid), 102 is dead, 103 has a marker whose pid was reused, 300 is this process's.
     let m = marker_file(&inst.join("103"));
     m.save(&MarkerBody {
@@ -515,6 +517,7 @@ fn pruning_removes_only_dead_pid_folders() {
     assert!(
         inst.join("101").exists() && inst.join("notapid").exists() && inst.join("a-file").exists()
     );
+    assert!(inst.join("104").is_file());
     assert!(!inst.join("102").exists() && !inst.join("103").exists() && !inst.join("300").exists());
     assert_eq!(
         prune_instances(&t.path().join("nowhere"), 1, &procs.probe()),
@@ -526,4 +529,26 @@ fn pruning_removes_only_dead_pid_folders() {
 fn the_scope_follows_the_single_instance_lock() {
     assert_eq!(InstanceScope::of(true), InstanceScope::Main);
     assert_eq!(InstanceScope::of(false), InstanceScope::Separate);
+}
+
+#[cfg(feature = "os-probe")]
+#[test]
+fn the_os_probe_knows_this_process_and_not_a_pid_nobody_has() {
+    let started = os_probe(std::process::id()).expect("this process is in the process table");
+    assert!(started > 0);
+    // Linux caps pids at 2^22 and macOS at 99999: this one is never in use.
+    assert_eq!(os_probe(u32::MAX - 1), None);
+}
+
+#[cfg(feature = "os-probe")]
+#[test]
+fn begin_uses_the_real_pid_and_process_table_and_ends_clean() {
+    let t = tempfile::tempdir().unwrap();
+    let run = Lifecycle::begin(start(t.path()));
+    assert!(run.restore("main").windows.is_empty());
+    run.checkpoint("main", json!({"n": 1})).unwrap();
+    run.flush();
+    run.forget_window("main");
+    run.flush();
+    assert!(run.report(true).unclean.is_none());
 }
