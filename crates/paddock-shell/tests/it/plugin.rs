@@ -786,18 +786,17 @@ fn user_files_bring_their_commands_recent_lists_and_drop_grants() {
     )
     .unwrap();
     assert_eq!(started.lock().unwrap().len(), 1);
-    // Without a picker (and without native dialogs) choosing says so; with the native dialogs there is one, and on the mock
-    // runtime nothing is chosen. A tray popover may not choose at all.
+    // Choosing: with `native-dialogs` the shell installs the native picker, which (on the mock runtime, with no dialog plugin
+    // registered) chooses nothing; without it the service has no picker and says so. A tray popover may not choose at all.
     let picked = invoke(
         &main,
         "files_pick",
         json!({ "request": { "kind": "openFile" } }),
     );
     if cfg!(feature = "native-dialogs") {
-        assert_eq!(picked.unwrap(), json!([]));
+        assert_eq!(picked, Ok(json!([])));
     } else {
-        let e = picked.unwrap_err();
-        assert_eq!(e["code"], "unavailable", "{e}");
+        assert_eq!(picked.unwrap_err()["code"], "unavailable");
     }
     assert!(
         text(
@@ -852,4 +851,54 @@ fn user_files_bring_their_commands_recent_lists_and_drop_grants() {
         e.contains("user files") && e.contains("no config folder"),
         "{e}"
     );
+}
+
+#[test]
+fn storage_brings_its_commands_to_main_windows_and_dialogs_and_a_failing_setup_names_it() {
+    use paddock_storage::{Category, Kind, Storage};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    std::fs::create_dir_all(root.join("cache")).unwrap();
+    std::fs::write(root.join("cache/a.bin"), [0u8; 10]).unwrap();
+    let r2 = root.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .storage(move |_| {
+            let categories = vec![
+                Category::new("cache", "Cache", Kind::Cache)
+                    .folder(r2.join("cache"))
+                    .entries(|_| None),
+            ];
+            Ok(Storage::new(std::sync::Arc::new(categories)).also_within(&r2))
+        }));
+    let main = window(&app, "main");
+    let tray = window(&app, "tray");
+    assert_eq!(
+        invoke(&main, "storage_last", json!({})).unwrap(),
+        Value::Null
+    );
+    let refused = invoke(
+        &main,
+        "storage_clear",
+        json!({ "request": { "categories": [{ "id": "cache" }] } }),
+    )
+    .unwrap_err();
+    assert_eq!(
+        refused["kind"], "noPreview",
+        "a clear needs a scan first: {refused}"
+    );
+    assert!(text(&invoke(&tray, "storage_scan", json!({})).unwrap_err()).contains("not allowed"));
+    assert!(root.join("cache/a.bin").exists());
+    let built = mock_builder()
+        .plugin(
+            Builder::new(identity())
+                .in_memory()
+                .native_menu(false)
+                .storage(|_| Err("no folders".into()))
+                .build(),
+        )
+        .build(context());
+    let e = built.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("storage") && e.contains("no folders"), "{e}");
 }

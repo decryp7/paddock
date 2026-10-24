@@ -14,7 +14,7 @@
 :root {
   --pd-font-sans: -apple-system, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI', 'Cantarell', 'Noto Sans', system-ui,
     sans-serif;
-  --pd-font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, 'JetBrains Mono', monospace;
+  --pd-font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'JetBrains Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
 
   // Type scale: size / line-height. Weights used: 400, 500, 600.
   --pd-text-caption: 11px;

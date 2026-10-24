@@ -21,6 +21,11 @@ export interface PdColumn<T> {
   readonly required?: boolean;
   /** Shorten in the middle, with the full value as the tooltip (rule 9). For paths, ids and hashes. */
   readonly truncate?: 'middle';
+  /**
+   * The header is for assistive technology only (a narrow glyph column such as severity): screen readers and the sort
+   * button's name keep it, the header row shows nothing, so the column can be as narrow as its glyph.
+   */
+  readonly headerHidden?: boolean;
 }
 
 /** The sort of a table: one column, one direction. */

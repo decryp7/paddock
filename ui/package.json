@@ -12,7 +12,7 @@
     "test:tokens": "vitest run --config vitest.tokens.config.ts",
     "gallery": "npm run build:css && ng serve gallery --port 4300",
     "gallery:build": "npm run build:css && ng build gallery",
-    "screenshots": "SCREENSHOTS=1 playwright test",
+    "screenshots": "SCREENSHOTS=1 playwright test --project=screenshots",
     "build:e2e": "node scripts/build-e2e.mjs",
     "shell-demo": "npm run build:css && ng serve shell-demo --port 4301",
     "shell-demo:build": "npm run build:css && ng build shell-demo",

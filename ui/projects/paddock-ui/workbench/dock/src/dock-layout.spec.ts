@@ -70,6 +70,14 @@ describe('view layouts', () => {
 });
 
 describe('DockLayout.fit', () => {
+  it('holds a group to the window when the window is smaller than its views\' minimum (320 px; review P1-2)', () => {
+    const layout = setup();
+    const { api, groups } = fakeDock(272, 200, { events: { width: 272, height: 200 } });
+    layout.constrain(api);
+    expect(groups[0]!.api.setConstraints).toHaveBeenCalledWith({ minimumWidth: 272, minimumHeight: 200 });
+    expect(groups[0]!.element.dataset['minWidth']).toBe('560');
+  });
+
   it('constrains every group from the views it holds (events 560, assistant 320), also without a measured size', () => {
     const layout = setup();
     const { api, groups } = fakeDock(0, 0, { events: { width: 0, height: 0 }, 'ai-chat': { width: 0, height: 0 } });

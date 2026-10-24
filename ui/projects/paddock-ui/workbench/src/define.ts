@@ -191,6 +191,11 @@ export interface ExplorerProviderDef<T extends object = object, N extends Explor
    * the section reloads from its roots. Read through signals, so it is tracked.
    */
   readonly changes?: Live<T, unknown>;
+  /**
+   * The node to reveal now, as ids from the top level down (the active document's path): the tree expands to it and
+   * selects it. Null reveals nothing (an app's setting can turn following off by answering null).
+   */
+  readonly reveal?: Live<T, readonly string[] | null>;
   /** A text for the empty tree ("Open a folder to start"); a command button may follow. */
   readonly empty?: { readonly text: Message; readonly command?: string };
 }

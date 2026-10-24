@@ -1,3 +1,4 @@
+import { demoAccent, demoPitwallState } from './app/params';
 import { inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { defineCommand, msg, provideAppearance, provideShellContext } from '@decryp7/paddock-ui/shell';
@@ -31,7 +32,7 @@ export function bootMainWindow(): Promise<unknown> {
   const pitwall = desktop ? pitwallIpc() : null;
   return bootstrapApplication(WorkbenchDemo, {
     providers: [
-      provideAppearance({ accent: 'graphite' }),
+      provideAppearance({ accent: demoAccent() }),
       provideWorkbenchContributions<WorkbenchDemoContext>(DEMO_CONTRIBUTIONS),
       provideLiveContributions((injector) => ({
         commands: [
@@ -62,7 +63,7 @@ export function bootMainWindow(): Promise<unknown> {
         backend: () =>
           pitwall
             ? new TauriPitwallBackend(pitwall)
-            : new MemoryPitwallBackend({ state: { kind: 'notRunning' }, app: 'Workbench demo', builtInAvailable: false }),
+            : new MemoryPitwallBackend({ state: demoPitwallState(), app: 'Workbench demo', builtInAvailable: false }),
       }),
     ],
   }).catch((e: unknown) => {
