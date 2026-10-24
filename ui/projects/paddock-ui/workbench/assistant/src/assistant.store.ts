@@ -28,6 +28,8 @@ export interface PendingApproval {
   readonly callId: string;
   readonly name: string;
   readonly summary: string;
+  /** The arguments of the call. */
+  readonly input: unknown;
 }
 
 interface AssistantState {
@@ -46,6 +48,8 @@ interface AssistantState {
   /** The last command that failed, in the engine's words. */
   failure: string | null;
   listOpen: boolean;
+  /** Conversations deleted but still restorable (until the undo time passes). */
+  deleting: readonly { id: string; title: string }[];
 }
 
 const initialState: AssistantState = {
@@ -60,7 +64,11 @@ const initialState: AssistantState = {
   run: 'idle',
   failure: null,
   listOpen: false,
+  deleting: [],
 };
+
+/** How long a deleted conversation can still be brought back. */
+export const UNDO_MS = 8000;
 
 const cut = (text: string, max: number): string => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
 
@@ -101,8 +109,21 @@ export const AssistantStore = signalStore(
       return out.slice(0, ASSISTANT_LIMITS.contextItems);
     });
     const turn = computed(() => store.turns().at(-1) ?? null);
+    const visible = computed(() => {
+      const gone = store.deleting().map((d) => d.id);
+      return store.conversations().filter((c) => !gone.includes(c.id));
+    });
     return {
       chips,
+      /** The conversations the list shows (those waiting out their undo time are hidden). */
+      visibleConversations: visible,
+      /** The conversation deleted last, still restorable. */
+      undoable: computed(() => store.deleting().at(-1) ?? null),
+      /** The pane's heading: the conversation's title, "New conversation" when there is none yet. */
+      title: computed(() => {
+        const id = store.activeId();
+        return (id && store.conversations().find((c) => c.id === id)?.title) || $localize`:@@pd.wb.assistant.new:New conversation`;
+      }),
       /** The turn that streams in, or the last one. */
       lastTurn: turn,
       /** Something is going on: a question is sent and not finished. */
@@ -111,7 +132,7 @@ export const AssistantStore = signalStore(
       approval: computed<PendingApproval | null>(() => {
         const t = turn();
         if (!t?.running) return null;
-        for (const p of t.parts) if (p.kind === 'tool' && p.card.state === 'awaiting') return { callId: p.card.callId, name: p.card.name, summary: p.card.summary };
+        for (const p of t.parts) if (p.kind === 'tool' && p.card.state === 'awaiting') return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input };
         return null;
       }),
       canSend: computed(() => store.run() === 'idle' && store.draft().trim().length > 0),
@@ -123,6 +144,7 @@ export const AssistantStore = signalStore(
   withMethods((store) => {
     let unlisten: Unlisten | null = null;
     let disposed = false;
+    const timers = new Map<string, ReturnType<typeof setTimeout>>();
     const refreshList = async (): Promise<void> => {
       try {
         patchState(store, { conversations: await store._backend.conversations() });
@@ -148,6 +170,15 @@ export const AssistantStore = signalStore(
         void refreshList();
       }
     };
+    const remove = async (id: string): Promise<void> => {
+      try {
+        await store._backend.delete(id);
+      } catch (e) {
+        patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.delete:The conversation could not be deleted.`) });
+      }
+      if (store.activeId() === id) patchState(store, { activeId: null, turns: [], run: 'idle' });
+      await refreshList();
+    };
     return {
       /** Asks for the info and the conversations (also the Retry of a failed first load). */
       async load(): Promise<void> {
@@ -168,6 +199,12 @@ export const AssistantStore = signalStore(
       },
       dispose(): void {
         disposed = true;
+        // A delete still waiting out its undo time is what the user chose: it goes through.
+        for (const [id, timer] of timers) {
+          clearTimeout(timer);
+          void store._backend.delete(id).catch(() => undefined);
+        }
+        timers.clear();
         unlisten?.();
         unlisten = null;
       },
@@ -202,14 +239,28 @@ export const AssistantStore = signalStore(
           patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.open:The conversation could not be opened.`) });
         }
       },
-      async remove(id: string): Promise<void> {
-        try {
-          await store._backend.delete(id);
-        } catch (e) {
-          patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.delete:The conversation could not be deleted.`) });
-        }
-        if (store.activeId() === id) patchState(store, { activeId: null, turns: [], run: 'idle' });
-        await refreshList();
+      remove,
+      /** Deletes a conversation after the undo time: it leaves the list now and stays in the store until then. */
+      removeLater(id: string): void {
+        const c = store.conversations().find((x) => x.id === id);
+        if (!c || timers.has(id)) return;
+        patchState(store, { deleting: [...store.deleting(), { id, title: c.title }] });
+        timers.set(
+          id,
+          setTimeout(() => {
+            timers.delete(id);
+            patchState(store, { deleting: store.deleting().filter((d) => d.id !== id) });
+            void remove(id);
+          }, UNDO_MS),
+        );
+      },
+      /** Brings a conversation back that is still waiting out its undo time. */
+      undoRemove(id: string): void {
+        const timer = timers.get(id);
+        if (timer === undefined) return;
+        clearTimeout(timer);
+        timers.delete(id);
+        patchState(store, { deleting: store.deleting().filter((d) => d.id !== id) });
       },
       /** Sends the draft with the chips that are on. */
       async send(): Promise<void> {

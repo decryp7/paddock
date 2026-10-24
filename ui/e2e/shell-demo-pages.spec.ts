@@ -1,6 +1,5 @@
 import {
   axeViolations,
-  captureStable,
   expect,
   expectNoHorizontalScroll,
   expectWithinWidth,
@@ -8,9 +7,7 @@ import {
   LAYOUT_WIDTHS,
   test,
   THEMES,
-  WINDOW_SIZES,
   type Page,
-  type ShellApp,
 } from '@decryp7/paddock-e2e';
 
 // The pages frame (plan S14) in the shell demo: navigation, lazy pages with their own providers, conditions and badges,
@@ -27,7 +24,7 @@ test.describe('pages frame (plan S14)', () => {
     await expect(app.frame.heading).toHaveText('Overview');
     await expect(page).toHaveTitle('Overview – Paddock Shell Demo');
     await expect(app.sidebar.link('Overview')).toHaveAttribute('aria-current', 'page');
-    await expect(app.sidebar.links).toHaveText([/^Overview$/, /^Runners/, /^Local AI$/, /^Dialogs$/, /^Schedules$/, /^Keyboard$/, /^About$/]);
+    await expect(app.sidebar.links).toHaveText([/^Overview$/, /^Runners/, /^Local AI$/, /^Dialogs$/, /^Schedules$/, /^Files$/, /^Keyboard$/, /^Activity$/, /^About$/]);
 
     await app.sidebar.link('Keyboard').click();
     await expect(app.frame.heading).toHaveText('Keyboard');
@@ -329,80 +326,6 @@ test.describe('pages frame (plan S14)', () => {
       await app.frame.toggle.click();
       await expect(app.frame.scrim).toBeVisible();
       expect(await axeViolations(page)).toEqual([]);
-    });
-  }
-});
-
-// Screenshots for review (UI rule 20): 1440x900 @2x and narrow widths, both themes. `SCREENSHOTS=1 npx playwright test`.
-// Each is taken once the frame has settled (fonts, no animation, the status bar's layout unchanged between two looks).
-test.describe('pages frame screenshots', () => {
-  test.skip(!process.env['SCREENSHOTS'], 'set SCREENSHOTS=1 to rewrite docs/screenshots/shell-demo');
-  test.use({ deviceScaleFactor: 2 });
-  const shot = (name: string) => `${__dirname}/../docs/screenshots/shell-demo/${name}.png`;
-  const STATUS = 'pd-status-bar [data-status-item]';
-
-  /** The Runners page with a running job and the search index down; the toasts have timed out. Developer pages off. */
-  async function scene(app: ShellApp, colorScheme: 'dark' | 'light', size: { readonly width: number; readonly height: number }): Promise<void> {
-    const { page } = app;
-    await page.addInitScript(() => localStorage.setItem('sd.developer', 'off'));
-    await page.clock.install();
-    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
-    await page.setViewportSize(size);
-    await app.frame.open();
-    await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
-    await page.getByRole('button', { name: 'Start quiet job' }).click();
-    await page.getByRole('button', { name: 'Break the search index' }).click();
-    await page.getByRole('button', { name: 'Notify three times' }).click();
-    await page.evaluate(() => (location.hash = '#/runners'));
-    await expect(page.locator('sd-runners-page')).toBeVisible();
-    await expect(app.sidebar.link('Dialogs')).toHaveCount(0);
-    await page.clock.runFor(14_000);
-    await page.mouse.move(size.width / 2, size.height - 60);
-    await expect(app.statusBar.item('pd.jobs')).not.toHaveClass(/hidden/);
-  }
-
-  for (const colorScheme of THEMES) {
-    for (const name of ['wide', 'rail', 'narrow'] as const) {
-      test(`${name} ${colorScheme}`, async ({ app, page }) => {
-        await scene(app, colorScheme, WINDOW_SIZES[name]);
-        await captureStable(page, shot(`pages-${name}-${colorScheme}`), { selector: STATUS });
-        if (name !== 'wide') {
-          await app.frame.toggle.click();
-          await expect(app.frame.scrim).toBeVisible();
-          await captureStable(page, shot(`pages-${name}-open-${colorScheme}`), { selector: STATUS });
-        }
-      });
-    }
-
-    test(`health popover ${colorScheme}`, async ({ app, page }) => {
-      await scene(app, colorScheme, WINDOW_SIZES.wide);
-      await app.statusBar.chip.click();
-      await expect(app.notifications.services).toBeVisible();
-      await captureStable(page, shot(`pages-health-${colorScheme}`), { selector: STATUS });
-    });
-
-    test(`keyboard focus ${colorScheme}`, async ({ app, page }) => {
-      await scene(app, colorScheme, WINDOW_SIZES.wide);
-      // A focused page link that is also the selected one (F6 to the sidebar), then one that is not.
-      await app.frame.focusBy('F6', '[data-page-link]');
-      await expect(app.sidebar.link(/^Runners/)).toBeFocused();
-      await captureStable(page, shot(`pages-focus-nav-selected-${colorScheme}`), { selector: STATUS });
-      await page.keyboard.press('ArrowUp');
-      await expect(app.sidebar.link('Overview')).toBeFocused();
-      await captureStable(page, shot(`pages-focus-nav-${colorScheme}`), { selector: STATUS });
-      // Narrow: the title bar's toggle, then "…" in the status bar (the ring inside the bar).
-      await page.setViewportSize(WINDOW_SIZES.narrow);
-      await expect.poll(() => app.frame.sidebarMode()).toBe('overlay');
-      await app.frame.focusBy('F6', '[data-testid="sidebar-toggle"]');
-      await captureStable(page, shot(`pages-focus-toggle-${colorScheme}`), { selector: STATUS });
-      await app.frame.focusBy('Shift+Tab', '[data-testid="status-more"]');
-      await captureStable(page, shot(`pages-focus-more-${colorScheme}`), { selector: STATUS });
-    });
-
-    test(`macOS app ${colorScheme}`, async ({ app, page }) => {
-      await asMacApp(page);
-      await scene(app, colorScheme, WINDOW_SIZES.wide);
-      await captureStable(page, shot(`pages-macos-${colorScheme}`), { selector: STATUS });
     });
   }
 });

@@ -35,6 +35,11 @@ wait_for_version() {
     sleep 2
   done
 }
+# The app's own view must agree with systemd: "running" (the agent answers), not just an active unit.
+expect_running() {
+  local st; st=$("$agent" status)
+  echo "$st" | grep -q '"condition": "running"' || { echo "::error::the app does not see the agent running"; echo "$st"; return 1; }
+}
 cleanup() {
   [ -x "$agent" ] && "$agent" uninstall || true
   systemctl --user stop "$unit" 2>/dev/null || true
@@ -51,10 +56,12 @@ mkdir -p "$(dirname "$dest")"
 rm -rf "$dest" && cp -R "$old" "$dest"
 "$agent" install
 wait_for_version "$v_old"
+expect_running
 echo "build N ($v_old) runs"
 
 rm -rf "$dest" && cp -R "$new" "$dest"
 "$agent" check
 wait_for_version "$v_new"
 systemctl --user is-active "$unit" | grep -qx active || { echo "::error::the unit is not active"; systemctl --user status "$unit" --no-pager || true; exit 1; }
+expect_running
 echo "build N+1 ($v_new) runs after the update; the unit is active"

@@ -14,7 +14,7 @@ test('planShots: screens x themes in table order, by theme or flat', () => {
 
 test('planShots refuses a duplicate or unsafe name', () => {
   assert.throws(() => planShots([screens[0]!, screens[0]!]), /listed twice/);
-  for (const name of ['', 'Home', '../x', 'a/b', 'a b', '-a']) assert.throws(() => planShots([{ name, url: '/' }]), /lower-case words/, name);
+  for (const name of ['', 'Home', '../x', 'a b', '-a', 'a//b', 'a/', '/a', 'a/../b']) assert.throws(() => planShots([{ name, url: '/' }]), /lower-case words/, name);
 });
 
 test('sha256 is the hex digest of the bytes', () => {
@@ -40,4 +40,10 @@ test('recordHashes merges, sorts, survives a damaged manifest and leaves no temp
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('planShots puts a folder in the file path, by theme or flat', () => {
+  const sub = [{ name: 'debrief/card', url: '/' }];
+  assert.deepEqual(planShots(sub).map((s) => s.file), ['dark/debrief/card.png', 'light/debrief/card.png']);
+  assert.deepEqual(planShots(sub, 'flat').map((s) => s.file), ['debrief/card-dark.png', 'debrief/card-light.png']);
 });

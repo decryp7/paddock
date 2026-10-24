@@ -21,6 +21,11 @@ export interface PdColumn<T> {
   readonly required?: boolean;
   /** Shorten in the middle, with the full value as the tooltip (rule 9). For paths, ids and hashes. */
   readonly truncate?: 'middle';
+  /**
+   * The header is for assistive technology only (a narrow glyph column such as severity): screen readers and the sort
+   * button's name keep it, the header row shows nothing, so the column can be as narrow as its glyph.
+   */
+  readonly headerHidden?: boolean;
 }
 
 /** The sort of a table: one column, one direction. */
@@ -172,4 +177,63 @@ export function inlineActions(actions: readonly PdRowAction[]): readonly PdRowAc
 /** The menu list: every action, destructive ones last. */
 export function menuActions(actions: readonly PdRowAction[]): readonly PdRowAction[] {
   return [...actions.filter((a) => !a.danger), ...actions.filter((a) => a.danger)];
+}
+
+/** The least width the primary (required) column keeps (rule 18: at 320 px the name is still readable). */
+export const PD_PRIMARY_MIN_PX = 128;
+
+/** Pixels a column needs at least: its fixed width, or a small floor for flexible ones. */
+function minPx<T>(c: PdColumn<T>): number {
+  const px = /^(\d+(?:\.\d+)?)px$/.exec(c.width ?? '');
+  return px ? Number(px[1]) : 64;
+}
+
+/** The grid track of a column: required ones never shrink under {@link PD_PRIMARY_MIN_PX}. */
+export function columnTrack<T>(c: PdColumn<T>): string {
+  const floor = `${PD_PRIMARY_MIN_PX}px`;
+  if (!c.required) return c.width ?? 'minmax(0, 1fr)';
+  if (!c.width) return `minmax(${floor}, 2fr)`;
+  return c.width.replace(/^minmax\(\s*0(px)?\s*,/, `minmax(${floor},`);
+}
+
+/**
+ * The columns that fit `width`: first those the user or the defaults show, then, while the required columns would be squeezed under
+ * their floor, optional columns drop out from the right (the table's own columns, not the window's). `gap` is the column gap and
+ * `padding` the row padding on both sides; `actions` the action column's width.
+ */
+export function fitColumns<T>(shown: readonly PdColumn<T>[], width: number, actions: number, gap = 12, padding = 24): readonly PdColumn<T>[] {
+  const out = [...shown];
+  const need = (): number => {
+    const cols = out.length + (actions ? 1 : 0);
+    const fixed = out.reduce((a, c) => a + (c.required ? PD_PRIMARY_MIN_PX : minPx(c)), 0);
+    return fixed + actions + gap * Math.max(0, cols - 1) + padding;
+  };
+  while (need() > width) {
+    let drop = -1;
+    for (let i = out.length - 1; i >= 0; i -= 1) {
+      if (!out[i]?.required) {
+        drop = i;
+        break;
+      }
+    }
+    if (drop < 0) break;
+    out.splice(drop, 1);
+  }
+  return out;
+}
+
+/** The width of the action column: nothing without actions, the "..." button alone when narrow, else room for the hover buttons. */
+export function actionColumnWidth(hasActions: boolean, inlineCount: number, narrow: boolean): number {
+  if (!hasActions) return 0;
+  return narrow ? 28 : 28 + 28 * Math.min(2, inlineCount);
+}
+
+/** The row heights the family has (UI guide §3: Compact 24, Standard 32, Comfortable 36). */
+export const PD_ROW_HEIGHTS = [24, 32, 36] as const;
+/** The sticky header's height, whatever the rows' (UI guide §8). */
+export const PD_HEADER_HEIGHT = 28;
+
+/** The row height for a density: the token's value when it is one of the family's, else Standard. */
+export function rowHeightFor(token: number): number {
+  return (PD_ROW_HEIGHTS as readonly number[]).includes(token) ? token : 32;
 }

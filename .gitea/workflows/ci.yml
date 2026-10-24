@@ -118,14 +118,13 @@ jobs:
       #   C07 release preflight and C08 release artifacts: Paddock releases through publish.yml, not an app release job;
       #   C23 commit lint and doc blocks: Paddock's AGENTS.md is the source of the blocks, and its history predates the
       #     100-character subject rule.
-      # C14 (hermetic wrapper), C29, C30 (wall clock) and C36 (parser hardening) report warnings; C15 has a dated waiver (paddock.waivers.toml).
+      # C24 needs every docs/images file reviewed (docs/images/REVIEWED.md). C37 needs one test binary per crate and every
+      # crate tested here and on the workspace hack (paddock.conformance.json). C14 (hermetic wrapper), C29 and C30 (wall clock)
+      # report warnings; C36 (parser hardening) is strict here (a new parser needs its never-panics test); C15 has a dated
+      # waiver (paddock.waivers.toml).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C29,C30,C31,C34,C35,C36
-      # C24 needs every docs/images file reviewed (docs/images/REVIEWED.md). C14 (hermetic wrapper), C29 and C30 (wall clock) report warnings; C15 has a dated waiver (paddock.waivers.toml).
-      - name: Paddock itself (applicable checks)
-        working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37 --strict C36
 
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
@@ -168,6 +167,10 @@ jobs:
     defaults:
       run:
         working-directory: crates
+    env:
+      # The job runs as root in the container, where Chromium refuses to start with its sandbox (the real-browser test of
+      # paddock-chromium); the driver drops the sandbox only for root AND with this opt-in.
+      PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: ./.gitea/actions/setup-rust
@@ -195,7 +198,7 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -220,6 +223,8 @@ jobs:
         shell: bash
     env:
       CARGO_TERM_COLOR: always
+      # Root in the Linux container: Chromium needs the opt-in to start without its sandbox (ignored when not root).
+      PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -318,21 +323,19 @@ jobs:
         run: cargo clippy -p paddock-runtime --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-runtime --all-features --profile ci && cargo test -p paddock-runtime --all-features --doc
 
       # The driver against its fake browser (Unix), and against the image's Chrome for Testing on Linux (CHROMIUM_TEST_PATH, the
-      # build chromium.toml pins; never an installed browser, rule 7). The job runs as root in the container: the sandbox is
-      # dropped by the explicit opt-in, and a missing browser fails instead of skipping.
+      # build chromium.toml pins; never an installed browser, rule 7). There a missing browser fails instead of skipping.
       - name: paddock-chromium
         if: ${{ !cancelled() }}
         env:
-          PADDOCK_BROWSER_NO_SANDBOX: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
           PADDOCK_REQUIRE_TEST_BROWSER: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
         run: cargo clippy -p paddock-chromium --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-chromium --all-features --profile ci && cargo test -p paddock-chromium --all-features --doc
 
       - name: paddock-mcp
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-mcp --all-targets --all-features -- -D warnings && cargo test -p paddock-mcp --all-features
+        run: cargo clippy -p paddock-mcp --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-mcp --all-features --profile ci && cargo test -p paddock-mcp --all-features --doc
       - name: paddock-archive
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-archive --all-targets --all-features -- -D warnings && cargo test -p paddock-archive --all-features
+        run: cargo clippy -p paddock-archive --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-archive --all-features --profile ci && cargo test -p paddock-archive --all-features --doc
       - name: paddock-bench
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-bench --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-bench --all-features --profile ci && cargo test -p paddock-bench --all-features --doc
@@ -340,13 +343,28 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-cli --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-cli --all-features --profile ci && cargo test -p paddock-cli --all-features --doc
       # The IPC with real child processes (its own test child) and the companion link; the fuzz target is built on Linux.
+      - name: paddock-view
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-view --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-view --all-features --profile ci && cargo test -p paddock-view --all-features --doc
+
       - name: paddock-ipc
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-ipc --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-ipc --all-features --profile ci && cargo test -p paddock-ipc --all-features --doc
 
+      # Crash containment: panics, quarantine on a fake clock, guarded calls with time budgets.
+      - name: paddock-guard
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-guard --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-guard --all-features --profile ci && cargo test -p paddock-guard --all-features --doc
+
       - name: paddock-env
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-env --all-features --profile ci && cargo test -p paddock-env --all-features --doc
+      - name: paddock-files
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-files --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-files --all-features --profile ci && cargo test -p paddock-files --all-features --doc
+      - name: paddock-storage
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-storage --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-storage --all-features --profile ci && cargo test -p paddock-storage --all-features --doc
 
       - name: paddock-testkit
         if: ${{ !cancelled() }}
@@ -382,9 +400,9 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-net --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-net --all-features --profile ci && cargo test -p paddock-net --all-features --doc
 
-      - name: paddock-mcp
+      - name: paddock-siblings
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-mcp --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-mcp --all-features --profile ci && cargo test -p paddock-mcp --all-features --doc
+        run: cargo clippy -p paddock-siblings --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-siblings --all-features --profile ci && cargo nextest run -p paddock-siblings --profile ci && cargo test -p paddock-siblings --all-features --doc
 
       - name: paddock-build
         if: ${{ !cancelled() }}
@@ -409,6 +427,22 @@ jobs:
       - name: paddock-assistant
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-assistant --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-assistant --all-features --profile ci && cargo test -p paddock-assistant --all-features --doc
+
+      # The plugin package: manifest limits, archive layout and signature, trust, keys; properties run with the tests; the fuzz
+      # targets are in paddock-plugin-package/fuzz (cargo +nightly fuzz run manifest|package).
+      # The plugin platform's API, host and test kit; the host's tests start the test kit's fixture plugin as a real process.
+      - name: paddock-plugin-api
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-plugin-api --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-api --all-features --profile ci && cargo test -p paddock-plugin-api --all-features --doc
+      - name: paddock-plugin-host
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-plugin-host --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-host --all-features --profile ci && cargo test -p paddock-plugin-host --all-features --doc
+      - name: paddock-plugin-test
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-plugin-test --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-test --all-features --profile ci && cargo test -p paddock-plugin-test --all-features --doc
+      - name: paddock-plugin-package
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-plugin-package --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-plugin-package --all-features --profile ci && cargo test -p paddock-plugin-package --all-features --doc
 
       - name: paddock-pitwall
         if: ${{ !cancelled() }}
@@ -460,6 +494,43 @@ jobs:
 
       - name: App (fmt, clippy, tests on the mock runtime, deny)
         working-directory: apps/shell-demo/src-tauri
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo nextest run --workspace --config-file ../../../crates/.config/nextest.toml --profile ci
+          cargo test --workspace --doc
+          cargo deny check
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+  # Paddock Workbench Demo (apps/workbench-demo, plan X50 W8): the shell and workbench plugins in a real app, in its own workspace, with the UI it
+  # embeds. Inside this repo it is the first consumer: a change to a shell or workbench crate or to the UI that breaks an app fails
+  # here before a tag. Its installers are built by workbench-demo-release.yml (a `workbench-demo-v*` tag or a manual run).
+  workbench-demo-app:
+    name: workbench demo app (fmt, clippy, tests, deny)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
+          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
+
+      # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
+      - name: The UI the app embeds
+        working-directory: ui
+        run: |
+          npm ci
+          npm run workbench-demo:build
+
+      - name: App (fmt, clippy, tests on the mock runtime, deny)
+        working-directory: apps/workbench-demo/src-tauri
         run: |
           cargo fmt --all --check
           cargo clippy --workspace --all-targets -- -D warnings

@@ -315,3 +315,88 @@ describe('PdExplorer', () => {
     expect(element.textContent).toContain('Nothing to explore.');
   });
 });
+
+describe('PdExplorer changes', () => {
+  it('reloads a section when the value it depends on changes', async () => {
+    const { signal } = await import('@angular/core');
+    const selected = signal('a');
+    let asked = 0;
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: provideShellTesting<{ sel: () => string }>({
+        context: () => Promise.resolve(() => ({ sel: () => selected() })),
+        providers: [
+          ExplorerStore,
+          provideWorkbenchContributions<{ sel: () => string }>({
+            explorerProviders: [
+              defineExplorerProvider<{ sel: () => string }>({
+                id: 'wd.outline',
+                title: msg('wd.outline', 'Outline'),
+                order: 1,
+                changes: (ctx) => ctx.sel(),
+                roots: (ctx) => {
+                  asked++;
+                  return Promise.resolve({ nodes: [file(`sym-of-${ctx.sel()}`)] });
+                },
+              }),
+            ],
+          }),
+        ],
+      }),
+    });
+    await TestBed.inject(ShellContextHost).load();
+    const { fixture, element } = await render(PdExplorer);
+    await settle(fixture);
+    expect(element.querySelector('[data-node-id="sym-of-a"]')).not.toBeNull();
+    selected.set('b');
+    await settle(fixture);
+    await settle(fixture);
+    expect(element.querySelector('[data-node-id="sym-of-b"]')).not.toBeNull();
+    expect(asked).toBe(2);
+  });
+});
+
+describe('PdExplorer reveal', () => {
+  it('expands to the active item and selects it, again when it changes, and stops at a missing node', async () => {
+    const { signal } = await import('@angular/core');
+    const active = signal<readonly string[] | null>(['src', 'src/lib', 'src/lib/a.rs']);
+    const tree: Record<string, ExplorerNode[]> = {
+      '': [folder('src'), file('README.md')],
+      src: [folder('src/lib'), file('src/main.rs')],
+      'src/lib': [file('src/lib/a.rs')],
+    };
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: provideShellTesting<{ active: () => readonly string[] | null }>({
+        context: () => Promise.resolve(() => ({ active: () => active() })),
+        providers: [
+          ExplorerStore,
+          provideWorkbenchContributions<{ active: () => readonly string[] | null }>({
+            explorerProviders: [
+              defineExplorerProvider<{ active: () => readonly string[] | null }>({
+                id: 'wd.files',
+                title: msg('wd.files', 'Files'),
+                order: 1,
+                reveal: (ctx) => ctx.active(),
+                roots: () => Promise.resolve({ nodes: tree['']! }),
+                children: (node) => Promise.resolve({ nodes: tree[node.id] ?? [] }),
+              }),
+            ],
+          }),
+        ],
+      }),
+    });
+    await TestBed.inject(ShellContextHost).load();
+    const store = TestBed.inject(ExplorerStore);
+    const { fixture } = await render(PdExplorer);
+    for (let i = 0; i < 4; i++) await settle(fixture);
+    expect(store.selected()).toBe(treeKey('wd.files', 'src/lib/a.rs'));
+    expect(store.expanded()).toEqual([treeKey('wd.files', 'src'), treeKey('wd.files', 'src/lib')]);
+    active.set(['src', 'src/main.rs']);
+    for (let i = 0; i < 3; i++) await settle(fixture);
+    expect(store.selected()).toBe(treeKey('wd.files', 'src/main.rs'));
+    expect(await store.reveal('wd.files', ['nope'])).toBeNull();
+    expect(await store.reveal('wd.files', ['README.md', 'x'])).toBeNull();
+    expect(await store.reveal('wd.files', [])).toBeNull();
+  });
+});

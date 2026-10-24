@@ -3,5 +3,6 @@
 
 mod support;
 
+mod never_panics;
 mod pure;
 mod updater;

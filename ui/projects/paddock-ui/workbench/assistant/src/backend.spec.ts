@@ -142,4 +142,21 @@ describe('MemoryAssistantBackend', () => {
     expect((await seeded.conversations())[0]?.id).toBe(FIXTURE_CONVERSATION.id);
     seeded.emit('c', { type: 'notice', message: 'x' });
   });
+
+  it('plays /fail (words, then an error of kind failed) and /slow (words, then waits for Stop)', async () => {
+    const b = new MemoryAssistantBackend();
+    const failed = await ask(b, '/fail now');
+    await settle(10);
+    expect(failed.events.some((e) => e.type === 'delta')).toBe(true);
+    expect(failed.events.at(-1)).toMatchObject({ type: 'error', kind: 'failed', message: 'The model stopped answering.' });
+    expect(await b.stop(failed.ack.conversationId)).toBe(false);
+
+    const slow = await ask(b, '/slow please');
+    await settle(10);
+    expect(slow.events.some((e) => e.type === 'delta')).toBe(true);
+    expect(slow.events.some((e) => e.type === 'done')).toBe(false);
+    expect(await b.stop(slow.ack.conversationId)).toBe(true);
+    await settle(5);
+    expect(slow.events.at(-1)).toMatchObject({ type: 'done', end: 'cancelled' });
+  });
 });

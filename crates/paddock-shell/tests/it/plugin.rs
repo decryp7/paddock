@@ -751,3 +751,154 @@ fn the_knowledge_packs_bring_their_commands_event_and_health_entry() {
     );
     assert!(invoke(&main, "packs_reload", json!({})).is_ok());
 }
+
+#[test]
+fn user_files_bring_their_commands_recent_lists_and_drop_grants() {
+    use paddock_files::open::{Invocation, Launcher};
+    use paddock_files::recent::{FILES, Recents};
+    struct Seen(Arc<Mutex<Vec<String>>>);
+    impl Launcher for Seen {
+        fn start(&self, i: &Invocation) -> std::io::Result<()> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(i.program.to_string_lossy().into_owned());
+            Ok(())
+        }
+    }
+    let started = Arc::new(Mutex::new(Vec::new()));
+    let s2 = started.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .files(move |_| {
+            Ok(paddock_files::Files::new(Recents::open(None, &[FILES]))
+                .launcher(Arc::new(Seen(s2))))
+        }));
+    let main = window(&app, "main");
+    let tray = window(&app, "tray");
+    let lists = invoke(&main, "files_recent_list", json!({})).unwrap();
+    assert_eq!(lists["lists"][0]["id"], "files");
+    invoke(
+        &main,
+        "files_open_url",
+        json!({ "url": "https://example.org" }),
+    )
+    .unwrap();
+    assert_eq!(started.lock().unwrap().len(), 1);
+    // Choosing: with `native-dialogs` the shell installs the native picker, which (on the mock runtime, with no dialog plugin
+    // registered) chooses nothing; without it the service has no picker and says so. A tray popover may not choose at all.
+    let picked = invoke(
+        &main,
+        "files_pick",
+        json!({ "request": { "kind": "openFile" } }),
+    );
+    if cfg!(feature = "native-dialogs") {
+        assert_eq!(picked, Ok(json!([])));
+    } else {
+        assert_eq!(picked.unwrap_err()["code"], "unavailable");
+    }
+    assert!(
+        text(
+            &invoke(
+                &tray,
+                "files_pick",
+                json!({ "request": { "kind": "openFile" } })
+            )
+            .unwrap_err()
+        )
+        .contains("not allowed")
+    );
+    // A file dropped on a window is granted to it.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("a.log");
+    std::fs::write(&log, "x").unwrap();
+    assert_eq!(
+        invoke(
+            &main,
+            "files_reveal",
+            json!({ "path": log.to_string_lossy() })
+        )
+        .unwrap_err()["code"],
+        "notGranted"
+    );
+    paddock_files::tauri::on_window_event(
+        &main.as_ref().window(),
+        &tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop {
+            paths: vec![log.clone()],
+            position: tauri::PhysicalPosition::new(0.0, 0.0),
+        }),
+    );
+    invoke(
+        &main,
+        "files_reveal",
+        json!({ "path": log.to_string_lossy() }),
+    )
+    .unwrap();
+    assert_eq!(started.lock().unwrap().len(), 2);
+    // A failing set-up names the part.
+    let built = mock_builder()
+        .plugin(
+            Builder::new(identity())
+                .in_memory()
+                .native_menu(false)
+                .files(|_| Err("no config folder".into()))
+                .build(),
+        )
+        .build(context());
+    let e = built.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(
+        e.contains("user files") && e.contains("no config folder"),
+        "{e}"
+    );
+}
+
+#[test]
+fn storage_brings_its_commands_to_main_windows_and_dialogs_and_a_failing_setup_names_it() {
+    use paddock_storage::{Category, Kind, Storage};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    std::fs::create_dir_all(root.join("cache")).unwrap();
+    std::fs::write(root.join("cache/a.bin"), [0u8; 10]).unwrap();
+    let r2 = root.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .storage(move |_| {
+            let categories = vec![
+                Category::new("cache", "Cache", Kind::Cache)
+                    .folder(r2.join("cache"))
+                    .entries(|_| None),
+            ];
+            Ok(Storage::new(std::sync::Arc::new(categories)).also_within(&r2))
+        }));
+    let main = window(&app, "main");
+    let tray = window(&app, "tray");
+    assert_eq!(
+        invoke(&main, "storage_last", json!({})).unwrap(),
+        Value::Null
+    );
+    let refused = invoke(
+        &main,
+        "storage_clear",
+        json!({ "request": { "categories": [{ "id": "cache" }] } }),
+    )
+    .unwrap_err();
+    assert_eq!(
+        refused["kind"], "noPreview",
+        "a clear needs a scan first: {refused}"
+    );
+    assert!(text(&invoke(&tray, "storage_scan", json!({})).unwrap_err()).contains("not allowed"));
+    assert!(root.join("cache/a.bin").exists());
+    let built = mock_builder()
+        .plugin(
+            Builder::new(identity())
+                .in_memory()
+                .native_menu(false)
+                .storage(|_| Err("no folders".into()))
+                .build(),
+        )
+        .build(context());
+    let e = built.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("storage") && e.contains("no folders"), "{e}");
+}

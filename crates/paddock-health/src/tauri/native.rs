@@ -75,12 +75,71 @@ impl<R: Runtime> Toaster for PluginToaster<R> {
     }
 
     fn permission(&self) -> Permission {
-        match self.0.notification().permission_state() {
-            Ok(PermissionState::Granted) => Permission::Granted,
-            Ok(PermissionState::Denied) => Permission::Denied,
-            _ => Permission::Unknown,
-        }
+        permission_of(self.0.notification().permission_state())
     }
+
+    fn request_permission(&self) -> Permission {
+        permission_of(self.0.notification().request_permission())
+    }
+
+    fn open_system_settings(&self) -> Result<(), ToastError> {
+        open_settings_with(std::env::consts::OS, &spawn_detached)
+    }
+}
+
+/// The permission a plugin answer means (an error or a prompt state is "not known").
+pub fn permission_of(state: ::tauri_plugin_notification::Result<PermissionState>) -> Permission {
+    match state {
+        Ok(PermissionState::Granted) => Permission::Granted,
+        Ok(PermissionState::Denied) => Permission::Denied,
+        _ => Permission::Unknown,
+    }
+}
+
+/// The program and arguments that open the notification settings of `os` (`std::env::consts::OS`), or `None` where the
+/// system has no page the app can reach (Linux desktops differ; GNOME's settings are the one that is the same everywhere).
+pub fn settings_command(os: &str) -> Option<(&'static str, &'static [&'static str])> {
+    match os {
+        "macos" => Some((
+            "open",
+            &["x-apple.systempreferences:com.apple.Notifications-Settings.extension"],
+        )),
+        "windows" => Some(("explorer.exe", &["ms-settings:notifications"])),
+        "linux" => Some(("gnome-control-center", &["notifications"])),
+        _ => None,
+    }
+}
+
+/// Starts a program with arguments (injected so tests start nothing).
+pub type Spawn<'a> = dyn Fn(&str, &[&str]) -> Result<(), String> + 'a;
+
+/// Opens the notification settings of `os` through `spawn` (program, arguments).
+pub fn open_settings_with(
+    os: &str,
+    spawn: &Spawn<'_>,
+) -> Result<(), ToastError> {
+    let Some((program, args)) = settings_command(os) else {
+        return Err(ToastError(
+            "Open your system's notification settings and allow notifications for this app.".into(),
+        ));
+    };
+    spawn(program, args).map_err(|e| {
+        ToastError(format!(
+            "The system's notification settings could not be opened ({e}). Open them by hand and allow notifications for this app."
+        ))
+    })
+}
+
+/// Starts a program without waiting for it. Platform glue.
+fn spawn_detached(program: &str, args: &[&str]) -> Result<(), String> {
+    paddock_proc::command(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -171,5 +230,52 @@ mod tests {
         // Desktop systems do not ask: always granted.
         assert_eq!(toaster.permission(), Permission::Granted);
         toaster.subscribe(std::sync::Arc::new(|_| {}));
+        assert_eq!(toaster.request_permission(), Permission::Granted);
+    }
+
+    #[test]
+    fn the_permission_follows_the_plugins_answer() {
+        assert_eq!(
+            permission_of(Ok(PermissionState::Granted)),
+            Permission::Granted
+        );
+        assert_eq!(
+            permission_of(Ok(PermissionState::Denied)),
+            Permission::Denied
+        );
+        assert_eq!(
+            permission_of(Ok(PermissionState::Prompt)),
+            Permission::Unknown
+        );
+        let failed = Err(::tauri_plugin_notification::Error::from(
+            std::io::Error::other("x"),
+        ));
+        assert_eq!(permission_of(failed), Permission::Unknown);
+    }
+
+    #[test]
+    fn each_os_opens_its_own_notification_settings_and_a_failure_says_what_to_do() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let record = |p: &str, a: &[&str]| {
+            calls.borrow_mut().push((p.to_string(), a.join(" ")));
+            Ok(())
+        };
+        for os in ["macos", "windows", "linux"] {
+            open_settings_with(os, &record).unwrap();
+        }
+        let calls = calls.into_inner();
+        assert_eq!(calls[0].0, "open");
+        assert!(calls[0].1.contains("Notifications"));
+        assert_eq!(
+            calls[1],
+            ("explorer.exe".into(), "ms-settings:notifications".into())
+        );
+        assert_eq!(calls[2].0, "gnome-control-center");
+        let unknown = open_settings_with("haiku", &|_, _| Ok(())).unwrap_err();
+        assert!(unknown.0.contains("notification settings"));
+        let failed =
+            open_settings_with("macos", &|_, _| Err("no such program".into())).unwrap_err();
+        assert!(failed.0.contains("no such program") && failed.0.contains("by hand"));
     }
 }

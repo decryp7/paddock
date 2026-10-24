@@ -4,7 +4,7 @@
 [workspace]
 resolver = "3"
 # Fuzz targets are their own workspaces (cargo-fuzz).
-exclude = ["paddock-ipc/fuzz", "paddock-testplan/fuzz"]
+exclude = ["paddock-ipc/fuzz", "paddock-plugin-package/fuzz", "paddock-testplan/fuzz", "paddock-view/fuzz"]
 members = [
     "paddock-archive",
     "paddock-assistant",
@@ -18,6 +18,8 @@ members = [
     "paddock-diag",
     "paddock-download",
     "paddock-env",
+    "paddock-guard",
+    "paddock-files",
     "paddock-health",
     "paddock-ipc",
     "paddock-jobs",
@@ -31,16 +33,23 @@ members = [
     "paddock-packs",
     "paddock-panels",
     "paddock-pitwall",
+    "paddock-plugin-api",
+    "paddock-plugin-host",
+    "paddock-plugin-package",
+    "paddock-plugin-test",
     "paddock-proc",
     "paddock-runtime",
     "paddock-secrets",
     "paddock-service",
     "paddock-settings",
     "paddock-shell",
+    "paddock-storage",
+    "paddock-siblings",
     "paddock-startup",
     "paddock-testkit",
     "paddock-testplan",
     "paddock-updater",
+    "paddock-view",
     "paddock-watch",
     "paddock-window",
     "paddock-workbench",
@@ -77,6 +86,8 @@ paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "dec
 paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
 paddock-download = { path = "paddock-download", version = "0.1.0", registry = "decryp7" }
 paddock-env = { path = "paddock-env", version = "0.1.0", registry = "decryp7" }
+paddock-guard = { path = "paddock-guard", version = "0.1.0", registry = "decryp7" }
+paddock-files = { path = "paddock-files", version = "0.1.0", registry = "decryp7" }
 paddock-health = { path = "paddock-health", version = "0.1.0", registry = "decryp7" }
 paddock-ipc = { path = "paddock-ipc", version = "0.1.0", registry = "decryp7" }
 paddock-jobs = { path = "paddock-jobs", version = "0.1.0", registry = "decryp7" }
@@ -90,16 +101,23 @@ paddock-net = { path = "paddock-net", version = "0.1.0", registry = "decryp7" }
 paddock-packs = { path = "paddock-packs", version = "0.1.0", registry = "decryp7" }
 paddock-panels = { path = "paddock-panels", version = "0.1.0", registry = "decryp7" }
 paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "decryp7" }
+paddock-plugin-api = { path = "paddock-plugin-api", version = "0.1.0", registry = "decryp7" }
+paddock-plugin-host = { path = "paddock-plugin-host", version = "0.1.0", registry = "decryp7" }
+paddock-plugin-package = { path = "paddock-plugin-package", version = "0.1.0", registry = "decryp7" }
+paddock-plugin-test = { path = "paddock-plugin-test", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }
 paddock-runtime = { path = "paddock-runtime", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
 paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "decryp7" }
 paddock-shell = { path = "paddock-shell", version = "0.2.0", registry = "decryp7" }
+paddock-storage = { path = "paddock-storage", version = "0.1.0", registry = "decryp7" }
+paddock-siblings = { path = "paddock-siblings", version = "0.1.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "decryp7" }
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
 paddock-testplan = { path = "paddock-testplan", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.1.0", registry = "decryp7" }
+paddock-view = { path = "paddock-view", version = "0.1.0", registry = "decryp7" }
 paddock-watch = { path = "paddock-watch", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.1.0", registry = "decryp7" }
 paddock-workbench = { path = "paddock-workbench", version = "0.1.0", registry = "decryp7" }

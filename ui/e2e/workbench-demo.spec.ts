@@ -116,7 +116,7 @@ test.describe('dock (plan W2a, W2b)', () => {
     const wb = new WorkbenchApp(page);
     await wb.frame.open();
     const dock = page.getByTestId('pd-dock');
-    await page.locator('#pd-stage').click({ position: { x: 5, y: 5 } });
+    await tab(page, 'wd.orientation').click();
     await page.keyboard.press('ControlOrMeta+2');
     await expect(dock).toHaveAttribute('data-perspective', 'wd.review');
     await expect(tab(page, 'wd.problems')).toBeVisible();
@@ -142,7 +142,7 @@ test.describe('dock (plan W2a, W2b)', () => {
       await wb.explorer.expand('wd.files', 'src');
       await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
       await wb.activity.item('wd.act.problems').click();
-      await wb.activity.item('wd.act.outline').click();
+      await wb.activity.item('pd.wb.assistant.activity').click();
       await expect(tab(page, 'wd.problems')).toBeVisible();
       const short = await page.locator('[data-min-width]').evaluateAll((groups) =>
         groups
@@ -187,4 +187,71 @@ test.describe('pop-out (plan W3)', () => {
     await wb.palette.run('Pop out to window');
     await expect(tab).toHaveCount(0);
   });
+});
+
+test.describe('review 1 (X50)', () => {
+  test('P1-1: the Explorer menu opens at the pointer, and at the row for Shift+F10', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    const row = wb.explorer.node('wd.files', 'README.md');
+    const box = (await row.boundingBox())!;
+    const at = { x: box.x + 60, y: box.y + box.height / 2 };
+    await page.mouse.click(at.x, at.y, { button: 'right' });
+    await expect(wb.explorer.menu).toBeVisible();
+    // The overlay settles at the pointer within a frame of opening (CDK positions it after it is attached).
+    await expect.poll(async () => {
+      const m = (await wb.explorer.menu.boundingBox())!;
+      return Math.max(Math.abs(m.x - at.x), Math.abs(m.y - at.y));
+    }).toBeLessThanOrEqual(8);
+    await expect(row).toHaveClass(/pd-menu-target/);
+    await page.keyboard.press('Escape');
+    await row.click();
+    await page.keyboard.press('Shift+F10');
+    await expect(wb.explorer.menu).toBeVisible();
+    await expect.poll(async () => {
+      const kb = (await wb.explorer.menu.boundingBox())!;
+      return Math.abs(kb.y - (box.y + box.height)) <= 8 && kb.x >= box.x;
+    }).toBe(true);
+  });
+
+  test('P1-2: at 320 px the Problem column takes most of the table, with the file folded under it', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.palette.open();
+    await wb.palette.search('>show problems');
+    await wb.palette.run('Show problems');
+    const table = page.locator('wd-problems-view pd-table');
+    await expect(table.getByRole('columnheader', { name: /Problem/ })).toBeVisible();
+    const [tw, pw] = await Promise.all([
+      table.evaluate((t) => t.getBoundingClientRect().width),
+      table.getByRole('columnheader', { name: /Problem/ }).evaluate((h) => h.getBoundingClientRect().width),
+    ]);
+    expect(pw / tw).toBeGreaterThanOrEqual(0.6);
+    await expect(table.locator('.where').first()).toBeVisible();
+    await expectNoHorizontalScroll(page);
+  });
+
+  test('P1-3: a fitted layout is said in the notifications, never over the dock', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await wb.frame.open();
+    await wb.explorer.expand('wd.files', 'src');
+    await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
+    await wb.activity.item('wd.act.problems').click();
+    await expect(page.locator('[data-testid="pd-dock-tab"][data-panel-id="wd.problems"]')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => (localStorage.getItem(k) ?? '').includes('wd.problems')))).toBe(true);
+    await page.setViewportSize({ width: 700, height: 560 });
+    await page.reload();
+    await expect(page.locator('pd-dock .pd-dock-notice')).toHaveCount(0);
+    await expect(wb.notifications.toasts.getByText('Layout adjusted to fit this window')).toBeVisible();
+  });
+});
+
+test('a pop-out window boots its shell and its one view (regression: the page kept the main root)', async ({ page, pageErrors }) => {
+  await page.goto('/#/popout?panel=wd.code%23src%2Fmain.rs&host=main&label=p-main-1');
+  // Without a host in the browser it waits for the host's snapshot first (bounded), then shows the view.
+  await expect(page.getByTestId('code-lines')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('pd-popout-shell')).toBeVisible();
+  expect(pageErrors).toEqual([]);
 });

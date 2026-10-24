@@ -1,3 +1,4 @@
+import { panelTitle } from '@decryp7/paddock-ui/workbench';
 import { inject, Injectable } from '@angular/core';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { type LayoutPlan, type OpenView, type ViewLayout, planLayout, restorable, type SavedHints } from '@decryp7/paddock-ui';
@@ -70,9 +71,13 @@ export class DockLayout {
     return [...out, ...extra];
   }
 
-  /** The row of the main column a panel sits in: an extra instance of a view (a second timeline) is stacked below the first, in a row of its own. */
-  private rowOf(id: string, view: Parameters<typeof viewRow>[0] & { id: string }): string {
-    return id === view.id ? viewRow(view) : id;
+  /**
+   * The row of the main column a panel sits in: its view's row. Instances of a view (`pn.code#a`, `pn.code#b`) share it as
+   * tabs (Debrief stacked a second timeline in a row of its own, which squeezed the analysis row out once three files
+   * were open: a regression test in dock-scenarios.spec.ts keeps it so).
+   */
+  private rowOf(_id: string, view: Parameters<typeof viewRow>[0] & { id: string }): string {
+    return viewRow(view);
   }
 
   /** How recently the user worked with a panel: just opened is the latest, else its place in the most-recently-used list. */
@@ -142,7 +147,11 @@ export class DockLayout {
       if (!mins.length) continue;
       const minimumWidth = Math.max(...mins.map((m) => m.width));
       const minimumHeight = Math.max(...mins.map((m) => m.height));
-      g.api.setConstraints({ minimumWidth, ...(minimumHeight ? { minimumHeight } : {}) });
+      // In a window smaller than a view's minimum (the plan overflows: 320 px), the group is held to the window, not the
+      // declared size, so the view lays out by its container queries instead of being clipped (review P1-2).
+      const fitW = api.width > 0 ? Math.min(minimumWidth, api.width) : minimumWidth;
+      const fitH = api.height > 0 ? Math.min(minimumHeight, api.height) : minimumHeight;
+      g.api.setConstraints({ minimumWidth: fitW, ...(fitH ? { minimumHeight: fitH } : {}) });
       // The declared minimum, readable from outside (the scenario tests assert every group against it).
       g.element.dataset['minWidth'] = String(minimumWidth);
       g.element.dataset['minHeight'] = String(minimumHeight);
@@ -171,7 +180,7 @@ export class DockLayout {
       if (!view) continue;
       if (!fresh.includes(h.id)) this.record({ id: h.id, slot: options.capture?.(h.id) ?? NO_SLOT, into: null });
       api.removePanel(panel);
-      const item = { id: h.id, title: view.title.text, side: 'right' as const, size: viewLayout(view).pref.width, slot: { referencePanel: null, direction: 'within' as const } };
+      const item = { id: h.id, title: panelTitle(view, h.id), side: 'right' as const, size: viewLayout(view).pref.width, slot: { referencePanel: null, direction: 'within' as const } };
       this.ctx.autoHide.update((s) => {
         const hidden = autoHideReduce(s, { type: 'unpin', item });
         return fresh.includes(h.id) && !options.background ? autoHideReduce(hidden, { type: 'activate', id: h.id }) : hidden;

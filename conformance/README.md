@@ -36,6 +36,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C34 | every `bundle.externalBin` sidecar is listed in `sidecars` of `paddock.conformance.json` (C04 starts it from the bundle with `--self-test`) and its crate handles `--self-test` (`paddock_proc::self_test::handle`) (rule 23) | |
 | C35 | every `untimed` entry of a `withCallTimeout` policy (`@decryp7/paddock-ui/ipc`) is declared in `untimedCommands` of `paddock.conformance.json` with a reason (it starts a job / waits for the user, rule 12); stale declarations warn | |
 | C36 | a parser crate (public `parse*`/`decode*`/`from_str`/`from_bytes` over text, bytes or a reader; or named in `parserCrates`) has a fuzz target or a never-panics test (`paddock_testkit::never_panics`, `proptest!`); `parserSkip` lists non-parsers. Warning | |
+| C37 | one integration-test binary per crate: a `tests/<name>.rs` beside `tests/it/` is an error unless `ownTestBinaries` of `paddock.conformance.json` names it with a reason (a feature it needs, a process-wide log or hook, no harness); every Cargo workspace member is tested by a workflow step (`-p <name>`, or a `--workspace` step unless the workspace is in `perCrateSteps`) and, with cargo-hakari, depends on the workspace-hack crate (rule 40) | |
 | C32 | the translation catalogs are current: `paddock-i18n build --check --no-extract` over the app's `paddock-i18n.json` (every catalog equals its sources, every runtime JSON equals its catalog); a missing config warns | `npm ci` (the app's installed `@decryp7/paddock-ui`) |
 | C33 | every window is checked with axe: an e2e spec runs axe, and every dialog of `dialog-contracts.json` is covered (`axeEveryDialog`, or the id in a spec that runs axe; `a11y.skip` names the exceptions with a reason). Warns when no spec walks a keyboard-only flow or tests the app's accent with `accentProblems` | |
 
@@ -68,7 +69,7 @@ a package none of whose licence options is permissive fails both modes. The allo
 
 `paddock.conformance.json` (optional): `app`, `appDir`, `tauriDir`, `workflowsDir`, `sidecars` (`[{ "name": "x-worker", "args": ["--self-test"] }]`),
 `nonGates` (job ids the release job need not wait for), `commitRange`, `appName` (display name for templates; default the id with a capital),
-`docBlocks` (`{ "AGENTS.md": ["rules", ...] }` replaces the default targets), `untimedCommands` (`{ "method": "why it is never timed out" }`, C35), `parserCrates` / `parserSkip` (C36), `windowWeight` (`{ stats, windows: { main: { maxKb, entries? } } }`), `baselineSkip` (template paths this app does not take; prefer a waiver).
+`docBlocks` (`{ "AGENTS.md": ["rules", ...] }` replaces the default targets), `untimedCommands` (`{ "method": "why it is never timed out" }`, C35), `parserCrates` / `parserSkip` (C36), `ownTestBinaries` (`{ "crates/x/tests/y.rs": "why it needs its own binary" }`) and `perCrateSteps` (workspace folders whose members each need their own CI step) (C37), `windowWeight` (`{ stats, windows: { main: { maxKb, entries? } } }`), `baselineSkip` (template paths this app does not take; prefer a waiver).
 
 `paddock.waivers.toml`:
 

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { form, FormField, maxLength, min, minLength, required, validate } from '@angular/forms/signals';
 import { PdChart, type PdChartSpec } from '@decryp7/paddock-ui/chart';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
-import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdSort } from '@decryp7/paddock-ui/table';
+import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdSort } from '@decryp7/paddock-ui/table';
 
 interface Plugin {
   id: string;
@@ -29,8 +29,8 @@ const MANY: Plugin[] = Array.from({ length: 5000 }, (_, i) => ({
   name: `Record ${String(i + 1).padStart(4, '0')}`,
   kind: KINDS[i % KINDS.length] as string,
   version: `2.${i % 9}.0`,
-  size: (i * 37) % 4096,
-  path: `/data/records/${i}/entry.bin`,
+  size: ((i + 1) * 37) % 4096,
+  path: `/data/records/${i + 1}/entry.bin`,
   state: 'ready',
 }));
 
@@ -47,19 +47,18 @@ const COLUMNS: PdColumn<Plugin>[] = [
 @Component({
   selector: 'gal-data',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdTable, PdCell, PdChart, PdField, PdFieldControl, FormField],
+  imports: [PdTable, PdCell, PdTableEmpty, PdChart, PdField, PdFieldControl, FormField],
   template: `
     <section class="gal-section" data-testid="table" aria-labelledby="h-table">
       <h2 id="h-table">Data table</h2>
       <p>Sort by a header, filter, choose columns; arrows, Home, End and Enter on a row; Shift+F10 or a right-click opens the row menu. Columns drop out as the table narrows.</p>
-      <div class="gal-box" data-testid="table-small">
+      <div class="gal-box gal-pad" data-testid="table-small">
         <pd-table
           label="Plugins"
           [rows]="plugins"
           [columns]="columns"
           [rowKey]="key"
           [rowActions]="actions"
-          [rowHeight]="40"
           [(sort)]="sort"
           [(selectedKey)]="selected"
           (rowActivate)="opened.set($event.name)"
@@ -69,9 +68,26 @@ const COLUMNS: PdColumn<Plugin>[] = [
         </pd-table>
       </div>
       <p data-testid="table-status">Opened: {{ opened() || 'none' }}. Chose: {{ chosen() || 'nothing' }}.</p>
+      <h3>States</h3>
+      <div class="gal-states-grid">
+        <div class="gal-box gal-pad" data-testid="box-selected">
+          <pd-table label="Selected and sorted" [rows]="plugins.slice(0, 5)" [columns]="columns" [rowKey]="key" [rowActions]="actions" [filterable]="false" selectedKey="p1" [sort]="{ key: 'size', direction: 'desc' }" />
+        </div>
+        <div class="gal-box gal-pad" data-testid="box-empty">
+          <pd-table label="Empty" [rows]="none" [columns]="columns" [rowKey]="key" [rowActions]="actions" [filterable]="false">
+            <div pdTableEmpty class="gal-next"><strong>No plugins installed</strong><span>Plugins add file formats and viewers.</span><button class="pd-btn pd-btn--primary" type="button">Install a plugin</button></div>
+          </pd-table>
+        </div>
+        <div class="gal-box gal-pad" data-testid="box-loading">
+          <pd-table label="Loading" [rows]="none" [columns]="columns" [rowKey]="key" [rowActions]="actions" [filterable]="false" state="loading" />
+        </div>
+        <div class="gal-box gal-pad" data-testid="box-error">
+          <pd-table label="Error" [rows]="none" [columns]="columns" [rowKey]="key" [rowActions]="actions" [filterable]="false" state="error" errorText="The plugin list could not be read." />
+        </div>
+      </div>
       <h3>Grouped, and 5,000 rows in a virtual viewport</h3>
-      <div class="gal-box" data-testid="table-virtual">
-        <pd-table label="Records" [rows]="many" [columns]="columns" [rowKey]="key" [rowHeight]="32" groupBy="kind" [maxHeight]="260" [virtual]="true" />
+      <div class="gal-box gal-pad" data-testid="table-virtual">
+        <pd-table label="Records" [rows]="many" [columns]="columns" [rowKey]="key" groupBy="kind" [maxHeight]="260" [virtual]="true" />
       </div>
     </section>
 
@@ -79,10 +95,12 @@ const COLUMNS: PdColumn<Plugin>[] = [
       <h2 id="h-pdchart">Chart</h2>
       <p>The wrapper draws a spec in the family theme; each chart has a name and a text twin for screen readers.</p>
       <div class="gal-charts">
-        <div class="gal-box"><pd-chart label="Requests per hour" [spec]="line" [height]="200" /></div>
-        <div class="gal-box"><pd-chart label="Jobs by outcome per day" [spec]="stacked" [height]="200" /></div>
-        <div class="gal-box"><pd-chart label="Latency by hour" [spec]="area" [height]="200" /></div>
+        <div class="gal-box"><pd-chart label="Request rate" [spec]="line" [height]="200" /></div>
+        <div class="gal-box"><pd-chart label="Outcome per day, last 7 days" [spec]="stacked" [height]="200" /></div>
+        <div class="gal-box"><pd-chart label="Latency p95, last 24 h" [spec]="area" [height]="200" /></div>
         <div class="gal-box"><pd-chart label="Disk use by kind" [spec]="donut" [height]="200" /></div>
+        <div class="gal-box" data-testid="chart-loading-box"><pd-chart label="Latency p95, last 24 h" [spec]="area" [height]="200" state="loading" /></div>
+        <div class="gal-box" data-testid="chart-error-box"><pd-chart label="Latency p95, last 24 h" [spec]="area" [height]="200" state="error" errorText="The latency data could not be loaded." /></div>
       </div>
     </section>
 
@@ -93,8 +111,11 @@ const COLUMNS: PdColumn<Plugin>[] = [
         <pd-field label="Name" hint="Shown in the list" [state]="f.name()" [submitted]="submitted()">
           <input class="pd-input" type="text" pdFieldControl [formField]="f.name" autocomplete="off" />
         </pd-field>
-        <pd-field label="Port" hint="1 to 65535" [state]="f.port()" [submitted]="submitted()">
+        <pd-field label="Port" hint="1 to 65535" size="short" [state]="f.port()" [submitted]="submitted()">
           <input class="pd-input" type="number" pdFieldControl [formField]="f.port" />
+        </pd-field>
+        <pd-field label="Workspace" hint="Set by your administrator">
+          <input class="pd-input" type="text" pdFieldControl value="Debrief" disabled />
         </pd-field>
         <div class="gal-row"><button class="pd-btn pd-btn--primary" type="submit">Save</button></div>
       </form>
@@ -104,12 +125,17 @@ const COLUMNS: PdColumn<Plugin>[] = [
   styles: `
     .gal-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: var(--pd-space-3); }
     .gal-form { display: grid; gap: var(--pd-space-3); padding: var(--pd-space-4); max-width: 28rem; }
+    .gal-pad { padding: var(--pd-space-3); }
+    .gal-states-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 36rem), 1fr)); gap: var(--pd-space-3); }
+    .gal-next { display: grid; justify-items: center; gap: var(--pd-space-2); }
+    .gal-next span { color: var(--pd-text-muted); }
     .gal-state { color: var(--pd-text-muted); }
     .gal-state[data-state='failed'] { color: var(--pd-danger-text, var(--pd-danger)); }
   `,
 })
 export class GalData {
   protected readonly plugins = PLUGINS;
+  protected readonly none: Plugin[] = [];
   protected readonly many = MANY;
   protected readonly columns = COLUMNS;
   protected readonly key = (p: Plugin): string => p.id;
@@ -128,7 +154,7 @@ export class GalData {
   }
 
   protected readonly hours = Array.from({ length: 12 }, (_, i) => `${String(i * 2).padStart(2, '0')}:00`);
-  protected readonly line: PdChartSpec = { kind: 'line', x: this.hours, unit: 'req', series: [{ name: 'Requests', values: [12, 18, 9, 22, 41, 38, 52, null, 47, 33, 21, 15], color: 'accent' }] };
+  protected readonly line: PdChartSpec = { kind: 'line', x: this.hours, unit: 'req/h', series: [{ name: 'Requests', values: [12, 18, 9, 22, 41, 38, 52, null, 47, null, 21, 15], color: 'accent' }] };
   protected readonly stacked: PdChartSpec = {
     kind: 'stackedBar',
     x: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
