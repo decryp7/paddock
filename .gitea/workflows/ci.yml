@@ -74,6 +74,26 @@ jobs:
       - name: Publish dry run
         run: node ../scripts/publish.mjs --skip-build
 
+  # @decryp7/paddock-conformance (conformance/, plan X9): every check has a good and a bad fixture, the release scripts are
+  # tested (latest.json byte-equal to the apps' copy), the shared macOS verify runs against a shimmed bundle. No dependencies.
+  conformance:
+    name: conformance (checks, release scripts)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: conformance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Tests
+        run: npm test
+
   crates:
     name: crates (fmt, coverage, deny)
     runs-on: ubuntu-latest
