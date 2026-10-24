@@ -1,0 +1,51 @@
+//! The text that marks a browser as AI-driven, shown outside the page (the status chip and, where the OS allows it,
+//! the window title). Nothing is injected into a page: that could disturb page scripts and layout and leak into
+//! extracted text or screenshots.
+
+/// What the AI does in the browser right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Activity {
+    /// Reading a page.
+    Reading,
+    /// Running a search.
+    Searching,
+    /// A page needs the user (a challenge).
+    WaitingForYou,
+}
+
+impl Activity {
+    /// The word shown for it.
+    pub fn word(self) -> &'static str {
+        match self {
+            Activity::Reading => "reading",
+            Activity::Searching => "searching",
+            Activity::WaitingForYou => "waiting for you",
+        }
+    }
+}
+
+/// `"<product> AI — <activity>: <host>"`; `product` is the application's product name.
+pub fn window_title(product: &str, activity: Activity, host: &str) -> String {
+    format!("{product} AI — {}: {host}", activity.word())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_format() {
+        assert_eq!(
+            window_title("Debrief", Activity::Reading, "example.com"),
+            "Debrief AI — reading: example.com"
+        );
+        assert_eq!(
+            window_title("Debrief", Activity::WaitingForYou, "g.test"),
+            "Debrief AI — waiting for you: g.test"
+        );
+        assert_eq!(
+            window_title("X", Activity::Searching, "h"),
+            "X AI — searching: h"
+        );
+    }
+}
