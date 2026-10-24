@@ -1,0 +1,17 @@
+[package]
+name = "paddock-proc"
+version = "0.1.0"
+description = "Child processes for the Paddock apps: commands without a console window, runs with a timeout and an output cap, supervised children whose whole tree ends on drop, a memory cap that counts proportional memory, process memory (PSS on Linux, threads skipped) and the user's login PATH."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

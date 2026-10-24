@@ -5,6 +5,11 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-proc` (plan X6): child processes. `command` (no console window on Windows), `clean_env` and `lower_priority`;
+  `run_bounded` (timeout, output cap, the whole tree ended, typed `RunError`); `Supervised` children (own process group,
+  `terminate` with grace, tree ended on drop, an optional `MemoryCap` with warning, stop and peak, a `Registry` and
+  `end_all` for shutdown); `process_memory` / `tree_memory` (PSS from `smaps_rollup` on Linux, thread entries skipped);
+  `kill_tree`, `ask`, `end`, `terminate` for single pids; `login_path` and `merge_path`.
 - `paddock-env` (plan X7, decision D3): folders and state files. `AppDirs` (data, config, cache, logs, runtime per OS from an
   injectable environment; `<ID>_HOME` override in debug builds only; portable mode; Windows is Local, the old Roaming folder
   is named for the one-time move) and `VersionedFile<T>` (atomic write with fsync and `.bak`, migration chain, a damaged file

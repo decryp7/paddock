@@ -98,7 +98,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-service` | background service install/control per OS | yes |
-| `paddock-proc` | child processes with timeouts, caps, kill-tree | yes |
+| `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
@@ -623,3 +623,39 @@ paddock_log::log_from_webview(window, level, message);               // the webv
   (`CrashMarker`, in `AppDirs::data()`); the next start reads it (plan X3) and clears it.
 - `spawn_child_capture(name, stderr)` logs a child's output line by line (4 KiB per line, `Child` + `child:<name>`).
 - Tests use `Logging::scoped`, a temp folder and `ManualClock`; no sleeps.
+
+## `paddock-proc` (plan X6)
+
+Child processes, the code seven helpers in five apps wrote their own copies of. The apps' `clippy.toml` forbids
+`Command::new` and points at `paddock_proc::command`.
+
+```rust
+use paddock_proc::{Limits, MemoryCap, Supervised, command, run_bounded};
+
+let mut git = command("git");                                  // no console window on Windows (R06)
+git.args(["status", "--porcelain"]);
+let out = run_bounded(git, Limits::new(Duration::from_secs(10)).max_output(1 << 20))?;   // tree ended on timeout
+if out.success() { use_it(&out.stdout_text()); }
+
+let browser = Supervised::spawn_capped(cmd, MemoryCap::new(4 << 30, "the browser").listener(listener))?;  // drop ends the tree
+paddock_proc::end_all();                                       // at shutdown / in the panic hook: every supervised tree
+```
+
+- `command(program)`; `clean_env(&mut cmd, KEPT_ENV)` clears the environment to an allow-list; `lower_priority(&mut cmd)` is
+  below-normal on Windows and `setpriority` before exec elsewhere (never `nice(1)`, which drops `DYLD_*` on macOS).
+- `run_bounded(cmd, Limits)`: stdin closed, stdout and stderr captured up to `max_output` each (the rest is read and dropped so
+  the child never blocks); a timeout, or with `stop_on_cap` the cap, ends the whole tree. `Outcome` is `Exited | TimedOut |
+  OutputCap`; spawn failures are a typed `RunError` whose message names the program, not its arguments.
+- `Supervised`: its own process group on Unix; `kill`, `terminate(grace)` (SIGTERM, then the tree), `wait` and drop end and
+  reap the tree. Every one is in a `Registry` (`global_registry()` for `spawn`), so `end_all()` ends them without their owners.
+  `MemoryCap` samples the tree every 200 ms (PSS on Linux), warns at 80%, ends it over the cap and tells a `MemoryListener`
+  (`Warning | Stopped | Ended`, with the peak); `stopped_over_memory()` and `memory_peak()` read it back.
+- `process_memory(pid)` / `tree_memory(root)`: PSS from `/proc/<pid>/smaps_rollup` on Linux (resident size if unreadable),
+  resident size elsewhere; thread entries are skipped (rule 26). `kill_tree`, `ask` / `end` (one pid, not its group, for the
+  leftovers of finished jobs), `terminate(pid, grace)`, `is_alive`, `processes_mentioning(needle)` (leak checks).
+- `login_path()`: the `PATH` of the user's login shell (`$SHELL -l -i -c`, then `-l -c`; bounded, absolute entries only;
+  `None` on Windows or when no shell answers); `merge_path(login, inherited, sep)`. The caller sets `PATH` once at start.
+- Tests start only the test binary itself (re-executed with a mode) or `sh` scripts in a temp folder, and check afterwards
+  that the pids are gone.
+- Not yet: a Windows job object (`KILL_ON_JOB_CLOSE`). Windows trees end through `taskkill /T /F`, which cannot reach a
+  helper whose parent already exited; the stdin lifeline and the sandbox limits of `debrief-ipc` stay with `paddock-ipc` (X13).
