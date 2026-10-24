@@ -5,7 +5,7 @@ import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from
 import { WorkbenchRegistry } from '@decryp7/paddock-ui/workbench';
 import { ASSISTANT_LIMITS, type AssistantInfo, type ContextItem, type ConversationSummary, type Envelope } from '../generated/assistant';
 import { AssistantBackend, type Unlisten } from './backend';
-import { answerText, reduceTurn, startTurn, turnsOf, type TurnView } from './chat-model';
+import { answerText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
 import { assistantMessage } from './wire';
 
 /** Where the conversation is: nothing going on, a question on its way to the engine, answering, or being stopped. */
@@ -122,7 +122,8 @@ export const AssistantStore = signalStore(
       /** The pane's heading: the conversation's title, "New conversation" when there is none yet. */
       title: computed(() => {
         const id = store.activeId();
-        return (id && store.conversations().find((c) => c.id === id)?.title) || $localize`:@@pd.wb.assistant.new:New conversation`;
+        const raw = id ? store.conversations().find((c) => c.id === id)?.title : null;
+        return (raw && conversationTitle(raw)) || $localize`:@@pd.wb.assistant.new:New conversation`;
       }),
       /** The turn that streams in, or the last one. */
       lastTurn: turn,
@@ -178,6 +179,24 @@ export const AssistantStore = signalStore(
       }
       if (store.activeId() === id) patchState(store, { activeId: null, turns: [], run: 'idle' });
       await refreshList();
+    };
+    /** Starts a turn with this question and context. */
+    const submit = async (text: string, context: readonly ContextItem[]): Promise<void> => {
+      const allowWrite = store.allowWrite() && store.hasWriteTools();
+      const conversationId = store.activeId();
+      patchState(store, { run: 'sending', failure: null, draft: '', off: [], on: [], listOpen: false, turns: [...store.turns(), startTurn(text, context)] });
+      try {
+        const ack = await store._backend.send({ ...(conversationId ? { conversationId } : {}), text, context: [...context], allowWrite });
+        patchState(store, { activeId: ack.conversationId });
+      } catch (e) {
+        // Refused before it started (empty, busy, gone): the question comes back to the draft.
+        patchState(store, {
+          run: 'idle',
+          draft: text,
+          failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.send:The question could not be sent.`),
+          turns: store.turns().slice(0, -1),
+        });
+      }
     };
     return {
       /** Asks for the info and the conversations (also the Retry of a failed first load). */
@@ -265,26 +284,17 @@ export const AssistantStore = signalStore(
       /** Sends the draft with the chips that are on. */
       async send(): Promise<void> {
         if (!store.canSend()) return;
-        const text = store.draft().trim();
         const context: ContextItem[] = store
           .chips()
           .filter((c) => c.on)
           .map((c) => ({ id: c.id, label: c.detail ? `${c.label}: ${c.detail}` : c.label, text: c.text }));
-        const allowWrite = store.allowWrite() && store.hasWriteTools();
-        const conversationId = store.activeId();
-        patchState(store, { run: 'sending', failure: null, draft: '', off: [], on: [], listOpen: false, turns: [...store.turns(), startTurn(text, context)] });
-        try {
-          const ack = await store._backend.send({ ...(conversationId ? { conversationId } : {}), text, context, allowWrite });
-          patchState(store, { activeId: ack.conversationId });
-        } catch (e) {
-          // Refused before it started (empty, busy, gone): the question comes back to the draft.
-          patchState(store, {
-            run: 'idle',
-            draft: text,
-            failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.send:The question could not be sent.`),
-            turns: store.turns().slice(0, -1),
-          });
-        }
+        await submit(store.draft().trim(), context);
+      },
+      /** Asks the last question again, with the context it had (the Retry of a failed turn). */
+      async retry(): Promise<void> {
+        const last = store.turns().at(-1);
+        if (!last || store.run() !== 'idle' || !last.error) return;
+        await submit(last.user, last.context);
       },
       /** Stops the running turn (Escape, the Stop button). */
       async stop(): Promise<void> {
@@ -301,9 +311,12 @@ export const AssistantStore = signalStore(
       async approve(callId: string, approved: boolean): Promise<void> {
         const id = store.activeId();
         if (!id) return;
+        // A declined call is the user's choice: mark it before the engine's "did not run" arrives, so it is never drawn as a failure.
+        if (!approved) update((t) => setDeclined(t, callId, true));
         try {
           await store._backend.approve(id, callId, approved);
         } catch (e) {
+          if (!approved) update((t) => setDeclined(t, callId, false));
           patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.approve:The decision could not be sent.`) });
         }
       },
