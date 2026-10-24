@@ -5,6 +5,10 @@ import { parseJobs, parseSteps } from './util/workflows.mjs';
 
 export const DEFAULT_CONFIG = {
   app: null,
+  appName: null,
+  docBlocks: null,
+  baselineSkip: [],
+  windowWeight: null,
   appDir: 'app',
   tauriDir: 'app/src-tauri',
   workflowsDir: '.gitea/workflows',

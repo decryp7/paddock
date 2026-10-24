@@ -54,3 +54,39 @@ export const ids = (findings) => findings.map((f) => f.check);
 export const messages = (findings) => findings.map((f) => f.message).join('\n');
 
 export const TAURI_CONF = (version = '1.2.3') => JSON.stringify({ productName: 'Demo', version });
+
+// ---- the shared sources (templates/repo, docs/blocks, lint) of this very checkout --------------------------------------
+import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { loadManifest } from '../src/sync/baseline.mjs';
+import { fill } from '../src/sync/fill.mjs';
+import { loadBlocks, inspectBlock } from '../src/sync/blocks.mjs';
+
+/** This checkout of Paddock: the reference for baseline and doc-block tests. */
+export const PADDOCK = fileURLToPath(new URL('../..', import.meta.url));
+
+/** The files of an app repo that is exactly in line with the templates (placeholders filled for `app`). */
+export function baselineFiles(app = 'demo') {
+  const config = { app, appDir: 'app' };
+  const files = {};
+  for (const e of loadManifest(PADDOCK)) {
+    const text = fill(e.text, config);
+    const path = e.path.startsWith('app/') ? e.path : e.path;
+    files[path] = e.mode === 'sections' && e.path === 'Cargo.toml' ? `[workspace]\nmembers = []\n\n${text}` : text;
+  }
+  return files;
+}
+
+/** AGENTS.md and the other doc files with every default block in place, plus an app section of its own. */
+export function blockFiles(app = 'demo') {
+  const config = { app, appDir: 'app' };
+  const reg = loadBlocks(PADDOCK);
+  const files = {};
+  for (const [file, names] of Object.entries(reg.defaultTargets)) {
+    let text = file === 'AGENTS.md' ? `# ${app} rules\n\nOwn intro.\n\n## Own section\n\nKept.\n` : '';
+    for (const n of names) text = inspectBlock(text, reg.blocks.find((b) => b.name === n), config).desired;
+    files[file] = text;
+  }
+  return files;
+}
+export const readText = (p) => readFileSync(p, 'utf8');
