@@ -140,6 +140,9 @@
       <trans-unit id="pd.health.repairing" datatype="html">
         <source>Repairing…</source>
       </trans-unit>
+      <trans-unit id="pd.health.repairing-for" datatype="html">
+        <source>Repairing <x id="service"/>…</source>
+      </trans-unit>
       <trans-unit id="pd.health.retry" datatype="html">
         <source>Retry</source>
       </trans-unit>
@@ -166,6 +169,9 @@
       </trans-unit>
       <trans-unit id="pd.health.try-again" datatype="html">
         <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.health.unavailable" datatype="html">
+        <source>This is unavailable until it works again.</source>
       </trans-unit>
       <trans-unit id="pd.health.unknown" datatype="html">
         <source>The state of the services is not known yet.</source>
@@ -214,6 +220,12 @@
       </trans-unit>
       <trans-unit id="pd.jobs.status" datatype="html">
         <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.compact.one" datatype="html">
+        <source>1 job</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.compact.other" datatype="html">
+        <source><x id="count"/> jobs</source>
       </trans-unit>
       <trans-unit id="pd.jobs.status.count" datatype="html">
         <source><x id="phase"/> <x id="count"/></source>
