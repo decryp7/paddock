@@ -121,9 +121,14 @@ fn a_test_returns_at_once_and_the_outcome_arrives_on_the_event() {
     )
     .unwrap();
     let started = invoke(&w, "channels_test", json!({"channel": channel("w")})).unwrap();
-    let event = rx
-        .recv_timeout(Duration::from_secs(30))
-        .expect("the outcome");
+    let event = loop {
+        let e = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the outcome");
+        if e["kind"] == "test" {
+            break e;
+        }
+    };
     assert_eq!(
         (
             event["kind"].as_str(),
