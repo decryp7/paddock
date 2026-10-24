@@ -533,7 +533,7 @@ mod tests {
         assert_eq!(j["failed"], 1);
         assert_eq!(j["rows"][0]["verdict"], "over-budget");
         assert_eq!(j["rows"][2]["limit"], Value::Null);
-        assert_eq!(fmt_num(2.71828), "2.72");
+        assert_eq!(fmt_num(1.23456), "1.23");
         let missing = check(&budgets, &run(&[]), None).render_markdown();
         assert!(
             missing.contains("| q | - | 100.0 | missing |") || missing.contains("| q | - |"),

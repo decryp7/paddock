@@ -1,0 +1,48 @@
+[package]
+name = "paddock-ipc"
+version = "0.1.0"
+description = "The family's one IPC (ADR 0001 step 1): length-prefixed postcard frames on a private local endpoint, a per-launch token and peer-pid handshake, a symmetric peer with calls, streams with credits, cancel and pushes, the child launcher and loop, and the companion link (discovery file, reconnect with back-off, replace another build)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+# The fuzz targets are their own workspace and are not published.
+exclude = ["fuzz"]
+
+# A child process for this crate's own tests (echo, exit at once, never connect, wrong token, a link companion). Never shipped
+# by an app; it only exists so the tests start real processes.
+[[bin]]
+name = "paddock-ipc-test-child"
+path = "src/bin/test_child.rs"
+test = false
+doc = false
+
+[dependencies]
+paddock-env = { workspace = true }
+paddock-jobs = { workspace = true }
+paddock-proc = { workspace = true }
+getrandom = "0.3"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+# `float_roundtrip`: a JSON number crosses the IPC unchanged (found by the fuzz target: without it a float could move by
+# one unit in the last place each time it crossed).
+serde_json = { version = "1", features = ["float_roundtrip"] }
+subtle = "2.6"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
