@@ -94,6 +94,12 @@ red-orange (hue 18) and not amber, and why it is never used as a status.
 | Pitwall | technical, control-room violet | #A58BFA | #6D3FD6 | #7546E0 |
 | Dyno | lively, vital, magenta | #F063A8 | #B01E6E | #C2287C |
 | Spotter | watchful, fresh teal | #2CC4B0 | #0B7A6E | #0E8577 |
+| Sighter | precise, sight-glass lime | #A8D94A | #4D7300 | #4D7300 |
+
+Sighter (proposed 2026-10-24, hue 80): 41 deg from warning amber, 70 from success green, far from Spotter teal (172) and
+Debrief blue (217). Measured: dark text 10.8:1 on surface-1, light text 5.6:1 on white and 5.0:1 on surface-2, white on
+the fill 5.6:1. It is a lime, so it must never stand in for success (status always has its word and icon); re-tint the
+app icon to the same hue and add the token set to `paddock-ui` with its token tests before freezing.
 
 Accent rules: primary button, selected nav item (tinted bg 14% + 2 px left or full tint, accent icon), focus ring (2 px
 accent, 2 px offset), links, the single highlighted chart series, progress of the app's own primary metric. Not
