@@ -43,11 +43,12 @@ export {
   ASSISTANT_CONTEXT,
   WORKBENCH_KINDS,
   PALETTE_PREFIX,
+  COMMANDS_PREFIX,
   layoutProblems,
   targetProblems,
   activityTarget,
 } from './src/kinds';
-export { provideWorkbenchContributions, provideWorkbenchKinds, type WorkbenchBatch } from './src/provide';
+export { provideWorkbenchContributions, provideWorkbenchKinds, provideLiveContributions, type WorkbenchBatch } from './src/provide';
 export {
   WorkbenchRegistry,
   VIEW_PANEL,
