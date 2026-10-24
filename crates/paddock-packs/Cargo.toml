@@ -26,6 +26,7 @@ log = { version = "0.4", optional = true }
 tauri = { workspace = true, optional = true }
 serde_ignored = "0.1"
 toml = "0.9"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"
