@@ -5,6 +5,11 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Crate `paddock-commands` 0.1.0 (plan S1, ADR 0012): `command_table!` (kind, window classes, request limit, validated at
+  compile time, optional invoke-handler macro), the shell's window label scheme, the pure `check` with the
+  `DialogGrant` hook for per-dialog contracts, the Tauri `Guard` (refuses and logs before arguments are parsed),
+  `Table::contract_problems`, the async-only check and generated-file check for tests, and generated TypeScript:
+  `shell/generated/commands.ts` (wire types) and `shell/generated/shell-commands.ts` (command names).
 - App shell scaffold (plan S0 of `docs/plans/workbench.md`, ADR 0012): secondary entry points `@decryp7/paddock-ui/shell`,
   `/shell/{startup,notify,dialogs,jobs,settings,about,menu,pages,i18n,store,testing}`, `/workbench` and
   `/workbench/{dock,panels,palette,explorer,assistant,testing}` (empty until their work packages land); the
