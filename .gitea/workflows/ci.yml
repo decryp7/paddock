@@ -385,6 +385,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-window --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-window --all-features --profile ci && cargo test -p paddock-window --all-features --doc
 
+      - name: paddock-workbench
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-workbench --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-workbench --all-features --profile ci && cargo test -p paddock-workbench --all-features --doc
+
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
