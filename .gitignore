@@ -19,3 +19,7 @@
 /apps/shell-demo/src-tauri/target/
 /apps/shell-demo/dist/
 /eslint/node_modules
+
+# Coverage data (a test child that outlives its parent leaves one in its working folder).
+*.profraw
+*.profdata

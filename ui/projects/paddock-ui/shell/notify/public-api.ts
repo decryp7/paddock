@@ -90,4 +90,4 @@ export {
   notifyPort,
   type ShellNotifyOptions,
 } from './src/provide-notify';
-export { NOTIFY_CONTRIBUTIONS } from './src/notify.contributions';
+export { NOTIFY_CONTRIBUTIONS, OS_NOTIFICATIONS_CONTRIBUTIONS, NOTIFICATIONS_SETTINGS_PAGE } from './src/notify.contributions';
