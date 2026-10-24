@@ -150,11 +150,12 @@ jobs:
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
       - run: cargo fmt --all --check
       # Merged line coverage over all test binaries, adapters included (the per-binary summary counts unused generic instances).
-      # Native glue files are left out (crates/README.md: never logic, reviewed by hand), and so is paddock-proc's test child (a
-      # re-executed test binary that its parent ends with SIGKILL, so its coverage data is never written).
+      # Native glue files are left out (crates/README.md: never logic, reviewed by hand), and so are paddock-proc's test child (a
+      # re-executed test binary that its parent ends with SIGKILL, so its coverage data is never written) and paddock-ipc's (the same); paddock-ipc's endpoint/{unix,windows}.rs are
+      # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered).
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src)/native\.rs$|paddock-proc/src/testchild\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           awk -F'[:,]' '/^DA:/{t++; if($3>0)h++} END{p=100*h/t; printf "lines %d/%d = %.2f%%\n", h, t, p; if(p<99) exit 1}' lcov.info
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -268,10 +269,18 @@ jobs:
       - name: paddock-bench
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-bench --all-targets --all-features -- -D warnings && cargo test -p paddock-bench --all-features
+      # The IPC with real child processes (its own test child) and the companion link; the fuzz target is built on Linux.
+      - name: paddock-ipc
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-ipc --all-targets --all-features -- -D warnings && cargo test -p paddock-ipc --all-features
 
       - name: paddock-env
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo test -p paddock-env --all-features
+
+      - name: paddock-packs
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-packs --all-targets --all-features -- -D warnings && cargo test -p paddock-packs --all-features
 
       - name: paddock-log
         if: ${{ !cancelled() }}
@@ -328,9 +337,9 @@ jobs:
       - name: App (fmt, clippy, tests on the mock runtime, deny)
         working-directory: apps/shell-demo/src-tauri
         run: |
-          cargo fmt --check
-          cargo clippy --all-targets -- -D warnings
-          cargo test
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
           cargo deny check
 
       - uses: ./.gitea/actions/sccache-stats

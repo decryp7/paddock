@@ -80,11 +80,25 @@ pub fn login_path() -> Option<String> {
         return None;
     }
     let shell_var = std::env::var("SHELL").ok();
-    shell_candidates(shell_var.as_deref(), cfg!(target_os = "macos"), |p| {
-        p.is_file()
-    })
-    .iter()
-    .find_map(|s| ask_shell(s, SHELL_TIMEOUT))
+    login_path_from(
+        shell_var.as_deref(),
+        cfg!(target_os = "macos"),
+        |p| p.is_file(),
+        SHELL_TIMEOUT,
+    )
+}
+
+/// [`login_path`] with the machine's facts given: `$SHELL`, whether this is macOS, which shell files exist and how long
+/// each shell may take.
+pub fn login_path_from(
+    shell_var: Option<&str>,
+    macos: bool,
+    exists: impl Fn(&Path) -> bool,
+    timeout: Duration,
+) -> Option<String> {
+    shell_candidates(shell_var, macos, exists)
+        .iter()
+        .find_map(|s| ask_shell(s, timeout))
 }
 
 /// Merges the login shell's `PATH` in front of the inherited one, dropping duplicates and empty entries. `sep` is the
@@ -219,6 +233,32 @@ mod tests {
             assert_eq!(
                 ask_shell(&d.path().join("missing"), Duration::from_secs(60)),
                 None
+            );
+        }
+
+        #[test]
+        fn the_first_candidate_shell_that_answers_gives_the_login_path() {
+            let d = tempfile::tempdir().unwrap();
+            let junk = script(d.path(), "junk", "echo nothing useful");
+            let good = script(
+                d.path(),
+                "good",
+                &format!("printf '{BEGIN}/login/bin{END}'"),
+            );
+            let junk_path = junk.to_string_lossy().into_owned();
+            let good_path = good.to_string_lossy().into_owned();
+            // `$SHELL` is tried first and the usual shells are only used where they exist.
+            let only_ours = |p: &Path| p == junk || p == good;
+            assert_eq!(
+                login_path_from(Some(&junk_path), false, only_ours, Duration::from_secs(60)),
+                None
+            );
+            let both = |p: &Path| p == junk || p == good;
+            let shells = shell_candidates(Some(&good_path), false, both);
+            assert_eq!(shells, std::slice::from_ref(&good));
+            assert_eq!(
+                login_path_from(Some(&good_path), false, both, Duration::from_secs(60)).as_deref(),
+                Some("/login/bin")
             );
         }
 
