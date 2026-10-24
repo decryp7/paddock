@@ -132,7 +132,7 @@ jobs:
         run: node --test tools/test/*.test.mjs
 
       - name: new-app templates
-        run: node --test scripts/new-app.test.mjs
+        run: node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs
 
   # @decryp7/paddock-eslint (eslint/, plan X11): RuleTester cases per rule and the preset run through ESLint on temp files.
   eslint-preset:
@@ -173,10 +173,12 @@ jobs:
       # Native glue files are left out (crates/README.md: never logic, reviewed by hand), and so are paddock-proc's test child (a
       # re-executed test binary that its parent ends with SIGKILL, so its coverage data is never written) and paddock-ipc's (the same); paddock-ipc's endpoint/{unix,windows}.rs are
       # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered).
+      # The gate (scripts/coverage-gate.mjs) leaves out only the `#[tauri::command]` attribute lines: llvm-cov charges every
+      # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
           cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
-          awk -F'[:,]' '/^DA:/{t++; if($3>0)h++} END{p=100*h/t; printf "lines %d/%d = %.2f%%\n", h, t, p; if(p<99) exit 1}' lcov.info
+          node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
         if: always()
