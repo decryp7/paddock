@@ -1,6 +1,6 @@
 //! The extraction as a paddock-jobs job: Jobs-list snapshots, progress on the job, Cancel.
 
-mod common;
+use crate::common;
 
 use common::*;
 use paddock_archive::{Options, extract_job};
