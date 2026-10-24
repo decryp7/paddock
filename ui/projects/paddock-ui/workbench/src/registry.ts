@@ -128,3 +128,14 @@ export function isOffered<T extends object>(when: ((ctx: ShellContext<T>) => boo
   if (!when) return true;
   return evaluate(when, ctx, false);
 }
+
+/**
+ * The tab title of a panel: the view's title for its one panel; for an instance (`pn.code#src/main.rs`) the last part of
+ * the key (`main.rs`), so several instances of one view are told apart. The full key is the tab's tooltip (the dock).
+ */
+export function panelTitle(view: { readonly title: { readonly text: string } }, panel: string): string {
+  const { key } = parsePanelId(panel);
+  if (key === null) return view.title.text;
+  const tail = key.split(/[\\/]/).filter(Boolean).at(-1);
+  return tail ?? key;
+}
