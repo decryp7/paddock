@@ -1,6 +1,6 @@
 //! Extraction end to end on archives built in memory, in temporary folders only.
 
-mod common;
+use crate::common;
 
 use common::*;
 use paddock_archive::{

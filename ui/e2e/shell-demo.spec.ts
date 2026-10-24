@@ -143,7 +143,12 @@ test.describe('menus and keys (plan S13)', () => {
     const mac = await app.menus.isMac();
     // In the window the app menu's entries (Settings…, plan S10) are at the end of File: the title bar names the app; on
     // macOS they are in the native app menu.
-    await expect(app.menus.bar.getByRole('menuitem')).toHaveText(['File', 'View', 'Help']);
+    await expect(app.menus.bar.getByRole('menuitem')).toHaveText(['File', 'Edit', 'View', 'Help']);
+    // Edit holds Undo and Redo (plan X44), inert until there is something to take back.
+    const edit = await app.menus.open('Edit');
+    await expect(edit.getByRole('menuitem', { name: /^Undo/ })).toHaveAttribute('aria-disabled', 'true');
+    await expect(edit.getByRole('menuitem', { name: /^Redo/ })).toHaveAttribute('aria-disabled', 'true');
+    await page.keyboard.press('Escape');
     const help = await app.menus.open('Help');
     const greet = help.getByRole('menuitem', { name: 'Say hello' });
     await expect(greet).toContainText(mac ? '⇧⌘H' : 'Ctrl+Shift+H');
@@ -173,7 +178,7 @@ test.describe('menus and keys (plan S13)', () => {
     await page.keyboard.press('ArrowDown');
     await expect(app.menus.menu('File').getByRole('menuitem', { name: 'Start sample job' })).toBeFocused();
     await page.keyboard.press('ArrowRight');
-    await expect(app.menus.menu('View')).toBeVisible();
+    await expect(app.menus.menu('Edit')).toBeVisible();
     expect(await axeViolations(page)).toEqual([]);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('menu')).toHaveCount(0);
