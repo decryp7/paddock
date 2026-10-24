@@ -36,6 +36,7 @@ export class DockPersistence {
         ...(Object.keys(this.ctx.autoHideSides()).length ? { autoHideSides: { ...this.ctx.autoHideSides() } } : {}),
         ...(this.ctx.displaced.size ? { displaced: [...this.ctx.displaced.values()] } : {}),
         ...(Object.keys(this.ctx.userSizes).length ? { sizes: { ...this.ctx.userSizes } } : {}),
+        ...(this.ctx.poppedSlots.size ? { poppedOut: [...this.ctx.poppedSlots].map(([id, slot]) => ({ id, slot })) } : {}),
       },
     };
   }

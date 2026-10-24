@@ -1,5 +1,6 @@
 import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
-import { keepGroupsUnscrolled, labelTabOverflow, overflowLabel, overflowTooltip } from './dock-dom';
+import { DOCK_STYLES } from './dock-styles';
+import { keepActiveTabVisible, keepGroupsUnscrolled, labelTabOverflow, overflowLabel, overflowTooltip } from './dock-dom';
 
 describe('keepGroupsUnscrolled', () => {
   it('puts a group scrolled sideways back, leaves vertical scrolling and other elements alone, and stops when disposed', () => {
@@ -103,3 +104,89 @@ describe('labelTabOverflow', () => {
   });
 });
 
+
+describe('the overflow chip chevron', () => {
+  it('points down: dockview turns its own chevron by 90 degrees, ours must not be turned again', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<div class="dv-tabs-overflow-dropdown-root"><div class="dv-tabs-overflow-dropdown-default"><svg></svg><span>3</span></div></div>';
+    const watch = labelTabOverflow(root);
+    const svg = root.querySelector('.dv-tabs-overflow-dropdown-default svg')!;
+    expect(svg.classList.contains('pd-dock-overflow-chevron')).toBe(true);
+    expect(svg.querySelector('path')!.getAttribute('d')).toBe(PD_ICON_PATHS['chevron-down']);
+    // The count stays next to it.
+    expect(root.querySelector('.dv-tabs-overflow-dropdown-default span')!.textContent).toBe('3');
+    expect(DOCK_STYLES).toMatch(/\.dv-tabs-overflow-dropdown-default > svg\.pd-dock-overflow-chevron \{ transform: none; \}/);
+    watch.dispose();
+  });
+});
+
+describe('keepActiveTabVisible', () => {
+  const rect = (left: number, right: number) => () => ({ left, right }) as DOMRect;
+  function strip(box: [number, number], active: [number, number] | null) {
+    const root = document.createElement('div');
+    root.innerHTML = '<div class="dv-tabs-container"><div class="dv-tab"></div><div class="dv-tab dv-active-tab"></div></div>';
+    document.body.appendChild(root);
+    const el = root.querySelector<HTMLElement>('.dv-tabs-container')!;
+    el.getBoundingClientRect = rect(box[0], box[1]);
+    const tab = root.querySelector<HTMLElement>('.dv-active-tab')!;
+    let left = 0;
+    // The tab moves with the strip's scroll, as in a browser.
+    const place = { at: active ?? [0, 0] };
+    const tabRect = () => rect(place.at[0] - left, place.at[1] - left)();
+    tab.getBoundingClientRect = tabRect;
+    if (!active) tab.classList.remove('dv-active-tab');
+    Object.defineProperty(el, 'scrollLeft', { get: () => left, set: (v: number) => (left = v) });
+    return { root, el, tab, left: () => left, moveTo: (l: number, r: number) => (place.at = [l, r]) };
+  }
+
+  it('scrolls the strip so an active tab beyond its right edge shows, and one beyond its left edge shows', () => {
+    const right = strip([0, 100], [90, 180]);
+    const watch = keepActiveTabVisible(right.root);
+    expect(right.left()).toBe(80);
+    watch.dispose();
+    const left = strip([100, 200], [60, 140]);
+    const watch2 = keepActiveTabVisible(left.root);
+    expect(left.left()).toBe(-40);
+    watch2.dispose();
+    right.root.remove();
+    left.root.remove();
+  });
+
+  it('never moves a tab whose left edge would leave the strip when the tab is wider than the strip', () => {
+    const wide = strip([0, 100], [10, 400]);
+    const watch = keepActiveTabVisible(wide.root);
+    expect(wide.left()).toBe(10);
+    watch.dispose();
+    wide.root.remove();
+  });
+
+  it('leaves a strip alone when its active tab is entirely inside, or it has none', () => {
+    const inside = strip([0, 100], [10, 90]);
+    const none = strip([0, 100], null);
+    const a = keepActiveTabVisible(inside.root);
+    const b = keepActiveTabVisible(none.root);
+    expect([inside.left(), none.left()]).toEqual([0, 0]);
+    a.dispose();
+    b.dispose();
+    inside.root.remove();
+    none.root.remove();
+  });
+
+  it('follows the active tab when it changes and when asked to refresh', async () => {
+    const m = strip([0, 100], [10, 90]);
+    const watch = keepActiveTabVisible(m.root);
+    m.moveTo(120, 190);
+    m.tab.classList.add('another');
+    await Promise.resolve();
+    expect(m.left()).toBe(90);
+    m.moveTo(340, 400);
+    watch.refresh();
+    expect(m.left()).toBe(300);
+    watch.dispose();
+    m.moveTo(900, 990);
+    m.tab.classList.add('after-dispose');
+    await Promise.resolve();
+    expect(m.left()).toBe(300);
+    m.root.remove();
+  });
+});
