@@ -58,10 +58,7 @@ type ChannelsSetup<R> = Box<
         + Send,
 >;
 type McpSetup<R> = Box<
-    dyn FnOnce(
-            &AppHandle<R>,
-            paddock_mcp::Emit,
-        ) -> Result<Arc<paddock_mcp::McpControl>, BoxError>
+    dyn FnOnce(&AppHandle<R>, paddock_mcp::Emit) -> Result<Arc<paddock_mcp::McpControl>, BoxError>
         + Send,
 >;
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
@@ -226,7 +223,10 @@ impl<R: Runtime> Builder<R> {
     /// `mcp_audit_clear` and the `paddock://mcp` event); only the key dialog's window may issue a key.
     pub fn mcp(
         mut self,
-        f: impl FnOnce(&AppHandle<R>, paddock_mcp::Emit) -> Result<Arc<paddock_mcp::McpControl>, BoxError>
+        f: impl FnOnce(
+            &AppHandle<R>,
+            paddock_mcp::Emit,
+        ) -> Result<Arc<paddock_mcp::McpControl>, BoxError>
         + Send
         + 'static,
     ) -> Self {
