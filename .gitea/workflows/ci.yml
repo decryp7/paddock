@@ -61,6 +61,9 @@ jobs:
       - name: Build the shell demo
         run: npm run shell-demo:build
 
+      - name: Build the workbench demo
+        run: npm run workbench-demo:build
+
       # Lists every npm package, entry point and crate with what a tag would publish; publishes nothing.
       - name: Publish dry run
         run: node ../scripts/publish.mjs --skip-build
@@ -97,6 +100,7 @@ jobs:
         env:
           PW_PORT: ${{ matrix.shard == 1 && '4300' || '4310' }}
           SHELL_DEMO_PORT: ${{ matrix.shard == 1 && '4301' || '4311' }}
+          WORKBENCH_DEMO_PORT: ${{ matrix.shard == 1 && '4302' || '4312' }}
         run: npx playwright test --shard=${{ matrix.shard }}/2
 
   # @decryp7/paddock-conformance (conformance/, plan X9): every check has a good and a bad fixture, the release scripts are
