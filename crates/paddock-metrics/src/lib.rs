@@ -32,5 +32,5 @@ pub use native::SystemProbe;
 pub use retention::{MAX_KEEP, MAX_POINTS, MAX_TIERS, Retention, RetentionError, TierSpec};
 pub use sampler::{DEFAULT_MOUNTS_EVERY, MachineProbe, Sampler};
 pub use series::{Mean, Millis, Series, bucket_start};
-pub use size::{EntryKind, FolderSize, Limit, Listing, SizeLimits, folder_size, folder_size_with};
+pub use size::{Entries, EntryKind, FolderSize, Limit, SizeLimits, folder_size, folder_size_with};
 pub use store::{Pushed, TieredStore};

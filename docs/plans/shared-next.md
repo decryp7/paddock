@@ -466,8 +466,8 @@ Gaps left:
   each client's handshake has its own thread and limit (a silent client delays nobody); `LinkServer` has Pitcrew's cap
   (`max_connections`, `max_handshakes`, `busy` refusals) and push `Subscriptions`; the Windows discovery file is checked
   for its owner (the user, or Administrators). The OS accept itself still waits in 100 ms slices to see the stop flag.
-- Windows: the endpoint code type-checks here and needs the Windows runner; children use `paddock-proc` trees (taskkill)
-  until X54's job object.
+- Windows: the endpoint code type-checks here and needs the Windows runner. Children run in `paddock-proc`'s kill-on-close
+  job object (X54, 2026-10-25; type-checked here, its orphan test runs on the Windows runner).
 
 ## X25 built: adoption and exit codes (2026-10-25)
 
@@ -482,6 +482,15 @@ Gaps left:
 - **Agent and service programs** (`debrief-agent`, `pitcrew-service` `cli.rs`, `dyno-agent` `cli.rs`): `Verb::add_to_help`,
   `Verb::status_exit` (3 when not running), `Verb::reject_extra`.
 
+## X22 built: adoption (2026-10-25)
+
+`paddock-mcp` 0.1.0 (crates/README.md "paddock-mcp"). Debrief builds its server first on it (tools: search events, errors around a
+time, anomalies, known issues, incident summary, exception groups, entity lookup; `--mcp` mode on `serve_stdio`; the Settings page
+builds the `Policy` and shows the `AuditLog`). Pacenotes and Sighter move their existing servers onto it (Sighter keeps its allow-list,
+confirmation, budgets, stop key and replay log in its own tool handlers). Pitwall's MCP client/router and `paddock-pitwall`'s planned
+`mcp` module use `paddock_mcp::{types, jsonrpc, client}` instead of their own copies of the types. Open: the app's key list in
+Settings (issue/revoke UI, persistence of `KeyStore::export`) and a shared audit viewer in `@decryp7/paddock-ui` after the second server
+(ADR 0007 open question 2).
 ## X24 built: adoption (2026-10-25)
 
 `paddock-archive` 0.1.0 (crates/README.md "paddock-archive"). What each app deletes when it adopts it:

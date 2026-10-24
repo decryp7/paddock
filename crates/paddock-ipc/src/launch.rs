@@ -1,5 +1,6 @@
 //! The one launcher (ADR 0001, Debrief ADR 0017 §5): creates a private endpoint and token, starts the child through
-//! `paddock-proc` (no console window, its own process group, the whole tree ended on drop, an optional memory cap),
+//! `paddock-proc` (no console window, its own process group, a kill-on-close job object on Windows, the whole tree ended on
+//! drop, an optional memory cap),
 //! hands it the [`Bootstrap`] as one JSON line on stdin, keeps stdin open as its lifeline, and accepts its authenticated
 //! connection (token, protocol, and the pid of the process it started). The child side is [`crate::child`].
 
@@ -129,6 +130,12 @@ impl Child {
     /// Its process id.
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// Whether it runs in a kill-on-close job object (Windows: it and every helper it starts end when this app's handle
+    /// closes, also on a crash; elsewhere its process group plays that part).
+    pub fn in_job(&self) -> bool {
+        lock(&self.process).in_job()
     }
 
     /// Whether the process has exited.

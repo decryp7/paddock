@@ -338,6 +338,14 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       load: () => import('./pages/dialogs-page').then((m) => m.DialogsPage),
     }),
     definePage<DemoContext>({
+      id: 'sd.schedule',
+      title: msg('sd.page.schedule', 'Schedules'),
+      icon: 'pd:clock',
+      order: 250,
+      when: (ctx) => ctx.developer(),
+      load: () => import('./pages/schedule-page').then((m) => m.SchedulePage),
+    }),
+    definePage<DemoContext>({
       id: 'sd.keys',
       title: msg('sd.page.keys', 'Keyboard'),
       icon: 'pd:keyboard',

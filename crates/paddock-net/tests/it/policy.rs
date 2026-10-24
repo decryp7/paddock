@@ -917,3 +917,23 @@ proptest! {
         let _ = HostPattern::parse(&url);
     }
 }
+
+#[test]
+fn a_streamed_answer_has_its_own_response_limit_and_an_unread_body() {
+    let r = rig(
+        Policy::default(),
+        FakeWire::new().then(Reply::ok(b"streamed")),
+    );
+    let mut s = r
+        .egress
+        .stream_within(
+            &Request::get("https://api.example.org/big"),
+            &CancelToken::new(),
+            Duration::from_secs(3),
+            Some(Duration::from_secs(1)),
+        )
+        .unwrap();
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut s.body, &mut text).unwrap();
+    assert_eq!((s.status, text.as_str(), s.redirects), (200, "streamed", 0));
+}

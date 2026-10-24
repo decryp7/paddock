@@ -19,6 +19,7 @@ paddock-download = { workspace = true }
 url = "2"
 ureq = { version = "3.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"], optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 proptest = "1"

@@ -34,6 +34,7 @@ paddock-health = { workspace = true, features = ["tauri"] }
 paddock-jobs = { workspace = true, features = ["tauri"] }
 paddock-menu = { workspace = true, features = ["tauri"] }
 paddock-packs = { workspace = true, features = ["tauri"] }
+paddock-channels = { workspace = true, features = ["tauri"] }
 paddock-service = { workspace = true, features = ["tauri"] }
 paddock-settings = { workspace = true, features = ["tauri"] }
 paddock-startup = { workspace = true, features = ["tauri"] }

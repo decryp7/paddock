@@ -97,6 +97,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
+| `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
+| `paddock-testplan` | `.sighterplan` / `.sighterresult` as TOML (ADR 0005): typed ids and a closed `Step` enum, secrets by reference with redacting writers, canonical writer, traceability `Coverage`, plan `diff`, JUnit export, limits and a fuzz target (plan X52) | two (Pacenotes, Sighter); built |
 | `paddock-archive` | safe zip/tar/tar.gz/tar.xz unpacking: limits on entries, sizes and expansion ratio, traversal and link guards, layout and filter, all-or-nothing extract through a staging folder swapped in, progress and Cancel as a paddock-jobs job, fuzz target (plan X24) | yes (Debrief AI/video runtimes, Pitwall engines, Spotter renderer, Pitcrew runners); built |
 | `paddock-bench` | benchmark harness with stored budgets (rule 16): `Recorder` with an injected clock (startup, throughput, first event, query latency, memory), a results file per app, `budgets.toml` with tolerance and regression limit, `check`, and the `paddock-bench` command for the nightly workflow (plan X26) | yes (every app's benchmarks); built |
 
@@ -732,6 +734,28 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
 
+## `paddock-mcp` (plan X22)
+
+```rust
+use paddock_mcp::{AuditLog, Policy, Server, ToolDef, ToolOutput, serve_stdio};
+
+let audit = Arc::new(AuditLog::new(500));                                   // the app shows and clears this
+let server = Server::new("debrief", env!("CARGO_PKG_VERSION"), Arc::new(SystemClock::new()), audit.clone(), Arc::new(Redactor::new()));
+server.add_tool(ToolDef::read_only("search_events", "Searches the open logs.", schema, |ctx, args| {
+    Ok(ToolOutput { text: rows, structured: None, next_cursor })               // ctx.cursor, ctx.cancel; capped, timed, audited
+}).paged())?;
+server.set_policy(Policy::read_only());                                      // from the settings page; off by default
+serve_stdio(&server, &mut stdin.lock(), &mut stdout.lock())?;                // `--mcp` mode; or serve_loopback(server, keys, listener, 4)
+```
+
+Rules built in (ADR 0007): local only (stdio, or 127.0.0.1 with a handshake line holding a per-client `KeyStore` key: shown once,
+only a SHA-256 kept, revocable), off by default, every call audited with redacted arguments (`query`/`content` fields are kept as
+a size only), arguments validated against the tool's schema (a wrong call is a tool error the model can fix), results cut at the
+tool's byte limit with a cursor for more, a call that passes its time limit is cancelled and abandoned (at most 8 still running),
+a panicking tool is contained, actions (`ToolDef::action`) are hidden and refused until `Policy::allow_action(name)`. Sighter's own
+rules sit on top and are not relaxed. `client` has the request builders and typed results for a host (Pitwall); the wire types are
+shared. The contract test pins the message shapes against the specification's JSON Schema. Not built: `prompts`, subscriptions,
+sampling, HTTP transport (stdio and loopback only, as ADR 0007 decides).
 ## `paddock-archive` (plan X24)
 
 ```rust
@@ -1172,6 +1196,9 @@ browser.close();                                                    // Browser.c
   when `PADDOCK_FAKE_BROWSER` is set. `tests/real_browser.rs` drives a real Chrome for Testing headless when
   `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind.
 
+- Windows (plan X54): each supervised child runs in a kill-on-close job object held by the `Supervised` value; dropping it, or
+  the app ending in any way, ends the child and every helper it started, orphans included (`Supervised::in_job`).
+
 ## `paddock-service` (plan X4)
 
 Background services and login items, from the four designs in the apps: Pitwall's and Pitcrew's `service_install.rs` /
@@ -1465,3 +1492,35 @@ built yet (a real file is never overwritten); and it reruns on `TAURI_UPDATER_PU
 App extras (Debrief's commit id) stay in the app's build.rs before the call. `paddock_proc::self_test::handle(name, version, &checks)` is
 the first call in a sidecar's `main`: with `--self-test` it runs the checks, prints one line each and exits 0 or 1 (rule 23; C34 checks
 that every sidecar has it, and `paddock-sidecar self-test` starts them from the built bundle).
+
+## `paddock-testplan` (ADR 0005, plan X52)
+
+`.sighterplan` and `.sighterresult`: the formats Pacenotes drafts and Sighter runs. Pure (bytes in, strings out, no I/O); both files are TOML.
+
+```rust
+use paddock_testplan::{parse_plan, parse_result, Coverage, NoRedaction, SecretRedactor, diff, junit, lint};
+
+let plan = parse_plan(&bytes)?;                 // typed and validated; an error names line, key or id and the fix
+let text = plan.to_toml();                      // canonical: fixed key order, so a regenerated plan diffs cleanly
+let hash = plan.hash();                         // sha256 of the canonical text = a result's `plan_hash`
+let warnings = lint(&plan);                     // a literal typed into a password/token/card field: warn, never fail
+let redactor = SecretRedactor::for_plan(&plan, &keychain /* impl Resolver */);
+let result_text = result.to_toml(&redactor);    // resolved secrets become {{secret:NAME}}; same for junit::write
+let matrix = Coverage::from(&plan, &results);   // requirement x case x last status (and acceptance criteria), once for both tools
+let changes = diff(&old_plan, &new_plan);       // links kept by case id and step; only edited steps need a look
+```
+
+- Limits: file 4 MiB, 5,000 cases, 200 steps a case, strings 4 KiB, ids 64, a wait 1 h, results 50,000 case results. `format` and `version`
+  (major) come first; unknown keys at the same major are `UnknownKey { path, line }`; a newer major is `Version` ("needs Sighter/Pacenotes N
+  or newer"); the last two majors are read (today only 1 exists).
+- Ids are newtypes (`RequirementId`, `CaseId`, `ScreenName`, `PlanId`, `DataName`, `Tag`, `Column`, `SecretRef`); `#` is reserved for
+  `AcceptanceRef` (`REQ-142#AC-2` is the second entry of that requirement's `acceptance` list); `RelPath` refuses `..`, absolute and
+  backslash paths.
+- `Step` is a closed enum (click, type, press, select, wait_for, assert_screen, assert_text, wait); in the file a step is
+  `action = "..."` plus exactly the fields it needs, and a `target = { text, name, class, inside, near, nth }`. A value is plain text,
+  `{{data.COLUMN}}` (a column of the case's table) or `{{secret:NAME}}`; plain text may not contain `{{`.
+- Results carry evidence by relative path and sha256, never inline; `Status` is `pass | fail | blocked | needs_recording | skipped`.
+  `RunResult::is_for(&plan)` says whether a result belongs to this exact version of the plan.
+- The crate never resolves a secret: `Resolver` is the app's; `Redactor` is what writers take.
+- Tests: fixtures with invented data, every refusal, properties (`parse(write(p)) == p`, no input panics), `fuzz/` (`cargo +nightly fuzz run
+  formats`). JSON Schema export and thumbnails in results are not built (ADR open questions).
