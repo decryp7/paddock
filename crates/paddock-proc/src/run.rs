@@ -390,4 +390,14 @@ mod tests {
             "the helper that held the pipes was ended with the tree"
         );
     }
+
+    #[test]
+    fn a_program_the_os_cannot_start_is_a_spawn_error() {
+        // A name with a NUL byte can never be a program on any OS: neither "not found" nor "permission denied".
+        let e = run_bounded(crate::command("paddock\0program"), limits()).unwrap_err();
+        assert!(
+            matches!(&e, RunError::Spawn(_, io) if io.kind() == std::io::ErrorKind::InvalidInput),
+            "{e:?}"
+        );
+    }
 }
