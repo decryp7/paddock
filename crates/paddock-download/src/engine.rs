@@ -14,6 +14,7 @@ use crate::transport::{
     ByteRange, ContentRange, Get, Header, Response, Transport, is_identity, parse_content_range,
     parse_length, parse_retry_after, validator,
 };
+use paddock_jobs::time::Clock;
 use paddock_jobs::{CancelToken, HashingWriter, JobContext, Phase};
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
@@ -22,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 /// The phase ids of a download job, in order (`resume` only when a partial file is resumed).
 pub mod phases {
@@ -199,7 +200,7 @@ impl Downloader {
             self.check_space(req, size)?;
         }
         ctx.phase(Phase::items(phases::CONNECT, phases::CONNECT_LABEL, 1));
-        let ctl = Arc::new(Ctl::new(cancels));
+        let ctl = Arc::new(Ctl::new(cancels, self.net.hosts.clock().clone()));
         let probe = self.probe(req, &ctl)?;
         ctx.add(1);
         ctl.touch();
@@ -420,7 +421,7 @@ impl Downloader {
         ctl: &Ctl,
         tick: &mut dyn FnMut() -> io::Result<()>,
     ) -> Result<Finished, DownloadError> {
-        let mut saved = Instant::now();
+        let mut saved = ctl.clock.monotonic();
         loop {
             if let Some(done) = lock(&ctl.outcome).take() {
                 return Ok(done);
@@ -441,9 +442,9 @@ impl Downloader {
                     secs: self.net.config.stall_timeout.as_secs(),
                 });
             }
-            if saved.elapsed() >= self.net.config.save_every {
+            if ctl.clock.monotonic().saturating_sub(saved) >= self.net.config.save_every {
                 let _ = tick();
-                saved = Instant::now();
+                saved = ctl.clock.monotonic();
             }
             ctl.wait(TICK);
         }
@@ -639,21 +640,23 @@ pub(crate) struct Ctl {
     outcome: Mutex<Option<Finished>>,
     frontier: AtomicU64,
     host: Mutex<String>,
-    t0: Instant,
+    pub(crate) clock: Arc<dyn Clock>,
+    t0: Duration,
     last: AtomicU64,
     signal: (Mutex<()>, Condvar),
 }
 
 impl Ctl {
-    pub(crate) fn new(cancel: Cancels) -> Self {
+    pub(crate) fn new(cancel: Cancels, clock: Arc<dyn Clock>) -> Self {
         Ctl {
+            t0: clock.monotonic(),
+            clock,
             cancel,
             stop: AtomicBool::new(false),
             fatal: Mutex::new(None),
             outcome: Mutex::new(None),
             frontier: AtomicU64::new(0),
             host: Mutex::new(String::new()),
-            t0: Instant::now(),
             last: AtomicU64::new(0),
             signal: (Mutex::new(()), Condvar::new()),
         }
@@ -676,7 +679,8 @@ impl Ctl {
     }
 
     fn now_ms(&self) -> u64 {
-        self.t0.elapsed().as_millis() as u64
+        u64::try_from(self.clock.monotonic().saturating_sub(self.t0).as_millis())
+            .unwrap_or(u64::MAX)
     }
 
     /// A byte arrived, or the download waits on purpose (back-off, host cap): not a stall.
@@ -709,13 +713,13 @@ impl Ctl {
 
     /// Sleeps `d` in short slices, counting as a deliberate wait. False when the download stopped meanwhile.
     pub(crate) fn nap(&self, d: Duration) -> bool {
-        let until = Instant::now() + d;
+        let until = self.clock.monotonic().saturating_add(d);
         loop {
             if self.halted() {
                 return false;
             }
             self.touch();
-            let left = until.saturating_duration_since(Instant::now());
+            let left = until.saturating_sub(self.clock.monotonic());
             if left.is_zero() {
                 return true;
             }
@@ -796,7 +800,7 @@ impl Retry {
                 host: host.to_string(),
             });
         }
-        hosts.back_off(host, Instant::now() + throttle_wait(config, resp));
+        hosts.back_off(host, throttle_wait(config, resp));
         Ok(())
     }
 }
@@ -1235,7 +1239,7 @@ impl Segments {
                 Attempt::Halted => return,
                 Attempt::Fatal(e) => return self.ctl.fail(e),
                 Attempt::Throttled(wait) => {
-                    self.hosts.back_off(&self.host, Instant::now() + wait);
+                    self.hosts.back_off(&self.host, wait);
                     if self.limit.load(Ordering::Acquire) <= 1
                         && self.throttles.fetch_add(1, Ordering::AcqRel) + 1
                             > self.config.max_throttles

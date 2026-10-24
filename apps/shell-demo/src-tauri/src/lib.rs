@@ -15,6 +15,7 @@
 pub use shell_demo_agent as agent;
 pub mod commands;
 pub mod engine;
+pub mod packs;
 pub mod sections;
 pub mod tray;
 
@@ -217,6 +218,9 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
             Some(_) => setup.checks(Duration::ZERO, Duration::ZERO, 0),
         }))
     });
+    let packs_dir = test_dir.clone();
+    // The sample knowledge packs (plan X15/X23): the Knowledge packs page and the hot reload of the user's packs folder.
+    builder = builder.packs(move |app| Ok(packs::setup(app, &dirs(packs_dir.as_deref())?)));
     let report_dir = test_dir.clone();
     // Report a problem (plan X2) and the Logging section: the app's folders and log, the shell's built-in sections.
     builder = builder.diagnostics(move |_| {
@@ -304,7 +308,16 @@ pub fn run() {
     install_log();
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
-    let shell = shell::<tauri::Wry>(Place::Installed).setup(move |app| {
+    let mut shell = shell::<tauri::Wry>(Place::Installed);
+    // `app_relaunch` (a language change in Settings): the session is written, then the whole app starts again.
+    match paddock_startup::tauri::Startup::builder()
+        .relaunch(|app| app.restart())
+        .build()
+    {
+        Ok(startup) => shell = shell.startup(startup),
+        Err(e) => log::error!("The relaunch hook is not installed: {e}"),
+    }
+    let shell = shell.setup(move |app| {
         tray::create(app);
         paddock_window::tauri::start(app, &launch)?;
         Ok(())
