@@ -3,7 +3,10 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use paddock_view::{ViewAction, ViewDoc, ViewPatch, apply_patch, from_json, from_postcard, to_json, to_postcard, validate, validate_action};
+use paddock_view::{
+    ViewAction, ViewDoc, ViewPatch, apply_patch, from_json, from_postcard, to_json, to_postcard,
+    validate, validate_action,
+};
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(doc) = from_postcard::<ViewDoc>(data) {
@@ -21,7 +24,12 @@ fuzz_target!(|data: &[u8]| {
             let _ = validate(&doc);
         }
         if let Ok(patch) = from_json::<ViewPatch>(text) {
-            let mut doc = ViewDoc { schema: 1, title: "t".into(), root: paddock_view::Node::text("x").with_id("x"), etag: 1 };
+            let mut doc = ViewDoc {
+                schema: 1,
+                title: "t".into(),
+                root: paddock_view::Node::text("x").with_id("x"),
+                etag: 1,
+            };
             let _ = apply_patch(&mut doc, patch);
         }
         if let Ok(a) = from_json::<ViewAction>(text) {
@@ -29,7 +37,12 @@ fuzz_target!(|data: &[u8]| {
         }
     }
     if let Ok(patch) = from_postcard::<ViewPatch>(data) {
-        let mut doc = ViewDoc { schema: 1, title: "t".into(), root: paddock_view::Node::text("x").with_id("x"), etag: 1 };
+        let mut doc = ViewDoc {
+            schema: 1,
+            title: "t".into(),
+            root: paddock_view::Node::text("x").with_id("x"),
+            etag: 1,
+        };
         let _ = apply_patch(&mut doc, patch);
     }
     if let Ok(a) = from_postcard::<ViewAction>(data) {
