@@ -15,6 +15,11 @@ export class WindowLayouts {
   /** Resolves when the stored layouts are read. */
   readonly ready = this.named.ready;
 
+  /** Reads the saved layouts again (the manage dialog edits the store from its own window). */
+  reload(): Promise<void> {
+    return this.named.reload();
+  }
+
   /** Saves the current arrangement under `name`; returns the saved name, or null (empty name, no dock). */
   saveCurrent(name: string): string | null {
     const layout = this.dock.currentLayout();

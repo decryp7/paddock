@@ -13,6 +13,11 @@ pd-dock {
 pd-dock .pd-dock-center { grid-area: center; position: relative; min-width: 0; min-height: 0; display: flex; }
 pd-dock .pd-dock-mount { flex: 1; min-width: 0; min-height: 0; position: relative; }
 
+/* The skeleton of a dock that has no layout yet: a tab strip and a body, in the place of the first group. */
+pd-dock .pd-dock-boot { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; background: var(--pd-surface-1); }
+pd-dock .pd-dock-boot-strip { display: flex; gap: 2px; align-items: center; height: 34px; padding: 0 var(--pd-space-3); background: var(--pd-surface-2); border-bottom: 1px solid var(--pd-hairline); flex: none; }
+pd-dock .pd-dock-boot-strip span { display: block; width: 96px; height: 14px; border-radius: var(--pd-radius-tag); background: var(--pd-skeleton); }
+
 /* Auto-hide side bars (VS): vertical labels on the sides, horizontal at the bottom. */
 pd-dock .pd-dock-ah-bar { display: flex; gap: 2px; padding: 2px; background: var(--pd-bg); }
 pd-dock .pd-dock-ah-left { grid-area: left; flex-direction: column; border-right: 1px solid var(--pd-hairline); }
@@ -33,21 +38,20 @@ pd-dock .pd-dock-ah-tab:focus-visible { outline: 2px solid var(--pd-focus-ring);
 pd-dock .pd-dock-ah-flyout {
   position: absolute; z-index: 990; display: flex; flex-direction: column; background: var(--pd-surface-1);
   border: 1px solid var(--pd-border-strong); box-shadow: var(--pd-shadow-2); outline: none;
+  /* It is as tall as its content and never more than half the dock; a side one starts under the groups' tab strips, so it covers no other column's header actions. */
+  height: auto; max-height: 50%; max-width: 100%;
 }
-pd-dock .pd-dock-ah-flyout-left { left: 0; top: 0; bottom: 0; animation: pd-dock-slide-left calc(140ms * var(--pd-motion-scale, 1)) ease-out; }
-pd-dock .pd-dock-ah-flyout-right { right: 0; top: 0; bottom: 0; animation: pd-dock-slide-right calc(140ms * var(--pd-motion-scale, 1)) ease-out; }
-pd-dock .pd-dock-ah-flyout-bottom { left: 0; right: 0; bottom: 0; animation: pd-dock-slide-up calc(140ms * var(--pd-motion-scale, 1)) ease-out; }
+pd-dock .pd-dock-ah-flyout-left { left: 0; top: var(--pd-dock-strip-height, 34px); width: var(--pd-ah-size); animation: pd-dock-slide-left calc(140ms * var(--pd-motion-scale, 1)) ease-out; }
+pd-dock .pd-dock-ah-flyout-right { right: 0; top: var(--pd-dock-strip-height, 34px); width: var(--pd-ah-size); animation: pd-dock-slide-right calc(140ms * var(--pd-motion-scale, 1)) ease-out; }
+pd-dock .pd-dock-ah-flyout-bottom { left: 0; right: 0; bottom: 0; max-height: min(var(--pd-ah-size), 50%); animation: pd-dock-slide-up calc(140ms * var(--pd-motion-scale, 1)) ease-out; }
 @keyframes pd-dock-slide-left { from { transform: translateX(-24px); opacity: 0.4; } }
 @keyframes pd-dock-slide-right { from { transform: translateX(24px); opacity: 0.4; } }
 @keyframes pd-dock-slide-up { from { transform: translateY(24px); opacity: 0.4; } }
 @media (prefers-reduced-motion: reduce) { pd-dock .pd-dock-ah-flyout, .pd-dock-float-cue { animation: none !important; } pd-dock .pd-dock-skeleton span { animation: none !important; } }
-pd-dock .pd-dock-ah-head {
-  display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 4px 0 10px; flex: none;
-  background: var(--pd-bg); border-bottom: 1px solid var(--pd-hairline); box-shadow: inset 0 2px 0 var(--pd-accent);
-}
-pd-dock .pd-dock-ah-spacer { flex: 1; min-width: 0; }
-pd-dock .pd-dock-ah-body { flex: 1; min-height: 0; display: flex; }
-pd-dock .pd-dock-ah-body > .pd-panel { flex: 1; }
+/* The pin and close actions float over the corner (no header row); the pane has the 12 px inset all around. */
+pd-dock .pd-dock-ah-head { position: absolute; top: var(--pd-space-1); inset-inline-end: var(--pd-space-1); z-index: 1; display: flex; align-items: center; gap: 2px; border-radius: var(--pd-radius-control); background: var(--pd-surface-1); }
+pd-dock .pd-dock-ah-body { flex: 1; min-height: 0; display: flex; padding: var(--pd-space-3); box-sizing: border-box; overflow: auto; }
+pd-dock .pd-dock-ah-body > .pd-panel { flex: 1; height: auto; min-height: 0; }
 pd-dock .pd-dock-ah-grip { position: absolute; background: transparent; }
 pd-dock .pd-dock-ah-flyout-left .pd-dock-ah-grip { right: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
 pd-dock .pd-dock-ah-flyout-right .pd-dock-ah-grip { left: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
@@ -133,6 +137,8 @@ body.pd-dock-drag-cancel .dv-tab-ghost-drag { opacity: 0.5 !important; }
 .pd-dockview .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab { box-shadow: inset 0 2px 0 var(--pd-border-strong); }
 .pd-dockview .dv-drop-target-anchor, .pd-dockview .dv-drop-target-selection { border: 2px dashed var(--pd-accent) !important; background-color: var(--pd-accent-tint) !important; border-radius: 2px; }
 .dv-tabs-overflow-dropdown-default { min-width: 24px; min-height: 24px; }
+/* dockview turns the chevron of its overflow chip by 90 degrees; ours already points down. */
+.dv-tabs-overflow-dropdown-default > svg.pd-dock-overflow-chevron { transform: none; }
 .pd-dockview .dv-tabs-and-actions-container, .pd-dock-actions { -webkit-user-select: none; user-select: none; }
 
 /* Tabs: view icon, pin mark, title and close (14 px glyph in a 20 px hit area). */
@@ -174,6 +180,8 @@ body.pd-dock-drag-cancel .dv-tab-ghost-drag { opacity: 0.5 !important; }
   position: fixed; z-index: 1991; min-width: 180px; max-width: 80vw; margin: 0; list-style: none;
 }
 .pd-dock-menu > li { display: flex; }
+/* Hidden until the dock has placed it (never painted at the origin). */
+.pd-dock-menu:not([data-placed]) { visibility: hidden; }
 
 
 /* Full screen: the frame hides its chrome on html.pd-dock-full-screen; the dock hides its auto-hide bars. */
