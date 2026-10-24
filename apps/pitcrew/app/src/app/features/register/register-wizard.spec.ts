@@ -83,7 +83,7 @@ describe('RegisterWizard', () => {
 
   it('blocks Continue with messages until the step is valid', () => {
     const { f, el } = mount();
-    expect(text(el.querySelector('h2'))).toBe('Register a runner');
+    expect(text(el.querySelector('header.top'))).toContain('Pitcrew registers it with your server');
     submit(el);
     f.detectChanges();
     expect(el.querySelectorAll('.errors li')).toHaveLength(2);

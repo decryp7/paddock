@@ -38,14 +38,14 @@ pub fn cause_of(c: &ConnectionState) -> Option<(Cause, RepairAction)> {
         ConnectionState::Connecting | ConnectionState::Connected { .. } => None,
         ConnectionState::Unavailable { message } => Some((
             Cause::new("Pitcrew cannot reach its background service, so runners are not being managed.")
-                .hint("Choose Repair to register and start the service again.")
+                .hint("Choose Restart to register and start the service again (it is installed first when it never was).")
                 .detail(message.clone())
                 .code("pc.service.unavailable"),
             RepairAction::Restart,
         )),
         ConnectionState::Mismatch { message } => Some((
             Cause::new("Pitcrew and its background service are different versions.")
-                .hint("Choose Repair to start the service that belongs to this version; if it stays, reinstall Pitcrew.")
+                .hint("Choose Restart to start the service that belongs to this version; if it stays, reinstall Pitcrew.")
                 .detail(message.clone())
                 .code("pc.service.mismatch"),
             RepairAction::Restart,
